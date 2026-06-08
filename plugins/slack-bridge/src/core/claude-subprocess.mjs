@@ -1,0 +1,57 @@
+import { spawn } from "node:child_process";
+
+export function runClaude({ cwd, addDir, prompt, sessionId, timeoutMs = 180_000, onStarted, env = {} }) {
+  return new Promise((resolve, reject) => {
+    const args = ["-p", prompt, "--output-format", "json"];
+    if (sessionId) args.push("--resume", sessionId);
+    if (addDir) args.push("--add-dir", addDir);
+
+    // Copy process.env but strip Slack tokens — they must not leak into the claude subprocess.
+    const childEnv = { ...process.env };
+    delete childEnv.SLACK_BOT_TOKEN;
+    delete childEnv.SLACK_APP_TOKEN;
+    Object.assign(childEnv, env, { CLAUDE_VIA_SLACK: "1" });
+
+    // On Windows, `claude` is installed as `claude.cmd` (npm convention).
+    // spawn() without shell:true can't resolve .cmd files from PATH, so we
+    // use cmd.exe explicitly with properly separated arguments.
+    const [spawnCmd, spawnArgs, spawnOpts] = process.platform === "win32"
+      ? ["cmd.exe", ["/d", "/s", "/c", "claude", ...args], { cwd, env: childEnv, stdio: ["ignore", "pipe", "pipe"] }]
+      : ["claude",  args,                                   { cwd, env: childEnv, stdio: ["ignore", "pipe", "pipe"] }];
+    const child = spawn(spawnCmd, spawnArgs, spawnOpts);
+
+    onStarted?.(child);
+
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", c => { stdout += c; });
+    child.stderr.on("data", c => { stderr += c; });
+
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error(`claude timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+
+    child.on("exit", code => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        return reject(new Error(`claude exited ${code}: ${stderr.slice(-300)}`));
+      }
+      try {
+        const data = JSON.parse(stdout);
+        resolve({
+          result: data.result ?? "",
+          sessionId: data.session_id ?? null,
+          costUsd: data.total_cost_usd ?? 0,
+        });
+      } catch (e) {
+        reject(new Error(`claude output not JSON: ${e.message}\nOutput: ${stdout.slice(0, 200)}`));
+      }
+    });
+
+    child.on("error", e => {
+      clearTimeout(timer);
+      reject(new Error(`failed to spawn claude: ${e.message}`));
+    });
+  });
+}

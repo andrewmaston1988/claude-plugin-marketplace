@@ -1,0 +1,47 @@
+[
+  {
+    "type": "rich_text",
+    "elements": [
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "X:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " a",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      },
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "Y:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " b",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

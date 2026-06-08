@@ -1,0 +1,7 @@
+*Alpha*
+  *Value:* 1
+  *Notes:* first
+
+*Beta*
+  *Value:* 2
+  *Notes:* second

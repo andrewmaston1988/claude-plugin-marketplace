@@ -1,0 +1,13 @@
+{
+  "name": "@andrewmaston/claude-slack",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "src/index.mjs",
+  "bin": { "claude-slack": "./bin/claude-slack.mjs" },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test",
+    "smoke:dev": "node tests/smoke/dev.mjs",
+    "smoke:prod": "node tests/smoke/prod.mjs"
+  }
+}

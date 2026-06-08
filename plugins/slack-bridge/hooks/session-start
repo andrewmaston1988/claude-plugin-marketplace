@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# SessionStart hook — emits slack-bridge-context skill when CLAUDE_VIA_SLACK=1.
+# Also injects a restart note when CLAUDE_BRIDGE_RESTARTED is set.
+
+set -euo pipefail
+
+# Only activate when running under the bridge
+[ -z "${CLAUDE_VIA_SLACK:-}" ] && exit 0
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SKILL_FILE="${PLUGIN_ROOT}/skills/slack-bridge-context.md"
+
+skill_content="$(cat "${SKILL_FILE}" 2>/dev/null || echo "Error reading slack-bridge-context skill")"
+
+# Prepend restart note if the bridge was just restarted
+restart_note=""
+if [ -n "${CLAUDE_BRIDGE_RESTARTED:-}" ]; then
+  restart_note="_Bridge restarted at ${CLAUDE_BRIDGE_RESTARTED} — context may be fresh._\n\n"
+fi
+
+# Escape content for JSON embedding
+escape_for_json() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+escaped_skill="$(escape_for_json "${restart_note}${skill_content}")"
+
+printf '{"type":"system","system":"%s"}' "${escaped_skill}"

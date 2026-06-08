@@ -1,0 +1,61 @@
+[
+  {
+    "type": "section",
+    "text": {
+      "type": "mrkdwn",
+      "text": "Some intro text."
+    }
+  },
+  {
+    "type": "rich_text",
+    "elements": [
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "Col A:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " one",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      },
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "Col B:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " two",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "section",
+    "text": {
+      "type": "mrkdwn",
+      "text": "Some trailing text."
+    }
+  }
+]

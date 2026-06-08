@@ -1,0 +1,18 @@
+{
+  "name": "slack-bridge",
+  "description": "Two-way Slack ↔ Claude Code bridge via Socket Mode. Zero dependencies, Node 22+.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Andrew Maston",
+    "email": "andrew.maston1988@gmail.com"
+  },
+  "homepage": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "repository": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "slack",
+    "bridge",
+    "socket-mode",
+    "daemon"
+  ]
+}

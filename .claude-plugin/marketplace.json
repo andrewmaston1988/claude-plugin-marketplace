@@ -1,0 +1,20 @@
+{
+  "name": "andrewmaston1988-claude-plugins",
+  "description": "Claude Code plugins by Andrew Maston",
+  "owner": {
+    "name": "Andrew Maston",
+    "email": "andrew.maston1988@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "slack-bridge",
+      "description": "Two-way Slack ↔ Claude Code bridge via Socket Mode",
+      "version": "0.1.0",
+      "source": "./plugins/slack-bridge",
+      "author": {
+        "name": "Andrew Maston",
+        "email": "andrew.maston1988@gmail.com"
+      }
+    }
+  ]
+}

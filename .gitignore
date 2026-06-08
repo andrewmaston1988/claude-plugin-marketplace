@@ -1,0 +1,16 @@
+node_modules/
+.DS_Store
+Thumbs.db
+
+# Plugin runtime state (never commit)
+config.local.json
+*.log
+sessions.json
+bridge.pid
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+STATE.md

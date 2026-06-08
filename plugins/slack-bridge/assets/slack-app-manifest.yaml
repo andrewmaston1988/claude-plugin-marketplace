@@ -1,0 +1,45 @@
+display_information:
+  name: ${DISPLAY_NAME}
+  description: Two-way Claude Code chat
+  background_color: "#1a1a1a"
+
+features:
+  bot_user:
+    display_name: Claude
+    always_online: true
+  slash_commands:
+    - { command: /new,     description: Start a fresh session in this channel }
+    - { command: /reset,   description: Alias for /new }
+    - { command: /restart, description: Restart the bridge daemon }
+    - { command: /stop,    description: Interrupt Claude mid-response }
+
+oauth_config:
+  scopes:
+    bot:
+      - app_mentions:read
+      - chat:write
+      - chat:write.public
+      - chat:delete
+      - channels:history
+      - channels:read
+      - im:history
+      - im:read
+      - im:write
+      - commands
+    # user-scope block enabled by wizard only if SLACK_USER_TOKEN feature requested
+    # user:
+    #   - chat:write
+    #   - users:write
+    #   - users.profile:write
+
+settings:
+  event_subscriptions:
+    bot_events:
+      - app_mention
+      - message.im
+      - message.channels
+  interactivity:
+    is_enabled: true
+  socket_mode_enabled: true
+  org_deploy_enabled: false
+  token_rotation_enabled: false

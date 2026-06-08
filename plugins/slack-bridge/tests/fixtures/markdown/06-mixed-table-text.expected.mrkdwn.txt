@@ -1,0 +1,6 @@
+Some intro text.
+
+*one*
+  *Col B:* two
+
+Some trailing text.

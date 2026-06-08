@@ -1,0 +1,5 @@
+Inline `code` and this:
+
+```
+fenced block
+```

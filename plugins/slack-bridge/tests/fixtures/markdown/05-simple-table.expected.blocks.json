@@ -1,0 +1,135 @@
+[
+  {
+    "type": "rich_text",
+    "elements": [
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "Name:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " Alpha",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      },
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "Value:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " 1",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      },
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "Notes:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " first",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "type": "divider"
+  },
+  {
+    "type": "rich_text",
+    "elements": [
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "Name:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " Beta",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      },
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "Value:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " 2",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      },
+      {
+        "type": "rich_text_section",
+        "elements": [
+          {
+            "type": "text",
+            "text": "Notes:",
+            "style": {
+              "bold": true,
+              "underline": true
+            }
+          },
+          {
+            "type": "text",
+            "text": " second",
+            "style": {
+              "italic": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

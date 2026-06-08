@@ -1,0 +1,7 @@
+Some intro text.
+
+| Col A | Col B |
+|---|---|
+| one | two |
+
+Some trailing text.
