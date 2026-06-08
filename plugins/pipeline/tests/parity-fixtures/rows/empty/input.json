@@ -1,0 +1,14 @@
+{
+  "argv": [
+    "rows",
+    "{project_root}",
+    "--format",
+    "json"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [],
+    "progress_files": [],
+    "progress_steps": []
+  }
+}

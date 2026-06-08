@@ -1,0 +1,27 @@
+{
+  "argv": [
+    "row-add",
+    "{project_root}",
+    "new-feature",
+    "new-feature.md",
+    "queued",
+    "--branch",
+    "autonomous/new-feature",
+    "--r-model",
+    "claude-haiku-4-5-20251001",
+    "--d-model",
+    "claude-sonnet-4-6",
+    "--q-model",
+    "claude-sonnet-4-6",
+    "--rvw-model",
+    "claude-sonnet-4-6",
+    "--notes",
+    "type=dev"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [],
+    "progress_files": [],
+    "progress_steps": []
+  }
+}

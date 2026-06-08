@@ -1,0 +1,23 @@
+{
+  "pipeline_rows": [],
+  "progress_files": [
+    {
+      "slug": "dev-my-feature-abc",
+      "project": "testproject",
+      "parent_slug": null,
+      "prefix": null,
+      "pid": null,
+      "session_type": null,
+      "is_active": 1,
+      "notes": null
+    }
+  ],
+  "progress_steps": [
+    {
+      "slug": "dev-my-feature-abc",
+      "step_index": 1,
+      "content": "Step one",
+      "state": "pending"
+    }
+  ]
+}

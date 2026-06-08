@@ -1,0 +1,26 @@
+[
+  {
+    "slug": "active-slug-one",
+    "project": "testproject",
+    "parent_slug": null,
+    "prefix": null,
+    "pid": null,
+    "session_type": null,
+    "is_active": 1,
+    "notes": null,
+    "created_at": "2026-06-07 19:59:19",
+    "completed_at": null
+  },
+  {
+    "slug": "active-slug-two",
+    "project": "testproject",
+    "parent_slug": null,
+    "prefix": null,
+    "pid": null,
+    "session_type": null,
+    "is_active": 1,
+    "notes": null,
+    "created_at": "2026-06-07 19:59:19",
+    "completed_at": null
+  }
+]

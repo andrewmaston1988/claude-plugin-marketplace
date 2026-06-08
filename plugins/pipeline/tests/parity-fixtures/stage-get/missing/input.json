@@ -1,0 +1,13 @@
+{
+  "argv": [
+    "stage-get",
+    "{project_root}",
+    "ghost-feature"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [],
+    "progress_files": [],
+    "progress_steps": []
+  }
+}

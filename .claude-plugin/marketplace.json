@@ -15,6 +15,16 @@
         "name": "Andrew Maston",
         "email": "andrew.maston1988@gmail.com"
       }
+    },
+    {
+      "name": "pipeline",
+      "description": "Pipeline orchestration — queue plans, autonomous dev/test/review sessions, merge runner, TUI + web dashboards, spend governance",
+      "version": "0.1.0",
+      "source": "./plugins/pipeline",
+      "author": {
+        "name": "Andrew Maston",
+        "email": "andrew.maston1988@gmail.com"
+      }
     }
   ]
 }

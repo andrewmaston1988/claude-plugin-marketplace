@@ -1,0 +1,48 @@
+{
+  "argv": [
+    "progress-list-active",
+    "{memory_dir}"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [],
+    "progress_files": [
+      {
+        "slug": "active-slug-one",
+        "parent_slug": null,
+        "prefix": null
+      },
+      {
+        "slug": "active-slug-two",
+        "parent_slug": null,
+        "prefix": null
+      }
+    ],
+    "progress_steps": [
+      {
+        "slug": "active-slug-one",
+        "step_index": 1,
+        "content": "Do A",
+        "state": "pending"
+      },
+      {
+        "slug": "active-slug-one",
+        "step_index": 2,
+        "content": "Do B",
+        "state": "pending"
+      },
+      {
+        "slug": "active-slug-two",
+        "step_index": 1,
+        "content": "Do X",
+        "state": "pending"
+      },
+      {
+        "slug": "active-slug-two",
+        "step_index": 2,
+        "content": "Do Y",
+        "state": "pending"
+      }
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "pipeline_rows": [
+    {
+      "project": "testproject",
+      "feature": "transitioning-feature",
+      "plan_file": "transitioning-feature.md",
+      "stage": "dev",
+      "branch": "autonomous/transitioning-feature",
+      "r_model": "claude-haiku-4-5-20251001",
+      "d_model": "claude-sonnet-4-6",
+      "q_model": "claude-sonnet-4-6",
+      "rvw_model": "claude-sonnet-4-6",
+      "session_type": "dev",
+      "session_file": "",
+      "budget_usd": 5,
+      "qa_pass": null,
+      "dev_retries": 0,
+      "spawn_failed": 0,
+      "notes_extra": null,
+      "depends_on": null,
+      "rebase_required": 0,
+      "target_branch": "main",
+      "last_error": null,
+      "review_retries": 0,
+      "review_retry_budget": 3,
+      "review_verdict": null
+    }
+  ],
+  "progress_files": [],
+  "progress_steps": []
+}

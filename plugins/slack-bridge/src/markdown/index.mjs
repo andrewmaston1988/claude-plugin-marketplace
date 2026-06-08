@@ -17,6 +17,28 @@ export function hasTable(text) {
   return false;
 }
 
+// Split a long text into ≤maxLen chunks at paragraph boundaries (blank lines).
+// Shared by the bot conversation handler and the notify path — both want
+// multi-message rendering for long content so Slack doesn't clip silently
+// at its attachment-text cap. Originally lived in core/handler.mjs as a
+// private helper; lifted here so notify/index.mjs can reuse identically.
+export function splitResponse(text, maxLen = 3000) {
+  if (text.length <= maxLen) return [text];
+  const chunks = [];
+  const paras = text.split(/\n\n+/);
+  let current = "";
+  for (const para of paras) {
+    if (current.length + para.length + 2 > maxLen) {
+      if (current) chunks.push(current.trim());
+      current = para.length > maxLen ? para.slice(0, maxLen) : para;
+    } else {
+      current = current ? current + "\n\n" + para : para;
+    }
+  }
+  if (current.trim()) chunks.push(current.trim());
+  return chunks.length ? chunks : [text.slice(0, maxLen)];
+}
+
 function splitSegments(text) {
   const lines = text.split("\n");
   const segments = [];

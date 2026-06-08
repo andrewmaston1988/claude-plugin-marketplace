@@ -1,0 +1,35 @@
+{
+  "pipeline_rows": [],
+  "progress_files": [
+    {
+      "slug": "session-abc",
+      "project": "testproject",
+      "parent_slug": null,
+      "prefix": null,
+      "pid": null,
+      "session_type": null,
+      "is_active": 1,
+      "notes": null
+    }
+  ],
+  "progress_steps": [
+    {
+      "slug": "session-abc",
+      "step_index": 1,
+      "content": "Read plan",
+      "state": "pending"
+    },
+    {
+      "slug": "session-abc",
+      "step_index": 2,
+      "content": "Implement feature",
+      "state": "pending"
+    },
+    {
+      "slug": "session-abc",
+      "step_index": 3,
+      "content": "Run tests",
+      "state": "pending"
+    }
+  ]
+}

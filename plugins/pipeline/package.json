@@ -1,0 +1,22 @@
+{
+  "name": "pipeline",
+  "version": "0.1.0",
+  "description": "Pipeline orchestrator plugin for Claude Code — multi-stage autonomous dev sessions via SQLite-backed queue",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "main": "bin/pipeline.mjs",
+  "bin": {
+    "pipeline": "bin/pipeline.mjs"
+  },
+  "scripts": {
+    "test":        "node --test tests/*.mjs",
+    "verify":      "node tests/live-verify/harness.mjs",
+    "postinstall": "node scripts/postinstall/patch-blessed-borders.mjs"
+  },
+  "dependencies": {
+    "blessed": "^0.1.81"
+  }
+}

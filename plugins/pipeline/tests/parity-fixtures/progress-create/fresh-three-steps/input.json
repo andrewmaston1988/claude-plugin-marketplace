@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "progress-create",
+    "{memory_dir}",
+    "session-abc",
+    "--steps",
+    "Read plan|Implement feature|Run tests"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [],
+    "progress_files": [],
+    "progress_steps": []
+  }
+}

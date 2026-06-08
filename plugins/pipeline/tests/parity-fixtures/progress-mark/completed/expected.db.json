@@ -1,0 +1,35 @@
+{
+  "pipeline_rows": [],
+  "progress_files": [
+    {
+      "slug": "mark-test",
+      "project": "testproject",
+      "parent_slug": null,
+      "prefix": null,
+      "pid": null,
+      "session_type": null,
+      "is_active": 1,
+      "notes": null
+    }
+  ],
+  "progress_steps": [
+    {
+      "slug": "mark-test",
+      "step_index": 1,
+      "content": "Read plan",
+      "state": "completed"
+    },
+    {
+      "slug": "mark-test",
+      "step_index": 2,
+      "content": "Implement feature",
+      "state": "pending"
+    },
+    {
+      "slug": "mark-test",
+      "step_index": 3,
+      "content": "Run tests",
+      "state": "pending"
+    }
+  ]
+}

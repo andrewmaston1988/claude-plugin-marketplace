@@ -11,6 +11,7 @@ const DEFAULTS = {
     notifyChannel: null,
     sessionKey: "channel-thread",
     verbMode: "static",
+    verbModel: "claude-haiku-4-5",
   },
   extensions: [],
 };

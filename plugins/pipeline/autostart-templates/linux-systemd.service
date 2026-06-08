@@ -1,0 +1,15 @@
+[Unit]
+Description=Claude Pipeline Orchestrator daemon
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=${NODE_PATH} ${BRIDGE_ENTRY}
+WorkingDirectory=${CONFIG_DIR}
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:${LOG_DIR}/orchestrator.stdout.log
+StandardError=append:${LOG_DIR}/orchestrator.stderr.log
+
+[Install]
+WantedBy=default.target

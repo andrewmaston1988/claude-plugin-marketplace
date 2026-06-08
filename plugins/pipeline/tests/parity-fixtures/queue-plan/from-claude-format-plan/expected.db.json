@@ -1,0 +1,31 @@
+{
+  "pipeline_rows": [
+    {
+      "project": "testproject",
+      "feature": "my-feature",
+      "plan_file": "{repo}/plans/my-feature.md",
+      "stage": "queued",
+      "branch": "autonomous/my-feature",
+      "r_model": null,
+      "d_model": null,
+      "q_model": null,
+      "rvw_model": "claude-sonnet-4-6",
+      "session_type": null,
+      "session_file": null,
+      "budget_usd": null,
+      "qa_pass": null,
+      "dev_retries": 0,
+      "spawn_failed": 0,
+      "notes_extra": "type=dev",
+      "depends_on": null,
+      "rebase_required": 0,
+      "target_branch": "main",
+      "last_error": null,
+      "review_retries": 0,
+      "review_retry_budget": 3,
+      "review_verdict": null
+    }
+  ],
+  "progress_files": [],
+  "progress_steps": []
+}

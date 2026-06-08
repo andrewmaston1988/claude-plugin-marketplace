@@ -1,0 +1,26 @@
+{
+  "argv": [
+    "active-progress",
+    "{memory_dir}",
+    "my-feature"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [],
+    "progress_files": [
+      {
+        "slug": "dev-my-feature-abc",
+        "parent_slug": null,
+        "prefix": null
+      }
+    ],
+    "progress_steps": [
+      {
+        "slug": "dev-my-feature-abc",
+        "step_index": 1,
+        "content": "Step one",
+        "state": "pending"
+      }
+    ]
+  }
+}

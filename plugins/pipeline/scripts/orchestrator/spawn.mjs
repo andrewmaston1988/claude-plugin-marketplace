@@ -1,0 +1,339 @@
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { join, basename, delimiter as pathDelimiter } from "node:path";
+import { spawnSync, spawn } from "node:child_process";
+import { homedir } from "node:os";
+import {
+  rowGet, rowUpdate, setLastError,
+  sessionRecordSpawn,
+  appendSpawn,
+} from "../pipeline-db/index.mjs";
+import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
+import { orchestratorWorktreePath } from "../worktree-paths.mjs";
+import { publishNotification } from "../publisher.mjs";
+
+// ── session type routing ──────────────────────────────────────────────────────
+
+export const TOOLS = {
+  dev:      "Bash,Read,Write,Edit,Glob,Grep",
+  research: "Bash,Read,Write,Glob,Grep,WebFetch,WebSearch",
+  review:   "Bash,Read,Glob,Grep",
+  test:     "Bash,Read,Write,Glob,Grep",
+};
+
+const STAGE = {
+  dev:      "dev",
+  research: "research",
+  review:   "review",
+  test:     "test",
+};
+
+export function sessionTypeFromNotes(notes) {
+  const m = String(notes).match(/\btype=(dev|research|test|review)\b/);
+  return m ? m[1] : "dev";
+}
+
+export function modelFromNotes(notes, project, feature, stype, logFn) {
+  const m = String(notes).match(/\bmodel=([\w.-]+)\b/);
+  if (m) return m[1];
+  const cfg = loadPipelineConfig();
+  const defaultModel = stype === "review"
+    ? cfg.models.review_default
+    : cfg.models.dev_default;
+  if (logFn) logFn(`[${project}] row '${feature}' has no model= pin — defaulting to ${defaultModel}`, "WARN");
+  return defaultModel;
+}
+
+export function budgetFromNotes(notes) {
+  const m = String(notes).match(/\bbudget=([\d.]+)\b/);
+  return m ? m[1] : "10.00";
+}
+
+// ── worktree helpers ──────────────────────────────────────────────────────────
+
+export function ensureWorktree(projectDir, wtPath, branch, baseBranch, logFn) {
+  if (existsSync(wtPath)) {
+    logFn(`Reusing worktree at ${wtPath} for branch ${branch}`);
+    return true;
+  }
+  mkdirSync(join(wtPath, ".."), { recursive: true });
+  spawnSync("git", ["-C", projectDir, "fetch", "--quiet"], { timeout: 30000, windowsHide: true });
+  const r = spawnSync(
+    "git", ["-C", projectDir, "worktree", "add", "-b", branch, wtPath, baseBranch],
+    { timeout: 60000, windowsHide: true, encoding: "utf8" }
+  );
+  if (r.status === 0) {
+    logFn(`Created worktree at ${wtPath} for branch ${branch}`);
+    return true;
+  }
+  if (r.stderr && r.stderr.includes("already exists")) {
+    const r2 = spawnSync(
+      "git", ["-C", projectDir, "worktree", "add", wtPath, branch],
+      { timeout: 60000, windowsHide: true, encoding: "utf8" }
+    );
+    if (r2.status === 0) {
+      logFn(`Created worktree at ${wtPath} (existing branch ${branch})`);
+      return true;
+    }
+    logFn(`git worktree add failed (attach): ${(r2.stderr || "").trim()}`, "ERROR");
+  } else {
+    logFn(`git worktree add failed: ${(r.stderr || "").trim()}`, "ERROR");
+  }
+  return false;
+}
+
+export function gitWorktreeClean(wtPath, logFn) {
+  if (!existsSync(wtPath)) return true;
+  for (const extraArgs of [[], ["--cached"]]) {
+    try {
+      const r = spawnSync(
+        "git", ["-C", wtPath, "diff", "--exit-code", ...extraArgs],
+        { timeout: 30000, windowsHide: true, stdio: "ignore" }
+      );
+      if (r.status !== 0) return false;
+    } catch (e) {
+      if (logFn) logFn(`git worktree clean check failed for ${wtPath}: ${e.message}`, "ERROR");
+      return false;
+    }
+  }
+  return true;
+}
+
+export function validateSessionSlug(sessionFile, planStem) {
+  if (!planStem || !sessionFile) return null;
+  const parts = basename(String(sessionFile), ".md").split("-");
+  if (parts.length < 5 || !["dev", "test", "research", "review"].includes(parts[0])) return null;
+  const sessionSlug = parts.slice(4).join("-");
+  if (sessionSlug === planStem) return null;
+  return (
+    `session file slug '${sessionSlug}' does not match plan stem '${planStem}' — ` +
+    `orchestrator would create worktree on autonomous/${planStem} but session expects autonomous/${sessionSlug}`
+  );
+}
+
+export function findClaude() {
+  // Return the RESOLVED absolute path so spawn() skips PATH lookup. Returning
+  // the literal "claude" lets spawnSession's env.PATH (which prepends
+  // ~/.local/bin) override the demo's shim, causing real Claude to run in
+  // demo mode and burn tokens. Take the first line of `where`'s output —
+  // that's the highest-priority match given the caller's PATH at lookup time.
+  const localBin = join(homedir(), ".local", "bin");
+  for (const candidate of ["claude", join(localBin, "claude.exe"), join(localBin, "claude")]) {
+    const r = spawnSync("where", [candidate], { timeout: 3000, windowsHide: true, encoding: "utf8" });
+    if (r.status === 0 && r.stdout && r.stdout.trim()) {
+      const resolved = r.stdout.split(/\r?\n/)[0].trim();
+      return resolved || candidate;
+    }
+  }
+  return "claude";
+}
+
+// ── session spawner ───────────────────────────────────────────────────────────
+
+// Spawn a Claude session for one queued pipeline row. Takes the unified DB,
+// project name, registered project root, and pipeline row.
+export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRun, logFn }) {
+  const feature  = row.feature;
+  const notes    = row.notes_extra || "";
+  const stype    = sessionTypeFromNotes(notes);
+  const model    = modelFromNotes(notes, project, feature, stype, logFn);
+  const budget   = budgetFromNotes(notes);
+  const newStage = STAGE[stype] || "dev";
+  const tools    = TOOLS[stype] || TOOLS.dev;
+
+  if (dryRun) {
+    logFn(`[${project}] DRY-RUN: would spawn ${stype} session for '${feature}'`);
+    logFn(`  session file: ${sessionFile}`);
+    return null;
+  }
+
+  // 0. Pre-flight: plan file must exist on disk. queue-plan validates this at
+  // intake, but the file can move/delete between queue-time and spawn-time
+  // (e.g. plan promoted to plans/complete/). Without this guard, session-gen
+  // silently substitutes empty PLAN_CONTENT, the agent has nothing to do and
+  // exits 0 without handoff, and the reaper parks at manual — burning a full
+  // claude -p session producing nothing. Detect up front, park with a clear
+  // reason, never launch.
+  const planPathForCheck = (row.plan_file || "").trim();
+  if (!planPathForCheck || !existsSync(planPathForCheck)) {
+    const ts = new Date().toISOString().slice(0, 16);
+    const reason = planPathForCheck ? "plan-file-missing" : "plan-file-empty";
+    const note   = `[${reason} ${ts}]`;
+    logFn(`[${project}] '${feature}' ${reason}: ${planPathForCheck || "(empty)"} — parking at manual`, "ERROR");
+    try {
+      const r = rowGet(db, project, feature);
+      const existing = r ? (r.notes_extra || "") : "";
+      rowUpdate(db, project, feature, {
+        stage:       "manual",
+        notes_extra: existing ? `${existing} ${note}` : note,
+      });
+    } catch {}
+    publishNotification({
+      title: `Spawn Blocked: ${feature} (${reason})`,
+      message: (
+        `${stype} session for '${feature}' in ${project} blocked before spawn.\n` +
+        `Reason: ${reason} — plan_file '${planPathForCheck || "(empty)"}' not found on disk.\n` +
+        `Operator: restore the plan file or row-delete the row.`
+      ),
+      priority: "high",
+    }).catch(() => {});
+    return null;
+  }
+
+  // 1. Advance stage queued → <stage>
+  try {
+    const ok = rowUpdate(db, project, feature, { stage: newStage });
+    if (!ok) {
+      setLastError(db, project, feature, "stage-advance failed before spawn");
+      logFn(`[${project}] WARNING: could not update pipeline row for '${feature}'`, "WARN");
+      return null;
+    }
+  } catch (e) {
+    logFn(`[${project}] WARNING: stage-advance threw for '${feature}': ${e.message}`, "WARN");
+    return null;
+  }
+
+  // 2. Determine working directory.
+  const planStem       = basename(row.plan_file || "", ".md") || "";
+  const pipelineBranch = (row.branch || "—").trim();
+  let cwd = null;
+
+  if (existsSync(projectRoot)) {
+    if (planStem && ["dev", "test", "review"].includes(stype)) {
+      const branch = (pipelineBranch && pipelineBranch !== "—")
+        ? pipelineBranch
+        : `autonomous/${planStem}`;
+
+      const slugErr = validateSessionSlug(sessionFile, planStem);
+      if (slugErr) {
+        logFn(`[${project}] session slug mismatch — blocking spawn: ${slugErr}`, "ERROR");
+        try {
+          const row2 = rowGet(db, project, feature);
+          const existing = row2 ? (row2.notes_extra || "") : "";
+          rowUpdate(db, project, feature, {
+            stage:       "manual",
+            notes_extra: existing ? `${existing} blocked: ${slugErr}` : `blocked: ${slugErr}`,
+          });
+        } catch {}
+        return null;
+      }
+
+      const wtPath = orchestratorWorktreePath({ project, projectRoot, branch });
+      const targetBranch = row.target_branch || "main";
+      if (ensureWorktree(projectRoot, wtPath, branch, targetBranch, logFn)) {
+        cwd = wtPath;
+      } else {
+        logFn(`[${project}] worktree unavailable — falling back to project dir`, "WARN");
+        cwd = projectRoot;
+      }
+    } else {
+      cwd = projectRoot;
+    }
+  }
+
+  // 3. Correlation ID: feature-YYYYMMDDTHHMMSSz
+  const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replace(/[-:]/g, "");
+  const correlationId = `${feature}-${ts}`;
+
+  const worktreeCreated = !!(cwd && cwd !== projectRoot);
+  const spawnReason = worktreeCreated
+    ? "worktree created"
+    : (!planStem || stype === "research" ? "no plan/research session" : "worktree creation failed");
+
+  logFn(`[${project}] spawning ${stype} session for '${feature}' (corr_id=${correlationId})`);
+  logFn(`  session file: ${sessionFile}`);
+  logFn(`  cwd: ${cwd}`);
+  logFn(`  reason: ${spawnReason}`);
+
+  const claudePath = findClaude();
+  const prompt = `export CORRELATION_ID='${correlationId}'; Read '${sessionFile}' in full and execute the session.`;
+  const args = [
+    "-p", prompt,
+    "--model", model,
+    "--allowedTools", tools,
+    "--max-budget-usd", budget,
+  ];
+
+  const env = { ...process.env };
+  env.GIT_AUTHOR_NAME  = "Claude Agent";
+  env.GIT_AUTHOR_EMAIL = `claude-agent@${correlationId}`;
+  env.CORRELATION_ID   = correlationId;
+  const localBin = join(homedir(), ".local", "bin");
+  env.PATH = [localBin, env.PATH || ""].filter(Boolean).join(pathDelimiter);
+
+  // Windows: Node's spawn() rejects .bat/.cmd directly with EINVAL, and
+  // wrapping via shell:true makes cmd.exe re-parse the args — which mangles
+  // any prompt containing quotes/semicolons. Real claude is claude.exe so
+  // this is moot in production. For demo .bat shims (which are thin
+  // `node "<script>" %*` wrappers), peel off the .bat layer and invoke
+  // node directly with the underlying script — no shell, no arg corruption.
+  let spawnCmd = claudePath;
+  let spawnArgs = args;
+  if (process.platform === "win32" && /\.(bat|cmd)$/i.test(claudePath)) {
+    try {
+      const shimContent = readFileSync(claudePath, "utf8");
+      const m = shimContent.match(/node(?:\.exe)?\s+"([^"]+)"\s+%\*/i);
+      if (m && m[1]) {
+        spawnCmd = process.execPath;
+        spawnArgs = [m[1], ...args];
+        logFn(`[${project}] demo shim detected — invoking node directly: ${m[1]}`);
+      } else {
+        logFn(`[${project}] WARN: ${claudePath} looks like a .bat shim but doesn't match the expected 'node "..." %*' pattern — spawn will likely fail`, "WARN");
+      }
+    } catch (e) {
+      logFn(`[${project}] WARN: could not read shim ${claudePath}: ${e.message}`, "WARN");
+    }
+  }
+  const proc = spawn(spawnCmd, spawnArgs, {
+    cwd:         cwd || undefined,
+    env,
+    windowsHide: true,
+    detached:    false,
+    stdio:       "ignore",
+  });
+  process.stderr.write(JSON.stringify({
+    event:          "session_spawn",
+    correlation_id: correlationId,
+    pid:            proc.pid,
+    cwd:            cwd || "",
+    session_type:   stype,
+    session_file:   String(sessionFile),
+  }) + "\n");
+  proc.unref();
+  proc._feature       = feature;
+  proc._correlationId = correlationId;
+  proc._stype         = stype;
+  proc._project       = project;
+  proc._projectRoot   = projectRoot;
+  proc._startTime     = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+  logFn(`[${project}] spawned ${stype} session for '${feature}' (pid ${proc.pid}, corr_id=${correlationId})`);
+
+  // Record spawn in unified DB (sessions table)
+  try {
+    sessionRecordSpawn(db, {
+      correlationId, project, feature,
+      sessionType: stype,
+      cwd:         cwd || "",
+      sessionFile: String(sessionFile),
+      pid:         proc.pid,
+    });
+  } catch (e) {
+    logFn(`[${project}] warning: failed to record session in DB: ${e.message}`, "WARN");
+  }
+
+  // Record spawn in global analytics (session_spawn_map)
+  try {
+    appendSpawn(db, {
+      spawn_time: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+      corr_id:    correlationId,
+      stype,
+      cwd:        cwd || "",
+      project,
+      feature,
+    });
+  } catch (e) {
+    logFn(`[${project}] warning: failed to write session spawn map: ${e.message}`, "WARN");
+  }
+
+  return proc;
+}

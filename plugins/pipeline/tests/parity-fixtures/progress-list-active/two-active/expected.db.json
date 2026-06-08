@@ -1,0 +1,51 @@
+{
+  "pipeline_rows": [],
+  "progress_files": [
+    {
+      "slug": "active-slug-one",
+      "project": "testproject",
+      "parent_slug": null,
+      "prefix": null,
+      "pid": null,
+      "session_type": null,
+      "is_active": 1,
+      "notes": null
+    },
+    {
+      "slug": "active-slug-two",
+      "project": "testproject",
+      "parent_slug": null,
+      "prefix": null,
+      "pid": null,
+      "session_type": null,
+      "is_active": 1,
+      "notes": null
+    }
+  ],
+  "progress_steps": [
+    {
+      "slug": "active-slug-one",
+      "step_index": 1,
+      "content": "Do A",
+      "state": "pending"
+    },
+    {
+      "slug": "active-slug-one",
+      "step_index": 2,
+      "content": "Do B",
+      "state": "pending"
+    },
+    {
+      "slug": "active-slug-two",
+      "step_index": 1,
+      "content": "Do X",
+      "state": "pending"
+    },
+    {
+      "slug": "active-slug-two",
+      "step_index": 2,
+      "content": "Do Y",
+      "state": "pending"
+    }
+  ]
+}

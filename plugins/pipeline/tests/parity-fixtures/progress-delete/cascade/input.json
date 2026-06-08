@@ -1,0 +1,49 @@
+{
+  "argv": [
+    "progress-delete",
+    "{memory_dir}",
+    "coord-session_child"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [],
+    "progress_files": [
+      {
+        "slug": "coord-session",
+        "parent_slug": null,
+        "prefix": null
+      },
+      {
+        "slug": "coord-session_child",
+        "parent_slug": "coord-session",
+        "prefix": null
+      }
+    ],
+    "progress_steps": [
+      {
+        "slug": "coord-session",
+        "step_index": 1,
+        "content": "Setup",
+        "state": "pending"
+      },
+      {
+        "slug": "coord-session",
+        "step_index": 2,
+        "content": "Run coord-session_child",
+        "state": "pending"
+      },
+      {
+        "slug": "coord-session",
+        "step_index": 3,
+        "content": "Finalize",
+        "state": "pending"
+      },
+      {
+        "slug": "coord-session_child",
+        "step_index": 1,
+        "content": "Do task",
+        "state": "pending"
+      }
+    ]
+  }
+}

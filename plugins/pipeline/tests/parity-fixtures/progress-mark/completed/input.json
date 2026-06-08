@@ -1,0 +1,40 @@
+{
+  "argv": [
+    "progress-mark",
+    "{memory_dir}",
+    "mark-test",
+    "1",
+    "done"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [],
+    "progress_files": [
+      {
+        "slug": "mark-test",
+        "parent_slug": null,
+        "prefix": null
+      }
+    ],
+    "progress_steps": [
+      {
+        "slug": "mark-test",
+        "step_index": 1,
+        "content": "Read plan",
+        "state": "pending"
+      },
+      {
+        "slug": "mark-test",
+        "step_index": 2,
+        "content": "Implement feature",
+        "state": "pending"
+      },
+      {
+        "slug": "mark-test",
+        "step_index": 3,
+        "content": "Run tests",
+        "state": "pending"
+      }
+    ]
+  }
+}

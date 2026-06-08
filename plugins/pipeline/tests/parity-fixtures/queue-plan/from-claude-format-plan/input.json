@@ -1,0 +1,15 @@
+{
+  "argv": [
+    "queue-plan",
+    "{project_root}",
+    "my-feature",
+    "--target-branch",
+    "main"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [],
+    "progress_files": [],
+    "progress_steps": []
+  }
+}

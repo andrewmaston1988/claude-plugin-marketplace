@@ -7,6 +7,7 @@ A collection of [Claude Code](https://claude.ai/code) plugins.
 | Plugin | Description | Status | Docs |
 |--------|-------------|--------|------|
 | slack-bridge | Two-way Slack ↔ Claude Code bridge via Socket Mode | beta | [Setup guide](./plugins/slack-bridge/README.md) |
+| pipeline | Pipeline orchestrator — queue plans, autonomous dev/test/review sessions, TUI + web dashboards, spend governance, conversational `/pipeline-setup` skill | beta | [Setup guide](./plugins/pipeline/README.md) |
 
 ## Using the marketplace
 

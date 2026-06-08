@@ -7,9 +7,9 @@ const CTX_KEYS = ["file_path", "command", "pattern", "path", "prompt", "descript
  * Fire-and-forget: spawn claude -p to fetch a single whimsical verb for the
  * current tool. Calls onVerb(word) asynchronously if successful.
  *
- * @param {{ tool: string|undefined, input: object|undefined, onVerb: (v: string) => void, log: object }} opts
+ * @param {{ tool: string|undefined, input: object|undefined, onVerb: (v: string) => void, log: object, model: string|undefined }} opts
  */
-export function fetchHaikuVerb({ tool, input, onVerb, log }) {
+export function fetchHaikuVerb({ tool, input, onVerb, log, model = "claude-haiku-4-5" }) {
   let ctxStr = "";
   for (const k of CTX_KEYS) {
     if (typeof input?.[k] === "string") { ctxStr = ` on ${input[k].slice(0, 80)}`; break; }
@@ -23,7 +23,7 @@ export function fetchHaikuVerb({ tool, input, onVerb, log }) {
     `Be playful and unexpected. Avoid generic words like Processing, Computing, Analyzing, Running. ` +
     `Return only the single word, nothing else.`;
 
-  const args = ["-p", prompt, "--model", "claude-haiku-4-5", "--output-format", "text"];
+  const args = ["-p", prompt, "--model", model, "--output-format", "text"];
   // On Windows, `claude` is installed as `claude.cmd`; spawn() without shell:true
   // cannot resolve .cmd files from PATH, so use cmd.exe explicitly.
   const [spawnCmd, spawnArgs, spawnOpts] = process.platform === "win32"

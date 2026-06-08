@@ -6,6 +6,7 @@ export function startHeartbeat({ web, channel, ts, cmdEcho, log, extensions, ses
   let stopped = false;
   const startTime = Date.now();
   const verbMode = config?.slack?.verbMode ?? "static";
+  const verbModel = config?.slack?.verbModel ?? "claude-haiku-4-5";
 
   // Haiku verb state — updated asynchronously when tool changes
   let currentVerb = null;
@@ -75,6 +76,7 @@ export function startHeartbeat({ web, channel, ts, cmdEcho, log, extensions, ses
           input,
           onVerb: v => { currentVerb = v; },
           log,
+          model: verbModel,
         });
       }
     },

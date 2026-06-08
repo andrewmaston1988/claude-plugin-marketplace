@@ -1,0 +1,30 @@
+{
+  "_comment": "Copy to ~/.pipeline/config.json and edit. All keys are optional.",
+  "models": {
+    "dev_default":    "claude-haiku-4-5",
+    "review_default": "claude-sonnet-4-6",
+    "governor":       "claude-sonnet-4-6",
+    "doc_impact":     "claude-haiku-4-5"
+  },
+  "notifications": {
+    "slack_channel": null,
+    "_slack_channel_help": "Set to your Slack channel name (without '#') to enable notifications via the claude-slack plugin. Leave null to disable."
+  },
+  "review": {
+    "skill":     "/code-review",
+    "deep_flag": "",
+    "_deep_flag_help": "Append a flag to the review skill invocation. Leave empty for plain /code-review."
+  },
+  "orchestrator_worktree_base": null,
+  "handler_worktree_base":      null,
+  "_worktree_paths_help": "Templates for orchestrator-created (per pipeline row) and handler-managed (qa-test, code-review) worktree paths. Placeholders: {root}, {root_parent}, {project}, {branch}, {branch_type}, {branch_local}, {kind}, {feature}. Defaults — orchestrator: '{root_parent}/{project}-wt/{branch_type}-{branch_local}'; handler: '{root_parent}/.worktrees/{kind}-{feature}'. Use absolute paths to ignore {root_parent}.",
+  "plansDir": "plans",
+  "_plansDir_help": "Where plan files live, relative to the project root. Default 'plans' resolves to <project-root>/plans/. Supports {project} placeholder — use '../CLAUDE/repos/{project}/plans' if your plans live in a separate knowledge-base repo alongside the project (e.g. the directory layout ../CLAUDE/repos/my-project/plans).",
+  "session_templates_dir": null,
+  "_session_templates_dir_help": "Override directory for session templates (dev-session.md, review-session.md, test-session.md, research-session.md, governor-session.md). Per-file fallback to plugin bundled templates. Leave null to use bundled defaults.",
+  "merge": {
+    "doc_impact_enabled": false,
+    "commit_extras":      [],
+    "_help": "Merge layer settings. doc_impact_enabled: gates step 4 (LLM-driven doc updates against operator docs). commit_extras: extra paths (relative to the plans-repo git toplevel) to git-add into commit #2 when plans live outside the project repo (e.g. ['CLAUDE.md', 'pipeline-reference.md'] for the operator's setup)."
+  }
+}

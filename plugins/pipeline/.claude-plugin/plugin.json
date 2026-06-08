@@ -1,0 +1,18 @@
+{
+  "name": "pipeline",
+  "description": "Pipeline orchestration — queue, dev/test/review automation, merge runner, spend governance.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Andrew Maston",
+    "email": "andrew.maston1988@gmail.com"
+  },
+  "homepage": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "repository": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "pipeline",
+    "orchestrator",
+    "queue",
+    "automation"
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "argv": [
+    "stage-set",
+    "{project_root}",
+    "feature-beta",
+    "dev",
+    "--rebase-required",
+    "1"
+  ],
+  "stdin_text": null,
+  "preload": {
+    "pipeline_rows": [
+      {
+        "feature": "feature-beta",
+        "plan_file": "feature-beta.md",
+        "stage": "dev",
+        "branch": "autonomous/feature-beta",
+        "r_model": "claude-haiku-4-5-20251001",
+        "d_model": "claude-sonnet-4-6",
+        "q_model": "claude-sonnet-4-6",
+        "session_type": "dev",
+        "session_file": "",
+        "budget_usd": 5,
+        "qa_pass": null,
+        "dev_retries": 0,
+        "spawn_failed": 0,
+        "notes_extra": null,
+        "created_at": "2026-06-07 12:21:29",
+        "updated_at": "2026-06-07 12:21:29",
+        "depends_on": null,
+        "rebase_required": 0,
+        "target_branch": "main",
+        "last_error": null,
+        "rvw_model": "claude-sonnet-4-6",
+        "review_retries": 0,
+        "review_retry_budget": 3,
+        "review_verdict": null
+      }
+    ],
+    "progress_files": [],
+    "progress_steps": []
+  }
+}
