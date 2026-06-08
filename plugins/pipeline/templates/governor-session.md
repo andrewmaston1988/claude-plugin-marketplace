@@ -17,6 +17,7 @@ dev/test/review/research templates instead.
 - Correlation ID: `$CORRELATION_ID`
 - Project: `{{PROJECT}}`
 - Project root: `{{PROJECT_ROOT}}`
+- Reports directory: `{{REPORTS_DIR}}`
 - Working directory: `{{CWD}}`
 - Report type: `{{REPORT_TYPE}}` (full / status / monthly)
 - Report date: `{{REPORT_DATE}}` (YYYYMMDD — used for full/status; for monthly the YYYYMM month identifier is passed in this slot)
@@ -62,9 +63,9 @@ You compose the prose yourself either way — `generate-report` / `generate-stat
 
 **Write:**
 
-- `{{PROJECT_ROOT}}/reports/governance-{{REPORT_DATE}}.md` (if `REPORT_TYPE=full`)
-- `{{PROJECT_ROOT}}/reports/status-{{REPORT_DATE}}.md` (if `REPORT_TYPE=status`)
-- `{{PROJECT_ROOT}}/reports/governance-$REPORT_MONTH-monthly.md` (if `REPORT_TYPE=monthly`)
+- `{{REPORTS_DIR}}/governance-{{REPORT_DATE}}.md` (if `REPORT_TYPE=full`)
+- `{{REPORTS_DIR}}/status-{{REPORT_DATE}}.md` (if `REPORT_TYPE=status`)
+- `{{REPORTS_DIR}}/governance-$REPORT_MONTH-monthly.md` (if `REPORT_TYPE=monthly`)
 
 **Constraints:**
 
@@ -102,7 +103,7 @@ Check `$REPORT_TYPE`:
 2. **Read the style reference**
 
    ```bash
-   cat {{PROJECT_ROOT}}/reports/governance-<prior-month>-monthly.md
+   cat {{REPORTS_DIR}}/governance-<prior-month>-monthly.md
    ```
 
    The most recent monthly report is the bar for narrative quality. Match its tone, structure, and depth — not the auto-templated reports from the baseline `generate-report` path. Your output should be indistinguishable in style from a human-written briefing for a thoughtful colleague.
@@ -150,13 +151,13 @@ Check `$REPORT_TYPE`:
    - 13:1 is **not** "well above the 10:1 threshold." It is marginal — the cache barely covered its own write cost. 79:1 is exceptional. Do not let positive language for the 79:1 case bleed into the 13:1 case.
 
 4. **Write the file**
-   - Path: `{{PROJECT_ROOT}}/reports/governance-$REPORT_MONTH-monthly.md`
+   - Path: `{{REPORTS_DIR}}/governance-$REPORT_MONTH-monthly.md`
 
 5. **Publish the report**
 
    ```bash
    node $PLUGIN_DIR/scripts/metrics/index.mjs post-report \
-     {{PROJECT_ROOT}}/reports/governance-$REPORT_MONTH-monthly.md
+     {{REPORTS_DIR}}/governance-$REPORT_MONTH-monthly.md
    ```
 
 6. **Done**
@@ -236,14 +237,14 @@ Check `$REPORT_TYPE`:
 
 3. **Write the file**
 
-   - Full:   write to `{{PROJECT_ROOT}}/reports/governance-{{REPORT_DATE}}.md`
-   - Status: write to `{{PROJECT_ROOT}}/reports/status-{{REPORT_DATE}}.md`
+   - Full:   write to `{{REPORTS_DIR}}/governance-{{REPORT_DATE}}.md`
+   - Status: write to `{{REPORTS_DIR}}/status-{{REPORT_DATE}}.md`
 
 4. **Publish the report**
 
    ```bash
    node $PLUGIN_DIR/scripts/metrics/index.mjs post-report \
-     {{PROJECT_ROOT}}/reports/<report-file>.md
+     {{REPORTS_DIR}}/<report-file>.md
    ```
 
    `post-report` wraps the report in a JSON envelope (`kind: "report"`) and writes it to `<pipeline-state-dir>/notifications/`. The configured `notifications.on_write` forwarder routes reports to the operator's governance channel — you do not need to know the channel name. With no hook configured the report just lands on disk.

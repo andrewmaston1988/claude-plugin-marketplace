@@ -21,6 +21,7 @@ import {
 } from "../pipeline-db/index.mjs";
 import { findClaude } from "./spawn.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
+import { updateSpend } from "../metrics/spend.mjs";
 
 const _BUNDLED_GOVERNOR_TEMPLATE = fileURLToPath(
   new URL("../../templates/governor-session.md", import.meta.url)
@@ -129,7 +130,7 @@ function expandTemplate(content, vars) {
   return out;
 }
 
-function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour, kind = "daily" }) {
+async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour, kind = "daily" }) {
   const now = new Date();
   const ts  = now.toISOString().replace(/\.\d{3}Z$/, "Z").replace(/[-:]/g, "");
   const correlationId = kind === "monthly" ? `governor-monthly-${ts}` : `governor-${ts}`;
@@ -157,10 +158,13 @@ function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour, kind
     const sessionName = kind === "monthly" ? `gov-monthly-${ts}.md` : `gov-${ts}.md`;
     const sessionPath = join(ctx.sessionDir, sessionName);
 
+    mkdirSync(ctx.reportsDir, { recursive: true });
+
     const expanded = expandTemplate(templateContent, {
       CORRELATION_ID: correlationId,
       PROJECT:        ctx.projectName,
       PROJECT_ROOT:   ctx.projectRoot,
+      REPORTS_DIR:    ctx.reportsDir,
       REPORT_TYPE:    kind === "monthly" ? "monthly" : reportType,
       REPORT_DATE:    reportDate,
       CWD:            ctx.projectRoot,
@@ -176,6 +180,13 @@ function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour, kind
       });
     } catch (e) {
       logFn(`Warning: failed to record governor spawn: ${e.message}`, "WARN");
+    }
+
+    // Refresh spend data so the governor session reads fresh ccusage numbers.
+    try {
+      await updateSpend(db, reportDate);
+    } catch (e) {
+      logFn(`Warning: update-spend failed (non-fatal): ${e.message}`, "WARN");
     }
 
     const prompt = (
@@ -230,7 +241,7 @@ function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour, kind
   }
 }
 
-export function spawnGovernor(db, { dryRun, logFn }) {
+export async function spawnGovernor(db, { dryRun, logFn }) {
   const ctx = resolveGovernorContext(db);
   if (!ctx) return false;
   const { should, reportType, slotHour } = shouldSpawnGovernor(ctx.reportsDir, db);
@@ -238,7 +249,7 @@ export function spawnGovernor(db, { dryRun, logFn }) {
   return _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour, kind: "daily" });
 }
 
-export function spawnMonthlyGovernor(db, { dryRun, logFn }) {
+export async function spawnMonthlyGovernor(db, { dryRun, logFn }) {
   const ctx = resolveGovernorContext(db);
   if (!ctx) return false;
   if (!shouldSpawnMonthlyGovernor(db)) return false;

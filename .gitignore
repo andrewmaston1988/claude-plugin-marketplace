@@ -7,6 +7,8 @@ config.local.json
 *.log
 sessions.json
 bridge.pid
+pipeline.db
+sessions/
 
 # Editor
 .vscode/

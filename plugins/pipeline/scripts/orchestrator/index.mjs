@@ -13,7 +13,7 @@ import { resolveSessionFile } from "../session-gen.mjs";
 import {
   readState, writeState, deleteState, pidAlive, startupGuard,
 } from "./state-file.mjs";
-import { spawnSession } from "./spawn.mjs";
+import { spawnSession, spawnMerge } from "./spawn.mjs";
 import { reapFinished } from "./reaper.mjs";
 import { orchestratorWorktreePath } from "../worktree-paths.mjs";
 import { spawnGovernor, spawnMonthlyGovernor } from "./governor.mjs";
@@ -161,6 +161,25 @@ async function pollOnce({
     if (proc !== null) {
       activeProcs.set(project, proc);
     }
+  }
+
+  // Second pass: stage=merge rows. One merge per project per tick.
+  for (const [project, projectRoot] of pipelinePaths) {
+    if (projectFilter && project !== projectFilter) continue;
+    if (activeProcs.has(project)) continue;
+    if (projectIsActive(db, project)) continue;
+    if (activeProcs.size >= maxConcurrent) continue;
+
+    const rows = rowsList(db, project);
+    const mergeRow = rows.find(r =>
+      r.stage === "merge" &&
+      !r.rebase_required &&
+      depsMet(r, rows, logFn)
+    );
+    if (!mergeRow) continue;
+
+    const proc = spawnMerge(project, mergeRow, projectRoot, { db, dryRun, logFn });
+    if (proc !== null) activeProcs.set(project, proc);
   }
 
   return { nProjects, nQueued, nActive };

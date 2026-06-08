@@ -39,6 +39,8 @@ queued → dev → review → test → merge → done
 
 **Invariant:** A row cannot reach `stage=merge` without a gate verdict — either `qa_pass=true` (test path) or `review_verdict=ready_to_ship`. The merge runner enforces this before squash-merging.
 
+**Auto-spawn:** The orchestrator automatically spawns merge children when a pipeline row reaches `stage=merge` with no `rebase_required` flag and all dependencies satisfied. Each project is limited to one concurrent merge to avoid rebase/commit races. On successful exit (code 0), the merge script advances the row to `done`; on failure, the row remains at `merge` and an operator notification is sent.
+
 ---
 
 ## Quick start

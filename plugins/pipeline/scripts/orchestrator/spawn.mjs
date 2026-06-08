@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, basename, delimiter as pathDelimiter } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import {
   rowGet, rowUpdate, setLastError,
@@ -335,5 +336,56 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
     logFn(`[${project}] warning: failed to write session spawn map: ${e.message}`, "WARN");
   }
 
+  return proc;
+}
+
+// ── merge spawner ─────────────────────────────────────────────────────────────
+
+function isDirtyTree(projectRoot) {
+  try {
+    const r = spawnSync("git", ["status", "--porcelain"], {
+      cwd: projectRoot, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8",
+    });
+    if (r.status !== 0) return true;  // git failed → can't verify clean → assume dirty
+    return r.stdout.trim().length > 0;
+  } catch { return true; }
+}
+
+export function spawnMerge(project, row, projectRoot, { db, dryRun, logFn }) {
+  const feature = row.feature;
+  const branch  = row.branch || `autonomous/${feature}`;
+
+  if (isDirtyTree(projectRoot)) {
+    logFn(`[${project}] merge '${feature}' deferred — projectRoot has unstaged changes`, "WARN");
+    return null;
+  }
+
+  if (dryRun) {
+    logFn(`[${project}] DRY-RUN: would spawn merge for '${feature}' on ${branch}`);
+    return null;
+  }
+
+  const mergeScript = fileURLToPath(new URL("../merge/index.mjs", import.meta.url));
+  const args = [mergeScript, "--branches", branch, "--project-dir", projectRoot];
+
+  const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replace(/[-:]/g, "");
+  const correlationId = `merge-${feature}-${ts}`;
+
+  logFn(`[${project}] spawning merge for '${feature}' (corr_id=${correlationId})`);
+  logFn(`  merge script: ${mergeScript}`);
+  logFn(`  branch: ${branch}`);
+  logFn(`  cwd: ${projectRoot}`);
+
+  const env = { ...process.env, CORRELATION_ID: correlationId };
+  const proc = spawn(process.execPath, args, {
+    cwd: projectRoot, env, windowsHide: true, detached: false, stdio: "ignore",
+  });
+  proc.unref();
+  proc._feature       = feature;
+  proc._correlationId = correlationId;
+  proc._stype         = "merge";
+  proc._project       = project;
+  proc._projectRoot   = projectRoot;
+  proc._startTime     = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   return proc;
 }
