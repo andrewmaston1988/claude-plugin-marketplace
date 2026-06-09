@@ -74,6 +74,57 @@ If the user picks a channel: strip a leading `#`. If `claude-slack` isn't on PAT
 
 **SKIP this question** unless the user volunteers a preference or asks about cost. If they do, ask only for the session types they want to override.
 
+### Question 3b — on_merge_ready hook
+
+**What this does**: runs a script/executable whenever a pipeline row reaches `stage=merge` — fires for all projects, regardless of whether `autoMerge` is enabled. The hook receives four env vars: `PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`. Common use: post a Slack ping when a branch is ready to merge.
+
+**Default**: disabled (no hook set).
+
+**If you skip**: merge-ready events are still recorded internally; you just won't get an external notification. Add it later by setting `hooks.on_merge_ready` in `~/.pipeline/config.json`.
+
+**Ask the user what they want to happen** when a row is merge-ready. Don't lead with Slack — ask first, then figure out how to wire it. Common answers and how to handle each:
+
+- **"Post to Slack"** — check `~/.pipeline/config.json` for `hooks.on_notification` (or legacy `notifications.on_write`). If it points to a `claude-slack.mjs` file, you already have the forwarder path. Write `~/.pipeline/hooks/on-merge-ready.mjs` that reads the env vars, builds a JSON envelope, and calls that forwarder via `spawnSync("node", [claudeSlackPath, tmpEnvelopeFile])`. Example envelope: `{ title: "Merge ready: <feature>", message: "\`<branch>\` → \`<target>\` in *<project>* is ready to merge.", priority: "normal" }`. Write the tmp file to `os.tmpdir()`.
+- **"Run a webhook / curl"** — write a wrapper `.mjs` that reads the env vars and runs the appropriate command.
+- **"Log to a file"** — write a wrapper `.mjs` that appends a line to `~/.pipeline/logs/merge-ready.log`.
+- **"I have a script already"** — ask for the absolute path; use it directly.
+- **"Skip"** — omit `--merge-hook`.
+
+For any case where you write a new script: write it to `~/.pipeline/hooks/on-merge-ready.mjs` (create the dir if needed), make it self-contained, and show the user the file content before writing.
+
+Pass the hook path as `--merge-hook <abs-path>` (or omit to leave unset).
+
+### Question 3c — on_merge hook
+
+**What this does**: replaces the pipeline's local squash merge with a custom script. The hook receives the same four env vars as `on_merge_ready` (`PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`) and is responsible for performing the actual merge. When unset, the pipeline squash-merges locally as usual.
+
+**Default**: disabled (local squash merge used).
+
+**If you skip**: the pipeline squash-merges the branch to the target branch locally and pushes. GitHub won't show the PR as "merged" — the PR will close when the branch is deleted.
+
+**If you set it**: the hook fully owns the merge step. A common hook for GitHub repos:
+
+```js
+// ~/.pipeline/hooks/on-merge.mjs
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { homedir } from "node:os";
+const gh = join(homedir(), ".local", "bin", process.platform === "win32" ? "gh.exe" : "gh");
+const branch = process.env.PIPELINE_BRANCH;
+const result = spawnSync(gh, ["pr", "merge", branch, "--squash", "--delete-branch", "--auto"], {
+  stdio: "inherit",
+  env: { ...process.env, PATH: `${join(homedir(), ".local", "bin")};${process.env.PATH}` },
+});
+process.exit(result.status ?? 1);
+```
+
+**Ask the user** whether they want to use a GitHub PR merge or keep the local squash. Common answers:
+- **"GitHub PR merge"** — write the above hook to `~/.pipeline/hooks/on-merge.mjs` and pass `--on-merge <path>`.
+- **"Keep local squash"** — omit `--on-merge`.
+- **"I have a script already"** — ask for the path and use it directly.
+
+Pass the hook path as `--on-merge <abs-path>` (or omit to keep local squash).
+
 ### Question 4 — Autostart
 
 **What this does**: installs the orchestrator as an OS-level scheduled task so it starts at login and survives reboots — Task Scheduler on Windows, launchd plist on macOS, systemd user unit on Linux.
@@ -109,6 +160,8 @@ pipeline setup --non-interactive
   [--models r=...,d=...,q=...,rvw=...]
   [--review-skill <name>]
   [--review-deep-flag <flag>]
+  [--merge-hook <abs-path>]
+  [--on-merge <abs-path>]
   [--no-autostart]
   [--no-path-alias]
   [--continue-on-failed-prechecks]

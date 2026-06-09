@@ -19,10 +19,8 @@ function makeTmpDir() {
 }
 
 test("spawnMergeReadyHook: resolves immediately when on_merge_ready is null (no-op)", async () => {
-  // With no config file present in the test environment the hook is null → no-op.
-  // Verify it resolves without error rather than hanging.
   const start = Date.now();
-  await spawnMergeReadyHook("proj", "feat", "autonomous/feat", "master");
+  await spawnMergeReadyHook("proj", "feat", "autonomous/feat", "master", { _cfg: {} });
   ok(Date.now() - start < 1000, "no-op hook should resolve almost immediately");
 });
 

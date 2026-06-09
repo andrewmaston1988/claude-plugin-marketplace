@@ -93,17 +93,19 @@ Config key:
 
 ```json
 {
-  "notifications": {
-    "on_write": "/abs/path/to/forwarder.mjs"
+  "hooks": {
+    "on_notification": "/abs/path/to/forwarder.mjs"
   }
 }
 ```
 
 The hook is spawned once per envelope with the file path as its only argv. Stdio inherits.
 
+> **Legacy:** `notifications.on_write` is still read as a fallback for one release cycle. Migrate to `hooks.on_notification` — `pipeline setup` does this automatically on the next run.
+
 ### Bundled Slack forwarder
 
-The plugin ships `scripts/forwarders/claude-slack.mjs`. The setup wizard wires it as `on_write` automatically when:
+The plugin ships `scripts/forwarders/claude-slack.mjs`. The setup wizard wires it as `hooks.on_notification` automatically when:
 
 - A Slack channel is set (`notifications.governance_channel` or `notifications.pipeline_channel`)
 - `claude-slack` is on PATH (installable via the `slack-bridge` plugin in this same marketplace)
@@ -112,13 +114,13 @@ Channel resolution: `pipeline_channel || governance_channel`. So pipeline events
 
 ### Bringing your own forwarder
 
-Replace `notifications.on_write` with your own executable — anything that takes a JSON envelope path and forwards it. Read `scripts/forwarders/claude-slack.mjs` as a 50-line reference implementation. Common patterns:
+Replace `hooks.on_notification` with your own executable — anything that takes a JSON envelope path and forwards it. Read `scripts/forwarders/claude-slack.mjs` as a 50-line reference implementation. Common patterns:
 
 - **Different notifier** (Discord, MS Teams, email, webhook): substitute the underlying API call; the envelope format stays the same.
 - **Routing**: parse `envelope.priority` or `envelope.title` to choose the destination channel.
 - **Filtering**: skip envelopes you don't care about (e.g. only forward `priority: "high"`).
 
-Setup never clobbers a non-bundled `on_write` on re-run — once you point it at your own script, it stays yours.
+Setup never clobbers a non-bundled `on_notification` on re-run — once you point it at your own script, it stays yours.
 
 ---
 
@@ -159,8 +161,12 @@ Written to `~/.pipeline/config.json` by `pipeline setup`. All keys are optional 
 | `models.dev_default` | string | `"claude-haiku-4-5"` | Model used for dev sessions |
 | `models.review_default` | string | `"claude-sonnet-4-6"` | Model used for review sessions |
 | `models.governor` | string | `"claude-sonnet-4-6"` | Model used by the governor session (see "Governor and metrics" below) |
-| `models.doc_impact` | string | `"claude-haiku-4-5"` | Model used for doc-impact analysis during merge |
 | `notifications.governance_channel` | string \| null | `null` | Slack channel name for governance reports + failure notifications (e.g. `"your-channel-name"`, without `#`); `null` disables |
+| `notifications.pipeline_channel` | string \| null | `null` | Separate channel for per-row orchestrator events; falls back to `governance_channel` if null |
+| `hooks.on_notification` | string \| null | `null` | Path to forwarder script — called once per envelope with the JSON file path as its only argv |
+| `hooks.on_merge_ready` | string \| null | `null` | Path to hook script — called when a row reaches `stage=merge`; receives env vars (no argv) |
+| `hooks.on_merge` | string \| null | `null` | Path to hook script — replaces the local squash merge when set; receives same env vars as `on_merge_ready`; hook owns the git operation |
+| `autoMerge` | boolean | `false` | When `true`, the orchestrator automatically spawns the merge agent for rows at `stage=merge` |
 | `review.skill` | string | `"/code-review"` | Slash-command invoked by review sessions |
 | `review.deep_flag` | string | `""` | Extra flag appended to the review skill invocation (any string; empty disables) |
 
@@ -171,10 +177,16 @@ Example `~/.pipeline/config.json`:
   "models": {
     "dev_default": "claude-haiku-4-5",
     "review_default": "claude-sonnet-4-6",
-    "governor": "claude-sonnet-4-6",
-    "doc_impact": "claude-haiku-4-5"
+    "governor": "claude-sonnet-4-6"
   },
-  "notifications": { "governance_channel": "your-channel-name" },
+  "notifications": {
+    "governance_channel": "your-ops-channel",
+    "pipeline_channel": "your-pipeline-channel"
+  },
+  "hooks": {
+    "on_notification": "/abs/path/to/forwarder.mjs",
+    "on_merge_ready": "/abs/path/to/on-merge-ready.mjs"
+  },
   "review": { "skill": "/code-review", "deep_flag": "" }
 }
 ```
@@ -217,7 +229,7 @@ Phase 2 will add the action menu (queue / delete / etc. via shell-out to existin
 
 ## Notifications + forwarder hook
 
-The plugin is **notifier-agnostic**: every report and notification is written to a JSON envelope under `<pipeline-state-dir>/notifications/` (default `~/.pipeline/notifications/`). If `cfg.notifications.on_write` is set to a command, the publisher spawns it with the envelope's file path as its only argument. The hook reads the JSON, picks what it needs, and forwards to whichever sink it wants — Slack, MS Teams, Discord, Pushover, email, webhook, log shipper, anything.
+The plugin is **notifier-agnostic**: every report and notification is written to a JSON envelope under `<pipeline-state-dir>/notifications/` (default `~/.pipeline/notifications/`). If `cfg.hooks.on_notification` is set to a command, the publisher spawns it with the envelope's file path as its only argument. The hook reads the JSON, picks what it needs, and forwards to whichever sink it wants — Slack, MS Teams, Discord, Pushover, email, webhook, log shipper, anything.
 
 Out-of-the-box behaviour for a fresh install: notifications land on disk and nothing else happens. No external dependencies, no PATH lookups.
 
@@ -252,10 +264,31 @@ curl -X POST -H 'Content-Type: application/json' \
 Wire it via `~/.pipeline/config.json`:
 
 ```json
-{ "notifications": { "on_write": "/abs/path/to/forwarder.sh" } }
+{ "hooks": { "on_notification": "/abs/path/to/forwarder.sh" } }
 ```
 
 Hooks ending in `.mjs` / `.js` are auto-prefixed with `node`; everything else is exec'd directly. The hook's stdout/stderr inherit so failures are visible.
+
+### on_merge_ready hook
+
+Fires whenever a pipeline row reaches `stage=merge` — for every project, regardless of whether `autoMerge` is enabled. Common use: post a Slack ping, trigger a CI system, or log the event.
+
+```json
+{ "hooks": { "on_merge_ready": "/abs/path/to/hook.mjs" } }
+```
+
+The hook receives four environment variables — no argv:
+
+| Variable | Value |
+|----------|-------|
+| `PIPELINE_PROJECT` | Project name (e.g. `my-app`) |
+| `PIPELINE_FEATURE` | Feature slug (e.g. `fix-login-bug`) |
+| `PIPELINE_BRANCH` | Full branch name (e.g. `autonomous/fix-login-bug`) |
+| `PIPELINE_TARGET_BRANCH` | Merge target (e.g. `master`) |
+
+The hook has a 15-second hard timeout; its exit code is ignored (fire-and-forget).
+
+`pipeline setup` asks whether to configure `on_merge_ready` and can write a Slack wrapper to `~/.pipeline/hooks/on-merge-ready.mjs` automatically if `hooks.on_notification` is already pointing at the bundled claude-slack forwarder.
 
 ---
 
@@ -406,10 +439,10 @@ If a suspicious match is found, queueing fails with an error pointing at the off
 
 ## Merge layer
 
-`skills/merge/runner.mjs` runs the squash-merge pipeline: rebase → verify DoD → optional doc-impact → squash merge → move plans → project commit → smoke check. Invoked by the `/merge` skill:
+`skills/merge/merge.mjs` runs the squash-merge pipeline: rebase → verify DoD → squash merge → move plans → project commit → smoke check. Invoked by the `/merge` skill:
 
 ```bash
-node plugins/pipeline/skills/merge/runner.mjs \
+node plugins/pipeline/skills/merge/merge.mjs \
   --branches autonomous/feat-a,autonomous/feat-b \
   --project-dir /path/to/project \
   [--plans-dir /path/to/plans] \
@@ -424,7 +457,6 @@ Plan file paths are read from the pipeline DB row (stored at queue time). `--pla
 
 | Key | Default | Purpose |
 |---|---|---|
-| `merge.doc_impact_enabled` | `false` | Gate step 4 (LLM-driven doc updates). Public users keep it off. |
 | `plansDir` | `"plans"` | Where plan files live, relative to project root. Supports `{project}` placeholder. |
 
 ---
@@ -682,7 +714,7 @@ cd plugins/pipeline && npm test
 
 | Subcommand | Purpose |
 |------------|---------|
-| `notify --title <t> --message <m>` | Publish a notification envelope (forwarded if `notifications.on_write` is set) |
+| `notify --title <t> --message <m>` | Publish a notification envelope (forwarded if `hooks.on_notification` is set) |
 | `session-generate <project> <plan-file> <type>` | Generate a session file from template |
 | `target-branch-get <root> <feature>` | Read the target_branch for a row |
 
@@ -718,7 +750,7 @@ plugins/pipeline/
       discovery.mjs         Project discovery (pipeline_enabled flag)
       state-file.mjs        Orchestrator state file (~/.pipeline/orchestrator.state.json)
     session-gen.mjs         Session file template engine
-    publisher.mjs           Envelope writer + on_write hook dispatcher
+    publisher.mjs           Envelope writer + on_notification / on_merge_ready hook dispatcher
     merge/                  Branch merge helpers
     metrics/                Spend analytics + governance reporting (carried-along surface — see "Governor and metrics")
 ```
@@ -765,4 +797,4 @@ cat ~/.pipeline/orchestrator.state.json
 
 **DB locked errors:** The orchestrator and CLI share WAL-mode SQLite. If you see `SQLITE_BUSY`, a previous process may have crashed mid-transaction — wait a few seconds and retry.
 
-**Notifications not reaching downstream:** Check `<pipeline-state-dir>/notifications/` — the envelope files should be there. If they are, the publisher is doing its job; the issue is your `notifications.on_write` hook. Run it manually against one of the envelope files to debug: `<your-hook> <envelope.json>`. Stdout/stderr from the hook is inherited so any errors print to the orchestrator log.
+**Notifications not reaching downstream:** Check `<pipeline-state-dir>/notifications/` — the envelope files should be there. If they are, the publisher is doing its job; the issue is your `hooks.on_notification` hook. Run it manually against one of the envelope files to debug: `node <your-hook> <envelope.json>`. Stdout/stderr from the hook is inherited so any errors print to the orchestrator log.

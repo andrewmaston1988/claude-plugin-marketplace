@@ -212,8 +212,8 @@ export async function publishNotification({ title, message, messageFile, priorit
 
 // Spawn on_merge_ready hook — fires when a row reaches stage=merge.
 // Fire-and-forget with 15s cap, exit code ignored.
-export function spawnMergeReadyHook(project, feature, branch, targetBranch) {
-  const cfg = loadPipelineConfig();
+export function spawnMergeReadyHook(project, feature, branch, targetBranch, { _cfg } = {}) {
+  const cfg = _cfg ?? loadPipelineConfig();
   const hook = _resolveHookCommand(cfg.hooks?.on_merge_ready);
   if (!hook) return Promise.resolve();
   const args = /\.(mjs|js)$/.test(hook) ? ["node", hook] : [hook];
