@@ -21,6 +21,7 @@ import {
 } from "../pipeline-db/index.mjs";
 import { findClaude } from "./spawn.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
+import { getPaths } from "../../src/paths.mjs";
 import { updateSpend } from "../metrics/spend.mjs";
 
 const _BUNDLED_GOVERNOR_TEMPLATE = fileURLToPath(
@@ -174,6 +175,7 @@ async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour
 
     mkdirSync(ctx.reportsDir, { recursive: true });
 
+    const paths = getPaths();
     const expanded = expandTemplate(templateContent, {
       CORRELATION_ID: correlationId,
       PROJECT:        ctx.projectName,
@@ -182,6 +184,7 @@ async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour
       REPORT_TYPE:    kind === "monthly" ? "monthly" : reportType,
       REPORT_DATE:    reportDate,
       CWD:            ctx.projectRoot,
+      PIPELINE_DB:    join(paths.dataDir, "pipeline.db"),
     });
     writeFileSync(sessionPath, expanded, "utf8");
 
