@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { connectPath, close, projectAdd, rowAdd, rowUpdate } from "../scripts/pipeline-db/index.mjs";
 import { lookupPlanFile, step1IdentifyPlans, step6bArchiveOrphanedPlans } from "../skills/merge/scripts/plan-files.mjs";
-import { verifyAlreadyIntegrated, step7CommitProject } from "../skills/merge/scripts/runner.mjs";
+import { verifyAlreadyIntegrated, step7CommitProject } from "../skills/merge/scripts/merge.mjs";
 
 const PROJECT = "testproject";
 
@@ -217,7 +217,7 @@ test("porcelain filter: untracked lines do not count as staged changes", () => {
 // ── readSmokeCommand regex ────────────────────────────────────────────────────
 
 test("readSmokeCommand: extracts command from bash fence after smoke heading", () => {
-  // Inline reproduction of runner.mjs:readSmokeCommand (section-based approach).
+  // Inline reproduction of merge.mjs:readSmokeCommand (section-based approach).
   // Finds the smoke heading, extracts its section, then finds the first code fence.
   function extractSmokeCmd(text) {
     const sectionM = /^#+\s+smoke\b[^\n]*/im.exec(text);

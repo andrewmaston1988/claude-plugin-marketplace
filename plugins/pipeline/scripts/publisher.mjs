@@ -76,8 +76,18 @@ function _writeEnvelope(envelope, paths, cfg) {
 // blast radius if the hook hangs.
 //
 // Returns a Promise<void> that resolves on child close or after the timeout.
+
+function _resolveHookCommand(hookVal) {
+  if (!hookVal) return null;
+  if (typeof hookVal === "string") return hookVal;
+  if (Array.isArray(hookVal) && hookVal[0]?.command) return hookVal[0].command;
+  return null;
+}
+
 function _spawnHook(cfg, filePath, paths) {
-  const hook = cfg.notifications?.on_write;
+  // New key first, legacy fallback for one release
+  const hook = _resolveHookCommand(cfg.hooks?.on_notification)
+            ?? _resolveHookCommand(cfg.notifications?.on_write);
   if (!hook) return Promise.resolve();
   const args = /\.(mjs|js)$/.test(hook) ? ["node", hook, filePath] : [hook, filePath];
   return new Promise((resolveSpawn) => {
@@ -198,4 +208,30 @@ export async function publishNotification({ title, message, messageFile, priorit
   process.stdout.write(`Notification published: ${target}\n`);
   await _spawnHook(cfg, target, paths);
   return true;
+}
+
+// Spawn on_merge_ready hook — fires when a row reaches stage=merge.
+// Fire-and-forget with 15s cap, exit code ignored.
+export function spawnMergeReadyHook(project, feature, branch, targetBranch) {
+  const cfg = loadPipelineConfig();
+  const hook = _resolveHookCommand(cfg.hooks?.on_merge_ready);
+  if (!hook) return Promise.resolve();
+  const args = /\.(mjs|js)$/.test(hook) ? ["node", hook] : [hook];
+  const env = {
+    ...process.env,
+    PIPELINE_PROJECT:       project,
+    PIPELINE_FEATURE:       feature,
+    PIPELINE_BRANCH:        branch,
+    PIPELINE_TARGET_BRANCH: targetBranch,
+  };
+  return new Promise(resolve => {
+    try {
+      const child = spawn(args[0], args.slice(1), {
+        env, stdio: "ignore", windowsHide: true, detached: false,
+      });
+      child.on("close", resolve);
+      child.on("error", resolve);  // fire-and-forget; ignore errors
+      setTimeout(() => { try { child.kill(); } catch {} resolve(); }, 15_000).unref?.();
+    } catch { resolve(); }
+  });
 }

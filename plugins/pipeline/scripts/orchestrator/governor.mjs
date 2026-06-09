@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
-  appendGovernorSpawn, lastGovernorSpawnTime, appendSpawn,
+  appendGovernorSpawn, lastGovernorSpawnTime, lastGovernorSpawnAny, appendSpawn,
   projectGetByName,
 } from "../pipeline-db/index.mjs";
 import { findClaude } from "./spawn.mjs";
@@ -71,6 +71,12 @@ function lastSpawnFor(db, slotHour) {
   } catch { return null; }
 }
 
+// 5-minute global cooldown between any two governor spawns.
+// Prevents cascading catch-up fires when the reports directory is empty
+// (e.g. after a config change): each 30s orchestrator tick would otherwise
+// spawn the next slot until all four are in flight simultaneously.
+const GOVERNOR_COOLDOWN_MS = 5 * 60 * 1000;
+
 // Decide whether to spawn the daily governor based on time-of-day, missing
 // reports, and rate-limiting against the analytics table.
 export function shouldSpawnGovernor(reportsDir, db, _now = new Date()) {
@@ -78,6 +84,14 @@ export function shouldSpawnGovernor(reportsDir, db, _now = new Date()) {
   const todayStr  = now.toISOString().slice(0, 10).replace(/-/g, "");
   const yesterDt  = new Date(now); yesterDt.setUTCDate(now.getUTCDate() - 1);
   const yesterStr = yesterDt.toISOString().slice(0, 10).replace(/-/g, "");
+
+  // Global cooldown: if any governor spawn happened recently, block all slots.
+  try {
+    const anyTs = lastGovernorSpawnAny(db);
+    if (anyTs && (now.getTime() - new Date(anyTs).getTime()) < GOVERNOR_COOLDOWN_MS) {
+      return { should: false, reportType: null, slotHour: null, skippedReason: "cooldown" };
+    }
+  } catch { /* non-fatal: proceed without cooldown check */ }
 
   // Catch-up: yesterday's full report missing.
   if (!governorReportPresent(reportsDir, 0, yesterStr)) {
@@ -244,8 +258,13 @@ async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour
 export async function spawnGovernor(db, { dryRun, logFn }) {
   const ctx = resolveGovernorContext(db);
   if (!ctx) return false;
-  const { should, reportType, slotHour } = shouldSpawnGovernor(ctx.reportsDir, db);
-  if (!should) return false;
+  const { should, reportType, slotHour, skippedReason } = shouldSpawnGovernor(ctx.reportsDir, db);
+  if (!should) {
+    if (skippedReason === "cooldown") {
+      logFn("Governor: spawn suppressed — another session launched within the last 5 minutes", "WARN");
+    }
+    return false;
+  }
   return _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour, kind: "daily" });
 }
 

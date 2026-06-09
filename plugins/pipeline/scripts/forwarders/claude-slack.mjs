@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Built-in notifications.on_write forwarder for Slack.
+// Built-in hooks.on_notification forwarder for Slack (legacy: notifications.on_write).
 //
 // Reads the envelope JSON written by publisher.mjs (path passed as argv[2]),
 // resolves the destination channel by envelope kind, then shells out to
@@ -13,7 +13,7 @@
 //
 // Wired by the setup wizard when both a Slack channel and `claude-slack` are
 // detected. Users wanting a different forwarder can either:
-//   (a) replace `notifications.on_write` in config.json with their own script
+//   (a) replace `hooks.on_notification` in config.json with their own script
 //       (any executable taking the envelope file path as argv[1] works), or
 //   (b) inspect this file as a reference implementation.
 import { readFileSync, existsSync, readdirSync } from "node:fs";

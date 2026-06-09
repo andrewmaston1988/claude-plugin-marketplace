@@ -8,12 +8,13 @@ import {
   listEnabledProjects,
 } from "../pipeline-db/index.mjs";
 import { getPaths } from "../../src/paths.mjs";
-import { publishNotification } from "../publisher.mjs";
+import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
+import { publishNotification, spawnMergeReadyHook } from "../publisher.mjs";
 import { resolveSessionFile } from "../session-gen.mjs";
 import {
   readState, writeState, deleteState, pidAlive, startupGuard,
 } from "./state-file.mjs";
-import { spawnSession, spawnMerge } from "./spawn.mjs";
+import { spawnSession, spawnMerge, isDirtyTree, isMergedInto } from "./spawn.mjs";
 import { reapFinished } from "./reaper.mjs";
 import { orchestratorWorktreePath } from "../worktree-paths.mjs";
 import { spawnGovernor, spawnMonthlyGovernor } from "./governor.mjs";
@@ -164,6 +165,7 @@ async function pollOnce({
   }
 
   // Second pass: stage=merge rows. One merge per project per tick.
+  const cfg = loadPipelineConfig();
   for (const [project, projectRoot] of pipelinePaths) {
     if (projectFilter && project !== projectFilter) continue;
     if (activeProcs.has(project)) continue;
@@ -173,12 +175,23 @@ async function pollOnce({
     const rows = rowsList(db, project);
     const mergeRow = rows.find(r =>
       r.stage === "merge" &&
-      !r.rebase_required &&
       depsMet(r, rows, logFn)
     );
     if (!mergeRow) continue;
 
-    const proc = spawnMerge(project, mergeRow, projectRoot, { db, dryRun, logFn });
+    const branch      = mergeRow.branch || `autonomous/${mergeRow.feature}`;
+    const targetBranch = mergeRow.target_branch || "master";
+
+    // Fire on_merge_ready hook (fire-and-forget, all projects)
+    spawnMergeReadyHook(project, mergeRow.feature, branch, targetBranch).catch(() => {});
+
+    // autoMerge opt-in check
+    if (!cfg.autoMerge) continue;
+
+    const diverged = !isMergedInto(targetBranch, branch, projectRoot);
+    const dirty    = isDirtyTree(projectRoot);
+    const model    = (diverged || dirty) ? "claude-sonnet-4-6" : "claude-haiku-4-5";
+    const proc = spawnMerge(project, mergeRow, projectRoot, model, { db, dryRun, logFn });
     if (proc !== null) activeProcs.set(project, proc);
   }
 

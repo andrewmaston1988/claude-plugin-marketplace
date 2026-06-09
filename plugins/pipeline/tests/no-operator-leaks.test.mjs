@@ -51,7 +51,7 @@ function* walk(dir, rel = "") {
 test("smoke-9: no operator-private values in shipped plugin tree", (t) => {
   const leaks = [];
   for (const { abs, rel } of walk(PLUGIN_ROOT)) {
-    if (rel === "tests/smoke-9-no-operator-leaks.mjs") continue;
+    if (rel === "tests/no-operator-leaks.test.mjs") continue;
     const content = readFileSync(abs, "utf8");
     for (const needle of FORBIDDEN) {
       if (content.includes(needle)) {

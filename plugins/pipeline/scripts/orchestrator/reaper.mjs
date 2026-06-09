@@ -264,18 +264,14 @@ export function reapFinished(activeProcs, db, { logFn, dryRun = false }) {
         }
 
       } else if (resolvedStype === "merge") {
-        // merge.mjs's commit-and-merge.mjs:177 already advances the row to `done` on
-        // successful squash. If it failed, the row stays at `merge`. Two signals to
-        // distinguish:
-        //   exitCode 0 → success (row is `done` now)
-        //   exitCode != 0 → failure (row still `merge`; surface error to operator)
+        // Agent ran merge.mjs. On success (exit 0), row is already `done`
+        // (merge.mjs step 5 advances it). On failure (non-zero), row stays
+        // at `merge`; surface to operator.
         if (proc.exitCode === 0) {
           logFn(`[${project}] merge '${feature}' completed`);
         } else {
-          const row = rowGet(db, project, feature);
-          const rebase = row?.rebase_required ? "[rebase-required]" : `[merge-failed exit=${proc.exitCode}]`;
           logFn(`[${project}] merge '${feature}' failed exit=${proc.exitCode}`, "ERROR");
-          notifyFailure(project, feature, rebase.slice(1, -1));
+          notifyFailure(project, feature, `merge-failed exit=${proc.exitCode}`);
         }
       }
     }

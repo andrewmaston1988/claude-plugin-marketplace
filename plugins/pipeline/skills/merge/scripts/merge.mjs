@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 /**
- * runner.mjs — Mechanical /merge pipeline runner.
+ * merge.mjs — Mechanical /merge pipeline runner.
  *
  * Port of CLAUDE/scripts/merge.py to Node.js ESM. Steps 0a-9:
- * rebase, verify DoD, optional doc-impact, squash merge, plan archival,
- * project commit, smoke check.
+ * rebase, verify DoD, squash merge, plan archival, project commit, smoke check.
  *
  * Key differences from merge.py:
  *   - No --claude-base: plans live at --plans-dir (default: <project-dir>/plans/)
@@ -13,10 +12,10 @@
  *   - All pipeline-db calls via ESM imports, no python pipeline_cli subprocess
  *
  * Usage:
- *   node runner.mjs --branches b1,b2,... --project-dir <path>
- *                   [--plans-dir <path>] [--session-slug <slug>]
- *                   [--dry-run] [--skip-smoke] [--skip-testing]
- *                   [--target-branch <branch>] [--parent <slug>]
+ *   node merge.mjs --branches b1,b2,... --project-dir <path>
+ *                  [--plans-dir <path>] [--session-slug <slug>]
+ *                  [--dry-run] [--skip-smoke] [--skip-testing]
+ *                  [--target-branch <branch>] [--parent <slug>]
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join, basename } from "node:path";
@@ -47,7 +46,6 @@ import {
   step6MovePlans,
   step6bArchiveOrphanedPlans,
 } from "./plan-files.mjs";
-import { step4DocImpact } from "./doc-impact.mjs";
 import { step0bProgress, step9Cleanup } from "./progress.mjs";
 import { loadPipelineConfig } from "../../../src/pipeline-config.mjs";
 import { orchestratorWorktreePath } from "../../../scripts/worktree-paths.mjs";
@@ -85,9 +83,6 @@ function projectName(projectDir) {
 
 // ── Step 3 — Update plan Current Status ──────────────────────────────────────
 // Delegated to plan-files.mjs:step3UpdateStatus.
-
-// ── Step 4 — Doc impact ───────────────────────────────────────────────────────
-// Delegated to doc-impact.mjs:step4DocImpact.
 
 // ── Step 5 — Squash merge each branch ────────────────────────────────────────
 
@@ -127,7 +122,12 @@ export function verifyAlreadyIntegrated(planPath, projectDir) {
 }
 
 async function step5SquashMerge(db, project, projectDir, branches, planFiles, targetBranch = "main") {
-  await gitCheckoutWithRetry(projectDir, targetBranch);
+  const co = await gitCheckoutWithRetry(projectDir, targetBranch);
+  if (co.code !== 0) {
+    process.stderr.write(`BLOCKER: target branch '${targetBranch}' not found\n`);
+    process.stderr.write((co.stderr || "").trim() + "\n");
+    throw new GitError(`checkout ${targetBranch} failed`);
+  }
 
   for (const branch of branches) {
     const slug = branchSlug(branch);
@@ -319,7 +319,7 @@ async function main() {
     catch { targetBranch = "main"; }
   }
 
-  logOut(`runner.mjs — project=${project} branches=${branches.join(",")}`);
+  logOut(`merge.mjs — project=${project} branches=${branches.join(",")}`);
   logOut(`  projectDir=${projectDir}`);
   logOut(`  targetBranch=${targetBranch}`);
 
@@ -403,13 +403,7 @@ async function main() {
     await step3UpdateStatus(plFiles, projectDir, project);
     mark(3, "done");
 
-    // Step 4 (idx 4)
-    mark(4, "inprogress");
-    await step4DocImpact(projectDir, projectDir, project, branches, {
-      targetBranch,
-      _cfg: cfg,
-    });
-    mark(4, "done");
+    // Step 4 (idx 4) — doc-impact removed (fragile LLM call, human judgment preferred)
 
     // Step 5 — squash merge (idx 5)
     mark(5, "inprogress");
@@ -437,7 +431,7 @@ async function main() {
       mark(8, "done");
     }
 
-    logOut("runner.mjs — complete");
+    logOut("merge.mjs — complete");
   } catch (e) {
     logErr(`[merge] Unexpected error: ${e.message ?? e}`);
     exitCode = 6;

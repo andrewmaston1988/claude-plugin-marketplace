@@ -3,7 +3,6 @@ export const PIPELINE_DEFAULTS = {
     dev_default:    "claude-haiku-4-5",
     review_default: "claude-sonnet-4-6",
     governor:       "claude-sonnet-4-6",
-    doc_impact:     "claude-haiku-4-5",
   },
   notifications: {
     // Governance / reports channel — where Cache Health, monthly governance,
@@ -16,21 +15,23 @@ export const PIPELINE_DEFAULTS = {
     // Pipeline-event channel — orchestrator events (spawn, park, dev-complete,
     // review-pass, etc). Falls back to governance_channel when null.
     pipeline_channel:   null,
-    // Forwarder hook: shell command that receives the envelope JSON path as
-    // its only argv. Setup wizard wires this to the bundled claude-slack
-    // forwarder when a Slack channel is configured and claude-slack is on
-    // PATH. Users can replace with any executable (different notifier,
-    // custom routing, etc) — see README "Notifications" section.
+    // Legacy: on_write fallback for one release (see hooks.on_notification).
     on_write:         null,
     fallback_dir:     null,
   },
-  review: { skill: "/code-review", deep_flag: "" },
-  plansDir: "plans",
-  session_templates_dir: null,
-  merge: {
-    doc_impact_enabled: false,
-    commit_extras:      [],
+  hooks: {
+    // Array of { command: "..." } objects — Claude Code hook shape.
+    // on_notification: fired on every published notification/report.
+    //   argv[1]: path to JSON envelope file (schema_version, kind, title, body)
+    // on_merge_ready: fired when a row reaches stage=merge.
+    //   env: PIPELINE_PROJECT, PIPELINE_FEATURE, PIPELINE_BRANCH, PIPELINE_TARGET_BRANCH
+    on_notification: null,   // null | string (legacy) | [{command}]
+    on_merge_ready:  null,   // null | string | [{command}]
   },
+  autoMerge:  false,
+  review:     { skill: "/code-review", deep_flag: "" },
+  plansDir:   "plans",
+  session_templates_dir: null,
   governor: {
     enabled:       false,
     project:       null,

@@ -627,10 +627,7 @@ node plugins/pipeline/bin/pipeline.mjs setup
 node plugins/pipeline/bin/pipeline.mjs doctor
 
 # Run the full test suite
-node --test plugins/pipeline/tests/smoke-3.3.mjs \
-             plugins/pipeline/tests/smoke-3.5.mjs \
-             plugins/pipeline/tests/parity-runner.mjs \
-             plugins/pipeline/tests/smoke-4.mjs
+cd plugins/pipeline && npm test
 ```
 
 ---

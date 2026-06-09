@@ -228,16 +228,17 @@ export async function runWizard({ paths, log, opts = {} }) {
         }
         return false;
       })();
-      const existing = config.notifications.on_write || "";
+      const existing = config.hooks?.on_notification || config.notifications?.on_write || "";
       // Only set if unset or already pointing at our bundled forwarder — never
       // overwrite a custom user forwarder.
       if (slackOk && (!existing || existing.includes(bundledMarker))) {
-        config.notifications.on_write = forwarder;
-        say(`  ✓ on_write wired to bundled claude-slack forwarder`);
+        if (!config.hooks) config.hooks = {};
+        config.hooks.on_notification = forwarder;
+        say(`  ✓ on_notification wired to bundled claude-slack forwarder`);
       } else if (!slackOk) {
         say(`  ⚠ claude-slack not on PATH — Slack notifications won't fire until installed.`);
       } else {
-        say(`  ✓ on_write left as custom hook: ${existing}`);
+        say(`  ✓ on_notification left as custom hook: ${existing}`);
       }
     }
 

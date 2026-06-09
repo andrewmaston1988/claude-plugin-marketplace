@@ -135,7 +135,7 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
                          ?? null;
   const pipelineChannel   = resolved.notifications?.pipeline_channel ?? null;
   const effectivePipelineChannel = pipelineChannel || governanceChannel;
-  const onWrite           = resolved.notifications?.on_write         ?? null;
+  const onNotification    = resolved.hooks?.on_notification ?? resolved.notifications?.on_write ?? null;
 
   // 7a. Governance / general channel (warn if null — common and intentional)
   if (governanceChannel) {
@@ -151,18 +151,18 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
   } else {
     push("Pipeline channel set", false, true, "null — pipeline events disabled");
   }
-  // 7c. on_write hook (the actual forwarder) — must be set for any Slack post to happen
-  if (onWrite) {
-    if (existsSync(onWrite)) {
-      push("notifications.on_write", true, false, onWrite);
+  // 7c. on_notification hook (the actual forwarder) — must be set for any Slack post to happen
+  if (onNotification) {
+    if (existsSync(onNotification)) {
+      push("hooks.on_notification", true, false, onNotification);
     } else {
-      push("notifications.on_write", false, true, `set but file missing: ${onWrite}`);
+      push("hooks.on_notification", false, true, `set but file missing: ${onNotification}`);
     }
   } else if (effectivePipelineChannel || governanceChannel) {
-    push("notifications.on_write", false, true,
+    push("hooks.on_notification", false, true,
       "unset — pipeline writes envelope JSON only; nothing forwards to Slack. Re-run setup to wire claude-slack.");
   } else {
-    push("notifications.on_write", false, true, "unset — no channels configured (skipping)");
+    push("hooks.on_notification", false, true, "unset — no channels configured (skipping)");
   }
 
   // 8. claude-slack on PATH (warn — skipped if no channel anyway)

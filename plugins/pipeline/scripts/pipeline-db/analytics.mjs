@@ -93,6 +93,13 @@ export function lastGovernorSpawnTime(db, slotHour) {
   return row ? row.spawn_time : null;
 }
 
+export function lastGovernorSpawnAny(db) {
+  const row = db.prepare(
+    "SELECT spawn_time FROM governor_spawns ORDER BY spawn_time DESC LIMIT 1"
+  ).get();
+  return row ? row.spawn_time : null;
+}
+
 export function getBridgeSessionChildren(db, parentSessionId) {
   return db.prepare(
     "SELECT * FROM session_spawn_map WHERE parent_session_id = ? ORDER BY spawn_time"

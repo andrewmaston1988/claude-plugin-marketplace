@@ -8,7 +8,7 @@ import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { connectPath, close, projectAdd } from "../scripts/pipeline-db/index.mjs";
+import { connectPath, close, projectAdd, appendGovernorSpawn } from "../scripts/pipeline-db/index.mjs";
 import {
   resolveGovernorContext,
   shouldSpawnGovernor,
@@ -178,5 +178,79 @@ test("shouldSpawnMonthlyGovernor: true when first of month at 00:01+ UTC and no 
   const { tmp, db } = setup();
   try {
     equal(shouldSpawnMonthlyGovernor(db, new Date("2026-06-01T00:05:00Z")), true);
+  } finally { teardown(tmp, db); }
+});
+
+// ── Global cooldown guard ─────────────────────────────────────────────────────
+
+test("shouldSpawnGovernor: cooldown blocks spawn within 5 minutes of last spawn", () => {
+  const { tmp, db } = setup();
+  try {
+    const reportsDir = join(tmp, "reports");
+    mkdirSync(reportsDir, { recursive: true });
+    // Seed yesterday's report so catch-up for slot 0 doesn't fire
+    const now = new Date("2026-06-08T12:05:00Z");
+    const yest = new Date(now); yest.setUTCDate(now.getUTCDate() - 1);
+    const yStr = yest.toISOString().slice(0, 10).replace(/-/g, "");
+    writeFileSync(join(reportsDir, `governance-${yStr}.md`), "stub", "utf8");
+    // Also seed today's status reports so no catch-up fires for 6
+    writeFileSync(join(reportsDir, `status-20260608.md`), "stub", "utf8");
+    // Record a governor spawn 2 minutes ago (well within 5m cooldown)
+    const twoMinsAgo = new Date(now.getTime() - 2 * 60 * 1000);
+    appendGovernorSpawn(db, { slot_hour: 0, spawn_time: twoMinsAgo.toISOString(), corr_id: "test-1", report_type: "full" });
+    const result = shouldSpawnGovernor(reportsDir, db, now);
+    equal(result.should, false, "cooldown should block spawn within 5 minutes");
+    equal(result.skippedReason, "cooldown");
+  } finally { teardown(tmp, db); }
+});
+
+test("shouldSpawnGovernor: cooldown does not block after 5+ minutes", () => {
+  const { tmp, db } = setup();
+  try {
+    const reportsDir = join(tmp, "reports");
+    mkdirSync(reportsDir, { recursive: true });
+    // At canonical slot 12:05, ensure conditions for a valid spawn
+    const now = new Date("2026-06-08T12:05:00Z");
+    const yest = new Date(now); yest.setUTCDate(now.getUTCDate() - 1);
+    const yStr = yest.toISOString().slice(0, 10).replace(/-/g, "");
+    writeFileSync(join(reportsDir, `governance-${yStr}.md`), "stub", "utf8");
+    writeFileSync(join(reportsDir, `status-20260608.md`), "stub", "utf8");
+    // Record a spawn 6 minutes ago (past the 5m cooldown)
+    const sixMinsAgo = new Date(now.getTime() - 6 * 60 * 1000);
+    appendGovernorSpawn(db, { slot_hour: 0, spawn_time: sixMinsAgo.toISOString(), corr_id: "test-2", report_type: "full" });
+    const result = shouldSpawnGovernor(reportsDir, db, now);
+    // Cooldown expired — normal logic applies; at 12:05 canonical slot fires
+    equal(result.should, true, "cooldown should not block after 5+ minutes");
+    equal(result.skippedReason, undefined);
+  } finally { teardown(tmp, db); }
+});
+
+test("shouldSpawnGovernor: no cooldown when no prior spawn exists", () => {
+  const { tmp, db } = setup();
+  try {
+    const reportsDir = join(tmp, "reports");
+    mkdirSync(reportsDir, { recursive: true });
+    const now = new Date("2026-06-08T00:05:00Z");
+    // No prior spawn recorded — cooldown should be a no-op
+    const result = shouldSpawnGovernor(reportsDir, db, now);
+    equal(result.should, true, "no prior spawn means no cooldown, full report should fire");
+  } finally { teardown(tmp, db); }
+});
+
+test("shouldSpawnGovernor: cooldown blocks second slot after cascade scenario", () => {
+  // Simulates the incident: empty reports dir → slot 0 fires → 30s later slot 18 would fire.
+  // After slot 0 spawn is recorded, the 5m cooldown should suppress slot 18.
+  const { tmp, db } = setup();
+  try {
+    const reportsDir = join(tmp, "reports");
+    mkdirSync(reportsDir, { recursive: true });
+    // 30 seconds after slot 0 fired, at 18:xx UTC — all slots have missing reports
+    const now = new Date("2026-06-08T18:01:30Z");
+    // Slot 0 fired 30 seconds ago
+    const thirtySecsAgo = new Date(now.getTime() - 30 * 1000);
+    appendGovernorSpawn(db, { slot_hour: 0, spawn_time: thirtySecsAgo.toISOString(), corr_id: "cascade-0", report_type: "full" });
+    const result = shouldSpawnGovernor(reportsDir, db, now);
+    equal(result.should, false, "slot 18 should be suppressed by cooldown 30s after slot 0");
+    equal(result.skippedReason, "cooldown");
   } finally { teardown(tmp, db); }
 });

@@ -25,7 +25,7 @@ export {
   appendMetricSession, loadMetricSessions,
   upsertDailySpend, loadDailySpend,
   appendSpawn, updateSpawnSessionId, loadSpawnMap,
-  appendGovernorSpawn, loadGovernorSpawns, lastGovernorSpawnTime,
+  appendGovernorSpawn, loadGovernorSpawns, lastGovernorSpawnTime, lastGovernorSpawnAny,
   getBridgeSessionChildren, backfillSpawnParent,
   appendCycleLog, loadCycleLog,
 } from "./analytics.mjs";

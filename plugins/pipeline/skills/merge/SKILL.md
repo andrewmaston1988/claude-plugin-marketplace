@@ -11,7 +11,7 @@ tests, it closes out completed work.
 **Branches to merge:** $ARGUMENTS
 
 All mechanical work (git, plan moves, pipeline updates, doc edits, commit
-bodies, smoke check) is performed by `skills/merge/runner.mjs`. This page
+bodies, smoke check) is performed by `skills/merge/merge.mjs`. This page
 is a thin wrapper: locate `PLUGIN_ROOT`, parse `$ARGUMENTS` into a branch
 list, invoke the script, surface stderr to the user.
 
@@ -138,7 +138,7 @@ Agent(
     Steps:
     1. If working tree is dirty, stash changes first (git stash --include-untracked); remember to pop stash after merge completes.
     2. Ensure you are on the target branch (git checkout "$target_branch").
-    3. Run: node <PLUGIN_ROOT>/skills/merge/scripts/runner.mjs \
+    3. Run: node <PLUGIN_ROOT>/skills/merge/scripts/merge.mjs \
          --branches <b1,b2,...> \
          --project-dir <PROJECT_DIR> \
          --session-slug merge_<session-id> \

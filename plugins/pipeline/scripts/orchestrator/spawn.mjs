@@ -341,7 +341,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
 
 // ── merge spawner ─────────────────────────────────────────────────────────────
 
-function isDirtyTree(projectRoot) {
+export function isDirtyTree(projectRoot) {
   try {
     const r = spawnSync("git", ["status", "--porcelain"], {
       cwd: projectRoot, stdio: ["ignore", "pipe", "pipe"], encoding: "utf8",
@@ -351,33 +351,90 @@ function isDirtyTree(projectRoot) {
   } catch { return true; }
 }
 
-export function spawnMerge(project, row, projectRoot, { db, dryRun, logFn }) {
-  const feature = row.feature;
-  const branch  = row.branch || `autonomous/${feature}`;
+export function isMergedInto(targetBranch, featureBranch, projectRoot) {
+  try {
+    const r = spawnSync("git", ["merge-base", "--is-ancestor", targetBranch, featureBranch], {
+      cwd: projectRoot, stdio: "ignore", encoding: "utf8",
+    });
+    return r.status === 0;
+  } catch { return false; }
+}
 
-  if (isDirtyTree(projectRoot)) {
-    logFn(`[${project}] merge '${feature}' deferred — projectRoot has unstaged changes`, "WARN");
-    return null;
-  }
+export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn }) {
+  const feature      = row.feature;
+  const branch       = row.branch || `autonomous/${feature}`;
+  const targetBranch = row.target_branch || "master";
 
   if (dryRun) {
-    logFn(`[${project}] DRY-RUN: would spawn merge for '${feature}' on ${branch}`);
+    logFn(`[${project}] DRY-RUN: would spawn merge agent for '${feature}' model=${model}`);
     return null;
   }
 
-  const mergeScript = fileURLToPath(new URL("../merge/index.mjs", import.meta.url));
-  const args = [mergeScript, "--branches", branch, "--project-dir", projectRoot];
+  const cfg        = loadPipelineConfig();
+  const pluginRoot = fileURLToPath(new URL("../../..", import.meta.url)); // scripts/orchestrator → plugin root
+  const plansDir   = cfg.plansDir
+    ? cfg.plansDir.replace(/\{project\}/g, project)
+    : null;
+  const resolvedPlansDir = plansDir
+    ? (plansDir.startsWith("/") || /^[A-Za-z]:[/\\]/.test(plansDir)
+        ? plansDir
+        : join(projectRoot, "..", plansDir))
+    : null;
 
+  const plansDirFlag = resolvedPlansDir ? `--plans-dir "${resolvedPlansDir}"` : "";
   const ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z").replace(/[-:]/g, "");
   const correlationId = `merge-${feature}-${ts}`;
+  const sessionSlug   = `merge_${feature}`;
 
-  logFn(`[${project}] spawning merge for '${feature}' (corr_id=${correlationId})`);
-  logFn(`  merge script: ${mergeScript}`);
-  logFn(`  branch: ${branch}`);
-  logFn(`  cwd: ${projectRoot}`);
+  const mergeScript = fileURLToPath(new URL("../../skills/merge/scripts/merge.mjs", import.meta.url));
+  const prompt = [
+    `Run the merge for ${branch}.`,
+    `plugin-root: ${pluginRoot}. project-dir: ${projectRoot}.`,
+    `branches: ${branch}`,
+    `target-branch: ${targetBranch}`,
+    ``,
+    `Steps:`,
+    `1. Working tree may be dirty — stash with git stash --include-untracked if needed; pop after.`,
+    `2. git checkout ${targetBranch}`,
+    `3. Run: node "${mergeScript}" --branches ${branch} --project-dir "${projectRoot}" --session-slug ${sessionSlug} --target-branch ${targetBranch} ${plansDirFlag}`,
+    `4. If exit non-zero, report BLOCKER lines from stderr.`,
+    `5. If exit zero, report: branch merged, plan location, squash commit hash.`,
+    `6. Pop stash if created.`,
+    `Do NOT ask for confirmation. Proceed or emit BLOCKER and exit.`,
+  ].join("\n");
+
+  logFn(`[${project}] spawning merge agent for '${feature}' model=${model} (corr_id=${correlationId})`);
+
+  const claudePath = findClaude();
+  const args = [
+    "-p", prompt,
+    "--model", model,
+    "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep",
+    "--max-budget-usd", "3.00",
+  ];
 
   const env = { ...process.env, CORRELATION_ID: correlationId };
-  const proc = spawn(process.execPath, args, {
+  const localBin = join(homedir(), ".local", "bin");
+  env.PATH = [localBin, env.PATH || ""].filter(Boolean).join(pathDelimiter);
+
+  // Windows: handle .bat/.cmd shims
+  let spawnCmd = claudePath;
+  let spawnArgs = args;
+  if (process.platform === "win32" && /\.(bat|cmd)$/i.test(claudePath)) {
+    try {
+      const shimContent = readFileSync(claudePath, "utf8");
+      const m = shimContent.match(/node(?:\.exe)?\s+"([^"]+)"\s+%\*/i);
+      if (m && m[1]) {
+        spawnCmd = process.execPath;
+        spawnArgs = [m[1], ...args];
+        logFn(`[${project}] demo shim detected — invoking node directly: ${m[1]}`);
+      }
+    } catch (e) {
+      logFn(`[${project}] WARN: could not read shim ${claudePath}: ${e.message}`, "WARN");
+    }
+  }
+
+  const proc = spawn(spawnCmd, spawnArgs, {
     cwd: projectRoot, env, windowsHide: true, detached: false, stdio: "ignore",
   });
   proc.unref();
