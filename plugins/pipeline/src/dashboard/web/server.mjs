@@ -14,6 +14,7 @@ import { loadActiveSessions } from "../shared/load-sessions.mjs";
 import { loadProgressBySlug } from "../shared/load-progress.mjs";
 import { loadGitLog } from "../shared/load-git-log.mjs";
 import { loadAgentLog } from "../shared/load-agent-log.mjs";
+import { loadBacklog } from "../shared/load-backlog.mjs";
 import { renderIndex } from "./templates.mjs";
 
 const HERE         = fileURLToPath(new URL(".", import.meta.url));
@@ -96,7 +97,9 @@ async function _readBody(req) {
 function _buildPayload(db, projectName) {
   const project   = projectList(db).find(p => p.name === projectName);
   if (!project) return { project: null, rows: [], sessions: [], progress: {}, orch: null, gitLog: [] };
-  const rows      = _sortRows(rowsList(db, projectName) || []);
+  const dbRows    = rowsList(db, projectName) || [];
+  const backlogRows = loadBacklog(db, projectName);
+  const rows      = _sortRows([...dbRows, ...backlogRows]);
   const sessions  = loadActiveSessions(db, projectName);
   const slugs     = sessions.filter(s => s.is_active === 1)
     .map(s => (s.session_file || "").split(/[\\/]/).pop().replace(/\.md$/, ""));

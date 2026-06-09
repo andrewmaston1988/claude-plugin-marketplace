@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS schema_version (
 CREATE TABLE IF NOT EXISTS projects (
   name        TEXT PRIMARY KEY,
   root_path   TEXT NOT NULL UNIQUE,
+  plans_dir   TEXT,
   enabled     INTEGER NOT NULL DEFAULT 1,
   created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -223,6 +224,15 @@ function _applyMigrations(db) {
   }
   if (currentVersion < 2) {
     db.exec(SCHEMA_V2);
+  }
+  if (currentVersion < 3) {
+    // Add plans_dir column — ALTER TABLE ADD COLUMN is safe on existing data.
+    // Guard with PRAGMA in case a fresh install already has it from SCHEMA_V1.
+    const cols = db.prepare("PRAGMA table_info(projects)").all().map(c => c.name);
+    if (!cols.includes("plans_dir")) {
+      db.exec("ALTER TABLE projects ADD COLUMN plans_dir TEXT");
+    }
+    db.exec("INSERT OR IGNORE INTO schema_version (version) VALUES (3)");
   }
 }
 

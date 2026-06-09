@@ -1,7 +1,7 @@
 export { connectUnified, connectPath, close, dbPathUnified } from "./connection.mjs";
 export {
   projectAdd, projectList, projectGetByName, projectGetByPath,
-  projectSetEnabled, projectRemove, listEnabledProjects,
+  projectSetEnabled, projectUpdate, projectRemove, listEnabledProjects,
   validateProjectName, validateProjectPath,
 } from "./projects.mjs";
 export {

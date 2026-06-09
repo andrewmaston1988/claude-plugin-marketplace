@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import {
   connectUnified, close,
-  projectAdd, projectList, projectRemove, projectSetEnabled,
+  projectAdd, projectList, projectRemove, projectSetEnabled, projectUpdate,
 } from "../../scripts/pipeline-db/index.mjs";
 import { getFlag } from "./helpers.mjs";
 
@@ -11,13 +11,14 @@ export async function run(cmd, argv) {
   if (cmd === "project-add") {
     const [name, rootPathArg] = argv;
     if (!name || !rootPathArg) {
-      process.stderr.write("usage: project-add <name> <absolute-root-path>\n");
+      process.stderr.write("usage: project-add <name> <absolute-root-path> [--plans-dir <path>]\n");
       return 1;
     }
     const rootPath = resolve(rootPathArg);
+    const plansDir = getFlag("--plans-dir", argv);
     const db = connectUnified();
     try {
-      const row = projectAdd(db, { name, rootPath });
+      const row = projectAdd(db, { name, rootPath, plansDir });
       process.stdout.write(`OK: registered '${row.name}' -> ${row.root_path}\n`);
       return 0;
     } catch (e) {
@@ -94,6 +95,33 @@ export async function run(cmd, argv) {
       if (!ok) { process.stderr.write(`not found: project '${name}'\n`); return 1; }
       process.stdout.write(`OK: disabled '${name}'\n`);
       return 0;
+    } finally { close(db); }
+  }
+
+  // ── project-update ───────────────────────────────────────────────────────────
+  if (cmd === "project-update") {
+    const [name] = argv;
+    if (!name) {
+      process.stderr.write("usage: project-update <name> [--plans-dir <path>]\n");
+      return 1;
+    }
+    const plansDir = getFlag("--plans-dir", argv);
+    if (!plansDir) {
+      process.stderr.write("error: at least one field (--plans-dir) must be provided\n");
+      return 1;
+    }
+    const db = connectUnified();
+    try {
+      const row = projectUpdate(db, name, { plansDir });
+      if (!row) {
+        process.stderr.write(`not found: project '${name}'\n`);
+        return 1;
+      }
+      process.stdout.write(`OK: updated '${row.name}'\n`);
+      return 0;
+    } catch (e) {
+      process.stderr.write(`error: ${e.message}\n`);
+      return 1;
     } finally { close(db); }
   }
 

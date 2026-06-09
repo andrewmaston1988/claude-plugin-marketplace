@@ -25,6 +25,7 @@ import blessed from "blessed";
 import { connectUnified, close } from "../../../scripts/pipeline-db/index.mjs";
 import { getPaths } from "../../paths.mjs";
 import { loadProjects, loadRows } from "../shared/load-rows.mjs";
+import { loadBacklog } from "../shared/load-backlog.mjs";
 import { loadOrchState } from "../shared/load-orch-state.mjs";
 import { loadActiveSessions } from "../shared/load-sessions.mjs";
 import { loadProgressBySlug } from "../shared/load-progress.mjs";
@@ -519,7 +520,9 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
 
   function fetchData() {
     const project = projects[selectedProjectIdx];
-    cachedRowsAll  = _sortRows(loadRows(db, project.name, { showAll: true }));
+    const dbRows = loadRows(db, project.name, { showAll: true });
+    const backlogRows = loadBacklog(db, project.name);
+    cachedRowsAll  = _sortRows([...dbRows, ...backlogRows]);
     cachedSessions = loadActiveSessions(db, project.name);
     cachedOrch     = loadOrchState();
     const slugs    = cachedSessions

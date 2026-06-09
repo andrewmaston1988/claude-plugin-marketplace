@@ -32,10 +32,10 @@ export function menuOptions(row, branchExists = true) {
       opts.push({ label: `${prefix}Test   (branch found)`, action: "queue:test"   });
     }
   }
-  if (!["backlog", "done"].includes(stage)) {
+  if (!["backlog", "done"].includes(stage) && !row.virtual) {
     opts.push({ label: "Return to backlog", action: "stage:backlog" });
   }
-  if (stage !== "done") {
+  if (stage !== "done" && !row.virtual) {
     opts.push({ label: "Delete row + plan file", action: "delete" });
   }
   // Cancel is always present so Esc isn't the only way out.

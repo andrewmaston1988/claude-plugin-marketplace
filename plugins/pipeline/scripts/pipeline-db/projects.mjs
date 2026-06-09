@@ -25,7 +25,7 @@ export function validateProjectPath(rootPath) {
 
 // Insert a project. Returns the inserted row or null on validation failure
 // (with the error message thrown as Error — callers surface to user).
-export function projectAdd(db, { name, rootPath, enabled = 1 }) {
+export function projectAdd(db, { name, rootPath, plansDir, enabled = 1 }) {
   const nameErr = validateProjectName(name);
   if (nameErr) throw new Error(nameErr);
   const pathErr = validateProjectPath(rootPath);
@@ -34,8 +34,8 @@ export function projectAdd(db, { name, rootPath, enabled = 1 }) {
   db.exec("BEGIN IMMEDIATE");
   try {
     db.prepare(
-      "INSERT INTO projects (name, root_path, enabled) VALUES (?, ?, ?)"
-    ).run(name, rootPath, enabled);
+      "INSERT INTO projects (name, root_path, plans_dir, enabled) VALUES (?, ?, ?, ?)"
+    ).run(name, rootPath, plansDir || null, enabled);
     db.exec("COMMIT");
     return projectGetByName(db, name);
   } catch (e) {
@@ -51,19 +51,19 @@ export function projectAdd(db, { name, rootPath, enabled = 1 }) {
 
 export function projectList(db) {
   return db.prepare(
-    "SELECT name, root_path, enabled, created_at FROM projects ORDER BY name"
+    "SELECT name, root_path, plans_dir, enabled, created_at FROM projects ORDER BY name"
   ).all();
 }
 
 export function projectGetByName(db, name) {
   return db.prepare(
-    "SELECT name, root_path, enabled, created_at FROM projects WHERE name = ?"
+    "SELECT name, root_path, plans_dir, enabled, created_at FROM projects WHERE name = ?"
   ).get(name) ?? null;
 }
 
 export function projectGetByPath(db, rootPath) {
   return db.prepare(
-    "SELECT name, root_path, enabled, created_at FROM projects WHERE root_path = ?"
+    "SELECT name, root_path, plans_dir, enabled, created_at FROM projects WHERE root_path = ?"
   ).get(rootPath) ?? null;
 }
 
@@ -76,6 +76,25 @@ export function projectSetEnabled(db, name, enabled) {
     ).run(enabled ? 1 : 0, name);
     db.exec("COMMIT");
     return result.changes > 0;
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw e;
+  }
+}
+
+// Update a project's fields (e.g., plans_dir). Returns updated row or null.
+export function projectUpdate(db, name, { plansDir }) {
+  const existing = projectGetByName(db, name);
+  if (!existing) return null;
+
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    db.prepare("UPDATE projects SET plans_dir = ? WHERE name = ?").run(
+      plansDir || null,
+      name
+    );
+    db.exec("COMMIT");
+    return projectGetByName(db, name);
   } catch (e) {
     try { db.exec("ROLLBACK"); } catch {}
     throw e;

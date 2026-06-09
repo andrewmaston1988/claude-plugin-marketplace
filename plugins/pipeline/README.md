@@ -35,6 +35,17 @@ Spins up a self-contained sandbox in the background — no real Claude install n
 - `pipeline dashboard web` → http://localhost:8765/pipeline — watch it run
 - `pipeline doctor` — confirm setup is healthy
 
+## Backlog discovery
+
+The pipeline scans each project's `plans/` directory and displays unqueued plan files as virtual "backlog" rows on the dashboard. No need to remember where plans live — they surface automatically. Customize the scan directory per-project with `--plans-dir`:
+
+```
+pipeline project-add my-project /path/to/project --plans-dir /custom/plans
+pipeline project-update my-project --plans-dir /different/location
+```
+
+Virtual backlog rows are dim and offer queue actions. Delete only works on materialized rows (after queuing).
+
 ## Reference
 
 See [REFERENCE.md](./REFERENCE.md) for the detailed reference — config schema, subcommand list, dashboard keybindings, notifications/forwarders, worktree paths, architecture, troubleshooting.

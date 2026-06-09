@@ -116,8 +116,9 @@ Watch the pipeline:
   dashboard web     Launch the web dashboard at http://localhost:8765/pipeline
 
 Project registry:
-  project-add       <name> <absolute-root-path>
+  project-add       <name> <absolute-root-path> [--plans-dir <path>]
   project-list      [--format json|plain]
+  project-update    <name> [--plans-dir <path>]
   project-remove    <name> [--purge]
   project-enable    <name>
   project-disable   <name>

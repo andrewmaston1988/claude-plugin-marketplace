@@ -591,8 +591,8 @@ export function renderIndex({ projects, active }) {
         opts.push({ label: prefix + "Test   (branch found)", action: "queue:test"   });
       }
     }
-    if (!["backlog","done"].includes(row.stage)) opts.push({ label: "Return to backlog", action: "stage:backlog" });
-    if (row.stage !== "done") opts.push({ label: "Delete row + plan file", action: "delete", danger: true });
+    if (!["backlog","done"].includes(row.stage) && !row.virtual) opts.push({ label: "Return to backlog", action: "stage:backlog" });
+    if (row.stage !== "done" && !row.virtual) opts.push({ label: "Delete row + plan file", action: "delete", danger: true });
     opts.push({ label: "Cancel", action: "cancel" });
     return opts;
   }
