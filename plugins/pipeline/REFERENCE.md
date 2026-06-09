@@ -161,7 +161,6 @@ Written to `~/.pipeline/config.json` by `pipeline setup`. All keys are optional 
 | `models.dev_default` | string | `"claude-haiku-4-5"` | Model used for dev sessions |
 | `models.review_default` | string | `"claude-sonnet-4-6"` | Model used for review sessions |
 | `models.governor` | string | `"claude-sonnet-4-6"` | Model used by the governor session (see "Governor and metrics" below) |
-| `models.doc_impact` | string | `"claude-haiku-4-5"` | Model used for doc-impact analysis during merge |
 | `notifications.governance_channel` | string \| null | `null` | Slack channel name for governance reports + failure notifications (e.g. `"your-channel-name"`, without `#`); `null` disables |
 | `notifications.pipeline_channel` | string \| null | `null` | Separate channel for per-row orchestrator events; falls back to `governance_channel` if null |
 | `hooks.on_notification` | string \| null | `null` | Path to forwarder script — called once per envelope with the JSON file path as its only argv |
@@ -177,8 +176,7 @@ Example `~/.pipeline/config.json`:
   "models": {
     "dev_default": "claude-haiku-4-5",
     "review_default": "claude-sonnet-4-6",
-    "governor": "claude-sonnet-4-6",
-    "doc_impact": "claude-haiku-4-5"
+    "governor": "claude-sonnet-4-6"
   },
   "notifications": {
     "governance_channel": "your-ops-channel",
@@ -440,10 +438,10 @@ If a suspicious match is found, queueing fails with an error pointing at the off
 
 ## Merge layer
 
-`skills/merge/runner.mjs` runs the squash-merge pipeline: rebase → verify DoD → optional doc-impact → squash merge → move plans → project commit → smoke check. Invoked by the `/merge` skill:
+`skills/merge/merge.mjs` runs the squash-merge pipeline: rebase → verify DoD → squash merge → move plans → project commit → smoke check. Invoked by the `/merge` skill:
 
 ```bash
-node plugins/pipeline/skills/merge/runner.mjs \
+node plugins/pipeline/skills/merge/merge.mjs \
   --branches autonomous/feat-a,autonomous/feat-b \
   --project-dir /path/to/project \
   [--plans-dir /path/to/plans] \
@@ -458,7 +456,6 @@ Plan file paths are read from the pipeline DB row (stored at queue time). `--pla
 
 | Key | Default | Purpose |
 |---|---|---|
-| `merge.doc_impact_enabled` | `false` | Gate step 4 (LLM-driven doc updates). Public users keep it off. |
 | `plansDir` | `"plans"` | Where plan files live, relative to project root. Supports `{project}` placeholder. |
 
 ---
