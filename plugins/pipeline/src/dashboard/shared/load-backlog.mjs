@@ -1,16 +1,29 @@
 import { readdirSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
+import { resolve, isAbsolute } from "node:path";
 import { projectGetByName } from "../../../scripts/pipeline-db/projects.mjs";
 import { rowsList } from "../../../scripts/pipeline-db/rows.mjs";
+import { loadPipelineConfig } from "../../pipeline-config.mjs";
+
+function _resolvePlansDir(raw, projectRoot, projectName) {
+  const substituted = raw.replace(/\{project\}/g, projectName);
+  return isAbsolute(substituted) ? substituted : resolve(projectRoot, substituted);
+}
 
 // Load backlog rows (unqueued plan files) for a project.
 // Returns array of virtual rows: {feature, stage, plan_file, branch, notes_extra, virtual}
-export function loadBacklog(db, projectName) {
+export function loadBacklog(db, projectName, _cfg) {
   const project = projectGetByName(db, projectName);
   if (!project) return [];
 
-  // Resolve plans_dir: use project's explicit plans_dir if set, otherwise <root_path>/plans/
-  const plansDir = project.plans_dir || resolve(project.root_path, "plans");
+  // Resolve plans_dir: project row > global cfg.plansDir > <root_path>/plans/
+  let plansDir;
+  if (project.plans_dir) {
+    plansDir = project.plans_dir;
+  } else {
+    const cfg = _cfg ?? loadPipelineConfig();
+    const raw = cfg?.plansDir || "plans";
+    plansDir = _resolvePlansDir(raw, project.root_path, projectName);
+  }
   if (!existsSync(plansDir)) return [];
 
   try {
