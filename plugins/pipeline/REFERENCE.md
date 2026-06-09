@@ -165,6 +165,7 @@ Written to `~/.pipeline/config.json` by `pipeline setup`. All keys are optional 
 | `notifications.pipeline_channel` | string \| null | `null` | Separate channel for per-row orchestrator events; falls back to `governance_channel` if null |
 | `hooks.on_notification` | string \| null | `null` | Path to forwarder script — called once per envelope with the JSON file path as its only argv |
 | `hooks.on_merge_ready` | string \| null | `null` | Path to hook script — called when a row reaches `stage=merge`; receives env vars (no argv) |
+| `hooks.on_merge` | string \| null | `null` | Path to hook script — replaces the local squash merge when set; receives same env vars as `on_merge_ready`; hook owns the git operation |
 | `autoMerge` | boolean | `false` | When `true`, the orchestrator automatically spawns the merge agent for rows at `stage=merge` |
 | `review.skill` | string | `"/code-review"` | Slash-command invoked by review sessions |
 | `review.deep_flag` | string | `""` | Extra flag appended to the review skill invocation (any string; empty disables) |

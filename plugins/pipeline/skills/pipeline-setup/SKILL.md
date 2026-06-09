@@ -94,6 +94,37 @@ For any case where you write a new script: write it to `~/.pipeline/hooks/on-mer
 
 Pass the hook path as `--merge-hook <abs-path>` (or omit to leave unset).
 
+### Question 3c — on_merge hook
+
+**What this does**: replaces the pipeline's local squash merge with a custom script. The hook receives the same four env vars as `on_merge_ready` (`PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`) and is responsible for performing the actual merge. When unset, the pipeline squash-merges locally as usual.
+
+**Default**: disabled (local squash merge used).
+
+**If you skip**: the pipeline squash-merges the branch to the target branch locally and pushes. GitHub won't show the PR as "merged" — the PR will close when the branch is deleted.
+
+**If you set it**: the hook fully owns the merge step. A common hook for GitHub repos:
+
+```js
+// ~/.pipeline/hooks/on-merge.mjs
+import { spawnSync } from "node:child_process";
+import { join } from "node:path";
+import { homedir } from "node:os";
+const gh = join(homedir(), ".local", "bin", process.platform === "win32" ? "gh.exe" : "gh");
+const branch = process.env.PIPELINE_BRANCH;
+const result = spawnSync(gh, ["pr", "merge", branch, "--squash", "--delete-branch", "--auto"], {
+  stdio: "inherit",
+  env: { ...process.env, PATH: `${join(homedir(), ".local", "bin")};${process.env.PATH}` },
+});
+process.exit(result.status ?? 1);
+```
+
+**Ask the user** whether they want to use a GitHub PR merge or keep the local squash. Common answers:
+- **"GitHub PR merge"** — write the above hook to `~/.pipeline/hooks/on-merge.mjs` and pass `--on-merge <path>`.
+- **"Keep local squash"** — omit `--on-merge`.
+- **"I have a script already"** — ask for the path and use it directly.
+
+Pass the hook path as `--on-merge <abs-path>` (or omit to keep local squash).
+
 ### Question 4 — Autostart
 
 **What this does**: installs the orchestrator as an OS-level scheduled task so it starts at login and survives reboots — Task Scheduler on Windows, launchd plist on macOS, systemd user unit on Linux.
@@ -130,6 +161,7 @@ pipeline setup --non-interactive
   [--review-skill <name>]
   [--review-deep-flag <flag>]
   [--merge-hook <abs-path>]
+  [--on-merge <abs-path>]
   [--no-autostart]
   [--no-path-alias]
   [--continue-on-failed-prechecks]

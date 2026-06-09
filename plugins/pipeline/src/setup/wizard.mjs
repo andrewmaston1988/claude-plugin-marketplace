@@ -265,6 +265,29 @@ export async function runWizard({ paths, log, opts = {} }) {
       }
     }
 
+    // on_merge hook — replaces the local squash merge when set; hook owns the git operation.
+    {
+      const defOnMerge = config.hooks?.on_merge ?? null;
+      let onMerge;
+      if (nonInteractive) {
+        onMerge = opts.onMerge !== undefined ? (opts.onMerge || null) : defOnMerge;
+      } else {
+        say("\n  on_merge hook (optional — replaces the local squash merge when set).");
+        say("  Provide an absolute path to a script/executable, or blank to keep local squash.");
+        const raw = await ask(`  on_merge [${defOnMerge ?? "(none — local squash)"}]: `);
+        onMerge = raw.trim() || defOnMerge || null;
+      }
+      if (!config.hooks) config.hooks = {};
+      if (onMerge) {
+        config.hooks.on_merge = onMerge;
+        say(`  ✓ on_merge: ${onMerge}`);
+      } else if (config.hooks.on_merge) {
+        say(`  ✓ on_merge kept: ${config.hooks.on_merge}`);
+      } else {
+        say("  on_merge not configured — local squash merge used.");
+      }
+    }
+
     // Migrate legacy notifications.on_write → hooks.on_notification (cleanup).
     if (config.notifications?.on_write) {
       delete config.notifications.on_write;
