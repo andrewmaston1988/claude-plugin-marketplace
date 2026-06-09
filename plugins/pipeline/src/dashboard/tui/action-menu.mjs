@@ -32,6 +32,9 @@ export function menuOptions(row, branchExists = true) {
       opts.push({ label: `${prefix}Test   (branch found)`, action: "queue:test"   });
     }
   }
+  if (stage === "merge") {
+    opts.push({ label: "Merge now", action: "merge" });
+  }
   if (!["backlog", "done"].includes(stage) && !row.virtual) {
     opts.push({ label: "Return to backlog", action: "stage:backlog" });
   }
@@ -132,6 +135,14 @@ export async function runAction(screen, project, row, action, refreshFn) {
     if (refreshFn) refreshFn();
     return r.code === 0
       ? { ok: true,  message: `deleted ${row.feature}` }
+      : { ok: false, message: (r.stderr || r.stdout).trim().split("\n").pop() };
+  }
+  // merge → spawn a merge agent for this row (same logic as orchestrator autoMerge)
+  if (action === "merge") {
+    const r = await runPipeline(["spawn-merge", project, row.feature]);
+    if (refreshFn) refreshFn();
+    return r.code === 0
+      ? { ok: true,  message: (r.stdout || `merge spawned for ${row.feature}`).trim() }
       : { ok: false, message: (r.stderr || r.stdout).trim().split("\n").pop() };
   }
   if (action === "cancel") return { ok: true, message: "cancelled" };

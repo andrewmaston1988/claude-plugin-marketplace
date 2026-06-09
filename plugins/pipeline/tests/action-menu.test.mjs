@@ -47,3 +47,12 @@ test("branch_exists=false: no review/test options", () => {
   ok(opts.some(o => o.action === "queue:research"));
   ok(opts.some(o => o.action === "queue:dev"));
 });
+
+test("merge row: Merge now + return-to-backlog + delete, no queue options", () => {
+  const opts = menuOptions({ stage: "merge" }, true);
+  ok(opts.some(o => o.action === "merge"));
+  ok(opts.some(o => o.action === "stage:backlog"));
+  ok(opts.some(o => o.action === "delete"));
+  ok(!opts.some(o => o.action.startsWith("queue:")));
+  equal(opts[opts.length - 1].action, "cancel");
+});

@@ -59,6 +59,49 @@ const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
     return;
   }
 
+  if (cmd === "spawn-merge") {
+    const project = argv[0];
+    const feature = argv[1];
+    if (!project || !feature) {
+      process.stderr.write("usage: pipeline spawn-merge <project> <feature>\n");
+      setTimeout(() => process.exit(1), 150);
+      return;
+    }
+    const { connectUnified }      = await import("../scripts/pipeline-db/connection.mjs");
+    const { listEnabledProjects } = await import("../scripts/pipeline-db/projects.mjs");
+    const { rowsList }            = await import("../scripts/pipeline-db/rows.mjs");
+    const { spawnMerge, isDirtyTree, isMergedInto } = await import("../scripts/orchestrator/spawn.mjs");
+
+    const db          = connectUnified();
+    const projectRoot = new Map(listEnabledProjects(db)).get(project);
+    if (!projectRoot) {
+      process.stderr.write(`spawn-merge: project '${project}' not registered\n`);
+      setTimeout(() => process.exit(1), 150);
+      return;
+    }
+    const rows = rowsList(db, project);
+    const row  = rows.find(r => r.feature === feature);
+    if (!row) {
+      process.stderr.write(`spawn-merge: row '${feature}' not found in project '${project}'\n`);
+      setTimeout(() => process.exit(1), 150);
+      return;
+    }
+    if (row.stage !== "merge") {
+      process.stderr.write(`spawn-merge: row '${feature}' is at stage '${row.stage}', not 'merge'\n`);
+      setTimeout(() => process.exit(1), 150);
+      return;
+    }
+    const branch       = row.branch || `autonomous/${feature}`;
+    const targetBranch = row.target_branch || "master";
+    const diverged     = !isMergedInto(targetBranch, branch, projectRoot);
+    const dirty        = isDirtyTree(projectRoot);
+    const model        = (diverged || dirty) ? "claude-sonnet-4-6" : "claude-haiku-4-5";
+    spawnMerge(project, row, projectRoot, model, { db: null, dryRun: false, logFn: (m) => process.stderr.write(m + "\n") });
+    process.stdout.write(`spawned merge for ${feature} model=${model}\n`);
+    setTimeout(() => process.exit(0), 150);
+    return;
+  }
+
   if (cmd === "demo") {
     const { run: runDemo } = await import("../src/cli/demo.mjs");
     await runDemo("demo", argv);
@@ -159,6 +202,7 @@ Queue subcommands:
   queue-mode-detect    <plans-dir> <arguments>
 
 Other:
+  spawn-merge          <project> <feature>
   session-generate     <project> <plan-file> <session-type>
   notify               --title <text> --message <text>
   target-branch-get    <project> <feature>
