@@ -74,6 +74,26 @@ If the user picks a channel: strip a leading `#`. If `claude-slack` isn't on PAT
 
 **SKIP this question** unless the user volunteers a preference or asks about cost. If they do, ask only for the session types they want to override.
 
+### Question 3b — on_merge_ready hook
+
+**What this does**: runs a script/executable whenever a pipeline row reaches `stage=merge` — fires for all projects, regardless of whether `autoMerge` is enabled. The hook receives four env vars: `PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`. Common use: post a Slack ping when a branch is ready to merge.
+
+**Default**: disabled (no hook set).
+
+**If you skip**: merge-ready events are still recorded internally; you just won't get an external notification. Add it later by setting `hooks.on_merge_ready` in `~/.pipeline/config.json`.
+
+**Ask the user what they want to happen** when a row is merge-ready. Don't lead with Slack — ask first, then figure out how to wire it. Common answers and how to handle each:
+
+- **"Post to Slack"** — check `~/.pipeline/config.json` for `hooks.on_notification` (or legacy `notifications.on_write`). If it points to a `claude-slack.mjs` file, you already have the forwarder path. Write `~/.pipeline/hooks/on-merge-ready.mjs` that reads the env vars, builds a JSON envelope, and calls that forwarder via `spawnSync("node", [claudeSlackPath, tmpEnvelopeFile])`. Example envelope: `{ title: "Merge ready: <feature>", message: "\`<branch>\` → \`<target>\` in *<project>* is ready to merge.", priority: "normal" }`. Write the tmp file to `os.tmpdir()`.
+- **"Run a webhook / curl"** — write a wrapper `.mjs` that reads the env vars and runs the appropriate command.
+- **"Log to a file"** — write a wrapper `.mjs` that appends a line to `~/.pipeline/logs/merge-ready.log`.
+- **"I have a script already"** — ask for the absolute path; use it directly.
+- **"Skip"** — omit `--merge-hook`.
+
+For any case where you write a new script: write it to `~/.pipeline/hooks/on-merge-ready.mjs` (create the dir if needed), make it self-contained, and show the user the file content before writing.
+
+Pass the hook path as `--merge-hook <abs-path>` (or omit to leave unset).
+
 ### Question 4 — Autostart
 
 **What this does**: installs the orchestrator as an OS-level scheduled task so it starts at login and survives reboots — Task Scheduler on Windows, launchd plist on macOS, systemd user unit on Linux.
@@ -109,6 +129,7 @@ pipeline setup --non-interactive
   [--models r=...,d=...,q=...,rvw=...]
   [--review-skill <name>]
   [--review-deep-flag <flag>]
+  [--merge-hook <abs-path>]
   [--no-autostart]
   [--no-path-alias]
   [--continue-on-failed-prechecks]

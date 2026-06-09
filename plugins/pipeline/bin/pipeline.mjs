@@ -238,6 +238,7 @@ function _parseSetupOpts(argv) {
   const gc = get("--governance-channel"); if (gc !== null) opts.governanceChannel = gc;
   const sc = get("--slack");              if (sc !== null) opts.slackChannel      = sc;
   const pc = get("--pipeline-channel");   if (pc !== null) opts.pipelineChannel   = pc;
+  const mh = get("--merge-hook");         if (mh !== null) opts.mergeHook         = mh;
 
   // --register-project Name:Absolute/Path/To/Repo (repeatable; loop argv)
   opts.registerProjects = [];
