@@ -11,6 +11,7 @@ import {
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { orchestratorWorktreePath } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
+import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 
 // ── session type routing ──────────────────────────────────────────────────────
 
@@ -219,7 +220,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
       }
 
       const wtPath = orchestratorWorktreePath({ project, projectRoot, branch });
-      const targetBranch = row.target_branch || "main";
+      const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
       if (ensureWorktree(projectRoot, wtPath, branch, targetBranch, logFn)) {
         cwd = wtPath;
       } else {
@@ -363,7 +364,7 @@ export function isMergedInto(targetBranch, featureBranch, projectRoot) {
 export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn }) {
   const feature      = row.feature;
   const branch       = row.branch || `autonomous/${feature}`;
-  const targetBranch = row.target_branch || "master";
+  const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
 
   if (dryRun) {
     logFn(`[${project}] DRY-RUN: would spawn merge agent for '${feature}' model=${model}`);

@@ -29,7 +29,7 @@ dev/test/review/research templates instead.
 
 **Read** (data is guaranteed fresh — the orchestrator runs the metrics-refresh helpers immediately before spawning this session, so `bunx ccusage` has already been invoked on your behalf):
 
-- `{{PROJECT_ROOT}}/.pipeline/pipeline.db` — authoritative store for all metrics. Tables you'll read:
+- `{{PIPELINE_DB}}` — authoritative store for all metrics. Tables you'll read:
   - `daily_spend(date, total_cost, cache_create, cache_read, model_breakdowns)` — `model_breakdowns` is a JSON string. `date` is `YYYYMMDD`.
   - `metric_sessions(session_id, timestamp, command_type, branch, correlation_id, duration_seconds, files_indexed, plan_file, cache_create_tokens, cache_read_tokens, token_source, estimation_method)` — `timestamp` is epoch milliseconds.
 
@@ -38,7 +38,7 @@ Use the **DB path (absolute)** above — do not guess. Example query in Node (th
 ```bash
 node -e "
 const { DatabaseSync } = require('node:sqlite');
-const db = new DatabaseSync(process.env.PIPELINE_DB || '{{PROJECT_ROOT}}/.pipeline/pipeline.db');
+const db = new DatabaseSync(process.env.PIPELINE_DB || '{{PIPELINE_DB}}');
 const row = db.prepare('SELECT * FROM daily_spend WHERE date = ?').get('{{REPORT_DATE}}');
 console.log(row ? JSON.stringify(row, null, 2) : 'MISSING');
 "
@@ -288,7 +288,7 @@ node $PLUGIN_DIR/scripts/metrics/index.mjs update-spend $(date -d yesterday +%Y%
 # Verify the data landed:
 node -e "
 const { DatabaseSync } = require('node:sqlite');
-const db = new DatabaseSync(process.env.PIPELINE_DB || '{{PROJECT_ROOT}}/.pipeline/pipeline.db');
+const db = new DatabaseSync(process.env.PIPELINE_DB || '{{PIPELINE_DB}}');
 const d = new Date(Date.now() - 86400000).toISOString().slice(0,10).replace(/-/g,'');
 const r = db.prepare('SELECT * FROM daily_spend WHERE date = ?').get(d);
 console.log(r ? 'OK' : 'MISSING');

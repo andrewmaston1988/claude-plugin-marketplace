@@ -129,56 +129,78 @@ async function step5SquashMerge(db, project, projectDir, branches, planFiles, ta
     throw new GitError(`checkout ${targetBranch} failed`);
   }
 
+  const cfg = loadPipelineConfig();
+  const onMergeHook = cfg?.hooks?.on_merge || null;
+
   for (const branch of branches) {
     const slug = branchSlug(branch);
-    logOut(`[5] Squash-merging ${branch}`);
 
-    const aheadBehind = runGit(
-      ["rev-list", "--left-right", "--count", `${targetBranch}...${branch}`],
-      projectDir, { check: false },
-    );
-    const ahead = aheadBehind.code === 0
-      ? parseInt(aheadBehind.stdout.trim().split(/\s+/)[1], 10)
-      : -1;
-
-    let alreadyIntegrated = false;
-    if (ahead === 0) {
-      logOut(`[5] ${branch} is already integrated into ${targetBranch} — verifying`);
-      const planPath = planFiles[branch];
-      const guardBlockers = verifyAlreadyIntegrated(planPath, projectDir);
-      if (guardBlockers.length) {
-        for (const b of guardBlockers) logErr(`BLOCKER: ${b}`);
-        throw new GitError(
-          `${branch}: already-integrated check failed — branch may have committed to detached HEAD. ` +
-          `Inspect dangling commits via \`git fsck --lost-found\` and recover manually.`,
-        );
+    if (onMergeHook) {
+      // Delegate the merge to hooks.on_merge — it owns the git operation.
+      // Env vars match the on_merge_ready pattern for consistency.
+      logOut(`[5] Invoking hooks.on_merge for ${branch}`);
+      const env = {
+        ...process.env,
+        PIPELINE_PROJECT: project,
+        PIPELINE_FEATURE: slug,
+        PIPELINE_BRANCH: branch,
+        PIPELINE_TARGET_BRANCH: targetBranch,
+      };
+      const result = spawnSync(process.execPath, [onMergeHook], { env, stdio: "inherit" });
+      if (result.status !== 0) {
+        throw new GitError(`hooks.on_merge failed for ${branch} (exit ${result.status})`);
       }
-      logOut(`[5] ${branch} verified as integrated — skipping squash merge, running cleanup`);
-      alreadyIntegrated = true;
+      logOut(`[5] hooks.on_merge completed for ${branch}`);
     } else {
-      const mergeResult = await gitMergeSquashWithRetry(projectDir, branch);
-      if (mergeResult.code !== 0) {
-        const combined = (mergeResult.stdout + mergeResult.stderr).toLowerCase();
-        if (combined.includes("already up to date") || combined.includes("nothing to commit")) {
-          logOut(`[5] ${branch} had no changes to merge — treating as already integrated`);
-          alreadyIntegrated = true;
-        } else {
-          throw new GitError(`squash merge failed for ${branch}: ${mergeResult.stderr.trim()}`);
+      logOut(`[5] Squash-merging ${branch}`);
+
+      const aheadBehind = runGit(
+        ["rev-list", "--left-right", "--count", `${targetBranch}...${branch}`],
+        projectDir, { check: false },
+      );
+      const ahead = aheadBehind.code === 0
+        ? parseInt(aheadBehind.stdout.trim().split(/\s+/)[1], 10)
+        : -1;
+
+      let alreadyIntegrated = false;
+      if (ahead === 0) {
+        logOut(`[5] ${branch} is already integrated into ${targetBranch} — verifying`);
+        const planPath = planFiles[branch];
+        const guardBlockers = verifyAlreadyIntegrated(planPath, projectDir);
+        if (guardBlockers.length) {
+          for (const b of guardBlockers) logErr(`BLOCKER: ${b}`);
+          throw new GitError(
+            `${branch}: already-integrated check failed — branch may have committed to detached HEAD. ` +
+            `Inspect dangling commits via \`git fsck --lost-found\` and recover manually.`,
+          );
+        }
+        logOut(`[5] ${branch} verified as integrated — skipping squash merge, running cleanup`);
+        alreadyIntegrated = true;
+      } else {
+        const mergeResult = await gitMergeSquashWithRetry(projectDir, branch);
+        if (mergeResult.code !== 0) {
+          const combined = (mergeResult.stdout + mergeResult.stderr).toLowerCase();
+          if (combined.includes("already up to date") || combined.includes("nothing to commit")) {
+            logOut(`[5] ${branch} had no changes to merge — treating as already integrated`);
+            alreadyIntegrated = true;
+          } else {
+            throw new GitError(`squash merge failed for ${branch}: ${mergeResult.stderr.trim()}`);
+          }
         }
       }
+
+      if (!alreadyIntegrated) {
+        const message = _writeCommitMessage(projectDir, branch, planFiles[branch], targetBranch);
+        await gitCommitWithRetry(projectDir, "-m", message);
+        const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir).stdout.trim();
+        logOut(`[5] Committed ${commitHash}`);
+      } else {
+        const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir, { check: false }).stdout.trim();
+        logOut(`[5] ${branch} cleanup path — head at ${commitHash}, no new commit`);
+      }
     }
 
-    if (!alreadyIntegrated) {
-      const message = _writeCommitMessage(projectDir, branch, planFiles[branch], targetBranch);
-      await gitCommitWithRetry(projectDir, "-m", message);
-      const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir).stdout.trim();
-      logOut(`[5] Committed ${commitHash}`);
-    } else {
-      const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir, { check: false }).stdout.trim();
-      logOut(`[5] ${branch} cleanup path — head at ${commitHash}, no new commit`);
-    }
-
-    // Advance pipeline row to done
+    // Advance pipeline row to done — shared regardless of merge path
     if (db) {
       try {
         rowUpdate(db, project, slug, { stage: "done" });
@@ -187,7 +209,8 @@ async function step5SquashMerge(db, project, projectDir, branches, planFiles, ta
       }
     }
 
-    // Cleanup worktree and branch
+    // Cleanup worktree and local branch — shared regardless of merge path.
+    // Non-fatal: hook may have already deleted the remote branch.
     const wt = worktreePath(projectDir, slug);
     if (existsSync(wt)) {
       const r = await gitWorktreeWithRetry(projectDir, "remove", "--force", wt);

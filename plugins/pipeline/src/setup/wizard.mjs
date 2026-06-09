@@ -242,6 +242,57 @@ export async function runWizard({ paths, log, opts = {} }) {
       }
     }
 
+    // on_merge_ready hook — fires when a row reaches stage=merge (all projects, regardless of autoMerge).
+    {
+      const defMergeHook = config.hooks?.on_merge_ready ?? null;
+      let mergeHook;
+      if (nonInteractive) {
+        mergeHook = opts.mergeHook !== undefined ? (opts.mergeHook || null) : defMergeHook;
+      } else {
+        say("\n  on_merge_ready hook (optional — fires when a row reaches stage=merge).");
+        say("  Provide an absolute path to a script/executable, or blank to skip.");
+        const raw = await ask(`  on_merge_ready [${defMergeHook ?? "(none)"}]: `);
+        mergeHook = raw.trim() || defMergeHook || null;
+      }
+      if (!config.hooks) config.hooks = {};
+      if (mergeHook) {
+        config.hooks.on_merge_ready = mergeHook;
+        say(`  ✓ on_merge_ready: ${mergeHook}`);
+      } else if (config.hooks.on_merge_ready) {
+        say(`  ✓ on_merge_ready kept: ${config.hooks.on_merge_ready}`);
+      } else {
+        say("  on_merge_ready not configured — skipped.");
+      }
+    }
+
+    // on_merge hook — replaces the local squash merge when set; hook owns the git operation.
+    {
+      const defOnMerge = config.hooks?.on_merge ?? null;
+      let onMerge;
+      if (nonInteractive) {
+        onMerge = opts.onMerge !== undefined ? (opts.onMerge || null) : defOnMerge;
+      } else {
+        say("\n  on_merge hook (optional — replaces the local squash merge when set).");
+        say("  Provide an absolute path to a script/executable, or blank to keep local squash.");
+        const raw = await ask(`  on_merge [${defOnMerge ?? "(none — local squash)"}]: `);
+        onMerge = raw.trim() || defOnMerge || null;
+      }
+      if (!config.hooks) config.hooks = {};
+      if (onMerge) {
+        config.hooks.on_merge = onMerge;
+        say(`  ✓ on_merge: ${onMerge}`);
+      } else if (config.hooks.on_merge) {
+        say(`  ✓ on_merge kept: ${config.hooks.on_merge}`);
+      } else {
+        say("  on_merge not configured — local squash merge used.");
+      }
+    }
+
+    // Migrate legacy notifications.on_write → hooks.on_notification (cleanup).
+    if (config.notifications?.on_write) {
+      delete config.notifications.on_write;
+    }
+
     // Step 6 — write config (atomic .tmp → rename)
     mkdirSync(paths.configDir, { recursive: true });
     const tmpPath = configPath + ".tmp";

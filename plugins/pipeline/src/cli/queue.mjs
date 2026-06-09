@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, basename, isAbsolute, resolve, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { close, rowGet, rowAdd, rowUpdate } from "../../scripts/pipeline-db/index.mjs";
-import { getFlag } from "./helpers.mjs";
+import { getFlag, detectDefaultBranch } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 
 const QUEUE_STOP_WORDS = new Set([
@@ -93,6 +93,7 @@ function queueDepsExtract(planFilePath) {
   return [...new Set(slugs)].join(",");
 }
 
+
 function queueTargetExtract(planFilePath) {
   try {
     const lines = readFileSync(planFilePath, "utf8").split("\n");
@@ -104,11 +105,11 @@ function queueTargetExtract(planFilePath) {
         while (value && (value[value.length - 1] === "*" || value[value.length - 1] === " ")) {
           value = value.slice(0, -1);
         }
-        return value || "main";
+        return value || detectDefaultBranch(process.cwd());
       }
     }
   } catch {}
-  return "main";
+  return detectDefaultBranch(process.cwd());
 }
 
 function validateTargetBranch(value) {
@@ -267,12 +268,13 @@ export async function run(cmd, argv) {
 
     const derivedSource = branch || `autonomous/${feature}`;
     if (targetBranch === derivedSource || targetBranch.startsWith("autonomous/")) {
+      const defaultBranch = detectDefaultBranch(ctx.projectRoot);
       process.stderr.write(
-        `WARNING: *Target-Branch: ${targetBranch}* equals the source branch — treating merge destination as 'main'. ` +
-        `Use *Branch: \`${targetBranch}\`* for source-branch declaration; reserve *Target-Branch:* for non-main merge destinations only.\n`
+        `WARNING: *Target-Branch: ${targetBranch}* equals the source branch — treating merge destination as '${defaultBranch}'. ` +
+        `Use *Branch: \`${targetBranch}\`* for source-branch declaration; reserve *Target-Branch:* for non-default merge destinations only.\n`
       );
       if (!branch) branch = targetBranch;
-      targetBranch = "main";
+      targetBranch = defaultBranch;
     }
 
     if (depends) {
