@@ -91,11 +91,11 @@ test("PLACEHOLDER_KEYS includes every documented vocabulary entry", () => {
   deepEqual(new Set(PLACEHOLDER_KEYS), expected);
 });
 
-test("CLAUDE.md placeholder vocabulary table matches PLACEHOLDER_KEYS", async () => {
+test("REFERENCE.md placeholder vocabulary table matches PLACEHOLDER_KEYS", async () => {
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const here = fileURLToPath(new URL("./", import.meta.url));
-  const md = readFileSync(`${here}../CLAUDE.md`, "utf8");
+  const md = readFileSync(`${here}../REFERENCE.md`, "utf8");
   const start = md.indexOf("### Placeholder vocabulary");
   ok(start >= 0, "Placeholder vocabulary section present");
   const after = md.indexOf("\n### ", start + 1);

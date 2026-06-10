@@ -292,6 +292,53 @@ The hook has a 15-second hard timeout; its exit code is ignored (fire-and-forget
 
 ---
 
+## Path resolution
+
+Every config-driven path key in the plugin is resolved through one helper:
+`resolveTemplate(template, vars, { resolveBase, configDir })` in
+`scripts/worktree-paths.mjs`. The rule:
+
+1. Substitute `{placeholder}` tokens from `vars`; unknown placeholders pass through literally. `{config_dir}` is filled from the `configDir` option.
+2. Expand a leading `~/` to `os.homedir()`.
+3. If the result is absolute (POSIX `/...`, drive letter `C:\...`, UNC `\\server\share`), use verbatim. Otherwise resolve against `resolveBase`.
+
+### resolveBase categories
+
+| Category | `resolveBase` | Keys |
+|---|---|---|
+| Per-project          | `projectRoot` | `plansDir`, `governor.reports_dir`, `governor.session_dir`, `governor.log_dir`, `worktree_base` *(future)* |
+| Global / install-wide | `paths.configDir` | `notifications.fallback_dir`, `session_templates_dir`, `hooks.on_notification`, `hooks.on_merge_ready`, `governor.template_path` |
+| Within-worktree       | resolved `featureWorktreePath(...)` | `report_subpath` |
+
+`paths.configDir` is `~/.pipeline` on Mac/Windows and `$XDG_CONFIG_HOME/pipeline` (fallback `~/.config/pipeline`) on Linux.
+
+Hook values are command strings — only the first whitespace-separated token is routed through `resolveTemplate`; trailing argv passes through unchanged.
+
+**`hooks.on_merge` is not yet routed.** The consumer (`skills/merge/scripts/merge.mjs`) reads it raw, so operators must supply an absolute path until the retrofit lands. Doctor flags it as `hooks.on_merge (raw — bypasses resolveTemplate)`.
+
+### Placeholder vocabulary
+
+| Placeholder | Source |
+|---|---|
+| `{root}`             | `projectRoot` |
+| `{root_parent}`      | `dirname(projectRoot)` |
+| `{root_grandparent}` | `dirname(dirname(projectRoot))` |
+| `{project}`          | project name (or `basename(projectRoot)`) |
+| `{feature}`          | row feature / plan stem |
+| `{kind}`             | `code-review` / `qa-test` |
+| `{branch}`           | full branch name |
+| `{branch_type}`      | first slash-segment of branch |
+| `{branch_local}`     | branch minus the first slash-segment |
+| `{config_dir}`       | `paths.configDir` |
+
+The canonical exported list is `PLACEHOLDER_KEYS` in `scripts/worktree-paths.mjs`; a test pins this table to that constant so the two cannot drift.
+
+### Locators
+
+Resolution chains for external binaries (e.g. claude-slack) live under `src/locators/` and return `{ path, source }`. Wizard and doctor both consume the locator — never duplicate the chain inline.
+
+---
+
 ## Worktree paths
 
 The orchestrator creates one worktree per pipeline-row branch. Operator-managed worktrees for QA tests and code-review verdicts live in separate locations and are handled by the `pipeline test-complete` and `pipeline review-complete` subcommands. Both paths are template-driven via config:
