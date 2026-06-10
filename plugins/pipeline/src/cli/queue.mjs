@@ -117,6 +117,26 @@ function queueTargetExtract(planFilePath) {
   return detectDefaultBranch(process.cwd());
 }
 
+function queueTitleExtract(planFilePath) {
+  try {
+    const lines = readFileSync(planFilePath, "utf8").split("\n");
+    for (const line of lines) {
+      const s = line.trim();
+      if (s.startsWith("*Title:") || s.startsWith("* Title:")) {
+        let value = s.split(":").slice(1).join(":").trim();
+        while (value && (value[0] === "*" || value[0] === " ")) value = value.slice(1);
+        while (value && (value[value.length - 1] === "*" || value[value.length - 1] === " ")) {
+          value = value.slice(0, -1);
+        }
+        value = value.trim();
+        if (value.length > 256) value = value.slice(0, 256);
+        return value;
+      }
+    }
+  } catch {}
+  return "";
+}
+
 function validateTargetBranch(value) {
   const r = spawnSync("git", ["check-ref-format", "--branch", value],
     { stdio: ["ignore", "pipe", "pipe"] });
@@ -201,6 +221,13 @@ export async function run(cmd, argv) {
     return 0;
   }
 
+  if (cmd === "queue-title-extract") {
+    const [planFile] = argv;
+    if (!planFile) { process.stderr.write("usage: queue-title-extract <plan-file>\n"); return 1; }
+    process.stdout.write(`title=${queueTitleExtract(planFile)}\n`);
+    return 0;
+  }
+
   if (cmd === "queue-plan") {
     const [project, planFileArg, ...flags] = argv;
     if (!project || !planFileArg) {
@@ -260,6 +287,7 @@ export async function run(cmd, argv) {
     // CLI flag wins; fall back to plan-content extraction if a flag is absent.
     let branch  = branchFlag  ?? queueBranchExtract(planPath);
     let depends = dependsFlag ?? queueDepsExtract(planPath);
+    const prTitle = queueTitleExtract(planPath);
 
     if (targetBranch === null) {
       const [ok, msg] = lintTargetBranchProse(planPath);
@@ -332,6 +360,7 @@ export async function run(cmd, argv) {
           qModel: qModel !== "—" ? qModel : null,
           rvwModel: rvwModel !== "—" ? rvwModel : null,
           dependsOn: dependsArg, targetBranch,
+          prTitle: prTitle || null,
         });
         if (notes) rowUpdate(ctx.db, ctx.project, feature, { notes_extra: notes });
         const brNote = branch ? `, branch=${branch}` : "";

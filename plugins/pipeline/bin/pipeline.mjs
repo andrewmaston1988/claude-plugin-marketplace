@@ -198,6 +198,7 @@ Queue subcommands:
   queue-name-derive    <brief>
   queue-branch-extract <plan-file>
   queue-deps-extract   <plan-file>
+  queue-title-extract  <plan-file>
   queue-plan           <project> <plan-file>
   queue-mode-detect    <plans-dir> <arguments>
 
@@ -206,6 +207,7 @@ Other:
   session-generate     <project> <plan-file> <session-type>
   notify               --title <text> --message <text>
   target-branch-get    <project> <feature>
+  pr-title-get         <project> <feature>
   rebase-required-set  <project> <feature> <0|1>
   plugin-root          Print the absolute path to this plugin's root directory
   config-get <key>     Print a single config value (empty output if unset)

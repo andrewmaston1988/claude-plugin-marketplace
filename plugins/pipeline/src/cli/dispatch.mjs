@@ -23,6 +23,27 @@ export async function run(cmd, argv) {
     }
   }
 
+  if (cmd === "pr-title-get") {
+    const [project, feature] = argv;
+    if (!project || !feature) {
+      process.stderr.write("usage: pr-title-get <project> <feature>\n");
+      return 1;
+    }
+    const ctx = lookupProjectOrFail(project);
+    if (!ctx) return 1;
+    try {
+      const row = rowGet(ctx.db, ctx.project, feature);
+      if (!row) {
+        process.stderr.write(`not found: feature '${feature}'\n`);
+        return 1;
+      }
+      process.stdout.write(`${row.pr_title || ""}\n`);
+      return 0;
+    } finally {
+      close(ctx.db);
+    }
+  }
+
   if (cmd === "rebase-required-set") {
     const [project, feature, valueStr] = argv;
     if (!project || !feature || valueStr === undefined) {
