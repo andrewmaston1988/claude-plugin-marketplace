@@ -82,9 +82,10 @@ test("detectDefaultBranch falls back to DEFAULT_TARGET_BRANCH_FALLBACK on both l
 import { fileURLToPath } from "node:url";
 const PIPELINE_BIN = join(fileURLToPath(new URL("..", import.meta.url)), "bin", "pipeline.mjs");
 
-function runPipeline(args, env = {}) {
+function runPipeline(args, { env = {}, cwd } = {}) {
   return spawnSync(process.execPath, [PIPELINE_BIN, ...args], {
     env: { ...process.env, ...env },
+    cwd,
     stdio: ["ignore", "pipe", "pipe"],
     encoding: "utf8",
   });
@@ -102,17 +103,15 @@ test("queue-target-extract returns plan annotation when present", () => {
 });
 
 test("queue-target-extract falls back to detectDefaultBranch when no annotation", () => {
-  const tmp = mkdtempSync(join(tmpdir(), "pipeline-tb-noplan-"));
-  const planPath = join(tmp, "plan.md");
+  // Spawn pipeline in a synthesised repo whose origin HEAD is 'trunk', so the
+  // detected default is deterministic and != 'master' — a regression that
+  // re-introduces hardcoded "master" would fail this assertion.
+  const repo = freshRepo({ withOriginHead: "trunk" });
+  const planPath = join(repo, "plan.md");
   writeFileSync(planPath, "# plan\n\n## Motivation\n\nNo branch annotation.\n");
   try {
-    const r = runPipeline(["queue-target-extract", planPath]);
+    const r = runPipeline(["queue-target-extract", planPath], { cwd: repo });
     equal(r.status, 0, r.stderr);
-    // Resolution runs in process.cwd() (the test runner). Just verify the
-    // output is *some* non-empty branch — proves it didn't hardcode "master".
-    match(r.stdout, /^target=\S+/);
-    ok(!/target=master\b/.test(r.stdout) ||
-       detectDefaultBranch(process.cwd()) === "master",
-       "must only return 'master' if that's the actually-detected default");
-  } finally { rmSync(tmp, { recursive: true, force: true }); }
+    match(r.stdout, /target=trunk\b/);
+  } finally { rmSync(repo, { recursive: true, force: true }); }
 });
