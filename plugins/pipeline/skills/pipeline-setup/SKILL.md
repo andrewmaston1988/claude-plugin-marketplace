@@ -111,6 +111,15 @@ If the user picks a channel: strip a leading `#`. If `claude-slack` isn't on PAT
 
 For any case where you write a new script: write it to `~/.pipeline/hooks/on-merge-ready.mjs` (create the dir if needed), make it self-contained, and show the user the file content before writing.
 
+**If the hook creates a GitHub PR**, use `pipeline pr-title-get <project> <feature>` to read the human-readable title stored at queue time (from the plan's `*Title:*` annotation), falling back to the feature slug if empty:
+
+```js
+const pipelineBin = join(homedir(), ".claude", "plugins", "cache", "andrewmaston1988-claude-plugins", "pipeline", "0.1.0", "bin", "pipeline.mjs");
+const titleResult = spawnSync(process.execPath, [pipelineBin, "pr-title-get", project, feature], { encoding: "utf8", env: process.env });
+const title = titleResult.stdout?.trim() || feature;
+// then: spawnSync(ghBin, ["pr", "create", "--title", title, ...])
+```
+
 Pass the hook path as `--merge-hook <abs-path>` (or omit to leave unset).
 
 ### Question 3c — on_merge hook
