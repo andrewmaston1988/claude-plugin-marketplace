@@ -38,6 +38,7 @@ import { join, basename } from "node:path";
 import { spawn } from "node:child_process";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { getPaths } from "../src/paths.mjs";
+import { resolveTemplate } from "./worktree-paths.mjs";
 
 const SCHEMA_VERSION = 1;
 
@@ -50,7 +51,12 @@ function _timestamp() {
 }
 
 function _dropDir(cfg, paths) {
-  return cfg.notifications?.fallback_dir || join(paths.stateDir, "notifications");
+  const raw = cfg.notifications?.fallback_dir;
+  if (raw) {
+    // Global / install-wide key: resolves against paths.configDir per §B.
+    return resolveTemplate(raw, {}, { resolveBase: paths.configDir, configDir: paths.configDir });
+  }
+  return join(paths.stateDir, "notifications");
 }
 
 function _writeEnvelope(envelope, paths, cfg) {
@@ -77,17 +83,38 @@ function _writeEnvelope(envelope, paths, cfg) {
 //
 // Returns a Promise<void> that resolves on child close or after the timeout.
 
-function _resolveHookCommand(hookVal) {
+function _resolveHookCommand(hookVal, paths) {
+  let raw = null;
   if (!hookVal) return null;
-  if (typeof hookVal === "string") return hookVal;
-  if (Array.isArray(hookVal) && hookVal[0]?.command) return hookVal[0].command;
-  return null;
+  if (typeof hookVal === "string") raw = hookVal;
+  else if (Array.isArray(hookVal) && hookVal[0]?.command) raw = hookVal[0].command;
+  if (!raw) return null;
+  return _resolveHookFirstToken(raw, paths);
+}
+
+// Hook values are command strings; route the first whitespace-separated token
+// through resolveTemplate when it looks like a path (starts with `~`, `/`,
+// `\`, a drive letter, or `{config_dir}`). Trailing args are passed through
+// verbatim. resolveBase is configDir per §B.
+function _resolveHookFirstToken(cmd, paths) {
+  if (!paths) return cmd;
+  const m = cmd.match(/^(\S+)(\s.*)?$/);
+  if (!m) return cmd;
+  const head = m[1];
+  const tail = m[2] || "";
+  const looksLikePath = /^~|^[\/\\]|^[A-Za-z]:[\\/]|\{(config_dir|root|project)\}/.test(head);
+  if (!looksLikePath) return cmd;
+  const resolved = resolveTemplate(head, {}, {
+    resolveBase: paths.configDir,
+    configDir: paths.configDir,
+  });
+  return resolved + tail;
 }
 
 function _spawnHook(cfg, filePath, paths) {
   // New key first, legacy fallback for one release
-  const hook = _resolveHookCommand(cfg.hooks?.on_notification)
-            ?? _resolveHookCommand(cfg.notifications?.on_write);
+  const hook = _resolveHookCommand(cfg.hooks?.on_notification, paths)
+            ?? _resolveHookCommand(cfg.notifications?.on_write, paths);
   if (!hook) return Promise.resolve(false);
   const args = /\.(mjs|js)$/.test(hook) ? ["node", hook, filePath] : [hook, filePath];
   return new Promise((resolveSpawn) => {
@@ -162,8 +189,8 @@ function _markSent(target, cfg, paths) {
 export async function drainNotifications({ _cfg, _paths, logFn } = {}) {
   const cfg   = _cfg   ?? loadPipelineConfig();
   const paths = _paths ?? getPaths();
-  const hook = _resolveHookCommand(cfg.hooks?.on_notification)
-            ?? _resolveHookCommand(cfg.notifications?.on_write);
+  const hook = _resolveHookCommand(cfg.hooks?.on_notification, paths)
+            ?? _resolveHookCommand(cfg.notifications?.on_write, paths);
   if (!hook) return 0;  // notifier-agnostic install — nothing to drain to
 
   const dir = _dropDir(cfg, paths);
@@ -265,7 +292,8 @@ export async function publishNotification({ title, message, messageFile, priorit
 // Hook stdio is captured to <logDir>/merge-hook.log (append).
 export function spawnMergeReadyHook(project, feature, branch, targetBranch, projectRoot, { _cfg, _getPaths } = {}) {
   const cfg = _cfg ?? loadPipelineConfig();
-  const hook = _resolveHookCommand(cfg.hooks?.on_merge_ready);
+  const paths = (_getPaths ?? getPaths)();
+  const hook = _resolveHookCommand(cfg.hooks?.on_merge_ready, paths);
   if (!hook) return Promise.resolve();
   const args = /.(mjs|js)$/.test(hook) ? ["node", hook] : [hook];
   const env = {

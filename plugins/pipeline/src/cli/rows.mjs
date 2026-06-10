@@ -11,7 +11,8 @@ import {
 import { generateSessionFile } from "../../scripts/session-gen.mjs";
 import { publishNotification } from "../../scripts/publisher.mjs";
 import { getFlag } from "./helpers.mjs";
-import { handlerWorktreePath, orchestratorWorktreePath } from "../../scripts/worktree-paths.mjs";
+import { handlerWorktreePath, orchestratorWorktreePath, resolveTemplate } from "../../scripts/worktree-paths.mjs";
+import { getPaths } from "../paths.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 
 function formatRow(r) {
@@ -66,8 +67,12 @@ function gitErrDetail(r) {
 }
 
 function resolvePlansDir(raw, projectRoot, projectName) {
-  const substituted = raw.replace(/\{project\}/g, projectName);
-  return isAbsolute(substituted) ? substituted : resolve(projectRoot, substituted);
+  // Per §B: plansDir is per-project (resolveBase=projectRoot).
+  const paths = getPaths();
+  return resolveTemplate(raw, { root: projectRoot, project: projectName }, {
+    resolveBase: projectRoot,
+    configDir: paths.configDir,
+  });
 }
 
 function backlogScan(db, project, plansDir) {

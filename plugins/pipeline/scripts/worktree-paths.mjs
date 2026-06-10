@@ -1,6 +1,73 @@
-import { dirname, basename } from "node:path";
+import { dirname, basename, isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../src/config-defaults.mjs";
+
+// Unified placeholder vocabulary. Every config-driven path in the plugin
+// substitutes against this set; unknown placeholders pass through literally.
+// See plugins/pipeline/CLAUDE.md §"Path resolution".
+export const PLACEHOLDER_KEYS = Object.freeze([
+  "root",
+  "root_parent",
+  "root_grandparent",
+  "project",
+  "feature",
+  "kind",
+  "branch",
+  "branch_type",
+  "branch_local",
+  "config_dir",
+]);
+
+// Canonical config-driven path resolver. Applied to every path the plugin
+// reads from cfg.*. The contract:
+//
+//   1. Substitute {placeholder} tokens from `vars` + {config_dir} from the
+//      `configDir` option. Unknown placeholders pass through unchanged.
+//   2. Expand a leading `~/` to `os.homedir()`.
+//   3. If the result is absolute (POSIX `/...`, Windows drive `C:\...`, or
+//      UNC `\\server\share`), use it verbatim. Otherwise resolve against
+//      `resolveBase` (project root, configDir, or a worktree path —
+//      whichever fits the key's category; see plugin CLAUDE.md).
+//
+// `template` may be `null`/`undefined`; callers usually pass the config
+// value directly and short-circuit on falsy. To keep the helper safe we
+// return null in that case rather than throwing.
+export function resolveTemplate(
+  template,
+  vars = {},
+  { resolveBase, configDir } = {},
+) {
+  if (template == null || template === "") return template ?? null;
+  const substituted = substitute(String(template), {
+    ...vars,
+    config_dir: vars.config_dir ?? configDir ?? "",
+  });
+  const expanded = _expandTilde(substituted);
+  if (_isAbsoluteAny(expanded)) return expanded;
+  if (!resolveBase) return expanded;
+  return resolve(resolveBase, expanded);
+}
+
+function _expandTilde(p) {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/") || p.startsWith("~\\")) {
+    return homedir() + p.slice(1);
+  }
+  return p;
+}
+
+// Treat POSIX-absolute, drive-letter, AND UNC paths as absolute regardless of
+// the host OS. node:path's `isAbsolute` honours the running platform's rules,
+// so `/foo` is "relative" on Windows and `C:\foo` is "relative" on POSIX —
+// neither matches the contract here (operator's value should be used as-is).
+function _isAbsoluteAny(p) {
+  if (!p) return false;
+  if (isAbsolute(p)) return true;
+  if (/^[A-Za-z]:[\\/]/.test(p)) return true;     // Windows drive letter
+  if (p.startsWith("\\\\") || p.startsWith("//")) return true; // UNC
+  return false;
+}
 
 // Two resolvers share one substitution helper and one config loader. They
 // model two distinct contracts:

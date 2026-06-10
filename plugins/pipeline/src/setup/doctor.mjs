@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
@@ -7,10 +7,60 @@ import { loadPipelineConfig } from "../pipeline-config.mjs";
 import { connectUnified, close, dbPathUnified } from "../../scripts/pipeline-db/connection.mjs";
 import { projectList } from "../../scripts/pipeline-db/projects.mjs";
 import { readState, pidAlive } from "../../scripts/orchestrator/state-file.mjs";
+import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
+import { resolveTemplate, PLACEHOLDER_KEYS } from "../../scripts/worktree-paths.mjs";
 
 const execFileAsync = promisify(execFile);
 
+// Surface every config-driven path key, resolved against the §B category for
+// its key. Used by the `path-resolution-consistency` doctor check. `existsExpected`
+// flags whether a non-existent resolved path is a warn-worthy state.
+function _pathResolutionChecks(cfg, projects, paths) {
+  const out = [];
+  const cd = paths.configDir;
+  const _global = (raw) => raw
+    ? resolveTemplate(raw, {}, { resolveBase: cd, configDir: cd })
+    : null;
+  // Global / install-wide keys.
+  out.push({ key: "notifications.fallback_dir",  raw: cfg.notifications?.fallback_dir,  resolved: _global(cfg.notifications?.fallback_dir) ?? join(paths.stateDir, "notifications"), warn: false });
+  out.push({ key: "session_templates_dir",       raw: cfg.session_templates_dir,        resolved: _global(cfg.session_templates_dir) ?? "(bundled)", warn: cfg.session_templates_dir ? !existsSync(_global(cfg.session_templates_dir)) : false });
+  out.push({ key: "hooks.on_notification",       raw: cfg.hooks?.on_notification,       resolved: _resolveHookFirstTokenForReport(cfg.hooks?.on_notification, cd) ?? "(unset)", warn: false });
+  out.push({ key: "hooks.on_merge_ready",        raw: cfg.hooks?.on_merge_ready,        resolved: _resolveHookFirstTokenForReport(cfg.hooks?.on_merge_ready,  cd) ?? "(unset)", warn: false });
+  out.push({ key: "hooks.on_merge",              raw: cfg.hooks?.on_merge,              resolved: _resolveHookFirstTokenForReport(cfg.hooks?.on_merge,        cd) ?? "(unset)", warn: false });
+  out.push({ key: "governor.template_path",      raw: cfg.governor?.template_path,      resolved: _global(cfg.governor?.template_path) ?? "(bundled)", warn: cfg.governor?.template_path ? !existsSync(_global(cfg.governor.template_path)) : false });
+
+  // Per-project keys. Resolved against each registered project's root_path.
+  for (const p of projects ?? []) {
+    const _proj = (raw) => raw
+      ? resolveTemplate(raw, { root: p.root_path, project: p.name }, { resolveBase: p.root_path, configDir: cd })
+      : null;
+    out.push({ key: `[${p.name}] plansDir`,             raw: cfg.plansDir,             resolved: _proj(cfg.plansDir) ?? join(p.root_path, "plans"), warn: false });
+    out.push({ key: `[${p.name}] governor.reports_dir`, raw: cfg.governor?.reports_dir, resolved: _proj(cfg.governor?.reports_dir) ?? join(p.root_path, "reports"), warn: false });
+    out.push({ key: `[${p.name}] governor.session_dir`, raw: cfg.governor?.session_dir, resolved: _proj(cfg.governor?.session_dir) ?? join(p.root_path, "sessions"), warn: false });
+    out.push({ key: `[${p.name}] governor.log_dir`,     raw: cfg.governor?.log_dir,     resolved: _proj(cfg.governor?.log_dir)     ?? join(p.root_path, "logs"), warn: false });
+  }
+  return out;
+}
+
+// Mirrors publisher.mjs's first-token resolution for display purposes.
+function _resolveHookFirstTokenForReport(hookVal, configDir) {
+  let raw = null;
+  if (!hookVal) return null;
+  if (typeof hookVal === "string") raw = hookVal;
+  else if (Array.isArray(hookVal) && hookVal[0]?.command) raw = hookVal[0].command;
+  if (!raw) return null;
+  const m = raw.match(/^(\S+)(\s.*)?$/);
+  if (!m) return raw;
+  const head = m[1];
+  const tail = m[2] || "";
+  const looksLikePath = /^~|^[\/\\]|^[A-Za-z]:[\\/]|\{(config_dir|root|project)\}/.test(head);
+  if (!looksLikePath) return raw;
+  return resolveTemplate(head, {}, { resolveBase: configDir, configDir }) + tail;
+}
+
 // Locate an executable on PATH. Returns the absolute path or null.
+// Note: claude-slack uses the shared findClaudeSlackPlugin() locator below;
+// this helper is generic for any other PATH probe (currently unused).
 function _onPath(name) {
   const pathDirs = (process.env.PATH || "").split(/[;:]/);
   const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat", ".mjs", ".js", ""] : [""];
@@ -20,26 +70,6 @@ function _onPath(name) {
       const full = join(dir, name + ext);
       if (existsSync(full)) return full;
     }
-  }
-  // Fallback for claude-slack specifically: walk the plugins-cache the way the
-  // bundled forwarder does. The operator's `claude-slack` is a PowerShell
-  // function alias from $PROFILE, never on PATH from a non-PowerShell shell —
-  // but the binary IS reachable at the known plugin-marketplace install path.
-  if (name === "claude-slack") {
-    try {
-      const home = process.env.USERPROFILE || process.env.HOME || homedir();
-      const cache = join(home, ".claude", "plugins", "cache");
-      if (existsSync(cache)) {
-        for (const owner of readdirSync(cache)) {
-          const sb = join(cache, owner, "slack-bridge");
-          if (!existsSync(sb)) continue;
-          for (const ver of readdirSync(sb)) {
-            const exe = join(sb, ver, "bin", "claude-slack.mjs");
-            if (existsSync(exe)) return exe;
-          }
-        }
-      }
-    } catch {}
   }
   return null;
 }
@@ -165,22 +195,30 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
     push("hooks.on_notification", false, true, "unset — no channels configured (skipping)");
   }
 
-  // 8. claude-slack on PATH (warn — skipped if no channel anyway)
+  // 8. claude-slack plugin — uses the shared locator (env > cache > PATH).
+  // The env-var contract is "use this specifically" — if it's set but missing,
+  // we warn rather than silently fall back to cache.
   if (!governanceChannel) {
-    push("claude-slack on PATH", false, true, "skipped — no Slack channel configured");
-  } else if (process.env.CLAUDE_SLACK_PLUGIN) {
-    const env = process.env.CLAUDE_SLACK_PLUGIN;
-    if (existsSync(env)) {
-      push("claude-slack on PATH", true, false, `CLAUDE_SLACK_PLUGIN=${env}`);
-    } else {
-      push("claude-slack on PATH", false, true, `CLAUDE_SLACK_PLUGIN=${env} (file missing)`);
-    }
+    push("claude-slack-plugin", false, true, "skipped — no Slack channel configured");
+  } else if (process.env.CLAUDE_SLACK_PLUGIN && !existsSync(process.env.CLAUDE_SLACK_PLUGIN)) {
+    push("claude-slack-plugin", false, true, `CLAUDE_SLACK_PLUGIN=${process.env.CLAUDE_SLACK_PLUGIN} (file missing)`);
   } else {
-    const found = _onPath("claude-slack");
-    if (found) {
-      push("claude-slack on PATH", true, false, found);
+    const found = findClaudeSlackPlugin();
+    if (found.path) {
+      push("claude-slack-plugin", true, false, `${found.path} (source=${found.source})`);
     } else {
-      push("claude-slack on PATH", false, true, "not found — Slack notifications will silently no-op");
+      push("claude-slack-plugin", false, true, "not found — Slack notifications will silently no-op");
+    }
+  }
+
+  // 8b. pipeline-home — resolved configDir for this platform. Informational;
+  // warn (not fail) if the implicit default doesn't exist (fresh install).
+  {
+    const home = paths.configDir;
+    if (existsSync(home)) {
+      push("pipeline-home", true, false, home);
+    } else {
+      push("pipeline-home", false, true, `${home} (absent — likely fresh install)`);
     }
   }
 
@@ -224,6 +262,23 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
     } else {
       push("registered project paths", false, false, missing.join("; "));
     }
+  }
+
+  // 12. path-resolution-consistency — for every config-driven path key,
+  // print raw config value + resolved path. Warn when a key resolves to a
+  // non-existent file/dir where existence is expected. Runs after `projects`
+  // is populated so per-project keys can be exercised against each registry row.
+  {
+    const checks = _pathResolutionChecks(resolved, projects, paths);
+    const failed = checks.filter(c => c.warn);
+    const detail = checks.map(c =>
+      `${c.key}=${c.raw == null ? "(default)" : JSON.stringify(c.raw)} → ${c.resolved}${c.warn ? " ⚠ missing" : ""}`
+    ).join("; ");
+    push(
+      "path-resolution-consistency",
+      failed.length === 0, failed.length > 0,
+      detail || "(no keys to check)"
+    );
   }
 
   if (weOpenedDb && db) {

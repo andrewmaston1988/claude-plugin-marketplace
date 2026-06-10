@@ -22,6 +22,7 @@ import {
 import { findClaude } from "./spawn.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { getPaths } from "../../src/paths.mjs";
+import { resolveTemplate } from "../worktree-paths.mjs";
 import { updateSpend } from "../metrics/spend.mjs";
 
 const _BUNDLED_GOVERNOR_TEMPLATE = fileURLToPath(
@@ -38,14 +39,26 @@ export function resolveGovernorContext(db, _cfg) {
   const row = projectGetByName(db, projectName);
   if (!row?.root_path) return null;
   const projectRoot = row.root_path;
+  // Per §B: governor.{reports_dir, session_dir, log_dir} are per-project
+  // (resolveBase=projectRoot); governor.template_path is install-wide
+  // (resolveBase=configDir). Defaults match the prior literal join behaviour.
+  const paths = getPaths();
+  const projVars = { root: projectRoot, project: projectName };
+  const _proj = (raw, fallback) => raw
+    ? resolveTemplate(raw, projVars, { resolveBase: projectRoot, configDir: paths.configDir })
+    : fallback;
   return {
     cfg,
     projectName,
     projectRoot,
-    reportsDir:   cfg.governor.reports_dir   || join(projectRoot, "reports"),
-    sessionDir:   cfg.governor.session_dir   || join(projectRoot, "sessions"),
-    logDir:       cfg.governor.log_dir       || join(projectRoot, "logs"),
-    templatePath: cfg.governor.template_path || _BUNDLED_GOVERNOR_TEMPLATE,
+    reportsDir:   _proj(cfg.governor.reports_dir, join(projectRoot, "reports")),
+    sessionDir:   _proj(cfg.governor.session_dir, join(projectRoot, "sessions")),
+    logDir:       _proj(cfg.governor.log_dir,     join(projectRoot, "logs")),
+    templatePath: cfg.governor.template_path
+      ? resolveTemplate(cfg.governor.template_path, projVars, {
+          resolveBase: paths.configDir, configDir: paths.configDir,
+        })
+      : _BUNDLED_GOVERNOR_TEMPLATE,
     govModel:     cfg.models?.governor       || "claude-sonnet-4-6",
   };
 }

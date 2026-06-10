@@ -1,12 +1,18 @@
 import { readdirSync, existsSync } from "node:fs";
-import { resolve, isAbsolute } from "node:path";
+import { resolve } from "node:path";
 import { projectGetByName } from "../../../scripts/pipeline-db/projects.mjs";
 import { rowsList } from "../../../scripts/pipeline-db/rows.mjs";
 import { loadPipelineConfig } from "../../pipeline-config.mjs";
+import { resolveTemplate } from "../../../scripts/worktree-paths.mjs";
+import { getPaths } from "../../paths.mjs";
 
 function _resolvePlansDir(raw, projectRoot, projectName) {
-  const substituted = raw.replace(/\{project\}/g, projectName);
-  return isAbsolute(substituted) ? substituted : resolve(projectRoot, substituted);
+  // Per §B: plansDir is per-project (resolveBase=projectRoot).
+  const paths = getPaths();
+  return resolveTemplate(raw, { root: projectRoot, project: projectName }, {
+    resolveBase: projectRoot,
+    configDir: paths.configDir,
+  });
 }
 
 // Load backlog rows (unqueued plan files) for a project.
