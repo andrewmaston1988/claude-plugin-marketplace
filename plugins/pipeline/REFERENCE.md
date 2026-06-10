@@ -343,6 +343,18 @@ Hook values are command strings — only the first whitespace-separated token is
 
 The canonical exported list is `PLACEHOLDER_KEYS` in `scripts/worktree-paths.mjs`; a test pins this table to that constant so the two cannot drift.
 
+### Helpers
+
+`scripts/worktree-paths.mjs` exposes three feature-aware wrappers over `resolveTemplate`:
+
+| Helper | Template key | Default | Notes |
+|---|---|---|---|
+| `featureWorktreePath({ project, projectRoot, feature })` | `cfg.worktree_base` | `{root_parent}/.worktrees/{project}/{feature}` | Phase 3b canonical per-feature worktree — one worktree shared across dev / research / review / test / merge. Branch-context placeholders substitute to `""` when called without one. |
+| `orchestratorWorktreePath({ project, projectRoot, branch })` | `cfg.orchestrator_worktree_base` | `{root_parent}/{project}-wt/{branch_type}-{branch_local}` | Deprecated compat wrapper (emits one-shot `console.warn`). Retained only so `tests/worktree-paths.test.mjs` can pin pre-3b parity; production callers must use `featureWorktreePath`. |
+| `handlerWorktreePath({ project, projectRoot, kind, feature })` | `cfg.handler_worktree_base` | `{root_parent}/.worktrees/{kind}-{feature}` | Deprecated compat wrapper (emits one-shot `console.warn`). Retained for the same reason; do not introduce new call sites. |
+
+All three flow through `resolveTemplate` with `resolveBase = projectRoot`, so the placeholder vocabulary, `~/` expansion, and absolute-vs-relative classification are identical across them.
+
 ### Locators
 
 Resolution chains for external binaries (e.g. claude-slack) live under `src/locators/` and return `{ path, source }`. Wizard and doctor both consume the locator — never duplicate the chain inline.

@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
-import { reportPath, handlerWorktreePath, resolveTemplate } from "./worktree-paths.mjs";
+import { reportPath, featureWorktreePath, resolveTemplate } from "./worktree-paths.mjs";
 import { getPaths } from "../src/paths.mjs";
 import { resolvePlanFile } from "../src/plans-resolver.mjs";
 
@@ -115,10 +115,13 @@ export function generateSessionFile(
   const progressPath = _resolvePartialPath("_progress-tracking.md", cfg);
   const progressBlock = existsSync(progressPath) ? readFileSync(progressPath, "utf8").trimEnd() : "";
 
-  const codeReviewWt   = handlerWorktreePath({ project, projectRoot, kind: "code-review", feature, _config: cfg });
-  const qaTestWt       = handlerWorktreePath({ project, projectRoot, kind: "qa-test",     feature, _config: cfg });
-  const reviewReports  = reportPath({ project, projectRoot, kind: "code-review", feature, _config: cfg }).dir;
-  const testReports    = reportPath({ project, projectRoot, kind: "qa-test",     feature, _config: cfg }).dir;
+  // Phase 3b: single worktree per feature. CODE_REVIEW_WT and QA_TEST_WT are
+  // load-bearing aliases for WORKTREE — dev-session.md's prior-report-discovery
+  // blocks still reference the legacy names; they must keep resolving to the
+  // same path until every template migrates. See plugins/pipeline/CLAUDE.md.
+  const worktree       = featureWorktreePath({ project, projectRoot, feature, _config: cfg });
+  const reviewRP       = reportPath({ project, projectRoot, kind: "code-review", feature, _config: cfg });
+  const testRP         = reportPath({ project, projectRoot, kind: "qa-test",     feature, _config: cfg });
 
   const content = _expand(template, {
     PROGRESS_TRACKING: progressBlock,
@@ -135,10 +138,13 @@ export function generateSessionFile(
     TARGET_BRANCH:     targetBranch,
     REVIEW_SKILL:      reviewSkill,
     REVIEW_RETRIES:    reviewRetries,
-    CODE_REVIEW_WT:    codeReviewWt,
-    QA_TEST_WT:        qaTestWt,
-    REVIEW_REPORTS_DIR: reviewReports,
-    TEST_REPORTS_DIR:   testReports,
+    WORKTREE:          worktree,
+    CODE_REVIEW_WT:    worktree,
+    QA_TEST_WT:        worktree,
+    REVIEW_REPORTS_DIR:    reviewRP.dir,
+    TEST_REPORTS_DIR:      testRP.dir,
+    REVIEW_PUBLISH_BRANCH: reviewRP.publishBranch,
+    TEST_PUBLISH_BRANCH:   testRP.publishBranch,
   });
 
   const sessionsDir = join(projectRoot, "sessions");
