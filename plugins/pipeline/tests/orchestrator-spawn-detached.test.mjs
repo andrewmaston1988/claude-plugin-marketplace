@@ -1,13 +1,7 @@
-// Verify detached child processes survive parent termination on Windows.
-// The test spawns a long-running node child with detached:true + unref(),
-// exits the spawner, and asserts the child PID is still alive after 1 s.
-//
-// On non-Windows, detached:true is safe but the OS doesn't enforce
-// job-object inheritance — the survival check still passes because
-// unref'd detached children outlive their parent on POSIX too.
+// Verify detached+unref child processes survive parent exit (Windows job-object fix).
 import { test } from "node:test";
 import { ok, strictEqual } from "node:assert/strict";
-import { spawnSync, spawn } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
