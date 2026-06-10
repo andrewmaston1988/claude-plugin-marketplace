@@ -148,15 +148,7 @@ Add a one-line prior-cycle summary as the first line of the Concerns section in 
 
 If `$N == 0` (fresh first attempt), skip this step entirely — no prior-cycle summary line needed.
 
-**Create the code-review worktree.** Do NOT check out a branch directly in `{{PROJECT_ROOT}}` — that would move the main CLAUDE repo off `main`:
-
-```bash
-cd {{PROJECT_ROOT}}
-git worktree add {{CODE_REVIEW_WT}} -b code-review/{{FEATURE}} main
-cd {{CWD}}
-```
-
-Use `{{CODE_REVIEW_WT}}` as `<CLAUDE-wt>` in subsequent steps. All report writes and commits go through this worktree — never into `{{PROJECT_ROOT}}` directly.
+**The feature worktree already exists.** Phase 3b: one worktree per feature at `{{WORKTREE}}`. Do NOT run `git worktree add` — the orchestrator (or a prior session) created it. All report writes land in subdirectories of this worktree; the publish step below moves the commit onto a side-branch.
 
 **Truncate large Bash outputs.** Any command that may produce large output (`git log`, `git diff` against a big branch) must be piped through `| head -200` or similar. Don't let raw diff output flood your context — the `/code-review` skill reads the diff itself; you don't need to inline the full content.
 
@@ -186,9 +178,16 @@ REPORT_PATH={{REVIEW_REPORTS_DIR}}/review-report-<date>-{{FEATURE}}-retry<N>-${C
 
 `{{REVIEW_REPORTS_DIR}}` is the absolute reports directory inside the code-review worktree; it's substituted by session-gen from a single config source so the reaper and the template can't drift. Never reconstruct this path inline — bash tool cwd resets between calls and a relative form would silently fail with `Report not found`.
 
-**Write the report file via Bash heredoc** — your tool surface does NOT include `Write`. The heredoc delimiter MUST be single-quoted and unique (`'PIPELINE_REVIEW_REPORT_SENTINEL_END'`) so the report content (which may include `$` expansions, backticks, or accidental `EOF` strings) can't break the heredoc parser:
+**Publish the report via stash-switchback dance — stash FIRST, then write the report on the publish branch.** The single feature worktree is currently on `autonomous/{{FEATURE}}`. Order matters: `git stash push -u` includes untracked files, so the report must be written *after* the stash and *on* the publish branch, otherwise the freshly-created untracked report is stashed away and the subsequent `git add` fails. The heredoc delimiter MUST be single-quoted and unique (`'PIPELINE_REVIEW_REPORT_SENTINEL_END'`) so the report content (which may include `$` expansions, backticks, or accidental `EOF` strings) can't break the heredoc parser:
 
 ```bash
+cd {{WORKTREE}}
+# 1. Stash any uncommitted dev WIP (untracked + tracked) BEFORE writing the report.
+git stash push -u -m "auto: code-review-{{FEATURE}}"
+STASH_RC=$?
+# 2. Create or fast-forward the publish branch.
+git checkout -B {{REVIEW_PUBLISH_BRANCH}}
+# 3. Write the report on the publish branch.
 mkdir -p "$(dirname "$REPORT_PATH")"
 cat > "$REPORT_PATH" << 'PIPELINE_REVIEW_REPORT_SENTINEL_END'
 # Code Review Report: {{FEATURE}} (attempt <N+1>)
@@ -210,9 +209,28 @@ cat > "$REPORT_PATH" << 'PIPELINE_REVIEW_REPORT_SENTINEL_END'
 
 review_verdict: <ready_to_ship | needs_work>
 PIPELINE_REVIEW_REPORT_SENTINEL_END
+# 4. Stage and commit the report.
+git add "$REPORT_PATH"
+git commit -m "code-review: {{FEATURE}} retry${N}"
+# 5. Return to the dev branch.
+git checkout autonomous/{{FEATURE}}
+# 6. Restore WIP (only if step 1 actually stashed something).
+if [ "$STASH_RC" = "0" ] && git stash list | grep -q "auto: code-review-{{FEATURE}}"; then
+  if ! git stash pop; then
+    # Stash-pop conflict — park at manual; preserve the stash for operator recovery.
+    {{PIPELINE_BIN}} stage-set {{PROJECT}} {{FEATURE}} manual \
+      --notes "[stash-pop-conflict] code-review report published to {{REVIEW_PUBLISH_BRANCH}} but dev WIP could not be restored; stash preserved (git stash list)"
+    {{PIPELINE_BIN}} notify --priority high \
+      --title "🚨 Stash-pop conflict" \
+      --message "code-review of {{FEATURE}} parked at manual: stash pop conflicted after report publish. Stash preserved; operator must run \`git stash list\` / \`git stash pop\` in {{WORKTREE}} to resolve."
+    exit 0
+  fi
+fi
 ```
 
 The trailing canonical `review_verdict:` line is **operator-facing only**. The orchestrator reads the verdict from the `--verdict` CLI arg in the next step, NOT by re-parsing this line. Make it match the `--verdict` value you will pass to `review-complete` for the operator's audit clarity.
+
+If any step before stash-pop fails the report is not published — that is a hard failure; do not call `review-complete`.
 
 **Progress mark each step.** As you complete each step, mark it via `{{PIPELINE_BIN}} progress-mark {{PROJECT}} $CORRELATION_ID <N> in_progress` then `... <N> completed`. Delete the progress entry when fully done: `{{PIPELINE_BIN}} progress-delete {{PROJECT}} $CORRELATION_ID`.
 
@@ -291,6 +309,7 @@ cd {{CWD}}
 {{PIPELINE_BIN}} review-complete \
     {{PROJECT}} {{FEATURE}} \
     --report "$REPORT_PATH" \
+    --publish-branch {{REVIEW_PUBLISH_BRANCH}} \
     --verdict <ready_to_ship|needs_work|abort> \
     --correlation-id ${CORRELATION_ID} \
     --title "<title from table above>" \

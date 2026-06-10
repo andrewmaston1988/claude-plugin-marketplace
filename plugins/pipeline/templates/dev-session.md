@@ -75,9 +75,13 @@ Solving a task with fewer tokens is as valuable as solving it faster. The Govern
 # 1. Standard test-reports dir (merged qa/ branches land here)
 ls {{PROJECT_ROOT}}/test-reports/test-report-*{{FEATURE}}*.md 2>/dev/null
 
-# 2. qa/ worktree (if test ran but branch not yet merged — e.g. QA Pass: false)
-if [ -d "{{QA_TEST_WT}}" ]; then
-  ls {{TEST_REPORTS_DIR}}/test-report-*{{FEATURE}}*.md 2>/dev/null
+# 2. Publish branch in the single feature worktree (post-3b — pre-merge reports
+#    live on {{TEST_PUBLISH_BRANCH}}, not in the dev-branch working tree).
+if [ -d "{{WORKTREE}}" ] && git -C {{WORKTREE}} rev-parse --verify {{TEST_PUBLISH_BRANCH}} >/dev/null 2>&1; then
+  # List reports reachable from the publish branch.
+  git -C {{WORKTREE}} ls-tree -r --name-only {{TEST_PUBLISH_BRANCH}} -- test-reports/ 2>/dev/null \
+    | grep "test-report-.*{{FEATURE}}" || true
+  # To read one: git -C {{WORKTREE}} show {{TEST_PUBLISH_BRANCH}}:<path-from-above>
 fi
 ```
 
@@ -93,15 +97,19 @@ If **any** report records **QA Pass: false**, the bugs it describes ARE the work
 
 If all reports record **QA Pass: true**, they are informational only — no action required.
 
-**Check for prior reviewer feedback.** If you are running because a code-review session returned `needs_work`, the reviewer's report is the contract for what to fix this attempt. The report lives in the code-review worktree on its own branch until the feature's `/merge`. Look in both places:
+**Check for prior reviewer feedback.** If you are running because a code-review session returned `needs_work`, the reviewer's report is the contract for what to fix this attempt. Post-3b the report lives on the publish side-branch in the single feature worktree until `/merge` lands it on master. Look in both places:
 
 ```bash
 # 1. Standard reports dir (post-merge — only matters if a prior cycle landed)
 ls {{PROJECT_ROOT}}/reports/review-report-*{{FEATURE}}*.md 2>/dev/null
 
-# 2. code-review/{{FEATURE}} worktree (pre-merge — most common case for active bounces)
-if [ -d "{{CODE_REVIEW_WT}}" ]; then
-  ls {{REVIEW_REPORTS_DIR}}/review-report-*{{FEATURE}}*.md 2>/dev/null
+# 2. Publish branch in the single feature worktree (pre-merge — most common
+#    case for active bounces). The dance committed the report on
+#    {{REVIEW_PUBLISH_BRANCH}}, not the dev branch — read via `git show`.
+if [ -d "{{WORKTREE}}" ] && git -C {{WORKTREE}} rev-parse --verify {{REVIEW_PUBLISH_BRANCH}} >/dev/null 2>&1; then
+  git -C {{WORKTREE}} ls-tree -r --name-only {{REVIEW_PUBLISH_BRANCH}} -- reports/ 2>/dev/null \
+    | grep "review-report-.*{{FEATURE}}" || true
+  # To read one: git -C {{WORKTREE}} show {{REVIEW_PUBLISH_BRANCH}}:<path-from-above>
 fi
 ```
 

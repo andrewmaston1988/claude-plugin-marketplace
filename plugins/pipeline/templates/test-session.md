@@ -129,17 +129,9 @@ python -c "import macro"   # smoke check — only valid from project root
 
 **Live tests are always manual — never start an operator-managed runtime process yourself.** Any test that requires one of the processes listed under "Operator-managed runtime processes" in Project Context to be running (e.g. observing JSONL output, verifying live HTTP responses, watching for behavioural patterns) must be documented as a **manual step** for the operator. Mark these as `BLOCKED (manual)` in the test report, include the exact verification steps the operator should run, and set the pipeline stage to `manual` on completion. The operator runs the process and confirms; you do not.
 
-**Create a CLAUDE repo worktree for this test branch.** Before writing anything, create a worktree of the CLAUDE repo on a new `qa/test-{{FEATURE}}` branch. Do NOT check out a branch directly in `{{PROJECT_ROOT}}` — that would move the main CLAUDE repo off `main`:
+**The feature worktree already exists.** Phase 3b: one worktree per feature at `{{WORKTREE}}`. Do NOT run `git worktree add` — the orchestrator (or a prior session) created it. Test reports land in `{{TEST_REPORTS_DIR}}` (a subdirectory of the single worktree); the publish step at the end of the session moves the commit onto the `{{TEST_PUBLISH_BRANCH}}` side-branch via stash-switchback.
 
-```bash
-cd {{PROJECT_ROOT}}
-git worktree add {{QA_TEST_WT}} -b qa/test-{{FEATURE}}
-cd {{CWD}}
-```
-
-Use `{{QA_TEST_WT}}` as `<CLAUDE-wt>` in subsequent steps. All test report writes and commits go into this worktree — not into `{{PROJECT_ROOT}}` directly.
-
-**Document everything.** At session start, create the test report **inside the qa worktree** (`{{QA_TEST_WT}}` from the previous step) so write and commit happen in the same worktree:
+**Document everything.** At session start, create the test report inside the single worktree's test-reports dir:
 `{{TEST_REPORTS_DIR}}/test-report-<date>-{{FEATURE}}-${CORRELATION_ID}.md`
 
 Always include the branch slug **and** `${CORRELATION_ID}` in the filename. The corr_id suffix guarantees uniqueness — two test runs on the same day for the same plan write to different files, so operator findings in older reports are never overwritten. Never use a bare `test-report-YYYY-MM-DD.md` name.
@@ -170,7 +162,38 @@ feature areas. Write your completion summary and proceed to notify.
 Include timestamps, log lines, exact error messages, and reproduction steps.
 Reference the relevant plan file and section if a finding matches a known issue.
 
-**Finalize the test session and advance the pipeline.** Once testing is complete and the report is written, use the atomic `test-complete` helper to commit the report, back-fill session artifacts, advance the pipeline, and notify — all in one step.
+**Publish the report to the `{{TEST_PUBLISH_BRANCH}}` branch (stash-switchback dance).** The single feature worktree is currently on `autonomous/{{FEATURE}}`. Publish the report to its own side-branch before calling `test-complete` so the merge skill can read it from git history.
+
+The stash step **scope-excludes** the `test-reports/` subdirectory via a pathspec — without that exclusion, `git stash push -u` would sweep the just-written report into the stash and the subsequent `git add` would fail with `pathspec did not match`. The exclusion keeps the report in the working tree across the branch switch so it can be committed onto the publish branch:
+
+```bash
+cd {{WORKTREE}}
+REPORT_PATH={{TEST_REPORTS_DIR}}/test-report-<date>-{{FEATURE}}-${CORRELATION_ID}.md
+# 1. Stash any uncommitted dev WIP, BUT keep the test-reports subdir in the
+#    working tree so it survives the branch switch onto the publish branch.
+git stash push -u -m "auto: qa-test-{{FEATURE}}" -- . ':!test-reports/'
+STASH_RC=$?
+# 2. Create or fast-forward the publish branch.
+git checkout -B {{TEST_PUBLISH_BRANCH}}
+# 3. Stage and commit the report.
+git add "$REPORT_PATH"
+git commit -m "qa-test: {{FEATURE}}"
+# 4. Return to the dev branch.
+git checkout autonomous/{{FEATURE}}
+# 5. Restore WIP (only if step 1 actually stashed something).
+if [ "$STASH_RC" = "0" ] && git stash list | grep -q "auto: qa-test-{{FEATURE}}"; then
+  if ! git stash pop; then
+    {{PIPELINE_BIN}} stage-set {{PROJECT}} {{FEATURE}} manual \
+      --notes "[stash-pop-conflict] qa-test report published to {{TEST_PUBLISH_BRANCH}} but dev WIP could not be restored; stash preserved (git stash list)"
+    {{PIPELINE_BIN}} notify --priority high \
+      --title "🚨 Stash-pop conflict" \
+      --message "qa-test of {{FEATURE}} parked at manual: stash pop conflicted after report publish. Stash preserved; operator must run \`git stash list\` / \`git stash pop\` in {{WORKTREE}} to resolve."
+    exit 0
+  fi
+fi
+```
+
+**Finalize the test session and advance the pipeline.** Once testing is complete and the report has been published, use the atomic `test-complete` helper to back-fill session artifacts, advance the pipeline, and notify — all in one step. (The report itself is already committed by the dance above; `test-complete`'s commit step is a no-op when there is nothing new to stage.)
 
 Determine the test outcome:
 - All automated tests pass and there are no live-run tests in the plan → `--qa-pass true --has-manual-tests false` (advances to `merge`)
@@ -186,6 +209,7 @@ The Manual steps entry (if needed) must be actionable: `Start macro, verify X in
     {{PROJECT}} {{FEATURE}} \
     --branch-slug {{FEATURE}} \
     --report {{PROJECT_ROOT}}/test-reports/test-report-<date>-{{FEATURE}}-${CORRELATION_ID}.md \
+    --publish-branch {{TEST_PUBLISH_BRANCH}} \
     --qa-pass true \
     --has-manual-tests false \
     --title "🩺 Tests Complete" \

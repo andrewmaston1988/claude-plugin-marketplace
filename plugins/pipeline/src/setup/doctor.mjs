@@ -8,7 +8,8 @@ import { connectUnified, close, dbPathUnified } from "../../scripts/pipeline-db/
 import { projectList } from "../../scripts/pipeline-db/projects.mjs";
 import { readState, pidAlive } from "../../scripts/orchestrator/state-file.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
-import { resolveTemplate, resolveHookFirstToken } from "../../scripts/worktree-paths.mjs";
+import { resolveTemplate, resolveHookFirstToken, featureWorktreePath } from "../../scripts/worktree-paths.mjs";
+import { spawnSync } from "node:child_process";
 
 const execFileAsync = promisify(execFile);
 
@@ -243,6 +244,45 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
       failed.length === 0, failed.length > 0,
       detail || "(no keys to check)"
     );
+  }
+
+  // 13. worktree-layout-stale — phase 3b warns when on-disk worktrees don't
+  // match the resolved feature template, so the operator knows to clean up.
+  if (projects.length === 0) {
+    push("worktree-layout-stale", true, false, "(no projects to check)");
+  } else {
+    const stale = [];
+    for (const p of projects) {
+      if (!existsSync(join(p.root_path, ".git"))) continue;
+      let listed;
+      try {
+        const r = spawnSync("git", ["-C", p.root_path, "worktree", "list", "--porcelain"],
+          { encoding: "utf8", windowsHide: true, timeout: 5000 });
+        if (r.status !== 0) continue;
+        listed = r.stdout;
+      } catch { continue; }
+      const paths = [];
+      for (const line of listed.split(/\r?\n/)) {
+        if (line.startsWith("worktree ")) paths.push(line.slice("worktree ".length).trim());
+      }
+      for (const wtPath of paths) {
+        if (!wtPath || wtPath === p.root_path) continue;
+        // Use the basename as a candidate feature to compute the canonical path.
+        const feature = wtPath.split(/[\\/]/).filter(Boolean).pop();
+        const expected = featureWorktreePath({
+          project: p.name, projectRoot: p.root_path, feature, _config: resolved,
+        });
+        const norm = (s) => String(s || "").replace(/\\/g, "/").replace(/\/$/, "");
+        if (norm(wtPath) !== norm(expected)) {
+          stale.push(`${p.name}: ${wtPath} (run \`git -C "${p.root_path}" worktree remove "${wtPath}"\`)`);
+        }
+      }
+    }
+    if (stale.length === 0) {
+      push("worktree-layout-stale", true, false, "no stale worktrees");
+    } else {
+      push("worktree-layout-stale", false, true, stale.join("; "));
+    }
   }
 
   if (weOpenedDb && db) {

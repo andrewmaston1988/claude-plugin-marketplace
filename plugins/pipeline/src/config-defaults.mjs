@@ -36,11 +36,16 @@ export const PIPELINE_DEFAULTS = {
   // prefix. Defaults cover orchestrator-spawned and operator-driven sessions.
   recognised_branch_types: ["autonomous", "interactive"],
   session_templates_dir: null,
-  // Per-kind reports dir under the handler worktree. Placeholders: {project}, {feature}.
+  // Single worktree per feature. The orchestrator creates this on first spawn;
+  // review/test sessions create it if missing. Phase 3b default.
+  worktree_base: "{root_parent}/.worktrees/{project}/{feature}",
+  // Per-kind reports dir under the single feature worktree. Placeholders: {project}, {feature}.
   report_subpath: {
-    "code-review": "repos/{project}/reports",
-    "qa-test":     "repos/{project}/test-reports",
+    "code-review": "reports",
+    "qa-test":     "test-reports",
   },
+  // Side-branch the stash-switchback dance publishes reports to. Placeholders: {kind}, {feature}.
+  report_publish_branch_template: "{kind}/{feature}",
   governor: {
     enabled:       false,
     project:       null,
