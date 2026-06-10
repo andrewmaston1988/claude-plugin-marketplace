@@ -61,3 +61,10 @@ export function projectHasActiveSession(db, project) {
   ).get(project);
   return progressRow ?? null;
 }
+
+export function countActiveSessions(db) {
+  const result = db.prepare(
+    "SELECT COUNT(*) as count FROM sessions WHERE is_active = 1"
+  ).get();
+  return result?.count ?? 0;
+}

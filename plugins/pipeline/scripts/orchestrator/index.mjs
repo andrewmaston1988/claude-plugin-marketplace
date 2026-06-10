@@ -4,7 +4,7 @@ import {
   connectUnified, close,
   rowsList,
   progressDelete,
-  projectHasActiveSession, sessionFinish,
+  projectHasActiveSession, sessionFinish, countActiveSessions,
   listEnabledProjects,
 } from "../pipeline-db/index.mjs";
 import { getPaths } from "../../src/paths.mjs";
@@ -15,7 +15,7 @@ import {
   readState, writeState, deleteState, pidAlive, startupGuard,
 } from "./state-file.mjs";
 import { spawnSession, spawnMerge, isDirtyTree, isMergedInto } from "./spawn.mjs";
-import { reapFinished } from "./reaper.mjs";
+import { reconcileSessions } from "./reaper.mjs";
 import { orchestratorWorktreePath } from "../worktree-paths.mjs";
 import { spawnGovernor, spawnMonthlyGovernor } from "./governor.mjs";
 
@@ -23,10 +23,6 @@ import { spawnGovernor, spawnMonthlyGovernor } from "./governor.mjs";
 
 const POLL_DEFAULT = 30;
 const MAX_CONCURRENT_DEFAULT = 3;
-
-// ── active-process map ────────────────────────────────────────────────────────
-
-const activeProcs = new Map(); // Map<project, ChildProcess>
 
 // ── logger ────────────────────────────────────────────────────────────────────
 
@@ -94,7 +90,7 @@ async function pollOnce({
   spawnGovernor(db, { dryRun, logFn });
   spawnMonthlyGovernor(db, { dryRun, logFn });
 
-  reapFinished(activeProcs, db, { logFn });
+  reconcileSessions(db, { logFn, dryRun });
 
   const pipelinePaths = listEnabledProjects(db);
   let nProjects = 0, nQueued = 0, nActive = 0;
@@ -119,19 +115,13 @@ async function pollOnce({
 
     if (!queued.length) continue;
 
-    if (activeProcs.has(project)) {
-      logFn(`[${project}] session active (in-process) — skipping`);
-      nActive++;
-      continue;
-    }
-
     if (projectIsActive(db, project)) {
-      logFn(`[${project}] session active (DB) — skipping`);
+      logFn(`[${project}] session active — skipping`);
       nActive++;
       continue;
     }
 
-    if (activeProcs.size >= maxConcurrent) {
+    if (countActiveSessions(db) >= maxConcurrent) {
       logFn(`global cap ${maxConcurrent} reached — deferring [${project}]`);
       continue;
     }
@@ -156,21 +146,17 @@ async function pollOnce({
       continue;
     }
 
-    const proc = spawnSession(project, row, sessionFile, projectRoot, {
+    spawnSession(project, row, sessionFile, projectRoot, {
       db, dryRun, logFn,
     });
-    if (proc !== null) {
-      activeProcs.set(project, proc);
-    }
   }
 
   // Second pass: stage=merge rows. One merge per project per tick.
   const cfg = loadPipelineConfig();
   for (const [project, projectRoot] of pipelinePaths) {
     if (projectFilter && project !== projectFilter) continue;
-    if (activeProcs.has(project)) continue;
     if (projectIsActive(db, project)) continue;
-    if (activeProcs.size >= maxConcurrent) continue;
+    if (countActiveSessions(db) >= maxConcurrent) continue;
 
     const rows = rowsList(db, project);
     const mergeRow = rows.find(r =>
@@ -191,8 +177,7 @@ async function pollOnce({
     const diverged = !isMergedInto(targetBranch, branch, projectRoot);
     const dirty    = isDirtyTree(projectRoot);
     const model    = (diverged || dirty) ? "claude-sonnet-4-6" : "claude-haiku-4-5";
-    const proc = spawnMerge(project, mergeRow, projectRoot, model, { db, dryRun, logFn });
-    if (proc !== null) activeProcs.set(project, proc);
+    spawnMerge(project, mergeRow, projectRoot, model, { db, dryRun, logFn });
   }
 
   return { nProjects, nQueued, nActive };
