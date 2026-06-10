@@ -191,6 +191,82 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 
 **SKIP this question** unless the user volunteers a non-standard branch prefix (e.g. a corporate `feature/` or `release/` convention). If they do, accept a comma-separated list and pass it as `--recognised-branch-types <list>`.
 
+### Question 3f — Worktree layout
+
+This block covers three related config keys: `worktree_base`, `report_subpath`, and `report_publish_branch_template`. Phase 3b made one worktree per feature the default — every dev/research/review/test/merge session for a given feature operates inside the same worktree. The keys below let an operator move that worktree off the default location.
+
+**Always ASK this question** — every other worktree-touching surface (dev sessions, review reports, test reports, merge) ends up at the resolved path. Quietly defaulting silently chooses where every feature's worktree lands on disk.
+
+#### `worktree_base`
+
+**What this does**: the template that produces the on-disk directory where the agent for this feature runs. Every dev, review, test, and merge session for this feature uses this same path.
+
+**Resolved default for this machine**: `<root_parent>/.worktrees/<project>/<feature>` — e.g. for project `myapp` at `C:\code\myapp`, feature `add-login`, the resolver returns `C:\code\.worktrees\myapp\add-login`. Run `pipeline doctor` after setup to see the materialised path.
+
+**Placeholder vocabulary**:
+
+| Placeholder | Source |
+|---|---|
+| `{root}` | the project root path |
+| `{root_parent}` | `dirname(root)` |
+| `{root_grandparent}` | `dirname(dirname(root))` |
+| `{project}` | the project name |
+| `{feature}` | the row's feature slug |
+| `{kind}` | session kind (`dev`, `review`, `qa-test`, etc) |
+
+Leading `~/` expands to the home directory; absolute paths pass through unchanged. Unknown placeholders are left literal so a typo (`{projetc}/...`) produces a directory whose name visibly contains the broken token.
+
+**Examples**:
+
+- `{root_parent}/.worktrees/{project}/{feature}` *(default)* → per-project worktree dir at root's parent
+- `{root_grandparent}/worktrees/{project}/{feature}` → shared worktrees parent two levels above
+- `~/wt/{project}/{feature}` → absolute path under the home directory
+
+**Consequences**: every session resolves through `orchestratorWorktreePath` and sees the same answer. Existing on-disk worktrees from a previous layout aren't migrated — `pipeline doctor`'s `worktree-layout-stale` check prints a `git worktree remove <path>` command per stale entry so the operator can clean them up by paste.
+
+#### `report_subpath`
+
+**What this does**: the per-kind subdirectory (under the feature worktree) into which the session writes its report. Object keyed by kind.
+
+**Resolved default for this machine**:
+
+```json
+{ "code-review": "reports", "qa-test": "test-reports" }
+```
+
+So a review report for feature `add-login` at the default `worktree_base` lands at `C:\code\.worktrees\myapp\add-login\reports\<file>.md`.
+
+**Examples**:
+
+- `{ "code-review": "reports", "qa-test": "test-reports" }` *(default)*
+- `{ "code-review": "review", "qa-test": "test" }` → shorter dir names
+
+**Consequences**: changing this for an established project means the merge skill's prior-verdict discovery (which reads from the publish branch via `git ls-tree`/`git show`) won't find old reports under the old path. New reports land at the new path on the next session.
+
+#### `report_publish_branch_template`
+
+**What this does**: the side-branch name the stash-switchback dance publishes each report to. Placeholders: `{kind}`, `{feature}`.
+
+**Resolved default for this machine**: `{kind}/{feature}` — review reports go to `code-review/<feature>`, test reports go to `qa-test/<feature>`.
+
+**Examples**:
+
+- `{kind}/{feature}` *(default)*
+- `reports/{kind}/{feature}` → namespace report branches under a `reports/` prefix
+
+**Consequences**: each retry's `git checkout -B {kind}/{feature}` force-resets the publish branch to the current dev HEAD plus the new report. Prior-retry commits become unreachable from the branch tip — the merge skill only consumes the latest verdict, so functionally fine, but the per-retry audit trail isn't preserved on the side-branch.
+
+#### Wiring + how to ask
+
+In the conversational walkthrough, present the two options the wizard shows:
+
+1. **Recommended** (one worktree per feature, project-namespaced) — print the resolved default for the user's first-registered project.
+2. **Custom** — accept a template string; surface unknown placeholders as a warning (they render literally, which is loud).
+
+Pass the answer as `--worktree-layout 1` (default) or `--worktree-layout 2 --worktree-base "<template>"`. The recommended choice writes the phase 3b defaults to all three keys.
+
+**Upgrade nudge for existing installs**: mention that `pipeline doctor`'s `worktree-layout-stale` check warns when on-disk worktrees diverge from the resolved template and prints copy-pasteable `git worktree remove` lines for cleanup. No automatic migration runs.
+
 ### Question 4 — Autostart
 
 **What this does**: installs the orchestrator as an OS-level scheduled task so it starts at login and survives reboots — Task Scheduler on Windows, launchd plist on macOS, systemd user unit on Linux.
@@ -222,6 +298,7 @@ Assemble flags from answers. Show the user **the full command including the flag
 ```
 pipeline setup --non-interactive
   [--register-project <name>:<absolute-path>]
+  [--worktree-layout 1|2] [--worktree-base "<template>"]
   [--slack <channel>]
   [--models r=...,d=...,q=...,rvw=...]
   [--review-skill <name>]
@@ -241,7 +318,7 @@ Wait for confirmation before running. The setup writes to `~/.pipeline/config.js
 node "$PIPELINE_BIN" setup --non-interactive <flags>
 ```
 
-Stream the output (it walks the 9 wizard steps). It should end with:
+Stream the output (it walks the 10 wizard steps). It should end with:
 
 > All checks passed.
 > Setup complete!
