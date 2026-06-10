@@ -28,6 +28,7 @@ import {
   progressCreate, progressMark, progressDelete,
 } from "../../scripts/pipeline-db/index.mjs";
 import { getPaths } from "../paths.mjs";
+import { resolvePlansDir } from "../plans-resolver.mjs";
 
 const PROJECT = "pipeline-demo";
 const MAIN_FEATURE = "add-dark-mode-toggle";
@@ -337,9 +338,10 @@ export async function run(cmd, argv) {
 
   const root = mkdtempSync(join(tmpdir(), "pipeline-demo-"));
   const projectRoot = join(root, "project");
-  mkdirSync(join(projectRoot, "plans"), { recursive: true });
+  const plansDir = resolvePlansDir({ project: PROJECT, projectRoot });
+  mkdirSync(plansDir, { recursive: true });
 
-  const mainPlan = join(projectRoot, "plans", `${MAIN_FEATURE}.md`);
+  const mainPlan = join(plansDir, `${MAIN_FEATURE}.md`);
   writeFileSync(mainPlan,
     "# add dark mode toggle\n\n" +
     "- preference toggle in settings\n" +
@@ -348,7 +350,7 @@ export async function run(cmd, argv) {
   );
   for (const dep of DEPENDENTS) {
     writeFileSync(
-      join(projectRoot, "plans", `${dep.feature}.md`),
+      join(plansDir, `${dep.feature}.md`),
       `# ${dep.feature.replace(/-/g, " ")}\n\n- depends on ${MAIN_FEATURE}\n`
     );
   }
@@ -383,7 +385,7 @@ export async function run(cmd, argv) {
   for (const dep of DEPENDENTS) {
     rowAdd(db, PROJECT, {
       feature:    dep.feature,
-      planFile:   join(projectRoot, "plans", `${dep.feature}.md`),
+      planFile:   join(plansDir, `${dep.feature}.md`),
       stage:      "backlog",
       dependsOn:  MAIN_FEATURE,
     });
