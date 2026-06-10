@@ -204,7 +204,7 @@ function _renderAgentsPanel(sessions, orch, progressBySlug, panelW, view) {
   for (const s of active) {
     const stype  = s.session_type || "dev";
     const stageColor = STAGE_COLOR[stype] || C_GREEN;
-    const slug   = (s.session_file || "").split(/[\\/]/).pop().replace(/\.md$/, "");
+    const slug   = s.correlation_id || "";
     const prog   = progressBySlug[slug] || { step: 0, total: 0, done: 0, inprog: 0, todo: 0 };
     const g      = _sessionGlyph(s, prog, stageColor);
     const elapsed = _fmtAge(s.spawn_time);
@@ -526,8 +526,8 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
     cachedSessions = loadActiveSessions(db, project.name);
     cachedOrch     = loadOrchState();
     const slugs    = cachedSessions
-      .filter(s => s.is_active === 1)
-      .map(s => (s.session_file || "").split(/[\\/]/).pop().replace(/\.md$/, ""));
+      .filter(s => s.is_active === 1 && s.correlation_id)
+      .map(s => s.correlation_id);
     cachedProgress = loadProgressBySlug(db, slugs);
     cachedGitLog   = loadGitLog(project.root_path, { limit: 8 });
     cachedAgentLog = loadAgentLog(cachedSessions, project.root_path, { limit: 20 });

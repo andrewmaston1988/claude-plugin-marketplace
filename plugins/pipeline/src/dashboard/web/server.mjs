@@ -101,8 +101,8 @@ function _buildPayload(db, projectName) {
   const backlogRows = loadBacklog(db, projectName);
   const rows      = _sortRows([...dbRows, ...backlogRows]);
   const sessions  = loadActiveSessions(db, projectName);
-  const slugs     = sessions.filter(s => s.is_active === 1)
-    .map(s => (s.session_file || "").split(/[\\/]/).pop().replace(/\.md$/, ""));
+  const slugs     = sessions.filter(s => s.is_active === 1 && s.correlation_id)
+    .map(s => s.correlation_id);
   const progress  = loadProgressBySlug(db, slugs);
   const orch      = loadOrchState();
   const gitLog    = loadGitLog(project.root_path, { limit: 8 });
