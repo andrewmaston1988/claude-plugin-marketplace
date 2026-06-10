@@ -209,6 +209,7 @@ The Manual steps entry (if needed) must be actionable: `Start macro, verify X in
     {{PROJECT}} {{FEATURE}} \
     --branch-slug {{FEATURE}} \
     --report {{PROJECT_ROOT}}/test-reports/test-report-<date>-{{FEATURE}}-${CORRELATION_ID}.md \
+    --publish-branch {{TEST_PUBLISH_BRANCH}} \
     --qa-pass true \
     --has-manual-tests false \
     --title "🩺 Tests Complete" \

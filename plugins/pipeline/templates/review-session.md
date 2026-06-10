@@ -309,6 +309,7 @@ cd {{CWD}}
 {{PIPELINE_BIN}} review-complete \
     {{PROJECT}} {{FEATURE}} \
     --report "$REPORT_PATH" \
+    --publish-branch {{REVIEW_PUBLISH_BRANCH}} \
     --verdict <ready_to_ship|needs_work|abort> \
     --correlation-id ${CORRELATION_ID} \
     --title "<title from table above>" \

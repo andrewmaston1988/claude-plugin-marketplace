@@ -359,16 +359,23 @@ export async function run(cmd, argv) {
     const title         = getFlag("--title", flags);
     const message       = getFlag("--message", flags);
     const priority      = getFlag("--priority", flags) || "default";
+    const publishBranch = getFlag("--publish-branch", flags) || "";
 
     if (!branchSlug || !reportPath || !qaPassStr || !hasManualStr || !title || !message) {
       close(ctx.db);
       process.stderr.write("test-complete: missing required flags\n");
       return 1;
     }
-    if (!existsSync(reportPath)) {
+    // Phase 3b: report may live only on the publish side-branch after the dance.
+    const qaWorktreeProbe = featureWorktreePath({ project: ctx.project, projectRoot: ctx.projectRoot, feature: branchSlug });
+    const reportOnPublishBranch = !existsSync(reportPath)
+      && publishBranch
+      && existsSync(qaWorktreeProbe)
+      && git(["cat-file", "-e", `${publishBranch}:${relative(qaWorktreeProbe, reportPath).replaceAll("\\","/")}`], qaWorktreeProbe).status === 0;
+    if (!existsSync(reportPath) && !reportOnPublishBranch) {
       close(ctx.db);
       await notify(`Test Handoff Failed: ${feature} — report missing`,
-        `Test report not found at ${reportPath}\n\nPlease check the path and re-run.`, "high");
+        `Test report not found at ${reportPath} (and not on publish branch ${publishBranch || "<unset>"})\n\nPlease check the path and re-run.`, "high");
       return 2;
     }
 
@@ -376,19 +383,33 @@ export async function run(cmd, argv) {
     const hasManual    = hasManualStr === "true";
     const targetStage  = qaPass ? (hasManual ? "manual" : "merge") : "test";
 
-    // Step 3: commit report on qa worktree
-    // Phase 3b: all session kinds share the single feature worktree.
-    const qaWorktree = featureWorktreePath({ project: ctx.project, projectRoot: ctx.projectRoot, feature: branchSlug });
-    if (existsSync(qaWorktree)) {
+    // Step 3: commit report on qa worktree (or skip if dance already published).
+    // Phase 3b: all session kinds share the single feature worktree. When the
+    // session's stash-switchback dance already committed the report onto the
+    // publish branch, the dev-branch working tree is clean and the helper's
+    // add+commit becomes a no-op.
+    const qaWorktree = qaWorktreeProbe;
+    if (existsSync(qaWorktree) && !reportOnPublishBranch) {
       const corrId = process.env.CORRELATION_ID || "unknown";
       const passFail = qaPass ? "pass" : "fail";
       const commitMsg = `[${corrId}] Test report: ${feature} — ${passFail}`;
       try {
         const relReport = relative(qaWorktree, reportPath);
         let r = git(["add", relReport], qaWorktree);
-        if (r.status !== 0) throw new Error(gitErrDetail(r));
-        r = git(["commit", "-m", commitMsg], qaWorktree);
-        if (r.status !== 0) throw new Error(gitErrDetail(r));
+        if (r.status !== 0) {
+          const detail = gitErrDetail(r);
+          if (detail.includes("did not match any files") || detail.includes("pathspec")) {
+            process.stderr.write("INFO: report not in dev-branch working tree; dance already published — skipping helper commit.\n");
+          } else {
+            throw new Error(detail);
+          }
+        } else {
+          r = git(["commit", "-m", commitMsg], qaWorktree);
+          if (r.status !== 0) {
+            const detail = gitErrDetail(r);
+            if (!detail.includes("nothing to commit")) throw new Error(detail);
+          }
+        }
       } catch (e) {
         process.stderr.write(`WARNING: failed to commit report: ${e.message}\n`);
         await notify(`Test Handoff Failed: ${feature} — commit error`,
@@ -396,6 +417,8 @@ export async function run(cmd, argv) {
         close(ctx.db);
         return 3;
       }
+    } else if (reportOnPublishBranch) {
+      process.stderr.write(`INFO: report already on ${publishBranch}; dance owns the commit.\n`);
     } else {
       process.stderr.write(`WARNING: qa worktree not found at ${qaWorktree}; skipping commit\n`);
     }
@@ -462,6 +485,7 @@ export async function run(cmd, argv) {
     const title         = getFlag("--title", flags);
     let message         = getFlag("--message", flags);
     const priority      = getFlag("--priority", flags) || "default";
+    const publishBranch = getFlag("--publish-branch", flags) || "";
     let notifyTitle     = title;
     let notifyPriority  = priority;
 
@@ -484,11 +508,17 @@ export async function run(cmd, argv) {
       return 7;
     }
 
-    if (!existsSync(reportPath)) {
+    // Phase 3b: report may live only on the publish side-branch after the dance.
+    const reviewWorktreeProbe = featureWorktreePath({ project: ctx.project, projectRoot: ctx.projectRoot, feature });
+    const reviewReportOnPublishBranch = !existsSync(reportPath)
+      && publishBranch
+      && existsSync(reviewWorktreeProbe)
+      && git(["cat-file", "-e", `${publishBranch}:${relative(reviewWorktreeProbe, reportPath).replaceAll("\\","/")}`], reviewWorktreeProbe).status === 0;
+    if (!existsSync(reportPath) && !reviewReportOnPublishBranch) {
       close(ctx.db);
       process.stderr.write(`ERROR: report not found at ${reportPath}\n`);
       await notify(`Review Failed: ${feature} — report missing`,
-        `Report file not found at ${reportPath}\n\nCheck the path and re-run.`, "high");
+        `Report file not found at ${reportPath} (and not on publish branch ${publishBranch || "<unset>"})\n\nCheck the path and re-run.`, "high");
       return 2;
     }
 
@@ -520,24 +550,35 @@ export async function run(cmd, argv) {
     const reviewRetries      = row.review_retries ?? 0;
     const reviewRetryBudget  = row.review_retry_budget ?? 3;
 
-    // Commit report on code-review worktree
-    // Phase 3b: all session kinds share the single feature worktree.
-    const worktree = featureWorktreePath({ project: ctx.project, projectRoot: ctx.projectRoot, feature });
-    if (existsSync(worktree)) {
+    // Commit report on code-review worktree (skip when the dance already did).
+    // Phase 3b: all session kinds share the single feature worktree. When the
+    // review-session dance has already published the report on the side-branch,
+    // the dev-branch working tree no longer has the file — the helper just
+    // records the verdict + advances the row.
+    const worktree = reviewWorktreeProbe;
+    if (existsSync(worktree) && !reviewReportOnPublishBranch) {
       const commitMsg = `[${correlationId}] Review report: ${feature} — ${verdict}`;
       try {
         const relReport = relative(worktree, reportPath);
         let r = git(["add", relReport], worktree);
-        if (r.status !== 0) throw new Error(gitErrDetail(r));
-        r = git(["commit", "-m", commitMsg], worktree);
         if (r.status !== 0) {
           const detail = gitErrDetail(r);
-          if (detail.includes("nothing to commit")) {
-            close(ctx.db);
-            process.stderr.write("INFO: report already committed by a parallel call; exiting cleanly.\n");
-            return 0;
+          if (detail.includes("did not match any files") || detail.includes("pathspec")) {
+            process.stderr.write("INFO: report not in dev-branch working tree; dance already published — skipping helper commit.\n");
+          } else {
+            throw new Error(detail);
           }
-          throw new Error(detail);
+        } else {
+          r = git(["commit", "-m", commitMsg], worktree);
+          if (r.status !== 0) {
+            const detail = gitErrDetail(r);
+            if (detail.includes("nothing to commit")) {
+              close(ctx.db);
+              process.stderr.write("INFO: report already committed by a parallel call; exiting cleanly.\n");
+              return 0;
+            }
+            throw new Error(detail);
+          }
         }
       } catch (e) {
         process.stderr.write(`WARNING: failed to commit report: ${e.message}\n`);
@@ -546,6 +587,8 @@ export async function run(cmd, argv) {
         close(ctx.db);
         return 3;
       }
+    } else if (reviewReportOnPublishBranch) {
+      process.stderr.write(`INFO: report already on ${publishBranch}; dance owns the commit.\n`);
     } else {
       process.stderr.write(`WARNING: code-review worktree not found at ${worktree}; skipping commit\n`);
     }

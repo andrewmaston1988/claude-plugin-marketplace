@@ -239,3 +239,58 @@ test("doctor worktree-layout-stale: warns on path that doesn't match template", 
     try { rmSync(root, { recursive: true, force: true, maxRetries: 5 }); } catch {}
   }
 });
+
+// ── Regression: post-dance state — report-on-publish-branch, gone from disk ──
+//
+// After the stash-switchback dance commits the report on the publish branch
+// and checks back out to autonomous/{feature}, the report file is removed
+// from the dev-branch working tree (because the file is tracked on the
+// publish branch but not on the dev branch). The retry-2 review pinned this
+// as the BLOCKER: review-complete/test-complete would then fail at
+// `existsSync(reportPath)` or at `git add` with `pathspec did not match`.
+//
+// The fix accepts a `--publish-branch` flag and probes the side-branch via
+// `git cat-file -e <pb>:<relpath>`. This test pins the precondition the
+// helper now relies on: after the dance, the file is NOT on disk but IS
+// reachable from the publish branch via cat-file.
+test("post-dance: report absent from working tree but reachable from publish branch", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "spawn-wt-postdance-"));
+  try {
+    git(tmp, "init", "-q", "-b", "main");
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "init");
+    git(tmp, "checkout", "-b", "autonomous/feat-y");
+
+    // Simulate the full review-session dance: stash → checkout pb → write → commit → checkout dev.
+    // Need some untracked WIP so stash push -u has something to stash.
+    writeFileSync(join(tmp, "wip.txt"), "dev WIP\n");
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t",
+        "stash", "push", "-u", "-m", "auto: code-review-feat-y");
+    git(tmp, "checkout", "-B", "code-review/feat-y");
+    mkdirSync(join(tmp, "reports"), { recursive: true });
+    const reportRel = "reports/review-report-2026-06-10-feat-y-retry0.md";
+    writeFileSync(join(tmp, reportRel), "verdict: needs_work\n");
+    git(tmp, "add", reportRel);
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "code-review: feat-y retry0");
+    git(tmp, "checkout", "autonomous/feat-y");
+
+    // Post-dance precondition: file is GONE from working tree on the dev branch.
+    ok(!existsSync(join(tmp, reportRel)),
+       "post-dance: report file must not be present in dev-branch working tree");
+
+    // But it IS reachable from the publish branch — this is what the helper probes.
+    const probe = spawnSync("git", ["cat-file", "-e", `code-review/feat-y:${reportRel}`],
+                            { cwd: tmp, encoding: "utf8" });
+    equal(probe.status, 0,
+          `git cat-file -e code-review/feat-y:${reportRel} must succeed: stderr=${probe.stderr}`);
+
+    // The corresponding `git show` must return the report content (dev-session.md
+    // discovery relies on this to read prior reviewer feedback).
+    const show = spawnSync("git", ["show", `code-review/feat-y:${reportRel}`],
+                           { cwd: tmp, encoding: "utf8" });
+    equal(show.status, 0, `git show must succeed: stderr=${show.stderr}`);
+    ok(show.stdout.includes("needs_work"),
+       `git show output must contain report content: ${show.stdout}`);
+  } finally {
+    try { rmSync(tmp, { recursive: true, force: true, maxRetries: 3 }); } catch {}
+  }
+});
