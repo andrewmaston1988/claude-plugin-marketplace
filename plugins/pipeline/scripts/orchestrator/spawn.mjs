@@ -34,9 +34,14 @@ export function sessionTypeFromNotes(notes) {
   return m ? m[1] : "dev";
 }
 
-export function modelFromNotes(notes, project, feature, stype, logFn) {
-  const m = String(notes).match(/\bmodel=([\w.-]+)\b/);
+export function modelFromNotes(notes, project, feature, stype, logFn, row) {
+  const m = String(notes).match(/\bmodel=([\w.:-]+)\b/);
   if (m) return m[1];
+  // Fall back to the row's typed model columns (set via --d-model / --rvw-model at queue time)
+  if (row) {
+    const col = stype === "review" ? row.rvw_model : row.d_model;
+    if (col && col !== "—") return col;
+  }
   const cfg = loadPipelineConfig();
   const defaultModel = stype === "review"
     ? cfg.models.review_default
@@ -129,6 +134,17 @@ export function findClaude() {
   return "claude";
 }
 
+// Non-Claude models route through the local proxy (claude-code-proxy on :18081).
+// Returns env-var overrides to merge; empty for native Claude models.
+export function proxyEnvFor(model) {
+  if (!model || model.startsWith("claude-")) return {};
+  return {
+    ANTHROPIC_BASE_URL: "http://localhost:18081",
+    ANTHROPIC_API_KEY:  "dummy-local-key",
+    ANTHROPIC_MODEL:    model,
+  };
+}
+
 // ── session spawner ───────────────────────────────────────────────────────────
 
 // Spawn a Claude session for one queued pipeline row. Takes the unified DB,
@@ -137,7 +153,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   const feature  = row.feature;
   const notes    = row.notes_extra || "";
   const stype    = sessionTypeFromNotes(notes);
-  const model    = modelFromNotes(notes, project, feature, stype, logFn);
+  const model    = modelFromNotes(notes, project, feature, stype, logFn, row);
   const budget   = budgetFromNotes(notes);
   const newStage = STAGE[stype] || "dev";
   const tools    = TOOLS[stype] || TOOLS.dev;
@@ -279,6 +295,12 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   env.CORRELATION_ID   = correlationId;
   const localBin = join(homedir(), ".local", "bin");
   env.PATH = [localBin, env.PATH || ""].filter(Boolean).join(pathDelimiter);
+
+  const proxyEnv = proxyEnvFor(model);
+  if (Object.keys(proxyEnv).length) {
+    Object.assign(env, proxyEnv);
+    logFn(`[${project}] proxy model detected — routing '${model}' via local proxy`);
+  }
 
   // Windows: Node's spawn() rejects .bat/.cmd directly with EINVAL, and
   // wrapping via shell:true makes cmd.exe re-parse the args — which mangles
@@ -435,6 +457,14 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
   const env = { ...process.env, CORRELATION_ID: correlationId };
   const localBin = join(homedir(), ".local", "bin");
   env.PATH = [localBin, env.PATH || ""].filter(Boolean).join(pathDelimiter);
+
+  {
+    const proxyEnv = proxyEnvFor(model);
+    if (Object.keys(proxyEnv).length) {
+      Object.assign(env, proxyEnv);
+      logFn(`[${project}] proxy model detected — routing '${model}' via local proxy (merge)`);
+    }
+  }
 
   // Windows: handle .bat/.cmd shims
   let spawnCmd = claudePath;
