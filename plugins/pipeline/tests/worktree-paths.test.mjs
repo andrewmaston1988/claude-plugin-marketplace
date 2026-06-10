@@ -5,10 +5,12 @@
 // shared-worktree semantics for orchestrator-spawned sessions).
 import { test } from "node:test";
 import { equal, deepEqual, throws, ok } from "node:assert/strict";
+import { homedir } from "node:os";
 import {
   branchLocal,
   branchType,
   substitute,
+  featureWorktreePath,
   orchestratorWorktreePath,
   handlerWorktreePath,
   reportPath,
@@ -235,6 +237,138 @@ test("reportPath: feature with regex metachars is escaped in glob", () => {
   // The literal-dot escape means an *unrelated* feature like 'featXxXy' must not match.
   equal(false, glob.test("review-report-2026-06-10-featXxXy-retry0-corr.md"));
 });
+
+// ── featureWorktreePath ──────────────────────────────────────────────────────
+
+test("featureWorktreePath: default template collapses empty branch context", () => {
+  // Default mirrors orchestrator shape; with no branch the {branch_type}-{branch_local}
+  // pair substitutes to "-" — phase 3b moves the default to a feature-only shape.
+  const out = featureWorktreePath({
+    project: "p", projectRoot: "/x/p", feature: "feat-y", _config: {},
+  });
+  equal(out, "/x/p-wt/-");
+});
+
+test("featureWorktreePath: operator override with {feature}", () => {
+  const out = featureWorktreePath({
+    project: "p", projectRoot: "/x/p", feature: "feat-y",
+    _config: { worktree_base: "{root_parent}/.worktrees/{project}/{feature}" },
+  });
+  equal(out, "/x/.worktrees/p/feat-y");
+});
+
+test("featureWorktreePath: ~/ expands to homedir", () => {
+  const out = featureWorktreePath({
+    project: "p", projectRoot: "/x/p", feature: "f",
+    _config: { worktree_base: "~/wt/{project}/{feature}" },
+  });
+  equal(out, `${homedir()}/wt/p/f`);
+});
+
+test("featureWorktreePath: absolute POSIX template passes through verbatim", () => {
+  const out = featureWorktreePath({
+    project: "p", projectRoot: "/x/p", feature: "f",
+    _config: { worktree_base: "/srv/wt/{feature}" },
+  });
+  equal(out, "/srv/wt/f");
+});
+
+test("featureWorktreePath: Windows drive-letter template passes through verbatim", () => {
+  const out = featureWorktreePath({
+    project: "p", projectRoot: "/x/p", feature: "f",
+    _config: { worktree_base: "C:/work/wt/{feature}" },
+  });
+  equal(out, "C:/work/wt/f");
+});
+
+test("featureWorktreePath: UNC template passes through verbatim", () => {
+  const out = featureWorktreePath({
+    project: "p", projectRoot: "/x/p", feature: "f",
+    _config: { worktree_base: "//server/share/wt/{feature}" },
+  });
+  equal(out, "//server/share/wt/f");
+});
+
+test("featureWorktreePath: relative template resolves against projectRoot", () => {
+  const out = featureWorktreePath({
+    project: "p", projectRoot: "/x/p", feature: "f",
+    _config: { worktree_base: "wt/{feature}" },
+  });
+  // Host's path.resolve joins relative segments to projectRoot; on Windows the
+  // result is drive-anchored. Assert the tail rather than the absolute prefix.
+  ok(out.replace(/\\/g, "/").endsWith("/x/p/wt/f"));
+});
+
+test("featureWorktreePath: unknown placeholder passes through literally", () => {
+  const out = featureWorktreePath({
+    project: "p", projectRoot: "/x/p", feature: "f",
+    _config: { worktree_base: "/wt/{feature}/{unknown}" },
+  });
+  equal(out, "/wt/f/{unknown}");
+});
+
+// ── Parity: compat wrappers vs pre-refactor outputs ──────────────────────────
+//
+// Pre-refactor implementations called `substitute()` directly with no
+// resolveBase / `~/` handling. For the default templates plus the operator
+// overrides exercised below, the substituted output is already absolute, so
+// resolveTemplate's classification step leaves it untouched. These tests pin
+// that equivalence.
+
+function _preRefactorOrchestrator({ project, projectRoot, branch, _config }) {
+  const cfg = _config ?? {};
+  const template = cfg.orchestrator_worktree_base || "{root_parent}/{project}-wt/{branch_type}-{branch_local}";
+  return substitute(template, {
+    root:         projectRoot || "",
+    root_parent:  projectRoot ? projectRoot.replace(/\/[^/]+$/, "") : "",
+    project:      project     || (projectRoot ? projectRoot.split("/").pop() : ""),
+    branch_local: branchLocal(branch),
+    branch_type:  branchType(branch),
+    branch:       branch || "",
+  });
+}
+
+function _preRefactorHandler({ project, projectRoot, kind, feature, _config }) {
+  const cfg = _config ?? {};
+  const template = cfg.handler_worktree_base || "{root_parent}/.worktrees/{kind}-{feature}";
+  return substitute(template, {
+    root:        projectRoot || "",
+    root_parent: projectRoot ? projectRoot.replace(/\/[^/]+$/, "") : "",
+    project:     project     || (projectRoot ? projectRoot.split("/").pop() : ""),
+    kind:        kind        || "",
+    feature:     feature     || "",
+  });
+}
+
+const ORCH_CASES = [
+  { project: "p",  projectRoot: "/x/p",  branch: "autonomous/foo",      _config: {} },
+  { project: "p",  projectRoot: "/x/p",  branch: "research/foo",        _config: {} },
+  { project: "p",  projectRoot: "/x/p",  branch: "main",                _config: {} },
+  { project: "p",  projectRoot: null,    branch: "autonomous/foo",      _config: {} },
+  { project: undefined, projectRoot: "/a/b/myproj", branch: "autonomous/x", _config: {} },
+  { project: "p",  projectRoot: "/c/code/p", branch: "autonomous/feat-x",
+    _config: { orchestrator_worktree_base: "{root_parent}/wt/{project}/{branch_local}" } },
+];
+
+for (const c of ORCH_CASES) {
+  test(`parity orchestrator: ${JSON.stringify({ branch: c.branch, cfg: c._config })}`, () => {
+    equal(orchestratorWorktreePath(c), _preRefactorOrchestrator(c));
+  });
+}
+
+const HANDLER_CASES = [
+  { project: "p", projectRoot: "/c/code/p", kind: "qa-test",     feature: "feat-x", _config: {} },
+  { project: "p", projectRoot: "/c/code/p", kind: "code-review", feature: "feat-x", _config: {} },
+  { project: "p", projectRoot: null,        kind: "qa-test",     feature: "x",      _config: {} },
+  { project: "p", projectRoot: "/anything", kind: "qa-test",     feature: "x",
+    _config: { handler_worktree_base: "/Users/me/wt/{kind}-{feature}" } },
+];
+
+for (const c of HANDLER_CASES) {
+  test(`parity handler: ${JSON.stringify({ kind: c.kind, cfg: c._config })}`, () => {
+    equal(handlerWorktreePath(c), _preRefactorHandler(c));
+  });
+}
 
 test("reportPath: unknown kind throws", () => {
   throws(() => reportPath({ kind: "bogus", project: "p", projectRoot: "/x/p", feature: "f", _config: {} }),

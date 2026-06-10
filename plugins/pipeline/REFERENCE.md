@@ -306,7 +306,7 @@ Every config-driven path key in the plugin is resolved through one helper:
 
 | Category | `resolveBase` | Keys |
 |---|---|---|
-| Per-project          | `projectRoot` | `plansDir`, `governor.reports_dir`, `governor.session_dir`, `governor.log_dir`, `worktree_base` *(future)* |
+| Per-project          | `projectRoot` | `plansDir`, `governor.reports_dir`, `governor.session_dir`, `governor.log_dir`, `worktree_base` |
 | Global / install-wide | `paths.configDir` | `notifications.fallback_dir`, `session_templates_dir`, `hooks.on_notification`, `hooks.on_merge_ready`, `governor.template_path` |
 | Within-worktree       | resolved `featureWorktreePath(...)` | `report_subpath` |
 
@@ -332,6 +332,18 @@ Hook values are command strings — only the first whitespace-separated token is
 | `{config_dir}`       | `paths.configDir` |
 
 The canonical exported list is `PLACEHOLDER_KEYS` in `scripts/worktree-paths.mjs`; a test pins this table to that constant so the two cannot drift.
+
+### Helpers
+
+`scripts/worktree-paths.mjs` exposes three feature-aware wrappers over `resolveTemplate`:
+
+| Helper | Template key | Default | Notes |
+|---|---|---|---|
+| `featureWorktreePath({ project, projectRoot, feature })` | `cfg.worktree_base` | `{root_parent}/{project}-wt/{branch_type}-{branch_local}` | Canonical per-feature worktree. Branch-context placeholders substitute to `""` when called without one. Phase 3b moves all call sites onto this helper and changes the default to a feature-only shape. |
+| `orchestratorWorktreePath({ project, projectRoot, branch })` | `cfg.orchestrator_worktree_base` | same as above | Compat wrapper. Routed through `resolveTemplate` so `~/` and relative overrides resolve the same as every other path key. |
+| `handlerWorktreePath({ project, projectRoot, kind, feature })` | `cfg.handler_worktree_base` | `{root_parent}/.worktrees/{kind}-{feature}` | Compat wrapper for qa-test / code-review worktrees the operator manages. |
+
+All three flow through `resolveTemplate` with `resolveBase = projectRoot`, so the placeholder vocabulary, `~/` expansion, and absolute-vs-relative classification are identical across them.
 
 ### Locators
 

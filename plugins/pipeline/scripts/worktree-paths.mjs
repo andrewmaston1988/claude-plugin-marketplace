@@ -87,6 +87,18 @@ function _isAbsoluteAny(p) {
 
 const DEFAULT_ORCHESTRATOR_TEMPLATE = "{root_parent}/{project}-wt/{branch_type}-{branch_local}";
 const DEFAULT_HANDLER_TEMPLATE      = "{root_parent}/.worktrees/{kind}-{feature}";
+// Phase 3a seam: featureWorktreePath default mirrors the orchestrator shape so
+// nothing moves on disk. Phase 3b changes this default to the per-feature shape.
+const DEFAULT_WORKTREE_TEMPLATE     = "{root_parent}/{project}-wt/{branch_type}-{branch_local}";
+
+function _commonVars({ project, projectRoot }) {
+  return {
+    root:             projectRoot || "",
+    root_parent:      projectRoot ? dirname(projectRoot) : "",
+    root_grandparent: projectRoot ? dirname(dirname(projectRoot)) : "",
+    project:          project || (projectRoot ? basename(projectRoot) : ""),
+  };
+}
 
 
 // "autonomous/foo-bar" → "foo-bar"; "interactive/x" → "x"; "bare" → "bare".
@@ -115,33 +127,43 @@ export function substitute(template, vars) {
   return out;
 }
 
-// Resolve the worktree path the orchestrator creates for a pipeline row.
-// `_config` is an injection point for tests; production callers omit it.
+// Canonical per-feature worktree path. Single template (`cfg.worktree_base`).
+// Branch-context placeholders substitute to "" when called without one.
+// Phase 3b moves all call sites onto this helper.
+export function featureWorktreePath({ project, projectRoot, feature, _config } = {}) {
+  const cfg = _config ?? loadPipelineConfig();
+  const template = cfg.worktree_base || DEFAULT_WORKTREE_TEMPLATE;
+  return resolveTemplate(template, {
+    ..._commonVars({ project, projectRoot }),
+    feature:      feature || "",
+    branch:       "",
+    branch_type:  "",
+    branch_local: "",
+  }, { resolveBase: projectRoot });
+}
+
+// Compat wrapper. Same default + signature as before; routed through
+// resolveTemplate so `~/` and relative overrides resolve consistently.
 export function orchestratorWorktreePath({ project, projectRoot, branch, _config } = {}) {
   const cfg = _config ?? loadPipelineConfig();
   const template = cfg.orchestrator_worktree_base || DEFAULT_ORCHESTRATOR_TEMPLATE;
-  return substitute(template, {
-    root:         projectRoot || "",
-    root_parent:  projectRoot ? dirname(projectRoot) : "",
-    project:      project     || (projectRoot ? basename(projectRoot) : ""),
+  return resolveTemplate(template, {
+    ..._commonVars({ project, projectRoot }),
     branch_local: branchLocal(branch),
     branch_type:  branchType(branch),
     branch:       branch || "",
-  });
+  }, { resolveBase: projectRoot });
 }
 
-// Resolve a handler-style worktree path (qa-test / code-review).
-// `_config` is an injection point for tests; production callers omit it.
+// Compat wrapper for the qa-test / code-review handler worktree.
 export function handlerWorktreePath({ project, projectRoot, kind, feature, _config } = {}) {
   const cfg = _config ?? loadPipelineConfig();
   const template = cfg.handler_worktree_base || DEFAULT_HANDLER_TEMPLATE;
-  return substitute(template, {
-    root:        projectRoot || "",
-    root_parent: projectRoot ? dirname(projectRoot) : "",
-    project:     project     || (projectRoot ? basename(projectRoot) : ""),
-    kind:        kind        || "",
-    feature:     feature     || "",
-  });
+  return resolveTemplate(template, {
+    ..._commonVars({ project, projectRoot }),
+    kind:    kind    || "",
+    feature: feature || "",
+  }, { resolveBase: projectRoot });
 }
 
 // Single source of truth for review-report and test-report locations.
