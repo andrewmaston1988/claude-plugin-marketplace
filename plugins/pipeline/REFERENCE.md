@@ -33,6 +33,7 @@ queued → dev → review → test → merge → done
 | `feature` | Feature slug (primary key) |
 | `stage` | Current stage: queued, dev, review, test, manual, merge, or done |
 | `branch` | Git branch name (null if not yet created) |
+| `pr_title` | PR title for GitHub PR; extracted from plan's `*Title:*` annotation at queue time |
 | `qa_pass` | Test result: true, false, or null (untested) |
 | `notes_extra` | Operator notes |
 | `rebase_required` | Flag if branch needs rebase before merge |
@@ -288,6 +289,15 @@ The hook receives four environment variables — no argv:
 
 The hook has a 15-second hard timeout; its exit code is ignored (fire-and-forget).
 
+#### PR Title
+
+The `pr_title` column is populated at queue time by extracting the plan's `*Title:* <text>*` annotation. The hook can retrieve the PR title for a custom GitHub PR or log message:
+
+```bash
+const titleResult = spawnSync(pipelineBin, ["pr-title-get", project, feature], { encoding: "utf8" });
+const title = (titleResult.stdout?.trim()) || feature;  // fall back to slug if empty
+```
+
 `pipeline setup` asks whether to configure `on_merge_ready` and can write a Slack wrapper to `~/.pipeline/hooks/on-merge-ready.mjs` automatically if `hooks.on_notification` is already pointing at the bundled claude-slack forwarder.
 
 ---
@@ -306,7 +316,7 @@ Every config-driven path key in the plugin is resolved through one helper:
 
 | Category | `resolveBase` | Keys |
 |---|---|---|
-| Per-project          | `projectRoot` | `plansDir`, `governor.reports_dir`, `governor.session_dir`, `governor.log_dir`, `worktree_base` |
+| Per-project          | `projectRoot` | `plansDir`, `governor.reports_dir`, `governor.session_dir`, `governor.log_dir`, `worktree_base` *(future)* |
 | Global / install-wide | `paths.configDir` | `notifications.fallback_dir`, `session_templates_dir`, `hooks.on_notification`, `hooks.on_merge_ready`, `governor.template_path` |
 | Within-worktree       | resolved `featureWorktreePath(...)` | `report_subpath` |
 
@@ -332,18 +342,6 @@ Hook values are command strings — only the first whitespace-separated token is
 | `{config_dir}`       | `paths.configDir` |
 
 The canonical exported list is `PLACEHOLDER_KEYS` in `scripts/worktree-paths.mjs`; a test pins this table to that constant so the two cannot drift.
-
-### Helpers
-
-`scripts/worktree-paths.mjs` exposes three feature-aware wrappers over `resolveTemplate`:
-
-| Helper | Template key | Default | Notes |
-|---|---|---|---|
-| `featureWorktreePath({ project, projectRoot, feature })` | `cfg.worktree_base` | `{root_parent}/{project}-wt/{branch_type}-{branch_local}` | Canonical per-feature worktree. Branch-context placeholders substitute to `""` when called without one. Phase 3b moves all call sites onto this helper and changes the default to a feature-only shape. |
-| `orchestratorWorktreePath({ project, projectRoot, branch })` | `cfg.orchestrator_worktree_base` | same as above | Compat wrapper. Routed through `resolveTemplate` so `~/` and relative overrides resolve the same as every other path key. |
-| `handlerWorktreePath({ project, projectRoot, kind, feature })` | `cfg.handler_worktree_base` | `{root_parent}/.worktrees/{kind}-{feature}` | Compat wrapper for qa-test / code-review worktrees the operator manages. |
-
-All three flow through `resolveTemplate` with `resolveBase = projectRoot`, so the placeholder vocabulary, `~/` expansion, and absolute-vs-relative classification are identical across them.
 
 ### Locators
 
@@ -788,6 +786,7 @@ cd plugins/pipeline && npm test
 | `queue-plan <root> <plan-file>` | Queue a plan for orchestration |
 | `queue-name-derive <brief>` | Derive a slug from a description |
 | `queue-branch-extract <plan-file>` | Extract branch from plan frontmatter |
+| `queue-title-extract <plan-file>` | Extract PR title from plan's `*Title:*` annotation |
 
 ### Other
 
@@ -796,6 +795,7 @@ cd plugins/pipeline && npm test
 | `notify --title <t> --message <m>` | Publish a notification envelope (forwarded if `hooks.on_notification` is set) |
 | `session-generate <project> <plan-file> <type>` | Generate a session file from template |
 | `target-branch-get <root> <feature>` | Read the target_branch for a row |
+| `pr-title-get <root> <feature>` | Read the pr_title for a row (empty if unset; typically called by on_merge_ready hook) |
 
 ---
 

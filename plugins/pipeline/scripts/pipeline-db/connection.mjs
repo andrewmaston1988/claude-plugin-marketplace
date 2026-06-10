@@ -210,6 +210,11 @@ CREATE INDEX IF NOT EXISTS idx_cycle_log_end_time        ON cycle_log(end_time);
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);
 `;
 
+const SCHEMA_V3 = `
+ALTER TABLE pipeline_rows ADD COLUMN pr_title TEXT;
+INSERT OR IGNORE INTO schema_version (version) VALUES (3);
+`;
+
 function _applyMigrations(db) {
   let currentVersion = 0;
   try {
@@ -226,11 +231,10 @@ function _applyMigrations(db) {
     db.exec(SCHEMA_V2);
   }
   if (currentVersion < 3) {
-    // Add plans_dir column — ALTER TABLE ADD COLUMN is safe on existing data.
-    // Guard with PRAGMA in case a fresh install already has it from SCHEMA_V1.
-    const cols = db.prepare("PRAGMA table_info(projects)").all().map(c => c.name);
-    if (!cols.includes("plans_dir")) {
-      db.exec("ALTER TABLE projects ADD COLUMN plans_dir TEXT");
+    // Add pr_title column — ALTER TABLE ADD COLUMN is safe on existing data.
+    const cols = db.prepare("PRAGMA table_info(pipeline_rows)").all().map(c => c.name);
+    if (!cols.includes("pr_title")) {
+      db.exec("ALTER TABLE pipeline_rows ADD COLUMN pr_title TEXT");
     }
     db.exec("INSERT OR IGNORE INTO schema_version (version) VALUES (3)");
   }
