@@ -146,13 +146,22 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
               });
               notifyFailure(project, feature, "review-touched-source", { dryRun });
             } else {
+              // Reports are written by the review session into the code-review
+              // worktree at {{PROJECT_ROOT}}/../CLAUDE-wt/code-review-{{FEATURE}}/repos/{{PROJECT}}/reports/
+              // with filename review-report-<date>-{{FEATURE}}-retry<N>-${CORRELATION_ID}.md
+              // per the review-session.md template. The reaper checks the same path
+              // for the current retry's report so an exit-0-without-review-
+              // complete can distinguish "agent wrote a report but failed to
+              // call review-complete" from "agent never produced a report".
               const retryN = row.review_retries || 0;
-              const reportsDir = join(spawnWt, "reports");
-              const reportFile = `review-report-${feature}-retry${retryN}.md`;
+              const reportsDir = join(projectRoot, "..", "CLAUDE-wt", `code-review-${feature}`, "repos", project, "reports");
               let hasReport = false;
               if (existsSync(reportsDir)) {
                 try {
-                  hasReport = readdirSync(reportsDir).includes(reportFile);
+                  const pattern = new RegExp(
+                    `^review-report-.*${feature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*retry${retryN}.*\\.md$`
+                  );
+                  hasReport = readdirSync(reportsDir).some((file) => pattern.test(file));
                 } catch {}
               }
               const note = hasReport ? "[review-stuck-cli-failed]" : "[review-stuck-no-report]";
