@@ -2,7 +2,7 @@ import { appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import {
   connectUnified, close,
-  rowsList,
+  rowsList, rowUpdate,
   progressDelete,
   projectHasActiveSession, sessionFinish, countActiveSessions,
   listEnabledProjects,
@@ -171,14 +171,23 @@ async function pollOnce({
     );
     if (!mergeRow) continue;
 
-    const branch      = mergeRow.branch || `autonomous/${mergeRow.feature}`;
+    const branch       = mergeRow.branch || `autonomous/${mergeRow.feature}`;
     const targetBranch = mergeRow.target_branch || "master";
 
-    // Fire on_merge_ready hook (fire-and-forget, all projects)
-    spawnMergeReadyHook(project, mergeRow.feature, branch, targetBranch).catch(() => {});
+    // Fire on_merge_ready ONCE, regardless of active sessions (spawns no session).
+    if (!(mergeRow.notes_extra || "").includes("[merge-ready-fired]")) {
+      spawnMergeReadyHook(project, mergeRow.feature, branch, targetBranch, projectRoot).catch(() => {});
+      try {
+        const n = mergeRow.notes_extra || "";
+        rowUpdate(db, project, mergeRow.feature, { notes_extra: n ? `${n} [merge-ready-fired]` : "[merge-ready-fired]" });
+      } catch {}
+    }
 
-    // autoMerge opt-in check
+    // Spawning a merge SESSION still needs the concurrency guards.
     if (!cfg.autoMerge) continue;
+    if (activeProcs.has(project)) continue;
+    if (projectIsActive(db, project)) continue;
+    if (activeProcs.size >= maxConcurrent) continue;
 
     const diverged = !isMergedInto(targetBranch, branch, projectRoot);
     const dirty    = isDirtyTree(projectRoot);
