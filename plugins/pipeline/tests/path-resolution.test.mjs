@@ -1,6 +1,3 @@
-// Tests for resolveTemplate — the canonical config-driven path resolver
-// introduced by paths-and-config-base. Exercises the three resolveBase
-// categories from plan §B + every placeholder in the vocabulary.
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { resolve } from "node:path";
@@ -79,8 +76,6 @@ test("resolveTemplate: null/undefined template returns null", () => {
 });
 
 test("resolveTemplate: empty template normalizes to null", () => {
-  // Empty must not slip into path.join("", x) — return null so a forgotten
-  // `if (raw)` guard can't silently produce a CWD-relative path.
   equal(resolveTemplate("", {}, { resolveBase: PROJ }), null);
 });
 
@@ -89,7 +84,6 @@ test("resolveTemplate: missing resolveBase keeps relative path as-is", () => {
 });
 
 test("PLACEHOLDER_KEYS includes every documented vocabulary entry", () => {
-  // Sanity check against §C of the plan. Order doesn't matter.
   const expected = new Set([
     "root", "root_parent", "root_grandparent", "project",
     "feature", "kind", "branch", "branch_type", "branch_local", "config_dir",
@@ -98,14 +92,10 @@ test("PLACEHOLDER_KEYS includes every documented vocabulary entry", () => {
 });
 
 test("CLAUDE.md placeholder vocabulary table matches PLACEHOLDER_KEYS", async () => {
-  // Pin the prose §C table against the exported constant so the docs can't
-  // grow (or lose) an entry the code doesn't.
   const { readFileSync } = await import("node:fs");
   const { fileURLToPath } = await import("node:url");
   const here = fileURLToPath(new URL("./", import.meta.url));
   const md = readFileSync(`${here}../CLAUDE.md`, "utf8");
-  // Pull every `{name}` token from the table rows in the Placeholder vocabulary
-  // section (between §C heading and the next heading).
   const start = md.indexOf("### Placeholder vocabulary");
   ok(start >= 0, "Placeholder vocabulary section present");
   const after = md.indexOf("\n### ", start + 1);
@@ -115,7 +105,7 @@ test("CLAUDE.md placeholder vocabulary table matches PLACEHOLDER_KEYS", async ()
   deepEqual(tokens, new Set(PLACEHOLDER_KEYS));
 });
 
-// ── 6. Per-key end-to-end resolution (one stub per §B category) ─────────────
+// ── 6. Per-key end-to-end resolution ────────────────────────────────────────
 
 test("end-to-end: plansDir (per-project) resolves under projectRoot", () => {
   const raw = "../CLAUDE/repos/{project}/plans";

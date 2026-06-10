@@ -67,7 +67,6 @@ function gitErrDetail(r) {
 }
 
 function resolvePlansDir(raw, projectRoot, projectName) {
-  // Per §B: plansDir is per-project (resolveBase=projectRoot).
   const paths = getPaths();
   return resolveTemplate(raw, { root: projectRoot, project: projectName }, {
     resolveBase: projectRoot,

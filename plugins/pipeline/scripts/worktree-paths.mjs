@@ -3,9 +3,7 @@ import { homedir } from "node:os";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../src/config-defaults.mjs";
 
-// Unified placeholder vocabulary. Every config-driven path in the plugin
-// substitutes against this set; unknown placeholders pass through literally.
-// See plugins/pipeline/CLAUDE.md §"Path resolution".
+// Pinned to the canonical vocabulary by tests; unknown placeholders pass through literally.
 export const PLACEHOLDER_KEYS = Object.freeze([
   "root",
   "root_parent",
@@ -19,21 +17,8 @@ export const PLACEHOLDER_KEYS = Object.freeze([
   "config_dir",
 ]);
 
-// Canonical config-driven path resolver. Applied to every path the plugin
-// reads from cfg.*. The contract:
-//
-//   1. Substitute {placeholder} tokens from `vars` + {config_dir} from the
-//      `configDir` option. Unknown placeholders pass through unchanged.
-//   2. Expand a leading `~/` to `os.homedir()`.
-//   3. If the result is absolute (POSIX `/...`, Windows drive `C:\...`, or
-//      UNC `\\server\share`), use it verbatim. Otherwise resolve against
-//      `resolveBase` (project root, configDir, or a worktree path —
-//      whichever fits the key's category; see plugin CLAUDE.md).
-//
-// `template` may be `null`/`undefined`/`""`; callers usually pass the config
-// value directly and short-circuit on falsy. Empty and nullish both return
-// `null` so a forgotten `if (raw)` guard can't silently route `""` into
-// `path.join("", x)` and produce a CWD-relative path.
+// Empty/nullish → null (not "") so a missing guard can't route "" into
+// path.join and yield a CWD-relative path.
 export function resolveTemplate(
   template,
   vars = {},
@@ -50,12 +35,8 @@ export function resolveTemplate(
   return resolve(resolveBase, expanded);
 }
 
-// Hook config values are command strings: a path-or-bin token followed by
-// optional argv. Route the first token through resolveTemplate when it
-// looks like a path (leading `~`, `/`, `\`, drive letter, or a path-shaped
-// placeholder). Trailing argv is passed through unchanged. Shared by
-// publisher.mjs (live spawn) and doctor.mjs (display in path-resolution-
-// consistency report). resolveBase is configDir per §B.
+// Resolve only the first token of a hook command (the binary/path);
+// trailing argv passes through unchanged.
 export function resolveHookFirstToken(hookVal, configDir) {
   let raw = null;
   if (!hookVal) return null;
@@ -66,7 +47,7 @@ export function resolveHookFirstToken(hookVal, configDir) {
   if (!m) return raw;
   const head = m[1];
   const tail = m[2] || "";
-  const looksLikePath = /^~|^[\/\\]|^[A-Za-z]:[\\/]|\{(config_dir|root|project)\}/.test(head);
+  const looksLikePath = /^~|^[/\\]|^[A-Za-z]:[\\/]|\{(config_dir|root|project)\}/.test(head);
   if (!looksLikePath) return raw;
   return resolveTemplate(head, {}, { resolveBase: configDir, configDir }) + tail;
 }
@@ -79,15 +60,12 @@ function _expandTilde(p) {
   return p;
 }
 
-// Treat POSIX-absolute, drive-letter, AND UNC paths as absolute regardless of
-// the host OS. node:path's `isAbsolute` honours the running platform's rules,
-// so `/foo` is "relative" on Windows and `C:\foo` is "relative" on POSIX —
-// neither matches the contract here (operator's value should be used as-is).
+// Cross-platform: node:path.isAbsolute only honours the host's rules.
 function _isAbsoluteAny(p) {
   if (!p) return false;
   if (isAbsolute(p)) return true;
-  if (/^[A-Za-z]:[\\/]/.test(p)) return true;     // Windows drive letter
-  if (p.startsWith("\\\\") || p.startsWith("//")) return true; // UNC
+  if (/^[A-Za-z]:[\\/]/.test(p)) return true;
+  if (p.startsWith("\\\\") || p.startsWith("//")) return true;
   return false;
 }
 

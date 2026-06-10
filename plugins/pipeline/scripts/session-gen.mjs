@@ -41,7 +41,6 @@ function _resolveTemplatePath(sessionType, _cfg = loadPipelineConfig()) {
 function _resolvePartialPath(name, _cfg = loadPipelineConfig()) {
   const override = _cfg.session_templates_dir;
   if (override) {
-    // Global / install-wide key per §B → resolves against paths.configDir.
     const paths = getPaths();
     const resolvedDir = resolveTemplate(override, {}, {
       resolveBase: paths.configDir,

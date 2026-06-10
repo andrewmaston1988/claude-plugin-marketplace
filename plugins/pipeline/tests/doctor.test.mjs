@@ -4,7 +4,7 @@
 // on the host's `claude` CLI presence.
 import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runDoctor, printDoctor, doctorExitCode } from "../src/setup/doctor.mjs";
@@ -151,7 +151,7 @@ test("doctorExitCode: any hard fail → 1", () => {
   equal(doctorExitCode(r), 1);
 });
 
-test("printDoctor: tristate icons match", (t) => {
+test("printDoctor: tristate icons match", () => {
   const calls = [];
   const origWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = (s) => { calls.push(s); return true; };

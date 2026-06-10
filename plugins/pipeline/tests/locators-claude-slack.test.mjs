@@ -1,13 +1,7 @@
-// Tests for findClaudeSlackPlugin — the shared locator extracted from
-// wizard.mjs and doctor.mjs by paths-and-config-base. Resolution order:
-// env > cache walk > PATH > null.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { join } from "node:path";
 import { findClaudeSlackPlugin } from "../src/locators/claude-slack.mjs";
-
-// All probes go through injection seams (_env, _existsSync) so the tests
-// never depend on the real filesystem or process environment.
 
 test("env override wins when file exists", () => {
   const env = { CLAUDE_SLACK_PLUGIN: "/abs/custom/claude-slack.mjs", HOME: "/home/u" };

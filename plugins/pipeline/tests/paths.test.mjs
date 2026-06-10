@@ -1,16 +1,9 @@
-// Tests for src/paths.mjs — Mac/Windows unchanged, Linux uses XDG when set
-// and falls back to ~/.config / ~/.local/share / ~/.local/state when not.
-//
-// node:test's --test-isolation by default runs each test file in its own
-// process, so toggling process.platform in this file doesn't leak.
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { equal } from "node:assert/strict";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-// Re-import paths.mjs via dynamic import after stubbing platform — required
-// because the module is otherwise cached with whatever platform first loaded
-// it. We use Object.defineProperty since process.platform is read-only.
+// Stub platform + bust ESM cache to re-evaluate paths.mjs per call.
 async function loadPathsAs(platform, env = {}) {
   const orig = process.platform;
   Object.defineProperty(process, "platform", { value: platform, configurable: true });
@@ -18,7 +11,6 @@ async function loadPathsAs(platform, env = {}) {
   for (const k of ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"]) delete process.env[k];
   Object.assign(process.env, env);
   try {
-    // Bust cache by appending a unique query string. Node 22 ESM supports this.
     const mod = await import(`../src/paths.mjs?cb=${platform}-${Math.random().toString(36).slice(2)}`);
     return mod.getPaths();
   } finally {

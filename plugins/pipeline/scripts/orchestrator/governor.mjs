@@ -39,9 +39,6 @@ export function resolveGovernorContext(db, _cfg) {
   const row = projectGetByName(db, projectName);
   if (!row?.root_path) return null;
   const projectRoot = row.root_path;
-  // Per §B: governor.{reports_dir, session_dir, log_dir} are per-project
-  // (resolveBase=projectRoot); governor.template_path is install-wide
-  // (resolveBase=configDir). Defaults match the prior literal join behaviour.
   const paths = getPaths();
   const projVars = { root: projectRoot, project: projectName };
   const _proj = (raw, fallback) => raw

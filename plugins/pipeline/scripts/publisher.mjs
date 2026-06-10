@@ -53,7 +53,6 @@ function _timestamp() {
 function _dropDir(cfg, paths) {
   const raw = cfg.notifications?.fallback_dir;
   if (raw) {
-    // Global / install-wide key: resolves against paths.configDir per §B.
     return resolveTemplate(raw, {}, { resolveBase: paths.configDir, configDir: paths.configDir });
   }
   return join(paths.stateDir, "notifications");
@@ -288,7 +287,7 @@ export function spawnMergeReadyHook(project, feature, branch, targetBranch, proj
       const logDir = paths.logDir;
       mkdirSync(logDir, { recursive: true });
       logFd = openSync(join(logDir, "merge-hook.log"), "a");
-    } catch (e) {
+    } catch {
       // If log open fails, continue anyway with stdio ignored
     }
 

@@ -7,7 +7,6 @@ import { resolveTemplate } from "../../../scripts/worktree-paths.mjs";
 import { getPaths } from "../../paths.mjs";
 
 function _resolvePlansDir(raw, projectRoot, projectName) {
-  // Per §B: plansDir is per-project (resolveBase=projectRoot).
   const paths = getPaths();
   return resolveTemplate(raw, { root: projectRoot, project: projectName }, {
     resolveBase: projectRoot,

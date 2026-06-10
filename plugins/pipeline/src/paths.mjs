@@ -1,9 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-// Resolve XDG-style env-or-fallback. The slack-bridge plugin uses the same
-// convention, so a Linux user with custom XDG dirs gets a consistent layout
-// across both. Mac and Windows keep `~/.pipeline` (no XDG convention there).
 function _xdg(envName, fallback) {
   return process.env[envName] || fallback;
 }

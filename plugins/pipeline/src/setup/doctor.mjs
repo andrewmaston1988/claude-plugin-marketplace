@@ -8,31 +8,24 @@ import { connectUnified, close, dbPathUnified } from "../../scripts/pipeline-db/
 import { projectList } from "../../scripts/pipeline-db/projects.mjs";
 import { readState, pidAlive } from "../../scripts/orchestrator/state-file.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
-import { resolveTemplate, resolveHookFirstToken, PLACEHOLDER_KEYS } from "../../scripts/worktree-paths.mjs";
+import { resolveTemplate, resolveHookFirstToken } from "../../scripts/worktree-paths.mjs";
 
 const execFileAsync = promisify(execFile);
 
-// Surface every config-driven path key, resolved against the §B category for
-// its key. Used by the `path-resolution-consistency` doctor check. `existsExpected`
-// flags whether a non-existent resolved path is a warn-worthy state.
 function _pathResolutionChecks(cfg, projects, paths) {
   const out = [];
   const cd = paths.configDir;
   const _global = (raw) => raw
     ? resolveTemplate(raw, {}, { resolveBase: cd, configDir: cd })
     : null;
-  // Global / install-wide keys.
   out.push({ key: "notifications.fallback_dir",  raw: cfg.notifications?.fallback_dir,  resolved: _global(cfg.notifications?.fallback_dir) ?? join(paths.stateDir, "notifications"), warn: false });
   out.push({ key: "session_templates_dir",       raw: cfg.session_templates_dir,        resolved: _global(cfg.session_templates_dir) ?? "(bundled)", warn: cfg.session_templates_dir ? !existsSync(_global(cfg.session_templates_dir)) : false });
   out.push({ key: "hooks.on_notification",       raw: cfg.hooks?.on_notification,       resolved: resolveHookFirstToken(cfg.hooks?.on_notification, cd) ?? "(unset)", warn: false });
   out.push({ key: "hooks.on_merge_ready",        raw: cfg.hooks?.on_merge_ready,        resolved: resolveHookFirstToken(cfg.hooks?.on_merge_ready,  cd) ?? "(unset)", warn: false });
-  // hooks.on_merge consumer (skills/merge/scripts/merge.mjs) doesn't yet route through
-  // resolveTemplate — operators must use an absolute path until the retrofit lands.
-  // We surface the raw value verbatim so doctor doesn't lie about what the runtime sees.
+  // on_merge consumer (skills/merge/scripts/merge.mjs) doesn't route through resolveTemplate yet.
   out.push({ key: "hooks.on_merge (raw — bypasses resolveTemplate)", raw: cfg.hooks?.on_merge, resolved: cfg.hooks?.on_merge ?? "(unset)", warn: false });
   out.push({ key: "governor.template_path",      raw: cfg.governor?.template_path,      resolved: _global(cfg.governor?.template_path) ?? "(bundled)", warn: cfg.governor?.template_path ? !existsSync(_global(cfg.governor.template_path)) : false });
 
-  // Per-project keys. Resolved against each registered project's root_path.
   for (const p of projects ?? []) {
     const _proj = (raw) => raw
       ? resolveTemplate(raw, { root: p.root_path, project: p.name }, { resolveBase: p.root_path, configDir: cd })
