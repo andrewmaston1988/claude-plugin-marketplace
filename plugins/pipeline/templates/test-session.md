@@ -133,14 +133,14 @@ python -c "import macro"   # smoke check — only valid from project root
 
 ```bash
 cd {{PROJECT_ROOT}}
-git worktree add ../CLAUDE-wt/qa-test-{{FEATURE}} -b qa/test-{{FEATURE}}
+git worktree add {{QA_TEST_WT}} -b qa/test-{{FEATURE}}
 cd {{CWD}}
 ```
 
-Use `../CLAUDE-wt/qa-test-{{FEATURE}}` as `<CLAUDE-wt>` in subsequent steps. All test report writes and commits go into this worktree — not into `{{PROJECT_ROOT}}` directly.
+Use `{{QA_TEST_WT}}` as `<CLAUDE-wt>` in subsequent steps. All test report writes and commits go into this worktree — not into `{{PROJECT_ROOT}}` directly.
 
-**Document everything.** At session start, create the test report **inside the qa worktree** (`<CLAUDE-wt>` from the previous step) so write and commit happen in the same worktree:
-`<CLAUDE-wt>/repos/{{PROJECT}}/test-reports/test-report-<date>-{{FEATURE}}-${CORRELATION_ID}.md`
+**Document everything.** At session start, create the test report **inside the qa worktree** (`{{QA_TEST_WT}}` from the previous step) so write and commit happen in the same worktree:
+`{{TEST_REPORTS_DIR}}/test-report-<date>-{{FEATURE}}-${CORRELATION_ID}.md`
 
 Always include the branch slug **and** `${CORRELATION_ID}` in the filename. The corr_id suffix guarantees uniqueness — two test runs on the same day for the same plan write to different files, so operator findings in older reports are never overwritten. Never use a bare `test-report-YYYY-MM-DD.md` name.
 Record each test run: what you ran, what you observed, pass/fail, and any anomalies.

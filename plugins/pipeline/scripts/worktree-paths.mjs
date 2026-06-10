@@ -20,6 +20,12 @@ import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 const DEFAULT_ORCHESTRATOR_TEMPLATE = "{root_parent}/{project}-wt/{branch_type}-{branch_local}";
 const DEFAULT_HANDLER_TEMPLATE      = "{root_parent}/.worktrees/{kind}-{feature}";
 
+// Per-kind path under the handler worktree. Override via cfg.report_subpath.
+const DEFAULT_REPORT_SUBPATH = {
+  "code-review": "repos/{project}/reports",
+  "qa-test":     "repos/{project}/test-reports",
+};
+
 // "autonomous/foo-bar" → "foo-bar"; "interactive/x" → "x"; "bare" → "bare".
 // Used so worktree leaf directories aren't prefixed with the branch's category.
 export function branchLocal(branch) {
@@ -73,4 +79,29 @@ export function handlerWorktreePath({ project, projectRoot, kind, feature, _conf
     kind:        kind        || "",
     feature:     feature     || "",
   });
+}
+
+// Single source of truth for review-report and test-report locations.
+// Returns { wt, dir, glob }. Templates / session-gen / reaper all call this.
+// retryN narrows the code-review glob to a specific cycle; null matches all.
+export function reportPath({ kind, feature, projectRoot, project, retryN, _config } = {}) {
+  if (kind !== "code-review" && kind !== "qa-test") {
+    throw new Error(`reportPath: unknown kind '${kind}' (expected "code-review" or "qa-test")`);
+  }
+  const cfg = _config ?? loadPipelineConfig();
+  const wt = handlerWorktreePath({ project, projectRoot, kind, feature, _config: cfg });
+  const projectName = project || (projectRoot ? basename(projectRoot) : "");
+  const subpathTemplate = cfg.report_subpath?.[kind] ?? DEFAULT_REPORT_SUBPATH[kind];
+  const sub = substitute(subpathTemplate, { project: projectName, feature: feature || "" });
+  // Forward-slash join: handlerWorktreePath already emits forward slashes.
+  const dir = `${wt}/${sub}`.replace(/\\/g, "/");
+  const featureEsc = String(feature || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const glob = kind === "code-review"
+    ? new RegExp(
+        retryN == null
+          ? `^review-report-.*${featureEsc}.*\\.md$`
+          : `^review-report-.*${featureEsc}.*retry${retryN}.*\\.md$`,
+      )
+    : new RegExp(`^test-report-.*${featureEsc}.*\\.md$`);
+  return { wt, dir, glob };
 }

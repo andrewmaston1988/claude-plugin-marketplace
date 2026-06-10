@@ -76,10 +76,8 @@ Solving a task with fewer tokens is as valuable as solving it faster. The Govern
 ls {{PROJECT_ROOT}}/test-reports/test-report-*{{FEATURE}}*.md 2>/dev/null
 
 # 2. qa/ worktree (if test ran but branch not yet merged — e.g. QA Pass: false)
-CLAUDE_PARENT="$(dirname "{{PROJECT_ROOT}}")"
-QA_WORKTREE="${CLAUDE_PARENT}/CLAUDE-wt/qa-test-{{FEATURE}}"
-if [ -d "$QA_WORKTREE" ]; then
-  ls "${QA_WORKTREE}/repos/{{PROJECT}}/test-reports/test-report-*{{FEATURE}}*.md" 2>/dev/null
+if [ -d "{{QA_TEST_WT}}" ]; then
+  ls {{TEST_REPORTS_DIR}}/test-report-*{{FEATURE}}*.md 2>/dev/null
 fi
 ```
 
@@ -102,10 +100,8 @@ If all reports record **QA Pass: true**, they are informational only — no acti
 ls {{PROJECT_ROOT}}/reports/review-report-*{{FEATURE}}*.md 2>/dev/null
 
 # 2. code-review/{{FEATURE}} worktree (pre-merge — most common case for active bounces)
-CLAUDE_PARENT="$(dirname "{{PROJECT_ROOT}}")"
-CODE_REVIEW_WT="${CLAUDE_PARENT}/CLAUDE-wt/code-review-{{FEATURE}}"
-if [ -d "$CODE_REVIEW_WT" ]; then
-  ls "${CODE_REVIEW_WT}/repos/{{PROJECT}}/reports/review-report-*{{FEATURE}}*.md" 2>/dev/null
+if [ -d "{{CODE_REVIEW_WT}}" ]; then
+  ls {{REVIEW_REPORTS_DIR}}/review-report-*{{FEATURE}}*.md 2>/dev/null
 fi
 ```
 

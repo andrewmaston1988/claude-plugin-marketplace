@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
+import { reportPath, handlerWorktreePath } from "./worktree-paths.mjs";
 
 function _todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -109,21 +110,30 @@ export function generateSessionFile(
   const progressPath = _resolvePartialPath("_progress-tracking.md", cfg);
   const progressBlock = existsSync(progressPath) ? readFileSync(progressPath, "utf8").trimEnd() : "";
 
+  const codeReviewWt   = handlerWorktreePath({ project, projectRoot, kind: "code-review", feature, _config: cfg });
+  const qaTestWt       = handlerWorktreePath({ project, projectRoot, kind: "qa-test",     feature, _config: cfg });
+  const reviewReports  = reportPath({ project, projectRoot, kind: "code-review", feature, _config: cfg }).dir;
+  const testReports    = reportPath({ project, projectRoot, kind: "qa-test",     feature, _config: cfg }).dir;
+
   const content = _expand(template, {
     PROGRESS_TRACKING: progressBlock,
     PIPELINE_BIN:      _PIPELINE_BIN,
-    SESSION_TYPE:   sessionType,
-    FEATURE:        feature,
-    PROJECT:        project,
-    PROJECT_ROOT:   projectRoot,
-    PLAN_PATH:      planPath,
-    PLAN_CONTENT:   planContent,
-    CORRELATION_ID: sessionSlug,
-    BRANCH:         branch,
-    CWD:            cwd || "",
-    TARGET_BRANCH:  targetBranch,
-    REVIEW_SKILL:   reviewSkill,
-    REVIEW_RETRIES: reviewRetries,
+    SESSION_TYPE:      sessionType,
+    FEATURE:           feature,
+    PROJECT:           project,
+    PROJECT_ROOT:      projectRoot,
+    PLAN_PATH:         planPath,
+    PLAN_CONTENT:      planContent,
+    CORRELATION_ID:    sessionSlug,
+    BRANCH:            branch,
+    CWD:               cwd || "",
+    TARGET_BRANCH:     targetBranch,
+    REVIEW_SKILL:      reviewSkill,
+    REVIEW_RETRIES:    reviewRetries,
+    CODE_REVIEW_WT:    codeReviewWt,
+    QA_TEST_WT:        qaTestWt,
+    REVIEW_REPORTS_DIR: reviewReports,
+    TEST_REPORTS_DIR:   testReports,
   });
 
   const sessionsDir = join(projectRoot, "sessions");
