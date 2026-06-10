@@ -9,7 +9,7 @@ import {
 } from "../pipeline-db/index.mjs";
 import { gitWorktreeClean, sessionTypeFromNotes } from "./spawn.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
-import { orchestratorWorktreePath } from "../worktree-paths.mjs";
+import { orchestratorWorktreePath, handlerWorktreePath } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { generateSessionFile } from "../session-gen.mjs";
 import { pidAlive } from "./state-file.mjs";
@@ -146,15 +146,11 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
               });
               notifyFailure(project, feature, "review-touched-source", { dryRun });
             } else {
-              // Reports are written by the review session into the code-review
-              // worktree at {{PROJECT_ROOT}}/../CLAUDE-wt/code-review-{{FEATURE}}/repos/{{PROJECT}}/reports/
-              // with filename review-report-<date>-{{FEATURE}}-retry<N>-${CORRELATION_ID}.md
-              // per the review-session.md template. The reaper checks the same path
-              // for the current retry's report so an exit-0-without-review-
-              // complete can distinguish "agent wrote a report but failed to
-              // call review-complete" from "agent never produced a report".
+              // Reports land in the code-review worktree under repos/{project}/reports/.
+              // Filenames carry a date + correlation_id, so match by glob.
               const retryN = row.review_retries || 0;
-              const reportsDir = join(projectRoot, "..", "CLAUDE-wt", `code-review-${feature}`, "repos", project, "reports");
+              const reviewWt = handlerWorktreePath({ project, projectRoot, kind: "code-review", feature });
+              const reportsDir = join(reviewWt, "repos", project, "reports");
               let hasReport = false;
               if (existsSync(reportsDir)) {
                 try {
