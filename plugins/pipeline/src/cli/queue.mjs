@@ -1,14 +1,4 @@
-// Target-branch resolution precedence (highest → lowest):
-//   1. Row's `target_branch` column (set at queue time / admin override).
-//   2. Operator's `--target-branch` flag on `queue-plan`.
-//   3. Plan-file's `*Target-Branch:` annotation (queueTargetExtract).
-//   4. detectDefaultBranch(projectRoot) — remote HEAD, then init.defaultBranch.
-//   5. DEFAULT_TARGET_BRANCH_FALLBACK ("main") when both git lookups fail.
-//
-// Levels 2–5 fire only when the row has no `target_branch` set; once a row is
-// queued the column wins. warnUnrecognisedTargetPrefix warns (not errors) when a
-// supplied --target-branch carries an unfamiliar prefix vs.
-// cfg.recognised_branch_types (default: ["autonomous","interactive"]).
+// Target-branch resolution precedence documented in REFERENCE.md.
 import { existsSync, readFileSync } from "node:fs";
 import { join, basename, isAbsolute, resolve, dirname } from "node:path";
 import { spawnSync } from "node:child_process";

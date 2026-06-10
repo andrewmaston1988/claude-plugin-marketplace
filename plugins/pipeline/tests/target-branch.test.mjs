@@ -1,6 +1,5 @@
-// Target-branch resolution: precedence chain + fallback + lint warning.
 import { test } from "node:test";
-import { equal, ok, match } from "node:assert/strict";
+import { equal, match } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
