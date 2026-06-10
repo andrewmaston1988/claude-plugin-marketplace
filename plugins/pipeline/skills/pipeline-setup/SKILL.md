@@ -144,6 +144,36 @@ process.exit(result.status ?? 1);
 
 Pass the hook path as `--on-merge <abs-path>` (or omit to keep local squash).
 
+### Question 3d — Plans directory (`plansDir`)
+
+**What this does**: tells every consumer (CLI `backlog-scan`, dashboard backlog, session-gen, demo) where each project's plan files live. The value is a template — placeholders are resolved per-project against that project's root.
+
+**Resolved default for this machine**: `<project-root>/plans/` — i.e. for project `myapp` at `C:\code\myapp` the resolver returns `C:\code\myapp\plans`. Use `pipeline doctor` after setup to see the materialised path.
+
+**Placeholder vocabulary**:
+
+| Placeholder | Source |
+|---|---|
+| `{root}` | the project root path |
+| `{root_parent}` | `dirname(root)` |
+| `{root_grandparent}` | `dirname(dirname(root))` |
+| `{project}` | the project name |
+
+Leading `~/` expands to the home directory; absolute paths pass through unchanged. Unknown placeholders are left literal so a typo (`{projetc}/plans`) produces a directory whose name visibly contains the broken token.
+
+**Examples**:
+
+- `plans` *(default)* → `<project-root>/plans/`
+- `../CLAUDE/repos/{project}/plans` → sibling knowledge-base repo, one plans dir per project
+- `{root_parent}/shared-plans` → a single shared plans directory at the project root's parent
+- `~/work/plans/{project}` → absolute path under the home directory
+
+**Consequences**: every read of the plans directory (dashboard backlog, `pipeline backlog-scan`, session-gen reading plan content) routes through `resolvePlansDir` and sees the same answer. If a project row's `plans_dir` column is set (via `pipeline project-add --plans-dir <abs>` / `pipeline project-update --plans-dir <abs>`), the per-project value wins over `cfg.plansDir` for that one project. No on-disk migration is performed when the value changes — point the value at where the plans already are.
+
+**Default**: keep `plans` unless the user's plans live elsewhere (e.g. a separate knowledge-base repo).
+
+**SKIP this question** unless the user volunteers that their plans are not under each project's root.
+
 ### Question 4 — Autostart
 
 **What this does**: installs the orchestrator as an OS-level scheduled task so it starts at login and survives reboots — Task Scheduler on Windows, launchd plist on macOS, systemd user unit on Linux.

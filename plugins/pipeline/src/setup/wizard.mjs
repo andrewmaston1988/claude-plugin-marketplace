@@ -141,18 +141,36 @@ export async function runWizard({ paths, log, opts = {} }) {
       ? (opts.reviewDeepFlag !== undefined ? opts.reviewDeepFlag : defFlag)
       : ((await ask(`  review.deep_flag (extra flag for review skill, or blank for none) [${defFlag || "(none)"}]: `)).trim() || defFlag);
 
-    // plansDir — where plan files live (relative to each project root)
+    // plansDir — where plan files live. Templates may reference any of:
+    //   {root}             — the project root path
+    //   {root_parent}      — the project root's parent directory
+    //   {root_grandparent} — two levels above the project root
+    //   {project}          — the project name
+    // Leading `~/` expands to the home directory; absolute paths pass through.
     const defPlansDir = defaults.plansDir ?? PIPELINE_DEFAULTS.plansDir;
     if (!nonInteractive) {
       say("\n  Plan files location (plansDir):\n");
       say("    Default 'plans' → <project-root>/plans/\n");
-      say("    Use {project} for a separate knowledge-base repo, e.g.:\n");
-      say("      ../CLAUDE/repos/{project}/plans\n");
+      say("    Placeholders: {root}, {root_parent}, {root_grandparent}, {project}.\n");
+      say("    Examples:\n");
+      say("      ../CLAUDE/repos/{project}/plans   (sibling knowledge-base repo)\n");
+      say("      {root_parent}/shared-plans       (sibling dir at root's parent)\n");
+      say("      ~/work/plans/{project}           (absolute, ~-expanded)\n");
+      say("    Consequences: an unknown placeholder is left literal in the path,\n");
+      say("    so a typo will produce a directory name like '{projetc}' you can spot.\n");
     }
     const plansDirRaw = nonInteractive
       ? (opts.plansDir !== undefined ? opts.plansDir : defPlansDir)
       : ((await ask(`  plansDir [${defPlansDir}]: `)).trim() || defPlansDir);
     config.plansDir = plansDirRaw || defPlansDir;
+    // Surface unknown placeholders to the operator without rejecting input.
+    const PLANS_DIR_PLACEHOLDERS = new Set(["root", "root_parent", "root_grandparent", "project"]);
+    const unknown = [...String(config.plansDir).matchAll(/\{([a-z_]+)\}/gi)]
+      .map(m => m[1])
+      .filter(p => !PLANS_DIR_PLACEHOLDERS.has(p));
+    if (unknown.length && !nonInteractive) {
+      say(`    ⚠ unknown placeholder(s): ${[...new Set(unknown)].map(p => `{${p}}`).join(" ")} — will render literally.\n`);
+    }
 
     // Step 5 — Slack notification channels
     hr();

@@ -11,9 +11,9 @@ import {
 import { generateSessionFile } from "../../scripts/session-gen.mjs";
 import { publishNotification } from "../../scripts/publisher.mjs";
 import { getFlag } from "./helpers.mjs";
-import { handlerWorktreePath, orchestratorWorktreePath, resolveTemplate } from "../../scripts/worktree-paths.mjs";
-import { getPaths } from "../paths.mjs";
+import { handlerWorktreePath, orchestratorWorktreePath } from "../../scripts/worktree-paths.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
+import { resolvePlansDir, resolvePlanFile } from "../plans-resolver.mjs";
 
 function formatRow(r) {
   const qa = r.qa_pass;
@@ -64,14 +64,6 @@ function gitErrDetail(r) {
   const stderr = r.stderr ? r.stderr.toString() : "";
   const stdout = r.stdout ? r.stdout.toString() : "";
   return stderr || stdout || "(no output)";
-}
-
-function resolvePlansDir(raw, projectRoot, projectName) {
-  const paths = getPaths();
-  return resolveTemplate(raw, { root: projectRoot, project: projectName }, {
-    resolveBase: projectRoot,
-    configDir: paths.configDir,
-  });
 }
 
 function backlogScan(db, project, plansDir) {
@@ -142,7 +134,7 @@ export async function run(cmd, argv) {
         const planPathCheck =
           isAbsolute(planFile) ? planFile
           : looksLikePath      ? resolve(process.cwd(), planFile)
-          :                      join(ctx.projectRoot, "plans", planFile);
+          :                      resolvePlanFile(planFile, { project: ctx.project, projectRoot: ctx.projectRoot });
         if (!existsSync(planPathCheck)) {
           close(ctx.db);
           process.stderr.write(`plan file not found: ${planPathCheck}\n`);
@@ -266,9 +258,7 @@ export async function run(cmd, argv) {
     if (plansDirArg) {
       plansDir = plansDirArg;
     } else {
-      const { loadPipelineConfig } = await import("../pipeline-config.mjs");
-      const cfg = loadPipelineConfig();
-      plansDir = resolvePlansDir(cfg.plansDir || "plans", ctx.projectRoot, ctx.project);
+      plansDir = resolvePlansDir({ project: ctx.project, projectRoot: ctx.projectRoot });
     }
     if (!existsSync(plansDir)) { close(ctx.db); process.stderr.write(`not found: ${plansDir}\n`); return 1; }
     const fmt = getFlag("--format", flags) || "plain";
@@ -299,9 +289,7 @@ export async function run(cmd, argv) {
     if (plansDirArg) {
       plansDir = plansDirArg;
     } else {
-      const { loadPipelineConfig } = await import("../pipeline-config.mjs");
-      const cfg = loadPipelineConfig();
-      plansDir = resolvePlansDir(cfg.plansDir || "plans", ctx.projectRoot, ctx.project);
+      plansDir = resolvePlansDir({ project: ctx.project, projectRoot: ctx.projectRoot });
     }
     if (!existsSync(plansDir)) { close(ctx.db); process.stdout.write("0 new backlog rows\n"); return 0; }
     let added = 0;
