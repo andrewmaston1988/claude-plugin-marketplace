@@ -9,7 +9,7 @@ import {
 } from "../pipeline-db/index.mjs";
 import { gitWorktreeClean, sessionTypeFromNotes } from "./spawn.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
-import { orchestratorWorktreePath } from "../worktree-paths.mjs";
+import { orchestratorWorktreePath, handlerWorktreePath } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { generateSessionFile } from "../session-gen.mjs";
 import { pidAlive } from "./state-file.mjs";
@@ -146,13 +146,18 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
               });
               notifyFailure(project, feature, "review-touched-source", { dryRun });
             } else {
+              // Reports land in the code-review worktree under repos/{project}/reports/.
+              // Filenames carry a date + correlation_id, so match by glob.
               const retryN = row.review_retries || 0;
-              const reportsDir = join(spawnWt, "reports");
-              const reportFile = `review-report-${feature}-retry${retryN}.md`;
+              const reviewWt = handlerWorktreePath({ project, projectRoot, kind: "code-review", feature });
+              const reportsDir = join(reviewWt, "repos", project, "reports");
               let hasReport = false;
               if (existsSync(reportsDir)) {
                 try {
-                  hasReport = readdirSync(reportsDir).includes(reportFile);
+                  const pattern = new RegExp(
+                    `^review-report-.*${feature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*retry${retryN}.*\\.md$`
+                  );
+                  hasReport = readdirSync(reportsDir).some((file) => pattern.test(file));
                 } catch {}
               }
               const note = hasReport ? "[review-stuck-cli-failed]" : "[review-stuck-no-report]";
