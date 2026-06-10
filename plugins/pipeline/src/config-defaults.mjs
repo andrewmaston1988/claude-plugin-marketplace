@@ -32,6 +32,11 @@ export const PIPELINE_DEFAULTS = {
   review:     { skill: "/code-review", deep_flag: "" },
   plansDir:   "plans",
   session_templates_dir: null,
+  // Per-kind reports dir under the handler worktree. Placeholders: {project}, {feature}.
+  report_subpath: {
+    "code-review": "repos/{project}/reports",
+    "qa-test":     "repos/{project}/test-reports",
+  },
   governor: {
     enabled:       false,
     project:       null,

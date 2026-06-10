@@ -4,13 +4,14 @@
 // operator-style overrides, and edge cases (null projectRoot, bare branches,
 // shared-worktree semantics for orchestrator-spawned sessions).
 import { test } from "node:test";
-import { equal, deepEqual } from "node:assert/strict";
+import { equal, deepEqual, throws, ok } from "node:assert/strict";
 import {
   branchLocal,
   branchType,
   substitute,
   orchestratorWorktreePath,
   handlerWorktreePath,
+  reportPath,
 } from "../scripts/worktree-paths.mjs";
 
 // ── branchLocal / branchType helpers ─────────────────────────────────────────
@@ -158,4 +159,84 @@ test("all 4 session types on the same branch resolve to the same orchestrator wo
   for (let i = 0; i < 4; i++) {
     equal(orchestratorWorktreePath(args), path);
   }
+});
+
+// ── reportPath ───────────────────────────────────────────────────────────────
+
+test("reportPath: code-review default dir nests under handler worktree", () => {
+  const { wt, dir } = reportPath({
+    kind: "code-review", project: "p", projectRoot: "/x/p", feature: "feat-y", _config: {},
+  });
+  equal(wt,  "/x/.worktrees/code-review-feat-y");
+  equal(dir, "/x/.worktrees/code-review-feat-y/repos/p/reports");
+});
+
+test("reportPath: qa-test default dir uses test-reports subpath", () => {
+  const { dir } = reportPath({
+    kind: "qa-test", project: "p", projectRoot: "/x/p", feature: "feat-y", _config: {},
+  });
+  equal(dir, "/x/.worktrees/qa-test-feat-y/repos/p/test-reports");
+});
+
+test("reportPath: cfg.report_subpath override is honoured per-kind", () => {
+  const cfg = { report_subpath: { "code-review": "custom/{project}/cr", "qa-test": "custom/{project}/qa" } };
+  const cr = reportPath({ kind: "code-review", project: "p", projectRoot: "/x/p", feature: "f", _config: cfg });
+  const qa = reportPath({ kind: "qa-test",     project: "p", projectRoot: "/x/p", feature: "f", _config: cfg });
+  equal(cr.dir, "/x/.worktrees/code-review-f/custom/p/cr");
+  equal(qa.dir, "/x/.worktrees/qa-test-f/custom/p/qa");
+});
+
+test("reportPath: handler_worktree_base override flows through to wt + dir", () => {
+  const cfg = { handler_worktree_base: "{root_parent}/CLAUDE-wt/{kind}-{feature}" };
+  const { wt, dir } = reportPath({
+    kind: "code-review", project: "p", projectRoot: "/x/p", feature: "f", _config: cfg,
+  });
+  equal(wt,  "/x/CLAUDE-wt/code-review-f");
+  equal(dir, "/x/CLAUDE-wt/code-review-f/repos/p/reports");
+});
+
+test("reportPath: project name derives from projectRoot when omitted", () => {
+  const { dir } = reportPath({
+    kind: "code-review", projectRoot: "/x/myproj", feature: "f", _config: {},
+  });
+  equal(dir, "/x/.worktrees/code-review-f/repos/myproj/reports");
+});
+
+test("reportPath: glob matches retry-N report when retryN given", () => {
+  const { glob } = reportPath({
+    kind: "code-review", project: "p", projectRoot: "/x/p", feature: "feat-y", retryN: 2, _config: {},
+  });
+  ok(glob.test("review-report-2026-06-10-feat-y-retry2-corr123.md"));
+  equal(false, glob.test("review-report-2026-06-10-feat-y-retry0-corr123.md"));
+  equal(false, glob.test("review-report-2026-06-10-feat-y-retry1-corr123.md"));
+});
+
+test("reportPath: glob matches across retries when retryN null", () => {
+  const { glob } = reportPath({
+    kind: "code-review", project: "p", projectRoot: "/x/p", feature: "feat-y", _config: {},
+  });
+  ok(glob.test("review-report-2026-06-10-feat-y-retry0-corr.md"));
+  ok(glob.test("review-report-2026-06-10-feat-y-retry5-corr.md"));
+});
+
+test("reportPath: qa-test glob matches test-report filename pattern", () => {
+  const { glob } = reportPath({
+    kind: "qa-test", project: "p", projectRoot: "/x/p", feature: "feat-y", _config: {},
+  });
+  ok(glob.test("test-report-2026-06-10-feat-y-corr.md"));
+  equal(false, glob.test("review-report-2026-06-10-feat-y-corr.md"));
+});
+
+test("reportPath: feature with regex metachars is escaped in glob", () => {
+  const { glob } = reportPath({
+    kind: "code-review", project: "p", projectRoot: "/x/p", feature: "feat.x+y", retryN: 0, _config: {},
+  });
+  ok(glob.test("review-report-2026-06-10-feat.x+y-retry0-corr.md"));
+  // The literal-dot escape means an *unrelated* feature like 'featXxXy' must not match.
+  equal(false, glob.test("review-report-2026-06-10-featXxXy-retry0-corr.md"));
+});
+
+test("reportPath: unknown kind throws", () => {
+  throws(() => reportPath({ kind: "bogus", project: "p", projectRoot: "/x/p", feature: "f", _config: {} }),
+         /unknown kind 'bogus'/);
 });
