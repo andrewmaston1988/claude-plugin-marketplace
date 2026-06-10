@@ -16,3 +16,7 @@ sessions/
 *.swp
 *.swo
 STATE.md
+
+# Symlinked from <claude-base>/repos/claude-plugin-marketplace/CLAUDE.md;
+# the canonical doc is checked in there, not here.
+/CLAUDE.md
