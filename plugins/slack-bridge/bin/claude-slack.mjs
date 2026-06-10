@@ -244,7 +244,19 @@ if (rest.includes("--daemon") || rest.includes("-d")) {
 
   if (process.platform === "win32") {
     const trayScript = _ftu(new URL("../src/tray/windows.ps1", import.meta.url));
-    const tray = _sp("powershell.exe", [
+    // The tray needs TWO things that conflict under Node's spawn flags:
+    //   1. A console — powershell.exe is a console-subsystem exe; its WinForms
+    //      message loop (Application.Run) dies instantly without one. Node's
+    //      `detached: true` sets DETACHED_PROCESS, which STRIPS the console.
+    //   2. Job breakaway — Task Scheduler runs this launcher inside a job object
+    //      with kill-on-close; a child that stays in the job is terminated when
+    //      the launcher exits. `detached: false` keeps the console but stays in
+    //      the job, so the tray is killed on task completion.
+    // `cmd /c start` resolves both: `start` creates the tray with a NEW (hidden)
+    // console AND breaks it out of the launcher's job, so it survives.
+    const tray = _sp("cmd.exe", [
+      "/c", "start", "", "/min",
+      "powershell.exe",
       "-WindowStyle", "Hidden",
       "-NonInteractive",
       "-File", trayScript,
@@ -253,7 +265,7 @@ if (rest.includes("--daemon") || rest.includes("-d")) {
       "-ConfigPath", configArgDaemon,
       "-NodeExe", process.execPath,
       "-LogDir", paths.logDir,
-    ], { detached: true, stdio: "ignore" });
+    ], { detached: true, stdio: "ignore", windowsHide: true });
     tray.unref();
   }
 

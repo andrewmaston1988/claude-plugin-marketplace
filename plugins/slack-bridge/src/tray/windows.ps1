@@ -33,8 +33,10 @@ $menu.Items.Add("-") | Out-Null
 $itemStop = New-Object System.Windows.Forms.ToolStripMenuItem
 $itemStop.Text = "Stop bridge"
 $itemStop.add_Click({
-  $pid = (Get-Content $PidFile -ErrorAction SilentlyContinue) -as [int]
-  if ($pid) { Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue }
+  # NB: do not name this $pid — that is a read-only automatic variable (this
+  # process's own PID); assigning to it fails and Stop-Process would kill the tray.
+  $bridgePid = (Get-Content $script:PidFile -ErrorAction SilentlyContinue) -as [int]
+  if ($bridgePid) { Stop-Process -Id $bridgePid -Force -ErrorAction SilentlyContinue }
 })
 $menu.Items.Add($itemStop) | Out-Null
 
@@ -42,11 +44,11 @@ $menu.Items.Add($itemStop) | Out-Null
 $itemRestart = New-Object System.Windows.Forms.ToolStripMenuItem
 $itemRestart.Text = "Restart bridge"
 $itemRestart.add_Click({
-  $pid = (Get-Content $PidFile -ErrorAction SilentlyContinue) -as [int]
-  if ($pid) { Stop-Process -Id $pid -Force -ErrorAction SilentlyContinue }
+  $bridgePid = (Get-Content $script:PidFile -ErrorAction SilentlyContinue) -as [int]
+  if ($bridgePid) { Stop-Process -Id $bridgePid -Force -ErrorAction SilentlyContinue }
   Start-Sleep -Milliseconds 500
-  Start-Process -FilePath $NodeExe `
-    -ArgumentList $EntryPath, "start", "--config", $ConfigPath `
+  Start-Process -FilePath $script:NodeExe `
+    -ArgumentList $script:EntryPath, "start", "--config", $script:ConfigPath `
     -WindowStyle Hidden
 })
 $menu.Items.Add($itemRestart) | Out-Null
@@ -57,14 +59,14 @@ $menu.Items.Add("-") | Out-Null
 $itemLog = New-Object System.Windows.Forms.ToolStripMenuItem
 $itemLog.Text = "Show log"
 $itemLog.add_Click({
-  $logFile = if ($LogDir) {
-    Get-ChildItem -Path $LogDir -Filter "*.log" -ErrorAction SilentlyContinue |
+  $logFile = if ($script:LogDir) {
+    Get-ChildItem -Path $script:LogDir -Filter "*.log" -ErrorAction SilentlyContinue |
       Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName
   } else { $null }
   if ($logFile) {
     Start-Process notepad.exe $logFile
   } else {
-    [System.Windows.Forms.MessageBox]::Show("No log file found in: $LogDir", "claude-slack")
+    [System.Windows.Forms.MessageBox]::Show("No log file found in: $script:LogDir", "claude-slack")
   }
 })
 $menu.Items.Add($itemLog) | Out-Null
@@ -83,20 +85,20 @@ $tray.ContextMenuStrip = $menu
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 2000
 $timer.add_Tick({
-  $pidStr = Get-Content $PidFile -ErrorAction SilentlyContinue
+  $pidStr = Get-Content $script:PidFile -ErrorAction SilentlyContinue
   $alive = $false
   if ($pidStr) {
     $proc = Get-Process -Id ([int]$pidStr) -ErrorAction SilentlyContinue
     $alive = $null -ne $proc
   }
   if ($alive) {
-    $itemStatus.Text = "Status: running (PID $pidStr)"
-    $tray.Icon = [System.Drawing.SystemIcons]::Information
-    $tray.Text = "claude-slack — running"
+    $script:itemStatus.Text = "Status: running (PID $pidStr)"
+    $script:tray.Icon = [System.Drawing.SystemIcons]::Information
+    $script:tray.Text = "claude-slack - running"
   } else {
-    $itemStatus.Text = "Status: stopped"
-    $tray.Icon = [System.Drawing.SystemIcons]::Warning
-    $tray.Text = "claude-slack — stopped"
+    $script:itemStatus.Text = "Status: stopped"
+    $script:tray.Icon = [System.Drawing.SystemIcons]::Warning
+    $script:tray.Text = "claude-slack - stopped"
   }
 })
 $timer.Start()

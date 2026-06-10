@@ -33,8 +33,8 @@
 //
 // Forwarders should treat unknown fields as opaque and not depend on field
 // order. `schema_version` is bumped if the field set changes.
-import { existsSync, mkdirSync, writeFileSync, readFileSync, openSync, closeSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, writeFileSync, readFileSync, openSync, closeSync, readdirSync, renameSync, statSync } from "node:fs";
+import { join, basename } from "node:path";
 import { spawn } from "node:child_process";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { getPaths } from "../src/paths.mjs";
@@ -88,7 +88,7 @@ function _spawnHook(cfg, filePath, paths) {
   // New key first, legacy fallback for one release
   const hook = _resolveHookCommand(cfg.hooks?.on_notification)
             ?? _resolveHookCommand(cfg.notifications?.on_write);
-  if (!hook) return Promise.resolve();
+  if (!hook) return Promise.resolve(false);
   const args = /\.(mjs|js)$/.test(hook) ? ["node", hook, filePath] : [hook, filePath];
   return new Promise((resolveSpawn) => {
     let logFd;
@@ -98,16 +98,17 @@ function _spawnHook(cfg, filePath, paths) {
       logFd = openSync(join(logDir, "hook.log"), "a");
     } catch (e) {
       process.stderr.write(`notifications.on_write log open threw: ${e.message}\n`);
-      resolveSpawn();
+      resolveSpawn(false);
       return;
     }
 
     let settled = false;
-    const settle = () => {
+    // true only on exit 0; false leaves the envelope for the orch drain pass.
+    const settle = (ok) => {
       if (settled) return;
       settled = true;
       try { closeSync(logFd); } catch {}
-      resolveSpawn();
+      resolveSpawn(ok === true);
     };
 
     let child;
@@ -119,7 +120,7 @@ function _spawnHook(cfg, filePath, paths) {
       });
     } catch (e) {
       process.stderr.write(`notifications.on_write hook spawn threw: ${e.message}\n`);
-      settle();
+      settle(false);
       return;
     }
 
@@ -131,13 +132,61 @@ function _spawnHook(cfg, filePath, paths) {
     const timer = setTimeout(() => {
       try { process.stderr.write(`notifications.on_write hook timed out after ${TIMEOUT_MS}ms\n`); } catch {}
       try { child.kill(); } catch {}
-      settle();
+      settle(false);
     }, TIMEOUT_MS);
     timer.unref?.();
 
-    child.on("error", () => settle());
-    child.on("close", () => { clearTimeout(timer); settle(); });
+    child.on("error", () => settle(false));
+    child.on("close", (code) => { clearTimeout(timer); settle(code === 0); });
   });
+}
+
+// Forwarded envelopes move here so the drain pass skips them (kept for audit).
+function _sentDir(cfg, paths) {
+  return join(_dropDir(cfg, paths), "sent");
+}
+
+function _markSent(target, cfg, paths) {
+  try {
+    const dir = _sentDir(cfg, paths);
+    mkdirSync(dir, { recursive: true });
+    renameSync(target, join(dir, basename(target)));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Forward un-sent envelopes from the long-lived orchestrator — the backstop for
+// agent-published notifications whose inline forwarder is killed on teardown.
+export async function drainNotifications({ _cfg, _paths, logFn } = {}) {
+  const cfg   = _cfg   ?? loadPipelineConfig();
+  const paths = _paths ?? getPaths();
+  const hook = _resolveHookCommand(cfg.hooks?.on_notification)
+            ?? _resolveHookCommand(cfg.notifications?.on_write);
+  if (!hook) return 0;  // notifier-agnostic install — nothing to drain to
+
+  const dir = _dropDir(cfg, paths);
+  let entries;
+  try { entries = readdirSync(dir); } catch { return 0; }
+
+  const SETTLE_MS = 8_000;
+  const now = Date.now();
+  let sent = 0;
+  for (const f of entries) {
+    if (!f.endsWith(".json")) continue;
+    const target = join(dir, f);
+    let mtime;
+    try { mtime = statSync(target).mtimeMs; } catch { continue; }
+    if (now - mtime < SETTLE_MS) continue;  // let in-flight inline forwards finish
+
+    const ok = await _spawnHook(cfg, target, paths);
+    if (ok && _markSent(target, cfg, paths)) {
+      sent++;
+      if (logFn) logFn(`[notify-drain] forwarded ${f}`);
+    }
+  }
+  return sent;
 }
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -172,7 +221,8 @@ export async function publishReport(reportFile, { dryRun = false, _cfg, _paths }
 
   const target = _writeEnvelope(envelope, paths, cfg);
   process.stdout.write(`Report published: ${target}\n`);
-  await _spawnHook(cfg, target, paths);
+  const ok = await _spawnHook(cfg, target, paths);
+  if (ok) _markSent(target, cfg, paths);  // else: left for orch drain pass
   return true;
 }
 

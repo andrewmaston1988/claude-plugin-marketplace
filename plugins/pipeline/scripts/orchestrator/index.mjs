@@ -9,7 +9,7 @@ import {
 } from "../pipeline-db/index.mjs";
 import { getPaths } from "../../src/paths.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
-import { publishNotification, spawnMergeReadyHook } from "../publisher.mjs";
+import { publishNotification, spawnMergeReadyHook, drainNotifications } from "../publisher.mjs";
 import { resolveSessionFile } from "../session-gen.mjs";
 import {
   readState, writeState, deleteState, pidAlive, startupGuard,
@@ -95,6 +95,12 @@ async function pollOnce({
   spawnMonthlyGovernor(db, { dryRun, logFn });
 
   reapFinished(activeProcs, db, { logFn });
+
+  // Deliver notifications dropped when an agent's inline forwarder was killed on teardown.
+  if (!dryRun) {
+    try { await drainNotifications({ logFn }); }
+    catch (e) { logFn(`notify-drain error: ${e.message}`, "WARN"); }
+  }
 
   const pipelinePaths = listEnabledProjects(db);
   let nProjects = 0, nQueued = 0, nActive = 0;

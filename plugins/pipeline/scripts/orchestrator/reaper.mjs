@@ -226,7 +226,7 @@ export function reapFinished(activeProcs, db, { logFn, dryRun = false }) {
                   cwd,
                 });
                 const relPath = relative(projectRoot, sessionPath).replace(/\\/g, "/");
-                const notes = `type=review sessions/${relPath} [dev-no-handoff-recovered ${ts}]`;
+                const notes = `type=review ${relPath} [dev-no-handoff-recovered ${ts}]`;
                 rowUpdate(db, project, feature, {
                   stage:       "queued",
                   notes_extra: notes,

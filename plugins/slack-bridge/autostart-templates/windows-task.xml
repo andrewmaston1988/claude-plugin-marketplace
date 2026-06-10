@@ -27,7 +27,7 @@
   <Actions Context="Author">
     <Exec>
       <Command>${NODE_PATH}</Command>
-      <Arguments>${BRIDGE_ENTRY}</Arguments>
+      <Arguments>${BRIDGE_ENTRY} start --daemon</Arguments>
       <WorkingDirectory>${CONFIG_DIR}</WorkingDirectory>
     </Exec>
   </Actions>
