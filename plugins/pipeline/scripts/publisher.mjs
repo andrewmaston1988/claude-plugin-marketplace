@@ -259,29 +259,51 @@ export async function publishNotification({ title, message, messageFile, priorit
   await _spawnHook(cfg, target, paths);
   return true;
 }
-
 // Spawn on_merge_ready hook — fires when a row reaches stage=merge.
 // Fire-and-forget with 15s cap, exit code ignored.
-export function spawnMergeReadyHook(project, feature, branch, targetBranch, { _cfg } = {}) {
+// projectRoot: path to the project (passed via PIPELINE_PROJECT_ROOT env var).
+// Hook stdio is captured to <logDir>/merge-hook.log (append).
+export function spawnMergeReadyHook(project, feature, branch, targetBranch, projectRoot, { _cfg, _getPaths } = {}) {
   const cfg = _cfg ?? loadPipelineConfig();
   const hook = _resolveHookCommand(cfg.hooks?.on_merge_ready);
   if (!hook) return Promise.resolve();
-  const args = /\.(mjs|js)$/.test(hook) ? ["node", hook] : [hook];
+  const args = /.(mjs|js)$/.test(hook) ? ["node", hook] : [hook];
   const env = {
     ...process.env,
     PIPELINE_PROJECT:       project,
     PIPELINE_FEATURE:       feature,
     PIPELINE_BRANCH:        branch,
     PIPELINE_TARGET_BRANCH: targetBranch,
+    PIPELINE_PROJECT_ROOT:  projectRoot ?? "",
   };
   return new Promise(resolve => {
+    let logFd;
+    try {
+      const paths = (_getPaths ?? getPaths)();
+      const logDir = paths.logDir;
+      mkdirSync(logDir, { recursive: true });
+      logFd = openSync(join(logDir, "merge-hook.log"), "a");
+    } catch (e) {
+      // If log open fails, continue anyway with stdio ignored
+    }
+
+    let settled = false;
+    const settle = () => {
+      if (settled) return;
+      settled = true;
+      if (logFd != null) {
+        try { closeSync(logFd); } catch {}
+      }
+      resolve();
+    };
+
     try {
       const child = spawn(args[0], args.slice(1), {
-        env, stdio: "ignore", windowsHide: true, detached: false,
+        env, stdio: logFd != null ? ["ignore", logFd, logFd] : "ignore", windowsHide: true, detached: false,
       });
-      child.on("close", resolve);
-      child.on("error", resolve);  // fire-and-forget; ignore errors
-      setTimeout(() => { try { child.kill(); } catch {} resolve(); }, 15_000).unref?.();
-    } catch { resolve(); }
+      child.on("close", settle);
+      child.on("error", settle);  // fire-and-forget; ignore errors
+      setTimeout(() => { try { child.kill(); } catch {} settle(); }, 15_000).unref?.();
+    } catch { settle(); }
   });
 }
