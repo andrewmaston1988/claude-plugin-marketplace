@@ -105,3 +105,64 @@ test("isMergedInto: false when target has moved ahead of feature (diverged)", ()
 test("isMergedInto: false for nonexistent path", () => {
   strictEqual(isMergedInto("master", "feature/z", "/nonexistent/xyz"), false);
 });
+
+// ── on_merge_ready sibling-iteration logic ────────────────────────────────────
+// Tests verify the filter predicate that replaced the single .find() call.
+// We test the shape of the predicate rather than calling runTick end-to-end,
+// which would require a fully-wired DB and filesystem.
+
+function unfiredMergeRows(rows) {
+  return rows.filter(r =>
+    r.stage === "merge" &&
+    !(r.notes_extra || "").includes("[merge-ready-fired]")
+  );
+}
+
+test("unfired filter: two siblings at merge → both returned", () => {
+  const rows = [
+    { feature: "feat-a", stage: "merge", notes_extra: null },
+    { feature: "feat-b", stage: "merge", notes_extra: null },
+  ];
+  const result = unfiredMergeRows(rows);
+  strictEqual(result.length, 2);
+  ok(result.some(r => r.feature === "feat-a"));
+  ok(result.some(r => r.feature === "feat-b"));
+});
+
+test("unfired filter: one sibling already marked → only unmarked returned", () => {
+  const rows = [
+    { feature: "feat-a", stage: "merge", notes_extra: "[merge-ready-fired]" },
+    { feature: "feat-b", stage: "merge", notes_extra: null },
+  ];
+  const result = unfiredMergeRows(rows);
+  strictEqual(result.length, 1);
+  strictEqual(result[0].feature, "feat-b");
+});
+
+test("unfired filter: single row at merge → returned once", () => {
+  const rows = [
+    { feature: "solo", stage: "merge", notes_extra: null },
+  ];
+  const result = unfiredMergeRows(rows);
+  strictEqual(result.length, 1);
+  strictEqual(result[0].feature, "solo");
+});
+
+test("unfired filter: single already-marked row → empty", () => {
+  const rows = [
+    { feature: "solo", stage: "merge", notes_extra: "prev [merge-ready-fired]" },
+  ];
+  const result = unfiredMergeRows(rows);
+  strictEqual(result.length, 0);
+});
+
+test("unfired filter: non-merge rows ignored", () => {
+  const rows = [
+    { feature: "feat-dev",    stage: "dev",    notes_extra: null },
+    { feature: "feat-review", stage: "review", notes_extra: null },
+    { feature: "feat-merge",  stage: "merge",  notes_extra: null },
+  ];
+  const result = unfiredMergeRows(rows);
+  strictEqual(result.length, 1);
+  strictEqual(result[0].feature, "feat-merge");
+});

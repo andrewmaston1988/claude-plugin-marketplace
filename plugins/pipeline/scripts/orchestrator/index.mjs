@@ -15,6 +15,7 @@ import {
   readState, writeState, deleteState, pidAlive, startupGuard,
 } from "./state-file.mjs";
 import { spawnSession, spawnMerge, isDirtyTree, isMergedInto } from "./spawn.mjs";
+import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 import { reconcileSessions } from "./reaper.mjs";
 import { orchestratorWorktreePath } from "../worktree-paths.mjs";
 import { spawnGovernor, spawnMonthlyGovernor } from "./governor.mjs";
@@ -165,6 +166,25 @@ async function pollOnce({
     if (countActiveSessions(db) >= maxConcurrent) continue;
 
     const rows = rowsList(db, project);
+
+    // Fire on_merge_ready for ALL unfired merge-stage rows (not just the first).
+    const unfired = rows.filter(r =>
+      r.stage === "merge" &&
+      depsMet(r, rows, logFn) &&
+      !(r.notes_extra || "").includes("[merge-ready-fired]")
+    );
+    for (const row of unfired) {
+      const rowBranch       = row.branch || `autonomous/${row.feature}`;
+      const rowTargetBranch = row.target_branch || detectDefaultBranch(projectRoot);
+      spawnMergeReadyHook(project, row.feature, rowBranch, rowTargetBranch, projectRoot).catch(() => {});
+      try {
+        const n = row.notes_extra || "";
+        rowUpdate(db, project, row.feature, { notes_extra: n ? `${n} [merge-ready-fired]` : "[merge-ready-fired]" });
+      } catch {}
+      logFn?.(`[${project}] on_merge_ready fired for '${row.feature}'`);
+    }
+
+    // Spawning a merge SESSION still needs the concurrency guards — one per project per tick.
     const mergeRow = rows.find(r =>
       r.stage === "merge" &&
       depsMet(r, rows, logFn)
@@ -172,18 +192,8 @@ async function pollOnce({
     if (!mergeRow) continue;
 
     const branch       = mergeRow.branch || `autonomous/${mergeRow.feature}`;
-    const targetBranch = mergeRow.target_branch || "master";
+    const targetBranch = mergeRow.target_branch || detectDefaultBranch(projectRoot);
 
-    // Fire on_merge_ready ONCE, regardless of active sessions (spawns no session).
-    if (!(mergeRow.notes_extra || "").includes("[merge-ready-fired]")) {
-      spawnMergeReadyHook(project, mergeRow.feature, branch, targetBranch, projectRoot).catch(() => {});
-      try {
-        const n = mergeRow.notes_extra || "";
-        rowUpdate(db, project, mergeRow.feature, { notes_extra: n ? `${n} [merge-ready-fired]` : "[merge-ready-fired]" });
-      } catch {}
-    }
-
-    // Spawning a merge SESSION still needs the concurrency guards.
     if (!cfg.autoMerge) continue;
     if (activeProcs.has(project)) continue;
     if (projectIsActive(db, project)) continue;
