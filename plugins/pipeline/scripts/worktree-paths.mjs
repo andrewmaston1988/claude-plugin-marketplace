@@ -1,5 +1,6 @@
 import { dirname, basename } from "node:path";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
+import { PIPELINE_DEFAULTS } from "../src/config-defaults.mjs";
 
 // Two resolvers share one substitution helper and one config loader. They
 // model two distinct contracts:
@@ -20,11 +21,6 @@ import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 const DEFAULT_ORCHESTRATOR_TEMPLATE = "{root_parent}/{project}-wt/{branch_type}-{branch_local}";
 const DEFAULT_HANDLER_TEMPLATE      = "{root_parent}/.worktrees/{kind}-{feature}";
 
-// Per-kind path under the handler worktree. Override via cfg.report_subpath.
-const DEFAULT_REPORT_SUBPATH = {
-  "code-review": "repos/{project}/reports",
-  "qa-test":     "repos/{project}/test-reports",
-};
 
 // "autonomous/foo-bar" → "foo-bar"; "interactive/x" → "x"; "bare" → "bare".
 // Used so worktree leaf directories aren't prefixed with the branch's category.
@@ -91,7 +87,7 @@ export function reportPath({ kind, feature, projectRoot, project, retryN, _confi
   const cfg = _config ?? loadPipelineConfig();
   const wt = handlerWorktreePath({ project, projectRoot, kind, feature, _config: cfg });
   const projectName = project || (projectRoot ? basename(projectRoot) : "");
-  const subpathTemplate = cfg.report_subpath?.[kind] ?? DEFAULT_REPORT_SUBPATH[kind];
+  const subpathTemplate = cfg.report_subpath?.[kind] ?? PIPELINE_DEFAULTS.report_subpath[kind];
   const sub = substitute(subpathTemplate, { project: projectName, feature: feature || "" });
   // Forward-slash join: handlerWorktreePath already emits forward slashes.
   const dir = `${wt}/${sub}`.replace(/\\/g, "/");

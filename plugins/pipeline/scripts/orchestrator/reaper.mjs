@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
-import { join, basename, relative } from "node:path";
+import { basename, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   rowGet, rowUpdate, setLastError,
