@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
-import { join, basename, relative } from "node:path";
+import { basename, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   rowGet, rowUpdate, setLastError,
@@ -9,7 +9,7 @@ import {
 } from "../pipeline-db/index.mjs";
 import { gitWorktreeClean, sessionTypeFromNotes } from "./spawn.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
-import { orchestratorWorktreePath, handlerWorktreePath } from "../worktree-paths.mjs";
+import { orchestratorWorktreePath, reportPath } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { generateSessionFile } from "../session-gen.mjs";
 import { pidAlive } from "./state-file.mjs";
@@ -146,17 +146,13 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
               });
               notifyFailure(project, feature, "review-touched-source", { dryRun });
             } else {
-              // Reports land in the code-review worktree under repos/{project}/reports/.
-              // Filenames carry a date + correlation_id, so match by glob.
               const retryN = row.review_retries || 0;
-              const reviewWt = handlerWorktreePath({ project, projectRoot, kind: "code-review", feature });
-              const reportsDir = join(reviewWt, "repos", project, "reports");
+              const { dir: reportsDir, glob: pattern } = reportPath({
+                kind: "code-review", project, projectRoot, feature, retryN,
+              });
               let hasReport = false;
               if (existsSync(reportsDir)) {
                 try {
-                  const pattern = new RegExp(
-                    `^review-report-.*${feature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}.*retry${retryN}.*\\.md$`
-                  );
                   hasReport = readdirSync(reportsDir).some((file) => pattern.test(file));
                 } catch {}
               }

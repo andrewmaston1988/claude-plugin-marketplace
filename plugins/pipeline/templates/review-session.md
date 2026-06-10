@@ -123,15 +123,12 @@ Use `$N` as `<N>` in the report filename (heredoc below); use `${RETRY_LABEL}` i
 **Read prior review reports (if any).** When `$N > 0`, previous review cycles exist. Read each prior report so you know what was flagged before and can verify whether the dev actually addressed it:
 
 ```bash
-CLAUDE_PARENT="$(dirname "{{PROJECT_ROOT}}")"
-CODE_REVIEW_WT="${CLAUDE_PARENT}/CLAUDE-wt/code-review-{{FEATURE}}"
-
-# Check the code-review worktree first (pre-merge — most common for active features)
-if [ -d "$CODE_REVIEW_WT" ]; then
-  ls "${CODE_REVIEW_WT}/repos/{{PROJECT}}/reports/review-report-*{{FEATURE}}*.md" 2>/dev/null
+# Pre-merge: reports written by prior review cycles into the code-review worktree.
+if [ -d "{{CODE_REVIEW_WT}}" ]; then
+  ls {{REVIEW_REPORTS_DIR}}/review-report-*{{FEATURE}}*.md 2>/dev/null
 fi
 
-# Also check the merged reports dir
+# Post-merge: same reports landed under the project's own reports dir.
 ls {{PROJECT_ROOT}}/reports/review-report-*{{FEATURE}}*.md 2>/dev/null
 ```
 
@@ -155,11 +152,11 @@ If `$N == 0` (fresh first attempt), skip this step entirely — no prior-cycle s
 
 ```bash
 cd {{PROJECT_ROOT}}
-git worktree add ../CLAUDE-wt/code-review-{{FEATURE}} -b code-review/{{FEATURE}} main
+git worktree add {{CODE_REVIEW_WT}} -b code-review/{{FEATURE}} main
 cd {{CWD}}
 ```
 
-Use `../CLAUDE-wt/code-review-{{FEATURE}}` (or its absolute equivalent) as `<CLAUDE-wt>` in subsequent steps. All report writes and commits go through this worktree — never into `{{PROJECT_ROOT}}` directly.
+Use `{{CODE_REVIEW_WT}}` as `<CLAUDE-wt>` in subsequent steps. All report writes and commits go through this worktree — never into `{{PROJECT_ROOT}}` directly.
 
 **Truncate large Bash outputs.** Any command that may produce large output (`git log`, `git diff` against a big branch) must be piped through `| head -200` or similar. Don't let raw diff output flood your context — the `/code-review` skill reads the diff itself; you don't need to inline the full content.
 
@@ -184,10 +181,10 @@ Anything other than `ready_to_ship` or `needs_work` passed to `review-complete` 
 **Define the report path ONCE as a shell variable** — the path is used three times below (mkdir, heredoc target, `review-complete --report`, and in the notify message), and drift between any two of them causes a silent `Report not found` failure. **You MUST set `REPORT_PATH` in your shell session and reference `$REPORT_PATH` in every place it appears** — do not retype the path inline:
 
 ```bash
-REPORT_PATH={{PROJECT_ROOT}}/../CLAUDE-wt/code-review-{{FEATURE}}/repos/{{PROJECT}}/reports/review-report-<date>-{{FEATURE}}-retry<N>-${CORRELATION_ID}.md
+REPORT_PATH={{REVIEW_REPORTS_DIR}}/review-report-<date>-{{FEATURE}}-retry<N>-${CORRELATION_ID}.md
 ```
 
-Note the literal path structure: `code-review-{{FEATURE}}/repos/{{PROJECT}}/reports/...` — the `/repos/{{PROJECT}}/` segment is load-bearing (matches where the merger expects to find the report on the code-review worktree's filesystem) and MUST be present. The `{{PROJECT_ROOT}}/..` prefix makes this an absolute path after session-generate substitution — never use a relative `../CLAUDE-wt/` form, as bash tool cwd resets between calls and will cause a silent `Report not found` failure.
+`{{REVIEW_REPORTS_DIR}}` is the absolute reports directory inside the code-review worktree; it's substituted by session-gen from a single config source so the reaper and the template can't drift. Never reconstruct this path inline — bash tool cwd resets between calls and a relative form would silently fail with `Report not found`.
 
 **Write the report file via Bash heredoc** — your tool surface does NOT include `Write`. The heredoc delimiter MUST be single-quoted and unique (`'PIPELINE_REVIEW_REPORT_SENTINEL_END'`) so the report content (which may include `$` expansions, backticks, or accidental `EOF` strings) can't break the heredoc parser:
 
@@ -290,7 +287,7 @@ EOF
 ```
 
 ```bash
-cd {{CWD}}   # ensure $REPORT_PATH (a relative path) resolves correctly
+cd {{CWD}}
 {{PIPELINE_BIN}} review-complete \
     {{PROJECT}} {{FEATURE}} \
     --report "$REPORT_PATH" \
