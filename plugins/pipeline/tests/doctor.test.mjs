@@ -28,13 +28,12 @@ function findCheck(results, label) {
   return results.find(r => r.label === label) ?? null;
 }
 
-test("doctor: returns exactly 15 results", async () => {
-  // 13 prior checks + 2 added by paths-and-config-base: pipeline-home,
-  // path-resolution-consistency.
+test("doctor: returns exactly 16 results", async () => {
+  // 15 prior checks + 1 added by phase 3b: worktree-layout-stale.
   const { tmp, paths, cfgPath } = freshPaths();
   try {
     const results = await runDoctor({ paths, configPath: cfgPath });
-    equal(results.length, 15);
+    equal(results.length, 16);
   } finally { cleanup(tmp); }
 });
 

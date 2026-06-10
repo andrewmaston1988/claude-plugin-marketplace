@@ -9,7 +9,7 @@ import {
 } from "../pipeline-db/index.mjs";
 import { gitWorktreeClean, sessionTypeFromNotes } from "./spawn.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
-import { orchestratorWorktreePath, reportPath } from "../worktree-paths.mjs";
+import { featureWorktreePath, reportPath } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { generateSessionFile } from "../session-gen.mjs";
 import { pidAlive } from "./state-file.mjs";
@@ -135,7 +135,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
         } else if (row) {
           try {
             const planStem = basename(row.plan_file || "", ".md") || "";
-            const spawnWt  = orchestratorWorktreePath({ project, projectRoot, branch: `autonomous/${planStem}` });
+            const spawnWt  = featureWorktreePath({ project, projectRoot, feature: planStem });
             const existing = row.notes_extra || "";
 
             if (!gitWorktreeClean(spawnWt, logFn)) {
@@ -186,8 +186,8 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
 
             if (recoverable) {
               try {
-                const cwd      = orchestratorWorktreePath({
-                  project, projectRoot, branch: `autonomous/${planStem}`,
+                const cwd      = featureWorktreePath({
+                  project, projectRoot, feature: planStem,
                 });
                 const sessionPath = generateSessionFile(project, row.plan_file, "review", {
                   projectRoot,

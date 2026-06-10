@@ -87,9 +87,9 @@ function _isAbsoluteAny(p) {
 
 const DEFAULT_ORCHESTRATOR_TEMPLATE = "{root_parent}/{project}-wt/{branch_type}-{branch_local}";
 const DEFAULT_HANDLER_TEMPLATE      = "{root_parent}/.worktrees/{kind}-{feature}";
-// Phase 3a seam: featureWorktreePath default mirrors the orchestrator shape so
-// nothing moves on disk. Phase 3b changes this default to the per-feature shape.
-const DEFAULT_WORKTREE_TEMPLATE     = "{root_parent}/{project}-wt/{branch_type}-{branch_local}";
+// Phase 3b: one worktree per feature; project-namespaced, branch-agnostic.
+const DEFAULT_WORKTREE_TEMPLATE     = "{root_parent}/.worktrees/{project}/{feature}";
+const DEFAULT_PUBLISH_BRANCH_TEMPLATE = "{kind}/{feature}";
 
 function _commonVars({ project, projectRoot }) {
   return {
@@ -142,9 +142,16 @@ export function featureWorktreePath({ project, projectRoot, feature, _config } =
   }, { resolveBase: projectRoot });
 }
 
-// Compat wrapper. Same default + signature as before; routed through
-// resolveTemplate so `~/` and relative overrides resolve consistently.
+// Deprecated compat wrapper. Phase 3b: callers should use featureWorktreePath.
+// Emits a one-shot console.warn so leftover call sites are visible during the
+// transition. Suppressed when invoked from worktree-paths tests (NODE_ENV=test
+// + PIPELINE_SUPPRESS_DEPRECATED) so the test suite stays quiet.
+let _orchWarned = false;
 export function orchestratorWorktreePath({ project, projectRoot, branch, _config } = {}) {
+  if (!_orchWarned && !process.env.PIPELINE_SUPPRESS_DEPRECATED) {
+    console.warn("[deprecation] orchestratorWorktreePath is deprecated — use featureWorktreePath (phase 3b)");
+    _orchWarned = true;
+  }
   const cfg = _config ?? loadPipelineConfig();
   const template = cfg.orchestrator_worktree_base || DEFAULT_ORCHESTRATOR_TEMPLATE;
   return resolveTemplate(template, {
@@ -155,8 +162,13 @@ export function orchestratorWorktreePath({ project, projectRoot, branch, _config
   }, { resolveBase: projectRoot });
 }
 
-// Compat wrapper for the qa-test / code-review handler worktree.
+// Deprecated compat wrapper. Phase 3b: callers should use featureWorktreePath.
+let _handlerWarned = false;
 export function handlerWorktreePath({ project, projectRoot, kind, feature, _config } = {}) {
+  if (!_handlerWarned && !process.env.PIPELINE_SUPPRESS_DEPRECATED) {
+    console.warn("[deprecation] handlerWorktreePath is deprecated — use featureWorktreePath (phase 3b)");
+    _handlerWarned = true;
+  }
   const cfg = _config ?? loadPipelineConfig();
   const template = cfg.handler_worktree_base || DEFAULT_HANDLER_TEMPLATE;
   return resolveTemplate(template, {
@@ -167,18 +179,20 @@ export function handlerWorktreePath({ project, projectRoot, kind, feature, _conf
 }
 
 // Single source of truth for review-report and test-report locations.
-// Returns { wt, dir, glob }. Templates / session-gen / reaper all call this.
+// Returns { wt, dir, glob, publishBranch }. Templates / session-gen / reaper all call this.
 // retryN narrows the code-review glob to a specific cycle; null matches all.
+// Phase 3b: reports live under the single feature worktree (featureWorktreePath);
+// `publishBranch` is the side-branch the stash-switchback dance commits the report to.
 export function reportPath({ kind, feature, projectRoot, project, retryN, _config } = {}) {
   if (kind !== "code-review" && kind !== "qa-test") {
     throw new Error(`reportPath: unknown kind '${kind}' (expected "code-review" or "qa-test")`);
   }
   const cfg = _config ?? loadPipelineConfig();
-  const wt = handlerWorktreePath({ project, projectRoot, kind, feature, _config: cfg });
+  const wt = featureWorktreePath({ project, projectRoot, feature, _config: cfg });
   const projectName = project || (projectRoot ? basename(projectRoot) : "");
   const subpathTemplate = cfg.report_subpath?.[kind] ?? PIPELINE_DEFAULTS.report_subpath[kind];
   const sub = substitute(subpathTemplate, { project: projectName, feature: feature || "" });
-  // Forward-slash join: handlerWorktreePath already emits forward slashes.
+  // Forward-slash join: featureWorktreePath already emits forward slashes.
   const dir = `${wt}/${sub}`.replace(/\\/g, "/");
   const featureEsc = String(feature || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const glob = kind === "code-review"
@@ -188,5 +202,7 @@ export function reportPath({ kind, feature, projectRoot, project, retryN, _confi
           : `^review-report-.*${featureEsc}.*retry${retryN}.*\\.md$`,
       )
     : new RegExp(`^test-report-.*${featureEsc}.*\\.md$`);
-  return { wt, dir, glob };
+  const publishBranchTemplate = cfg.report_publish_branch_template || DEFAULT_PUBLISH_BRANCH_TEMPLATE;
+  const publishBranch = substitute(publishBranchTemplate, { kind, feature: feature || "" });
+  return { wt, dir, glob, publishBranch };
 }

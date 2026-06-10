@@ -165,43 +165,43 @@ test("all 4 session types on the same branch resolve to the same orchestrator wo
 
 // ── reportPath ───────────────────────────────────────────────────────────────
 
-test("reportPath: code-review default dir nests under handler worktree", () => {
+test("reportPath: code-review default dir nests under feature worktree (phase 3b)", () => {
   const { wt, dir } = reportPath({
     kind: "code-review", project: "p", projectRoot: "/x/p", feature: "feat-y", _config: {},
   });
-  equal(wt,  "/x/.worktrees/code-review-feat-y");
-  equal(dir, "/x/.worktrees/code-review-feat-y/repos/p/reports");
+  equal(wt,  "/x/.worktrees/p/feat-y");
+  equal(dir, "/x/.worktrees/p/feat-y/reports");
 });
 
-test("reportPath: qa-test default dir uses test-reports subpath", () => {
+test("reportPath: qa-test default dir uses test-reports subpath (phase 3b)", () => {
   const { dir } = reportPath({
     kind: "qa-test", project: "p", projectRoot: "/x/p", feature: "feat-y", _config: {},
   });
-  equal(dir, "/x/.worktrees/qa-test-feat-y/repos/p/test-reports");
+  equal(dir, "/x/.worktrees/p/feat-y/test-reports");
 });
 
 test("reportPath: cfg.report_subpath override is honoured per-kind", () => {
   const cfg = { report_subpath: { "code-review": "custom/{project}/cr", "qa-test": "custom/{project}/qa" } };
   const cr = reportPath({ kind: "code-review", project: "p", projectRoot: "/x/p", feature: "f", _config: cfg });
   const qa = reportPath({ kind: "qa-test",     project: "p", projectRoot: "/x/p", feature: "f", _config: cfg });
-  equal(cr.dir, "/x/.worktrees/code-review-f/custom/p/cr");
-  equal(qa.dir, "/x/.worktrees/qa-test-f/custom/p/qa");
+  equal(cr.dir, "/x/.worktrees/p/f/custom/p/cr");
+  equal(qa.dir, "/x/.worktrees/p/f/custom/p/qa");
 });
 
-test("reportPath: handler_worktree_base override flows through to wt + dir", () => {
-  const cfg = { handler_worktree_base: "{root_parent}/CLAUDE-wt/{kind}-{feature}" };
+test("reportPath: worktree_base override flows through to wt + dir", () => {
+  const cfg = { worktree_base: "{root_parent}/CLAUDE-wt/{project}/{feature}" };
   const { wt, dir } = reportPath({
     kind: "code-review", project: "p", projectRoot: "/x/p", feature: "f", _config: cfg,
   });
-  equal(wt,  "/x/CLAUDE-wt/code-review-f");
-  equal(dir, "/x/CLAUDE-wt/code-review-f/repos/p/reports");
+  equal(wt,  "/x/CLAUDE-wt/p/f");
+  equal(dir, "/x/CLAUDE-wt/p/f/reports");
 });
 
 test("reportPath: project name derives from projectRoot when omitted", () => {
   const { dir } = reportPath({
     kind: "code-review", projectRoot: "/x/myproj", feature: "f", _config: {},
   });
-  equal(dir, "/x/.worktrees/code-review-f/repos/myproj/reports");
+  equal(dir, "/x/.worktrees/myproj/f/reports");
 });
 
 test("reportPath: glob matches retry-N report when retryN given", () => {
@@ -240,13 +240,11 @@ test("reportPath: feature with regex metachars is escaped in glob", () => {
 
 // ── featureWorktreePath ──────────────────────────────────────────────────────
 
-test("featureWorktreePath: default template collapses empty branch context", () => {
-  // Default mirrors orchestrator shape; with no branch the {branch_type}-{branch_local}
-  // pair substitutes to "-" — phase 3b moves the default to a feature-only shape.
+test("featureWorktreePath: default template is per-feature (phase 3b)", () => {
   const out = featureWorktreePath({
     project: "p", projectRoot: "/x/p", feature: "feat-y", _config: {},
   });
-  equal(out, "/x/p-wt/-");
+  equal(out, "/x/.worktrees/p/feat-y");
 });
 
 test("featureWorktreePath: operator override with {feature}", () => {

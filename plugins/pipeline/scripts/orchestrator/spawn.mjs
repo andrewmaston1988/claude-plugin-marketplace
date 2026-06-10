@@ -9,7 +9,7 @@ import {
   appendSpawn,
 } from "../pipeline-db/index.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
-import { orchestratorWorktreePath } from "../worktree-paths.mjs";
+import { featureWorktreePath } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 
@@ -253,7 +253,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
         return null;
       }
 
-      const wtPath = orchestratorWorktreePath({ project, projectRoot, branch });
+      const wtPath = featureWorktreePath({ project, projectRoot, feature: planStem });
       const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
       if (ensureWorktree(projectRoot, wtPath, branch, targetBranch, logFn)) {
         cwd = wtPath;
