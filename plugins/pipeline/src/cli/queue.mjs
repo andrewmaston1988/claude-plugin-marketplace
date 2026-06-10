@@ -63,6 +63,9 @@ function queueDepsExtract(planFilePath) {
   }
   if (!blockLines.length) return "";
 
+  // "none" / "- none" means explicitly no dependencies — not a parse failure.
+  if (/^\s*[-*]?\s*none\s*$/i.test(blockLines.join(" ").trim())) return "";
+
   const blockText = blockLines.join(" ");
   let slugs = [];
 
