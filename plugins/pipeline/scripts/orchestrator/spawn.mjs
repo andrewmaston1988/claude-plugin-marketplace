@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, basename, delimiter as pathDelimiter } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -198,6 +198,24 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   const planStem       = basename(row.plan_file || "", ".md") || "";
   const pipelineBranch = (row.branch || "—").trim();
   let cwd = null;
+
+  // Bootstrap absent project root for worktree-eligible sessions
+  if (!existsSync(projectRoot) && planStem && ["dev", "test", "review"].includes(stype)) {
+    try {
+      mkdirSync(projectRoot, { recursive: true });
+      const defaultBranch = detectDefaultBranch(projectRoot) || "main";
+      spawnSync("git", ["init", "-q", "-b", defaultBranch], { cwd: projectRoot, windowsHide: true });
+      writeFileSync(join(projectRoot, "README.md"), `# ${project}\n\nAutonomous-managed project (orchestrator bootstrap).\n`, "utf8");
+      spawnSync("git", ["-C", projectRoot, "add", "README.md"], { windowsHide: true });
+      spawnSync("git", ["-C", projectRoot, "-c", "commit.gpgsign=false", "commit", "-m", "Initial commit (orchestrator bootstrap)"], {
+        cwd: projectRoot, windowsHide: true,
+        env: { ...process.env, GIT_AUTHOR_NAME: "Claude Agent", GIT_AUTHOR_EMAIL: "claude-agent@orchestrator", GIT_COMMITTER_NAME: "Claude Agent", GIT_COMMITTER_EMAIL: "claude-agent@orchestrator" },
+      });
+      logFn(`[${project}] bootstrap_project — created git repo at ${projectRoot}`, "WARN");
+    } catch (e) {
+      logFn(`[${project}] project bootstrap failed: ${e.message}`, "ERROR");
+    }
+  }
 
   if (existsSync(projectRoot)) {
     if (planStem && ["dev", "test", "review"].includes(stype)) {
