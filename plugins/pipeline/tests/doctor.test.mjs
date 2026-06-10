@@ -4,7 +4,7 @@
 // on the host's `claude` CLI presence.
 import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runDoctor, printDoctor, doctorExitCode } from "../src/setup/doctor.mjs";
@@ -28,11 +28,13 @@ function findCheck(results, label) {
   return results.find(r => r.label === label) ?? null;
 }
 
-test("doctor: returns exactly 13 results", async () => {
+test("doctor: returns exactly 15 results", async () => {
+  // 13 prior checks + 2 added by paths-and-config-base: pipeline-home,
+  // path-resolution-consistency.
   const { tmp, paths, cfgPath } = freshPaths();
   try {
     const results = await runDoctor({ paths, configPath: cfgPath });
-    equal(results.length, 13);
+    equal(results.length, 15);
   } finally { cleanup(tmp); }
 });
 
@@ -111,7 +113,7 @@ test("doctor: Governance channel set + CLAUDE_SLACK_PLUGIN missing file → chec
     process.env.CLAUDE_SLACK_PLUGIN = join(tmp, "missing-plugin.mjs");
     const results = await runDoctor({ paths, configPath: cfgPath });
     const slack  = findCheck(results, "Governance channel set");
-    const handler = findCheck(results, "claude-slack on PATH");
+    const handler = findCheck(results, "claude-slack-plugin");
     ok(slack && slack.ok, "Slack channel should pass");
     ok(handler && !handler.ok && handler.warn, "claude-slack should warn (missing file)");
     match(handler.detail, /file missing/);
@@ -127,7 +129,7 @@ test("doctor: Slack disabled → check 8 skipped (warns 'skipped — no Slack ch
   try {
     // No config → null slack_channel → check 8 should report 'skipped'
     const results = await runDoctor({ paths, configPath: cfgPath });
-    const handler = findCheck(results, "claude-slack on PATH");
+    const handler = findCheck(results, "claude-slack-plugin");
     ok(handler && !handler.ok && handler.warn);
     match(handler.detail, /skipped/);
   } finally { cleanup(tmp); }
@@ -149,7 +151,7 @@ test("doctorExitCode: any hard fail → 1", () => {
   equal(doctorExitCode(r), 1);
 });
 
-test("printDoctor: tristate icons match", (t) => {
+test("printDoctor: tristate icons match", () => {
   const calls = [];
   const origWrite = process.stdout.write.bind(process.stdout);
   process.stdout.write = (s) => { calls.push(s); return true; };

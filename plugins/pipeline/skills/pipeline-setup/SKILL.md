@@ -8,6 +8,25 @@ Walk the user through pipeline setup conversationally, **explaining each choice*
 
 **Tone**: warm, peer-level. Each question gets a one-sentence "what this does" + a one-sentence "default behaviour" + a one-sentence "implication if you change it". The user shouldn't have to read source to know what they're agreeing to.
 
+## How to surface each config option
+
+This skill MUST follow the same shape for every config key it prompts the user about. Adopted from the `paths-and-config-base` plan (§F); subsequent skill edits inherit the contract.
+
+For every key the skill surfaces:
+
+1. **Explain** in plain English what the key controls. One sentence.
+2. **Show the resolved default for this user's machine** — concrete values, not abstract templates. Run the resolver against this machine's `paths.configDir`, `projectRoot`, etc., and print the result. "Default: `~/.pipeline/notifications`" is wrong; "Default: `C:\Users\Andrew\.pipeline\notifications`" is right.
+3. **Give 2–3 example values** spanning common scenarios (per-project relative path, `~/...`, absolute path, `{config_dir}`-rooted, etc.).
+4. **Document consequences**: which files land where; what re-resolves on each plugin run; whether existing on-disk state has to migrate when the value changes.
+5. **Accept follow-ups** ("why?", "what if I set X?") from the same understanding — don't push the user back through the prompt to ask a clarifying question.
+
+Path-shaped values must go through `resolveTemplate(value, vars, { resolveBase, configDir })` exported from `plugins/pipeline/scripts/worktree-paths.mjs`. The placeholder vocabulary and `resolveBase` category for each key are defined in `plugins/pipeline/CLAUDE.md` "Path resolution"; do not invent ad-hoc resolution rules.
+
+The two environment-check values this skill always surfaces:
+
+- **pipeline-home** — `paths.configDir` for this platform. Mac/Windows: `~/.pipeline`. Linux: `$XDG_CONFIG_HOME/pipeline` (fallback `~/.config/pipeline`). Tell the user the resolved value and that orchestrator state, queue DB, and notification drop files land there.
+- **CLAUDE_SLACK_PLUGIN** — env override for the claude-slack notifier binary. Print resolved path + source (`env` / `cache` / `path` / not found). Explain that without it (and without a channel set) all Slack alerts silently no-op.
+
 ## Step 0 — Find the binary
 
 The plugin lives at one of these paths depending on install method:

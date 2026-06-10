@@ -1,6 +1,73 @@
-import { dirname, basename } from "node:path";
+import { dirname, basename, isAbsolute, resolve } from "node:path";
+import { homedir } from "node:os";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../src/config-defaults.mjs";
+
+// Pinned to the canonical vocabulary by tests; unknown placeholders pass through literally.
+export const PLACEHOLDER_KEYS = Object.freeze([
+  "root",
+  "root_parent",
+  "root_grandparent",
+  "project",
+  "feature",
+  "kind",
+  "branch",
+  "branch_type",
+  "branch_local",
+  "config_dir",
+]);
+
+// Empty/nullish → null (not "") so a missing guard can't route "" into
+// path.join and yield a CWD-relative path.
+export function resolveTemplate(
+  template,
+  vars = {},
+  { resolveBase, configDir } = {},
+) {
+  if (template == null || template === "") return null;
+  const substituted = substitute(String(template), {
+    ...vars,
+    config_dir: vars.config_dir ?? configDir ?? "",
+  });
+  const expanded = _expandTilde(substituted);
+  if (_isAbsoluteAny(expanded)) return expanded;
+  if (!resolveBase) return expanded;
+  return resolve(resolveBase, expanded);
+}
+
+// Resolve only the first token of a hook command (the binary/path);
+// trailing argv passes through unchanged.
+export function resolveHookFirstToken(hookVal, configDir) {
+  let raw = null;
+  if (!hookVal) return null;
+  if (typeof hookVal === "string") raw = hookVal;
+  else if (Array.isArray(hookVal) && hookVal[0]?.command) raw = hookVal[0].command;
+  if (!raw) return null;
+  const m = raw.match(/^(\S+)(\s.*)?$/);
+  if (!m) return raw;
+  const head = m[1];
+  const tail = m[2] || "";
+  const looksLikePath = /^~|^[/\\]|^[A-Za-z]:[\\/]|\{(config_dir|root|project)\}/.test(head);
+  if (!looksLikePath) return raw;
+  return resolveTemplate(head, {}, { resolveBase: configDir, configDir }) + tail;
+}
+
+function _expandTilde(p) {
+  if (p === "~") return homedir();
+  if (p.startsWith("~/") || p.startsWith("~\\")) {
+    return homedir() + p.slice(1);
+  }
+  return p;
+}
+
+// Cross-platform: node:path.isAbsolute only honours the host's rules.
+function _isAbsoluteAny(p) {
+  if (!p) return false;
+  if (isAbsolute(p)) return true;
+  if (/^[A-Za-z]:[\\/]/.test(p)) return true;
+  if (p.startsWith("\\\\") || p.startsWith("//")) return true;
+  return false;
+}
 
 // Two resolvers share one substitution helper and one config loader. They
 // model two distinct contracts:
