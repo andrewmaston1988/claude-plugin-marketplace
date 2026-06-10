@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { reportPath, handlerWorktreePath, resolveTemplate } from "./worktree-paths.mjs";
 import { getPaths } from "../src/paths.mjs";
+import { resolvePlanFile } from "../src/plans-resolver.mjs";
 
 function _todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -98,12 +99,10 @@ export function generateSessionFile(
   const date = _todayStr();
   const sessionSlug = `${sessionType}-${date}-${planStem}`;
 
-  // Plan content is the user's plan file. If the path is relative, resolve
-  // it under projectRoot/plans/ — matches the convention rows.mjs uses for
-  // the row's plan_file column.
-  const planPath = planFile.startsWith("/") || /^[a-zA-Z]:[/\\]/.test(planFile)
-    ? planFile
-    : join(projectRoot, "plans", planFile);
+  // Plan content is the user's plan file. Relative paths route through
+  // resolvePlanFile → resolvePlansDir, which honours cfg.plansDir (so an
+  // operator with plans in a sibling repo sees the right file).
+  const planPath = resolvePlanFile(planFile, { project, projectRoot, _config: cfg });
   const planContent = existsSync(planPath) ? readFileSync(planPath, "utf8") : "";
 
   const templatePath = _resolveTemplatePath(sessionType, cfg);

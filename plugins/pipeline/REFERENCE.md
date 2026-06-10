@@ -435,9 +435,17 @@ The plan-file path can be:
 
 1. **Absolute** — used as-is.
 2. **Relative with a slash** — resolved against the cwd.
-3. **Bare filename** — resolved under `<projectRoot>/plans/<file>` (the conventional location).
+3. **Bare filename** — resolved under the project's plans directory (see precedence below).
 
 Whatever resolution wins, the **absolute path** is stored on the row. Every downstream consumer (session-gen, orchestrator, merge) reads it from there — no re-resolution, no convention drift.
+
+**Plans-directory precedence** (used by `resolvePlansDir()` in `src/plans-resolver.mjs`; every consumer routes through this helper — no second implementation):
+
+1. Project row's `plans_dir` column (literal absolute path; `pipeline project-add --plans-dir <abs>` / `project-update`). Wins per-project.
+2. `cfg.plansDir` from `~/.pipeline/config.json` — a template substituted through `resolveTemplate`.
+3. `<projectRoot>/plans` — historical default.
+
+`resolvePlanFile(planFile, opts)` resolves a single filename: absolute paths pass through; bare filenames join under the resolved plans directory.
 
 ### Session types
 
