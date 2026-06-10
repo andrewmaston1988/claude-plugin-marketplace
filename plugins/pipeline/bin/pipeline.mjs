@@ -9,7 +9,7 @@ import { run as runStage     } from "../src/cli/stage.mjs";
 import { run as runRows      } from "../src/cli/rows.mjs";
 import { run as runQueue     } from "../src/cli/queue.mjs";
 import { run as runProjects  } from "../src/cli/projects.mjs";
-import { getFlag } from "../src/cli/helpers.mjs";
+import { getFlag, detectDefaultBranch } from "../src/cli/helpers.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -92,7 +92,7 @@ const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
       return;
     }
     const branch       = row.branch || `autonomous/${feature}`;
-    const targetBranch = row.target_branch || "master";
+    const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
     const diverged     = !isMergedInto(targetBranch, branch, projectRoot);
     const dirty        = isDirtyTree(projectRoot);
     const model        = (diverged || dirty) ? "claude-sonnet-4-6" : "claude-haiku-4-5";
@@ -253,6 +253,7 @@ Other:
 //   --review-skill <name>      override review.skill (e.g. "ultrareview").
 //   --review-deep-flag <flag>  override review.deep_flag ("" to clear).
 //   --plans-dir <path>         override plansDir (e.g. "../CLAUDE/repos/{project}/plans").
+//   --recognised-branch-types <list>  comma-sep branch-type prefixes (default "autonomous,interactive").
 //   --slack <channel>          set Slack channel ("" to disable).
 //   --register-project N:P     register a project (repeatable; N=name, P=abs path).
 //   --no-deps                  skip npm install.
@@ -284,6 +285,7 @@ function _parseSetupOpts(argv) {
   const pc = get("--pipeline-channel");   if (pc !== null) opts.pipelineChannel   = pc;
   const mh = get("--merge-hook");         if (mh !== null) opts.mergeHook         = mh;
   const om = get("--on-merge");           if (om !== null) opts.onMerge           = om;
+  const rbt = get("--recognised-branch-types"); if (rbt !== null) opts.recognisedBranchTypes = rbt;
 
   // --register-project Name:Absolute/Path/To/Repo (repeatable; loop argv)
   opts.registerProjects = [];

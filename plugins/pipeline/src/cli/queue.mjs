@@ -1,9 +1,11 @@
+// Target-branch resolution precedence documented in REFERENCE.md.
 import { existsSync, readFileSync } from "node:fs";
 import { join, basename, isAbsolute, resolve, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { close, rowGet, rowAdd, rowUpdate } from "../../scripts/pipeline-db/index.mjs";
 import { getFlag, detectDefaultBranch } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
+import { loadPipelineConfig } from "../pipeline-config.mjs";
 
 const QUEUE_STOP_WORDS = new Set([
   "a","an","the","for","in","on","at","to","of","and","or","but",
@@ -128,6 +130,20 @@ function validateTargetBranch(value) {
   return [false, `invalid git branch name: ${value}`];
 }
 
+const DEFAULT_RECOGNISED_BRANCH_TYPES = ["autonomous", "interactive"];
+
+function warnUnrecognisedTargetPrefix(targetBranch, recognised) {
+  if (!targetBranch || !targetBranch.includes("/")) return;
+  const types = (recognised && recognised.length) ? recognised : DEFAULT_RECOGNISED_BRANCH_TYPES;
+  const prefix = targetBranch.split("/", 1)[0];
+  if (types.includes(prefix)) return;
+  process.stderr.write(
+    `WARNING: --target-branch '${targetBranch}' uses an unrecognised prefix '${prefix}/'. ` +
+    `Recognised types: ${types.map(t => `'${t}/'`).join(", ")}. ` +
+    `Proceeding — set cfg.recognised_branch_types if this is intentional.\n`
+  );
+}
+
 function lintTargetBranchProse(planPath) {
   let content;
   try { content = readFileSync(planPath, "utf8"); } catch { return [true, ""]; }
@@ -140,17 +156,6 @@ function lintTargetBranchProse(planPath) {
   }
   const body = lines.slice(bodyStart).join("\n");
 
-  if (body.includes("feature/")) {
-    for (let i = bodyStart; i < lines.length; i++) {
-      if (lines[i].includes("feature/")) {
-        return [false,
-          `ERROR: plan body mentions 'feature/' branch but no *Target-Branch: annotation found.\n` +
-          `Detected at line ${i + 1}: ${lines[i].trim()}\n\n` +
-          `Either:\n  - Add \`*Target-Branch: <branch-name>\` immediately under the plan title, OR\n` +
-          `  - Pass --target-branch main explicitly to confirm the default.`];
-      }
-    }
-  }
   const trgPat = /target.{0,5}branch/i;
   if (trgPat.test(body)) {
     for (let i = bodyStart; i < lines.length; i++) {
@@ -159,7 +164,7 @@ function lintTargetBranchProse(planPath) {
           `ERROR: plan body mentions 'target branch' but no *Target-Branch: annotation found.\n` +
           `Detected at line ${i + 1}: ${lines[i].trim()}\n\n` +
           `Either:\n  - Add \`*Target-Branch: <branch-name>\` immediately under the plan title, OR\n` +
-          `  - Pass --target-branch main explicitly to confirm the default.`];
+          `  - Pass --target-branch <branch> explicitly to confirm the default.`];
       }
     }
   }
@@ -268,6 +273,9 @@ export async function run(cmd, argv) {
       process.stderr.write(`ERROR: invalid target-branch '${targetBranch}': ${errMsg}\n`);
       return 1;
     }
+
+    const cfg = loadPipelineConfig();
+    warnUnrecognisedTargetPrefix(targetBranch, cfg.recognised_branch_types);
 
     const derivedSource = branch || `autonomous/${feature}`;
     if (targetBranch === derivedSource || targetBranch.startsWith("autonomous/")) {
