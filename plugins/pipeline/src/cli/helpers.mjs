@@ -5,8 +5,10 @@ export function getFlag(name, argv) {
   return i !== -1 && i + 1 < argv.length ? argv[i + 1] : null;
 }
 
+export const DEFAULT_TARGET_BRANCH_FALLBACK = "main";
+
 // Detect the repo's default branch for the given working directory.
-// Order: remote HEAD → git config init.defaultBranch → "master".
+// Order: remote HEAD → git config init.defaultBranch → DEFAULT_TARGET_BRANCH_FALLBACK.
 export function detectDefaultBranch(cwd) {
   const rHead = spawnSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD"],
     { cwd, stdio: ["ignore", "pipe", "pipe"] });
@@ -20,5 +22,5 @@ export function detectDefaultBranch(cwd) {
     const b = rCfg.stdout.toString().trim();
     if (b) return b;
   }
-  return "master";
+  return DEFAULT_TARGET_BRANCH_FALLBACK;
 }

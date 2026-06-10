@@ -31,6 +31,10 @@ export const PIPELINE_DEFAULTS = {
   autoMerge:  false,
   review:     { skill: "/code-review", deep_flag: "" },
   plansDir:   "plans",
+  // Branch-name prefixes recognised as orchestration branches. Used by the
+  // queue lint to warn (not error) when --target-branch carries an unfamiliar
+  // prefix. Defaults cover orchestrator-spawned and operator-driven sessions.
+  recognised_branch_types: ["autonomous", "interactive"],
   session_templates_dir: null,
   // Per-kind reports dir under the handler worktree. Placeholders: {project}, {feature}.
   report_subpath: {

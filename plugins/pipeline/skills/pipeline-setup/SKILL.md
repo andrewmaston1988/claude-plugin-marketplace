@@ -174,6 +174,23 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 
 **SKIP this question** unless the user volunteers that their plans are not under each project's root.
 
+### Question 3e — Branch conventions
+
+**What this does**: tells the queue lint which `<prefix>/...` patterns count as orchestration branches. `--target-branch` values whose prefix isn't on this list trigger a one-line warning (not an error) — useful when an operator passes an unfamiliar destination so they can confirm intent.
+
+**Default**: `["autonomous", "interactive"]`. Orchestrator-spawned rows live on `autonomous/<slug>`; operator-driven multi-commit work lives on `interactive/<slug>`. The wizard also shows the **detected default branch** of the first registered project (via `git symbolic-ref refs/remotes/origin/HEAD` then `git config init.defaultBranch`, falling back to `main`). That value is what `target_branch` resolves to when neither a flag nor a `*Target-Branch:` plan annotation is set.
+
+**If you skip**: defaults stand. The lint still warns on unrecognised prefixes; it never blocks queueing.
+
+**Precedence chain `queue-plan` uses for the row's `target_branch`** (first hit wins):
+
+1. `--target-branch <name>` flag.
+2. Plan file's `*Target-Branch: <name>*` annotation.
+3. `detectDefaultBranch(projectRoot)`.
+4. `DEFAULT_TARGET_BRANCH_FALLBACK` (`"main"`).
+
+**SKIP this question** unless the user volunteers a non-standard branch prefix (e.g. a corporate `feature/` or `release/` convention). If they do, accept a comma-separated list and pass it as `--recognised-branch-types <list>`.
+
 ### Question 4 — Autostart
 
 **What this does**: installs the orchestrator as an OS-level scheduled task so it starts at login and survives reboots — Task Scheduler on Windows, launchd plist on macOS, systemd user unit on Linux.

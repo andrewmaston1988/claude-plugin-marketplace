@@ -46,3 +46,16 @@ Report the resulting row to the user and tell them to watch progress with:
 If the orchestrator isn't running, surface a hint:
 
 > The orchestrator is not running. Start it with the `o` key in the TUI's agents panel, or run `node scripts/orchestrator/index.mjs` from the plugin dir.
+
+## Target branch resolution
+
+`queue-plan` resolves the row's `target_branch` (the merge destination) via this precedence chain — first hit wins:
+
+1. `--target-branch <name>` flag on the queue command.
+2. Plan file's `*Target-Branch: <name>*` annotation immediately under the title.
+3. `detectDefaultBranch(projectRoot)` — reads `git symbolic-ref refs/remotes/origin/HEAD`, then `git config init.defaultBranch`.
+4. `DEFAULT_TARGET_BRANCH_FALLBACK` (`"main"`) when both git lookups fail.
+
+Existing rows: once a row has `target_branch` stored, the column wins; the chain only runs at queue time. A row queued before the chain landed keeps whatever it had — set `--target-branch` explicitly to override.
+
+If `--target-branch` carries a prefix not in `cfg.recognised_branch_types` (default `["autonomous", "interactive"]`), `queue-plan` emits a one-line warning but proceeds. Unusual destinations are allowed; the warning is so an operator can confirm intent.

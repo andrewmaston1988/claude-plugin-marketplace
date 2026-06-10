@@ -11,8 +11,9 @@ import { loadPipelineConfig } from "../pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../config-defaults.mjs";
 import { renderTemplate, installAutostart, verifyAutostart } from "./autostart.mjs";
 import { runDoctor, printDoctor } from "./doctor.mjs";
-import { connectUnified, close as dbClose, projectAdd } from "../../scripts/pipeline-db/index.mjs";
+import { connectUnified, close as dbClose, projectAdd, projectList } from "../../scripts/pipeline-db/index.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
+import { detectDefaultBranch } from "../cli/helpers.mjs";
 
 // Non-interactive defaults — applied when `opts.nonInteractive === true` and the
 // caller didn't override the specific key. Designed so a future Claude (or CI)
@@ -171,6 +172,34 @@ export async function runWizard({ paths, log, opts = {} }) {
     if (unknown.length && !nonInteractive) {
       say(`    ⚠ unknown placeholder(s): ${[...new Set(unknown)].map(p => `{${p}}`).join(" ")} — will render literally.\n`);
     }
+
+    // Branch conventions — recognised target-branch type prefixes.
+    const defTypes = defaults.recognised_branch_types ?? PIPELINE_DEFAULTS.recognised_branch_types;
+    let detectedDefault = null;
+    try {
+      const briefDb = connectUnified(paths);
+      try {
+        const projs = projectList(briefDb);
+        if (projs && projs.length) {
+          detectedDefault = detectDefaultBranch(projs[0].root_path);
+        }
+      } finally { dbClose(briefDb); }
+    } catch { /* fresh setup, no DB yet */ }
+    if (!nonInteractive) {
+      say("\n  Branch conventions:");
+      if (detectedDefault) {
+        say(`    Detected default branch (first registered project): ${detectedDefault}`);
+      } else {
+        say("    No project registered yet — detected default will be computed per-project at queue time.");
+      }
+      say(`    recognised_branch_types — comma-separated prefixes treated as orchestration branches.`);
+      say(`    Unrecognised prefixes warn (not error) at queue time.\n`);
+    }
+    const typesRaw = nonInteractive
+      ? (opts.recognisedBranchTypes !== undefined ? opts.recognisedBranchTypes : defTypes.join(","))
+      : ((await ask(`  recognised_branch_types [${defTypes.join(",")}]: `)).trim() || defTypes.join(","));
+    config.recognised_branch_types = String(typesRaw)
+      .split(",").map(s => s.trim()).filter(Boolean);
 
     // Step 5 — Slack notification channels
     hr();
