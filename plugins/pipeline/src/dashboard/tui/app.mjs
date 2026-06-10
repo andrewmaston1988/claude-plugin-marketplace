@@ -152,6 +152,10 @@ function _sessionGlyph(session, prog, stageColor) {
   if (dead)     return { spinChar: "✗",    spinColor: C_RED,    nameColor: C_RED,    timeColor: C_RED };
   if (stalled)  return { spinChar: "●",    spinColor: C_YELLOW, nameColor: C_YELLOW, timeColor: C_YELLOW };
   if (inprog)   return { spinChar: spin(), spinColor: stageColor, nameColor: C_TEXT, timeColor: stageColor };
+  // Alive but no task currently in_progress (between tasks)
+  if (session.is_active === 1) {
+    return { spinChar: spin(), spinColor: C_DIM, nameColor: C_TEXT, timeColor: C_DIM };
+  }
   if (finished) return { spinChar: "✓",    spinColor: C_DIM,    nameColor: C_DIM,    timeColor: C_DIM };
   return         { spinChar: "·",          spinColor: C_DIM,    nameColor: C_TEXT,   timeColor: C_DIM };
 }
