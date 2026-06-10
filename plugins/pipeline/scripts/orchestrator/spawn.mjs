@@ -329,7 +329,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
     cwd:         cwd || undefined,
     env,
     windowsHide: true,
-    detached:    false,
+    detached:    true,
     stdio:       "ignore",
   });
   process.stderr.write(JSON.stringify({
@@ -484,7 +484,7 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
   }
 
   const proc = spawn(spawnCmd, spawnArgs, {
-    cwd: projectRoot, env, windowsHide: true, detached: false, stdio: "ignore",
+    cwd: projectRoot, env, windowsHide: true, detached: true, stdio: "ignore",
   });
   proc.unref();
   proc._feature       = feature;
