@@ -655,7 +655,7 @@ export async function run(cmd, argv) {
     }
 
     const relPath = relative(ctx.projectRoot, sessionPath).replace(/\\/g, "/");
-    const notes = `type=review sessions/${relPath}`;
+    const notes = `type=review ${relPath}`;
 
     try {
       const ok = rowUpdate(ctx.db, ctx.project, feature, { stage: "queued", notes_extra: notes });
