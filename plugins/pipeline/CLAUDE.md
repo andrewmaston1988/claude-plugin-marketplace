@@ -10,6 +10,8 @@
 
 Override via `cfg.worktree_base`. The orchestrator creates the worktree on first spawn for a feature; review/test sessions create it on demand if the feature was queued straight to them.
 
+The fresh-install wizard prompts for this in `Step 6/10 — Worktree layout` (`src/setup/wizard.mjs`); the conversational walkthrough lives under `Question 3f — Worktree layout` in `skills/pipeline-setup/SKILL.md`.
+
 ### Reports are published to side-branches
 
 The single worktree sits on `autonomous/{feature}` for dev work. Reports (code-review verdicts, qa-test reports) are written into subdirectories of the worktree (`reports/`, `test-reports/`) but **published to their own side-branches** via a stash-switchback dance so the merge skill can still read verdicts from git history:

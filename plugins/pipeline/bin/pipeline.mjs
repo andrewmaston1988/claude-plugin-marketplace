@@ -258,6 +258,8 @@ Other:
 //   --recognised-branch-types <list>  comma-sep branch-type prefixes (default "autonomous,interactive").
 //   --slack <channel>          set Slack channel ("" to disable).
 //   --register-project N:P     register a project (repeatable; N=name, P=abs path).
+//   --worktree-layout 1|2      worktree layout choice (1=recommended, 2=custom).
+//   --worktree-base <tpl>      custom worktree template (used when --worktree-layout=2).
 //   --no-deps                  skip npm install.
 //   --no-autostart             skip OS autostart install.
 //   --no-path-alias            skip appending pipeline alias to shell profile.
@@ -288,6 +290,8 @@ function _parseSetupOpts(argv) {
   const mh = get("--merge-hook");         if (mh !== null) opts.mergeHook         = mh;
   const om = get("--on-merge");           if (om !== null) opts.onMerge           = om;
   const rbt = get("--recognised-branch-types"); if (rbt !== null) opts.recognisedBranchTypes = rbt;
+  const wl  = get("--worktree-layout");  if (wl  !== null) opts.worktreeLayout = wl;
+  const wb  = get("--worktree-base");    if (wb  !== null) opts.worktreeBase   = wb;
 
   // --register-project Name:Absolute/Path/To/Repo (repeatable; loop argv)
   opts.registerProjects = [];
