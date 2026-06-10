@@ -20,7 +20,7 @@ function makeTmpDir() {
 
 test("spawnMergeReadyHook: resolves immediately when on_merge_ready is null (no-op)", async () => {
   const start = Date.now();
-  await spawnMergeReadyHook("proj", "feat", "autonomous/feat", "master", { _cfg: {} });
+  await spawnMergeReadyHook("proj", "feat", "autonomous/feat", "master", "/tmp/proj", { _cfg: {} });
   ok(Date.now() - start < 1000, "no-op hook should resolve almost immediately");
 });
 
@@ -57,7 +57,7 @@ test("spawnMergeReadyHook: hook script receives correct PIPELINE_* env vars", as
     const publisherUrl = new URL("../scripts/publisher.mjs", import.meta.url).href;
     const script = [
       `import { spawnMergeReadyHook } from ${JSON.stringify(publisherUrl)};`,
-      `await spawnMergeReadyHook("myproject", "my-feat", "autonomous/my-feat", "main");`,
+      `await spawnMergeReadyHook("myproject", "my-feat", "autonomous/my-feat", "main", "/tmp/projroot");`,
     ].join("\n");
     const entryFile = join(tmp, "runner.mjs");
     writeFileSync(entryFile, script, "utf8");
@@ -98,7 +98,7 @@ test("spawnMergeReadyHook: array hook shape [{command}] is resolved correctly", 
     const publisherUrl2 = new URL("../scripts/publisher.mjs", import.meta.url).href;
     const script = [
       `import { spawnMergeReadyHook } from ${JSON.stringify(publisherUrl2)};`,
-      `await spawnMergeReadyHook("p", "f", "autonomous/f", "master");`,
+      `await spawnMergeReadyHook("p", "f", "autonomous/f", "master", "/tmp/projroot");`,
     ].join("\n");
     const entryFile = join(tmp, "runner.mjs");
     writeFileSync(entryFile, script, "utf8");

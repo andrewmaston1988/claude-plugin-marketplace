@@ -38,6 +38,7 @@ import { join, basename } from "node:path";
 import { spawn } from "node:child_process";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { getPaths } from "../src/paths.mjs";
+import { resolveTemplate, resolveHookFirstToken } from "./worktree-paths.mjs";
 
 const SCHEMA_VERSION = 1;
 
@@ -50,7 +51,11 @@ function _timestamp() {
 }
 
 function _dropDir(cfg, paths) {
-  return cfg.notifications?.fallback_dir || join(paths.stateDir, "notifications");
+  const raw = cfg.notifications?.fallback_dir;
+  if (raw) {
+    return resolveTemplate(raw, {}, { resolveBase: paths.configDir, configDir: paths.configDir });
+  }
+  return join(paths.stateDir, "notifications");
 }
 
 function _writeEnvelope(envelope, paths, cfg) {
@@ -77,17 +82,15 @@ function _writeEnvelope(envelope, paths, cfg) {
 //
 // Returns a Promise<void> that resolves on child close or after the timeout.
 
-function _resolveHookCommand(hookVal) {
-  if (!hookVal) return null;
-  if (typeof hookVal === "string") return hookVal;
-  if (Array.isArray(hookVal) && hookVal[0]?.command) return hookVal[0].command;
-  return null;
+function _resolveHookCommand(hookVal, paths) {
+  if (!paths) return null;
+  return resolveHookFirstToken(hookVal, paths.configDir);
 }
 
 function _spawnHook(cfg, filePath, paths) {
   // New key first, legacy fallback for one release
-  const hook = _resolveHookCommand(cfg.hooks?.on_notification)
-            ?? _resolveHookCommand(cfg.notifications?.on_write);
+  const hook = _resolveHookCommand(cfg.hooks?.on_notification, paths)
+            ?? _resolveHookCommand(cfg.notifications?.on_write, paths);
   if (!hook) return Promise.resolve(false);
   const args = /\.(mjs|js)$/.test(hook) ? ["node", hook, filePath] : [hook, filePath];
   return new Promise((resolveSpawn) => {
@@ -162,8 +165,8 @@ function _markSent(target, cfg, paths) {
 export async function drainNotifications({ _cfg, _paths, logFn } = {}) {
   const cfg   = _cfg   ?? loadPipelineConfig();
   const paths = _paths ?? getPaths();
-  const hook = _resolveHookCommand(cfg.hooks?.on_notification)
-            ?? _resolveHookCommand(cfg.notifications?.on_write);
+  const hook = _resolveHookCommand(cfg.hooks?.on_notification, paths)
+            ?? _resolveHookCommand(cfg.notifications?.on_write, paths);
   if (!hook) return 0;  // notifier-agnostic install — nothing to drain to
 
   const dir = _dropDir(cfg, paths);
@@ -265,7 +268,8 @@ export async function publishNotification({ title, message, messageFile, priorit
 // Hook stdio is captured to <logDir>/merge-hook.log (append).
 export function spawnMergeReadyHook(project, feature, branch, targetBranch, projectRoot, { _cfg, _getPaths } = {}) {
   const cfg = _cfg ?? loadPipelineConfig();
-  const hook = _resolveHookCommand(cfg.hooks?.on_merge_ready);
+  const paths = (_getPaths ?? getPaths)();
+  const hook = _resolveHookCommand(cfg.hooks?.on_merge_ready, paths);
   if (!hook) return Promise.resolve();
   const args = /.(mjs|js)$/.test(hook) ? ["node", hook] : [hook];
   const env = {
@@ -283,7 +287,7 @@ export function spawnMergeReadyHook(project, feature, branch, targetBranch, proj
       const logDir = paths.logDir;
       mkdirSync(logDir, { recursive: true });
       logFd = openSync(join(logDir, "merge-hook.log"), "a");
-    } catch (e) {
+    } catch {
       // If log open fails, continue anyway with stdio ignored
     }
 

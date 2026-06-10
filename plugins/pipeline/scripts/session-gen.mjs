@@ -2,7 +2,8 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
-import { reportPath, handlerWorktreePath } from "./worktree-paths.mjs";
+import { reportPath, handlerWorktreePath, resolveTemplate } from "./worktree-paths.mjs";
+import { getPaths } from "../src/paths.mjs";
 
 function _todayStr() {
   return new Date().toISOString().slice(0, 10);
@@ -40,7 +41,12 @@ function _resolveTemplatePath(sessionType, _cfg = loadPipelineConfig()) {
 function _resolvePartialPath(name, _cfg = loadPipelineConfig()) {
   const override = _cfg.session_templates_dir;
   if (override) {
-    const candidate = join(override, name);
+    const paths = getPaths();
+    const resolvedDir = resolveTemplate(override, {}, {
+      resolveBase: paths.configDir,
+      configDir: paths.configDir,
+    });
+    const candidate = join(resolvedDir, name);
     if (existsSync(candidate)) return candidate;
   }
   return join(_BUNDLED_TEMPLATES_DIR, name);

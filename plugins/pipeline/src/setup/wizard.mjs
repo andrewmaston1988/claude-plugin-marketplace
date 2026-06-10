@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import {
   readFileSync, writeFileSync, renameSync,
-  mkdirSync, existsSync, appendFileSync, readdirSync,
+  mkdirSync, existsSync, appendFileSync,
 } from "node:fs";
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
@@ -12,6 +12,7 @@ import { PIPELINE_DEFAULTS } from "../config-defaults.mjs";
 import { renderTemplate, installAutostart, verifyAutostart } from "./autostart.mjs";
 import { runDoctor, printDoctor } from "./doctor.mjs";
 import { connectUnified, close as dbClose, projectAdd } from "../../scripts/pipeline-db/index.mjs";
+import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
 
 // Non-interactive defaults — applied when `opts.nonInteractive === true` and the
 // caller didn't override the specific key. Designed so a future Claude (or CI)
@@ -195,39 +196,7 @@ export async function runWizard({ paths, log, opts = {} }) {
     if (channelVal || pipelineVal) {
       const forwarder = fileURLToPath(new URL("../../scripts/forwarders/claude-slack.mjs", import.meta.url));
       const bundledMarker = "/forwarders/claude-slack.mjs";
-      const slackOk = (() => {
-        // 1) CLAUDE_SLACK_PLUGIN env override — same precedence doctor uses.
-        if (process.env.CLAUDE_SLACK_PLUGIN && existsSync(process.env.CLAUDE_SLACK_PLUGIN)) return true;
-        // 2) Standard plugin-marketplace install location. Robust to both
-        //    PowerShell (function alias, not on PATH) AND mingw bash (PATH
-        //    has POSIX separators that the Win path walk can't decode).
-        const home = process.env.USERPROFILE || process.env.HOME || homedir();
-        const candidatesGlob = join(home, ".claude", "plugins", "cache");
-        if (existsSync(candidatesGlob)) {
-          try {
-            for (const owner of readdirSync(candidatesGlob)) {
-              const sb = join(candidatesGlob, owner, "slack-bridge");
-              if (!existsSync(sb)) continue;
-              for (const ver of readdirSync(sb)) {
-                const exe = join(sb, ver, "bin", "claude-slack.mjs");
-                if (existsSync(exe)) return true;
-              }
-            }
-          } catch {}
-        }
-        // 3) PATH walk with extensions (last-ditch — works when claude-slack
-        //    is a real binary or .cmd shim on a sane shell). Splits on BOTH
-        //    `;` (Windows) and `:` (mingw bash) to survive either env.
-        const dirs = (process.env.PATH || "").split(/[;:]/);
-        const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat", ".mjs", ".js", ""] : [""];
-        for (const d of dirs) {
-          if (!d) continue;
-          for (const ext of exts) {
-            if (existsSync(join(d, "claude-slack" + ext))) return true;
-          }
-        }
-        return false;
-      })();
+      const slackOk = !!findClaudeSlackPlugin().path;
       const existing = config.hooks?.on_notification || config.notifications?.on_write || "";
       // Only set if unset or already pointing at our bundled forwarder — never
       // overwrite a custom user forwarder.
