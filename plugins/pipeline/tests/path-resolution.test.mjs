@@ -3,7 +3,7 @@
 // categories from plan §B + every placeholder in the vocabulary.
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
-import { resolve, sep } from "node:path";
+import { resolve } from "node:path";
 import { homedir } from "node:os";
 import { resolveTemplate, PLACEHOLDER_KEYS } from "../scripts/worktree-paths.mjs";
 
@@ -35,8 +35,6 @@ test("resolveTemplate: {config_dir} substituted from configDir option", () => {
 
 test("resolveTemplate: leading ~/ expands to homedir()", () => {
   const out = resolveTemplate("~/.pipeline/notifications", {}, { resolveBase: CFG });
-  equal(out, `${homedir()}/.pipeline/notifications`.replace(/\//g, out.includes("\\") ? "\\" : "/").replace(/\\/g, "/").length > 0 ? `${homedir()}${sep}.pipeline${sep}notifications`.includes(sep) ? `${homedir()}/.pipeline/notifications` : `${homedir()}/.pipeline/notifications` : out);
-  // Less brittle: just check starts with homedir and ends with the literal segment
   ok(out.startsWith(homedir()));
   ok(out.endsWith(".pipeline/notifications") || out.endsWith(".pipeline\\notifications"));
 });
@@ -80,8 +78,10 @@ test("resolveTemplate: null/undefined template returns null", () => {
   equal(resolveTemplate(undefined, {}, { resolveBase: PROJ }), null);
 });
 
-test("resolveTemplate: empty template returns empty", () => {
-  equal(resolveTemplate("", {}, { resolveBase: PROJ }), "");
+test("resolveTemplate: empty template normalizes to null", () => {
+  // Empty must not slip into path.join("", x) — return null so a forgotten
+  // `if (raw)` guard can't silently produce a CWD-relative path.
+  equal(resolveTemplate("", {}, { resolveBase: PROJ }), null);
 });
 
 test("resolveTemplate: missing resolveBase keeps relative path as-is", () => {
@@ -95,6 +95,24 @@ test("PLACEHOLDER_KEYS includes every documented vocabulary entry", () => {
     "feature", "kind", "branch", "branch_type", "branch_local", "config_dir",
   ]);
   deepEqual(new Set(PLACEHOLDER_KEYS), expected);
+});
+
+test("CLAUDE.md placeholder vocabulary table matches PLACEHOLDER_KEYS", async () => {
+  // Pin the prose §C table against the exported constant so the docs can't
+  // grow (or lose) an entry the code doesn't.
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const here = fileURLToPath(new URL("./", import.meta.url));
+  const md = readFileSync(`${here}../CLAUDE.md`, "utf8");
+  // Pull every `{name}` token from the table rows in the Placeholder vocabulary
+  // section (between §C heading and the next heading).
+  const start = md.indexOf("### Placeholder vocabulary");
+  ok(start >= 0, "Placeholder vocabulary section present");
+  const after = md.indexOf("\n### ", start + 1);
+  const section = md.slice(start, after >= 0 ? after : md.length);
+  const tokens = new Set();
+  for (const m of section.matchAll(/`\{([a-z_]+)\}`/g)) tokens.add(m[1]);
+  deepEqual(tokens, new Set(PLACEHOLDER_KEYS));
 });
 
 // ── 6. Per-key end-to-end resolution (one stub per §B category) ─────────────

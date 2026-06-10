@@ -38,7 +38,7 @@ import { join, basename } from "node:path";
 import { spawn } from "node:child_process";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { getPaths } from "../src/paths.mjs";
-import { resolveTemplate } from "./worktree-paths.mjs";
+import { resolveTemplate, resolveHookFirstToken } from "./worktree-paths.mjs";
 
 const SCHEMA_VERSION = 1;
 
@@ -84,31 +84,8 @@ function _writeEnvelope(envelope, paths, cfg) {
 // Returns a Promise<void> that resolves on child close or after the timeout.
 
 function _resolveHookCommand(hookVal, paths) {
-  let raw = null;
-  if (!hookVal) return null;
-  if (typeof hookVal === "string") raw = hookVal;
-  else if (Array.isArray(hookVal) && hookVal[0]?.command) raw = hookVal[0].command;
-  if (!raw) return null;
-  return _resolveHookFirstToken(raw, paths);
-}
-
-// Hook values are command strings; route the first whitespace-separated token
-// through resolveTemplate when it looks like a path (starts with `~`, `/`,
-// `\`, a drive letter, or `{config_dir}`). Trailing args are passed through
-// verbatim. resolveBase is configDir per §B.
-function _resolveHookFirstToken(cmd, paths) {
-  if (!paths) return cmd;
-  const m = cmd.match(/^(\S+)(\s.*)?$/);
-  if (!m) return cmd;
-  const head = m[1];
-  const tail = m[2] || "";
-  const looksLikePath = /^~|^[\/\\]|^[A-Za-z]:[\\/]|\{(config_dir|root|project)\}/.test(head);
-  if (!looksLikePath) return cmd;
-  const resolved = resolveTemplate(head, {}, {
-    resolveBase: paths.configDir,
-    configDir: paths.configDir,
-  });
-  return resolved + tail;
+  if (!paths) return null;
+  return resolveHookFirstToken(hookVal, paths.configDir);
 }
 
 function _spawnHook(cfg, filePath, paths) {

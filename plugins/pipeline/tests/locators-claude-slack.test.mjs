@@ -3,6 +3,7 @@
 // env > cache walk > PATH > null.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
+import { join } from "node:path";
 import { findClaudeSlackPlugin } from "../src/locators/claude-slack.mjs";
 
 // All probes go through injection seams (_env, _existsSync) so the tests
@@ -16,18 +17,55 @@ test("env override wins when file exists", () => {
   equal(r.path,   "/abs/custom/claude-slack.mjs");
 });
 
-test("env override is ignored when file missing → cache wins", () => {
+test("env override ignored when file missing → cache walk wins", () => {
   const env = { CLAUDE_SLACK_PLUGIN: "/abs/missing.mjs", HOME: "/home/u", PATH: "" };
-  // existsSync returns true for cache root + a single bundled entry.
-  const existsSync = (p) => p === "/abs/missing.mjs" ? false :
-    p === "/home/u/.claude/plugins/cache" ? true :
-    p === "/home/u/.claude/plugins/cache/owner/slack-bridge" ? true :
-    /claude-slack\.mjs$/.test(p);
-  // readdirSync isn't injectable yet; for the cache walk the locator uses
-  // node:fs.readdirSync directly. We simulate the env-fail path here by
-  // checking it doesn't return source="env".
-  const r = findClaudeSlackPlugin({ _env: env, _existsSync: existsSync });
-  ok(r.source !== "env", "should not return env when file missing");
+  const cacheRoot   = join("/home/u", ".claude", "plugins", "cache");
+  const ownerDir    = join(cacheRoot, "owner");
+  const sbDir       = join(ownerDir, "slack-bridge");
+  const verDir      = join(sbDir, "0.1.0");
+  const exe         = join(verDir, "bin", "claude-slack.mjs");
+  const existsSync = (p) => {
+    if (p === "/abs/missing.mjs") return false;
+    if (p === cacheRoot) return true;
+    if (p === sbDir) return true;
+    if (p === exe) return true;
+    return false;
+  };
+  const readdirSync = (p) => {
+    if (p === cacheRoot) return ["owner"];
+    if (p === sbDir) return ["0.1.0"];
+    throw new Error(`unexpected readdirSync: ${p}`);
+  };
+  const r = findClaudeSlackPlugin({ _env: env, _existsSync: existsSync, _readdirSync: readdirSync });
+  equal(r.source, "cache");
+  equal(r.path, exe);
+});
+
+test("cache walk skips owners without slack-bridge dir", () => {
+  const env = { HOME: "/home/u", PATH: "" };
+  const cacheRoot = join("/home/u", ".claude", "plugins", "cache");
+  const owner2sb  = join(cacheRoot, "owner2", "slack-bridge");
+  const ver       = join(owner2sb, "1.2.3");
+  const exe       = join(ver, "bin", "claude-slack.mjs");
+  const existsSync = (p) => p === cacheRoot || p === owner2sb || p === exe;
+  const readdirSync = (p) => {
+    if (p === cacheRoot) return ["owner1", "owner2"];      // owner1 has no slack-bridge
+    if (p === owner2sb) return ["1.2.3"];
+    throw new Error(`unexpected readdirSync: ${p}`);
+  };
+  const r = findClaudeSlackPlugin({ _env: env, _existsSync: existsSync, _readdirSync: readdirSync });
+  equal(r.source, "cache");
+  equal(r.path, exe);
+});
+
+test("cache walk tolerates unreadable directory and falls through", () => {
+  const env = { HOME: "/home/u", PATH: "" };
+  const cacheRoot = join("/home/u", ".claude", "plugins", "cache");
+  const existsSync = (p) => p === cacheRoot;
+  const readdirSync = () => { throw new Error("EACCES"); };
+  const r = findClaudeSlackPlugin({ _env: env, _existsSync: existsSync, _readdirSync: readdirSync });
+  // Should not throw; nothing on PATH either → null.
+  equal(r.path, null);
 });
 
 test("PATH walk discovers binary when no env override and no cache", () => {

@@ -8,7 +8,7 @@ import { connectUnified, close, dbPathUnified } from "../../scripts/pipeline-db/
 import { projectList } from "../../scripts/pipeline-db/projects.mjs";
 import { readState, pidAlive } from "../../scripts/orchestrator/state-file.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
-import { resolveTemplate, PLACEHOLDER_KEYS } from "../../scripts/worktree-paths.mjs";
+import { resolveTemplate, resolveHookFirstToken, PLACEHOLDER_KEYS } from "../../scripts/worktree-paths.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -24,9 +24,12 @@ function _pathResolutionChecks(cfg, projects, paths) {
   // Global / install-wide keys.
   out.push({ key: "notifications.fallback_dir",  raw: cfg.notifications?.fallback_dir,  resolved: _global(cfg.notifications?.fallback_dir) ?? join(paths.stateDir, "notifications"), warn: false });
   out.push({ key: "session_templates_dir",       raw: cfg.session_templates_dir,        resolved: _global(cfg.session_templates_dir) ?? "(bundled)", warn: cfg.session_templates_dir ? !existsSync(_global(cfg.session_templates_dir)) : false });
-  out.push({ key: "hooks.on_notification",       raw: cfg.hooks?.on_notification,       resolved: _resolveHookFirstTokenForReport(cfg.hooks?.on_notification, cd) ?? "(unset)", warn: false });
-  out.push({ key: "hooks.on_merge_ready",        raw: cfg.hooks?.on_merge_ready,        resolved: _resolveHookFirstTokenForReport(cfg.hooks?.on_merge_ready,  cd) ?? "(unset)", warn: false });
-  out.push({ key: "hooks.on_merge",              raw: cfg.hooks?.on_merge,              resolved: _resolveHookFirstTokenForReport(cfg.hooks?.on_merge,        cd) ?? "(unset)", warn: false });
+  out.push({ key: "hooks.on_notification",       raw: cfg.hooks?.on_notification,       resolved: resolveHookFirstToken(cfg.hooks?.on_notification, cd) ?? "(unset)", warn: false });
+  out.push({ key: "hooks.on_merge_ready",        raw: cfg.hooks?.on_merge_ready,        resolved: resolveHookFirstToken(cfg.hooks?.on_merge_ready,  cd) ?? "(unset)", warn: false });
+  // hooks.on_merge consumer (skills/merge/scripts/merge.mjs) doesn't yet route through
+  // resolveTemplate — operators must use an absolute path until the retrofit lands.
+  // We surface the raw value verbatim so doctor doesn't lie about what the runtime sees.
+  out.push({ key: "hooks.on_merge (raw — bypasses resolveTemplate)", raw: cfg.hooks?.on_merge, resolved: cfg.hooks?.on_merge ?? "(unset)", warn: false });
   out.push({ key: "governor.template_path",      raw: cfg.governor?.template_path,      resolved: _global(cfg.governor?.template_path) ?? "(bundled)", warn: cfg.governor?.template_path ? !existsSync(_global(cfg.governor.template_path)) : false });
 
   // Per-project keys. Resolved against each registered project's root_path.
@@ -40,38 +43,6 @@ function _pathResolutionChecks(cfg, projects, paths) {
     out.push({ key: `[${p.name}] governor.log_dir`,     raw: cfg.governor?.log_dir,     resolved: _proj(cfg.governor?.log_dir)     ?? join(p.root_path, "logs"), warn: false });
   }
   return out;
-}
-
-// Mirrors publisher.mjs's first-token resolution for display purposes.
-function _resolveHookFirstTokenForReport(hookVal, configDir) {
-  let raw = null;
-  if (!hookVal) return null;
-  if (typeof hookVal === "string") raw = hookVal;
-  else if (Array.isArray(hookVal) && hookVal[0]?.command) raw = hookVal[0].command;
-  if (!raw) return null;
-  const m = raw.match(/^(\S+)(\s.*)?$/);
-  if (!m) return raw;
-  const head = m[1];
-  const tail = m[2] || "";
-  const looksLikePath = /^~|^[\/\\]|^[A-Za-z]:[\\/]|\{(config_dir|root|project)\}/.test(head);
-  if (!looksLikePath) return raw;
-  return resolveTemplate(head, {}, { resolveBase: configDir, configDir }) + tail;
-}
-
-// Locate an executable on PATH. Returns the absolute path or null.
-// Note: claude-slack uses the shared findClaudeSlackPlugin() locator below;
-// this helper is generic for any other PATH probe (currently unused).
-function _onPath(name) {
-  const pathDirs = (process.env.PATH || "").split(/[;:]/);
-  const exts = process.platform === "win32" ? [".exe", ".cmd", ".bat", ".mjs", ".js", ""] : [""];
-  for (const dir of pathDirs) {
-    if (!dir) continue;
-    for (const ext of exts) {
-      const full = join(dir, name + ext);
-      if (existsSync(full)) return full;
-    }
-  }
-  return null;
 }
 
 // Run the doctor checks and return a results array. Each result:

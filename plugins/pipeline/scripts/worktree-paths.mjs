@@ -30,15 +30,16 @@ export const PLACEHOLDER_KEYS = Object.freeze([
 //      `resolveBase` (project root, configDir, or a worktree path —
 //      whichever fits the key's category; see plugin CLAUDE.md).
 //
-// `template` may be `null`/`undefined`; callers usually pass the config
-// value directly and short-circuit on falsy. To keep the helper safe we
-// return null in that case rather than throwing.
+// `template` may be `null`/`undefined`/`""`; callers usually pass the config
+// value directly and short-circuit on falsy. Empty and nullish both return
+// `null` so a forgotten `if (raw)` guard can't silently route `""` into
+// `path.join("", x)` and produce a CWD-relative path.
 export function resolveTemplate(
   template,
   vars = {},
   { resolveBase, configDir } = {},
 ) {
-  if (template == null || template === "") return template ?? null;
+  if (template == null || template === "") return null;
   const substituted = substitute(String(template), {
     ...vars,
     config_dir: vars.config_dir ?? configDir ?? "",
@@ -47,6 +48,27 @@ export function resolveTemplate(
   if (_isAbsoluteAny(expanded)) return expanded;
   if (!resolveBase) return expanded;
   return resolve(resolveBase, expanded);
+}
+
+// Hook config values are command strings: a path-or-bin token followed by
+// optional argv. Route the first token through resolveTemplate when it
+// looks like a path (leading `~`, `/`, `\`, drive letter, or a path-shaped
+// placeholder). Trailing argv is passed through unchanged. Shared by
+// publisher.mjs (live spawn) and doctor.mjs (display in path-resolution-
+// consistency report). resolveBase is configDir per §B.
+export function resolveHookFirstToken(hookVal, configDir) {
+  let raw = null;
+  if (!hookVal) return null;
+  if (typeof hookVal === "string") raw = hookVal;
+  else if (Array.isArray(hookVal) && hookVal[0]?.command) raw = hookVal[0].command;
+  if (!raw) return null;
+  const m = raw.match(/^(\S+)(\s.*)?$/);
+  if (!m) return raw;
+  const head = m[1];
+  const tail = m[2] || "";
+  const looksLikePath = /^~|^[\/\\]|^[A-Za-z]:[\\/]|\{(config_dir|root|project)\}/.test(head);
+  if (!looksLikePath) return raw;
+  return resolveTemplate(head, {}, { resolveBase: configDir, configDir }) + tail;
 }
 
 function _expandTilde(p) {

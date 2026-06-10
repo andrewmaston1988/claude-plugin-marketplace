@@ -21,7 +21,7 @@ Every config-driven path in this plugin resolves through one helper:
 | Category | `resolveBase` | Keys |
 |---|---|---|
 | Per-project    | `projectRoot`    | `plansDir`, `governor.reports_dir`, `governor.session_dir`, `governor.log_dir`, `worktree_base` *(future)* |
-| Global / install-wide | `paths.configDir` | `notifications.fallback_dir`, `session_templates_dir`, `hooks.on_notification`, `hooks.on_merge_ready`, `hooks.on_merge`, `governor.template_path` |
+| Global / install-wide | `paths.configDir` | `notifications.fallback_dir`, `session_templates_dir`, `hooks.on_notification`, `hooks.on_merge_ready`, `governor.template_path` |
 | Within-worktree | resolved `featureWorktreePath(...)` | `report_subpath` |
 
 `paths.configDir` resolves to `~/.pipeline` on Mac/Windows and
@@ -31,6 +31,14 @@ see `src/paths.mjs`.
 Hook values are command strings; only the first whitespace-separated token
 is routed through `resolveTemplate`. Trailing argv is passed through
 unchanged.
+
+**`hooks.on_merge` — not yet routed.** The merge hook consumer
+(`skills/merge/scripts/merge.mjs`) reads `cfg.hooks.on_merge` raw and spawns
+it without going through `resolveTemplate`. Until that retrofit lands,
+operators must give `hooks.on_merge` an **absolute** path — `~/...`,
+`{config_dir}/...`, and relative values will not resolve. Doctor's
+`path-resolution-consistency` check surfaces it as
+`hooks.on_merge (raw — bypasses resolveTemplate)` so the gap is visible.
 
 ### Placeholder vocabulary (§C)
 

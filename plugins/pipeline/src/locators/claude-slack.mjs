@@ -13,11 +13,15 @@
 //
 // Returns { path, source } where source ∈ {"env","cache","path",null}.
 // `_env` and `_existsSync` are injection seams for tests.
-import { existsSync as _realExistsSync, readdirSync } from "node:fs";
+import { existsSync as _realExistsSync, readdirSync as _realReaddirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-export function findClaudeSlackPlugin({ _env = process.env, _existsSync = _realExistsSync } = {}) {
+export function findClaudeSlackPlugin({
+  _env = process.env,
+  _existsSync = _realExistsSync,
+  _readdirSync = _realReaddirSync,
+} = {}) {
   // 1) env override
   if (_env.CLAUDE_SLACK_PLUGIN && _existsSync(_env.CLAUDE_SLACK_PLUGIN)) {
     return { path: _env.CLAUDE_SLACK_PLUGIN, source: "env" };
@@ -28,10 +32,10 @@ export function findClaudeSlackPlugin({ _env = process.env, _existsSync = _realE
   const cache = join(home, ".claude", "plugins", "cache");
   if (_existsSync(cache)) {
     try {
-      for (const owner of readdirSync(cache)) {
+      for (const owner of _readdirSync(cache)) {
         const sb = join(cache, owner, "slack-bridge");
         if (!_existsSync(sb)) continue;
-        for (const ver of readdirSync(sb)) {
+        for (const ver of _readdirSync(sb)) {
           const exe = join(sb, ver, "bin", "claude-slack.mjs");
           if (_existsSync(exe)) return { path: exe, source: "cache" };
         }
