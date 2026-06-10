@@ -5,7 +5,7 @@ import {
 } from "node:fs";
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPipelineConfig } from "../pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../config-defaults.mjs";
@@ -101,7 +101,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 2 — environment pre-checks
     hr();
-    say("Step 1/9 — Environment check\n");
+    say("Step 1/10 — Environment check\n");
     const preResults = await runDoctor({ paths });
     printDoctor(preResults);
     const preFailed = preResults.filter(r => !r.ok && !r.warn);
@@ -117,7 +117,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 3 — model defaults
     hr();
-    say("Step 2/9 — Model defaults\n");
+    say("Step 2/10 — Model defaults\n");
     if (!nonInteractive) say("Press Enter to keep the default, or type a model ID to override.\n");
     config.models = config.models ?? {};
     for (const [key, defVal] of Object.entries(PIPELINE_DEFAULTS.models)) {
@@ -131,7 +131,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 4 — review skill config
     hr();
-    say("Step 3/9 — Review skill config\n");
+    say("Step 3/10 — Review skill config\n");
     config.review = config.review ?? {};
     const defSkill = defaults.review?.skill     ?? PIPELINE_DEFAULTS.review.skill;
     const defFlag  = defaults.review?.deep_flag ?? PIPELINE_DEFAULTS.review.deep_flag;
@@ -203,7 +203,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 5 — Slack notification channels
     hr();
-    say("Step 4/9 — Slack notification channels\n");
+    say("Step 4/10 — Slack notification channels\n");
     config.notifications = config.notifications ?? {};
     // Backward-compat: read pre-rename `slack_channel` as a fallback default.
     const defChannel    = defaults.notifications?.governance_channel
@@ -309,16 +309,11 @@ export async function runWizard({ paths, log, opts = {} }) {
       delete config.notifications.on_write;
     }
 
-    // Step 6 — write config (atomic .tmp → rename)
-    mkdirSync(paths.configDir, { recursive: true });
-    const tmpPath = configPath + ".tmp";
-    writeFileSync(tmpPath, JSON.stringify(config, null, 2), { mode: 0o600 });
-    renameSync(tmpPath, configPath);
-    say(`\nConfig written to: ${configPath}`);
-
-    // Step 7 — register first project
+    // Step 7 — register first project (config is written after worktree-layout
+    // step so the resolved-default path can use the first registered project's
+    // actual root_parent).
     hr();
-    say("Step 5/9 — Register first project\n");
+    say("Step 5/10 — Register first project\n");
     say("The orchestrator dispatches sessions per registered project.");
     if (!nonInteractive) say("You can skip this step and run 'pipeline project-add <name> <path>' later.\n");
     {
@@ -372,9 +367,81 @@ export async function runWizard({ paths, log, opts = {} }) {
       }
     }
 
+    // Step 7.5 — Worktree layout. Placed AFTER project registration so the
+    // resolved-default path uses the first registered project's actual
+    // root_parent (the surface-each-option contract requires showing a
+    // concrete resolved default).
+    hr();
+    say("Step 6/10 — Worktree layout\n");
+    const defWtBase     = defaults.worktree_base ?? PIPELINE_DEFAULTS.worktree_base;
+    const defReportSub  = defaults.report_subpath ?? PIPELINE_DEFAULTS.report_subpath;
+    const defPublishTpl = defaults.report_publish_branch_template
+                       ?? PIPELINE_DEFAULTS.report_publish_branch_template;
+    const WT_PLACEHOLDERS = new Set([
+      "root", "root_parent", "root_grandparent", "project", "feature", "kind",
+    ]);
+    // Resolve a concrete preview path using the first registered project if any.
+    let resolvedExample = defWtBase;
+    try {
+      const briefDb = connectUnified(paths);
+      try {
+        const projs = projectList(briefDb);
+        if (projs && projs.length) {
+          const root    = projs[0].root_path;
+          const project = projs[0].name;
+          resolvedExample = String(defWtBase)
+            .replace(/\{root_grandparent\}/g, dirname(dirname(root)))
+            .replace(/\{root_parent\}/g, dirname(root))
+            .replace(/\{root\}/g, root)
+            .replace(/\{project\}/g, project)
+            .replace(/\{feature\}/g, "<feature>");
+        }
+      } finally { dbClose(briefDb); }
+    } catch { /* no DB yet — preview stays as template */ }
+    if (!nonInteractive) {
+      say("  Where should worktrees live on disk?\n");
+      say("    1) Recommended (one worktree per feature, project-namespaced)");
+      say(`         paths: <resolved: ${resolvedExample}>`);
+      say("         reports inside: reports/ and test-reports/\n");
+      say("    2) Custom — type a template string");
+      say("         placeholders: {root} {root_parent} {root_grandparent} {project} {feature} {kind}");
+      say("         accepts: absolute paths, ~/..., relative-to-project-root\n");
+    }
+    let wtChoice;
+    if (nonInteractive) {
+      wtChoice = opts.worktreeLayout ? String(opts.worktreeLayout) : "1";
+    } else {
+      wtChoice = (await ask("  Choose [1]: ")).trim() || "1";
+    }
+    if (wtChoice === "2") {
+      const customRaw = nonInteractive
+        ? (opts.worktreeBase != null ? String(opts.worktreeBase) : defWtBase)
+        : (await ask("  Custom template: ")).trim();
+      const customTpl = customRaw || defWtBase;
+      const unknownWt = [...String(customTpl).matchAll(/\{([a-z_]+)\}/gi)]
+        .map(m => m[1])
+        .filter(p => !WT_PLACEHOLDERS.has(p));
+      if (unknownWt.length && !nonInteractive) {
+        say(`    ⚠ unknown placeholder(s): ${[...new Set(unknownWt)].map(p => `{${p}}`).join(" ")} — will render literally.\n`);
+      }
+      config.worktree_base = customTpl;
+    } else {
+      config.worktree_base = defWtBase;
+    }
+    config.report_subpath = JSON.parse(JSON.stringify(defReportSub));
+    config.report_publish_branch_template = defPublishTpl;
+
+    // Write config (atomic .tmp → rename). Deferred until after the worktree
+    // step so all keys land in one write.
+    mkdirSync(paths.configDir, { recursive: true });
+    const tmpPath = configPath + ".tmp";
+    writeFileSync(tmpPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+    renameSync(tmpPath, configPath);
+    say(`\nConfig written to: ${configPath}`);
+
     // Step 8 — autostart
     hr();
-    say("Step 6/9 — Autostart\n");
+    say("Step 7/10 — Autostart\n");
     const nodePath    = process.execPath;
     // Autostart targets the orchestrator entry directly, not the CLI binary.
     // Previously this pointed at bin/pipeline.mjs — the OS scheduler would
@@ -406,7 +473,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 9 — PATH alias
     hr();
-    say("Step 7/9 — Add pipeline to PATH\n");
+    say("Step 8/10 — Add pipeline to PATH\n");
     // PATH alias targets the user-facing CLI dispatcher, NOT the daemon entry.
     // bridgeEntry above is scripts/orchestrator/index.mjs (correct for the OS
     // scheduler); for shell aliases users need bin/pipeline.mjs so subcommands
@@ -479,14 +546,14 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 10 — smoke test
     hr();
-    say("Step 8/9 — Smoke test\n");
+    say("Step 9/10 — Smoke test\n");
     const smokeResults = await runDoctor({ paths });
     printDoctor(smokeResults);
     const failed = smokeResults.filter(r => !r.ok && !r.warn);
 
     // Step 11 — launch hint
     hr();
-    say("Step 9/9 — Done\n");
+    say("Step 10/10 — Done\n");
     if (failed.length === 0) {
       say("All checks passed.");
     } else {
