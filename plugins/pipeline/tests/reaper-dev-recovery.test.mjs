@@ -7,27 +7,25 @@
 
 import { test } from "node:test";
 import { strictEqual, ok, match } from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 
+import { mkdirSync } from "node:fs";
 import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
 import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
 import { rowAdd } from "../scripts/pipeline-db/rows.mjs";
-import { reapFinished } from "../scripts/orchestrator/reaper.mjs";
+import { reconcileSessions } from "../scripts/orchestrator/reaper.mjs";
 
-function makeMockProc({ project, feature, projectRoot, exitCode = 0, correlationId = "test-corr" }) {
-  // Mirror the shape spawn.mjs stamps onto the child process object.
-  return {
-    exitCode,
-    _feature:       feature,
-    _stype:         "dev",
-    _project:       project,
-    _projectRoot:   projectRoot,
-    _correlationId: correlationId,
-    _startTime:     new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
-  };
+// High PID value that is guaranteed not to be a live process on this machine
+const DEAD_PID = 999999;
+
+function seedDeadSession(db, { project, feature, correlationId = "test-corr" }) {
+  // Insert a session with a dead PID so reconcileSessions will detect it as finished.
+  db.prepare(
+    "INSERT INTO sessions (correlation_id, project, feature, session_type, cwd, session_file, spawn_time, pid, is_active) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"
+  ).run(correlationId, project, feature, "dev", "/tmp", "sessions/dev.md", new Date().toISOString(), DEAD_PID);
 }
 
 function setupTempProject() {
@@ -35,8 +33,7 @@ function setupTempProject() {
   // the plan + a sessions dir to write into. projectAdd requires the path
   // to be a real git repo.
   const root = mkdtempSync(join(tmpdir(), "reaper-recovery-"));
-  const r = spawnSync("git", ["init", "--quiet"], { cwd: root, stdio: "ignore" });
-  if (r.status !== 0) throw new Error("git init failed in setupTempProject");
+  mkdirSync(join(root, ".git"), { recursive: true });
   const plans = join(root, "plans");
   mkdirSync(plans, { recursive: true });
   const planFile = join(plans, "feat-x.md");
@@ -58,12 +55,11 @@ test("reaper: dev-no-handoff inside review-bounce → recovers to review", () =>
       "WHERE project=? AND feature=?"
     ).run("type=dev sessions/dev-2026-06-08-feat-x.md", "needs_work", 1, 3, "p", "feat-x");
 
-    const proc = makeMockProc({ project: "p", feature: "feat-x", projectRoot: root, exitCode: 0 });
-    const activeProcs = new Map([["p", proc]]);
+    seedDeadSession(db, { project: "p", feature: "feat-x", correlationId: "test-corr-1" });
     const logs = [];
     const logFn = (msg, level) => logs.push({ msg, level: level || "INFO" });
 
-    reapFinished(activeProcs, db, { logFn, dryRun: true });
+    reconcileSessions(db, { logFn, dryRun: true });
 
     const row = db.prepare(
       "SELECT stage, notes_extra FROM pipeline_rows WHERE project=? AND feature=?"
@@ -94,12 +90,11 @@ test("reaper: dev-no-handoff with no review verdict (initial dev) → parks at m
       "UPDATE pipeline_rows SET notes_extra=? WHERE project=? AND feature=?"
     ).run("type=dev sessions/dev-2026-06-08-feat-x.md", "p", "feat-x");
 
-    const proc = makeMockProc({ project: "p", feature: "feat-x", projectRoot: root, exitCode: 0 });
-    const activeProcs = new Map([["p", proc]]);
+    seedDeadSession(db, { project: "p", feature: "feat-x", correlationId: "test-corr-2" });
     const logs = [];
     const logFn = (msg, level) => logs.push({ msg, level: level || "INFO" });
 
-    reapFinished(activeProcs, db, { logFn, dryRun: true });
+    reconcileSessions(db, { logFn, dryRun: true });
 
     const row = db.prepare(
       "SELECT stage, notes_extra FROM pipeline_rows WHERE project=? AND feature=?"
@@ -127,12 +122,11 @@ test("reaper: dev-no-handoff with needs_work but budget exhausted → parks at m
       "WHERE project=? AND feature=?"
     ).run("type=dev sessions/dev-2026-06-08-feat-x.md", "needs_work", 3, 3, "p", "feat-x");
 
-    const proc = makeMockProc({ project: "p", feature: "feat-x", projectRoot: root, exitCode: 0 });
-    const activeProcs = new Map([["p", proc]]);
+    seedDeadSession(db, { project: "p", feature: "feat-x", correlationId: "test-corr-3" });
     const logs = [];
     const logFn = (msg, level) => logs.push({ msg, level: level || "INFO" });
 
-    reapFinished(activeProcs, db, { logFn, dryRun: true });
+    reconcileSessions(db, { logFn, dryRun: true });
 
     const row = db.prepare(
       "SELECT stage, notes_extra FROM pipeline_rows WHERE project=? AND feature=?"

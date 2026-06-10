@@ -1,16 +1,18 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join, basename, relative } from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   rowGet, rowUpdate, setLastError,
   autoRequeueDev, resetDevRetries,
-  sessionFinish,
-  projectGetByName,
+  sessionFinish, sessionsActive, projectGetByName,
   appendCycleLog,
 } from "../pipeline-db/index.mjs";
 import { gitWorktreeClean, sessionTypeFromNotes } from "./spawn.mjs";
+import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 import { orchestratorWorktreePath } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { generateSessionFile } from "../session-gen.mjs";
+import { pidAlive } from "./state-file.mjs";
 
 function appendNote(existing, note) {
   return existing ? `${existing} ${note}` : note;
@@ -38,26 +40,28 @@ function notifyFailure(project, feature, reason, { dryRun = false } = {}) {
   publishNotification({ title, message: msg, priority: "high" }, { dryRun }).catch(() => {});
 }
 
-// Reap finished orchestrator child processes. Takes the unified DB handle;
-// project + projectRoot are read from each proc's _project / _projectRoot tags
-// stamped at spawn time. `dryRun` propagates to notifyFailure so tests can
-// exercise reap logic without spamming the real notifications dir / Slack.
-export function reapFinished(activeProcs, db, { logFn, dryRun = false }) {
-  const finished = [];
-  for (const [project, proc] of activeProcs) {
-    if (proc.exitCode !== null) finished.push(project);
-  }
+function branchHasCommits(projectRoot, branch, targetBranch) {
+  try {
+    const r = spawnSync("git", ["-C", projectRoot, "rev-list", "--count", `${targetBranch}..${branch}`],
+      { encoding: "utf8", windowsHide: true });
+    return r.status === 0 && parseInt(r.stdout.trim(), 10) > 0;
+  } catch { return false; }
+}
 
-  for (const project of finished) {
-    const proc = activeProcs.get(project);
-    activeProcs.delete(project);
+// Reconcile sessions based on process state (DB-driven, no activeProcs).
+// Iterate active sessions; for each with a dead pid, mark finished and
+// apply recovery logic based on the row's stage and session type.
+export function reconcileSessions(db, { logFn, dryRun = false }) {
+  const activeSessions = sessionsActive(db);
+  const finished = activeSessions.filter(sess => !pidAlive(sess.pid));
 
-    const rc            = proc.exitCode;
-    const feature       = proc._feature || "unknown";
-    const correlationId = proc._correlationId || null;
-    const stype         = proc._stype || null;
-    const projectRoot   = proc._projectRoot || (projectGetByName(db, project)?.root_path ?? null);
-    const startTime     = proc._startTime || null;
+  for (const sess of finished) {
+    const project       = sess.project;
+    const feature       = sess.feature || "unknown";
+    const correlationId = sess.correlation_id || null;
+    const stype         = sess.session_type || null;
+    const projectRoot   = projectGetByName(db, project)?.root_path ?? null;
+    const startTime     = sess.spawn_time || null;
     const endTime       = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     const durationSecs  = startTime ? (Date.parse(endTime) - Date.parse(startTime)) / 1000 : null;
 
@@ -66,9 +70,7 @@ export function reapFinished(activeProcs, db, { logFn, dryRun = false }) {
       catch (e) { logFn(`[${project}] warning: failed to mark session finished: ${e.message}`, "WARN"); }
     }
 
-    // Resolved session type — fall back to row notes if not stamped on proc.
-    // `outcome` defaults to pass/fail by exit code; the test-requeue branch
-    // below flips it to "retry" when applicable.
+    // Resolved session type — prefer row notes if stype not stamped on session.
     let resolvedStype = stype;
     if (!resolvedStype) {
       try {
@@ -77,31 +79,36 @@ export function reapFinished(activeProcs, db, { logFn, dryRun = false }) {
       } catch { resolvedStype = "dev"; }
     }
     resolvedStype = resolvedStype || "dev";
-    let outcome = rc === 0 ? "pass" : "fail";
 
-    if (rc !== 0) {
-      const crashNote = resolvedStype === "review" ? "[review-crashed]" : "[spawn-failed]";
-      logFn(`[${project}] session '${feature}' exited ${rc} — reverting to queued`, "ERROR");
+    let row;
+    try {
+      row = rowGet(db, project, feature);
+    } catch {
+      logFn(`[${project}] failed to read row for '${feature}' — skipping reconcile`, "ERROR");
+      continue;
+    }
 
-      try {
-        const row = rowGet(db, project, feature);
-        const existing = row ? (row.notes_extra || "") : "";
-        setLastError(db, project, feature, `session exited ${rc}`);
-        rowUpdate(db, project, feature, {
-          stage:       "queued",
-          notes_extra: appendNote(existing, crashNote),
-        });
-      } catch (e) {
-        logFn(`[${project}] reaper update failed: ${e.message}`, "ERROR");
-      }
-      notifyFailure(project, feature, null, { dryRun });
+    let outcome = "fail"; // Dead pid always indicates failure/orphan
+    const ts = new Date().toISOString().slice(0, 16);
 
+    // Check if row already advanced past this session's stage (handoff recorded).
+    // If so, session is done — nothing to do.
+    const sessionStage = resolvedStype === "merge" ? "merge"
+                       : resolvedStype === "review" ? "review"
+                       : resolvedStype === "test" ? "test"
+                       : "dev";
+
+    if (row && row.stage !== sessionStage) {
+      logFn(
+        `[${project}] ${sessionStage} '${feature}' pid dead; row already at stage=${row.stage} ` +
+        `(handoff recorded) — no action`
+      );
     } else {
-      logFn(`[${project}] session '${feature}' completed (exit 0)`);
+      // Row stage matches session stage — session is orphaned/no-handoff
+      logFn(`[${project}] session '${feature}' pid dead; row still at stage=${sessionStage} — applying recovery`, "WARN");
 
       if (resolvedStype === "test") {
         try {
-          const row = rowGet(db, project, feature);
           if (row) {
             const qaPass = row.qa_pass;
             if (qaPass === 0) {
@@ -125,38 +132,20 @@ export function reapFinished(activeProcs, db, { logFn, dryRun = false }) {
       } else if (resolvedStype === "review") {
         if (!projectRoot) {
           logFn(`[${project}] review-reaper: no projectRoot known — skipping`, "WARN");
-          continue;
-        }
-        try {
-          const row = rowGet(db, project, feature);
-          if (!row) continue;
-
-          if (row.stage !== "review") {
-            logFn(
-              `[${project}] review '${feature}' exit 0; row already at stage=${row.stage} (handled by review-complete) — no action`
-            );
-          } else {
+        } else if (row) {
+          try {
             const planStem = basename(row.plan_file || "", ".md") || "";
             const spawnWt  = orchestratorWorktreePath({ project, projectRoot, branch: `autonomous/${planStem}` });
-            const ts       = new Date().toISOString().slice(0, 16);
             const existing = row.notes_extra || "";
 
             if (!gitWorktreeClean(spawnWt, logFn)) {
-              logFn(`[${project}] review '${feature}' exit 0 but worktree dirty — parking at manual`, "ERROR");
+              logFn(`[${project}] review '${feature}' pid dead but worktree dirty — parking at manual`, "ERROR");
               rowUpdate(db, project, feature, {
                 stage:       "manual",
                 notes_extra: appendNote(existing, `[review-touched-source ${ts}]`),
               });
               notifyFailure(project, feature, "review-touched-source", { dryRun });
             } else {
-              // Reports are written by the review session into
-              // <spawnWt>/reports/review-report-<feature>-retry<N>.md per the
-              // bundled review-session.md template. <N> is the row's current
-              // review_retries (so each retry gets its own report and prior
-              // verdicts stay browseable). The reaper checks the same path
-              // for the current retry's report so an exit-0-without-review-
-              // complete can distinguish "agent wrote a report but failed to
-              // call review-complete" from "agent never produced a report".
               const retryN = row.review_retries || 0;
               const reportsDir = join(spawnWt, "reports");
               const reportFile = `review-report-${feature}-retry${retryN}.md`;
@@ -167,55 +156,35 @@ export function reapFinished(activeProcs, db, { logFn, dryRun = false }) {
                 } catch {}
               }
               const note = hasReport ? "[review-stuck-cli-failed]" : "[review-stuck-no-report]";
-              logFn(`[${project}] review '${feature}' exit 0 with no verdict — parking at manual ${note}`, "ERROR");
+              logFn(`[${project}] review '${feature}' pid dead, no verdict — parking at manual ${note}`, "ERROR");
               rowUpdate(db, project, feature, {
                 stage:       "manual",
                 notes_extra: appendNote(existing, `${note} ${ts}`),
               });
               notifyFailure(project, feature, note, { dryRun });
             }
+          } catch (e) {
+            logFn(`[${project}] review-reaper update failed: ${e.message}`, "ERROR");
           }
-        } catch (e) {
-          logFn(`[${project}] review-reaper update failed: ${e.message}`, "ERROR");
         }
 
       } else if (resolvedStype === "dev") {
-        // Dev sessions are expected to call `pipeline dev-complete` themselves
-        // — that command sets stage=queued + notes_extra=type=review and the
-        // orch then spawns the review session. If the session exited 0 but
-        // didn't perform the handoff, two cases matter:
-        //
-        //   (a) Recoverable — the row is mid review-bounce cycle
-        //       (review_retries > 0, budget remains). The agent likely
-        //       self-aborted because its self-review still flagged a BLOCKER
-        //       (per the dev template's "don't dev-complete with a known
-        //       [BLOCKER] outstanding" rule) but committed work to the branch
-        //       anyway. Advancing to review here uses an existing retry slot
-        //       to let the reviewer judge the committed state. The budget
-        //       naturally bounds the loop.
-        //
-        //       Note: we deliberately do NOT gate on review_verdict.
-        //       `autoRequeueDevFromReview` clears the column to NULL on
-        //       bounce (pipeline-db/rows.mjs:126, pipeline_db.py:416) so the
-        //       next review cycle starts fresh — reading the verdict here
-        //       always sees NULL. `review_retries > 0` is the reliable
-        //       "we are in a bounce loop" signal.
-        //
-        //   (b) Terminal — either an initial dev that forgot the handoff
-        //       (review_retries == 0), or budget exhausted (retries ==
-        //       budget). Park at manual for human triage.
-        try {
-          const row = rowGet(db, project, feature);
-          if (row && row.stage === "dev" && (row.notes_extra || "").startsWith("type=dev")) {
-            const ts          = new Date().toISOString().slice(0, 16);
+        if (!row || row.stage !== "dev") {
+          // No recovery needed — row already advanced past dev stage
+        } else if (!(row.notes_extra || "").startsWith("type=dev")) {
+          // Not a type=dev session, skip recovery
+        } else {
+          try {
             const existing    = row.notes_extra || "";
             const retries     = row.review_retries || 0;
             const budget      = row.review_retry_budget || 3;
-            const recoverable = retries > 0 && retries < budget && projectRoot;
+            const planStem    = basename(row.plan_file || "", ".md") || feature;
+            const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
+            const hasWork     = branchHasCommits(projectRoot, `autonomous/${planStem}`, targetBranch);
+            const recoverable = !!projectRoot && retries < budget && (retries > 0 || hasWork);
 
             if (recoverable) {
               try {
-                const planStem = basename(row.plan_file || "", ".md") || feature;
                 const cwd      = orchestratorWorktreePath({
                   project, projectRoot, branch: `autonomous/${planStem}`,
                 });
@@ -232,14 +201,12 @@ export function reapFinished(activeProcs, db, { logFn, dryRun = false }) {
                   notes_extra: notes,
                 });
                 logFn(
-                  `[${project}] dev '${feature}' exit 0 no handoff — ` +
-                  `recoverable (review verdict=needs_work, retries=${retries}/${budget}); ` +
+                  `[${project}] dev '${feature}' pid dead, no handoff — ` +
+                  `recoverable (review_retries=${retries}/${budget}); ` +
                   `advancing to review`,
                   "WARN"
                 );
               } catch (gerr) {
-                // Recovery failed (session-gen threw, worktree missing,
-                // whatever) — fall back to park so the operator can triage.
                 logFn(
                   `[${project}] dev '${feature}' recovery failed (${gerr.message}) — parking at manual`,
                   "ERROR"
@@ -251,27 +218,27 @@ export function reapFinished(activeProcs, db, { logFn, dryRun = false }) {
                 notifyFailure(project, feature, "dev-no-handoff-recovery-failed", { dryRun });
               }
             } else {
-              logFn(`[${project}] dev '${feature}' exit 0 but no handoff — parking at manual`, "WARN");
+              logFn(`[${project}] dev '${feature}' pid dead, no handoff — parking at manual`, "WARN");
               rowUpdate(db, project, feature, {
                 stage:       "manual",
                 notes_extra: appendNote(existing, `[dev-no-handoff ${ts}]`),
               });
               notifyFailure(project, feature, "dev-no-handoff", { dryRun });
             }
+          } catch (e) {
+            logFn(`[${project}] dev-reaper update failed: ${e.message}`, "ERROR");
           }
-        } catch (e) {
-          logFn(`[${project}] dev-reaper update failed: ${e.message}`, "ERROR");
         }
 
       } else if (resolvedStype === "merge") {
-        // Agent ran merge.mjs. On success (exit 0), row is already `done`
-        // (merge.mjs step 5 advances it). On failure (non-zero), row stays
-        // at `merge`; surface to operator.
-        if (proc.exitCode === 0) {
-          logFn(`[${project}] merge '${feature}' completed`);
-        } else {
-          logFn(`[${project}] merge '${feature}' failed exit=${proc.exitCode}`, "ERROR");
-          notifyFailure(project, feature, `merge-failed exit=${proc.exitCode}`);
+        logFn(`[${project}] merge '${feature}' pid dead — parking at manual for triage`, "ERROR");
+        if (row) {
+          const existing = row.notes_extra || "";
+          rowUpdate(db, project, feature, {
+            stage:       "manual",
+            notes_extra: appendNote(existing, `[merge-crashed ${ts}]`),
+          });
+          notifyFailure(project, feature, "merge-crashed", { dryRun });
         }
       }
     }
