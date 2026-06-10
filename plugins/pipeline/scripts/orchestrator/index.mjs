@@ -162,12 +162,11 @@ async function pollOnce({
   const cfg = loadPipelineConfig();
   for (const [project, projectRoot] of pipelinePaths) {
     if (projectFilter && project !== projectFilter) continue;
-    if (projectIsActive(db, project)) continue;
-    if (countActiveSessions(db) >= maxConcurrent) continue;
 
     const rows = rowsList(db, project);
 
-    // Fire on_merge_ready for ALL unfired merge-stage rows (not just the first).
+    // Fire on_merge_ready for ALL unfired merge-stage rows — unconditional, does not
+    // spawn a session so the concurrency guard must not block it.
     const unfired = rows.filter(r =>
       r.stage === "merge" &&
       depsMet(r, rows, logFn) &&
@@ -185,6 +184,8 @@ async function pollOnce({
     }
 
     // Spawning a merge SESSION still needs the concurrency guards — one per project per tick.
+    if (projectIsActive(db, project)) continue;
+    if (countActiveSessions(db) >= maxConcurrent) continue;
     const mergeRow = rows.find(r =>
       r.stage === "merge" &&
       depsMet(r, rows, logFn)
