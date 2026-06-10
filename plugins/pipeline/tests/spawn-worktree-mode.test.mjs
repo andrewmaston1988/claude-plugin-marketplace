@@ -107,6 +107,82 @@ test("stash-switchback dance: pop conflict leaves stash preserved", () => {
   }
 });
 
+// ── Regression: test-session.md scope-excludes test-reports/ from the stash ──
+//
+// test-session.md cannot use the review-session re-order (stash → checkout →
+// write) because the test report is built incrementally throughout the session.
+// Instead it stashes with `-- . ':!test-reports/'` so the report directory
+// stays in the working tree across the branch switch. This test pins that
+// behaviour: with the pathspec exclusion, an untracked file in test-reports/
+// must survive `git stash push -u` (and a subsequent `git add` must succeed).
+test("test-session dance: stash with pathspec keeps test-reports/ in working tree", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "spawn-wt-test-mode-"));
+  try {
+    git(tmp, "init", "-q", "-b", "main");
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "init");
+    git(tmp, "checkout", "-b", "autonomous/feat-y");
+
+    // Simulate a test session: report written before the publish dance.
+    mkdirSync(join(tmp, "test-reports"), { recursive: true });
+    writeFileSync(join(tmp, "test-reports", "test-report.md"), "verdict: pass\n");
+    // Also some dev WIP (untracked, outside test-reports/) that SHOULD stash.
+    writeFileSync(join(tmp, "wip.txt"), "dev WIP\n");
+
+    // Scope-excluded stash: keep test-reports/ in the working tree.
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t",
+        "stash", "push", "-u", "-m", "auto: qa-test-feat-y", "--", ".", ":!test-reports/");
+    // Report must still exist in the working tree.
+    ok(existsSync(join(tmp, "test-reports", "test-report.md")),
+       "test-reports/ must survive stash push -u with pathspec exclusion");
+    // Dev WIP must have been stashed.
+    ok(!existsSync(join(tmp, "wip.txt")), "non-excluded WIP should stash away");
+
+    // The follow-up add+commit on the publish branch must succeed because the
+    // report is still there.
+    git(tmp, "checkout", "-B", "qa-test/feat-y");
+    git(tmp, "add", "test-reports/test-report.md");
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "qa-test: feat-y");
+    const log = git(tmp, "log", "--format=%s", "qa-test/feat-y");
+    ok(log.includes("qa-test: feat-y"), `publish commit missing: ${log}`);
+  } finally {
+    try { rmSync(tmp, { recursive: true, force: true, maxRetries: 3 }); } catch {}
+  }
+});
+
+// ── Regression: review-session.md writes the report AFTER stash + checkout ───
+//
+// The earlier bug was the template writing the report before `git stash push
+// -u`, which then stashed the untracked report away. This test simulates the
+// fixed ordering and asserts a working publish commit.
+test("review-session dance: write-after-stash ordering reaches the publish branch", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "spawn-wt-review-mode-"));
+  try {
+    git(tmp, "init", "-q", "-b", "main");
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "--allow-empty", "-m", "init");
+    git(tmp, "checkout", "-b", "autonomous/feat-y");
+
+    // Untracked dev WIP exists before the dance.
+    writeFileSync(join(tmp, "wip.txt"), "dev WIP\n");
+
+    // Step 1: stash WIP.
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t",
+        "stash", "push", "-u", "-m", "auto: code-review-feat-y");
+    ok(!existsSync(join(tmp, "wip.txt")), "WIP should stash");
+    // Step 2: publish branch.
+    git(tmp, "checkout", "-B", "code-review/feat-y");
+    // Step 3: write the report AFTER stash+checkout.
+    mkdirSync(join(tmp, "reports"), { recursive: true });
+    writeFileSync(join(tmp, "reports", "review-report.md"), "verdict: ready_to_ship\n");
+    // Step 4: add + commit must succeed.
+    git(tmp, "add", "reports/review-report.md");
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "code-review: feat-y retry0");
+    const log = git(tmp, "log", "--format=%s", "code-review/feat-y");
+    ok(log.includes("code-review: feat-y retry0"), `publish commit missing: ${log}`);
+  } finally {
+    try { rmSync(tmp, { recursive: true, force: true, maxRetries: 3 }); } catch {}
+  }
+});
+
 // ── Defaults sanity: featureWorktreePath default shape is per-feature ────────
 
 test("default worktree_base is per-feature, not per-branch", () => {

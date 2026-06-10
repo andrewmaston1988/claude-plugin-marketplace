@@ -11,7 +11,7 @@ import {
 import { generateSessionFile } from "../../scripts/session-gen.mjs";
 import { publishNotification } from "../../scripts/publisher.mjs";
 import { getFlag } from "./helpers.mjs";
-import { handlerWorktreePath, orchestratorWorktreePath } from "../../scripts/worktree-paths.mjs";
+import { featureWorktreePath } from "../../scripts/worktree-paths.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { resolvePlansDir, resolvePlanFile } from "../plans-resolver.mjs";
 
@@ -377,7 +377,8 @@ export async function run(cmd, argv) {
     const targetStage  = qaPass ? (hasManual ? "manual" : "merge") : "test";
 
     // Step 3: commit report on qa worktree
-    const qaWorktree = handlerWorktreePath({ project: ctx.project, projectRoot: ctx.projectRoot, kind: "qa-test", feature: branchSlug });
+    // Phase 3b: all session kinds share the single feature worktree.
+    const qaWorktree = featureWorktreePath({ project: ctx.project, projectRoot: ctx.projectRoot, feature: branchSlug });
     if (existsSync(qaWorktree)) {
       const corrId = process.env.CORRELATION_ID || "unknown";
       const passFail = qaPass ? "pass" : "fail";
@@ -520,7 +521,8 @@ export async function run(cmd, argv) {
     const reviewRetryBudget  = row.review_retry_budget ?? 3;
 
     // Commit report on code-review worktree
-    const worktree = handlerWorktreePath({ project: ctx.project, projectRoot: ctx.projectRoot, kind: "code-review", feature });
+    // Phase 3b: all session kinds share the single feature worktree.
+    const worktree = featureWorktreePath({ project: ctx.project, projectRoot: ctx.projectRoot, feature });
     if (existsSync(worktree)) {
       const commitMsg = `[${correlationId}] Review report: ${feature} — ${verdict}`;
       try {
@@ -629,8 +631,8 @@ export async function run(cmd, argv) {
       // report file so prior verdicts remain readable as history.
       const devCompleteRow = rowGet(ctx.db, ctx.project, feature);
       const planStem = (planFile || "").replace(/\.md$/, "").split(/[\\/]/).pop();
-      const cwd = orchestratorWorktreePath({
-        project: ctx.project, projectRoot: ctx.projectRoot, branch: `autonomous/${planStem}`,
+      const cwd = featureWorktreePath({
+        project: ctx.project, projectRoot: ctx.projectRoot, feature: planStem,
       });
       sessionPath = generateSessionFile(ctx.project, planFile, "review", {
         projectRoot: ctx.projectRoot,

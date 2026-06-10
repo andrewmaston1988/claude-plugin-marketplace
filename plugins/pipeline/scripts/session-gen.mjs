@@ -116,7 +116,9 @@ export function generateSessionFile(
   const progressBlock = existsSync(progressPath) ? readFileSync(progressPath, "utf8").trimEnd() : "";
 
   // Phase 3b: single worktree per feature. CODE_REVIEW_WT and QA_TEST_WT are
-  // aliases for WORKTREE so templates that haven't migrated still resolve.
+  // load-bearing aliases for WORKTREE — dev-session.md's prior-report-discovery
+  // blocks still reference the legacy names; they must keep resolving to the
+  // same path until every template migrates. See plugins/pipeline/CLAUDE.md.
   const worktree       = featureWorktreePath({ project, projectRoot, feature, _config: cfg });
   const reviewRP       = reportPath({ project, projectRoot, kind: "code-review", feature, _config: cfg });
   const testRP         = reportPath({ project, projectRoot, kind: "qa-test",     feature, _config: cfg });

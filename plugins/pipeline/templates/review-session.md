@@ -178,9 +178,16 @@ REPORT_PATH={{REVIEW_REPORTS_DIR}}/review-report-<date>-{{FEATURE}}-retry<N>-${C
 
 `{{REVIEW_REPORTS_DIR}}` is the absolute reports directory inside the code-review worktree; it's substituted by session-gen from a single config source so the reaper and the template can't drift. Never reconstruct this path inline — bash tool cwd resets between calls and a relative form would silently fail with `Report not found`.
 
-**Write the report file via Bash heredoc** — your tool surface does NOT include `Write`. The heredoc delimiter MUST be single-quoted and unique (`'PIPELINE_REVIEW_REPORT_SENTINEL_END'`) so the report content (which may include `$` expansions, backticks, or accidental `EOF` strings) can't break the heredoc parser:
+**Publish the report via stash-switchback dance — stash FIRST, then write the report on the publish branch.** The single feature worktree is currently on `autonomous/{{FEATURE}}`. Order matters: `git stash push -u` includes untracked files, so the report must be written *after* the stash and *on* the publish branch, otherwise the freshly-created untracked report is stashed away and the subsequent `git add` fails. The heredoc delimiter MUST be single-quoted and unique (`'PIPELINE_REVIEW_REPORT_SENTINEL_END'`) so the report content (which may include `$` expansions, backticks, or accidental `EOF` strings) can't break the heredoc parser:
 
 ```bash
+cd {{WORKTREE}}
+# 1. Stash any uncommitted dev WIP (untracked + tracked) BEFORE writing the report.
+git stash push -u -m "auto: code-review-{{FEATURE}}"
+STASH_RC=$?
+# 2. Create or fast-forward the publish branch.
+git checkout -B {{REVIEW_PUBLISH_BRANCH}}
+# 3. Write the report on the publish branch.
 mkdir -p "$(dirname "$REPORT_PATH")"
 cat > "$REPORT_PATH" << 'PIPELINE_REVIEW_REPORT_SENTINEL_END'
 # Code Review Report: {{FEATURE}} (attempt <N+1>)
@@ -202,25 +209,12 @@ cat > "$REPORT_PATH" << 'PIPELINE_REVIEW_REPORT_SENTINEL_END'
 
 review_verdict: <ready_to_ship | needs_work>
 PIPELINE_REVIEW_REPORT_SENTINEL_END
-```
-
-The trailing canonical `review_verdict:` line is **operator-facing only**. The orchestrator reads the verdict from the `--verdict` CLI arg in the next step, NOT by re-parsing this line. Make it match the `--verdict` value you will pass to `review-complete` for the operator's audit clarity.
-
-**Publish the report to the `{{REVIEW_PUBLISH_BRANCH}}` branch (stash-switchback dance).** The single feature worktree is currently on `autonomous/{{FEATURE}}`. The report must land on its own side-branch so the merge skill can read the verdict from git history. Do the stash-switchback dance:
-
-```bash
-cd {{WORKTREE}}
-# 1. Stash any uncommitted dev WIP (untracked + tracked).
-git stash push -u -m "auto: code-review-{{FEATURE}}"
-STASH_RC=$?
-# 2. Create or fast-forward the publish branch.
-git checkout -B {{REVIEW_PUBLISH_BRANCH}}
-# 3. Stage and commit the report.
+# 4. Stage and commit the report.
 git add "$REPORT_PATH"
 git commit -m "code-review: {{FEATURE}} retry${N}"
-# 4. Return to the dev branch.
+# 5. Return to the dev branch.
 git checkout autonomous/{{FEATURE}}
-# 5. Restore WIP (only if step 1 actually stashed something).
+# 6. Restore WIP (only if step 1 actually stashed something).
 if [ "$STASH_RC" = "0" ] && git stash list | grep -q "auto: code-review-{{FEATURE}}"; then
   if ! git stash pop; then
     # Stash-pop conflict — park at manual; preserve the stash for operator recovery.
@@ -233,6 +227,8 @@ if [ "$STASH_RC" = "0" ] && git stash list | grep -q "auto: code-review-{{FEATUR
   fi
 fi
 ```
+
+The trailing canonical `review_verdict:` line is **operator-facing only**. The orchestrator reads the verdict from the `--verdict` CLI arg in the next step, NOT by re-parsing this line. Make it match the `--verdict` value you will pass to `review-complete` for the operator's audit clarity.
 
 If any step before stash-pop fails the report is not published — that is a hard failure; do not call `review-complete`.
 

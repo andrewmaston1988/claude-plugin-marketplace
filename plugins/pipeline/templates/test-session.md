@@ -162,13 +162,16 @@ feature areas. Write your completion summary and proceed to notify.
 Include timestamps, log lines, exact error messages, and reproduction steps.
 Reference the relevant plan file and section if a finding matches a known issue.
 
-**Publish the report to the `{{TEST_PUBLISH_BRANCH}}` branch (stash-switchback dance).** The single feature worktree is currently on `autonomous/{{FEATURE}}`. Publish the report to its own side-branch before calling `test-complete` so the merge skill can read it from git history:
+**Publish the report to the `{{TEST_PUBLISH_BRANCH}}` branch (stash-switchback dance).** The single feature worktree is currently on `autonomous/{{FEATURE}}`. Publish the report to its own side-branch before calling `test-complete` so the merge skill can read it from git history.
+
+The stash step **scope-excludes** the `test-reports/` subdirectory via a pathspec — without that exclusion, `git stash push -u` would sweep the just-written report into the stash and the subsequent `git add` would fail with `pathspec did not match`. The exclusion keeps the report in the working tree across the branch switch so it can be committed onto the publish branch:
 
 ```bash
 cd {{WORKTREE}}
 REPORT_PATH={{TEST_REPORTS_DIR}}/test-report-<date>-{{FEATURE}}-${CORRELATION_ID}.md
-# 1. Stash any uncommitted dev WIP.
-git stash push -u -m "auto: qa-test-{{FEATURE}}"
+# 1. Stash any uncommitted dev WIP, BUT keep the test-reports subdir in the
+#    working tree so it survives the branch switch onto the publish branch.
+git stash push -u -m "auto: qa-test-{{FEATURE}}" -- . ':!test-reports/'
 STASH_RC=$?
 # 2. Create or fast-forward the publish branch.
 git checkout -B {{TEST_PUBLISH_BRANCH}}
