@@ -357,7 +357,7 @@ export async function runWizard({ paths, log, opts = {} }) {
       if (!isNaN(portVal) && portVal > 0) {
         if (!config.web) config.web = {};
         config.web.port = portVal;
-        say(`  ✓ web.port: ${portVal}  →  http://localhost:${portVal}/pipeline\n`);
+        say(`  ✓ web.port: ${portVal}\n`);
       }
 
       const defHost = config.web?.host ?? PIPELINE_DEFAULTS.web.host;
@@ -372,7 +372,10 @@ export async function runWizard({ paths, log, opts = {} }) {
       const hostVal = hostRaw || defHost;
       if (!config.web) config.web = {};
       config.web.host = hostVal;
-      say(`  ✓ web.host: ${hostVal}\n`);
+      // Map well-known loopback to "localhost" for the bookmark URL; echo
+      // every other host verbatim so the URL reflects the actual bind.
+      const displayHost = (hostVal === "127.0.0.1" || hostVal === "::1") ? "localhost" : hostVal;
+      say(`  ✓ web.host: ${hostVal}  →  http://${displayHost}:${config.web.port}/pipeline\n`);
     }
 
     // Step 7 — register first project (config is written after worktree-layout
