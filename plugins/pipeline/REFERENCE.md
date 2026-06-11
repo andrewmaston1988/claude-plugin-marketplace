@@ -310,7 +310,7 @@ If `pr_title` is empty (old rows), the feature slug is used as the subject — i
 
 **Relationship to `autoMerge`:** when `autoMerge: true`, the orchestrator calls `spawnMerge` which runs `merge.mjs` — so `on_merge` fires for autoMerge-triggered merges too, not just manual `/merge` invocations.
 
-> **Note:** unlike `on_merge_ready`, `on_merge` is not yet routed through `resolveTemplate`. Supply an absolute path — relative paths will not resolve correctly until this is retrofitted. `pipeline doctor` flags this.
+> **Note:** unlike `on_merge_ready`, `on_merge` is not yet routed through `resolveTemplate`. Supply an absolute path — relative paths will not resolve correctly until this is retrofitted.
 
 ---
 
