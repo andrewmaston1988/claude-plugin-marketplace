@@ -1,10 +1,11 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { join, isAbsolute } from "node:path";
+import { join, isAbsolute, dirname } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadPipelineConfig } from "../pipeline-config.mjs";
+import { resolvePlansDir } from "../plans-resolver.mjs";
 import { connectUnified, close, dbPathUnified } from "../../scripts/pipeline-db/connection.mjs";
 import { projectList } from "../../scripts/pipeline-db/projects.mjs";
 import { readState, pidAlive } from "../../scripts/orchestrator/state-file.mjs";
@@ -29,9 +30,20 @@ function _pathResolutionChecks(cfg, projects, paths) {
 
   for (const p of projects ?? []) {
     const _proj = (raw) => raw
-      ? resolveTemplate(raw, { root: p.root_path, project: p.name }, { resolveBase: p.root_path, configDir: cd })
+      ? resolveTemplate(raw, {
+          root:             p.root_path,
+          root_parent:      dirname(p.root_path),
+          root_grandparent: dirname(dirname(p.root_path)),
+          project:          p.name,
+        }, { resolveBase: p.root_path, configDir: cd })
       : null;
-    out.push({ key: `[${p.name}] plansDir`,             raw: cfg.plansDir,             resolved: _proj(cfg.plansDir) ?? join(p.root_path, "plans"), warn: false });
+    const plansResolved = resolvePlansDir({
+      project:         p.name,
+      projectRoot:     p.root_path,
+      projectPlansDir: p.plans_dir,
+      _config:         cfg,
+    });
+    out.push({ key: `[${p.name}] plansDir`,             raw: p.plans_dir ?? cfg.plansDir, resolved: plansResolved ?? join(p.root_path, "plans"), warn: false });
     out.push({ key: `[${p.name}] governor.reports_dir`, raw: cfg.governor?.reports_dir, resolved: _proj(cfg.governor?.reports_dir) ?? join(p.root_path, "reports"), warn: false });
     out.push({ key: `[${p.name}] governor.session_dir`, raw: cfg.governor?.session_dir, resolved: _proj(cfg.governor?.session_dir) ?? join(p.root_path, "sessions"), warn: false });
     out.push({ key: `[${p.name}] governor.log_dir`,     raw: cfg.governor?.log_dir,     resolved: _proj(cfg.governor?.log_dir)     ?? join(p.root_path, "logs"), warn: false });
