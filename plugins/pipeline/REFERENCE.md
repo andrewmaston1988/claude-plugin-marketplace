@@ -299,6 +299,15 @@ The hook receives the same four environment variables as `on_merge_ready`:
 | `PIPELINE_BRANCH` | Full branch name |
 | `PIPELINE_TARGET_BRANCH` | Merge target |
 
+**Enriched squash commit message (bundled template):** the bundled `on-merge.mjs` template (see `src/setup/wizard-hooks.mjs`) builds a richer squash commit than GitHub's default:
+
+1. Calls `row-get <project> <feature>` to read `pr_title`, `d_model`, and `target_branch` in a single DB call.
+2. Runs `git diff <target>...<branch> --stat --no-color` and passes the output to `claude -p` (Haiku, temperature=0) to generate a 2-3 bullet plain-text commit body.
+3. Appends a `Co-Authored-By: <Model Display Name> <noreply@anthropic.com>` trailer using the `d_model` from the DB row.
+4. Calls `gh pr merge --squash --subject <pr_title> --body <bullets+trailer>`.
+
+If `pr_title` is empty (old rows), the feature slug is used as the subject — identical to GitHub's default. If `claude -p` fails or times out, the body falls back to the trailer alone.
+
 **Relationship to `autoMerge`:** when `autoMerge: true`, the orchestrator calls `spawnMerge` which runs `merge.mjs` — so `on_merge` fires for autoMerge-triggered merges too, not just manual `/merge` invocations.
 
 > **Note:** unlike `on_merge_ready`, `on_merge` is not yet routed through `resolveTemplate`. Supply an absolute path — relative paths will not resolve correctly until this is retrofitted. `pipeline doctor` flags this.
@@ -324,13 +333,15 @@ The hook receives four environment variables — no argv:
 
 The hook has a 15-second hard timeout; its exit code is ignored (fire-and-forget).
 
-#### PR Title
+#### Row Data
 
-The `pr_title` column is populated at queue time by extracting the plan's `*Title:* <text>*` annotation. The hook can retrieve the PR title for a custom GitHub PR or log message:
+The `pr_title` column is populated at queue time by extracting the plan's `*Title:* <text>*` annotation. Use `row-get` to retrieve the full row (including `pr_title`, `d_model`, `target_branch`) in a single call:
 
-```bash
-const titleResult = spawnSync(pipelineBin, ["pr-title-get", project, feature], { encoding: "utf8" });
-const title = (titleResult.stdout?.trim()) || feature;  // fall back to slug if empty
+```js
+const rowResult = spawnSync(pipelineBin, ["row-get", project, feature], { encoding: "utf8" });
+let row = {};
+try { row = JSON.parse(rowResult.stdout?.trim() || "{}"); } catch {}
+const title = row.pr_title || feature;  // fall back to slug if empty
 ```
 
 `pipeline setup` asks whether to configure `on_merge_ready` and can write a Slack wrapper to `~/.pipeline/hooks/on-merge-ready.mjs` automatically if `hooks.on_notification` is already pointing at the bundled claude-slack forwarder.
@@ -841,8 +852,9 @@ cd plugins/pipeline && npm test
 |------------|---------|
 | `notify --title <t> --message <m>` | Publish a notification envelope (forwarded if `hooks.on_notification` is set) |
 | `session-generate <project> <plan-file> <type>` | Generate a session file from template |
-| `target-branch-get <root> <feature>` | Read the target_branch for a row |
-| `pr-title-get <root> <feature>` | Read the pr_title for a row (empty if unset; typically called by on_merge_ready hook) |
+| `row-get <project> <feature>` | Read the full row as JSON — includes `pr_title`, `d_model`, `target_branch`, and all other fields. Preferred over the piecemeal column commands in hook scripts. |
+| `target-branch-get <root> <feature>` | Read the target_branch for a row (deprecated — use `row-get`) |
+| `pr-title-get <root> <feature>` | Read the pr_title for a row (deprecated — use `row-get`) |
 
 ---
 

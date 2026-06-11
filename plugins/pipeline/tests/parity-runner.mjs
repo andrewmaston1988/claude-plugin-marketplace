@@ -297,9 +297,9 @@ function runFixture(caseDir, op) {
       env, cwd: PLUGIN, stdio: "pipe", timeout: 15000,
       input: input.stdin_text || undefined,
     });
-    const stdout   = result.stdout ? result.stdout.toString() : "";
-    const stderr   = result.stderr ? result.stderr.toString() : "";
-    const exitCode = result.status;
+    const rawStdout = result.stdout ? result.stdout.toString() : "";
+    const stderr    = result.stderr ? result.stderr.toString() : "";
+    const exitCode  = result.status;
 
     const db2 = connectPath(dbPath);
     let snapshot;
@@ -308,13 +308,17 @@ function runFixture(caseDir, op) {
     // Normalise OS-tmp repo path to `{repo}` so fixtures stay portable across
     // runs and platforms. Stored absolute plan_file paths (from queue-plan)
     // depend on the temp dir; this canonicalises them. Backslashes in Windows
-    // paths get converted to forward slashes throughout the snapshot.
+    // paths get converted to forward slashes throughout the snapshot and stdout.
     const repoFwd = repo.replace(/\\/g, "/");
     const normalisedSnapshot = JSON.parse(
       JSON.stringify(snapshot)
         .replace(/\\\\/g, "/")
         .replaceAll(repoFwd, "{repo}")
     );
+    const stdout = rawStdout
+      .replace(/\\\\/g, "/")
+      .replaceAll(repo.replace(/\\/g, "/"), "{repo}")
+      .replaceAll(repo, "{repo}");
 
     return { input, stdout, stderr, exitCode, snapshot: normalisedSnapshot };
   } finally {
@@ -369,7 +373,7 @@ if (REGEN) {
 
       const r = runFixture(c.dir, c.op);
 
-      if (c.op === "rows" || c.op === "progress-list-active") {
+      if (c.op === "rows" || c.op === "progress-list-active" || c.op === "queue-plan") {
         const strip = obj => {
           if (Array.isArray(obj)) return obj.map(strip);
           if (obj && typeof obj === "object") {

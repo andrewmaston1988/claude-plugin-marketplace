@@ -20,7 +20,9 @@
     "notes": "",
     "rebase_required": false,
     "target_branch": "main",
-    "last_error": null
+    "last_error": null,
+    "pr_title": null,
+    "depends_on": null
   },
   {
     "feature": "second-feature",
@@ -43,6 +45,8 @@
     "notes": "",
     "rebase_required": false,
     "target_branch": "main",
-    "last_error": null
+    "last_error": null,
+    "pr_title": null,
+    "depends_on": null
   }
 ]

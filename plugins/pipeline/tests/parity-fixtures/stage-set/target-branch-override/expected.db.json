@@ -23,7 +23,8 @@
       "last_error": null,
       "review_retries": 0,
       "review_retry_budget": 3,
-      "review_verdict": null
+      "review_verdict": null,
+      "pr_title": null
     }
   ],
   "progress_files": [],
