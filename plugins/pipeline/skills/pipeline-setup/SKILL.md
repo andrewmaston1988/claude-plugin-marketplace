@@ -174,6 +174,18 @@ process.exit(result.status ?? 1);
 
 Pass the hook path as `--on-merge <abs-path>` (or omit to keep local squash).
 
+### Question 3c2 — merge_check hook
+
+**Ask this whenever the user wired up PR-based merge hooks (3b/3c) on a non-GitHub platform.** It closes the last gap in the PR workflow: a PR merged in the platform's UI (rather than via `/merge`) is invisible to the orchestrator — its only built-in detection is `gh pr list` (GitHub-only), so the row sits at `stage=merge` forever.
+
+**What this does**: `hooks.merge_check` is invoked once per `merge`-stage row each orchestrator poll, with the same env vars as the other merge hooks plus `PIPELINE_PROJECT_ROOT`. Exit 0 = "this branch's PR is merged" -> the row advances to `done` automatically. Non-zero = not merged; re-checked next poll. 20s timeout.
+
+**Default**: disabled. GitHub repos fall back to the legacy `gh pr list` detection; everything else has no UI-merge detection.
+
+**For Bitbucket**: write `~/.pipeline/hooks/merge-check.mjs` that queries `GET /2.0/repositories/<ws>/<repo>/pullrequests?q=source.branch.name="<PIPELINE_BRANCH>" AND state="MERGED"` (workspace/repo parsed from the project root's `git remote get-url origin`) and exits 0 on a non-empty result. Reuse the credential-loading pattern from the user's existing on-merge hook if one exists.
+
+Set `hooks.merge_check` in `~/.pipeline/config.json` (full placeholder/`~/` resolution applies).
+
 ### Question 3d — Plans directory (`plansDir`)
 
 **What this does**: tells every consumer (CLI `backlog-scan`, dashboard backlog, session-gen, demo) where each project's plan files live. The value is a template — placeholders are resolved per-project against that project's root.

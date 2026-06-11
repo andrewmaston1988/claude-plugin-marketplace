@@ -18,7 +18,8 @@ import {
 import { spawnSession, spawnMerge, isDirtyTree, isMergedInto } from "./spawn.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 import { reconcileSessions } from "./reaper.mjs";
-import { orchestratorWorktreePath } from "../worktree-paths.mjs";
+import { orchestratorWorktreePath, resolveHookFirstToken } from "../worktree-paths.mjs";
+import { fileURLToPath } from "node:url";
 import { spawnGovernor, spawnMonthlyGovernor } from "./governor.mjs";
 
 // ── constants ─────────────────────────────────────────────────────────────────
@@ -83,9 +84,20 @@ function depsMet(row, allRows, logFn) {
 
 // ── merged-branch cleanup ─────────────────────────────────────────────────────
 
-// Detect pipeline rows whose branch was squash-merged via GitHub (outside the
-// /merge skill) and advance them to done. Only targets `merge`-stage rows to
-// avoid touching in-flight dev/test/review work.
+const PLUGIN_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+// Detect pipeline rows whose branch was merged outside the /merge skill and
+// advance them to done. Only targets `merge`-stage rows to avoid touching
+// in-flight dev/test/review work.
+//
+// Detection is pluggable via cfg.hooks.merge_check — an executable invoked
+// once per merge-stage row with the same env contract as the other merge
+// hooks (PIPELINE_PROJECT / PIPELINE_FEATURE / PIPELINE_BRANCH /
+// PIPELINE_TARGET_BRANCH / PIPELINE_PROJECT_ROOT / PLUGIN_DIR). Exit 0 means
+// "this branch's PR is merged"; any other exit means not merged (or unknown).
+// This is how non-GitHub platforms (Bitbucket, GitLab) get UI-merge
+// detection. When the hook is unset, the legacy `gh pr list` path runs for
+// GitHub repos; everything else is skipped silently.
 function cleanupMergedRows(db, project, projectRoot, { dryRun, logFn }) {
   let rows;
   try {
@@ -93,25 +105,52 @@ function cleanupMergedRows(db, project, projectRoot, { dryRun, logFn }) {
   } catch { return; }
   if (!rows.length) return;
 
-  // Query GitHub for merged PRs — requires `gh` on PATH and a GitHub remote.
-  const ghResult = spawnSync(
-    "gh", ["pr", "list", "--state", "merged", "--json", "headRefName", "--limit", "200"],
-    { cwd: projectRoot, encoding: "utf8", timeout: 10000 }
-  );
-  if (ghResult.status !== 0) return; // gh not available or not a GitHub repo — skip silently
+  const cfg = loadPipelineConfig();
+  const checkHook = resolveHookFirstToken(cfg.hooks?.merge_check, getPaths().configDir);
 
-  let mergedBranches;
-  try {
-    mergedBranches = new Set(
-      JSON.parse(ghResult.stdout).map(pr => pr.headRefName)
+  let isMergedBranch;
+  if (checkHook) {
+    isMergedBranch = (row, branch, targetBranch) => {
+      const argv = /\.(mjs|js)$/.test(checkHook) ? [process.execPath, [checkHook]] : [checkHook, []];
+      const r = spawnSync(argv[0], argv[1], {
+        timeout: 20000, windowsHide: true, stdio: "ignore",
+        env: {
+          ...process.env,
+          PIPELINE_PROJECT:       project,
+          PIPELINE_FEATURE:       row.feature,
+          PIPELINE_BRANCH:        branch,
+          PIPELINE_TARGET_BRANCH: targetBranch,
+          PIPELINE_PROJECT_ROOT:  projectRoot,
+          PLUGIN_DIR:             PLUGIN_DIR,
+        },
+      });
+      return r.status === 0;
+    };
+  } else {
+    // Legacy: query GitHub for merged PRs — requires `gh` on PATH and a GitHub remote.
+    const ghResult = spawnSync(
+      "gh", ["pr", "list", "--state", "merged", "--json", "headRefName", "--limit", "200"],
+      { cwd: projectRoot, encoding: "utf8", timeout: 10000 }
     );
-  } catch { return; }
+    if (ghResult.status !== 0) return; // gh not available or not a GitHub repo — skip silently
+
+    let mergedBranches;
+    try {
+      mergedBranches = new Set(
+        JSON.parse(ghResult.stdout).map(pr => pr.headRefName)
+      );
+    } catch { return; }
+    isMergedBranch = (row, branch) => mergedBranches.has(branch);
+  }
 
   for (const row of rows) {
-    const branch = row.branch || `autonomous/${row.feature}`;
-    if (!mergedBranches.has(branch)) continue;
+    // "—" is the row-add placeholder for "no branch recorded" — same sentinel
+    // handling as the on_merge_ready firing below.
+    const branch = (row.branch && row.branch !== "—") ? row.branch : `autonomous/${row.feature}`;
+    const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
+    if (!isMergedBranch(row, branch, targetBranch)) continue;
 
-    logFn(`[${project}] '${row.feature}' branch merged via GitHub — advancing to done`);
+    logFn(`[${project}] '${row.feature}' branch merged on the remote — advancing to done`);
     if (dryRun) continue;
 
     try {
