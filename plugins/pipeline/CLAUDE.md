@@ -1,5 +1,25 @@
 # Pipeline plugin
 
+## Configuration knobs
+
+All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DEFAULTS` at load time. Missing keys fall back to the defaults below.
+
+| Key | Default | Notes |
+|---|---|---|
+| `web.port` | `8765` | Port the web dashboard listens on. Override with `--port` on the CLI for a single session. Doctor check `web-port-conflict` warns when a foreign process occupies this port. |
+| `governor.enabled` | `false` | Opt-in to scheduled background governance reports. Also set `governor.project`. |
+| `governor.project` | `null` | Name of the registered project whose root is used as fallback for `reports_dir`, `session_dir`, `log_dir`. |
+| `governor.template_path` | _(bundled)_ | Path to a custom governor session template. Relative paths resolve from `~/.pipeline/`. |
+| `governor.reports_dir` | `<project-root>/reports` | Where governance markdown reports land. |
+| `governor.session_dir` | `<project-root>/sessions` | Where governor session files are written. |
+| `governor.log_dir` | `<project-root>/logs` | Where governor stdout/stderr logs go. |
+
+**Web dashboard host**: the `host` default changed from `null` (all interfaces) to `"127.0.0.1"` (loopback-only). Operators who need to bind to all interfaces can pass `--host ::` or `--host 0.0.0.0` to `pipeline dashboard web`. No config key is exposed for host — the dual-stack edge case is handled by the CLI flag only.
+
+**Slack-bridge tokens**: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `CLAUDE_CWD` are env-var overrides for the slack-bridge's `tokens.bot`, `tokens.app`, and `claude.cwd` config keys respectively. Env vars win over config values. Full mapping: `plugins/slack-bridge/CONFIG.md`.
+
+**Governor spawn contract**: when the governor is enabled, the orchestrator sets `CORRELATION_ID`, `REPORT_TYPE`, `REPORT_DATE`, `REPORT_MONTH`, `PIPELINE_DB`, and `PLUGIN_DIR` in the child process env before launching the governor session. Doctor check `governor-env-contract` verifies the template doesn't reference vars outside this set.
+
 ## Worktree layout
 
 **One worktree per feature.** As of phase 3b, every pipeline-managed session for a feature — dev, research, review, test, merge — operates inside a single git worktree at:
