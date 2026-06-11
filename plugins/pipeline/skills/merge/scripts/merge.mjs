@@ -18,7 +18,7 @@
  *                  [--target-branch <branch>] [--parent <slug>]
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, relative, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 
@@ -230,7 +230,14 @@ export async function step7CommitProject(projectDir, branches, { plansDir = null
   // Stage the plans directory — use plansDir if provided, else default to <projectDir>/plans
   const resolvedPlansDir = plansDir || join(projectDir, "plans");
   if (existsSync(resolvedPlansDir)) {
-    await gitAddWithRetry(projectDir, resolvedPlansDir);
+    // Only stage plansDir when it lives inside projectDir. An external plansDir
+    // belongs to a different git repo; staging it from here fails and is not our job.
+    const rel = relative(projectDir, resolvedPlansDir);
+    if (!rel.startsWith("..") && !isAbsolute(rel)) {
+      await gitAddWithRetry(projectDir, resolvedPlansDir);
+    } else {
+      logOut(`[7] plansDir '${resolvedPlansDir}' is outside projectDir — skipping git add in project repo`);
+    }
   }
 
   // Filter ?? (untracked) lines before deciding whether to commit
