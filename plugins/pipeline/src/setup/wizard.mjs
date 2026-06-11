@@ -101,7 +101,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 2 — environment pre-checks
     hr();
-    say("Step 1/10 — Environment check\n");
+    say("Step 1/11 — Environment check\n");
     const preResults = await runDoctor({ paths });
     printDoctor(preResults);
     const preFailed = preResults.filter(r => !r.ok && !r.warn);
@@ -117,7 +117,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 3 — model defaults
     hr();
-    say("Step 2/10 — Model defaults\n");
+    say("Step 2/11 — Model defaults\n");
     if (!nonInteractive) say("Press Enter to keep the default, or type a model ID to override.\n");
     config.models = config.models ?? {};
     for (const [key, defVal] of Object.entries(PIPELINE_DEFAULTS.models)) {
@@ -131,7 +131,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 4 — review skill config
     hr();
-    say("Step 3/10 — Review skill config\n");
+    say("Step 3/11 — Review skill config\n");
     config.review = config.review ?? {};
     const defSkill = defaults.review?.skill     ?? PIPELINE_DEFAULTS.review.skill;
     const defFlag  = defaults.review?.deep_flag ?? PIPELINE_DEFAULTS.review.deep_flag;
@@ -154,7 +154,7 @@ export async function runWizard({ paths, log, opts = {} }) {
       say("    Default 'plans' → <project-root>/plans/\n");
       say("    Placeholders: {root}, {root_parent}, {root_grandparent}, {project}.\n");
       say("    Examples:\n");
-      say("      ../CLAUDE/repos/{project}/plans   (sibling knowledge-base repo)\n");
+      say("      {root_parent}/<my-kb>/repos/{project}/plans (sibling knowledge-base repo)\n");
       say("      {root_parent}/shared-plans       (sibling dir at root's parent)\n");
       say("      ~/work/plans/{project}           (absolute, ~-expanded)\n");
       say("    Consequences: an unknown placeholder is left literal in the path,\n");
@@ -203,7 +203,15 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 5 — Slack notification channels
     hr();
-    say("Step 4/10 — Slack notification channels\n");
+    say("Step 4/11 — Slack notification channels\n");
+    if (!nonInteractive) {
+      say("  The slack-bridge reads tokens from env vars (highest priority) or config.json.\n");
+      say("  Env var ↔ config key mapping:\n");
+      say("    SLACK_BOT_TOKEN  →  tokens.bot   (required)\n");
+      say("    SLACK_APP_TOKEN  →  tokens.app   (required for Socket Mode)\n");
+      say("    CLAUDE_CWD       →  claude.cwd   (optional; sets working dir for claude)\n");
+      say("  Set the env vars for secrets; use config.json for non-secret defaults.\n\n");
+    }
     config.notifications = config.notifications ?? {};
     // Backward-compat: read pre-rename `slack_channel` as a fallback default.
     const defChannel    = defaults.notifications?.governance_channel
@@ -331,11 +339,47 @@ export async function runWizard({ paths, log, opts = {} }) {
       delete config.notifications.on_write;
     }
 
+    // Step 5/11 — web dashboard port
+    hr();
+    say("Step 5/11 — Web dashboard port\n");
+    {
+      const defPort = config.web?.port ?? PIPELINE_DEFAULTS.web.port;
+      if (!nonInteractive) {
+        say(`  The pipeline web dashboard (http://localhost:<port>/pipeline) listens on this port.\n`);
+        say(`  Default: ${defPort}. Change it if another service already occupies ${defPort}.\n`);
+        say(`  Bookmarks and scripts that reference a specific port will need updating if you change it.\n`);
+        say(`  Example: http://localhost:9000/pipeline\n`);
+      }
+      const portRaw = nonInteractive
+        ? (opts.webPort !== undefined ? String(opts.webPort) : "")
+        : (await ask(`  web.port [${defPort}]: `)).trim();
+      const portVal = portRaw ? parseInt(portRaw, 10) : defPort;
+      if (!isNaN(portVal) && portVal > 0) {
+        if (!config.web) config.web = {};
+        config.web.port = portVal;
+        say(`  ✓ web.port: ${portVal}  →  http://localhost:${portVal}/pipeline\n`);
+      }
+
+      const defHost = config.web?.host ?? PIPELINE_DEFAULTS.web.host;
+      if (!nonInteractive) {
+        say(`\n  web.host controls which network interfaces the dashboard binds to.\n`);
+        say(`  "${defHost}" (default) = loopback only — dashboard is not reachable from other machines.\n`);
+        say(`  "0.0.0.0" = all interfaces — reachable on your local network (LAN access).\n`);
+      }
+      const hostRaw = nonInteractive
+        ? (opts.webHost !== undefined ? String(opts.webHost) : "")
+        : (await ask(`  web.host [${defHost}]: `)).trim();
+      const hostVal = hostRaw || defHost;
+      if (!config.web) config.web = {};
+      config.web.host = hostVal;
+      say(`  ✓ web.host: ${hostVal}\n`);
+    }
+
     // Step 7 — register first project (config is written after worktree-layout
     // step so the resolved-default path can use the first registered project's
     // actual root_parent).
     hr();
-    say("Step 5/10 — Register first project\n");
+    say("Step 6/11 — Register first project\n");
     say("The orchestrator dispatches sessions per registered project.");
     if (!nonInteractive) say("You can skip this step and run 'pipeline project-add <name> <path>' later.\n");
     {
@@ -394,7 +438,7 @@ export async function runWizard({ paths, log, opts = {} }) {
     // root_parent (the surface-each-option contract requires showing a
     // concrete resolved default).
     hr();
-    say("Step 6/10 — Worktree layout\n");
+    say("Step 7/11 — Worktree layout\n");
     const defWtBase     = defaults.worktree_base ?? PIPELINE_DEFAULTS.worktree_base;
     const defReportSub  = defaults.report_subpath ?? PIPELINE_DEFAULTS.report_subpath;
     const defPublishTpl = defaults.report_publish_branch_template
@@ -463,7 +507,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 8 — autostart
     hr();
-    say("Step 7/10 — Autostart\n");
+    say("Step 8/11 — Autostart\n");
     const nodePath    = process.execPath;
     // Autostart targets the orchestrator entry directly, not the CLI binary.
     // Previously this pointed at bin/pipeline.mjs — the OS scheduler would
@@ -495,7 +539,7 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 9 — PATH alias
     hr();
-    say("Step 8/10 — Add pipeline to PATH\n");
+    say("Step 9/11 — Add pipeline to PATH\n");
     // PATH alias targets the user-facing CLI dispatcher, NOT the daemon entry.
     // bridgeEntry above is scripts/orchestrator/index.mjs (correct for the OS
     // scheduler); for shell aliases users need bin/pipeline.mjs so subcommands
@@ -568,14 +612,14 @@ export async function runWizard({ paths, log, opts = {} }) {
 
     // Step 10 — smoke test
     hr();
-    say("Step 9/10 — Smoke test\n");
+    say("Step 10/11 — Smoke test\n");
     const smokeResults = await runDoctor({ paths });
     printDoctor(smokeResults);
     const failed = smokeResults.filter(r => !r.ok && !r.warn);
 
     // Step 11 — launch hint
     hr();
-    say("Step 10/10 — Done\n");
+    say("Step 11/11 — Done\n");
     if (failed.length === 0) {
       say("All checks passed.");
     } else {

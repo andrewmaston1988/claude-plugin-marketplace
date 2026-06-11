@@ -129,7 +129,7 @@ const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
       return; // do NOT setTimeout-exit; blessed owns the event loop
     }
     if (subcmd === "web") {
-      const host = getFlag("--host", argv.slice(1)) || "127.0.0.1";
+      const host = getFlag("--host", argv.slice(1)) || undefined;
       // 8765 sits outside the Windows Hyper-V dynamic exclusion range that
       // typically blocks 5000–5100 with EACCES, and avoids collision-prone 8080.
       const port = parseInt(getFlag("--port", argv.slice(1)) || "8765", 10);

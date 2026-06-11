@@ -12,7 +12,7 @@
 // `root_path` as the fallback root. Operator opts in by setting
 // `cfg.governor.enabled = true` and `cfg.governor.project = "<name>"`.
 import { existsSync, mkdirSync, writeFileSync, readFileSync, statSync, openSync, closeSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {
@@ -233,11 +233,16 @@ async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour
       "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep",
       "--max-budget-usd", "5.00",
     ];
+    const pluginDir = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
     const env = { ...process.env };
     env.GIT_AUTHOR_NAME  = "Claude Agent";
     env.GIT_AUTHOR_EMAIL = `claude-agent@${correlationId}`;
     env.CORRELATION_ID   = correlationId;
     env.REPORT_TYPE      = kind === "monthly" ? "monthly" : reportType;
+    env.REPORT_DATE      = reportDate;
+    env.REPORT_MONTH     = kind === "monthly" ? reportDate : reportDate.slice(0, 6);
+    env.PIPELINE_DB      = join(paths.dataDir, "pipeline.db");
+    env.PLUGIN_DIR       = pluginDir;
 
     mkdirSync(ctx.logDir, { recursive: true });
     const logPath = join(ctx.logDir, `gov-${correlationId}.log`);

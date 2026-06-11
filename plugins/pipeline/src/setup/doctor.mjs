@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { join, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -283,6 +284,78 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
     } else {
       push("worktree-layout-stale", false, true, stale.join("; "));
     }
+  }
+
+  // 14. web-port-conflict — warn if a process is bound on the configured
+  // web.port and it does NOT look like our own dashboard server.
+  {
+    const cfgPort = resolved?.web?.port ?? 8765;
+    let portInUse = false;
+    let portOurServer = false;
+    try {
+      const r = spawnSync(
+        process.platform === "win32"
+          ? "cmd"
+          : "bash",
+        process.platform === "win32"
+          ? ["/c", `netstat -ano -p TCP 2>nul | findstr ":${cfgPort} "`]
+          : ["-c", `ss -tlnp 2>/dev/null | grep ':${cfgPort} ' || lsof -iTCP:${cfgPort} -sTCP:LISTEN -n -P 2>/dev/null | head -2`],
+        { encoding: "utf8", windowsHide: true, timeout: 3000 }
+      );
+      if (r.stdout && r.stdout.includes(String(cfgPort))) {
+        portInUse = true;
+        // Heuristic: if the dashboard is running, its process title contains "pipeline"
+        // or the parent process is node running pipeline.mjs.  We can't be definitive
+        // here so this is a warn-only check.
+        portOurServer = /pipeline/i.test(r.stdout);
+      }
+    } catch { /* non-fatal */ }
+
+    if (!portInUse) {
+      push("web-port-conflict", true, false, `port ${cfgPort} is free`);
+    } else if (portOurServer) {
+      push("web-port-conflict", true, false, `port ${cfgPort} in use by dashboard (expected)`);
+    } else {
+      push("web-port-conflict", false, true,
+        `port ${cfgPort} (cfg.web.port) appears to be occupied by another process — ` +
+        `set a different port in ~/.pipeline/config.json or pass --port to dashboard web`
+      );
+    }
+  }
+
+  // 15. governor-env-contract — when the governor is enabled, confirm the
+  // template references only placeholders/vars that the spawn contract provides.
+  if (resolved?.governor?.enabled) {
+    const contractVars = new Set([
+      "CORRELATION_ID", "REPORT_TYPE", "REPORT_DATE", "REPORT_MONTH",
+      "PIPELINE_DB", "PLUGIN_DIR",
+    ]);
+    const templatePath = resolved.governor.template_path
+      ? (resolved.governor.template_path.startsWith("~")
+          ? join(homedir(), resolved.governor.template_path.slice(1))
+          : isAbsolute(resolved.governor.template_path)
+              ? resolved.governor.template_path
+              : join(homedir(), ".pipeline", resolved.governor.template_path))
+      : null;
+    // Read whichever template will be used (custom or bundled path from governor.mjs).
+    const bundledPath = join(fileURLToPath(new URL("../../templates/governor-session.md", import.meta.url)));
+    const tplPath = (templatePath && existsSync(templatePath)) ? templatePath : bundledPath;
+    let unknown = [];
+    if (existsSync(tplPath)) {
+      const tplContent = readFileSync(tplPath, "utf8");
+      const varRefs = [...tplContent.matchAll(/\$([A-Z_][A-Z0-9_]*)/g)].map(m => m[1]);
+      unknown = [...new Set(varRefs)].filter(v => !contractVars.has(v) && !["PATH", "HOME", "USER", "SHELL"].includes(v));
+    }
+    if (unknown.length === 0) {
+      push("governor-env-contract", true, false, "all template $VAR refs are in spawn contract");
+    } else {
+      push("governor-env-contract", false, true,
+        `template references vars not in spawn contract: ${unknown.join(", ")} — ` +
+        "add them to governor.mjs spawn env or remove the references"
+      );
+    }
+  } else {
+    push("governor-env-contract", true, false, "governor disabled — skipped");
   }
 
   if (weOpenedDb && db) {

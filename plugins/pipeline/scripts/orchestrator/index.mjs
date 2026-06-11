@@ -126,7 +126,7 @@ function cleanupMergedRows(db, project, projectRoot, { dryRun, logFn }) {
     try {
       const entries = progressListActive(db, { project });
       for (const entry of entries) {
-        if (entry.slug.includes(stem)) {
+        if (entry.slug === stem || entry.slug.endsWith(`-${stem}`)) {
           try { progressDelete(db, entry.slug); } catch (e) { logFn(`[${project}] WARN: could not delete progress ${entry.slug}: ${e.message}`, "WARN"); }
         }
       }
