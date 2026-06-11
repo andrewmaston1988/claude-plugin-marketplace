@@ -101,6 +101,8 @@ If the user picks a channel: strip a leading `#`. If `claude-slack` isn't on PAT
 
 **If you skip**: merge-ready events are still recorded internally; you just won't get an external notification. Add it later by setting `hooks.on_merge_ready` in `~/.pipeline/config.json`.
 
+**Before asking**: check whether `~/.pipeline/hooks/on-merge-ready.mjs` already exists. If it does and `hooks.on_merge_ready` is not already set in config, say: "Found existing hook at `~/.pipeline/hooks/on-merge-ready.mjs` — wire this into config? [Y/n]". On yes, use that path directly and skip the question below. On no, proceed with the normal question.
+
 **Ask the user what they want to happen** when a row is merge-ready. Don't lead with Slack — ask first, then figure out how to wire it. Common answers and how to handle each:
 
 - **"Post to Slack"** — check `~/.pipeline/config.json` for `hooks.on_notification` (or legacy `notifications.on_write`). If it points to a `claude-slack.mjs` file, you already have the forwarder path. Write `~/.pipeline/hooks/on-merge-ready.mjs` that reads the env vars, builds a JSON envelope, and calls that forwarder via `spawnSync("node", [claudeSlackPath, tmpEnvelopeFile])`. Example envelope: `{ title: "Merge ready: <feature>", message: "\`<branch>\` → \`<target>\` in *<project>* is ready to merge.", priority: "normal" }`. Write the tmp file to `os.tmpdir()`.
@@ -148,6 +150,8 @@ const result = spawnSync(gh, ["pr", "merge", branch, "--squash", "--delete-branc
 });
 process.exit(result.status ?? 1);
 ```
+
+**Before asking**: check whether `~/.pipeline/hooks/on-merge.mjs` already exists. If it does and `hooks.on_merge` is not already set in config, say: "Found existing hook at `~/.pipeline/hooks/on-merge.mjs` — wire this into config? [Y/n]". On yes, use that path directly and skip the question below. On no, proceed with the normal question.
 
 **Ask the user** whether they want to use a GitHub PR merge or keep the local squash. Common answers:
 - **"GitHub PR merge"** — write the above hook to `~/.pipeline/hooks/on-merge.mjs` and pass `--on-merge <path>`.
