@@ -44,6 +44,18 @@ queued → dev → review → test → merge → done
 
 ---
 
+## Related skills
+
+| Skill | When to use |
+|-------|-------------|
+| `/pipeline-setup` | Conversational setup walkthrough — use instead of the TTY wizard when running inside Claude Code. Covers all 9 wizard steps interactively. |
+| `/pipeline` | Show and manage pipeline rows for a project — stages, blocked rows, manual recovery. |
+| `/pipeline-demo` | Narrated hands-on demo in a self-contained sandbox. Spins up a throwaway project + 4 plan files, walks rows through all stages on a ~10-minute timeline, narrates each transition while you watch the dashboard. Good for new users or showing the plugin to someone. |
+| `/queue` | Queue a plan file for orchestration. |
+| `/merge` | Squash-merge one or more tested branches to main. Invokes the `hooks.on_merge` hook if configured (hook owns the git operation when set). |
+
+---
+
 ## Quick start
 
 Run the interactive setup wizard:
@@ -269,6 +281,29 @@ Wire it via `~/.pipeline/config.json`:
 ```
 
 Hooks ending in `.mjs` / `.js` are auto-prefixed with `node`; everything else is exec'd directly. The hook's stdout/stderr inherit so failures are visible.
+
+### on_merge hook
+
+Fires at the point of merge — invoked by `merge.mjs` (step 5) for each branch being squash-merged. When set, **the hook owns the git operation**: the normal squash-merge logic is skipped entirely and the hook is responsible for performing the merge itself. A non-zero exit code aborts the merge with an error.
+
+```json
+{ "hooks": { "on_merge": "/abs/path/to/hook.mjs" } }
+```
+
+The hook receives the same four environment variables as `on_merge_ready`:
+
+| Variable | Value |
+|----------|-------|
+| `PIPELINE_PROJECT` | Project name |
+| `PIPELINE_FEATURE` | Feature slug |
+| `PIPELINE_BRANCH` | Full branch name |
+| `PIPELINE_TARGET_BRANCH` | Merge target |
+
+**Relationship to `autoMerge`:** when `autoMerge: true`, the orchestrator calls `spawnMerge` which runs `merge.mjs` — so `on_merge` fires for autoMerge-triggered merges too, not just manual `/merge` invocations.
+
+> **Note:** unlike `on_merge_ready`, `on_merge` is not yet routed through `resolveTemplate`. Supply an absolute path — relative paths will not resolve correctly until this is retrofitted. `pipeline doctor` flags this.
+
+---
 
 ### on_merge_ready hook
 
@@ -771,7 +806,7 @@ cd plugins/pipeline && npm test
 | `row-add <root> <feature> <plan-file> <stage>` | Add a new pipeline row |
 | `rows <root> [--format json\|plain\|md]` | List all rows |
 | `row-delete <root> <feature>` | Remove a pipeline row |
-| `done <root> <feature>` | Mark a feature complete |
+| `done <root> <feature>` | Mark a feature complete (only valid from `manual` stage — `stage-set … done` works from any stage, but directly advancing a non-manual row to done is unusual and skips all quality gates) |
 | `cycle-log <project> [--feature <slug>] [--limit N] [--format json\|plain]` | Per-session timing + spend + outcome log (one row per finished session) |
 | `next-actions <root>` | Show what the orchestrator would act on next |
 | `dev-complete <project> <plan-file> <feature> --pipeline <path>` | Advance dev → review |
