@@ -130,9 +130,13 @@ const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
     }
     if (subcmd === "web") {
       const host = getFlag("--host", argv.slice(1)) || undefined;
-      // 8765 sits outside the Windows Hyper-V dynamic exclusion range that
-      // typically blocks 5000–5100 with EACCES, and avoids collision-prone 8080.
-      const port = parseInt(getFlag("--port", argv.slice(1)) || "8765", 10);
+      // Pass --port through only when the flag is present. Defaulting here
+      // (e.g. to 8765) would short-circuit startWebServer's cfg.web.port
+      // fallback because the server treats any non-undefined port as a CLI
+      // override. The server applies its own 8765 fallback when neither the
+      // flag nor cfg.web.port is set.
+      const portFlag = getFlag("--port", argv.slice(1));
+      const port = portFlag != null ? parseInt(portFlag, 10) : undefined;
       const { startWebServer } = await import("../src/dashboard/web/server.mjs");
       const { getPaths } = await import("../src/paths.mjs");
       startWebServer({ paths: getPaths(), host, port });
