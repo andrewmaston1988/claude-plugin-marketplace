@@ -3,7 +3,22 @@ import {
   connectUnified, close,
   projectAdd, projectList, projectRemove, projectSetEnabled, projectUpdate,
 } from "../../scripts/pipeline-db/index.mjs";
+import { updatePipelineConfig } from "../pipeline-config.mjs";
 import { getFlag } from "./helpers.mjs";
+
+// Write a per-project plansDir override to cfg.plansDirs[<name>] in config.json.
+// Pass null/undefined to remove the entry.
+function _setPlansDirOverride(name, plansDir) {
+  updatePipelineConfig(cfg => {
+    if (plansDir) {
+      cfg.plansDirs = cfg.plansDirs ?? {};
+      cfg.plansDirs[name] = plansDir;
+    } else if (cfg.plansDirs) {
+      delete cfg.plansDirs[name];
+      if (Object.keys(cfg.plansDirs).length === 0) delete cfg.plansDirs;
+    }
+  });
+}
 
 export async function run(cmd, argv) {
 
@@ -18,7 +33,11 @@ export async function run(cmd, argv) {
     const plansDir = getFlag("--plans-dir", argv);
     const db = connectUnified();
     try {
-      const row = projectAdd(db, { name, rootPath, plansDir });
+      // DB row stores name/root_path/enabled only; per-project plansDir overrides
+      // live in config.json under cfg.plansDirs[<name>] so they are declarative
+      // and diffable alongside the rest of the config.
+      const row = projectAdd(db, { name, rootPath });
+      if (plansDir) _setPlansDirOverride(name, plansDir);
       process.stdout.write(`OK: registered '${row.name}' -> ${row.root_path}\n`);
       return 0;
     } catch (e) {
@@ -102,21 +121,25 @@ export async function run(cmd, argv) {
   if (cmd === "project-update") {
     const [name] = argv;
     if (!name) {
-      process.stderr.write("usage: project-update <name> [--plans-dir <path>]\n");
+      process.stderr.write("usage: project-update <name> [--plans-dir <path>] [--clear-plans-dir]\n");
       return 1;
     }
     const plansDir = getFlag("--plans-dir", argv);
-    if (!plansDir) {
-      process.stderr.write("error: at least one field (--plans-dir) must be provided\n");
+    const clearPlansDir = argv.includes("--clear-plans-dir");
+    if (!plansDir && !clearPlansDir) {
+      process.stderr.write("error: at least one of --plans-dir <path> or --clear-plans-dir must be provided\n");
       return 1;
     }
     const db = connectUnified();
     try {
-      const row = projectUpdate(db, name, { plansDir });
+      // Confirm the project exists; also clear the legacy DB column so the
+      // new cfg.plansDirs entry is the only source for this project.
+      const row = projectUpdate(db, name, { plansDir: null });
       if (!row) {
         process.stderr.write(`not found: project '${name}'\n`);
         return 1;
       }
+      _setPlansDirOverride(name, clearPlansDir ? null : plansDir);
       process.stdout.write(`OK: updated '${row.name}'\n`);
       return 0;
     } catch (e) {
