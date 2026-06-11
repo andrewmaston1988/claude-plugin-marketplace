@@ -505,9 +505,10 @@ Whatever resolution wins, the **absolute path** is stored on the row. Every down
 
 **Plans-directory precedence** (used by `resolvePlansDir()` in `src/plans-resolver.mjs`; every consumer routes through this helper — no second implementation):
 
-1. Project row's `plans_dir` column (literal absolute path; `pipeline project-add --plans-dir <abs>` / `project-update`). Wins per-project.
-2. `cfg.plansDir` from `~/.pipeline/config.json` — a template substituted through `resolveTemplate`.
-3. `<projectRoot>/plans` — historical default.
+1. `cfg.plansDirs[<project>]` from `~/.pipeline/config.json` — a map of project name to template string. Set via `pipeline project-add --plans-dir <path>` or `project-update --plans-dir <path>`. The full placeholder vocabulary is honoured. Wins per-project.
+2. Project row's `plans_dir` column (legacy; pre-`plansDirs` installs). Cleared on every `project-update`; new writes go to the config map. Still read for backward compatibility.
+3. `cfg.plansDir` from `~/.pipeline/config.json` — a template substituted through `resolveTemplate`.
+4. `<projectRoot>/plans` — historical default.
 
 `resolvePlanFile(planFile, opts)` resolves a single filename: absolute paths pass through; bare filenames join under the resolved plans directory.
 
@@ -588,7 +589,8 @@ Plan file paths are read from the pipeline DB row (stored at queue time). `--pla
 
 | Key | Default | Purpose |
 |---|---|---|
-| `plansDir` | `"plans"` | Where plan files live, relative to project root. Supports `{project}` placeholder. |
+| `plansDir` | `"plans"` | Where plan files live, relative to project root. Supports the standard placeholder vocabulary (`{root}`, `{root_parent}`, `{root_grandparent}`, `{project}`). |
+| `plansDirs` | `{}` | Per-project overrides keyed by project name (e.g. `{"my-project": "../shared/plans/{project}"}`). Same placeholder vocabulary as `plansDir`. Wins over `plansDir` for that project only. Written by `pipeline project-add --plans-dir <path>` / `project-update --plans-dir <path>`. |
 
 ---
 
