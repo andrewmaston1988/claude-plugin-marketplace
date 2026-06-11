@@ -1,4 +1,4 @@
-// smoke-15: governor revival — cfg-gating + scheduling logic.
+// governor revival — cfg-gating + scheduling logic.
 //
 // Covers the pieces of governor.mjs that don't actually spawn a subprocess:
 // context resolution, report-presence checks, and shouldSpawn* timing logic

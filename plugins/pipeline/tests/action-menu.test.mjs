@@ -1,4 +1,4 @@
-// smoke-19: menuOptions matrix mirrors Python _menu_options(row, branch_exists).
+// menuOptions matrix mirrors Python _menu_options(row, branch_exists).
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { menuOptions } from "../src/dashboard/tui/action-menu.mjs";

@@ -1,4 +1,4 @@
-// smoke-10: verify loadPipelineConfig deep-merge behaviour.
+// verify loadPipelineConfig deep-merge behaviour.
 //
 // The only config loader is `src/pipeline-config.mjs`. Its contract:
 //   - no file → deep clone of PIPELINE_DEFAULTS

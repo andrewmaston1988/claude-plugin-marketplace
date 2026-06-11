@@ -23,6 +23,10 @@ import {
 } from "../scripts/pipeline-db/index.mjs";
 import { loadBacklog } from "../src/dashboard/shared/load-backlog.mjs";
 
+// Pin the default plansDir template so the suite never reads the operator's real
+// ~/.pipeline/config.json (whose plansDir may point outside the temp repo).
+const TEST_CFG = { plansDir: "plans" };
+
 function makeFakeRepo(parent, name) {
   const path = join(parent, name);
   mkdirSync(path, { recursive: true });
@@ -47,7 +51,7 @@ test("loadBacklog: default plans_dir (root/plans/)", () => {
     // Queue plan1, so it shouldn't appear in backlog
     rowAdd(db, "proj-a", { feature: "plan1", planFile: join(plansDir, "plan1.md"), stage: "dev" });
 
-    const backlog = loadBacklog(db, "proj-a");
+    const backlog = loadBacklog(db, "proj-a", TEST_CFG);
     assert.equal(backlog.length, 2, "should return 2 unqueued plans");
     assert.equal(backlog.some(r => r.feature === "plan2"), true);
     assert.equal(backlog.some(r => r.feature === "plan3"), true);
@@ -71,7 +75,7 @@ test("loadBacklog: custom plans_dir", () => {
 
     projectAdd(db, { name: "proj-a", rootPath: repoA, plansDir: customDir });
 
-    const backlog = loadBacklog(db, "proj-a");
+    const backlog = loadBacklog(db, "proj-a", TEST_CFG);
     assert.equal(backlog.length, 2);
     assert.equal(backlog.some(r => r.feature === "plan-x"), true);
     assert.equal(backlog.some(r => r.feature === "plan-y"), true);
@@ -90,7 +94,7 @@ test("loadBacklog: directory doesn't exist → returns []", () => {
 
     projectAdd(db, { name: "proj-a", rootPath: repoA });
 
-    const backlog = loadBacklog(db, "proj-a");
+    const backlog = loadBacklog(db, "proj-a", TEST_CFG);
     assert.equal(backlog.length, 0);
     close(db);
   } finally {
@@ -111,7 +115,7 @@ test("loadBacklog: ignores non-.md files", () => {
 
     projectAdd(db, { name: "proj-a", rootPath: repoA });
 
-    const backlog = loadBacklog(db, "proj-a");
+    const backlog = loadBacklog(db, "proj-a", TEST_CFG);
     assert.equal(backlog.length, 1);
     assert.equal(backlog[0].feature, "plan1");
     close(db);
@@ -133,7 +137,7 @@ test("loadBacklog: excludes complete/ subdirectory (top-level only)", () => {
 
     projectAdd(db, { name: "proj-a", rootPath: repoA });
 
-    const backlog = loadBacklog(db, "proj-a");
+    const backlog = loadBacklog(db, "proj-a", TEST_CFG);
     assert.equal(backlog.length, 1);
     assert.equal(backlog[0].feature, "active");
     close(db);
@@ -162,7 +166,7 @@ test("projectUpdate: set plans_dir on existing project", () => {
     let project = projectUpdate(db, "proj-a", { plansDir: customDir });
     assert.equal(project.plans_dir, customDir);
 
-    const backlog = loadBacklog(db, "proj-a");
+    const backlog = loadBacklog(db, "proj-a", TEST_CFG);
     assert.equal(backlog.length, 1);
     assert.equal(backlog[0].feature, "plan-new");
     close(db);

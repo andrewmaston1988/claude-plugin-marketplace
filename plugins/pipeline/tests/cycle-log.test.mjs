@@ -1,4 +1,4 @@
-// smoke-17: cycle_log schema + appendCycleLog/loadCycleLog round-trip.
+// cycle_log schema + appendCycleLog/loadCycleLog round-trip.
 import { test } from "node:test";
 import { equal, ok, deepEqual, throws } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
