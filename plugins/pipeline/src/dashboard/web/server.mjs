@@ -12,7 +12,7 @@ import { loadPipelineConfig } from "../../pipeline-config.mjs";
 import { projectList } from "../../../scripts/pipeline-db/projects.mjs";
 import { loadOrchState } from "../shared/load-orch-state.mjs";
 import { loadActiveSessions } from "../shared/load-sessions.mjs";
-import { loadProgressBySlug } from "../shared/load-progress.mjs";
+import { loadProgressBySlug, progressKey } from "../shared/load-progress.mjs";
 import { loadGitLog } from "../shared/load-git-log.mjs";
 import { loadAgentLog } from "../shared/load-agent-log.mjs";
 import { loadBacklog } from "../shared/load-backlog.mjs";
@@ -102,8 +102,8 @@ function _buildPayload(db, projectName) {
   const backlogRows = loadBacklog(db, projectName);
   const rows      = _sortRows([...dbRows, ...backlogRows]);
   const sessions  = loadActiveSessions(db, projectName);
-  const slugs     = sessions.filter(s => s.is_active === 1 && s.correlation_id)
-    .map(s => s.correlation_id);
+  const slugs     = sessions.filter(s => s.is_active === 1 && progressKey(s))
+    .map(progressKey);
   const progress  = loadProgressBySlug(db, slugs);
   const orch      = loadOrchState();
   const gitLog    = loadGitLog(project.root_path, { limit: 8 });
