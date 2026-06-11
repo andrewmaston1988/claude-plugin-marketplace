@@ -90,14 +90,14 @@ const PLUGIN_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 // advance them to done. Only targets `merge`-stage rows to avoid touching
 // in-flight dev/test/review work.
 //
-// Detection is pluggable via cfg.hooks.merge_check — an executable invoked
+// Detection is hook-driven: cfg.hooks.merge_check is an executable invoked
 // once per merge-stage row with the same env contract as the other merge
 // hooks (PIPELINE_PROJECT / PIPELINE_FEATURE / PIPELINE_BRANCH /
 // PIPELINE_TARGET_BRANCH / PIPELINE_PROJECT_ROOT / PLUGIN_DIR). Exit 0 means
 // "this branch's PR is merged"; any other exit means not merged (or unknown).
-// This is how non-GitHub platforms (Bitbucket, GitLab) get UI-merge
-// detection. When the hook is unset, the legacy `gh pr list` path runs for
-// GitHub repos; everything else is skipped silently.
+// Platform-agnostic by design — a Bitbucket hook queries the PR API, a GitHub
+// hook can shell out to `gh pr view`. No hook configured → no UI-merge
+// detection; rows stay at stage=merge until /merge or `pipeline done`.
 function cleanupMergedRows(db, project, projectRoot, { dryRun, logFn }) {
   let rows;
   try {
@@ -107,41 +107,24 @@ function cleanupMergedRows(db, project, projectRoot, { dryRun, logFn }) {
 
   const cfg = loadPipelineConfig();
   const checkHook = resolveHookFirstToken(cfg.hooks?.merge_check, getPaths().configDir);
+  if (!checkHook) return;
 
-  let isMergedBranch;
-  if (checkHook) {
-    isMergedBranch = (row, branch, targetBranch) => {
-      const argv = /\.(mjs|js)$/.test(checkHook) ? [process.execPath, [checkHook]] : [checkHook, []];
-      const r = spawnSync(argv[0], argv[1], {
-        timeout: 20000, windowsHide: true, stdio: "ignore",
-        env: {
-          ...process.env,
-          PIPELINE_PROJECT:       project,
-          PIPELINE_FEATURE:       row.feature,
-          PIPELINE_BRANCH:        branch,
-          PIPELINE_TARGET_BRANCH: targetBranch,
-          PIPELINE_PROJECT_ROOT:  projectRoot,
-          PLUGIN_DIR:             PLUGIN_DIR,
-        },
-      });
-      return r.status === 0;
-    };
-  } else {
-    // Legacy: query GitHub for merged PRs — requires `gh` on PATH and a GitHub remote.
-    const ghResult = spawnSync(
-      "gh", ["pr", "list", "--state", "merged", "--json", "headRefName", "--limit", "200"],
-      { cwd: projectRoot, encoding: "utf8", timeout: 10000 }
-    );
-    if (ghResult.status !== 0) return; // gh not available or not a GitHub repo — skip silently
-
-    let mergedBranches;
-    try {
-      mergedBranches = new Set(
-        JSON.parse(ghResult.stdout).map(pr => pr.headRefName)
-      );
-    } catch { return; }
-    isMergedBranch = (row, branch) => mergedBranches.has(branch);
-  }
+  const isMergedBranch = (row, branch, targetBranch) => {
+    const argv = /\.(mjs|js)$/.test(checkHook) ? [process.execPath, [checkHook]] : [checkHook, []];
+    const r = spawnSync(argv[0], argv[1], {
+      timeout: 20000, windowsHide: true, stdio: "ignore",
+      env: {
+        ...process.env,
+        PIPELINE_PROJECT:       project,
+        PIPELINE_FEATURE:       row.feature,
+        PIPELINE_BRANCH:        branch,
+        PIPELINE_TARGET_BRANCH: targetBranch,
+        PIPELINE_PROJECT_ROOT:  projectRoot,
+        PLUGIN_DIR:             PLUGIN_DIR,
+      },
+    });
+    return r.status === 0;
+  };
 
   for (const row of rows) {
     // "—" is the row-add placeholder for "no branch recorded" — same sentinel

@@ -179,7 +179,7 @@ Written to `~/.pipeline/config.json` by `pipeline setup`. All keys are optional 
 | `hooks.on_notification` | string \| null | `null` | Path to forwarder script — called once per envelope with the JSON file path as its only argv |
 | `hooks.on_merge_ready` | string \| null | `null` | Path to hook script — called when a row reaches `stage=merge`; receives env vars (no argv) |
 | `hooks.on_merge` | string \| null | `null` | Path to hook script — replaces the local squash merge when set; receives same env vars as `on_merge_ready`; hook owns the git operation |
-| `hooks.merge_check` | string \| null | `null` | Path to hook script — invoked per `merge`-stage row each poll; exit 0 = "branch's PR is merged on the remote" → row advances to `done`. Enables UI-merge detection on non-GitHub platforms |
+| `hooks.merge_check` | string \| null | `null` | Path to hook script — invoked per `merge`-stage row each poll; exit 0 = "branch's PR is merged on the remote" → row advances to `done`. Sole mechanism for UI-merge detection (platform-agnostic) |
 | `autoMerge` | boolean | `false` | When `true`, the orchestrator automatically spawns the merge agent for rows at `stage=merge` |
 | `review.skill` | string | `"/code-review"` | Slash-command invoked by review sessions |
 | `review.deep_flag` | string | `""` | Extra flag appended to the review skill invocation (any string; empty disables) |
@@ -349,7 +349,7 @@ const title = row.pr_title || feature;  // fall back to slug if empty
 
 ### merge_check hook
 
-Closes the loop when a PR is merged in the platform UI rather than through `/merge`. Without it, the orchestrator's only merged-PR detection shells out to `gh pr list` — GitHub-only — so a Bitbucket/GitLab UI merge leaves the row parked at `stage=merge` forever.
+Closes the loop when a PR is merged in the platform UI rather than through `/merge`. Without it, the orchestrator has no UI-merge detection — a PR merged on the platform side leaves its row parked at `stage=merge` until `/merge` or `pipeline done` runs.
 
 ```json
 { "hooks": { "merge_check": "~/.pipeline/hooks/merge-check.mjs" } }
@@ -357,9 +357,7 @@ Closes the loop when a PR is merged in the platform UI rather than through `/mer
 
 Each orchestrator poll invokes the hook once per `merge`-stage row with the standard merge-hook env contract (`PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`, `PIPELINE_PROJECT_ROOT`, `PLUGIN_DIR`) and a 20-second timeout. Exit 0 means "this branch's PR is merged on the remote" — the row advances to `done` and its progress entries are cleaned up. Any other exit (or timeout) means not merged; the row is left alone and re-checked next poll.
 
-A Bitbucket implementation is a ~40-line script: query `GET /2.0/repositories/<ws>/<repo>/pullrequests?q=source.branch.name="<branch>" AND state="MERGED"` and exit 0 when the result is non-empty.
-
-When `hooks.merge_check` is unset, the legacy `gh pr list` path runs for GitHub repos and everything else is skipped silently.
+A Bitbucket implementation is a ~40-line script: query `GET /2.0/repositories/<ws>/<repo>/pullrequests?q=source.branch.name="<branch>" AND state="MERGED"` and exit 0 when the result is non-empty. A GitHub implementation can shell out to `gh pr view <branch> --json state` and check for `"MERGED"`.
 
 ---
 
