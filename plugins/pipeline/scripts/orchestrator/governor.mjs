@@ -107,7 +107,9 @@ export function shouldSpawnGovernor(reportsDir, db, _now = new Date()) {
   // Catch-up: yesterday's full report missing.
   if (!governorReportPresent(reportsDir, 0, yesterStr)) {
     const last = lastSpawnFor(db, 0);
-    if (!last || (now.getTime() - last.getTime()) > 3600000) {
+    const lastDs = last ? last.toISOString().slice(0, 10).replace(/-/g, "") : null;
+    // Allow one retry today if we only tried yesterday and it's been an hour.
+    if (!lastDs || (lastDs === yesterStr && (now.getTime() - last.getTime()) > 3600000)) {
       return { should: true, reportType: "full", slotHour: 0 };
     }
   }
@@ -116,7 +118,11 @@ export function shouldSpawnGovernor(reportsDir, db, _now = new Date()) {
   for (const slot of [18, 12, 6]) {
     if (now.getUTCHours() >= slot && !governorReportPresent(reportsDir, slot, todayStr)) {
       const last = lastSpawnFor(db, slot);
-      if (!last || (now.getTime() - last.getTime()) > 3600000) {
+      if (!last) {
+        return { should: true, reportType: "status", slotHour: slot };
+      }
+      const lastDs = last.toISOString().slice(0, 10).replace(/-/g, "");
+      if (lastDs !== todayStr) {
         return { should: true, reportType: "status", slotHour: slot };
       }
     }
