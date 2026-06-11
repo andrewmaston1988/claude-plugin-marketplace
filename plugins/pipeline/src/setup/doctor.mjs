@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { join, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -331,7 +331,11 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
       "PIPELINE_DB", "PLUGIN_DIR",
     ]);
     const templatePath = resolved.governor.template_path
-      ? join(homedir(), ".pipeline", resolved.governor.template_path).replace("~", homedir())
+      ? (resolved.governor.template_path.startsWith("~")
+          ? join(homedir(), resolved.governor.template_path.slice(1))
+          : isAbsolute(resolved.governor.template_path)
+              ? resolved.governor.template_path
+              : join(homedir(), ".pipeline", resolved.governor.template_path))
       : null;
     // Read whichever template will be used (custom or bundled path from governor.mjs).
     const bundledPath = join(fileURLToPath(new URL("../../templates/governor-session.md", import.meta.url)));

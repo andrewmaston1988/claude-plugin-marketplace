@@ -233,7 +233,7 @@ async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour
       "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep",
       "--max-budget-usd", "5.00",
     ];
-    const pluginDir = dirname(dirname(fileURLToPath(import.meta.url)));
+    const pluginDir = dirname(dirname(dirname(fileURLToPath(import.meta.url))));
     const env = { ...process.env };
     env.GIT_AUTHOR_NAME  = "Claude Agent";
     env.GIT_AUTHOR_EMAIL = `claude-agent@${correlationId}`;

@@ -118,14 +118,11 @@ export function startWebServer({ paths, host, port } = {}) {
   const cfg = loadPipelineConfig(cfgPath);
   const resolvedHost = host !== undefined ? host : "127.0.0.1";
   const resolvedPort = port !== undefined ? port : (cfg?.web?.port ?? 8765);
-  // Reassign for use below
-  host = resolvedHost;
-  port = resolvedPort;
   const db = connectUnified(paths);
 
   const server = createServer(async (req, res) => {
     try {
-      const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
+      const url = new URL(req.url, `http://${req.headers.host || `${resolvedHost}:${resolvedPort}`}`);
       const path = url.pathname;
       const projectName = url.searchParams.get("project") || "";
 
@@ -229,15 +226,15 @@ export function startWebServer({ paths, host, port } = {}) {
   // protocol-agnostic for the user.
   server.on("error", (err) => {
     if (err && err.code === "EADDRINUSE") {
-      process.stderr.write(`pipeline dashboard web: port ${port} already in use — another dashboard is already running. Visit http://localhost:${port}/pipeline\n`);
+      process.stderr.write(`pipeline dashboard web: port ${resolvedPort} already in use — another dashboard is already running. Visit http://localhost:${resolvedPort}/pipeline\n`);
       process.exit(2);
     }
     throw err;
   });
-  const listenArgs = host ? [port, host] : [port];
+  const listenArgs = resolvedHost ? [resolvedPort, resolvedHost] : [resolvedPort];
   server.listen(...listenArgs, () => {
-    const displayHost = host || "localhost";
-    process.stdout.write(`pipeline dashboard web: http://${displayHost}:${port}/pipeline\n`);
+    const displayHost = resolvedHost || "localhost";
+    process.stdout.write(`pipeline dashboard web: http://${displayHost}:${resolvedPort}/pipeline\n`);
   });
 
   const shutdown = () => {
