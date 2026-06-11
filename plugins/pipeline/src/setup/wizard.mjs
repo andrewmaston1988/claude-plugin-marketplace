@@ -334,6 +334,41 @@ export async function runWizard({ paths, log, opts = {} }) {
       }
     }
 
+    // merge_check hook — detects PRs merged in the platform UI (outside /merge)
+    // and advances their rows to done. The sole UI-merge detection mechanism.
+    {
+      const defMergeCheck = config.hooks?.merge_check ?? null;
+      const existingMergeCheckFile = join(homedir(), ".pipeline", "hooks", "merge-check.mjs");
+      let mergeCheck;
+      if (nonInteractive) {
+        mergeCheck = opts.mergeCheck !== undefined ? (opts.mergeCheck || null) : defMergeCheck;
+      } else if (!defMergeCheck && existsSync(existingMergeCheckFile)) {
+        say(`\n  Found existing hook at ${existingMergeCheckFile}`);
+        const wire = await ask("  Wire this into config? [Y/n]: ");
+        mergeCheck = wire.trim().toLowerCase() === "n" ? null : existingMergeCheckFile;
+        if (!mergeCheck) {
+          say("\n  merge_check hook (optional — detects PRs merged in the platform UI).");
+          say("  Exit 0 = merged -> row advances to done. Without it, UI-merged rows stay at stage=merge.");
+          const raw = await ask(`  merge_check [${defMergeCheck ?? "(none)"}]: `);
+          mergeCheck = raw.trim() || null;
+        }
+      } else {
+        say("\n  merge_check hook (optional — detects PRs merged in the platform UI).");
+        say("  Exit 0 = merged -> row advances to done. Without it, UI-merged rows stay at stage=merge.");
+        const raw = await ask(`  merge_check [${defMergeCheck ?? "(none)"}]: `);
+        mergeCheck = raw.trim() || defMergeCheck || null;
+      }
+      if (!config.hooks) config.hooks = {};
+      if (mergeCheck) {
+        config.hooks.merge_check = mergeCheck;
+        say(`  ✓ merge_check: ${mergeCheck}`);
+      } else if (config.hooks.merge_check) {
+        say(`  ✓ merge_check kept: ${config.hooks.merge_check}`);
+      } else {
+        say("  merge_check not configured — UI-merged PRs won't auto-advance rows to done.");
+      }
+    }
+
     // Migrate legacy notifications.on_write → hooks.on_notification (cleanup).
     if (config.notifications?.on_write) {
       delete config.notifications.on_write;

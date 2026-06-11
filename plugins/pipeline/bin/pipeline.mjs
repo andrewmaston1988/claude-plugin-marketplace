@@ -294,6 +294,7 @@ function _parseSetupOpts(argv) {
   const pc = get("--pipeline-channel");   if (pc !== null) opts.pipelineChannel   = pc;
   const mh = get("--merge-hook");         if (mh !== null) opts.mergeHook         = mh;
   const om = get("--on-merge");           if (om !== null) opts.onMerge           = om;
+  const mc = get("--merge-check");        if (mc !== null) opts.mergeCheck        = mc;
   const rbt = get("--recognised-branch-types"); if (rbt !== null) opts.recognisedBranchTypes = rbt;
   const wl  = get("--worktree-layout");  if (wl  !== null) opts.worktreeLayout = wl;
   const wb  = get("--worktree-base");    if (wb  !== null) opts.worktreeBase   = wb;
