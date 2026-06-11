@@ -146,6 +146,10 @@ Agent(
     4. If exit code is non-zero, report the BLOCKER lines from stderr.
     5. If exit code is zero, report: branch(es) merged, plan location(s), squash commit hash.
     5.5. For each merged branch: read the completed plan file from <PROJECT_DIR>/plans/complete/<slug>.md (or the plansDir equivalent). In the ## Open Questions section, remove any bullets that were clearly resolved by the branch work — i.e., questions about implementation approach, design decisions, or unknowns the branch demonstrably answered. Leave questions that remain genuinely open. Use Edit to apply removals.
+    5.6. For each merged branch: clean up any lingering session progress entries whose slug contains the branch stem. Run:
+         pipeline progress-list-active $PROJECT
+         Parse the JSON output and collect slugs that contain the feature stem (the part after "autonomous/" in the branch name). For each matching slug, run: pipeline progress-delete $PROJECT <slug>
+         This removes orphaned dev/review/test progress dashboards for the feature.
     6. If stash was created in step 1, pop it now (git stash pop).
 
     Report back with: PASS or FAIL, one-line summary, any BLOCKER messages.

@@ -1,9 +1,10 @@
 import { appendFileSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
+import { spawnSync } from "node:child_process";
 import {
   connectUnified, close,
   rowsList, rowUpdate,
-  progressDelete,
+  progressDelete, progressListActive,
   projectHasActiveSession, sessionFinish, countActiveSessions,
   listEnabledProjects,
 } from "../pipeline-db/index.mjs";
@@ -80,6 +81,59 @@ function depsMet(row, allRows, logFn) {
   return unmet.length === 0;
 }
 
+// ── merged-branch cleanup ─────────────────────────────────────────────────────
+
+// Detect pipeline rows whose branch was squash-merged via GitHub (outside the
+// /merge skill) and advance them to done. Only targets `merge`-stage rows to
+// avoid touching in-flight dev/test/review work.
+function cleanupMergedRows(db, project, projectRoot, { dryRun, logFn }) {
+  let rows;
+  try {
+    rows = rowsList(db, project).filter(r => r.stage === "merge");
+  } catch { return; }
+  if (!rows.length) return;
+
+  // Query GitHub for merged PRs — requires `gh` on PATH and a GitHub remote.
+  const ghResult = spawnSync(
+    "gh", ["pr", "list", "--state", "merged", "--json", "headRefName", "--limit", "100"],
+    { cwd: projectRoot, encoding: "utf8" }
+  );
+  if (ghResult.status !== 0) return; // gh not available or not a GitHub repo — skip silently
+
+  let mergedBranches;
+  try {
+    mergedBranches = new Set(
+      JSON.parse(ghResult.stdout).map(pr => pr.headRefName)
+    );
+  } catch { return; }
+
+  for (const row of rows) {
+    const branch = row.branch || `autonomous/${row.feature}`;
+    if (!mergedBranches.has(branch)) continue;
+
+    logFn(`[${project}] '${row.feature}' branch merged via GitHub — advancing to done`);
+    if (dryRun) continue;
+
+    try {
+      rowUpdate(db, project, row.feature, { stage: "done" });
+    } catch (e) {
+      logFn(`[${project}] WARN: could not advance ${row.feature} to done: ${e.message}`, "WARN");
+      continue;
+    }
+
+    // Clean up any lingering progress entries for this feature.
+    const stem = row.feature;
+    try {
+      const entries = progressListActive(db, { project });
+      for (const entry of entries) {
+        if (entry.slug.includes(stem)) {
+          try { progressDelete(db, entry.slug); } catch {}
+        }
+      }
+    } catch {}
+  }
+}
+
 // ── poll ──────────────────────────────────────────────────────────────────────
 
 async function pollOnce({
@@ -105,6 +159,9 @@ async function pollOnce({
   for (const [project, projectRoot] of pipelinePaths) {
     if (projectFilter && project !== projectFilter) continue;
     nProjects++;
+
+    // Advance any merge-stage rows whose branch was squash-merged via GitHub.
+    cleanupMergedRows(db, project, projectRoot, { dryRun, logFn });
 
     let rows;
     try {
