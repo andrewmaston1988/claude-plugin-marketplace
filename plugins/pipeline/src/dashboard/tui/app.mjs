@@ -29,14 +29,17 @@ import { loadBacklog } from "../shared/load-backlog.mjs";
 import { loadOrchState } from "../shared/load-orch-state.mjs";
 import { loadActiveSessions } from "../shared/load-sessions.mjs";
 import { loadProgressBySlug, progressKey } from "../shared/load-progress.mjs";
+import { agentsViewModel } from "../shared/view-model/agents.mjs";
+import { pipelineViewModel, sortRows, createTransitionTracker } from "../shared/view-model/pipeline.mjs";
+import { orchViewModel } from "../shared/view-model/orch.mjs";
+import { fmtAge } from "../shared/view-model/util.mjs";
 import { loadGitLog } from "../shared/load-git-log.mjs";
 import { loadAgentLog } from "../shared/load-agent-log.mjs";
 import { openActionMenu } from "./action-menu.mjs";
 import { openOrchestratorModal } from "./orchestrator-modal.mjs";
 import {
   C_BG, C_BORDER_ACT, C_BORDER_IDLE, C_TEXT, C_DIM,
-  C_GREEN, C_YELLOW, C_RED, C_CYAN, C_HASH, C_KEY_BG, C_HEADER_HL, C_SELECTED,
-  STAGE_STYLE, STAGE_ORDER, STAGE_COLOR,
+  C_GREEN, C_CYAN, C_HASH, C_KEY_BG, C_HEADER_HL, C_SELECTED,
   fg, bg, bold,
 } from "./style.mjs";
 import {
@@ -46,39 +49,11 @@ import {
 
 const ANIM_TICK_MS = 100; // 10 Hz animation re-render
 
-// Stage transition tracking (ripple → shimmerStage fade)
-const _prevStages  = new Map();
-const _transitions = new Map();
+// Stage transition tracking (ripple → shimmerStage fade) — shared tracker,
+// same instance fed on every data refresh via pipelineViewModel.
+const _tracker = createTransitionTracker();
 
-function _trackTransitions(rows) {
-  const seen = new Set();
-  for (const r of rows) {
-    seen.add(r.feature);
-    const prev = _prevStages.get(r.feature);
-    if (prev !== r.stage) {
-      _transitions.set(r.feature, Date.now() / 1000);
-      _prevStages.set(r.feature, r.stage);
-    }
-  }
-  for (const k of _prevStages.keys()) if (!seen.has(k)) {
-    _prevStages.delete(k); _transitions.delete(k);
-  }
-}
-function _stageElapsed(feature) {
-  const t = _transitions.get(feature);
-  return t ? (Date.now() / 1000 - t) : 999;
-}
-
-function _fmtAge(iso) {
-  if (!iso) return "—";
-  const diff = Date.now() - Date.parse(iso);
-  if (isNaN(diff)) return "—";
-  const s = Math.round(diff / 1000);
-  if (s < 60)   return `${s}s`;
-  if (s < 3600) return `${Math.round(s/60)}m`;
-  if (s < 86400) return `${Math.round(s/3600)}h`;
-  return `${Math.round(s/86400)}d`;
-}
+const _fmtAge = fmtAge;
 
 // Visible length (strips blessed markup).
 function _visLen(s) { return String(s ?? "").replace(/\{[^}]*\}/g, "").length; }
@@ -132,44 +107,20 @@ function _bar(step, total, width = 8) {
   return fg(C_GREEN, "━".repeat(n)) + fg(C_DIM, "─".repeat(width - n));
 }
 
-// Approximate liveness — process.kill(pid, 0) throws if dead.
+// Approximate liveness — process.kill(pid, 0) throws if dead. Injected into
+// the shared agents view-model so the dead-session rule lives in one place.
 function _pidAlive(pid) {
   if (!pid || pid <= 4) return true; // 0/<=4 → mock or non-real PID
   try { process.kill(pid, 0); return true; } catch { return false; }
-}
-
-// Per-session state → icon + name color + time color used by the agents panel row.
-// Order matters: dead > stale > inprog > finished > idle.
-function _sessionGlyph(session, prog, stageColor) {
-  const spawnMs = Date.parse(session.spawn_time) || Date.now();
-  const ageSecs = (Date.now() - spawnMs) / 1000;
-  const dead     = session.pid > 0 && !_pidAlive(session.pid);
-  const inprog   = prog.inprog > 0;
-  const finished = !prog.todo && !prog.inprog && prog.done > 0;
-  // Stalled = still in_progress AND spawned over 30 min ago. Solid filled
-  // dot ● in yellow distinguishes from idle middle-dot · dim.
-  const stalled  = inprog && ageSecs > 30 * 60;
-  if (dead)     return { spinChar: "✗",    spinColor: C_RED,    nameColor: C_RED,    timeColor: C_RED };
-  if (stalled)  return { spinChar: "●",    spinColor: C_YELLOW, nameColor: C_YELLOW, timeColor: C_YELLOW };
-  if (inprog)   return { spinChar: spin(), spinColor: stageColor, nameColor: C_TEXT, timeColor: stageColor };
-  // Alive but no task currently in_progress (between tasks)
-  if (session.is_active === 1) {
-    return { spinChar: spin(), spinColor: C_DIM, nameColor: C_TEXT, timeColor: C_DIM };
-  }
-  if (finished) return { spinChar: "✓",    spinColor: C_DIM,    nameColor: C_DIM,    timeColor: C_DIM };
-  return         { spinChar: "·",          spinColor: C_DIM,    nameColor: C_TEXT,   timeColor: C_DIM };
 }
 
 // Orch view: single row spread across the panel width —
 //   orch: on (<lastpoll>)    ·    pid <pid>    ·    uptime <uptime>
 // Spread across the panel width with even gaps between the 3 segments.
 function _renderOrchView(orch, panelW) {
-  if (!orch.alive && orch.status === "absent") return ` ${fg(C_DIM, "›")} ${fg(C_DIM, "No orchestrator running")}`;
-  const status = orch.alive ? "on" : (orch.status || "stale");
-  const statusColor = orch.alive ? C_GREEN : C_RED;
-  const polled = _fmtAge(orch.last_poll);
-  const uptime = _fmtAge(orch.started_at);
-  const pid    = orch.pid ?? "—";
+  const vm = orchViewModel(orch);
+  if (vm.off) return ` ${fg(C_DIM, "›")} ${fg(C_DIM, "No orchestrator running")}`;
+  const { status, statusColor, polled, uptime, pid } = vm;
 
   // Three segments with markup; visible widths used for spacing.
   const seg1 = `${fg(statusColor, `orch: ${status}`)} ${fg(C_DIM, `(${polled})`)}`;
@@ -193,8 +144,8 @@ function _renderOrchView(orch, panelW) {
 
 function _renderAgentsPanel(sessions, orch, progressBySlug, panelW, view) {
   if (view === "orch") return _renderOrchView(orch, panelW);
-  const active = sessions.filter(s => s.is_active === 1);
-  if (active.length === 0) return fg(C_DIM, "  no sessions");
+  const models = agentsViewModel(sessions, progressBySlug, { pidAlive: _pidAlive });
+  if (models.length === 0) return fg(C_DIM, "  no sessions");
   // Column widths — name flexes to fill panelW.
   //   "  <sp> <name flex>  <bar 8>  <count 6 right>  <time 6 right>"
   const W_BAR   = 8;
@@ -205,19 +156,14 @@ function _renderAgentsPanel(sessions, orch, progressBySlug, panelW, view) {
   const SEPS    = 1 /* leading " " */ + 1 /* sp+name sep */ + 2 + 2 + 2 + 1 /* trailing margin */;
   const W_NAME  = Math.max(panelW - 1 /* sp */ - W_BAR - W_COUNT - W_TIME - SEPS, 12);
   const lines = [];
-  for (const s of active) {
-    const stype  = s.session_type || "dev";
-    const stageColor = STAGE_COLOR[stype] || C_GREEN;
-    const slug   = progressKey(s);
-    const prog   = progressBySlug[slug] || { step: 0, total: 0, done: 0, inprog: 0, todo: 0 };
-    const g      = _sessionGlyph(s, prog, stageColor);
-    const elapsed = _fmtAge(s.spawn_time);
-    const sp      = fg(g.spinColor, g.spinChar);
-    const name    = _padRight(_truncate(s.feature, W_NAME), W_NAME);
-    const bar     = _bar(prog.step, prog.total, W_BAR);
-    const count   = `${prog.step}/${prog.total}`.padStart(W_COUNT);
-    const time    = elapsed.padStart(W_TIME);
-    lines.push(` ${sp} ${fg(g.nameColor, name)}  ${bar}  ${fg(C_DIM, count)}  ${fg(g.timeColor, time)}`);
+  for (const m of models) {
+    const glyphChar = m.glyph.spinning ? spin() : m.glyph.char;
+    const sp      = fg(m.glyph.glyphColor, glyphChar);
+    const name    = _padRight(_truncate(m.feature, W_NAME), W_NAME);
+    const bar     = _bar(m.progress.step, m.progress.total, W_BAR);
+    const count   = `${m.progress.step}/${m.progress.total}`.padStart(W_COUNT);
+    const time    = m.age.padStart(W_TIME);
+    lines.push(` ${sp} ${fg(m.glyph.nameColor, name)}  ${bar}  ${fg(C_DIM, count)}  ${fg(m.glyph.timeColor, time)}`);
   }
   return lines.join("\n");
 }
@@ -260,107 +206,48 @@ function _renderAgentLogPanel(entries, panelW) {
 
 // ── pipeline panel (right) ──────────────────────────────────────────────────
 
-function _stageCell(row) {
-  // queued rows substitute the queued-type
-  // label; manual rows render as "Blocked" (red, bold) — both `blocked:`-
-  // prefixed notes and `[parked-review-budget-exhausted]` map to the same
-  // user-facing label since "the work needs human triage" is the only
-  // distinction the dashboard owes the operator.
-  const stage = row.stage;
-  const elapsed = _stageElapsed(row.feature);
-
-  let label = STAGE_STYLE[stage]?.label || stage;
-  let color = STAGE_COLOR[stage] || C_TEXT;
-  const qaFail  = row.qa_pass === 0;
-  const blocked = stage === "manual" && (row.notes_extra || "").startsWith("blocked:");
-  if (qaFail || blocked) color = C_RED;
-
-  if (stage === "queued") {
-    const m = /\btype=(\w+)\b/.exec(row.notes_extra || "");
-    if (m) {
-      const stype = m[1];
-      label = STAGE_STYLE[stype]?.label || stype;
-      color = STAGE_COLOR[stype] || C_DIM;
-    }
-  }
-
-  const parked = stage === "manual" && /\[parked-review-budget-exhausted/.test(row.notes_extra || "");
-  if (parked) {
-    label = "blocked";
-    color = C_RED;
-    return fg(color, bold(label));
-  }
-
-  if (elapsed < 60) return shimmerStage(label, color, elapsed);
-  return fg(color, STAGE_STYLE[stage]?.bold ? bold(label) : label);
+// All semantic derivation (stage label/color/bold, blocked/parked/qa-fail,
+// icon precedence, notes suppression) lives in the shared pipeline view-model;
+// these cells only translate model fields into blessed markup.
+function _stageCell(r) {
+  if (r.stage === "manual" && r.stageLabel === "blocked") return fg(r.stageColor, bold(r.stageLabel));
+  if (r.shimmerSecs != null) return shimmerStage(r.stageLabel, r.stageColor, r.shimmerSecs);
+  return fg(r.stageColor, r.stageBold ? bold(r.stageLabel) : r.stageLabel);
 }
 
-function _iconCell(row, runningTypeByFeature) {
-  // Blocked icon takes precedence over the spinner: a row parked at manual
-  // shouldn't appear to be running just because a stale session record
-  // still flags is_active=1 in the DB. The blocked state is the user-facing
-  // truth — needs human triage, not "in progress".
-  const notes = row.notes_extra || "";
-  const blocked = row.stage === "manual"
-                && (notes.startsWith("blocked:") || /\[parked-review-budget-exhausted/.test(notes));
-  if (blocked)             return fg(C_RED, "⊘");
-  if (runningTypeByFeature.has(row.feature)) {
-    const stype = runningTypeByFeature.get(row.feature);
-    return fg(STAGE_COLOR[stype] || C_GREEN, spin());
+function _iconCell(r) {
+  switch (r.icon) {
+    case "blocked": return fg(r.iconColor, "⊘");
+    case "spin":    return fg(r.iconColor, spin());
+    case "fail":    return fg(r.iconColor, "✗");
+    case "queue":   return fg(r.iconColor, queueSpin());
+    default:        return " ";
   }
-  if (row.qa_pass === 0)   return fg(C_RED, "✗");
-  if (row.stage === "queued") {
-    const m = /\btype=(\w+)\b/.exec(row.notes_extra || "");
-    const color = m ? (STAGE_COLOR[m[1]] || C_DIM) : C_DIM;
-    return fg(color, queueSpin());
-  }
-  return " ";
-}
-
-function _notesValue(row) {
-  const raw = (row.notes_extra || "").trim();
-  if (!raw) return "";
-  if (raw.startsWith("type=")) return ""; // queued metadata
-  return raw;
 }
 
 // Returns an array of row strings — blessed.list paints its own selected bg
-// across the full row width, so we don't wrap rows here.
-function _renderPipelineRows(rows, sessions, panelW) {
+// across the full row width, so we don't wrap rows here. `rows` are shared
+// pipeline view-model rows, not raw DB rows.
+function _renderPipelineRows(rows, panelW) {
   const fixed = 1 /* icon */ + 12 /* stage */ + 6 /* separators */;
   const fluid = Math.max(panelW - fixed, 30);
   const wFeature = Math.floor(fluid * 2/5);
   const wNotes   = fluid - wFeature;
 
-  const _slugRe = /^(dev|test|research|review)-\d{4}-\d{2}-\d{2}-(.+)$/;
-  const runningTypeByFeature = new Map();
-  for (const s of sessions) {
-    if (s.is_active !== 1 || !s.feature) continue;
-    const m = _slugRe.exec(s.session_file || "");
-    runningTypeByFeature.set(s.feature, m ? m[1] : (s.session_type || "dev"));
-  }
-
   if (rows.length === 0) return [fg(C_DIM, "  nothing active")];
   return rows.map((r) => {
-    const stage   = STAGE_COLOR[r.stage] || C_TEXT;
-    const blocked = r.stage === "manual" && (r.notes_extra || "").startsWith("blocked:");
-    const featureColor = (r.qa_pass === 0 || blocked) ? C_RED : stage;
-    const notesColor   = blocked ? C_RED : C_DIM;
-    const feature = _padRight(fg(featureColor, _truncate(r.feature, wFeature)), wFeature);
-    const icon    = _iconCell(r, runningTypeByFeature);
+    const feature = _padRight(fg(r.featureColor, _truncate(r.feature, wFeature)), wFeature);
+    const icon    = _iconCell(r);
     const stageC  = _padRight(_stageCell(r), 12);
-    const notes   = _padRight(fg(notesColor, marquee(_notesValue(r), wNotes - 2)), wNotes);
+    const notes   = _padRight(fg(r.notesColor, marquee(r.notes, wNotes - 2)), wNotes);
     return ` ${feature}  ${icon}  ${stageC}  ${notes}`;
   });
 }
 
-function _pipelinePanelLabel(allRows, visibleRows, showAll) {
-  const activeN = visibleRows.filter(r => r.stage !== "done" && r.stage !== "queued").length;
-  const queuedN = allRows.filter(r => r.stage === "queued").length;
-  const doneN   = allRows.filter(r => r.stage === "done").length;
-  let s = fg(C_HEADER_HL, " pipeline ") + fg(C_TEXT, `${activeN} active`);
-  if (!showAll && queuedN) s += "  " + fg(C_DIM, `+${queuedN} queued`);
-  if (!showAll && doneN)   s += "  " + fg(C_DIM, `+${doneN} done`);
+function _pipelinePanelLabel(counts, showAll) {
+  let s = fg(C_HEADER_HL, " pipeline ") + fg(C_TEXT, `${counts.active} active`);
+  if (!showAll && counts.queued) s += "  " + fg(C_DIM, `+${counts.queued} queued`);
+  if (!showAll && counts.done)   s += "  " + fg(C_DIM, `+${counts.done} done`);
   return s + " ";
 }
 
@@ -383,14 +270,6 @@ function _renderGitLogPanel(commits, panelW) {
     const w = _truncate(String(c.when || ""), W_WHEN).padStart(W_WHEN);
     return `  ${fg(C_HASH, h)}  ${fg(C_TEXT, m)}  ${fg(C_DIM, w)}`;
   }).join("\n");
-}
-
-function _sortRows(rows) {
-  return rows.slice().sort((a, b) => {
-    const ai = STAGE_ORDER.indexOf(a.stage);
-    const bi = STAGE_ORDER.indexOf(b.stage);
-    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-  });
 }
 
 // ── main ────────────────────────────────────────────────────────────────────
@@ -535,7 +414,7 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
     const project = projects[selectedProjectIdx];
     const dbRows = loadRows(db, project.name, { showAll: true });
     const backlogRows = loadBacklog(db, project.name);
-    cachedRowsAll  = _sortRows([...dbRows, ...backlogRows]);
+    cachedRowsAll  = sortRows([...dbRows, ...backlogRows]);
     cachedSessions = loadActiveSessions(db, project.name);
     cachedOrch     = loadOrchState();
     const slugs    = cachedSessions
@@ -544,7 +423,6 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
     cachedProgress = loadProgressBySlug(db, slugs);
     cachedGitLog   = loadGitLog(project.root_path, { limit: 8 });
     cachedAgentLog = loadAgentLog(cachedSessions, project.root_path, { limit: 20 });
-    _trackTransitions(cachedRowsAll);
   }
 
   function renderFrame() {
@@ -561,8 +439,11 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
     _centerLabel(agentLogBox,  ` ${fg(C_HEADER_HL, " activity ")} `);
     agentLogBox.setContent(_renderAgentLogPanel(cachedAgentLog, agentLogBox.width - 4));
 
-    _centerLabel(pipelineBox,  ` ${_pipelinePanelLabel(cachedRowsAll, visibleRows, showAll)} `);
-    pipelineBox.setItems(_renderPipelineRows(visibleRows, cachedSessions, pipelineBox.width - 4));
+    const pipelineVm = pipelineViewModel(cachedRowsAll, {
+      showAll, sessions: cachedSessions, tracker: _tracker,
+    });
+    _centerLabel(pipelineBox,  ` ${_pipelinePanelLabel(pipelineVm.counts, showAll)} `);
+    pipelineBox.setItems(_renderPipelineRows(pipelineVm.rows, pipelineBox.width - 4));
     if (cursorIdx >= visibleRows.length) cursorIdx = Math.max(0, visibleRows.length - 1);
     pipelineBox.select(cursorIdx);
 

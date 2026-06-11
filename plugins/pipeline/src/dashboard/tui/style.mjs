@@ -2,55 +2,29 @@
 // TUI render loop and the web dashboard. Anything visual the user sees
 // resolves through one of these constants.
 
+import { PALETTE } from "../shared/view-model/glyph.mjs";
+
 export const C_BG          = "#1e2030";
 export const C_BORDER_ACT  = "#7aa2f7";
 export const C_BORDER_IDLE = "#38597b";
-export const C_HEADER_HL   = "#8e5b4e";
-export const C_TEXT        = "#afb9d8";
-export const C_DIM         = "#4a5a78";
-export const C_GREEN       = "#95b170";
-export const C_YELLOW      = "#e0af68";
-export const C_RED         = "#c25c66";
-export const C_CYAN        = "#7dcfff";
-export const C_PURPLE      = "#c099ff";
+export const C_HEADER_HL   = PALETTE.headerHl;
+export const C_TEXT        = PALETTE.text;
+export const C_DIM         = PALETTE.dim;
+export const C_GREEN       = PALETTE.green;
+export const C_YELLOW      = PALETTE.yellow;
+export const C_RED         = PALETTE.red;
+export const C_CYAN        = PALETTE.cyan;
+export const C_PURPLE      = PALETTE.purple;
 export const C_HASH        = "#e0af68";
 export const C_KEY_BG      = "#38597b";
 export const C_SELECTED    = "#2a3b5c";
 
-// Stage label + color used everywhere a stage is rendered.
-//   merge / manual / test / dev / research / queued / backlog / done
-// Stage labels are bare names, no emoji — the TUI uses STAGE_COLOR to
-// distinguish them. Emoji-prefixed labels would consume extra width and
-// don't render reliably across the terminal+font combinations we target.
-export const STAGE_STYLE = {
-  merge:    { label: "merge",    color: C_GREEN,  bold: true },
-  manual:   { label: "manual",   color: C_YELLOW, bold: true },
-  test:     { label: "test",     color: C_CYAN,   bold: false },
-  dev:      { label: "dev",      color: C_TEXT,   bold: false },
-  research: { label: "research", color: C_PURPLE, bold: false },
-  review:   { label: "review",   color: C_CYAN,   bold: false },
-  queued:   { label: "queued",   color: C_DIM,    bold: false },
-  backlog:  { label: "backlog",  color: C_DIM,    bold: false },
-  done:     { label: "done",     color: C_DIM,    bold: false },
-};
-
-// Display order for the rows table.
-export const STAGE_ORDER = ["merge", "manual", "test", "review", "dev", "research", "queued", "backlog", "done"];
-
-// Stage → display color (used by shimmer effect on the stage label,
-// and for the inprog spinner color in the agents panel). `review` is
-// deliberately UNMAPPED so STAGE_COLOR[stype] || C_GREEN fallback turns
-// review spinners green.
-export const STAGE_COLOR = {
-  merge:    C_GREEN,
-  manual:   C_YELLOW,
-  test:     C_CYAN,
-  dev:      C_TEXT,
-  research: C_PURPLE,
-  queued:   C_DIM,
-  backlog:  C_DIM,
-  done:     C_DIM,
-};
+// Stage label/color/order are semantic decisions shared with the web
+// dashboard — canonical definitions live in the shared view-model layer.
+// Imported (stageMarkup below uses STAGE_STYLE) and re-exported so TUI
+// modules keep a single import surface for styling.
+import { STAGE_STYLE, STAGE_ORDER, STAGE_COLOR } from "../shared/view-model/glyph.mjs";
+export { STAGE_STYLE, STAGE_ORDER, STAGE_COLOR };
 
 // Spinner frames + tick rates (ticks per second).
 export const SPIN_FRAMES        = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
