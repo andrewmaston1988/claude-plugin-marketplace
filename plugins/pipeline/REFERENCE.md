@@ -363,14 +363,12 @@ Every config-driven path key in the plugin is resolved through one helper:
 | Category | `resolveBase` | Keys |
 |---|---|---|
 | Per-project          | `projectRoot` | `plansDir`, `governor.reports_dir`, `governor.session_dir`, `governor.log_dir`, `worktree_base` *(future)* |
-| Global / install-wide | `paths.configDir` | `notifications.fallback_dir`, `session_templates_dir`, `hooks.on_notification`, `hooks.on_merge_ready`, `governor.template_path` |
+| Global / install-wide | `paths.configDir` | `notifications.fallback_dir`, `session_templates_dir`, `hooks.on_notification`, `hooks.on_merge_ready`, `hooks.on_merge`, `governor.template_path` |
 | Within-worktree       | resolved `featureWorktreePath(...)` | `report_subpath` |
 
 `paths.configDir` is `~/.pipeline` on Mac/Windows and `$XDG_CONFIG_HOME/pipeline` (fallback `~/.config/pipeline`) on Linux.
 
 Hook values are command strings — only the first whitespace-separated token is routed through `resolveTemplate`; trailing argv passes through unchanged.
-
-**`hooks.on_merge` is not yet routed.** The consumer (`skills/merge/scripts/merge.mjs`) reads it raw, so operators must supply an absolute path until the retrofit lands. Doctor flags it as `hooks.on_merge (raw — bypasses resolveTemplate)`.
 
 ### Placeholder vocabulary
 
