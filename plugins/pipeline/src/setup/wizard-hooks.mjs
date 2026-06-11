@@ -5,8 +5,9 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const gh          = process.platform === "win32" ? "gh.exe" : "gh";
-const ghEnv       = process.env;
+const localBin    = join(homedir(), ".local", "bin");
+const gh          = process.platform === "win32" ? join(localBin, "gh.exe") : join(localBin, "gh");
+const ghEnv       = { ...process.env, PATH: \`\${localBin};\${process.env.PATH}\` };
 
 const project     = process.env.PIPELINE_PROJECT       ?? "?";
 const feature     = process.env.PIPELINE_FEATURE       ?? "?";
@@ -18,7 +19,9 @@ const projectRoot = process.env.PIPELINE_PROJECT_ROOT  ?? "";
 const pipelinePkgDir = join(homedir(), ".claude", "plugins", "cache", "andrewmaston1988-claude-plugins", "pipeline");
 let pipelineBin = "";
 try {
-  for (const ver of readdirSync(pipelinePkgDir).sort().reverse()) {
+  // Numeric sort so 0.10.0 ranks above 0.2.0; highest version with a bin wins.
+  const versions = readdirSync(pipelinePkgDir).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  for (const ver of versions) {
     const exe = join(pipelinePkgDir, ver, "bin", "pipeline.mjs");
     if (existsSync(exe)) { pipelineBin = exe; break; }
   }
@@ -59,14 +62,17 @@ if (projectRoot) {
 
 // Build commit body: diff summary + Co-Authored-By trailer.
 const trailerLines = [];
-if (dModel) {
-  // Map model IDs to display names for the Co-Authored-By trailer.
-  const MODEL_DISPLAY = {
-    "claude-haiku-4-5":  "Claude Haiku 4.5",
-    "claude-sonnet-4-6": "Claude Sonnet 4.6",
-    "claude-opus-4-8":   "Claude Opus 4.8",
-    "claude-fable-5":    "Claude Fable 5",
-  };
+// Map model IDs to display names. Only attribute Claude models — a non-Anthropic
+// dev model (e.g. an ollama/gemma row) must NOT get a @anthropic.com trailer.
+const MODEL_DISPLAY = {
+  "claude-haiku-4-5":  "Claude Haiku 4.5",
+  "claude-sonnet-4-6": "Claude Sonnet 4.6",
+  "claude-opus-4-8":   "Claude Opus 4.8",
+  "claude-fable-5":    "Claude Fable 5",
+};
+// Any claude-* id is attributed (pretty name if mapped, raw id otherwise);
+// non-Claude models get no @anthropic.com trailer.
+if (dModel && (MODEL_DISPLAY[dModel] || dModel.startsWith("claude-"))) {
   const displayName = MODEL_DISPLAY[dModel] || dModel;
   trailerLines.push(\`Co-Authored-By: \${displayName} <noreply@anthropic.com>\`);
 }

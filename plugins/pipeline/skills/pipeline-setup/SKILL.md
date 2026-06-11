@@ -113,11 +113,9 @@ For any case where you write a new script: write it to `~/.pipeline/hooks/on-mer
 
 **If the hook creates a GitHub PR**, use `pipeline row-get <project> <feature>` to read the full pipeline row in one call. Destructure `pr_title` (the human-readable title stored at queue time from the plan's `*Title:*` annotation) and any other fields you need, falling back to the feature slug if empty:
 
+Resolve `pipelineBin` from the plugin cache the same way the bundled `ON_MERGE_TEMPLATE` does (the canonical resolver lives in `src/setup/wizard-hooks.mjs` — scan version dirs, highest-with-a-bin wins; don't pin a version). Then:
+
 ```js
-// Resolve the highest installed plugin version so this survives upgrades.
-const pipelinePkgDir = join(homedir(), ".claude", "plugins", "cache", "andrewmaston1988-claude-plugins", "pipeline");
-const ver = readdirSync(pipelinePkgDir).filter(v => /^\d+\.\d+\.\d+/.test(v)).sort().pop() || "0.1.0";
-const pipelineBin = join(pipelinePkgDir, ver, "bin", "pipeline.mjs");
 const rowResult = spawnSync(process.execPath, [pipelineBin, "row-get", project, feature], { encoding: "utf8", env: process.env });
 let row = {};
 try { row = JSON.parse(rowResult.stdout?.trim() || "{}"); } catch {}
