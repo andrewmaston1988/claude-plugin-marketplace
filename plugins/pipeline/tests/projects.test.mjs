@@ -1,4 +1,4 @@
-// smoke-7-projects.mjs — registry CRUD + row scoping under the unified DB.
+// registry CRUD + row scoping under the unified DB.
 //
 // Plan #1 (pipeline-plugin-unified-db-and-registry) acceptance:
 //  - projects table CRUD

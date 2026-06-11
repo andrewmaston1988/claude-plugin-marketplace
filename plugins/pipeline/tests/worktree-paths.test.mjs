@@ -1,4 +1,4 @@
-// smoke-11: unified worktree path resolution.
+// unified worktree path resolution.
 //
 // Verifies both resolvers and their substitution helpers under defaults,
 // operator-style overrides, and edge cases (null projectRoot, bare branches,

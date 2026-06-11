@@ -1,4 +1,4 @@
-// smoke-21: merge hooks — spawnMergeReadyHook env-var contract.
+// merge hooks — spawnMergeReadyHook env-var contract.
 //
 // Covers the on_merge_ready hook path in publisher.mjs: null config is a
 // no-op, a configured hook script receives the correct env vars.

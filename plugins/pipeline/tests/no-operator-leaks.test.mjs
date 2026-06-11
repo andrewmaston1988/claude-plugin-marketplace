@@ -1,4 +1,4 @@
-// smoke-9: assert no operator-private values leak in the shipped plugin tree.
+// assert no operator-private values leak in the shipped plugin tree.
 //
 // A fresh `git clone` of the marketplace must not contain references to the
 // plugin author's private machine paths, project names, channels, or preferred
@@ -48,7 +48,7 @@ function* walk(dir, rel = "") {
   }
 }
 
-test("smoke-9: no operator-private values in shipped plugin tree", (t) => {
+test("no operator-private values in shipped plugin tree", (t) => {
   const leaks = [];
   for (const { abs, rel } of walk(PLUGIN_ROOT)) {
     if (rel === "tests/no-operator-leaks.test.mjs") continue;

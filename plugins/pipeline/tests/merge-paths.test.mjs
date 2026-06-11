@@ -1,4 +1,4 @@
-// smoke-14: merge-layer plan-path resolution and helpers.
+// merge-layer plan-path resolution and helpers.
 //
 // Covers the post-claudeBase-removal model: queue-plan stores absolute paths,
 // lookupPlanFile reads from rows, step6bArchive walks distinct plan-dirs from

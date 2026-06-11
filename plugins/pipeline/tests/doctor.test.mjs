@@ -1,4 +1,4 @@
-// smoke-13: pipeline doctor — 11 checks, tristate output, exit-code policy.
+// pipeline doctor — 11 checks, tristate output, exit-code policy.
 //
 // Focused per-check tests rather than end-to-end, so test results don't depend
 // on the host's `claude` CLI presence.
