@@ -16,7 +16,21 @@ import { loadProgressBySlug, progressKey } from "../shared/load-progress.mjs";
 import { loadGitLog } from "../shared/load-git-log.mjs";
 import { loadAgentLog } from "../shared/load-agent-log.mjs";
 import { loadBacklog } from "../shared/load-backlog.mjs";
+import { agentsViewModel } from "../shared/view-model/agents.mjs";
+import { pipelineViewModel, createTransitionTracker } from "../shared/view-model/pipeline.mjs";
+import { orchViewModel } from "../shared/view-model/orch.mjs";
 import { renderIndex } from "./templates.mjs";
+
+// One stage-transition tracker per project, persisted across requests so the
+// shimmer effect survives the client's poll cadence. The web client can't
+// hold transition state itself (each /api/state response is stateless), so
+// the server owns it — same tracker the TUI uses, fed once per payload build.
+const _trackers = new Map();
+function _trackerFor(project) {
+  let t = _trackers.get(project);
+  if (!t) { t = createTransitionTracker(); _trackers.set(project, t); }
+  return t;
+}
 
 const HERE         = fileURLToPath(new URL(".", import.meta.url));
 const PIPELINE_BIN = resolve(HERE, "..", "..", "..", "bin", "pipeline.mjs");
@@ -97,7 +111,7 @@ async function _readBody(req) {
 
 function _buildPayload(db, projectName) {
   const project   = projectList(db).find(p => p.name === projectName);
-  if (!project) return { project: null, rows: [], sessions: [], progress: {}, orch: null, gitLog: [] };
+  if (!project) return { project: null, rows: [], sessions: [], progress: {}, orch: null, gitLog: [], agents: [], pipeline: { counts: { active: 0, queued: 0, done: 0 }, rows: [] }, orchView: null };
   const dbRows    = rowsList(db, projectName) || [];
   const backlogRows = loadBacklog(db, projectName);
   const rows      = _sortRows([...dbRows, ...backlogRows]);
@@ -108,7 +122,16 @@ function _buildPayload(db, projectName) {
   const orch      = loadOrchState();
   const gitLog    = loadGitLog(project.root_path, { limit: 8 });
   const agentLog  = loadAgentLog(sessions, project.root_path, { limit: 500 });
-  return { project, rows, sessions, progress, orch, gitLog, agentLog };
+
+  // Derived view-models — same shared functions the TUI consumes, so the two
+  // surfaces can't drift. The server holds the transition tracker (the client
+  // is stateless between polls). The web omits pidAlive: cross-process liveness
+  // is the orchestrator/DB's job, and is_active already reflects it here.
+  const agents   = agentsViewModel(sessions, progress);
+  const pipeline  = pipelineViewModel(rows, { showAll: true, sessions, tracker: _trackerFor(projectName) });
+  const orchView = orchViewModel(orch);
+
+  return { project, rows, sessions, progress, orch, gitLog, agentLog, agents, pipeline, orchView };
 }
 
 export function startWebServer({ paths, host, port } = {}) {

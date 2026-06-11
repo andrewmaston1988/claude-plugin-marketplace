@@ -2,18 +2,14 @@
 // closely as a browser allows — monospace, Tokyo Night palette, rounded
 // panel borders with centered inset labels, char-based icons + spinners,
 // same column layouts as the TUI panels.
-
-const STAGE_COLOR = {
-  merge:    "#95b170",
-  manual:   "#e0af68",
-  test:     "#7dcfff",
-  dev:      "#afb9d8",
-  research: "#c099ff",
-  review:   "#95b170",
-  queued:   "#4a5a78",
-  backlog:  "#4a5a78",
-  done:     "#4a5a78",
-};
+//
+// All semantic derivation (stage colors, session glyphs, progress keying,
+// stage-transition shimmer, counts) is done server-side in the shared
+// view-model layer and arrives pre-computed in the /api/state payload
+// (state.agents, state.pipeline, state.orchView). The client JS below only
+// animates spinner frames and the shimmer/marquee CSS — it makes no
+// derivation decisions, so it can't drift from the TUI the way the old
+// duplicated client logic repeatedly did.
 
 const C_BG          = "#1e2030";
 const C_BORDER_ACT  = "#7aa2f7";
@@ -32,8 +28,6 @@ export function renderIndex({ projects, active }) {
   const projOptions = projects.map(p =>
     `<option value="${p.name}"${p.name === active ? " selected" : ""}>${p.name}</option>`
   ).join("");
-
-  const stageColorJson = JSON.stringify(STAGE_COLOR);
 
   return `<!doctype html>
 <html lang="en">
@@ -241,7 +235,6 @@ export function renderIndex({ projects, active }) {
 
 <script>
 (() => {
-  const STAGE_COLOR = ${stageColorJson};
   const $ = (s) => document.querySelector(s);
   let state = null;
   let agentsView = "agents"; // "agents" | "orch"
@@ -252,27 +245,6 @@ export function renderIndex({ projects, active }) {
   const QUEUE_SPIN  = ["⠁","⠂","⠄","⠂"];
   const CLAUDE_SPIN = ["·","*","+","✧","✶","✸","✲","✻","❊","✽","❋","❆","❋","✽","❊","✻","✲","✸","✶","✧","+","*","·"];
   function claudeSpin() { return CLAUDE_SPIN[Math.floor(Date.now()/166) % CLAUDE_SPIN.length]; }
-  // Stage-transition tracking for shimmer effect (fades out at 60s).
-  const lastStages  = new Map(); // feature → last seen stage
-  const transitions = new Map(); // feature → ms when stage changed
-  function trackTransitions(rows) {
-    const seen = new Set();
-    for (const r of rows) {
-      seen.add(r.feature);
-      const prev = lastStages.get(r.feature);
-      if (prev !== undefined && prev !== r.stage) {
-        transitions.set(r.feature, Date.now());
-      }
-      lastStages.set(r.feature, r.stage);
-    }
-    for (const k of [...lastStages.keys()]) {
-      if (!seen.has(k)) { lastStages.delete(k); transitions.delete(k); }
-    }
-  }
-  function isShimmering(feature) {
-    const t = transitions.get(feature);
-    return t && (Date.now() - t) < 60_000;
-  }
   function spin()      { return SPIN_FRAMES[Math.floor(Date.now()/110) % SPIN_FRAMES.length]; }
 
   // Horizontal-scroll marquee for the pipeline notes cell — mirrors the
@@ -305,16 +277,6 @@ export function renderIndex({ projects, active }) {
   }
   function queueSpin() { return QUEUE_SPIN[Math.floor(Date.now()/330) % QUEUE_SPIN.length]; }
 
-  function fmtAge(iso) {
-    if (!iso) return "—";
-    const diff = Date.now() - Date.parse(iso);
-    if (isNaN(diff)) return "—";
-    const s = Math.round(diff/1000);
-    if (s < 60) return s+"s";
-    if (s < 3600) return Math.round(s/60)+"m";
-    if (s < 86400) return Math.round(s/3600)+"h";
-    return Math.round(s/86400)+"d";
-  }
   function bar(step, total, w=8) {
     const n = Math.floor(w * step / Math.max(total, 1));
     return '<span class="bar">'
@@ -326,22 +288,6 @@ export function renderIndex({ projects, active }) {
     return String(s == null ? "" : s).replace(/[&<>"']/g, c => ({
       "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
     }[c]));
-  }
-  function sessionGlyph(s, prog) {
-    const ageS = (Date.now() - Date.parse(s.spawn_time))/1000;
-    // Liveness: caller filters to is_active === 1 already, so any
-    // session reaching this glyph is alive per the DB. The previous
-    // pid-based heuristic was backwards on Windows (real PIDs are
-    // always > 4) and rendered a red glyph in place of the spinner.
-    const dead = s.is_active === 0;
-    if (dead) return { ch: "✗", color: "var(--red)" };
-    if (prog.inprog > 0 && ageS > 30*60) return { ch: "●", color: "var(--yellow)" };
-    if (prog.inprog > 0) {
-      const c = STAGE_COLOR[s.session_type] || "var(--green)";
-      return { ch: spin(), color: c };
-    }
-    if (prog.todo === 0 && prog.done > 0) return { ch: "✓", color: "var(--dim)" };
-    return { ch: "·", color: "var(--dim)" };
   }
 
   async function fetchState() {
@@ -362,12 +308,13 @@ export function renderIndex({ projects, active }) {
 
   function renderAgentsLabel() {
     if (!state) return;
-    const sessions = (state.sessions || []).filter(s => s.is_active === 1);
-    const o = state.orch || {};
+    const agents = state.agents || [];
+    const o = state.orchView || {};
     let tail = "";
-    if (o.alive)                       tail = ' <span class="dim">·</span> <span style="color:var(--green)">orch: on</span> <span class="dim">(' + fmtAge(o.last_poll) + ')</span>';
-    else if (o.status === "absent")    tail = ' <span class="dim">·</span> <span class="dim">orch: off</span>';
-    else                               tail = ' <span class="dim">·</span> <span style="color:var(--red)">orch: ' + esc(o.status || "stale") + '</span>';
+    if (o.alive)        tail = ' <span class="dim">·</span> <span style="color:var(--green)">orch: on</span> <span class="dim">(' + esc(o.polled) + ')</span>';
+    else if (o.off)     tail = ' <span class="dim">·</span> <span class="dim">orch: off</span>';
+    else                tail = ' <span class="dim">·</span> <span style="color:var(--red)">orch: ' + esc(o.status || "stale") + '</span>';
+    const sessions = agents;
     const head = agentsView === "orch" ? "orchestrator" : "agents";
     let running = '';
     if (agentsView !== "orch" && sessions.length) {
@@ -385,44 +332,33 @@ export function renderIndex({ projects, active }) {
     if (!state) return;
     const inner = $("#agents-inner");
     if (agentsView === "orch") {
-      const o = state.orch || {};
-      const isOff = !o.alive && o.status === "absent";
-      const status = o.alive ? "on" : (o.status || "off");
-      const color  = o.alive ? "var(--green)" : "var(--red)";
-      const pid    = isOff ? "—" : (o.pid ?? "—");
-      const polled = isOff ? "—" : fmtAge(o.last_poll);
-      const uptime = isOff ? "—" : fmtAge(o.started_at);
+      const o = state.orchView || {};
       inner.innerHTML = '<div class="row agents clickable" id="orch-row" style="grid-template-columns:1fr 1fr 1fr;padding:8px;">'
-        + '<div><span style="color:' + color + '">orch: ' + status + '</span> <span class="dim">(' + polled + ')</span></div>'
-        + '<div class="cell center">pid ' + pid + '</div>'
-        + '<div class="cell right">uptime ' + uptime + '</div>'
+        + '<div><span style="color:' + (o.statusColor || "var(--dim)") + '">orch: ' + esc(o.status || "off") + '</span> <span class="dim">(' + esc(o.polled || "—") + ')</span></div>'
+        + '<div class="cell center">pid ' + esc(o.pid ?? "—") + '</div>'
+        + '<div class="cell right">uptime ' + esc(o.uptime || "—") + '</div>'
         + '</div>';
       const row = document.getElementById("orch-row");
-      row.onclick = () => openOrchModal(o);
+      // openOrchModal reads raw orch fields (pid/last_poll); pass the raw state.
+      row.onclick = () => openOrchModal(state.orch || {});
       return;
     }
-    const sessions = (state.sessions || []).filter(s => s.is_active === 1);
-    if (sessions.length === 0) {
+    // Pre-derived in the shared agents view-model (server-side). Each entry:
+    // { feature, glyph:{char,spinning,glyphColor}, progress, stageColor, age }.
+    const agents = state.agents || [];
+    if (agents.length === 0) {
       inner.innerHTML = '<div class="dim" style="padding:8px;">no sessions</div>';
       return;
     }
-    inner.innerHTML = sessions.map(s => {
-      // Progress map is keyed by session.correlation_id (see server-side
-      // progressKey() in dashboard/shared/load-progress.mjs). The previous
-      // implementation derived a key from session_file's basename minus .md,
-      // which never matched the correlation_id keys the map actually uses —
-      // every session rendered 0/0 in the web dashboard while the TUI
-      // (correctly keyed by correlation_id) showed real progress.
-      const slug = s.correlation_id || "";
-      const prog = state.progress[slug] || { step:0,total:0,done:0,inprog:0,todo:0 };
-      const g    = sessionGlyph(s, prog);
-      const stageColor = STAGE_COLOR[s.session_type] || "var(--green)";
+    inner.innerHTML = agents.map(a => {
+      const glyphChar = a.glyph.spinning ? spin() : a.glyph.char;
+      const prog = a.progress;
       return '<div class="row agents">'
-        + '<div class="cell center" style="color:'+g.color+'">'+g.ch+'</div>'
-        + '<div class="cell">'+esc(s.feature)+'</div>'
+        + '<div class="cell center" style="color:'+a.glyph.glyphColor+'">'+glyphChar+'</div>'
+        + '<div class="cell">'+esc(a.feature)+'</div>'
         + '<div>'+bar(prog.step, prog.total)+'</div>'
         + '<div class="cell right dim">'+prog.step+'/'+prog.total+'</div>'
-        + '<div class="cell right" style="color:'+stageColor+'">'+fmtAge(s.spawn_time)+'</div>'
+        + '<div class="cell right" style="color:'+a.stageColor+'">'+esc(a.age)+'</div>'
         + '</div>';
     }).join("");
   }
@@ -432,12 +368,15 @@ export function renderIndex({ projects, active }) {
   function renderPipelinePanel() {
     if (!state) return;
     const inner = $("#pipeline-inner");
-    let rows = (state.rows || []).slice();
+    // Pre-derived in the shared pipeline view-model (server-side): stage
+    // label/color/bold, blocked/qa-fail flags, icon type + color, notes
+    // suppression, and shimmerSecs (stage-transition timing). The client only
+    // animates spinner/shimmer frames and filters the done rows by the local
+    // showAll toggle.
+    const model = state.pipeline || { counts: { active: 0, queued: 0, done: 0 }, rows: [] };
+    let rows = model.rows.slice();
     if (!showAll) rows = rows.filter(r => r.stage !== "done");
-    trackTransitions(rows);
-    const active = rows.filter(r => r.stage !== "queued").length;
-    const queued = (state.rows||[]).filter(r => r.stage === "queued").length;
-    const done   = (state.rows||[]).filter(r => r.stage === "done").length;
+    const { active, queued, done } = model.counts;
     // Match TUI: "pipeline" in header-hl, "N active" in --text (white).
     let label = 'pipeline <span style="color:var(--text)">' + active + ' active</span>';
     if (!showAll && queued) label += ' <span class="dim">+'+queued+' queued</span>';
@@ -445,7 +384,7 @@ export function renderIndex({ projects, active }) {
     $("#pipeline-label").innerHTML = label;
 
     const sig = (showAll ? "all|" : "noDone|") + selectedFeature + "|" + rows.map(r =>
-      r.feature + ":" + r.stage + ":" + (r.notes_extra || "") + ":" + r.qa_pass
+      r.feature + ":" + r.stageLabel + ":" + r.icon + ":" + (r.notes || "") + ":" + (r.shimmerSecs != null)
     ).join(";");
     if (sig === _pipelineSig) return;
     _pipelineSig = sig;
@@ -454,35 +393,30 @@ export function renderIndex({ projects, active }) {
       return;
     }
     inner.innerHTML = rows.map(r => {
-      const color = STAGE_COLOR[r.stage] || "var(--text)";
-      const blocked = r.stage === "manual" && (r.notes_extra || "").startsWith("blocked:");
-      const featColor  = (r.qa_pass === 0 || blocked) ? "var(--red)" : color;
-      const notesColor = blocked ? "var(--red)" : "var(--dim)";
       let icon = "";
-      if (r.qa_pass === 0)             icon = '<span style="color:var(--red)">✗</span>';
-      else if (blocked)                icon = '<span style="color:var(--red)">⊘</span>';
-      else if (r.stage === "queued")   icon = '<span class="dim queue-spin">'+queueSpin()+'</span>';
-      else if (r.stage === "research" || r.stage === "dev" || r.stage === "review")
-        icon = '<span class="pipe-spin" style="color:'+color+'">'+spin()+'</span>';
-      const stageClass = r.stage === "backlog" ? "stage-pill italic" : "stage-pill";
+      if (r.icon === "fail")       icon = '<span style="color:'+r.iconColor+'">✗</span>';
+      else if (r.icon === "blocked") icon = '<span style="color:'+r.iconColor+'">⊘</span>';
+      else if (r.icon === "queue") icon = '<span class="queue-spin" style="color:'+r.iconColor+'">'+queueSpin()+'</span>';
+      else if (r.icon === "spin")  icon = '<span class="pipe-spin" style="color:'+r.iconColor+'">'+spin()+'</span>';
+      const stageClass = r.italic ? "stage-pill italic" : "stage-pill";
       const sel = r.feature === selectedFeature ? " selected" : "";
-      const stageHtml = isShimmering(r.feature)
-        ? '<span class="shimmer">' + Array.from(r.stage).map(c => '<span>'+esc(c)+'</span>').join('') + '</span>'
-        : esc(r.stage);
+      const stageHtml = (r.shimmerSecs != null)
+        ? '<span class="shimmer">' + Array.from(r.stageLabel).map(c => '<span>'+esc(c)+'</span>').join('') + '</span>'
+        : esc(r.stageLabel);
       return '<div class="row pipeline'+sel+'" data-feature="'+esc(r.feature)+'">'
-        + '<div class="cell" style="color:'+featColor+'">'+esc(r.feature)+'</div>'
+        + '<div class="cell" style="color:'+r.featureColor+'">'+esc(r.feature)+'</div>'
         + '<div class="cell center">'+icon+'</div>'
-        + '<div class="cell '+stageClass+'" style="color:'+color+'">'+stageHtml+'</div>'
+        + '<div class="cell '+stageClass+'" style="color:'+r.stageColor+'">'+stageHtml+'</div>'
         + (() => {
-            const noteFlat = String(r.notes_extra || "").replace(/\\n/g, " | ");
+            const noteFlat = String(r.notes || "").replace(/\\n/g, " | ");
             const SHORT = 32;
             if (noteFlat.length <= SHORT) {
-              return '<div class="cell" style="color:'+notesColor+'">'+esc(noteFlat)+'</div>';
+              return '<div class="cell" style="color:'+r.notesColor+'">'+esc(noteFlat)+'</div>';
             }
             const dur = Math.max(6, Math.round(noteFlat.length / 8));
             const unit = esc(noteFlat) + MARQUEE_SEP;
             const unitCh = noteFlat.length + MARQUEE_SEP.length;
-            return '<div class="cell marquee-notes" style="color:'+notesColor+'"><span class="marquee-inner" style="--marquee-dur:'+dur+'s;--marquee-shift:'+unitCh+'ch">'
+            return '<div class="cell marquee-notes" style="color:'+r.notesColor+'"><span class="marquee-inner" style="--marquee-dur:'+dur+'s;--marquee-shift:'+unitCh+'ch">'
               + unit + unit + unit + unit + '</span></div>';
           })()
         + '</div>';
@@ -491,7 +425,9 @@ export function renderIndex({ projects, active }) {
       el.onclick = () => {
         selectedFeature = el.dataset.feature;
         renderPipelinePanel();
-        const row = rows.find(r => r.feature === selectedFeature);
+        // buildMenuOptions needs the raw DB row (branch / virtual fields the
+        // view-model omits), so look it up from state.rows, not the model.
+        const row = (state.rows || []).find(r => r.feature === selectedFeature);
         if (row) openActionMenu(row);
       };
     });
@@ -596,7 +532,10 @@ export function renderIndex({ projects, active }) {
 
   function openActionMenu(row) {
     const opts = buildMenuOptions(row);
-    const color = STAGE_COLOR[row.stage] || "var(--text)";
+    // Stage color comes from the pre-derived pipeline model row for this
+    // feature (the view-model owns stage→color); fall back to plain text.
+    const modelRow = ((state.pipeline && state.pipeline.rows) || []).find(r => r.feature === row.feature);
+    const color = modelRow ? modelRow.stageColor : "var(--text)";
     $("#modal-title").innerHTML = esc(row.feature)
       + '<span class="stage" style="color:'+color+'"> · '+esc(row.stage)+'</span>';
     const ul = $("#modal-options");
