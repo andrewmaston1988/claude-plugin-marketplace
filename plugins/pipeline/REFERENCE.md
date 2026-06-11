@@ -310,7 +310,7 @@ If `pr_title` is empty (old rows), the feature slug is used as the subject — i
 
 **Relationship to `autoMerge`:** when `autoMerge: true`, the orchestrator calls `spawnMerge` which runs `merge.mjs` — so `on_merge` fires for autoMerge-triggered merges too, not just manual `/merge` invocations.
 
-> **Note:** unlike `on_merge_ready`, `on_merge` is not yet routed through `resolveTemplate`. Supply an absolute path — relative paths will not resolve correctly until this is retrofitted. `pipeline doctor` flags this.
+> **Note:** unlike `on_merge_ready`, `on_merge` is not yet routed through `resolveTemplate`. Supply an absolute path — relative paths will not resolve correctly until this is retrofitted.
 
 ---
 
@@ -472,10 +472,8 @@ Optional plan annotations the pipeline understands:
 # add dark mode toggle
 
 *Branch: `autonomous/dark-mode`*
-*Target-Branch: `main`*
-
-## Prerequisites
-- depends_on: theme-context-refactor
+*Title:* Add dark mode toggle
+*Prerequisites:* `autonomous/theme-context-refactor`
 
 ## Scope
 - preference toggle in settings
@@ -487,7 +485,7 @@ Optional plan annotations the pipeline understands:
 |------------|--------------|
 | `*Branch: \`<name>\`*` | Branch the orchestrator's worktree gets. Default: `autonomous/<plan-stem>`. |
 | `*Target-Branch: <name>*` | Branch the merge layer merges into. Default: `main`. |
-| `## Prerequisites` with `- depends_on: <slug>` lines | Row sits at `backlog` until each named feature reaches `merge`. Multiple deps allowed. |
+| `*Prerequisites:* \`autonomous/<slug>\`` | Row sits at `backlog` until each named slug reaches `merge`. Comma-separate multiple slugs on the same line. Omit the line entirely when there are no dependencies. |
 
 CLI flags override annotations — useful for one-off overrides without editing the plan.
 
@@ -899,12 +897,10 @@ plugins/pipeline/
 
 Features can declare upstream dependencies. A queued row will not spawn until all named dependencies are at `stage=done`.
 
-Declare in the plan file:
+Declare in the plan file header (alongside `*Branch:*` and `*Title:*`):
 
 ```markdown
-## Prerequisites
-- depends_on: auth-refactor
-- depends_on: theme-context
+*Prerequisites:* `autonomous/auth-refactor`, `autonomous/theme-context`
 ```
 
 Or pass at queue time:
