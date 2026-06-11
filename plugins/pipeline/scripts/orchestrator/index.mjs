@@ -95,8 +95,8 @@ function cleanupMergedRows(db, project, projectRoot, { dryRun, logFn }) {
 
   // Query GitHub for merged PRs — requires `gh` on PATH and a GitHub remote.
   const ghResult = spawnSync(
-    "gh", ["pr", "list", "--state", "merged", "--json", "headRefName", "--limit", "100"],
-    { cwd: projectRoot, encoding: "utf8" }
+    "gh", ["pr", "list", "--state", "merged", "--json", "headRefName", "--limit", "200"],
+    { cwd: projectRoot, encoding: "utf8", timeout: 10000 }
   );
   if (ghResult.status !== 0) return; // gh not available or not a GitHub repo — skip silently
 
@@ -127,7 +127,7 @@ function cleanupMergedRows(db, project, projectRoot, { dryRun, logFn }) {
       const entries = progressListActive(db, { project });
       for (const entry of entries) {
         if (entry.slug.includes(stem)) {
-          try { progressDelete(db, entry.slug); } catch {}
+          try { progressDelete(db, entry.slug); } catch (e) { logFn(`[${project}] WARN: could not delete progress ${entry.slug}: ${e.message}`, "WARN"); }
         }
       }
     } catch {}
