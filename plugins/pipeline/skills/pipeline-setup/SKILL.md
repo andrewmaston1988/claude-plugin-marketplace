@@ -76,6 +76,16 @@ Phrasing:
 
 If the user picks a channel: strip a leading `#`. If `claude-slack` isn't on PATH, mention they'll need it installed for the alerts to actually fire (config gets written either way).
 
+**Slack-bridge token provenance** — if the user asks how tokens are supplied to the bridge, explain the env-var ↔ config mapping:
+
+| Env var | Config key | Notes |
+|---|---|---|
+| `SLACK_BOT_TOKEN` | `tokens.bot` | Required. Bot token (`xoxb-…`). |
+| `SLACK_APP_TOKEN` | `tokens.app` | Required for Socket Mode. App token (`xapp-…`). |
+| `CLAUDE_CWD` | `claude.cwd` | Optional. Working dir for the `claude` subprocess. |
+
+Env vars win over config values. For production, set secrets in env; put non-secret defaults in `config.json`. The full mapping is documented in `plugins/slack-bridge/CONFIG.md`.
+
 ### Question 3 — Model defaults
 
 **What this does**: chooses which Claude model the orchestrator launches for each session type. The defaults are tuned for cost-vs-quality:
@@ -113,12 +123,12 @@ If the user picks a channel: strip a leading `#`. If `claude-slack` isn't on PAT
 
 For any case where you write a new script: write it to `~/.pipeline/hooks/on-merge-ready.mjs` (create the dir if needed), make it self-contained, and show the user the file content before writing.
 
-**If the hook creates a GitHub PR**, use `pipeline row-get <project> <feature>` to read the full pipeline row in one call. Destructure `pr_title` (the human-readable title stored at queue time from the plan's `*Title:*` annotation) and any other fields you need, falling back to the feature slug if empty:
-
-Resolve `pipelineBin` from the plugin cache the same way the bundled `ON_MERGE_TEMPLATE` does (the canonical resolver lives in `src/setup/wizard-hooks.mjs` — scan version dirs, highest-with-a-bin wins; don't pin a version). Then:
+**If the hook creates a GitHub PR**, use `pipeline row-get <project> <feature> --format json` to read the full pipeline row (PR title, dev model, target branch) in one call. `PLUGIN_DIR` is set in the hook's spawn env by the orchestrator — use it to locate the binary:
 
 ```js
-const rowResult = spawnSync(process.execPath, [pipelineBin, "row-get", project, feature], { encoding: "utf8", env: process.env });
+// PLUGIN_DIR is set in the hook's spawn env by the pipeline orchestrator.
+const pipelineBin = `${process.env.PLUGIN_DIR}/bin/pipeline.mjs`;
+const rowResult = spawnSync(process.execPath, [pipelineBin, "row-get", project, feature, "--format", "json"], { encoding: "utf8", env: process.env });
 let row = {};
 try { row = JSON.parse(rowResult.stdout?.trim() || "{}"); } catch {}
 const title = row.pr_title || feature;
@@ -189,6 +199,30 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 **Default**: keep `plans` unless the user's plans live elsewhere (e.g. a separate knowledge-base repo).
 
 **SKIP this question** unless the user volunteers that their plans are not under each project's root.
+
+### Question 3d-web — Web dashboard port and host (`web.port`, `web.host`)
+
+**What this does**: `web.port` sets the TCP port the web dashboard listens on. `web.host` controls which network interfaces it binds to — loopback-only (`127.0.0.1`, default) or all interfaces (`0.0.0.0` for LAN access).
+
+**Resolved defaults**: port `8765` (outside Windows Hyper-V exclusion range 5000–5100); host `127.0.0.1` (loopback-only).
+
+**Port examples**:
+
+- `8765` *(default)*
+- `9000` — if 8765 is already occupied by another service
+- `3001` — common local-dev preference
+
+**Host examples**:
+
+- `"127.0.0.1"` *(default)* — dashboard only reachable from this machine
+- `"0.0.0.0"` — bind all IPv4 interfaces; reachable from other machines on the LAN
+- `"::"` — dual-stack (IPv4 + IPv6) all-interfaces
+
+**Consequences**: changing the port invalidates existing browser bookmarks. The CLI `--port` and `--host` flags override config values for a single session (`pipeline dashboard web --host 0.0.0.0 --port 9999`). The doctor check `web-port-conflict` warns when a non-dashboard process is bound to the configured port at startup.
+
+**SKIP this question** unless the user mentions port conflicts, LAN access needs, or a host/port preference.
+
+If asked, set `web.port` and/or `web.host` in `~/.pipeline/config.json` and confirm with the bookmark URL: `http://localhost:<port>/pipeline`.
 
 ### Question 3e — Branch conventions
 
@@ -282,6 +316,38 @@ In the conversational walkthrough, present the two options the wizard shows:
 Pass the answer as `--worktree-layout 1` (default) or `--worktree-layout 2 --worktree-base "<template>"`. The recommended choice writes the phase 3b defaults to all three keys.
 
 **Upgrade nudge for existing installs**: mention that `pipeline doctor`'s `worktree-layout-stale` check warns when on-disk worktrees diverge from the resolved template and prints copy-pasteable `git worktree remove` lines for cleanup. No automatic migration runs.
+
+### Question 3g — Governor (optional)
+
+The governor is an optional background agent that generates daily/status/monthly spend reports and posts them to the `governance` Slack channel. It is opt-in: set `cfg.governor.enabled = true` to activate it.
+
+**What it does**: the orchestrator spawns a read-only Claude session on a cron-like schedule (00:01, 06:01, 12:01, 18:01 UTC daily; 00:01 on the first of each month). The session reads `pipeline.db` and writes a markdown report to `cfg.governor.reports_dir`.
+
+**Governor env-var contract** — when the orchestrator spawns the governor session, it sets these env vars in the child process:
+
+| Variable | Value | Notes |
+|---|---|---|
+| `CORRELATION_ID` | unique run id | Keyed off the spawn timestamp. |
+| `REPORT_TYPE` | `full` / `status` / `monthly` | Determines which report file is written. |
+| `REPORT_DATE` | `YYYYMMDD` or `YYYYMM` | Date key for full/status; month identifier for monthly. |
+| `REPORT_MONTH` | `YYYYMM` | Always the month identifier, regardless of report type. |
+| `PIPELINE_DB` | absolute path | Path to `pipeline.db`; use in shell commands as `$PIPELINE_DB`. |
+| `PLUGIN_DIR` | absolute path | Plugin root dir; use as `node $PLUGIN_DIR/scripts/…`. |
+
+These mirror the `{{…}}` template placeholders expanded at render time. Custom governor templates can reference both forms.
+
+**Config keys** (`cfg.governor.*`):
+
+| Key | Default | Notes |
+|---|---|---|
+| `enabled` | `false` | Must be `true` to activate governor spawning. |
+| `project` | `null` | Name of the registered project whose `root_path` is used as fallback dirs. |
+| `template_path` | _(bundled)_ | Path to a custom governor session template. |
+| `reports_dir` | `<project-root>/reports` | Where governance markdown reports land. |
+| `session_dir` | `<project-root>/sessions` | Where governor session files are written. |
+| `log_dir` | `<project-root>/logs` | Where governor stdout/stderr logs go. |
+
+**SKIP this question** unless the user asks about automated spend tracking or daily governance reports. If they want it, confirm `cfg.governor.enabled = true` and `cfg.governor.project = "<name>"` in `~/.pipeline/config.json`.
 
 ### Question 4 — Autostart
 

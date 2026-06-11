@@ -34,7 +34,8 @@
 // Forwarders should treat unknown fields as opaque and not depend on field
 // order. `schema_version` is bumped if the field set changes.
 import { existsSync, mkdirSync, writeFileSync, readFileSync, openSync, closeSync, readdirSync, renameSync, statSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { getPaths } from "../src/paths.mjs";
@@ -272,6 +273,7 @@ export function spawnMergeReadyHook(project, feature, branch, targetBranch, proj
   const hook = _resolveHookCommand(cfg.hooks?.on_merge_ready, paths);
   if (!hook) return Promise.resolve();
   const args = /.(mjs|js)$/.test(hook) ? ["node", hook] : [hook];
+  const pluginDir = dirname(dirname(fileURLToPath(import.meta.url)));
   const env = {
     ...process.env,
     PIPELINE_PROJECT:       project,
@@ -279,6 +281,7 @@ export function spawnMergeReadyHook(project, feature, branch, targetBranch, proj
     PIPELINE_BRANCH:        branch,
     PIPELINE_TARGET_BRANCH: targetBranch,
     PIPELINE_PROJECT_ROOT:  projectRoot ?? "",
+    PLUGIN_DIR:             pluginDir,
   };
   return new Promise(resolve => {
     let logFd;

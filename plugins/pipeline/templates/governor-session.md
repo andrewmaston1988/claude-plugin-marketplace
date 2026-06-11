@@ -25,6 +25,23 @@ dev/test/review/research templates instead.
 
 ---
 
+## Spawn contract
+
+The orchestrator sets the following environment variables before launching this session. All values are guaranteed non-empty when the session starts.
+
+| Variable | Value | Notes |
+|---|---|---|
+| `CORRELATION_ID` | `{{CORRELATION_ID}}` | Unique run identifier. Use in report filenames and progress slugs. |
+| `REPORT_TYPE` | `{{REPORT_TYPE}}` | `full` / `status` / `monthly` — controls which report file to write. |
+| `REPORT_DATE` | `{{REPORT_DATE}}` | `YYYYMMDD` for full/status; `YYYYMM` for monthly. |
+| `REPORT_MONTH` | _(YYYYMM)_ | Always the month identifier (`YYYYMM`), regardless of report type. Convenient for monthly-specific CLI calls. |
+| `PIPELINE_DB` | _(absolute path)_ | SQLite database path. Equivalent to `{{PIPELINE_DB}}`; use `$PIPELINE_DB` in shell commands. |
+| `PLUGIN_DIR` | _(absolute path)_ | Root directory of the installed pipeline plugin. Use as the base for `node $PLUGIN_DIR/scripts/…` calls. |
+
+The template placeholders `{{…}}` above are expanded at template render time. The env vars `$…` are available to every shell command the session runs.
+
+---
+
 ## Authority
 
 **Read** (data is guaranteed fresh — the orchestrator runs the metrics-refresh helpers immediately before spawning this session, so `bunx ccusage` has already been invoked on your behalf):

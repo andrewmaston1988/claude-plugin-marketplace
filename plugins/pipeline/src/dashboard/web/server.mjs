@@ -4,10 +4,11 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
+import { resolve, isAbsolute, join as pathJoin, relative } from "node:path";
 import { existsSync, unlinkSync } from "node:fs";
-import { isAbsolute, resolve as resolvePath, relative } from "node:path";
+import { homedir } from "node:os";
 import { connectUnified, close, rowsList, rowGet } from "../../../scripts/pipeline-db/index.mjs";
+import { loadPipelineConfig } from "../../pipeline-config.mjs";
 import { projectList } from "../../../scripts/pipeline-db/projects.mjs";
 import { loadOrchState } from "../shared/load-orch-state.mjs";
 import { loadActiveSessions } from "../shared/load-sessions.mjs";
@@ -79,8 +80,8 @@ function _planFileInProject(db, projectName, planFile) {
   if (!planFile || typeof planFile !== "string") return null;
   const project = projectList(db).find(p => p.name === projectName);
   if (!project || !project.root_path) return null;
-  const root = resolvePath(project.root_path);
-  const resolved = isAbsolute(planFile) ? resolvePath(planFile) : resolvePath(root, planFile);
+  const root = resolve(project.root_path);
+  const resolved = isAbsolute(planFile) ? resolve(planFile) : resolve(root, planFile);
   const rel = relative(root, resolved);
   if (rel.startsWith("..") || isAbsolute(rel)) return null;
   return resolved;
@@ -110,12 +111,18 @@ function _buildPayload(db, projectName) {
   return { project, rows, sessions, progress, orch, gitLog, agentLog };
 }
 
-export function startWebServer({ paths, host = null, port = 8765 } = {}) {
+export function startWebServer({ paths, host, port } = {}) {
+  const cfgPath = paths?.configDir
+    ? pathJoin(paths.configDir, "config.json")
+    : pathJoin(homedir(), ".pipeline", "config.json");
+  const cfg = loadPipelineConfig(cfgPath);
+  const resolvedHost = host !== undefined ? host : (cfg?.web?.host ?? "127.0.0.1");
+  const resolvedPort = port !== undefined ? port : (cfg?.web?.port ?? 8765);
   const db = connectUnified(paths);
 
   const server = createServer(async (req, res) => {
     try {
-      const url = new URL(req.url, `http://${req.headers.host || `${host}:${port}`}`);
+      const url = new URL(req.url, `http://${req.headers.host || `${resolvedHost}:${resolvedPort}`}`);
       const path = url.pathname;
       const projectName = url.searchParams.get("project") || "";
 
@@ -213,21 +220,16 @@ export function startWebServer({ paths, host = null, port = 8765 } = {}) {
     }
   });
 
-  // Bind to all interfaces (IPv4 0.0.0.0 + IPv6 ::) when no host given —
-  // so `localhost:PORT` works whether the browser resolves to 127.0.0.1
-  // (IPv4) or ::1 (IPv6). The displayed URL uses `localhost` so it's
-  // protocol-agnostic for the user.
+  // Default: loopback-only (127.0.0.1). Pass --host 0.0.0.0 or --host :: to bind all interfaces.
   server.on("error", (err) => {
     if (err && err.code === "EADDRINUSE") {
-      process.stderr.write(`pipeline dashboard web: port ${port} already in use — another dashboard is already running. Visit http://localhost:${port}/pipeline\n`);
+      process.stderr.write(`pipeline dashboard web: port ${resolvedPort} already in use — another dashboard is already running. Visit http://localhost:${resolvedPort}/pipeline\n`);
       process.exit(2);
     }
     throw err;
   });
-  const listenArgs = host ? [port, host] : [port];
-  server.listen(...listenArgs, () => {
-    const displayHost = host || "localhost";
-    process.stdout.write(`pipeline dashboard web: http://${displayHost}:${port}/pipeline\n`);
+  server.listen(resolvedPort, resolvedHost, () => {
+    process.stdout.write(`pipeline dashboard web: http://localhost:${resolvedPort}/pipeline\n`);
   });
 
   const shutdown = () => {
