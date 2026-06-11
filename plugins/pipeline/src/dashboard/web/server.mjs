@@ -231,9 +231,8 @@ export function startWebServer({ paths, host, port } = {}) {
     }
     throw err;
   });
-  const listenArgs = resolvedHost ? [resolvedPort, resolvedHost] : [resolvedPort];
-  server.listen(...listenArgs, () => {
-    const displayHost = resolvedHost || "localhost";
+  server.listen(resolvedPort, resolvedHost, () => {
+    const displayHost = resolvedHost;
     process.stdout.write(`pipeline dashboard web: http://${displayHost}:${resolvedPort}/pipeline\n`);
   });
 

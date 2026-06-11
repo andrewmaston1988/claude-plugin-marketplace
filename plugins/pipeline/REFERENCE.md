@@ -48,7 +48,7 @@ queued → dev → review → test → merge → done
 
 | Skill | When to use |
 |-------|-------------|
-| `/pipeline-setup` | Conversational setup walkthrough — use instead of the TTY wizard when running inside Claude Code. Covers all 9 wizard steps interactively. |
+| `/pipeline-setup` | Conversational setup walkthrough — use instead of the TTY wizard when running inside Claude Code. Covers all 11 wizard steps interactively. |
 | `/pipeline` | Show and manage pipeline rows for a project — stages, blocked rows, manual recovery. |
 | `/pipeline-demo` | Narrated hands-on demo in a self-contained sandbox. Spins up a throwaway project + 4 plan files, walks rows through all stages on a ~10-minute timeline, narrates each transition while you watch the dashboard. Good for new users or showing the plugin to someone. |
 | `/queue` | Queue a plan file for orchestration. |
@@ -64,7 +64,7 @@ Run the interactive setup wizard:
 node plugins/pipeline/bin/pipeline.mjs setup
 ```
 
-The wizard walks through 9 steps:
+The wizard walks through 11 steps:
 
 | Step | What happens |
 |------|--------------|

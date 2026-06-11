@@ -127,7 +127,7 @@ For any case where you write a new script: write it to `~/.pipeline/hooks/on-mer
 
 ```js
 // PLUGIN_DIR is set in the hook's spawn env by the pipeline orchestrator.
-const pipelineBin = join(process.env.PLUGIN_DIR, "bin", "pipeline.mjs");
+const pipelineBin = `${process.env.PLUGIN_DIR}/bin/pipeline.mjs`;
 const titleResult = spawnSync(process.execPath, [pipelineBin, "pr-title-get", project, feature], { encoding: "utf8", env: process.env });
 const title = titleResult.stdout?.trim() || feature;
 // then: spawnSync(ghBin, ["pr", "create", "--title", title, ...])
