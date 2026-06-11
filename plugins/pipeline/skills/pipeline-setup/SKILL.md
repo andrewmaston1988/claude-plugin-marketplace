@@ -196,23 +196,29 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 
 **SKIP this question** unless the user volunteers that their plans are not under each project's root.
 
-### Question 3d-web — Web dashboard port (`web.port`)
+### Question 3d-web — Web dashboard port and host (`web.port`, `web.host`)
 
-**What this does**: sets the TCP port the web dashboard (`pipeline dashboard web`) listens on. The URL the operator bookmarks is `http://localhost:<port>/pipeline`.
+**What this does**: `web.port` sets the TCP port the web dashboard listens on. `web.host` controls which network interfaces it binds to — loopback-only (`127.0.0.1`, default) or all interfaces (`0.0.0.0` for LAN access).
 
-**Resolved default for this machine**: `8765`. The port sits outside the Windows Hyper-V dynamic exclusion range (5000–5100) and avoids collision-prone 8080.
+**Resolved defaults**: port `8765` (outside Windows Hyper-V exclusion range 5000–5100); host `127.0.0.1` (loopback-only).
 
-**Examples**:
+**Port examples**:
 
 - `8765` *(default)*
 - `9000` — if 8765 is already occupied by another service
 - `3001` — common local-dev preference
 
-**Consequences**: changing the port invalidates existing browser bookmarks. The CLI `--port` flag overrides the config value for a single session (`pipeline dashboard web --port 9999`). The doctor check `web-port-conflict` warns when a non-dashboard process is bound to the configured port at startup.
+**Host examples**:
 
-**SKIP this question** unless the user says port 8765 is already in use or they have a port preference.
+- `"127.0.0.1"` *(default)* — dashboard only reachable from this machine
+- `"0.0.0.0"` — bind all IPv4 interfaces; reachable from other machines on the LAN
+- `"::"` — dual-stack (IPv4 + IPv6) all-interfaces
 
-If asked, set `web.port` in `~/.pipeline/config.json` and confirm with the bookmark URL: `http://localhost:<port>/pipeline`.
+**Consequences**: changing the port invalidates existing browser bookmarks. The CLI `--port` and `--host` flags override config values for a single session (`pipeline dashboard web --host 0.0.0.0 --port 9999`). The doctor check `web-port-conflict` warns when a non-dashboard process is bound to the configured port at startup.
+
+**SKIP this question** unless the user mentions port conflicts, LAN access needs, or a host/port preference.
+
+If asked, set `web.port` and/or `web.host` in `~/.pipeline/config.json` and confirm with the bookmark URL: `http://localhost:<port>/pipeline`.
 
 ### Question 3e — Branch conventions
 

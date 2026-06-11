@@ -116,7 +116,7 @@ export function startWebServer({ paths, host, port } = {}) {
     ? pathJoin(paths.configDir, "config.json")
     : pathJoin(homedir(), ".pipeline", "config.json");
   const cfg = loadPipelineConfig(cfgPath);
-  const resolvedHost = host !== undefined ? host : "127.0.0.1";
+  const resolvedHost = host !== undefined ? host : (cfg?.web?.host ?? "127.0.0.1");
   const resolvedPort = port !== undefined ? port : (cfg?.web?.port ?? 8765);
   const db = connectUnified(paths);
 

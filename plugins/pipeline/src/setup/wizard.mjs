@@ -337,6 +337,20 @@ export async function runWizard({ paths, log, opts = {} }) {
         config.web.port = portVal;
         say(`  ✓ web.port: ${portVal}  →  http://localhost:${portVal}/pipeline\n`);
       }
+
+      const defHost = config.web?.host ?? PIPELINE_DEFAULTS.web.host;
+      if (!nonInteractive) {
+        say(`\n  web.host controls which network interfaces the dashboard binds to.\n`);
+        say(`  "${defHost}" (default) = loopback only — dashboard is not reachable from other machines.\n`);
+        say(`  "0.0.0.0" = all interfaces — reachable on your local network (LAN access).\n`);
+      }
+      const hostRaw = nonInteractive
+        ? (opts.webHost !== undefined ? String(opts.webHost) : "")
+        : (await ask(`  web.host [${defHost}]: `)).trim();
+      const hostVal = hostRaw || defHost;
+      if (!config.web) config.web = {};
+      config.web.host = hostVal;
+      say(`  ✓ web.host: ${hostVal}\n`);
     }
 
     // Step 7 — register first project (config is written after worktree-layout
