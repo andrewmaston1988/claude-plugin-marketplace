@@ -198,7 +198,23 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 - `{root_parent}/shared-plans` → a single shared plans directory at the project root's parent
 - `~/work/plans/{project}` → absolute path under the home directory
 
-**Consequences**: every read of the plans directory (dashboard backlog, `pipeline backlog-scan`, session-gen reading plan content) routes through `resolvePlansDir` and sees the same answer. If a project row's `plans_dir` column is set (via `pipeline project-add --plans-dir <abs>` / `pipeline project-update --plans-dir <abs>`), the per-project value wins over `cfg.plansDir` for that one project. No on-disk migration is performed when the value changes — point the value at where the plans already are.
+**Consequences**: every read of the plans directory (dashboard backlog, `pipeline backlog-scan`, session-gen reading plan content) routes through `resolvePlansDir` and sees the same answer.
+
+**Per-project overrides** live in `cfg.plansDirs` -- a JSON map of project name to template, alongside the global `cfg.plansDir`. Example:
+
+```json
+{
+  "plansDir": "plans",
+  "plansDirs": {
+    "my-mono-repo": "../CLAUDE/repos/{project}/plans",
+    "legacy-svc":   "~/legacy-plans/{project}"
+  }
+}
+```
+
+`pipeline project-add <name> <root> --plans-dir <template>` and `pipeline project-update <name> --plans-dir <template>` write the entry into `cfg.plansDirs[<name>]`. `pipeline project-update <name> --clear-plans-dir` removes it. The full placeholder vocabulary (`{root}`, `{root_parent}`, `{root_grandparent}`, `{project}`) applies to both the global `plansDir` template and per-project `plansDirs[<name>]` entries.
+
+Precedence (first hit wins): `cfg.plansDirs[<project>]` > legacy `projects.plans_dir` DB column (read-only, deprecated) > `cfg.plansDir` template > `<projectRoot>/plans`. No on-disk migration is performed when the value changes -- point the value at where the plans already are.
 
 **Default**: keep `plans` unless the user's plans live elsewhere (e.g. a separate knowledge-base repo).
 
