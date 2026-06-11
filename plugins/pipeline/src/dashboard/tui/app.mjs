@@ -28,7 +28,7 @@ import { loadProjects, loadRows } from "../shared/load-rows.mjs";
 import { loadBacklog } from "../shared/load-backlog.mjs";
 import { loadOrchState } from "../shared/load-orch-state.mjs";
 import { loadActiveSessions } from "../shared/load-sessions.mjs";
-import { loadProgressBySlug } from "../shared/load-progress.mjs";
+import { loadProgressBySlug, progressKey } from "../shared/load-progress.mjs";
 import { loadGitLog } from "../shared/load-git-log.mjs";
 import { loadAgentLog } from "../shared/load-agent-log.mjs";
 import { openActionMenu } from "./action-menu.mjs";
@@ -208,7 +208,7 @@ function _renderAgentsPanel(sessions, orch, progressBySlug, panelW, view) {
   for (const s of active) {
     const stype  = s.session_type || "dev";
     const stageColor = STAGE_COLOR[stype] || C_GREEN;
-    const slug   = s.correlation_id || "";
+    const slug   = progressKey(s);
     const prog   = progressBySlug[slug] || { step: 0, total: 0, done: 0, inprog: 0, todo: 0 };
     const g      = _sessionGlyph(s, prog, stageColor);
     const elapsed = _fmtAge(s.spawn_time);
@@ -530,8 +530,8 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
     cachedSessions = loadActiveSessions(db, project.name);
     cachedOrch     = loadOrchState();
     const slugs    = cachedSessions
-      .filter(s => s.is_active === 1 && s.correlation_id)
-      .map(s => s.correlation_id);
+      .filter(s => s.is_active === 1 && progressKey(s))
+      .map(progressKey);
     cachedProgress = loadProgressBySlug(db, slugs);
     cachedGitLog   = loadGitLog(project.root_path, { limit: 8 });
     cachedAgentLog = loadAgentLog(cachedSessions, project.root_path, { limit: 20 });
