@@ -1,13 +1,13 @@
-// Bundled hook templates written by `pipeline setup` to ~/.pipeline/hooks/.
+// Reference template for ~/.pipeline/hooks/on-merge.mjs.
+// Copy this file to that path to use it as the on_merge hook.
 
 export const ON_MERGE_TEMPLATE = `import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
-const localBin    = join(homedir(), ".local", "bin");
-const gh          = process.platform === "win32" ? join(localBin, "gh.exe") : join(localBin, "gh");
-const ghEnv       = { ...process.env, PATH: \`\${localBin};\${process.env.PATH}\` };
+// Rely on gh being available on PATH (works on Linux, macOS, and Windows).
+const gh = "gh";
 
 const project     = process.env.PIPELINE_PROJECT       ?? "?";
 const feature     = process.env.PIPELINE_FEATURE       ?? "?";
@@ -83,7 +83,7 @@ if (body) mergeArgs.push("--body", body);
 
 const result = spawnSync(gh, mergeArgs, {
   stdio: "inherit",
-  env: ghEnv,
+  env: process.env,
 });
 process.exit(result.status ?? 1);
 `;
