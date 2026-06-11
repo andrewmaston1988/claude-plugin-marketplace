@@ -285,10 +285,9 @@ test("shouldSpawnGovernor: catch-up suppressed when last attempt was today", () 
     const now = new Date("2026-06-09T10:00:00Z");
     // Slot 0 already attempted today (30 min ago, past cooldown)
     appendGovernorSpawn(db, { slot_hour: 0, spawn_time: "2026-06-09T09:30:00Z", corr_id: "same-day-0", report_type: "full" });
-    // Write today's status-6 report so the status catch-up loop doesn't fire
+    // Write today's status-6 report so the status catch-up loop doesn't fire for slot 6.
+    // (file mtime at test runtime >> 2026-06-09T06:01Z → governorReportPresent returns true)
     writeFileSync(join(reportsDir, "status-20260609.md"), "stub", "utf8");
-    // Also add a today spawn for slot 6 to satisfy the status loop's date check
-    appendGovernorSpawn(db, { slot_hour: 6, spawn_time: "2026-06-09T06:05:00Z", corr_id: "same-day-6", report_type: "status" });
     const result = shouldSpawnGovernor(reportsDir, db, now);
     equal(result.should, false, "same-day catch-up suppression: already tried today, no retry");
   } finally { teardown(tmp, db); }
@@ -303,9 +302,8 @@ test("shouldSpawnGovernor: catch-up suppressed when last attempt was two days ag
     const now = new Date("2026-06-09T10:00:00Z");
     // Last spawn for slot 0 was 2 days ago (lastDs = "20260607" ≠ yesterday "20260608")
     appendGovernorSpawn(db, { slot_hour: 0, spawn_time: "2026-06-07T08:00:00Z", corr_id: "two-days-ago", report_type: "full" });
-    // Write status-6 report so status loop doesn't fire
+    // Write status-6 report so the status catch-up loop doesn't fire for slot 6
     writeFileSync(join(reportsDir, "status-20260609.md"), "stub", "utf8");
-    appendGovernorSpawn(db, { slot_hour: 6, spawn_time: "2026-06-09T06:05:00Z", corr_id: "two-days-6", report_type: "status" });
     const result = shouldSpawnGovernor(reportsDir, db, now);
     equal(result.should, false, "catch-up only allows one retry when lastDs === yesterday; two-days-ago must not retry");
   } finally { teardown(tmp, db); }
