@@ -4,10 +4,11 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { resolve } from "node:path";
+import { resolve, isAbsolute, join as pathJoin, resolve as resolvePath, relative } from "node:path";
 import { existsSync, unlinkSync } from "node:fs";
-import { isAbsolute, resolve as resolvePath, relative } from "node:path";
+import { homedir } from "node:os";
 import { connectUnified, close, rowsList, rowGet } from "../../../scripts/pipeline-db/index.mjs";
+import { loadPipelineConfig } from "../../pipeline-config.mjs";
 import { projectList } from "../../../scripts/pipeline-db/projects.mjs";
 import { loadOrchState } from "../shared/load-orch-state.mjs";
 import { loadActiveSessions } from "../shared/load-sessions.mjs";
@@ -110,7 +111,14 @@ function _buildPayload(db, projectName) {
   return { project, rows, sessions, progress, orch, gitLog, agentLog };
 }
 
-export function startWebServer({ paths, host = null, port = 8765 } = {}) {
+export function startWebServer({ paths, host, port } = {}) {
+  const cfgPath = pathJoin(homedir(), ".pipeline", "config.json");
+  const cfg = loadPipelineConfig(cfgPath);
+  const resolvedHost = host !== undefined ? host : "127.0.0.1";
+  const resolvedPort = port !== undefined ? port : (cfg?.web?.port ?? 8765);
+  // Reassign for use below
+  host = resolvedHost;
+  port = resolvedPort;
   const db = connectUnified(paths);
 
   const server = createServer(async (req, res) => {

@@ -46,6 +46,11 @@ export const PIPELINE_DEFAULTS = {
   },
   // Side-branch the stash-switchback dance publishes reports to. Placeholders: {kind}, {feature}.
   report_publish_branch_template: "{kind}/{feature}",
+  web: {
+    // Port the web dashboard listens on.  Operator can override via
+    // cfg.web.port (config.json) or --port on the CLI.
+    port: 8765,
+  },
   governor: {
     enabled:       false,
     project:       null,
