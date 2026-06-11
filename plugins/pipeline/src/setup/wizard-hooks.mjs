@@ -1,7 +1,6 @@
 // Bundled hook templates written by `pipeline setup` to ~/.pipeline/hooks/.
 
 export const ON_MERGE_TEMPLATE = `import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 
@@ -14,18 +13,8 @@ const feature     = process.env.PIPELINE_FEATURE       ?? "?";
 const branch      = process.env.PIPELINE_BRANCH        ?? "?";
 const projectRoot = process.env.PIPELINE_PROJECT_ROOT  ?? "";
 
-// Resolve pipeline CLI from the plugin cache — scan version dirs (highest first)
-// for the one that actually has the bin, so this survives plugin upgrades.
-const pipelinePkgDir = join(homedir(), ".claude", "plugins", "cache", "andrewmaston1988-claude-plugins", "pipeline");
-let pipelineBin = "";
-try {
-  // Numeric sort so 0.10.0 ranks above 0.2.0; highest version with a bin wins.
-  const versions = readdirSync(pipelinePkgDir).sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
-  for (const ver of versions) {
-    const exe = join(pipelinePkgDir, ver, "bin", "pipeline.mjs");
-    if (existsSync(exe)) { pipelineBin = exe; break; }
-  }
-} catch { /* cache unreadable — pipelineBin stays empty, row lookup is skipped below */ }
+// PLUGIN_DIR is set in the hook's spawn env by the pipeline orchestrator.
+const pipelineBin = process.env.PLUGIN_DIR ? join(process.env.PLUGIN_DIR, "bin", "pipeline.mjs") : "";
 
 // Fetch the full pipeline row in one call — pr_title, d_model, target_branch.
 // Skip if the bin couldn't be located; subject/model fall back to defaults below.

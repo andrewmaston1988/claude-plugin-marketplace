@@ -121,15 +121,15 @@ Env vars win over config values. For production, set secrets in env; put non-sec
 
 For any case where you write a new script: write it to `~/.pipeline/hooks/on-merge-ready.mjs` (create the dir if needed), make it self-contained, and show the user the file content before writing.
 
-**If the hook creates a GitHub PR**, use `pipeline pr-title-get <project> <feature>` to read the human-readable PR title (stored at queue time from the plan's `*Title:*` annotation), falling back to the feature slug if empty:
-
-`PLUGIN_DIR` is set in the hook's spawn env by the pipeline orchestrator — use it to locate the binary rather than pinning a version:
+**If the hook creates a GitHub PR**, use `pipeline row-get <project> <feature> --format json` to read the full pipeline row (PR title, dev model, target branch) in one call. `PLUGIN_DIR` is set in the hook's spawn env by the orchestrator — use it to locate the binary:
 
 ```js
 // PLUGIN_DIR is set in the hook's spawn env by the pipeline orchestrator.
 const pipelineBin = `${process.env.PLUGIN_DIR}/bin/pipeline.mjs`;
-const titleResult = spawnSync(process.execPath, [pipelineBin, "pr-title-get", project, feature], { encoding: "utf8", env: process.env });
-const title = titleResult.stdout?.trim() || feature;
+const rowResult = spawnSync(process.execPath, [pipelineBin, "row-get", project, feature, "--format", "json"], { encoding: "utf8", env: process.env });
+let row = {};
+try { row = JSON.parse(rowResult.stdout?.trim() || "{}"); } catch {}
+const title = row.pr_title || feature;
 // then: spawnSync(ghBin, ["pr", "create", "--title", title, ...])
 ```
 
