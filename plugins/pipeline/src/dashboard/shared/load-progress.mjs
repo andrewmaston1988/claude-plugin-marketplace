@@ -1,4 +1,14 @@
-// For each active session (by session_file slug), compute step/total from
+// Canonical session -> progress-map key. The progress map is built keyed by
+// session.correlation_id (see loadProgressBySlug + its call sites); every
+// renderer that looks the value up must use this helper so TUI / web / future
+// surfaces stay in lock-step. Returns "" for sessions without a correlation_id
+// (e.g. just-spawned, not yet wired up); those naturally miss the lookup and
+// render 0/0, which is correct.
+export function progressKey(session) {
+  return session?.correlation_id || "";
+}
+
+// For each active session (by session.correlation_id), compute step/total from
 // progress_steps grouped by state into the {done, inprog, todo, total,
 // step} shape the agents panel renders.
 export function loadProgressBySlug(db, slugs) {
