@@ -26,6 +26,7 @@ function _pathResolutionChecks(cfg, projects, paths) {
   out.push({ key: "hooks.on_notification",       raw: cfg.hooks?.on_notification,       resolved: resolveHookFirstToken(cfg.hooks?.on_notification, cd) ?? "(unset)", warn: false });
   out.push({ key: "hooks.on_merge_ready",        raw: cfg.hooks?.on_merge_ready,        resolved: resolveHookFirstToken(cfg.hooks?.on_merge_ready,  cd) ?? "(unset)", warn: false });
   out.push({ key: "hooks.on_merge",              raw: cfg.hooks?.on_merge,              resolved: resolveHookFirstToken(cfg.hooks?.on_merge,        cd) ?? "(unset)", warn: false });
+  out.push({ key: "hooks.merge_check",           raw: cfg.hooks?.merge_check,           resolved: resolveHookFirstToken(cfg.hooks?.merge_check,     cd) ?? "(unset)", warn: false });
   out.push({ key: "governor.template_path",      raw: cfg.governor?.template_path,      resolved: _global(cfg.governor?.template_path) ?? "(bundled)", warn: cfg.governor?.template_path ? !existsSync(_global(cfg.governor.template_path)) : false });
 
   for (const p of projects ?? []) {
