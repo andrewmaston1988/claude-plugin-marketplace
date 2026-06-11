@@ -51,5 +51,7 @@ export function formatRow(r) {
     last_error:          r.last_error || null,
     pr_title:            r.pr_title || null,
     depends_on:          r.depends_on || null,
+    waits_on:            r.waits_on || null,
+    base_branch:         r.base_branch || null,
   };
 }

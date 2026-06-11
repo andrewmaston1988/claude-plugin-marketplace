@@ -215,6 +215,13 @@ ALTER TABLE pipeline_rows ADD COLUMN pr_title TEXT;
 INSERT OR IGNORE INTO schema_version (version) VALUES (3);
 `;
 
+// waits_on: feature slug of a prerequisite row this one chains behind (the
+// orchestrator gates the spawn until that row is done AND its branch is an
+// ancestor of the target). base_branch: the branch a fresh feature worktree
+// is created from (default: target_branch) — lets a dependent branch off its
+// prerequisite's autonomous branch so it sees that code before it merges.
+const SCHEMA_V4_VERSION = 4;
+
 function _applyMigrations(db) {
   let currentVersion = 0;
   try {
@@ -237,6 +244,18 @@ function _applyMigrations(db) {
       db.exec("ALTER TABLE pipeline_rows ADD COLUMN pr_title TEXT");
     }
     db.exec("INSERT OR IGNORE INTO schema_version (version) VALUES (3)");
+  }
+  if (currentVersion < SCHEMA_V4_VERSION) {
+    // Add waits_on + base_branch — plan-base-branch-chaining. Idempotent
+    // guards so a partially-migrated DB doesn't throw on the second column.
+    const cols = db.prepare("PRAGMA table_info(pipeline_rows)").all().map(c => c.name);
+    if (!cols.includes("waits_on")) {
+      db.exec("ALTER TABLE pipeline_rows ADD COLUMN waits_on TEXT");
+    }
+    if (!cols.includes("base_branch")) {
+      db.exec("ALTER TABLE pipeline_rows ADD COLUMN base_branch TEXT");
+    }
+    db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V4_VERSION})`);
   }
 }
 

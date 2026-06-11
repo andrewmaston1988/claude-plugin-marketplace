@@ -264,8 +264,12 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
       }
 
       const wtPath = featureWorktreePath({ project, projectRoot, feature: planStem });
-      const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
-      if (ensureWorktree(projectRoot, wtPath, branch, targetBranch, logFn)) {
+      // base_branch is the checkout point for a fresh feature worktree —
+      // chaining sets it to a prerequisite's autonomous branch so the
+      // dependent sees that code before it merges. Falls back to the merge
+      // target, then the repo default.
+      const baseBranch = row.base_branch || row.target_branch || detectDefaultBranch(projectRoot);
+      if (ensureWorktree(projectRoot, wtPath, branch, baseBranch, logFn)) {
         cwd = wtPath;
       } else {
         logFn(`[${project}] worktree unavailable — falling back to project dir`, "WARN");

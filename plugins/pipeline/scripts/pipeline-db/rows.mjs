@@ -33,6 +33,7 @@ export function rowAdd(db, project, {
   dependsOn = null, targetBranch = "main",
   reviewRetries = null, reviewRetryBudget = null, reviewVerdict = null,
   prTitle = null,
+  waitsOn = null, baseBranch = null,
 } = {}) {
   const cols = [
     "project", "feature", "plan_file", "stage", "branch",
@@ -52,6 +53,8 @@ export function rowAdd(db, project, {
   if (reviewRetryBudget !== null){ cols.push("review_retry_budget"); vals.push(reviewRetryBudget); }
   if (reviewVerdict !== null)    { cols.push("review_verdict");      vals.push(reviewVerdict); }
   if (prTitle !== null)          { cols.push("pr_title");            vals.push(prTitle); }
+  if (waitsOn !== null)          { cols.push("waits_on");            vals.push(waitsOn); }
+  if (baseBranch !== null)       { cols.push("base_branch");         vals.push(baseBranch); }
 
   db.exec("BEGIN IMMEDIATE");
   try {

@@ -201,10 +201,13 @@ export async function run(cmd, argv) {
     if (!project || !planFileArg) {
       process.stderr.write(
         "usage: queue-plan <project> <plan-file-path> [--branch <name>] " +
-        "[--depends <slug,...>] [--target-branch <name>] [--type dev|research|review|test] " +
+        "[--depends <slug,...>] [--waits-on <slug>] [--base-branch <name>] " +
+        "[--target-branch <name>] [--type dev|research|review|test] " +
         "[--r-model] [--d-model] [--q-model] [--rvw-model]\n" +
         "  plan-file-path is the absolute or cwd-relative path to a markdown file.\n" +
-        "  Falls back to plan-content extraction when --branch / --depends / --target-branch are absent.\n"
+        "  Falls back to plan-content extraction when --branch / --depends / --target-branch are absent.\n" +
+        "  --waits-on gates the spawn until <slug> is done + landed on the target (auto-set from the first *Prerequisites:* slug).\n" +
+        "  --base-branch creates the feature worktree from <name> (e.g. autonomous/<prereq>) instead of the target branch.\n"
       );
       return 1;
     }
@@ -219,6 +222,8 @@ export async function run(cmd, argv) {
     let targetBranch  = getFlag("--target-branch", flags) || null;
     const branchFlag  = getFlag("--branch", flags) || null;
     const dependsFlag = getFlag("--depends", flags) || null;
+    const waitsOnFlag = getFlag("--waits-on", flags) || null;
+    const baseBranchFlag = getFlag("--base-branch", flags) || null;
 
     // Resolve plan path. Three modes:
     //   1. Absolute path → use as-is.
@@ -305,6 +310,13 @@ export async function run(cmd, argv) {
       depends = validated.join(",");
     }
 
+    // waits_on — strict single-prerequisite chain. --waits-on wins; otherwise
+    // auto-populate from the first *Prerequisites:* slug (the 90% case is one
+    // prerequisite). base_branch is opt-in only (--base-branch) since branching
+    // a dependent off an unmerged prerequisite branch is a deliberate choice.
+    const waitsOn = waitsOnFlag || (depends ? depends.split(",")[0] : null);
+    const baseBranch = baseBranchFlag || null;
+
     try {
       const existing = rowGet(ctx.db, ctx.project, feature);
       const existingStage = existing ? existing.stage : null;
@@ -329,12 +341,14 @@ export async function run(cmd, argv) {
           rvwModel: rvwModel !== "—" ? rvwModel : null,
           dependsOn: dependsArg, targetBranch,
           prTitle: prTitle || null,
+          waitsOn, baseBranch,
         });
         if (notes) rowUpdate(ctx.db, ctx.project, feature, { notes_extra: notes });
       } else {
         const fields = {
           stage: "queued", notes_extra: notes,
           branch: branchArg, depends_on: dependsArg, target_branch: targetBranch,
+          waits_on: waitsOn, base_branch: baseBranch,
         };
         if (rModel !== "—") fields.r_model = rModel;
         if (dModel !== "—") fields.d_model = dModel;
@@ -380,6 +394,87 @@ export async function run(cmd, argv) {
       process.stdout.write(`mode=free name=${queueNameDerive(arguments_)} stype=${stype}\n`);
     }
     return 0;
+  }
+
+  // queue-cluster <project> <plan1.md> [<plan2.md> ...]
+  // Reads each plan's *Prerequisites:* annotation, infers the dependency graph
+  // among the plans in this cluster, and queues every plan in one shot with
+  // waits_on + base_branch wired so the orchestrator chains them automatically.
+  // Within-cluster prerequisites also set base_branch to the prerequisite's
+  // autonomous branch, so a dependent's worktree starts from the prereq's code.
+  if (cmd === "queue-cluster") {
+    const [project, ...planArgs] = argv;
+    if (!project || planArgs.length === 0) {
+      process.stderr.write("usage: queue-cluster <project> <plan-file> [<plan-file> ...]\n");
+      return 1;
+    }
+    const ctx = lookupProjectOrFail(project);
+    if (!ctx) return 1;
+    // queue-plan reopens the DB per call; this lookup is only for path resolution.
+    close(ctx.db);
+
+    // Resolve each plan path the same way queue-plan does, and read its
+    // feature slug + in-cluster prerequisites.
+    const resolvePlan = (arg) => {
+      const looksLikePath = arg.includes("/") || arg.includes("\\");
+      let p = isAbsolute(arg) ? arg
+            : looksLikePath   ? resolve(process.cwd(), arg)
+            :                   join(ctx.projectRoot, "plans", arg);
+      if (!p.endsWith(".md")) p += ".md";
+      return p;
+    };
+    const nodes = [];
+    for (const arg of planArgs) {
+      const planPath = resolvePlan(arg);
+      if (!existsSync(planPath)) { process.stderr.write(`not found: ${planPath}\n`); return 1; }
+      const feature = basename(planPath, ".md");
+      const prereqs = (queueDepsExtract(planPath) || "").split(",").map(s => s.trim()).filter(Boolean);
+      nodes.push({ feature, planPath, prereqs });
+    }
+
+    const clusterFeatures = new Set(nodes.map(n => n.feature));
+    // Restrict each node's prereqs to features inside this cluster — out-of-
+    // cluster prereqs are left to the normal depends_on/waits_on plan annotation.
+    for (const n of nodes) n.inClusterPrereqs = n.prereqs.filter(p => clusterFeatures.has(p));
+
+    // Kahn topological sort into execution levels. A cycle leaves nodes unplaced.
+    const levels = [];
+    const placed = new Set();
+    let guard = nodes.length + 1;
+    while (placed.size < nodes.length && guard-- > 0) {
+      const level = nodes.filter(n => !placed.has(n.feature)
+        && n.inClusterPrereqs.every(p => placed.has(p)));
+      if (level.length === 0) break; // cycle
+      level.forEach(n => placed.add(n.feature));
+      levels.push(level);
+    }
+    if (placed.size < nodes.length) {
+      const stuck = nodes.filter(n => !placed.has(n.feature)).map(n => n.feature);
+      process.stderr.write(`ERROR: dependency cycle or unsatisfiable prereqs among: ${stuck.join(", ")}\n`);
+      return 1;
+    }
+
+    // Print the execution shape before queueing.
+    process.stdout.write("execution groups:\n");
+    levels.forEach((lvl, i) => {
+      process.stdout.write(`  [level-${i}] ${lvl.map(n => n.feature).join(", ")}\n`);
+    });
+
+    // Queue in topological order. The first in-cluster prereq becomes waits_on +
+    // base_branch (autonomous/<prereq>); queue-plan handles the rest.
+    let failures = 0;
+    for (const lvl of levels) {
+      for (const n of lvl) {
+        const qargs = [project, n.planPath, "--type", "dev"];
+        const prereq = n.inClusterPrereqs[0];
+        if (prereq) {
+          qargs.push("--waits-on", prereq, "--base-branch", `autonomous/${prereq}`);
+        }
+        const code = await run("queue-plan", qargs);
+        if (code !== 0) { failures++; process.stderr.write(`  queue failed: ${n.feature}\n`); }
+      }
+    }
+    return failures === 0 ? 0 : 1;
   }
 
   return null;

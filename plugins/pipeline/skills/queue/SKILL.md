@@ -59,3 +59,28 @@ If the orchestrator isn't running, surface a hint:
 Existing rows: once a row has `target_branch` stored, the column wins; the chain only runs at queue time. A row queued before the chain landed keeps whatever it had — set `--target-branch` explicitly to override.
 
 If `--target-branch` carries a prefix not in `cfg.recognised_branch_types` (default `["autonomous", "interactive"]`), `queue-plan` emits a one-line warning but proceeds. Unusual destinations are allowed; the warning is so an operator can confirm intent.
+
+## Prerequisite chaining (`--waits-on` / `--base-branch`)
+
+A plan can declare it depends on another with a `*Prerequisites:*` annotation (e.g. `*Prerequisites:* \`autonomous/foo-bar\``). When you queue such a plan:
+
+- `queue-plan` auto-sets `waits_on` from the first `*Prerequisites:*` slug. The orchestrator holds the row until that prerequisite is **`done` AND its branch is an ancestor of the target** (the ancestor check catches the case where a remote squash-merge marked the prereq `done` before the commit actually landed).
+- **When the plan has a `*Prerequisites:*` annotation, ask the operator:** *"This plan depends on `<slug>` — branch its worktree off `autonomous/<slug>` so it sees that code before the prereq merges? [Y/n]"*. On yes, add `--base-branch autonomous/<slug>`. On no, the dependent branches off the target as usual and only sees the prereq's code once it merges.
+
+Flags (both optional; `--waits-on` overrides the auto-derived value):
+
+```bash
+pipeline queue-plan <project> <PLAN_FILE> --type <STYPE> \
+  --waits-on <prereq-feature-slug> \
+  --base-branch autonomous/<prereq-feature-slug>
+```
+
+## Queueing a whole cluster at once
+
+For a set of plans with a dependency chain (e.g. 7 plans where each waits on the previous), don't queue them one at a time with manual waits — queue the cluster and let the orchestrator chain them:
+
+```bash
+pipeline queue-cluster <project> <plan1.md> <plan2.md> <plan3.md> ...
+```
+
+`queue-cluster` reads each plan's `*Prerequisites:*`, infers the dependency graph **among the plans in the cluster**, prints the execution groups (`[level-0] → [level-1] → ...`), then queues every plan with `waits_on` and `base_branch` wired so within-cluster dependents branch off their prerequisite's autonomous branch. Out-of-cluster prerequisites are left to the plan's own annotation. It refuses on a dependency cycle. The operator queues once; the orchestrator fans out each level as the prior one lands on the target.
