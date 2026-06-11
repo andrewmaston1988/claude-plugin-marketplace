@@ -524,6 +524,7 @@ export function renderIndex({ projects, active }) {
         opts.push({ label: prefix + "Test   (branch found)", action: "queue:test"   });
       }
     }
+    if (row.stage === "merge") opts.push({ label: "Merge now", action: "merge" });
     if (!["backlog","done"].includes(row.stage) && !row.virtual) opts.push({ label: "Return to backlog", action: "stage:backlog" });
     if (row.stage !== "done" && !row.virtual) opts.push({ label: "Delete row + plan file", action: "delete", danger: true });
     opts.push({ label: "Cancel", action: "cancel" });
@@ -563,6 +564,10 @@ export function renderIndex({ projects, active }) {
           r = await fetch("/api/action/row-delete", { method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({ project: state.project.name, feature: row.feature, planFile: row.plan_file }) });
+        } else if (a === "merge") {
+          r = await fetch("/api/action/spawn-merge", { method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ project: state.project.name, feature: row.feature }) });
         }
         const toast = $("#toast");
         toast.textContent = (r && r.ok) ? "✓ " + a : "✗ " + a;

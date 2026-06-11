@@ -189,6 +189,15 @@ export function startWebServer({ paths, host, port } = {}) {
           const r = await _runCli(["stage-set", project, feature, stage]);
           return _json(res, r.code === 0 ? 200 : 500, r);
         }
+        if (path === "/api/action/spawn-merge") {
+          // Mirrors the TUI action menu's "Merge now" on a merge-stage row —
+          // spawns a merge agent for the feature (same path as orchestrator
+          // autoMerge). The CLI guards that the row is actually at stage=merge.
+          const { project, feature } = body;
+          if (!project || !feature) return _json(res, 400, { error: "project, feature required" });
+          const r = await _runCli(["spawn-merge", project, feature]);
+          return _json(res, r.code === 0 ? 200 : 500, r);
+        }
         if (path === "/api/action/queue-plan") {
           const { project, planFile, type } = body;
           if (!project || !planFile) return _json(res, 400, { error: "project, planFile required" });
