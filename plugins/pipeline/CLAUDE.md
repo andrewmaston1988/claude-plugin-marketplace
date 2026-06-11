@@ -13,8 +13,7 @@ All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DE
 | `governor.reports_dir` | `<project-root>/reports` | Where governance markdown reports land. |
 | `governor.session_dir` | `<project-root>/sessions` | Where governor session files are written. |
 | `governor.log_dir` | `<project-root>/logs` | Where governor stdout/stderr logs go. |
-
-**Web dashboard host**: the `host` default changed from `null` (all interfaces) to `"127.0.0.1"` (loopback-only). Operators who need to bind to all interfaces can pass `--host ::` or `--host 0.0.0.0` to `pipeline dashboard web`. No config key is exposed for host — the dual-stack edge case is handled by the CLI flag only.
+| `web.host` | `"127.0.0.1"` | Network interface the dashboard binds to. `"127.0.0.1"` = loopback-only; `"0.0.0.0"` = all interfaces (LAN access). Override with `--host` on the CLI for a single session. |
 
 **Slack-bridge tokens**: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `CLAUDE_CWD` are env-var overrides for the slack-bridge's `tokens.bot`, `tokens.app`, and `claude.cwd` config keys respectively. Env vars win over config values. Full mapping: `plugins/slack-bridge/CONFIG.md`.
 
