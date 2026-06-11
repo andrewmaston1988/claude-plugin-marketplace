@@ -30,7 +30,7 @@ All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DE
 
 Override via `cfg.worktree_base`. The orchestrator creates the worktree on first spawn for a feature; review/test sessions create it on demand if the feature was queued straight to them.
 
-The fresh-install wizard prompts for this in `Step 6/10 — Worktree layout` (`src/setup/wizard.mjs`); the conversational walkthrough lives under `Question 3f — Worktree layout` in `skills/pipeline-setup/SKILL.md`.
+The fresh-install wizard prompts for this in `Step 7/11 — Worktree layout` (`src/setup/wizard.mjs`); the conversational walkthrough lives under `Question 3f — Worktree layout` in `skills/pipeline-setup/SKILL.md`.
 
 ### Reports are published to side-branches
 

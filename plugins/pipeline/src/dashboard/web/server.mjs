@@ -220,10 +220,7 @@ export function startWebServer({ paths, host, port } = {}) {
     }
   });
 
-  // Bind to all interfaces (IPv4 0.0.0.0 + IPv6 ::) when no host given —
-  // so `localhost:PORT` works whether the browser resolves to 127.0.0.1
-  // (IPv4) or ::1 (IPv6). The displayed URL uses `localhost` so it's
-  // protocol-agnostic for the user.
+  // Default: loopback-only (127.0.0.1). Pass --host 0.0.0.0 or --host :: to bind all interfaces.
   server.on("error", (err) => {
     if (err && err.code === "EADDRINUSE") {
       process.stderr.write(`pipeline dashboard web: port ${resolvedPort} already in use — another dashboard is already running. Visit http://localhost:${resolvedPort}/pipeline\n`);
@@ -232,8 +229,7 @@ export function startWebServer({ paths, host, port } = {}) {
     throw err;
   });
   server.listen(resolvedPort, resolvedHost, () => {
-    const displayHost = resolvedHost;
-    process.stdout.write(`pipeline dashboard web: http://${displayHost}:${resolvedPort}/pipeline\n`);
+    process.stdout.write(`pipeline dashboard web: http://localhost:${resolvedPort}/pipeline\n`);
   });
 
   const shutdown = () => {
