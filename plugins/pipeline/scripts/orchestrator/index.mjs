@@ -230,7 +230,10 @@ async function pollOnce({
       !(r.notes_extra || "").includes("[merge-ready-fired]")
     );
     for (const row of unfired) {
-      const rowBranch       = row.branch || `autonomous/${row.feature}`;
+      // "—" is the row-add placeholder for "no branch recorded" — treat it
+      // like empty, same as spawn.mjs does, or the hook receives a literal
+      // em-dash as PIPELINE_BRANCH and `git push origin —` fails.
+      const rowBranch       = (row.branch && row.branch !== "—") ? row.branch : `autonomous/${row.feature}`;
       const rowTargetBranch = row.target_branch || detectDefaultBranch(projectRoot);
       spawnMergeReadyHook(project, row.feature, rowBranch, rowTargetBranch, projectRoot).catch(() => {});
       try {
