@@ -407,16 +407,13 @@ export function renderIndex({ projects, active }) {
       return;
     }
     inner.innerHTML = sessions.map(s => {
-      // Progress is keyed by session-file basename (no extension, no path),
-      // e.g. "dev-2026-06-08-add-dark-mode-toggle". Three prior bugs here:
-      //   1. used the full path → never matched the basename key
-      //   2. regex /\\.md$/ matched literal "\.md" (escaped backslash + .md)
-      //      which doesn't appear at the end of a path — strip was a no-op.
-      //   3. this entire file is one big template literal — every backslash
-      //      we want in the SERVED JS must be doubled in the SOURCE. So a
-      //      regex char-class with backslash needs \\\\, and a literal-dot
-      //      escape needs \\.
-      const slug = (s.session_file || "").split(/[\\\\/]/).pop().replace(/\\.md$/, "");
+      // Progress map is keyed by session.correlation_id (see server-side
+      // progressKey() in dashboard/shared/load-progress.mjs). The previous
+      // implementation derived a key from session_file's basename minus .md,
+      // which never matched the correlation_id keys the map actually uses —
+      // every session rendered 0/0 in the web dashboard while the TUI
+      // (correctly keyed by correlation_id) showed real progress.
+      const slug = s.correlation_id || "";
       const prog = state.progress[slug] || { step:0,total:0,done:0,inprog:0,todo:0 };
       const g    = sessionGlyph(s, prog);
       const stageColor = STAGE_COLOR[s.session_type] || "var(--green)";
