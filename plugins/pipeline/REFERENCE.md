@@ -37,6 +37,9 @@ queued → dev → review → test → merge → done
 | `qa_pass` | Test result: true, false, or null (untested) |
 | `notes_extra` | Operator notes |
 | `rebase_required` | Flag if branch needs rebase before merge |
+| `depends_on` | Comma-separated prerequisite feature slugs; the row holds until all are `done` (soft list gate) |
+| `waits_on` | Single prerequisite feature slug; the row holds until it is `done` AND its branch is an ancestor of `target_branch` (strict chain gate) |
+| `base_branch` | Branch a fresh feature worktree is created from (default: `target_branch`); set to a prerequisite's `autonomous/<slug>` to chain dependent code |
 
 **Invariant:** A row cannot reach `stage=merge` without a gate verdict — either `qa_pass=true` (test path) or `review_verdict=ready_to_ship`. The merge runner enforces this before squash-merging.
 
@@ -839,7 +842,8 @@ cd plugins/pipeline && npm test
 
 | Subcommand | Purpose |
 |------------|---------|
-| `queue-plan <root> <plan-file>` | Queue a plan for orchestration |
+| `queue-plan <root> <plan-file>` | Queue a plan for orchestration (`--waits-on`, `--base-branch` for chaining) |
+| `queue-cluster <root> <plan-file>...` | Queue a dependency-chained set of plans in one shot; wires `waits_on` + `base_branch` from each plan's `*Prerequisites:*` |
 | `queue-name-derive <brief>` | Derive a slug from a description |
 | `queue-branch-extract <plan-file>` | Extract branch from plan frontmatter |
 | `queue-title-extract <plan-file>` | Extract PR title from plan's `*Title:*` annotation |
@@ -914,6 +918,29 @@ Update an existing row's dependencies: `pipeline stage-set <project-root> <featu
 Clear dependencies: `--depends ""`
 
 **Circular dependencies** (A depends on B, B depends on A) deadlock both rows indefinitely. Resolve by clearing `depends_on` manually.
+
+### Prerequisite chaining (`waits_on` + `base_branch`)
+
+`depends_on` is a soft list gate (all prerequisites `done`). For a single strict prerequisite plus base-branch chaining, use `waits_on` / `base_branch`:
+
+```bash
+pipeline queue-plan <project> <plan-file> \
+  --waits-on auth-refactor \
+  --base-branch autonomous/auth-refactor
+```
+
+- `--waits-on <slug>` — the row holds until `<slug>` is `done` **and** `autonomous/<slug>` is an ancestor of this row's `target_branch`. The ancestor check is what `depends_on` lacks: a remote squash-merge can mark a row `done` before the commit is reachable from the local target, and a dependent must not start from a base that lacks the prerequisite's code. Auto-populated from the first `*Prerequisites:*` slug when the flag is omitted.
+- `--base-branch <name>` — the feature worktree is created from `<name>` instead of `target_branch`. Point it at `autonomous/<prereq>` so the dependent's worktree contains the prerequisite's code from day one (before it merges). Opt-in only.
+
+### Queueing a cluster
+
+For a dependency chain of plans, queue them together and let the orchestrator chain them rather than queueing one at a time:
+
+```bash
+pipeline queue-cluster <project> <plan1.md> <plan2.md> ...
+```
+
+`queue-cluster` reads each plan's `*Prerequisites:*`, infers the dependency graph among the supplied plans, prints the execution groups (`[level-0] → [level-1] → ...`), then queues every plan with `waits_on` + `base_branch` wired for within-cluster prerequisites. Out-of-cluster prerequisites fall back to the plan's own annotation. Refuses on a dependency cycle.
 
 ---
 

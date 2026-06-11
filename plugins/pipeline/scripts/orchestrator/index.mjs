@@ -68,17 +68,47 @@ function projectIsActive(db, project) {
 
 // ── deps check ────────────────────────────────────────────────────────────────
 
-function depsMet(row, allRows, logFn) {
+function depsMet(row, allRows, logFn, projectRoot) {
+  const feature = row.feature || "?";
+
+  // depends_on — soft list gate: every named prerequisite row must be `done`.
   const dependsOn = (row.depends_on || "").trim();
-  if (!dependsOn) return true;
-  const depSlugs = dependsOn.split(",").map(s => s.trim()).filter(Boolean);
-  const doneFeatures = new Set(allRows.filter(r => r.stage === "done").map(r => r.feature));
-  const unmet = depSlugs.filter(d => !doneFeatures.has(d));
-  if (unmet.length) {
-    const feature = row.feature || "?";
-    logFn(`  [${feature}] deps not yet done: ${unmet.join(", ")} — holding`);
+  if (dependsOn) {
+    const depSlugs = dependsOn.split(",").map(s => s.trim()).filter(Boolean);
+    const doneFeatures = new Set(allRows.filter(r => r.stage === "done").map(r => r.feature));
+    const unmet = depSlugs.filter(d => !doneFeatures.has(d));
+    if (unmet.length) {
+      logFn(`  [${feature}] deps not yet done: ${unmet.join(", ")} — holding`);
+      return false;
+    }
   }
-  return unmet.length === 0;
+
+  // waits_on — strict single-prerequisite chain gate: the prerequisite row must
+  // be `done` AND its branch must actually be an ancestor of this row's target
+  // branch. `done` alone is not enough — a squash-merge on the remote can mark
+  // the prereq done before the commit is reachable from the local target, and
+  // base-branch chaining must not start a dependent off a base that lacks the
+  // prereq's code. The ancestor check closes that race.
+  const waitsOn = (row.waits_on || "").trim();
+  if (waitsOn) {
+    const prereq = allRows.find(r => r.feature === waitsOn);
+    if (!prereq || prereq.stage !== "done") {
+      logFn(`  [${feature}] waits_on '${waitsOn}' not done — holding`);
+      return false;
+    }
+    if (projectRoot) {
+      const prereqBranch = (prereq.branch && prereq.branch !== "—") ? prereq.branch : `autonomous/${waitsOn}`;
+      const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
+      // isMergedInto(a, b) → true when `a` is an ancestor of `b`. Here: has the
+      // prerequisite's branch landed on the target?
+      if (!isMergedInto(prereqBranch, targetBranch, projectRoot)) {
+        logFn(`  [${feature}] waits_on '${waitsOn}' done but ${prereqBranch} not yet on ${targetBranch} — holding`);
+        return false;
+      }
+    }
+  }
+
+  return true;
 }
 
 // ── merged-branch cleanup ─────────────────────────────────────────────────────
@@ -172,7 +202,7 @@ async function pollOnce({
     }
 
     const allQueued  = rows.filter(r => r.stage === "queued");
-    const queued     = allQueued.filter(r => depsMet(r, rows, logFn));
+    const queued     = allQueued.filter(r => depsMet(r, rows, logFn, projectRoot));
     nQueued         += allQueued.length;
     const nBlocked   = allQueued.length - queued.length;
     if (nBlocked) logFn(`[${project}] ${nBlocked} queued row(s) holding on unmet deps`);
@@ -226,7 +256,7 @@ async function pollOnce({
     // spawn a session so the concurrency guard must not block it.
     const unfired = rows.filter(r =>
       r.stage === "merge" &&
-      depsMet(r, rows, logFn) &&
+      depsMet(r, rows, logFn, projectRoot) &&
       !(r.notes_extra || "").includes("[merge-ready-fired]")
     );
     for (const row of unfired) {
@@ -248,7 +278,7 @@ async function pollOnce({
     if (countActiveSessions(db) >= maxConcurrent) continue;
     const mergeRow = rows.find(r =>
       r.stage === "merge" &&
-      depsMet(r, rows, logFn)
+      depsMet(r, rows, logFn, projectRoot)
     );
     if (!mergeRow) continue;
 

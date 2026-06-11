@@ -204,6 +204,7 @@ Queue subcommands:
   queue-deps-extract   <plan-file>
   queue-title-extract  <plan-file>
   queue-plan           <project> <plan-file>
+  queue-cluster        <project> <plan-file> [<plan-file> ...]
   queue-mode-detect    <plans-dir> <arguments>
 
 Other:
