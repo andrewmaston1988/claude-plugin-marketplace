@@ -40,56 +40,24 @@ function queueBranchExtract(planFilePath) {
 function queueDepsExtract(planFilePath) {
   let content;
   try { content = readFileSync(planFilePath, "utf8"); } catch { return ""; }
-  const lines = content.split("\n");
-  const blockLines = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const stripped = lines[i].trim();
-    if (/\bprerequisites\b\s*:/i.test(lines[i])) {
-      blockLines.push(lines[i]);
-      for (let j = i + 1; j < lines.length; j++) {
-        if (!lines[j].trim()) break;
-        blockLines.push(lines[j]);
-      }
-      break;
-    }
-    if (/^#+\s*prerequisites\s*$/i.test(stripped)) {
-      for (let j = i + 1; j < lines.length; j++) {
-        const cs = lines[j].trim();
-        if (cs.startsWith("#")) break;
-        if (cs) blockLines.push(lines[j]);
-        else if (blockLines.length) break;
-      }
-      break;
-    }
-  }
-  if (!blockLines.length) return "";
+  // Only the canonical inline annotation `*Prerequisites:* <value>` triggers extraction.
+  // Section-header form (`## Prerequisites`) is not supported — use the inline form.
+  const m = content.match(/^\*Prerequisites:\*\s+(.+)/m);
+  if (!m) return "";
 
-  // "none" / "- none" means explicitly no dependencies — not a parse failure.
-  if (/^\s*[-*]?\s*none\s*$/i.test(blockLines.join(" ").trim())) return "";
+  const value = m[1].trim();
+  if (/^none\s*$/i.test(value)) return "";
 
-  const blockText = blockLines.join(" ");
-  let slugs = [];
-
-  slugs = [...blockText.matchAll(/`autonomous\/([a-z0-9][a-z0-9-]*)`/gi)].map(m => m[1]);
-  if (!slugs.length) {
-    slugs = [...blockText.matchAll(/\*{1,2}([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)\*{1,2}/gi)]
-      .map(m => m[1]);
-  }
-  if (!slugs.length) {
-    slugs = [...blockText.matchAll(/`([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)`/gi)]
-      .map(m => m[1]);
-  }
-  if (!slugs.length) {
-    for (const bl of blockLines) {
-      const m = bl.trim().match(/^[-*]\s+([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)/i);
-      if (m) slugs.push(m[1]);
-    }
-  }
+  let slugs = [...value.matchAll(/`autonomous\/([a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
+  if (!slugs.length)
+    slugs = [...value.matchAll(/autonomous\/([a-z0-9][a-z0-9-]*)/gi)].map(r => r[1]);
+  if (!slugs.length)
+    slugs = [...value.matchAll(/`([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
 
   if (!slugs.length) {
     process.stderr.write(
-      `WARN: queue-deps-extract: Prerequisites block detected in ${basename(planFilePath)} ` +
+      `WARN: queue-deps-extract: *Prerequisites:* annotation found in ${basename(planFilePath)} ` +
       "but no plan slugs could be parsed -- check the plan's formatting or pass --depends manually.\n"
     );
     return "";
