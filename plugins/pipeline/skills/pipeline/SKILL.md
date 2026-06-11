@@ -1,6 +1,6 @@
 ---
 name: pipeline
-description: Use when the user wants to inspect a project's pipeline — rows in flight, queued, blocked, recently done. Triggers — "/pipeline", "show pipeline status", "what's in flight in the pipeline", "is anything blocked". SKIP for — queueing new work (use /queue), deep cross-project triage (use /pipeline-review), or starting a demo (use /pipeline-demo).
+description: Use when the user wants to inspect or manage a project's pipeline — rows in flight, queued, blocked, recently done, or needing manual recovery. Triggers — "show pipeline status", "what's in flight", "is anything blocked", "rows in manual", "restore pipeline row", "pipeline rows", any question about pipeline queue state. SKIP for — queueing new work (use /queue), deep cross-project triage (use /pipeline-review), or starting a demo (use /pipeline-demo).
 argument-hint: [<project>]
 ---
 
@@ -46,4 +46,7 @@ Group the output by stage (merge / manual / test / dev / research / queued / bac
 
 - If the orchestrator is off and there are queued rows: suggest starting it (`o` in the TUI agents panel, then Enter).
 - If everything is `done`: suggest `/queue <plan-file>` to add new work.
+- If something is `manual` due to an expired/dead session (`[dev-no-handoff]`, `[review-stuck-no-report]`): restore with `stage=queued` + `notes_extra=type=dev` (or `type=review` as appropriate). The orchestrator reads the `type=` prefix from `notes_extra` to pick the session template — without it the row sits queued but won't dispatch. `pipeline stage-set` doesn't set `notes_extra`; update the DB directly if needed.
 - If something is `manual` and `blocked:`: surface the block reason and ask whether they want to clear it (`pipeline stage-set <project> <feature> backlog` typically).
+
+For the full CLI surface (all subcommands, flags, orchestrator management): read `../../REFERENCE.md` (relative to this skill's base directory).
