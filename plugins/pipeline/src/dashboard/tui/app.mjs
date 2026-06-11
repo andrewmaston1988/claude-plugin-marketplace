@@ -419,6 +419,15 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
   let cachedGitLog = [];
   let cachedAgentLog = [];
 
+  // Clear the visible screen + scrollback before initialising blessed so the
+  // dashboard renders into a clean viewport. Without this, prior terminal
+  // output (the node:sqlite experimental warning, the launching shell's
+  // echo of `pipeline dashboard tui`, shell prompt, etc.) stays above the
+  // rendered UI and the terminal scrollbar is active. `\x1b[3J` is the xterm
+  // erase-scrollback extension, supported by Windows Terminal, iTerm2, and
+  // most modern xterms.
+  process.stdout.write("\x1b[2J\x1b[3J\x1b[H");
+
   const screen = blessed.screen({
     smartCSR: true,
     title: "pipeline",
