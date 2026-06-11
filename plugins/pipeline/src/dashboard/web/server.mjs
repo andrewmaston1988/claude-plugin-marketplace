@@ -4,7 +4,7 @@
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { resolve, isAbsolute, join as pathJoin, resolve as resolvePath, relative } from "node:path";
+import { resolve, isAbsolute, join as pathJoin, relative } from "node:path";
 import { existsSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import { connectUnified, close, rowsList, rowGet } from "../../../scripts/pipeline-db/index.mjs";
@@ -80,8 +80,8 @@ function _planFileInProject(db, projectName, planFile) {
   if (!planFile || typeof planFile !== "string") return null;
   const project = projectList(db).find(p => p.name === projectName);
   if (!project || !project.root_path) return null;
-  const root = resolvePath(project.root_path);
-  const resolved = isAbsolute(planFile) ? resolvePath(planFile) : resolvePath(root, planFile);
+  const root = resolve(project.root_path);
+  const resolved = isAbsolute(planFile) ? resolve(planFile) : resolve(root, planFile);
   const rel = relative(root, resolved);
   if (rel.startsWith("..") || isAbsolute(rel)) return null;
   return resolved;
@@ -112,7 +112,9 @@ function _buildPayload(db, projectName) {
 }
 
 export function startWebServer({ paths, host, port } = {}) {
-  const cfgPath = pathJoin(homedir(), ".pipeline", "config.json");
+  const cfgPath = paths?.configDir
+    ? pathJoin(paths.configDir, "config.json")
+    : pathJoin(homedir(), ".pipeline", "config.json");
   const cfg = loadPipelineConfig(cfgPath);
   const resolvedHost = host !== undefined ? host : "127.0.0.1";
   const resolvedPort = port !== undefined ? port : (cfg?.web?.port ?? 8765);

@@ -1,4 +1,4 @@
-// Wizard worktree-layout step (Step 6/10) — non-interactive paths only.
+// Wizard worktree-layout step (Step 7/11) — non-interactive paths only.
 //
 // One runWizard run per test. The step-labels test that captures stdout
 // MUST run first: overriding process.stdout.write mid-suite swallows the
@@ -43,7 +43,7 @@ const baseOpts = {
 };
 
 // Step labels test MUST come first — see comment at top of file.
-test("wizard: step labels renumbered to /10 (no stale /9 strings emitted)", async () => {
+test("wizard: step labels renumbered to /11 (no stale /10 strings emitted)", async () => {
   const ctx = freshPaths();
   const captured = [];
   const origWrite = process.stdout.write.bind(process.stdout);
@@ -55,12 +55,13 @@ test("wizard: step labels renumbered to /10 (no stale /9 strings emitted)", asyn
     cleanup(ctx.tmp);
   }
   const out = captured.join("");
-  match(out, /Step 1\/10 — Environment check/);
-  match(out, /Step 5\/10 — Register first project/);
-  match(out, /Step 6\/10 — Worktree layout/);
-  match(out, /Step 7\/10 — Autostart/);
-  match(out, /Step 10\/10 — Done/);
-  ok(!/Step \d+\/9 /.test(out), "no /9 step labels should remain");
+  match(out, /Step 1\/11 — Environment check/);
+  match(out, /Step 5\/11 — Web dashboard port/);
+  match(out, /Step 6\/11 — Register first project/);
+  match(out, /Step 7\/11 — Worktree layout/);
+  match(out, /Step 8\/11 — Autostart/);
+  match(out, /Step 11\/11 — Done/);
+  ok(!/Step \d+\/10 /.test(out), "no /10 step labels should remain");
 });
 
 test("wizard: choice 1 (default) writes phase-3b worktree keys", async () => {

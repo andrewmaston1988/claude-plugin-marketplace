@@ -233,7 +233,7 @@ async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour
       "--allowedTools", "Bash,Read,Write,Edit,Glob,Grep",
       "--max-budget-usd", "5.00",
     ];
-    const _pluginDir = dirname(dirname(fileURLToPath(import.meta.url)));
+    const pluginDir = dirname(dirname(fileURLToPath(import.meta.url)));
     const env = { ...process.env };
     env.GIT_AUTHOR_NAME  = "Claude Agent";
     env.GIT_AUTHOR_EMAIL = `claude-agent@${correlationId}`;
@@ -242,7 +242,7 @@ async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour
     env.REPORT_DATE      = reportDate;
     env.REPORT_MONTH     = kind === "monthly" ? reportDate : reportDate.slice(0, 6);
     env.PIPELINE_DB      = join(paths.dataDir, "pipeline.db");
-    env.PLUGIN_DIR       = _pluginDir;
+    env.PLUGIN_DIR       = pluginDir;
 
     mkdirSync(ctx.logDir, { recursive: true });
     const logPath = join(ctx.logDir, `gov-${correlationId}.log`);

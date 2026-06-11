@@ -121,15 +121,15 @@ Env vars win over config values. For production, set secrets in env; put non-sec
 
 For any case where you write a new script: write it to `~/.pipeline/hooks/on-merge-ready.mjs` (create the dir if needed), make it self-contained, and show the user the file content before writing.
 
-**If the hook creates a GitHub PR**, use `pipeline row-get <project> <feature>` to read the full pipeline row in one call. Destructure `pr_title` (the human-readable title stored at queue time from the plan's `*Title:*` annotation) and any other fields you need, falling back to the feature slug if empty:
+**If the hook creates a GitHub PR**, use `pipeline pr-title-get <project> <feature>` to read the human-readable PR title (stored at queue time from the plan's `*Title:*` annotation), falling back to the feature slug if empty:
 
-Resolve `pipelineBin` from the plugin cache the same way the bundled `ON_MERGE_TEMPLATE` does (the canonical resolver lives in `src/setup/wizard-hooks.mjs` — scan version dirs, highest-with-a-bin wins; don't pin a version). Then:
+`PLUGIN_DIR` is set in the hook's spawn env by the pipeline orchestrator — use it to locate the binary rather than pinning a version:
 
 ```js
-const rowResult = spawnSync(process.execPath, [pipelineBin, "row-get", project, feature], { encoding: "utf8", env: process.env });
-let row = {};
-try { row = JSON.parse(rowResult.stdout?.trim() || "{}"); } catch {}
-const title = row.pr_title || feature;
+// PLUGIN_DIR is set in the hook's spawn env by the pipeline orchestrator.
+const pipelineBin = join(process.env.PLUGIN_DIR, "bin", "pipeline.mjs");
+const titleResult = spawnSync(process.execPath, [pipelineBin, "pr-title-get", project, feature], { encoding: "utf8", env: process.env });
+const title = titleResult.stdout?.trim() || feature;
 // then: spawnSync(ghBin, ["pr", "create", "--title", title, ...])
 ```
 
@@ -208,7 +208,7 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 - `9000` — if 8765 is already occupied by another service
 - `3001` — common local-dev preference
 
-**Consequences**: changing the port invalidates existing browser bookmarks. The CLI `--port` flag overrides the config value for a single session (`pipeline dashboard web --port 9999`). The doctor check `web-port-conflict` warns when the running server's bound port differs from the configured one.
+**Consequences**: changing the port invalidates existing browser bookmarks. The CLI `--port` flag overrides the config value for a single session (`pipeline dashboard web --port 9999`). The doctor check `web-port-conflict` warns when a non-dashboard process is bound to the configured port at startup.
 
 **SKIP this question** unless the user says port 8765 is already in use or they have a port preference.
 
