@@ -105,11 +105,13 @@ Env vars win over config values. For production, set secrets in env; put non-sec
 
 ### Question 3b — on_merge_ready hook
 
-**What this does**: runs a script/executable whenever a pipeline row reaches `stage=merge` — fires for all projects, regardless of whether `autoMerge` is enabled. The hook receives four env vars: `PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`. Common use: post a Slack ping when a branch is ready to merge.
+**Always ASK this question** — alongside Slack (Q2), the merge-workflow hooks are how pipeline integrates with the user's day-to-day. Most users want a real PR-based workflow rather than the default local squash-and-push to the target branch, so don't bury this as a skippable sub-question of Q3 (models).
+
+**What this does**: runs a script/executable whenever a pipeline row reaches `stage=merge` — fires for all projects, regardless of whether `autoMerge` is enabled. The hook receives four env vars: `PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`. Common use: open a PR on GitHub/Bitbucket when a branch is ready to merge, or post a Slack ping.
 
 **Default**: disabled (no hook set).
 
-**If you skip**: merge-ready events are still recorded internally; you just won't get an external notification. Add it later by setting `hooks.on_merge_ready` in `~/.pipeline/config.json`.
+**If you skip**: merge-ready events are still recorded internally; you just won't get an external notification or PR opened. Add it later by setting `hooks.on_merge_ready` in `~/.pipeline/config.json`.
 
 **Before asking**: check whether `~/.pipeline/hooks/on-merge-ready.mjs` already exists. If it does and `hooks.on_merge_ready` is not already set in config, say: "Found existing hook at `~/.pipeline/hooks/on-merge-ready.mjs` — wire this into config? [Y/n]". On yes, use that path directly and skip the question below. On no, proceed with the normal question.
 
@@ -139,11 +141,13 @@ Pass the hook path as `--merge-hook <abs-path>` (or omit to leave unset).
 
 ### Question 3c — on_merge hook
 
+**Always ASK this question** — pairs with Q3b. If the user wired up `on_merge_ready` to open a PR, they almost certainly want `on_merge` to merge that PR via the platform's API rather than fall back to a local squash. Asking the two as a related cluster keeps the merge workflow coherent.
+
 **What this does**: replaces the pipeline's local squash merge with a custom script. The hook receives the same four env vars as `on_merge_ready` (`PIPELINE_PROJECT`, `PIPELINE_FEATURE`, `PIPELINE_BRANCH`, `PIPELINE_TARGET_BRANCH`) and is responsible for performing the actual merge. When unset, the pipeline squash-merges locally as usual.
 
 **Default**: disabled (local squash merge used).
 
-**If you skip**: the pipeline squash-merges the branch to the target branch locally and pushes. GitHub won't show the PR as "merged" — the PR will close when the branch is deleted.
+**If you skip**: the pipeline squash-merges the branch to the target branch locally and pushes. GitHub/Bitbucket won't show the PR as "merged" — the PR will close when the branch is deleted.
 
 **If you set it**: the hook fully owns the merge step. A common hook for GitHub repos:
 

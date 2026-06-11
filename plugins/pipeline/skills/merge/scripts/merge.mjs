@@ -48,7 +48,8 @@ import {
 } from "./plan-files.mjs";
 import { step0bProgress, step9Cleanup } from "./progress.mjs";
 import { loadPipelineConfig } from "../../../src/pipeline-config.mjs";
-import { orchestratorWorktreePath } from "../../../scripts/worktree-paths.mjs";
+import { getPaths } from "../../../src/paths.mjs";
+import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../scripts/worktree-paths.mjs";
 
 // ── Subprocess helpers ────────────────────────────────────────────────────────
 
@@ -130,7 +131,8 @@ async function step5SquashMerge(db, project, projectDir, branches, planFiles, ta
   }
 
   const cfg = loadPipelineConfig();
-  const onMergeHook = cfg?.hooks?.on_merge || null;
+  const paths = getPaths();
+  const onMergeHook = resolveHookFirstToken(cfg?.hooks?.on_merge, paths.configDir);
 
   for (const branch of branches) {
     const slug = branchSlug(branch);

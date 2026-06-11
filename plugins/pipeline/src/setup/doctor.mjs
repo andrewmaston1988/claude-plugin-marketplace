@@ -24,8 +24,7 @@ function _pathResolutionChecks(cfg, projects, paths) {
   out.push({ key: "session_templates_dir",       raw: cfg.session_templates_dir,        resolved: _global(cfg.session_templates_dir) ?? "(bundled)", warn: cfg.session_templates_dir ? !existsSync(_global(cfg.session_templates_dir)) : false });
   out.push({ key: "hooks.on_notification",       raw: cfg.hooks?.on_notification,       resolved: resolveHookFirstToken(cfg.hooks?.on_notification, cd) ?? "(unset)", warn: false });
   out.push({ key: "hooks.on_merge_ready",        raw: cfg.hooks?.on_merge_ready,        resolved: resolveHookFirstToken(cfg.hooks?.on_merge_ready,  cd) ?? "(unset)", warn: false });
-  // on_merge consumer (skills/merge/scripts/merge.mjs) doesn't route through resolveTemplate yet.
-  out.push({ key: "hooks.on_merge (raw — bypasses resolveTemplate)", raw: cfg.hooks?.on_merge, resolved: cfg.hooks?.on_merge ?? "(unset)", warn: false });
+  out.push({ key: "hooks.on_merge",              raw: cfg.hooks?.on_merge,              resolved: resolveHookFirstToken(cfg.hooks?.on_merge,        cd) ?? "(unset)", warn: false });
   out.push({ key: "governor.template_path",      raw: cfg.governor?.template_path,      resolved: _global(cfg.governor?.template_path) ?? "(bundled)", warn: cfg.governor?.template_path ? !existsSync(_global(cfg.governor.template_path)) : false });
 
   for (const p of projects ?? []) {
