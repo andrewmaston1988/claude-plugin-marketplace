@@ -87,7 +87,14 @@ export function generateSessionFile(
   if (!planFile.endsWith(".md")) planFile += ".md";
   const planStem = basename(planFile, ".md");
   if (!feature) feature = planStem;
-  if (!branch)  branch  = `autonomous/${planStem}`;
+  // Session slug, branch, and worktree all derive from `feature` -- the
+  // canonical identifier on the pipeline row. Earlier code re-derived these
+  // from basename(planFile), which broke when planFile reached us via a
+  // shell-escaped argv: every `\\` consumed as an escape collapses
+  // `C:\\code\\...\\X.md` to `C:code...X.md`, leaving no separators for
+  // basename to split on -- so the slug ended up containing the entire
+  // stripped path. Using `feature` short-circuits that vulnerability.
+  if (!branch)  branch  = `autonomous/${feature}`;
 
   const cfg = _cfg ?? loadPipelineConfig();
   if (!reviewSkill) {
@@ -97,7 +104,7 @@ export function generateSessionFile(
   }
 
   const date = _todayStr();
-  const sessionSlug = `${sessionType}-${date}-${planStem}`;
+  const sessionSlug = `${sessionType}-${date}-${feature}`;
 
   // Plan content is the user's plan file. Relative paths route through
   // resolvePlanFile → resolvePlansDir, which honours cfg.plansDir (so an

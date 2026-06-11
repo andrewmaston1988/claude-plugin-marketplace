@@ -646,11 +646,17 @@ export async function run(cmd, argv) {
       // retry number into its report filename — each retry gets its own
       // report file so prior verdicts remain readable as history.
       const devCompleteRow = rowGet(ctx.db, ctx.project, feature);
-      const planStem = (planFile || "").replace(/\.md$/, "").split(/[\\/]/).pop();
+      // Prefer the row's plan_file column (set by queue-plan with no shell
+      // hop) over the argv plan-file -- the latter can arrive shell-escaped
+      // when the dev session's hand-off command spelt the path with
+      // backslashes (e.g. `C:\code\...`), which collapses to `C:code...` and
+      // strips every separator. Fall back to argv only when the row is
+      // missing the column.
+      const planFileTrusted = devCompleteRow?.plan_file || planFile;
       const cwd = featureWorktreePath({
-        project: ctx.project, projectRoot: ctx.projectRoot, feature: planStem,
+        project: ctx.project, projectRoot: ctx.projectRoot, feature,
       });
-      sessionPath = generateSessionFile(ctx.project, planFile, "review", {
+      sessionPath = generateSessionFile(ctx.project, planFileTrusted, "review", {
         projectRoot: ctx.projectRoot,
         feature,
         reviewRetries: devCompleteRow?.review_retries ?? 0,
