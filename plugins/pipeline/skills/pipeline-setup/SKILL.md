@@ -111,12 +111,17 @@ If the user picks a channel: strip a leading `#`. If `claude-slack` isn't on PAT
 
 For any case where you write a new script: write it to `~/.pipeline/hooks/on-merge-ready.mjs` (create the dir if needed), make it self-contained, and show the user the file content before writing.
 
-**If the hook creates a GitHub PR**, use `pipeline pr-title-get <project> <feature>` to read the human-readable title stored at queue time (from the plan's `*Title:*` annotation), falling back to the feature slug if empty:
+**If the hook creates a GitHub PR**, use `pipeline row-get <project> <feature>` to read the full pipeline row in one call. Destructure `pr_title` (the human-readable title stored at queue time from the plan's `*Title:*` annotation) and any other fields you need, falling back to the feature slug if empty:
 
 ```js
-const pipelineBin = join(homedir(), ".claude", "plugins", "cache", "andrewmaston1988-claude-plugins", "pipeline", "0.1.0", "bin", "pipeline.mjs");
-const titleResult = spawnSync(process.execPath, [pipelineBin, "pr-title-get", project, feature], { encoding: "utf8", env: process.env });
-const title = titleResult.stdout?.trim() || feature;
+// Resolve the highest installed plugin version so this survives upgrades.
+const pipelinePkgDir = join(homedir(), ".claude", "plugins", "cache", "andrewmaston1988-claude-plugins", "pipeline");
+const ver = readdirSync(pipelinePkgDir).filter(v => /^\d+\.\d+\.\d+/.test(v)).sort().pop() || "0.1.0";
+const pipelineBin = join(pipelinePkgDir, ver, "bin", "pipeline.mjs");
+const rowResult = spawnSync(process.execPath, [pipelineBin, "row-get", project, feature], { encoding: "utf8", env: process.env });
+let row = {};
+try { row = JSON.parse(rowResult.stdout?.trim() || "{}"); } catch {}
+const title = row.pr_title || feature;
 // then: spawnSync(ghBin, ["pr", "create", "--title", title, ...])
 ```
 
