@@ -64,8 +64,18 @@ export function ensureWorktree(projectDir, wtPath, branch, baseBranch, logFn) {
   }
   mkdirSync(join(wtPath, ".."), { recursive: true });
   spawnSync("git", ["-C", projectDir, "fetch", "--quiet"], { timeout: 30000, windowsHide: true });
+  // Base the new branch on origin/<baseBranch> when it exists. The local ref
+  // is only as fresh as the operator's last pull — basing on it forks the
+  // feature branch from stale history (months stale in practice), and the
+  // fetch above updates origin/* refs, not local ones.
+  const originRef = `origin/${baseBranch}`;
+  const hasOrigin = spawnSync(
+    "git", ["-C", projectDir, "rev-parse", "--verify", "--quiet", originRef],
+    { timeout: 10000, windowsHide: true, stdio: "ignore" }
+  ).status === 0;
+  const baseRef = hasOrigin ? originRef : baseBranch;
   const r = spawnSync(
-    "git", ["-C", projectDir, "worktree", "add", "-b", branch, wtPath, baseBranch],
+    "git", ["-C", projectDir, "worktree", "add", "-b", branch, wtPath, baseRef],
     { timeout: 60000, windowsHide: true, encoding: "utf8" }
   );
   if (r.status === 0) {
