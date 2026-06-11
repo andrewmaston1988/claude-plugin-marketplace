@@ -3,7 +3,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, basename, isAbsolute, resolve, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import { close, rowGet, rowAdd, rowUpdate } from "../../scripts/pipeline-db/index.mjs";
-import { getFlag, detectDefaultBranch } from "./helpers.mjs";
+import { getFlag, detectDefaultBranch, formatRow } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { loadPipelineConfig } from "../pipeline-config.mjs";
 
@@ -363,9 +363,6 @@ export async function run(cmd, argv) {
           prTitle: prTitle || null,
         });
         if (notes) rowUpdate(ctx.db, ctx.project, feature, { notes_extra: notes });
-        const brNote = branch ? `, branch=${branch}` : "";
-        const depNote = depends ? `, depends_on=${depends}` : "";
-        process.stdout.write(`OK: '${feature}' queued (added)${brNote}${depNote}\n`);
       } else {
         const fields = {
           stage: "queued", notes_extra: notes,
@@ -376,10 +373,9 @@ export async function run(cmd, argv) {
         if (qModel !== "—") fields.q_model = qModel;
         if (rvwModel !== "—") fields.rvw_model = rvwModel;
         rowUpdate(ctx.db, ctx.project, feature, fields);
-        const brNote = branch ? `, branch=${branch}` : "";
-        const depNote = depends ? `, depends_on=${depends}` : "";
-        process.stdout.write(`OK: '${feature}' queued (promoted from '${existingStage}')${brNote}${depNote}\n`);
       }
+      const finalRow = rowGet(ctx.db, ctx.project, feature);
+      process.stdout.write(JSON.stringify(formatRow(finalRow)) + "\n");
       return 0;
     } catch (e) {
       process.stderr.write(`error: row-add/stage-set failed for '${feature}': ${e.message}\n`);

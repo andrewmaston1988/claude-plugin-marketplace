@@ -1,7 +1,29 @@
 import { close, rowGet, rowUpdate } from "../../scripts/pipeline-db/index.mjs";
+import { formatRow } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 
 export async function run(cmd, argv) {
+  if (cmd === "row-get") {
+    const [project, feature] = argv;
+    if (!project || !feature) {
+      process.stderr.write("usage: row-get <project> <feature>\n");
+      return 1;
+    }
+    const ctx = lookupProjectOrFail(project);
+    if (!ctx) return 1;
+    try {
+      const row = rowGet(ctx.db, ctx.project, feature);
+      if (!row) {
+        process.stderr.write(`not found: feature '${feature}'\n`);
+        return 1;
+      }
+      process.stdout.write(JSON.stringify(formatRow(row)) + "\n");
+      return 0;
+    } finally {
+      close(ctx.db);
+    }
+  }
+
   if (cmd === "target-branch-get") {
     const [project, feature] = argv;
     if (!project || !feature) {

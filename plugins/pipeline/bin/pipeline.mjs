@@ -206,6 +206,7 @@ Other:
   spawn-merge          <project> <feature>
   session-generate     <project> <plan-file> <session-type>
   notify               --title <text> --message <text>
+  row-get              <project> <feature>
   target-branch-get    <project> <feature>
   pr-title-get         <project> <feature>
   rebase-required-set  <project> <feature> <0|1>

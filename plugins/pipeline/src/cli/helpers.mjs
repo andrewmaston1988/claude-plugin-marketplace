@@ -24,3 +24,32 @@ export function detectDefaultBranch(cwd) {
   }
   return DEFAULT_TARGET_BRANCH_FALLBACK;
 }
+
+export function formatRow(r) {
+  const qa = r.qa_pass;
+  return {
+    feature:             r.feature,
+    plan_file:           r.plan_file,
+    branch:              r.branch || "—",
+    stage:               r.stage,
+    r_model:             r.r_model || "—",
+    d_model:             r.d_model || "—",
+    q_model:             r.q_model || "—",
+    rvw_model:           r.rvw_model || "—",
+    session_type:        r.session_type || "",
+    session_file:        r.session_file || "",
+    budget_usd:          r.budget_usd,
+    qa_pass:             qa === 1 ? "true" : (qa === 0 ? "false" : "—"),
+    dev_retries:         r.dev_retries || 0,
+    review_retries:      r.review_retries ?? 0,
+    review_retry_budget: r.review_retry_budget ?? 3,
+    review_verdict:      r.review_verdict,
+    spawn_failed:        Boolean(r.spawn_failed),
+    notes:               r.notes_extra || "",
+    rebase_required:     Boolean(r.rebase_required || 0),
+    target_branch:       r.target_branch || "main",
+    last_error:          r.last_error || null,
+    pr_title:            r.pr_title || null,
+    depends_on:          r.depends_on || null,
+  };
+}

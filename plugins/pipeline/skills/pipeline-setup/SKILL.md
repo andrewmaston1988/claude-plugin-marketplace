@@ -111,12 +111,15 @@ If the user picks a channel: strip a leading `#`. If `claude-slack` isn't on PAT
 
 For any case where you write a new script: write it to `~/.pipeline/hooks/on-merge-ready.mjs` (create the dir if needed), make it self-contained, and show the user the file content before writing.
 
-**If the hook creates a GitHub PR**, use `pipeline pr-title-get <project> <feature>` to read the human-readable title stored at queue time (from the plan's `*Title:*` annotation), falling back to the feature slug if empty:
+**If the hook creates a GitHub PR**, use `pipeline row-get <project> <feature>` to read the full pipeline row in one call. Destructure `pr_title` (the human-readable title stored at queue time from the plan's `*Title:*` annotation) and any other fields you need, falling back to the feature slug if empty:
+
+Resolve `pipelineBin` from the plugin cache the same way the bundled `ON_MERGE_TEMPLATE` does (the canonical resolver lives in `src/setup/wizard-hooks.mjs` — scan version dirs, highest-with-a-bin wins; don't pin a version). Then:
 
 ```js
-const pipelineBin = join(homedir(), ".claude", "plugins", "cache", "andrewmaston1988-claude-plugins", "pipeline", "0.1.0", "bin", "pipeline.mjs");
-const titleResult = spawnSync(process.execPath, [pipelineBin, "pr-title-get", project, feature], { encoding: "utf8", env: process.env });
-const title = titleResult.stdout?.trim() || feature;
+const rowResult = spawnSync(process.execPath, [pipelineBin, "row-get", project, feature], { encoding: "utf8", env: process.env });
+let row = {};
+try { row = JSON.parse(rowResult.stdout?.trim() || "{}"); } catch {}
+const title = row.pr_title || feature;
 // then: spawnSync(ghBin, ["pr", "create", "--title", title, ...])
 ```
 

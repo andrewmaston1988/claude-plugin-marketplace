@@ -1,4 +1,4 @@
-// smoke-12: plugin-owned session templates + placeholder expansion.
+// plugin-owned session templates + placeholder expansion.
 //
 // Covers session-gen.mjs against the bundled dev/review/research/test/governor
 // templates plus operator override behaviour with per-file fallback.

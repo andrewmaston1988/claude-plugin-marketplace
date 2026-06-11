@@ -24,7 +24,7 @@ test("modelFromNotes: '—' sentinel in row column is ignored", () => {
 });
 
 test("proxyEnvFor: claude- models return empty (no proxy)", () => {
-  deepStrictEqual(proxyEnvFor("claude-haiku-4-5-20251001"), {});
+  deepStrictEqual(proxyEnvFor("claude-haiku-4-5"), {});
   deepStrictEqual(proxyEnvFor("claude-sonnet-4-6"), {});
 });
 

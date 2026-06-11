@@ -1,4 +1,4 @@
-// smoke-16: publisher (notifier-agnostic envelope writer + on_write hook).
+// publisher (notifier-agnostic envelope writer + on_write hook).
 //
 // Covers: schema validity, drop-dir resolution, hook spawn shape, dryRun
 // behavior, missing-input error paths.

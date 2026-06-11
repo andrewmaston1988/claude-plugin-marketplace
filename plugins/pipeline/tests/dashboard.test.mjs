@@ -1,4 +1,4 @@
-// smoke-18: dashboard shared loaders — read-only data accessors used by both
+// dashboard shared loaders — read-only data accessors used by both
 // TUI and web. UI rendering is not auto-tested (matches Python upstream).
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
