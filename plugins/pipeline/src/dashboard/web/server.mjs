@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { resolve, isAbsolute, join as pathJoin, relative } from "node:path";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync, watchFile, unwatchFile } from "node:fs";
 import { homedir } from "node:os";
 import { connectUnified, close, rowsList, rowGet } from "../../../scripts/pipeline-db/index.mjs";
 import { loadPipelineConfig } from "../../pipeline-config.mjs";
@@ -115,14 +115,26 @@ export function startWebServer({ paths, host, port } = {}) {
   const cfgPath = paths?.configDir
     ? pathJoin(paths.configDir, "config.json")
     : pathJoin(homedir(), ".pipeline", "config.json");
-  const cfg = loadPipelineConfig(cfgPath);
-  const resolvedHost = host !== undefined ? host : (cfg?.web?.host ?? "127.0.0.1");
-  const resolvedPort = port !== undefined ? port : (cfg?.web?.port ?? 8765);
   const db = connectUnified(paths);
 
-  const server = createServer(async (req, res) => {
+  // CLI flags lock the bind; config changes never override an explicit --host/--port.
+  const cliHost = host;
+  const cliPort = port;
+  // Mutable bind state -- the request handler reads bind.host/.port so a
+  // config-driven restart does not require rebuilding the handler closure.
+  const bind = { host: undefined, port: undefined };
+
+  const resolveBind = () => {
+    const cfg = loadPipelineConfig(cfgPath);
+    return {
+      host: cliHost !== undefined ? cliHost : (cfg?.web?.host ?? "127.0.0.1"),
+      port: cliPort !== undefined ? cliPort : (cfg?.web?.port ?? 8765),
+    };
+  };
+
+  const requestHandler = async (req, res) => {
     try {
-      const url = new URL(req.url, `http://${req.headers.host || `${resolvedHost}:${resolvedPort}`}`);
+      const url = new URL(req.url, `http://${req.headers.host || `${bind.host}:${bind.port}`}`);
       const path = url.pathname;
       const projectName = url.searchParams.get("project") || "";
 
@@ -218,22 +230,45 @@ export function startWebServer({ paths, host, port } = {}) {
     } catch (e) {
       return _text(res, 500, `server error: ${e.message}`);
     }
-  });
+  };
 
   // Default: loopback-only (127.0.0.1). Pass --host 0.0.0.0 or --host :: to bind all interfaces.
-  server.on("error", (err) => {
-    if (err && err.code === "EADDRINUSE") {
-      process.stderr.write(`pipeline dashboard web: port ${resolvedPort} already in use — another dashboard is already running. Visit http://localhost:${resolvedPort}/pipeline\n`);
-      process.exit(2);
-    }
-    throw err;
-  });
-  server.listen(resolvedPort, resolvedHost, () => {
-    process.stdout.write(`pipeline dashboard web: http://localhost:${resolvedPort}/pipeline\n`);
-  });
+  let server = null;
+  const listenOn = ({ host: h, port: p }) => {
+    server = createServer(requestHandler);
+    server.on("error", (err) => {
+      if (err && err.code === "EADDRINUSE") {
+        process.stderr.write(`pipeline dashboard web: port ${p} already in use — another dashboard is already running. Visit http://localhost:${p}/pipeline\n`);
+        process.exit(2);
+      }
+      throw err;
+    });
+    server.listen(p, h, () => {
+      bind.host = h;
+      bind.port = p;
+      process.stdout.write(`pipeline dashboard web: http://localhost:${p}/pipeline\n`);
+    });
+  };
+
+  listenOn(resolveBind());
+
+  // Hot-reload: re-resolve the bind when ~/.pipeline/config.json changes and
+  // restart the listener if host/port differ. fs.watchFile polls (vs fs.watch
+  // event-based) so it survives the atomic .tmp -> rename pattern that
+  // updatePipelineConfig uses; 2s interval is plenty for config tweaks.
+  const onCfgChange = (curr, prev) => {
+    if (curr.mtimeMs === prev.mtimeMs) return;
+    const next = resolveBind();
+    if (next.host === bind.host && next.port === bind.port) return;
+    process.stdout.write(`pipeline dashboard web: config changed — restarting on ${next.host}:${next.port}\n`);
+    try { server.close(); } catch {}
+    listenOn(next);
+  };
+  watchFile(cfgPath, { interval: 2000 }, onCfgChange);
 
   const shutdown = () => {
-    try { server.close(); } catch {}
+    try { unwatchFile(cfgPath, onCfgChange); } catch {}
+    try { server?.close(); } catch {}
     try { close(db); } catch {}
     setTimeout(() => process.exit(0), 50);
   };

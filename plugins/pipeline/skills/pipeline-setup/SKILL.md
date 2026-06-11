@@ -206,6 +206,8 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 
 ### Question 3d-web — Web dashboard port and host (`web.port`, `web.host`)
 
+**Always ASK this question** -- `web.port` and `web.host` are base config, not power-user knobs. The default port 8765 often collides with Docker Desktop's IPv6 loopback bindings on Windows and `localhost:8765` lands on Docker rather than the dashboard. The loopback-vs-LAN host choice is a real per-user call (LAN access changes the security posture). Ask the two questions as a pair.
+
 **What this does**: `web.port` sets the TCP port the web dashboard listens on. `web.host` controls which network interfaces it binds to — loopback-only (`127.0.0.1`, default) or all interfaces (`0.0.0.0` for LAN access).
 
 **Resolved defaults**: port `8765` (outside Windows Hyper-V exclusion range 5000–5100); host `127.0.0.1` (loopback-only).
@@ -224,9 +226,9 @@ Leading `~/` expands to the home directory; absolute paths pass through unchange
 
 **Consequences**: changing the port invalidates existing browser bookmarks. The CLI `--port` and `--host` flags override config values for a single session (`pipeline dashboard web --host 0.0.0.0 --port 9999`). The doctor check `web-port-conflict` warns when a non-dashboard process is bound to the configured port at startup.
 
-**SKIP this question** unless the user mentions port conflicts, LAN access needs, or a host/port preference.
+**Hot reload**: a running dashboard polls `~/.pipeline/config.json` and restarts on its new bind when `cfg.web.port` or `cfg.web.host` changes -- no manual restart needed. The bookmark URL updates with the new port; existing browser tabs on the old port will need a refresh.
 
-If asked, set `web.port` and/or `web.host` in `~/.pipeline/config.json` and confirm with the bookmark URL: `http://localhost:<port>/pipeline`.
+Set `web.port` and/or `web.host` in `~/.pipeline/config.json` and confirm with the bookmark URL: `http://localhost:<port>/pipeline`.
 
 ### Question 3e — Branch conventions
 
