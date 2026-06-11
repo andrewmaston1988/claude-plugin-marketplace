@@ -233,12 +233,15 @@ export function startWebServer({ paths, host, port } = {}) {
   };
 
   // Default: loopback-only (127.0.0.1). Pass --host 0.0.0.0 or --host :: to bind all interfaces.
+  // Map well-known loopback addresses to "localhost" for readability; echo
+  // every other host verbatim so the banner reflects the actual bind.
+  const displayHost = (h) => (h === "127.0.0.1" || h === "::1") ? "localhost" : h;
   let server = null;
   const listenOn = ({ host: h, port: p }) => {
     server = createServer(requestHandler);
     server.on("error", (err) => {
       if (err && err.code === "EADDRINUSE") {
-        process.stderr.write(`pipeline dashboard web: port ${p} already in use — another dashboard is already running. Visit http://localhost:${p}/pipeline\n`);
+        process.stderr.write(`pipeline dashboard web: port ${p} already in use — another dashboard is already running. Visit http://${displayHost(h)}:${p}/pipeline\n`);
         process.exit(2);
       }
       throw err;
@@ -246,7 +249,7 @@ export function startWebServer({ paths, host, port } = {}) {
     server.listen(p, h, () => {
       bind.host = h;
       bind.port = p;
-      process.stdout.write(`pipeline dashboard web: http://localhost:${p}/pipeline\n`);
+      process.stdout.write(`pipeline dashboard web: http://${displayHost(h)}:${p}/pipeline\n`);
     });
   };
 
