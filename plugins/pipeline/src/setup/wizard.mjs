@@ -261,9 +261,20 @@ export async function runWizard({ paths, log, opts = {} }) {
     // on_merge_ready hook — fires when a row reaches stage=merge (all projects, regardless of autoMerge).
     {
       const defMergeHook = config.hooks?.on_merge_ready ?? null;
+      const existingMergeReadyFile = join(homedir(), ".pipeline", "hooks", "on-merge-ready.mjs");
       let mergeHook;
       if (nonInteractive) {
         mergeHook = opts.mergeHook !== undefined ? (opts.mergeHook || null) : defMergeHook;
+      } else if (!defMergeHook && existsSync(existingMergeReadyFile)) {
+        say(`\n  Found existing hook at ${existingMergeReadyFile}`);
+        const wire = await ask("  Wire this into config? [Y/n]: ");
+        mergeHook = wire.trim().toLowerCase() === "n" ? null : existingMergeReadyFile;
+        if (!mergeHook) {
+          say("\n  on_merge_ready hook (optional — fires when a row reaches stage=merge).");
+          say("  Provide an absolute path to a script/executable, or blank to skip.");
+          const raw = await ask(`  on_merge_ready [${defMergeHook ?? "(none)"}]: `);
+          mergeHook = raw.trim() || null;
+        }
       } else {
         say("\n  on_merge_ready hook (optional — fires when a row reaches stage=merge).");
         say("  Provide an absolute path to a script/executable, or blank to skip.");
@@ -284,9 +295,20 @@ export async function runWizard({ paths, log, opts = {} }) {
     // on_merge hook — replaces the local squash merge when set; hook owns the git operation.
     {
       const defOnMerge = config.hooks?.on_merge ?? null;
+      const existingMergeFile = join(homedir(), ".pipeline", "hooks", "on-merge.mjs");
       let onMerge;
       if (nonInteractive) {
         onMerge = opts.onMerge !== undefined ? (opts.onMerge || null) : defOnMerge;
+      } else if (!defOnMerge && existsSync(existingMergeFile)) {
+        say(`\n  Found existing hook at ${existingMergeFile}`);
+        const wire = await ask("  Wire this into config? [Y/n]: ");
+        onMerge = wire.trim().toLowerCase() === "n" ? null : existingMergeFile;
+        if (!onMerge) {
+          say("\n  on_merge hook (optional — replaces the local squash merge when set).");
+          say("  Provide an absolute path to a script/executable, or blank to keep local squash.");
+          const raw = await ask(`  on_merge [${defOnMerge ?? "(none — local squash)"}]: `);
+          onMerge = raw.trim() || null;
+        }
       } else {
         say("\n  on_merge hook (optional — replaces the local squash merge when set).");
         say("  Provide an absolute path to a script/executable, or blank to keep local squash.");
