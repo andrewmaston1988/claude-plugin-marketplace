@@ -154,7 +154,7 @@ export async function runWizard({ paths, log, opts = {} }) {
       say("    Default 'plans' → <project-root>/plans/\n");
       say("    Placeholders: {root}, {root_parent}, {root_grandparent}, {project}.\n");
       say("    Examples:\n");
-      say("      ../CLAUDE/repos/{project}/plans   (sibling knowledge-base repo)\n");
+      say("      {root_parent}/<my-kb>/repos/{project}/plans (sibling knowledge-base repo)\n");
       say("      {root_parent}/shared-plans       (sibling dir at root's parent)\n");
       say("      ~/work/plans/{project}           (absolute, ~-expanded)\n");
       say("    Consequences: an unknown placeholder is left literal in the path,\n");
@@ -204,6 +204,14 @@ export async function runWizard({ paths, log, opts = {} }) {
     // Step 5 — Slack notification channels
     hr();
     say("Step 4/10 — Slack notification channels\n");
+    if (!nonInteractive) {
+      say("  The slack-bridge reads tokens from env vars (highest priority) or config.json.\n");
+      say("  Env var ↔ config key mapping:\n");
+      say("    SLACK_BOT_TOKEN  →  tokens.bot   (required)\n");
+      say("    SLACK_APP_TOKEN  →  tokens.app   (required for Socket Mode)\n");
+      say("    CLAUDE_CWD       →  claude.cwd   (optional; sets working dir for claude)\n");
+      say("  Set the env vars for secrets; use config.json for non-secret defaults.\n\n");
+    }
     config.notifications = config.notifications ?? {};
     // Backward-compat: read pre-rename `slack_channel` as a fallback default.
     const defChannel    = defaults.notifications?.governance_channel
@@ -307,6 +315,28 @@ export async function runWizard({ paths, log, opts = {} }) {
     // Migrate legacy notifications.on_write → hooks.on_notification (cleanup).
     if (config.notifications?.on_write) {
       delete config.notifications.on_write;
+    }
+
+    // Step 4b — web dashboard port
+    hr();
+    say("Step 4b — Web dashboard port\n");
+    {
+      const defPort = config.web?.port ?? PIPELINE_DEFAULTS.web.port;
+      if (!nonInteractive) {
+        say(`  The pipeline web dashboard (http://localhost:<port>/pipeline) listens on this port.\n`);
+        say(`  Default: ${defPort}. Change it if another service already occupies ${defPort}.\n`);
+        say(`  Bookmarks and scripts that reference a specific port will need updating if you change it.\n`);
+        say(`  Example: http://localhost:9000/pipeline\n`);
+      }
+      const portRaw = nonInteractive
+        ? (opts.webPort !== undefined ? String(opts.webPort) : "")
+        : (await ask(`  web.port [${defPort}]: `)).trim();
+      const portVal = portRaw ? parseInt(portRaw, 10) : defPort;
+      if (!isNaN(portVal) && portVal > 0) {
+        if (!config.web) config.web = {};
+        config.web.port = portVal;
+        say(`  ✓ web.port: ${portVal}  →  http://localhost:${portVal}/pipeline\n`);
+      }
     }
 
     // Step 7 — register first project (config is written after worktree-layout
