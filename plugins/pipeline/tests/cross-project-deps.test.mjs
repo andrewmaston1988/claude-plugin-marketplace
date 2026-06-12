@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import { equal } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 process.env.PIPELINE_SUPPRESS_DEPRECATED = "1";
 
 import { depsMet, parseDepRef } from "../scripts/orchestrator/deps.mjs";
-import { validateCrossProjectDep } from "../src/cli/queue.mjs";
+import { validateCrossProjectDep, clusterTypeAudit } from "../src/cli/queue.mjs";
 import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
 import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
 import { rowAdd, rowUpdate } from "../scripts/pipeline-db/rows.mjs";
@@ -33,6 +33,19 @@ test("depsMet: cross-project dep holds until the other project's row is done", (
     rowUpdate(db, "proj-b", "dep", { stage: "done" });
     equal(depsMet(row, [], log, null, db), true, "releases when prereq done");
   } finally { close(db); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("clusterTypeAudit: lists plans missing *Type:*", () => {
+  const dir = mkdtempSync(join(tmpdir(), "cluster-audit-"));
+  const a = join(dir, "a.md"), b = join(dir, "b.md");
+  writeFileSync(a, "# A\n*Type:* dev\n");
+  writeFileSync(b, "# B\n(no type)\n");
+  try {
+    equal(clusterTypeAudit([a]).length, 0);
+    const missing = clusterTypeAudit([a, b]);
+    equal(missing.length, 1);
+    equal(missing[0], b);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("validateCrossProjectDep: ok when referenced project registered; error otherwise", () => {

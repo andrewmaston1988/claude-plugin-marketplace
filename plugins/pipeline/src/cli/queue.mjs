@@ -83,6 +83,12 @@ export function queueTypeExtract(planFilePath) {
   } catch { return ""; }
 }
 
+// Plans that lack a *Type:* annotation. Clustering requires an explicit type
+// per plan (no silent dev default), since queue-cluster has no per-node --type.
+export function clusterTypeAudit(planPaths) {
+  return planPaths.filter(p => !queueTypeExtract(p));
+}
+
 // A cross-project dep (`project:feature`) is valid only if the named project is
 // registered. Bare (same-project) tokens pass through — validated elsewhere.
 export function validateCrossProjectDep(token, db) {
@@ -497,6 +503,18 @@ export async function run(cmd, argv) {
       nodes.push({ feature, planPath, prereqs });
     }
 
+    // Clustering requires every plan to declare its session type — there is no
+    // per-node --type flag, and silently defaulting to dev would be wrong for a
+    // mixed-type cluster. The /queue skill prompts + writes missing types first.
+    const missingType = clusterTypeAudit(nodes.map(n => n.planPath));
+    if (missingType.length) {
+      process.stderr.write(
+        "ERROR: clustering requires a *Type:* annotation on every plan. Missing in:\n" +
+        missingType.map(p => `  ${p}`).join("\n") + "\n"
+      );
+      return 1;
+    }
+
     const clusterFeatures = new Set(nodes.map(n => n.feature));
     // Restrict each node's prereqs to features inside this cluster — out-of-
     // cluster prereqs are left to the normal depends_on/waits_on plan annotation.
@@ -530,7 +548,7 @@ export async function run(cmd, argv) {
     let failures = 0;
     for (const lvl of levels) {
       for (const n of lvl) {
-        const qargs = [project, n.planPath, "--type", "dev"];
+        const qargs = [project, n.planPath];
         const prereq = n.inClusterPrereqs[0];
         if (prereq) {
           qargs.push("--waits-on", prereq, "--base-branch", `autonomous/${prereq}`);
