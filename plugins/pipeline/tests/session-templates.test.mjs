@@ -161,3 +161,36 @@ test("resolveSessionFile: blank branch defaults to autonomous/<feature>", () => 
     match(content, /Branch: `autonomous\/feat-x`/);
   });
 });
+
+test("dev template guard checks {{BRANCH}}, no hardcoded autonomous/<feature>", () => {
+  withTempProject("# Plan\n", (root) => {
+    const out = generateSessionFile("p", "feat-x", "dev", {
+      projectRoot: root, branch: "anm/custom_x", _cfg: { review: {} },
+    });
+    const content = readFileSync(out, "utf8");
+    match(content, /must output: anm\/custom_x/);
+    ok(!content.includes("autonomous/feat-x"), "no hardcoded autonomous/<feature> should remain");
+  });
+});
+
+test("review template uses {{BRANCH}} for verify/checkout", () => {
+  withTempProject("# Plan\n", (root) => {
+    const out = generateSessionFile("p", "feat-x", "review", {
+      projectRoot: root, branch: "anm/custom_x", _cfg: { review: {} },
+    });
+    const content = readFileSync(out, "utf8");
+    match(content, /anm\/custom_x/);
+    ok(!content.includes("autonomous/feat-x"));
+  });
+});
+
+test("test template checkout returns to {{BRANCH}}", () => {
+  withTempProject("# Plan\n", (root) => {
+    const out = generateSessionFile("p", "feat-x", "test", {
+      projectRoot: root, branch: "anm/custom_x", _cfg: { review: {} },
+    });
+    const content = readFileSync(out, "utf8");
+    match(content, /git checkout anm\/custom_x/);
+    ok(!content.includes("autonomous/feat-x"));
+  });
+});

@@ -232,7 +232,7 @@ was blocked, or stopped early — notify using the shape that matches the outcom
   --title "🧬 Research Complete" \
   --message "$(cat <<EOF
 [key finding headline]
-• 🌳 \`autonomous/[feature]\`
+• 🌳 \`{{BRANCH}}\`
 • 🔍 [one-line key finding — the most actionable result]
 • 📋 [plan file: plans/[output-plan-slug].md]
 • 📢 [one sentence on confidence level or open questions remaining]
@@ -248,7 +248,7 @@ EOF
   --title "🚧 Research Blocked" \
   --message "$(cat <<EOF
 [blocker headline]
-• 🌳 \`autonomous/[feature]\`
+• 🌳 \`{{BRANCH}}\`
 • 🚧 [one-line blocker reason]
 • 📋 Action: [what the operator must do to unblock]
 • 📢 [one sentence on what was found before hitting the blocker]
@@ -265,7 +265,7 @@ EOF
   --title "🧬 Research Complete" \
   --message "$(cat <<EOF
 [insight headline]
-• 🌳 \`autonomous/[feature]\`
+• 🌳 \`{{BRANCH}}\`
 • 💡 [one-line key insight]
 • 📢 [one sentence on why no plan was produced]
 🟡 No dev session queued
