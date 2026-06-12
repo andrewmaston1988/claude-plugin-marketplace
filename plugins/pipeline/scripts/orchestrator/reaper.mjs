@@ -9,7 +9,7 @@ import {
 } from "../pipeline-db/index.mjs";
 import { gitWorktreeClean, sessionTypeFromNotes } from "./spawn.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
-import { featureWorktreePath, reportPath } from "../worktree-paths.mjs";
+import { featureWorktreePath, reportPath, resolveRowBranch } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { generateSessionFile } from "../session-gen.mjs";
 import { pidAlive } from "./state-file.mjs";
@@ -181,7 +181,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
             const budget      = row.review_retry_budget || 3;
             const planStem    = basename(row.plan_file || "", ".md") || feature;
             const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
-            const hasWork     = branchHasCommits(projectRoot, `autonomous/${planStem}`, targetBranch);
+            const hasWork     = branchHasCommits(projectRoot, resolveRowBranch(row, planStem), targetBranch);
             const recoverable = !!projectRoot && retries < budget && (retries > 0 || hasWork);
 
             if (recoverable) {
@@ -193,6 +193,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
                   projectRoot,
                   feature,
                   reviewRetries: retries,
+                  branch: resolveRowBranch(row, planStem),
                   cwd,
                 });
                 const relPath = relative(projectRoot, sessionPath).replace(/\\/g, "/");

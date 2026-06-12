@@ -97,7 +97,7 @@ You do NOT have authority to:
 
 ```bash
 cd {{CWD}}
-git rev-parse --verify autonomous/{{FEATURE}}   # must succeed
+git rev-parse --verify {{BRANCH}}   # must succeed
 ```
 
 If the branch is missing, exit with `--verdict needs_work` and a Concern naming the absent branch — there is nothing to review.
@@ -155,7 +155,7 @@ If `$N == 0` (fresh first attempt), skip this step entirely — no prior-cycle s
 **Invoke `/code-review` against the source branch.** Default mode (not `--fresh` — your session is already fresh-context from the orchestrator's perspective). Pass the source branch as the skill's positional argument:
 
 ```
-/code-review autonomous/{{FEATURE}}
+/code-review {{BRANCH}}
 ```
 
 The skill emits four sections (Concerns, Open questions, Pride, Verdict). Capture the entire output — you will paste it verbatim into the report file in the next step.
@@ -178,7 +178,7 @@ REPORT_PATH={{REVIEW_REPORTS_DIR}}/review-report-<date>-{{FEATURE}}-retry<N>-${C
 
 `{{REVIEW_REPORTS_DIR}}` is the absolute reports directory inside the code-review worktree; it's substituted by session-gen from a single config source so the reaper and the template can't drift. Never reconstruct this path inline — bash tool cwd resets between calls and a relative form would silently fail with `Report not found`.
 
-**Publish the report via stash-switchback dance — stash FIRST, then write the report on the publish branch.** The single feature worktree is currently on `autonomous/{{FEATURE}}`. Order matters: `git stash push -u` includes untracked files, so the report must be written *after* the stash and *on* the publish branch, otherwise the freshly-created untracked report is stashed away and the subsequent `git add` fails. The heredoc delimiter MUST be single-quoted and unique (`'PIPELINE_REVIEW_REPORT_SENTINEL_END'`) so the report content (which may include `$` expansions, backticks, or accidental `EOF` strings) can't break the heredoc parser:
+**Publish the report via stash-switchback dance — stash FIRST, then write the report on the publish branch.** The single feature worktree is currently on `{{BRANCH}}`. Order matters: `git stash push -u` includes untracked files, so the report must be written *after* the stash and *on* the publish branch, otherwise the freshly-created untracked report is stashed away and the subsequent `git add` fails. The heredoc delimiter MUST be single-quoted and unique (`'PIPELINE_REVIEW_REPORT_SENTINEL_END'`) so the report content (which may include `$` expansions, backticks, or accidental `EOF` strings) can't break the heredoc parser:
 
 ```bash
 cd {{WORKTREE}}
@@ -193,7 +193,7 @@ cat > "$REPORT_PATH" << 'PIPELINE_REVIEW_REPORT_SENTINEL_END'
 # Code Review Report: {{FEATURE}} (attempt <N+1>)
 
 **Plan:** `{{PROJECT_ROOT}}/plans/{{FEATURE}}.md`
-**Source branch:** `autonomous/{{FEATURE}}`
+**Source branch:** `{{BRANCH}}`
 **Target branch:** `{{TARGET_BRANCH}}`
 **Reviewer:** Claude (model pinned by orchestrator)
 **Correlation ID:** ${CORRELATION_ID}
@@ -213,7 +213,7 @@ PIPELINE_REVIEW_REPORT_SENTINEL_END
 git add "$REPORT_PATH"
 git commit -m "code-review: {{FEATURE}} retry${N}"
 # 5. Return to the dev branch.
-git checkout autonomous/{{FEATURE}}
+git checkout {{BRANCH}}
 # 6. Restore WIP (only if step 1 actually stashed something).
 if [ "$STASH_RC" = "0" ] && git stash list | grep -q "auto: code-review-{{FEATURE}}"; then
   if ! git stash pop; then
@@ -253,7 +253,7 @@ Use the message shape that matches the verdict:
 ```bash
 --message "$(cat <<EOF
 [headline summarising quality]
-• 🌳 \`autonomous/FEATURE\`
+• 🌳 \`{{BRANCH}}\`
 • 🎖 [one sentence from the /code-review Pride section — omit line if Pride was empty]
 • ⁉️ [N] advisory (non-blocking)
 • 📢 [one sentence on overall quality]
@@ -267,7 +267,7 @@ EOF
 ```bash
 --message "$(cat <<EOF
 [critical blocker in brief]
-• 🌳 \`autonomous/FEATURE\`
+• 🌳 \`{{BRANCH}}\`
 • 🚧 [N] blocker(s) · [N] advisory
 • ⚠️ [one-line distillation of the most critical BLOCKER]
 • 📢 [one sentence — pattern of failures or what still needs fixing]
@@ -281,7 +281,7 @@ EOF
 ```bash
 --message "$(cat <<EOF
 [recurring blocker in brief]
-• 🌳 \`autonomous/FEATURE\`
+• 🌳 \`{{BRANCH}}\`
 • 🚧 [N] blocker(s) · retry ${RETRY_LABEL}
 • ⚠️ [one-line distillation of the recurring BLOCKER]
 • 📢 [one sentence — why this is stuck]
@@ -295,7 +295,7 @@ EOF
 ```bash
 --message "$(cat <<EOF
 [approach issue in brief]
-• 🌳 \`autonomous/FEATURE\`
+• 🌳 \`{{BRANCH}}\`
 • 🚧 [one-line distillation of the ABORT concern]
 • 📢 [one sentence — why the approach is structurally wrong]
 🔴 Parked at manual
