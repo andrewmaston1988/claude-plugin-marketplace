@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { join, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
-import { reportPath, featureWorktreePath, resolveTemplate } from "./worktree-paths.mjs";
+import { reportPath, featureWorktreePath, resolveTemplate, resolveRowBranch } from "./worktree-paths.mjs";
 import { getPaths } from "../src/paths.mjs";
 import { resolvePlanFile } from "../src/plans-resolver.mjs";
 
@@ -178,13 +178,15 @@ export function resolveSessionFile(row, project, { projectRoot, dry, cwd } = {})
   const planFile = row.plan || "";
   const stype = _sessionTypeFromNotes(notes);
   const feature = row.feature || basename(planFile, ".md");
+  const planStem = basename(planFile, ".md");
+  const branch = resolveRowBranch(row, planStem);
   const targetBranch = row.target_branch || "main";
   // review_retries flows from the row so the review-session template can stamp
   // the right retry-N in its report filename (the reaper looks at the same
   // filename for the "exit 0 with no verdict" branch).
   const reviewRetries = row.review_retries ?? 0;
 
-  return generateSessionFile(project, planFile, stype, { projectRoot, feature, targetBranch, reviewRetries, cwd });
+  return generateSessionFile(project, planFile, stype, { projectRoot, feature, targetBranch, branch, reviewRetries, cwd });
 }
 
 export function validateSessionSlug(sessionFile, planStem) {

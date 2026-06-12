@@ -9,10 +9,12 @@ export async function run(cmd, argv) {
   const [project, planFile, sessionType] = argv;
   if (!project || !planFile || !sessionType) {
     process.stderr.write(
-      "usage: session-generate <project> <plan-file> <session-type> [--project-root <path>]\n"
+      "usage: session-generate <project> <plan-file> <session-type> [--project-root <path>] [--branch <name>]\n"
     );
     return 1;
   }
+
+  const branch = getFlag("--branch", argv) || undefined;
 
   let projectRoot = getFlag("--project-root", argv);
   if (projectRoot) {
@@ -34,7 +36,7 @@ export async function run(cmd, argv) {
   }
 
   try {
-    const path = generateSessionFile(project, planFile, sessionType, { projectRoot });
+    const path = generateSessionFile(project, planFile, sessionType, { projectRoot, branch });
     process.stdout.write(path + "\n");
     return 0;
   } catch (e) {

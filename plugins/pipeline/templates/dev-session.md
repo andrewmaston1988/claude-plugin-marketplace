@@ -198,7 +198,7 @@ the operator. Do not implement any phase of a multi-phase plan file.
 **Verify branch before touching anything.** The orchestrator pre-creates a git worktree
 already on the correct branch. At session start, verify:
 ```bash
-git branch --show-current   # must output: autonomous/{{FEATURE}}
+git branch --show-current   # must output: {{BRANCH}}
 ```
 If the output does not match, stop immediately — write the mismatch to the progress entry for `$CORRELATION_ID` (via `{{PIPELINE_BIN}} progress-note`) and notify the operator. Never commit directly to `main`. Never create or switch branches manually — the worktree is pre-positioned.
 
@@ -228,11 +228,11 @@ any of these CLAUDE repo files: `settings.json`, `setup-symlinks.ps1`, `scripts/
 `indexing/`, `templates/`, `commands/` — do NOT commit those changes to CLAUDE/main.
 Before touching any infrastructure file:
 
-1. `cd {{PROJECT_ROOT}} && git checkout -b autonomous/{{FEATURE}}`
+1. `cd {{PROJECT_ROOT}} && git checkout -b {{BRANCH}}`
    (create off current CLAUDE/main — the repo is on main at session start)
-2. Make infrastructure changes, commit to `autonomous/{{FEATURE}}`
+2. Make infrastructure changes, commit to `{{BRANCH}}`
 3. Leave the branch open. Do not merge it. Include in your completion notification:
-   "CLAUDE changes on `autonomous/{{FEATURE}}` — requires manual review and merge
+   "CLAUDE changes on `{{BRANCH}}` — requires manual review and merge
    before this feature is fully live."
 
 Knowledge base files (plan files, session files, test reports, memory files,
@@ -300,7 +300,7 @@ unresolvable dependency):
    {{PIPELINE_BIN}} notify \
      --title "🚧 Dev Blocked" \
      --message "[one-line description of what blocked]
-• 🌳 \`autonomous/[feature]\`
+• 🌳 \`{{BRANCH}}\`
 • 🚧 [blocker reason]
 • 📋 Action: [what the operator must do]
 🔴 Parked at manual
@@ -329,7 +329,7 @@ Write a completion summary to the progress entry for `$CORRELATION_ID` (via `{{P
 **Self-review before handoff.** Before calling `dev-complete`, run `/code-review` on your own branch to catch any `[BLOCKER]` issues you may have introduced or left unresolved:
 
 ```
-/code-review autonomous/{{FEATURE}}
+/code-review {{BRANCH}}
 ```
 
 - If the self-review produces **no `[BLOCKER]` concerns** → proceed to `dev-complete`.
@@ -348,7 +348,7 @@ from the current pipeline shape (review, test, or whatever comes after dev).
        --title "⚙️ Development Complete" \
        --message "$(cat <<'EOF'
 [one-line headline — what was built. IMPORTANT: --title is always the literal string above; never put the feature name or headline in --title]
-• 🌳 `autonomous/[feature]`
+• 🌳 `{{BRANCH}}`
 • [≤35 char item summary] ✔️
 • [repeat per changed item]
 • 🧪 [N passed, N skipped]

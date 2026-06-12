@@ -11,7 +11,7 @@ import {
 import { generateSessionFile } from "../../scripts/session-gen.mjs";
 import { publishNotification } from "../../scripts/publisher.mjs";
 import { getFlag, formatRow } from "./helpers.mjs";
-import { featureWorktreePath } from "../../scripts/worktree-paths.mjs";
+import { featureWorktreePath, resolveRowBranch } from "../../scripts/worktree-paths.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { resolvePlansDir, resolvePlanFile } from "../plans-resolver.mjs";
 
@@ -660,6 +660,7 @@ export async function run(cmd, argv) {
         projectRoot: ctx.projectRoot,
         feature,
         reviewRetries: devCompleteRow?.review_retries ?? 0,
+        branch: resolveRowBranch(devCompleteRow, feature),
         cwd,
       });
     } catch (e) {

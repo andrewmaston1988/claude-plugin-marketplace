@@ -83,6 +83,10 @@ Existing rows: once a row has `target_branch` stored, the column wins; the chain
 
 If `--target-branch` carries a prefix not in `cfg.recognised_branch_types` (default `["autonomous", "interactive"]`), `queue-plan` emits a one-line warning but proceeds. Unusual destinations are allowed; the warning is so an operator can confirm intent.
 
+## Source branch
+
+`--branch <name>` (or a plan's `*Branch: \`<name>\`*` annotation) may name **any** branch — the orchestrator checks it out in the feature worktree and the session works on it. Use this to resume work already committed on an existing branch. The only guard is the fail-safe: a resolved branch equal to the target/default branch parks the row at `manual` with `[branch-equals-target]` rather than spawning, so a session never commits to the merge destination. When omitted, the branch defaults to `autonomous/<plan-stem>`.
+
 ## Prerequisite chaining (`--waits-on` / `--base-branch`)
 
 A plan can declare it depends on another with a `*Prerequisites:*` annotation (e.g. `*Prerequisites:* \`autonomous/foo-bar\``). When you queue such a plan:
