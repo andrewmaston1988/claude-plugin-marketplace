@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, basename, isAbsolute, resolve, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
-import { close, rowGet, rowAdd, rowUpdate } from "../../scripts/pipeline-db/index.mjs";
+import { close, rowGet, rowAdd, rowUpdate, projectGetByName } from "../../scripts/pipeline-db/index.mjs";
 import { getFlag, detectDefaultBranch, formatRow } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { loadPipelineConfig } from "../pipeline-config.mjs";
@@ -37,7 +37,7 @@ function queueBranchExtract(planFilePath) {
   } catch { return ""; }
 }
 
-function queueDepsExtract(planFilePath) {
+export function queueDepsExtract(planFilePath) {
   let content;
   try { content = readFileSync(planFilePath, "utf8"); } catch { return ""; }
 
@@ -49,11 +49,18 @@ function queueDepsExtract(planFilePath) {
   const value = m[1].trim();
   if (/^none\s*$/i.test(value)) return "";
 
-  let slugs = [...value.matchAll(/`autonomous\/([a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
+  // Cross-project tokens: `project:feature` (kept whole). Strip them out before
+  // the same-project patterns so a project name isn't mis-read as a bare slug.
+  const crossSlugs = [...value.matchAll(/`?([\w.-]+:[\w.-]+)`?/g)].map(r => r[1]);
+  const sameValue  = value.replace(/`?[\w.-]+:[\w.-]+`?/g, " ");
+
+  let slugs = [...sameValue.matchAll(/`autonomous\/([a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
   if (!slugs.length)
-    slugs = [...value.matchAll(/autonomous\/([a-z0-9][a-z0-9-]*)/gi)].map(r => r[1]);
+    slugs = [...sameValue.matchAll(/autonomous\/([a-z0-9][a-z0-9-]*)/gi)].map(r => r[1]);
   if (!slugs.length)
-    slugs = [...value.matchAll(/`([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
+    slugs = [...sameValue.matchAll(/`([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
+
+  slugs = [...crossSlugs, ...slugs];
 
   if (!slugs.length) {
     process.stderr.write(
@@ -64,6 +71,45 @@ function queueDepsExtract(planFilePath) {
   }
 
   return [...new Set(slugs)].join(",");
+}
+
+export function queueTypeExtract(planFilePath) {
+  try {
+    const content = readFileSync(planFilePath, "utf8");
+    const m = content.match(/^\*Type:\*?\s*`?([A-Za-z]+)`?/m);
+    if (!m) return "";
+    const t = m[1].toLowerCase();
+    return ["dev", "research", "review", "test"].includes(t) ? t : "";
+  } catch { return ""; }
+}
+
+// Plans that lack a *Type:* annotation. Clustering requires an explicit type
+// per plan (no silent dev default), since queue-cluster has no per-node --type.
+export function clusterTypeAudit(planPaths) {
+  return planPaths.filter(p => !queueTypeExtract(p));
+}
+
+// A cross-project dep (`project:feature`) is valid only if the named project is
+// registered. Bare (same-project) tokens pass through — validated elsewhere.
+export function validateCrossProjectDep(token, db) {
+  const i = token.indexOf(":");
+  if (i === -1) return [true, ""];
+  const project = token.slice(0, i);
+  let row = null;
+  try { row = projectGetByName(db, project); } catch {}
+  if (!row) return [false, `cross-project prerequisite names an unregistered project: '${project}'`];
+  return [true, ""];
+}
+
+const _MODEL_LABEL = { research: "Research", dev: "Dev", qa: "QA", review: "Review" };
+export function queueModelExtract(planFilePath, kind) {
+  const label = _MODEL_LABEL[kind];
+  if (!label) return "";
+  try {
+    const content = readFileSync(planFilePath, "utf8");
+    const m = content.match(new RegExp(`^\\*${label}-Model:\\*?\\s*\`?([\\w.:-]+)\`?`, "m"));
+    return m ? m[1] : "";
+  } catch { return ""; }
 }
 
 
@@ -215,11 +261,11 @@ export async function run(cmd, argv) {
     const ctx = lookupProjectOrFail(project);
     if (!ctx) return 1;
 
-    const stype       = getFlag("--type", flags) || "dev";
-    const rModel      = getFlag("--r-model", flags) || "—";
-    const dModel      = getFlag("--d-model", flags) || "—";
-    const qModel      = getFlag("--q-model", flags) || "—";
-    const rvwModel    = getFlag("--rvw-model", flags) || "—";
+    const stypeFlag    = getFlag("--type", flags) || null;
+    const rModelFlag   = getFlag("--r-model", flags) || null;
+    const dModelFlag   = getFlag("--d-model", flags) || null;
+    const qModelFlag   = getFlag("--q-model", flags) || null;
+    const rvwModelFlag = getFlag("--rvw-model", flags) || null;
     let targetBranch  = getFlag("--target-branch", flags) || null;
     const branchFlag  = getFlag("--branch", flags) || null;
     const dependsFlag = getFlag("--depends", flags) || null;
@@ -267,6 +313,13 @@ export async function run(cmd, argv) {
     // absent, merge falls back to the feature slug (e.g. an unhelpful 'ESG-1234').
     const prTitle = (titleFlag ?? queueTitleExtract(planPath)).trim().slice(0, 256);
 
+    // Type/model: CLI flag wins, else plan annotation, else default.
+    const stype    = stypeFlag    || queueTypeExtract(planPath)             || "dev";
+    const rModel   = rModelFlag   || queueModelExtract(planPath, "research") || "—";
+    const dModel   = dModelFlag   || queueModelExtract(planPath, "dev")      || "—";
+    const qModel   = qModelFlag   || queueModelExtract(planPath, "qa")       || "—";
+    const rvwModel = rvwModelFlag || queueModelExtract(planPath, "review")   || "—";
+
     if (targetBranch === null) {
       const [ok, msg] = lintTargetBranchProse(planPath);
       if (!ok) { close(ctx.db); process.stderr.write(msg + "\n"); return 1; }
@@ -299,6 +352,13 @@ export async function run(cmd, argv) {
       const missing = [];
       const validated = [];
       for (const slug of depends.split(",").map(s => s.trim()).filter(Boolean)) {
+        if (slug.includes(":")) {
+          // Cross-project prerequisite — validate the referenced project is registered.
+          const [okX, msgX] = validateCrossProjectDep(slug, ctx.db);
+          if (!okX) { close(ctx.db); process.stderr.write(`ERROR: queue-plan: ${msgX}\n`); return 1; }
+          validated.push(slug);
+          continue;
+        }
         const inActive   = existsSync(join(plansDir, slug + ".md"));
         const inComplete = existsSync(join(completeDir, slug + ".md"));
         if (inActive || inComplete) validated.push(slug);
@@ -319,7 +379,18 @@ export async function run(cmd, argv) {
     // auto-populate from the first *Prerequisites:* slug (the 90% case is one
     // prerequisite). base_branch is opt-in only (--base-branch) since branching
     // a dependent off an unmerged prerequisite branch is a deliberate choice.
-    const waitsOn = waitsOnFlag || (depends ? depends.split(",")[0] : null);
+    // waits_on is same-project only (its ancestor check lives in one repo).
+    if (waitsOnFlag && waitsOnFlag.includes(":")) {
+      close(ctx.db);
+      process.stderr.write(`ERROR: --waits-on must be same-project; '${waitsOnFlag}' is cross-project (use depends_on)\n`);
+      return 1;
+    }
+    // Auto-populate from the first SAME-PROJECT prerequisite; cross-project deps
+    // (project:feature) are depends_on-only and never become waits_on.
+    const firstSameProjectDep = depends
+      ? depends.split(",").map(s => s.trim()).find(s => s && !s.includes(":")) || null
+      : null;
+    const waitsOn = waitsOnFlag || firstSameProjectDep;
     const baseBranch = baseBranchFlag || null;
 
     try {
@@ -437,6 +508,18 @@ export async function run(cmd, argv) {
       nodes.push({ feature, planPath, prereqs });
     }
 
+    // Clustering requires every plan to declare its session type — there is no
+    // per-node --type flag, and silently defaulting to dev would be wrong for a
+    // mixed-type cluster. The /queue skill prompts + writes missing types first.
+    const missingType = clusterTypeAudit(nodes.map(n => n.planPath));
+    if (missingType.length) {
+      process.stderr.write(
+        "ERROR: clustering requires a *Type:* annotation on every plan. Missing in:\n" +
+        missingType.map(p => `  ${p}`).join("\n") + "\n"
+      );
+      return 1;
+    }
+
     const clusterFeatures = new Set(nodes.map(n => n.feature));
     // Restrict each node's prereqs to features inside this cluster — out-of-
     // cluster prereqs are left to the normal depends_on/waits_on plan annotation.
@@ -470,7 +553,7 @@ export async function run(cmd, argv) {
     let failures = 0;
     for (const lvl of levels) {
       for (const n of lvl) {
-        const qargs = [project, n.planPath, "--type", "dev"];
+        const qargs = [project, n.planPath];
         const prereq = n.inClusterPrereqs[0];
         if (prereq) {
           qargs.push("--waits-on", prereq, "--base-branch", `autonomous/${prereq}`);

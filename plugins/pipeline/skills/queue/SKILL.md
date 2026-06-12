@@ -98,6 +98,8 @@ pipeline queue-plan <project> <PLAN_FILE> --type <STYPE> \
   --base-branch autonomous/<prereq-feature-slug>
 ```
 
+**Cross-project prerequisites.** A `*Prerequisites:*` token may name another project as `project:feature` (e.g. `esg-ng-core-linux:SYM-8617-esg-research`). These are **`depends_on`-only** — the row holds until that other-project row reaches `done`. They are never auto-set as `waits_on` (a cross-project `--waits-on` is rejected, because its ancestor check only works within one git repo). `queue-plan` validates that the named project is registered.
+
 ## Queueing a whole cluster at once
 
 For a set of plans with a dependency chain (e.g. 7 plans where each waits on the previous), don't queue them one at a time with manual waits — queue the cluster and let the orchestrator chain them:
@@ -106,4 +108,6 @@ For a set of plans with a dependency chain (e.g. 7 plans where each waits on the
 pipeline queue-cluster <project> <plan1.md> <plan2.md> <plan3.md> ...
 ```
 
-`queue-cluster` reads each plan's `*Prerequisites:*`, infers the dependency graph **among the plans in the cluster**, prints the execution groups (`[level-0] → [level-1] → ...`), then queues every plan with `waits_on` and `base_branch` wired so within-cluster dependents branch off their prerequisite's autonomous branch. Out-of-cluster prerequisites are left to the plan's own annotation. It refuses on a dependency cycle. The operator queues once; the orchestrator fans out each level as the prior one lands on the target.
+`queue-cluster` reads each plan's `*Prerequisites:*`, infers the dependency graph **among the plans in the cluster**, prints the execution groups (`[level-0] → [level-1] → ...`), then queues every plan with `waits_on` and `base_branch` wired so within-cluster dependents branch off their prerequisite's autonomous branch. Out-of-cluster prerequisites (including cross-project `project:feature` tokens) are left to the plan's own `depends_on`. It refuses on a dependency cycle. The operator queues once; the orchestrator fans out each level as the prior one lands on the target.
+
+**Every clustered plan must declare `*Type:*`.** There is no per-node `--type` for a cluster, so each plan carries its own session type via a `*Type:* <dev|research|review|test>` annotation (and may carry `*Dev-Model:*` etc.); `queue-cluster` is a full superset of `queue-plan`, driving each node at its own type/models/branch/target. `queue-cluster` **errors** if any plan lacks `*Type:*`. **Before running `queue-cluster`, read each plan and check for `*Type:*`; for any that is missing, ask the operator which type that plan should run as, then add `*Type:* <answer>` immediately under the plan's title (edit the plan file).** Only run `queue-cluster` once every plan has a `*Type:*`.
