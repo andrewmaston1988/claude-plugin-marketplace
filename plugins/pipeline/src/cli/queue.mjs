@@ -37,7 +37,7 @@ function queueBranchExtract(planFilePath) {
   } catch { return ""; }
 }
 
-function queueDepsExtract(planFilePath) {
+export function queueDepsExtract(planFilePath) {
   let content;
   try { content = readFileSync(planFilePath, "utf8"); } catch { return ""; }
 
@@ -49,11 +49,18 @@ function queueDepsExtract(planFilePath) {
   const value = m[1].trim();
   if (/^none\s*$/i.test(value)) return "";
 
-  let slugs = [...value.matchAll(/`autonomous\/([a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
+  // Cross-project tokens: `project:feature` (kept whole). Strip them out before
+  // the same-project patterns so a project name isn't mis-read as a bare slug.
+  const crossSlugs = [...value.matchAll(/`?([\w.-]+:[\w.-]+)`?/g)].map(r => r[1]);
+  const sameValue  = value.replace(/`?[\w.-]+:[\w.-]+`?/g, " ");
+
+  let slugs = [...sameValue.matchAll(/`autonomous\/([a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
   if (!slugs.length)
-    slugs = [...value.matchAll(/autonomous\/([a-z0-9][a-z0-9-]*)/gi)].map(r => r[1]);
+    slugs = [...sameValue.matchAll(/autonomous\/([a-z0-9][a-z0-9-]*)/gi)].map(r => r[1]);
   if (!slugs.length)
-    slugs = [...value.matchAll(/`([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
+    slugs = [...sameValue.matchAll(/`([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
+
+  slugs = [...crossSlugs, ...slugs];
 
   if (!slugs.length) {
     process.stderr.write(
