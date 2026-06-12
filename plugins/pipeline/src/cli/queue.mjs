@@ -66,6 +66,27 @@ function queueDepsExtract(planFilePath) {
   return [...new Set(slugs)].join(",");
 }
 
+export function queueTypeExtract(planFilePath) {
+  try {
+    const content = readFileSync(planFilePath, "utf8");
+    const m = content.match(/^\*Type:\*?\s*`?([A-Za-z]+)`?/m);
+    if (!m) return "";
+    const t = m[1].toLowerCase();
+    return ["dev", "research", "review", "test"].includes(t) ? t : "";
+  } catch { return ""; }
+}
+
+const _MODEL_LABEL = { research: "Research", dev: "Dev", qa: "QA", review: "Review" };
+export function queueModelExtract(planFilePath, kind) {
+  const label = _MODEL_LABEL[kind];
+  if (!label) return "";
+  try {
+    const content = readFileSync(planFilePath, "utf8");
+    const m = content.match(new RegExp(`^\\*${label}-Model:\\*?\\s*\`?([\\w.:-]+)\`?`, "m"));
+    return m ? m[1] : "";
+  } catch { return ""; }
+}
+
 
 function queueTargetExtract(planFilePath) {
   try {
@@ -214,11 +235,11 @@ export async function run(cmd, argv) {
     const ctx = lookupProjectOrFail(project);
     if (!ctx) return 1;
 
-    const stype       = getFlag("--type", flags) || "dev";
-    const rModel      = getFlag("--r-model", flags) || "—";
-    const dModel      = getFlag("--d-model", flags) || "—";
-    const qModel      = getFlag("--q-model", flags) || "—";
-    const rvwModel    = getFlag("--rvw-model", flags) || "—";
+    const stypeFlag    = getFlag("--type", flags) || null;
+    const rModelFlag   = getFlag("--r-model", flags) || null;
+    const dModelFlag   = getFlag("--d-model", flags) || null;
+    const qModelFlag   = getFlag("--q-model", flags) || null;
+    const rvwModelFlag = getFlag("--rvw-model", flags) || null;
     let targetBranch  = getFlag("--target-branch", flags) || null;
     const branchFlag  = getFlag("--branch", flags) || null;
     const dependsFlag = getFlag("--depends", flags) || null;
@@ -261,6 +282,13 @@ export async function run(cmd, argv) {
     let branch  = branchFlag  ?? queueBranchExtract(planPath);
     let depends = dependsFlag ?? queueDepsExtract(planPath);
     const prTitle = queueTitleExtract(planPath);
+
+    // Type/model: CLI flag wins, else plan annotation, else default.
+    const stype    = stypeFlag    || queueTypeExtract(planPath)             || "dev";
+    const rModel   = rModelFlag   || queueModelExtract(planPath, "research") || "—";
+    const dModel   = dModelFlag   || queueModelExtract(planPath, "dev")      || "—";
+    const qModel   = qModelFlag   || queueModelExtract(planPath, "qa")       || "—";
+    const rvwModel = rvwModelFlag || queueModelExtract(planPath, "review")   || "—";
 
     if (targetBranch === null) {
       const [ok, msg] = lintTargetBranchProse(planPath);
