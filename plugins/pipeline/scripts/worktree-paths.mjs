@@ -117,6 +117,15 @@ export function branchType(branch) {
   return s.includes("/") ? s.split("/")[0] : "";
 }
 
+// The branch a pipeline row resolves to. A declared `row.branch` is
+// authoritative for ANY name; the "—" placeholder and blank fall back to the
+// conventional default `autonomous/<plan-stem>`. Single source of truth for
+// spawn, session-gen, reaper, and dev-complete so they can't disagree.
+export function resolveRowBranch(row, planStem) {
+  const declared = String(row?.branch ?? "").trim();
+  return (declared && declared !== "—") ? declared : `autonomous/${planStem}`;
+}
+
 // Substitute {placeholder} tokens in a template. Unknown placeholders are
 // left untouched; null/undefined values render as empty strings.
 export function substitute(template, vars) {
