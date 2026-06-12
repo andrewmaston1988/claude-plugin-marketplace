@@ -8,7 +8,7 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, existsSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { generateSessionFile } from "../scripts/session-gen.mjs";
+import { generateSessionFile, resolveSessionFile } from "../scripts/session-gen.mjs";
 
 const SPAWN_MJS_PATH = fileURLToPath(new URL("../scripts/orchestrator/spawn.mjs", import.meta.url));
 
@@ -140,4 +140,57 @@ test("five session templates are bundled with the plugin", () => {
   for (const name of ["dev", "review", "test", "research", "governor"]) {
     ok(existsSync(join(dir, `${name}-session.md`)), `missing ${name}-session.md`);
   }
+});
+
+test("resolveSessionFile: row.branch flows into {{BRANCH}}", () => {
+  withTempProject("# Plan body\n", (root, planPath) => {
+    const row = { feature: "feat-x", plan: planPath, notes: "type=dev",
+                  branch: "anm/custom_x", target_branch: "main" };
+    const out = resolveSessionFile(row, "p", { projectRoot: root });
+    const content = readFileSync(out, "utf8");
+    match(content, /Branch: `anm\/custom_x`/);
+  });
+});
+
+test("resolveSessionFile: blank branch defaults to autonomous/<feature>", () => {
+  withTempProject("# Plan body\n", (root, planPath) => {
+    const row = { feature: "feat-x", plan: planPath, notes: "type=dev",
+                  branch: "—", target_branch: "main" };
+    const out = resolveSessionFile(row, "p", { projectRoot: root });
+    const content = readFileSync(out, "utf8");
+    match(content, /Branch: `autonomous\/feat-x`/);
+  });
+});
+
+test("dev template guard checks {{BRANCH}}, no hardcoded autonomous/<feature>", () => {
+  withTempProject("# Plan\n", (root) => {
+    const out = generateSessionFile("p", "feat-x", "dev", {
+      projectRoot: root, branch: "anm/custom_x", _cfg: { review: {} },
+    });
+    const content = readFileSync(out, "utf8");
+    match(content, /must output: anm\/custom_x/);
+    ok(!content.includes("autonomous/feat-x"), "no hardcoded autonomous/<feature> should remain");
+  });
+});
+
+test("review template uses {{BRANCH}} for verify/checkout", () => {
+  withTempProject("# Plan\n", (root) => {
+    const out = generateSessionFile("p", "feat-x", "review", {
+      projectRoot: root, branch: "anm/custom_x", _cfg: { review: {} },
+    });
+    const content = readFileSync(out, "utf8");
+    match(content, /anm\/custom_x/);
+    ok(!content.includes("autonomous/feat-x"));
+  });
+});
+
+test("test template checkout returns to {{BRANCH}}", () => {
+  withTempProject("# Plan\n", (root) => {
+    const out = generateSessionFile("p", "feat-x", "test", {
+      projectRoot: root, branch: "anm/custom_x", _cfg: { review: {} },
+    });
+    const content = readFileSync(out, "utf8");
+    match(content, /git checkout anm\/custom_x/);
+    ok(!content.includes("autonomous/feat-x"));
+  });
 });

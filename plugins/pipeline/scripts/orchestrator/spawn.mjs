@@ -9,7 +9,7 @@ import {
   appendSpawn,
 } from "../pipeline-db/index.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
-import { featureWorktreePath } from "../worktree-paths.mjs";
+import { featureWorktreePath, resolveRowBranch } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 
@@ -155,6 +155,14 @@ export function proxyEnvFor(model) {
   };
 }
 
+// A worktree-eligible session must never run on the merge destination — that
+// would commit straight to main. A declared branch is authoritative for its
+// NAME, but the name must not BE the target/default branch.
+export function isProtectedBranch(branch, targetBranch, defaultBranch) {
+  if (!branch) return false;
+  return branch === targetBranch || branch === defaultBranch;
+}
+
 // ── session spawner ───────────────────────────────────────────────────────────
 
 // Spawn a Claude session for one queued pipeline row. Takes the unified DB,
@@ -221,6 +229,40 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
     return null;
   }
 
+  // 0b. Fail-safe: refuse to spawn a worktree-eligible session whose resolved
+  // branch is the merge destination. Runs before the stage advance so the row
+  // parks at manual rather than flipping to <stage>. Code-enforced — not left
+  // to the agent reading the template guard.
+  if (["dev", "test", "review"].includes(stype)) {
+    const planStemFS = basename(row.plan_file || "", ".md") || feature;
+    const resolvedFS = resolveRowBranch(row, planStemFS);
+    const defaultFS  = detectDefaultBranch(projectRoot);
+    const targetFS   = row.target_branch || defaultFS;
+    if (isProtectedBranch(resolvedFS, targetFS, defaultFS)) {
+      const ts = new Date().toISOString().slice(0, 16);
+      const note = `[branch-equals-target ${ts}]`;
+      logFn(`[${project}] '${feature}' resolved branch '${resolvedFS}' is the merge destination — parking at manual`, "ERROR");
+      try {
+        const r = rowGet(db, project, feature);
+        const existing = r ? (r.notes_extra || "") : "";
+        rowUpdate(db, project, feature, {
+          stage:       "manual",
+          notes_extra: existing ? `${existing} ${note}` : note,
+        });
+      } catch {}
+      publishNotification({
+        title: `Spawn Blocked: ${feature} (branch-equals-target)`,
+        message: (
+          `${stype} session for '${feature}' in ${project} blocked before spawn.\n` +
+          `Resolved branch '${resolvedFS}' is the merge destination '${targetFS}'.\n` +
+          `Operator: declare a feature branch via *Branch:* or --branch, then re-queue.`
+        ),
+        priority: "high",
+      }).catch(() => {});
+      return null;
+    }
+  }
+
   // 1. Advance stage queued → <stage>
   try {
     const ok = rowUpdate(db, project, feature, { stage: newStage });
@@ -236,7 +278,6 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
 
   // 2. Determine working directory.
   const planStem       = basename(row.plan_file || "", ".md") || "";
-  const pipelineBranch = (row.branch || "—").trim();
   let cwd = null;
 
   // Bootstrap absent project root for worktree-eligible sessions
@@ -259,9 +300,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
 
   if (existsSync(projectRoot)) {
     if (planStem && ["dev", "test", "review"].includes(stype)) {
-      const branch = (pipelineBranch && pipelineBranch !== "—")
-        ? pipelineBranch
-        : `autonomous/${planStem}`;
+      const branch = resolveRowBranch(row, planStem);
 
       const slugErr = validateSessionSlug(sessionFile, planStem);
       if (slugErr) {
@@ -431,7 +470,7 @@ export function isMergedInto(targetBranch, featureBranch, projectRoot) {
 
 export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn }) {
   const feature      = row.feature;
-  const branch       = row.branch || `autonomous/${feature}`;
+  const branch       = resolveRowBranch(row, feature);
   const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
 
   if (dryRun) {

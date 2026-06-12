@@ -497,7 +497,7 @@ Optional plan annotations the pipeline understands:
 
 | Annotation | What it does |
 |------------|--------------|
-| `*Branch: \`<name>\`*` | Branch the orchestrator's worktree gets. Default: `autonomous/<plan-stem>`. |
+| `*Branch: \`<name>\`*` | Branch the orchestrator's worktree gets. Accepts **any** branch name (any prefix), not only `autonomous/`/`interactive/`. Default: `autonomous/<plan-stem>`. The session never commits to the target branch — see Failure handling. |
 | `*Target-Branch: <name>*` | Branch the merge layer merges into. Default: `main`. |
 | `*Prerequisites:* \`autonomous/<slug>\`` | Row holds until each named prerequisite row is `done`. Comma-separate multiple slugs. A token may be cross-project as `project:feature` (e.g. `example-service:PROJ-102-example-research`) — those are `depends_on`-only (never `waits_on`). Omit the line entirely when there are no dependencies. |
 | `*Type:* <dev\|research\|review\|test>` | Session type for this plan. Optional for a single `queue-plan` (the `--type` flag wins, else this, else `dev`); **required on every plan when clustering**. |
@@ -632,6 +632,7 @@ Plan file paths are read from the pipeline DB row (stored at queue time). `--pla
 | Dev session exits non-zero | Stage stays `dev`; no test session spawned; notification sent |
 | Test session exits non-zero | Partial report written; QA Pass set to `false`; notification sent |
 | Orchestrator spawn fails | Stage reverted to `queued`; `[spawn-failed]` in notes; notification sent |
+| Resolved branch equals the target/default branch | Spawn refused before launch; row parked at `manual` with `[branch-equals-target]`; notification sent (never commits to the merge destination) |
 | Research produces no plan | No chain; human notified |
 | Research has `[BLOCKER]` | No chain; notification names the blocking question |
 | `/merge` — QA Pass is not `true` | Hard stop; merge refused |

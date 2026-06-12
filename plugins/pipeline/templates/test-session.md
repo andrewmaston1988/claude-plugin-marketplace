@@ -94,7 +94,7 @@ You do NOT have authority to:
 
 ```bash
 cd {{CWD}}
-git branch --show-current   # must show the feature branch (e.g. autonomous/scan-time-regression-fix), NOT main
+git branch --show-current   # must show {{BRANCH}} (the row's branch), NOT main
 ```
 
 If this shows `main`, you are in the wrong directory. Stop immediately. Find the correct worktree path — it is listed in "Project directory" in Project Context above, and must end in `-wt/autonomous-{{FEATURE}}` or similar. Do not run any tests against the main branch.
@@ -162,7 +162,7 @@ feature areas. Write your completion summary and proceed to notify.
 Include timestamps, log lines, exact error messages, and reproduction steps.
 Reference the relevant plan file and section if a finding matches a known issue.
 
-**Publish the report to the `{{TEST_PUBLISH_BRANCH}}` branch (stash-switchback dance).** The single feature worktree is currently on `autonomous/{{FEATURE}}`. Publish the report to its own side-branch before calling `test-complete` so the merge skill can read it from git history.
+**Publish the report to the `{{TEST_PUBLISH_BRANCH}}` branch (stash-switchback dance).** The single feature worktree is currently on `{{BRANCH}}`. Publish the report to its own side-branch before calling `test-complete` so the merge skill can read it from git history.
 
 The stash step **scope-excludes** the `test-reports/` subdirectory via a pathspec — without that exclusion, `git stash push -u` would sweep the just-written report into the stash and the subsequent `git add` would fail with `pathspec did not match`. The exclusion keeps the report in the working tree across the branch switch so it can be committed onto the publish branch:
 
@@ -179,7 +179,7 @@ git checkout -B {{TEST_PUBLISH_BRANCH}}
 git add "$REPORT_PATH"
 git commit -m "qa-test: {{FEATURE}}"
 # 4. Return to the dev branch.
-git checkout autonomous/{{FEATURE}}
+git checkout {{BRANCH}}
 # 5. Restore WIP (only if step 1 actually stashed something).
 if [ "$STASH_RC" = "0" ] && git stash list | grep -q "auto: qa-test-{{FEATURE}}"; then
   if ! git stash pop; then
@@ -215,7 +215,7 @@ The Manual steps entry (if needed) must be actionable: `Start macro, verify X in
     --title "🩺 Tests Complete" \
     --message "$(cat <<EOF
 [one-line test result headline]
-• 🌳 \`autonomous/[feature]\`
+• 🌳 \`{{BRANCH}}\`
 • 🧪 [N passed, N skipped — or "N failures: one-line reason"]
 • 🔧 [N manual steps required — or omit line if none]
 • 📢 [one sentence on test coverage or notable findings]
