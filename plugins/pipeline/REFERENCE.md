@@ -37,7 +37,7 @@ queued → dev → review → test → merge → done
 | `qa_pass` | Test result: true, false, or null (untested) |
 | `notes_extra` | Operator notes |
 | `rebase_required` | Flag if branch needs rebase before merge |
-| `depends_on` | Comma-separated prerequisite feature slugs; the row holds until all are `done` (soft list gate) |
+| `depends_on` | Comma-separated prerequisite feature slugs; the row holds until all are `done` (soft list gate). A slug may be cross-project as `project:feature` (resolved against that project's row). |
 | `waits_on` | Single prerequisite feature slug; the row holds until it is `done` AND its branch is an ancestor of `target_branch` (strict chain gate) |
 | `base_branch` | Branch a fresh feature worktree is created from (default: `target_branch`); set to a prerequisite's `autonomous/<slug>` to chain dependent code |
 
@@ -499,7 +499,9 @@ Optional plan annotations the pipeline understands:
 |------------|--------------|
 | `*Branch: \`<name>\`*` | Branch the orchestrator's worktree gets. Default: `autonomous/<plan-stem>`. |
 | `*Target-Branch: <name>*` | Branch the merge layer merges into. Default: `main`. |
-| `*Prerequisites:* \`autonomous/<slug>\`` | Row sits at `backlog` until each named slug reaches `merge`. Comma-separate multiple slugs on the same line. Omit the line entirely when there are no dependencies. |
+| `*Prerequisites:* \`autonomous/<slug>\`` | Row holds until each named prerequisite row is `done`. Comma-separate multiple slugs. A token may be cross-project as `project:feature` (e.g. `example-service:PROJ-102-example-research`) — those are `depends_on`-only (never `waits_on`). Omit the line entirely when there are no dependencies. |
+| `*Type:* <dev\|research\|review\|test>` | Session type for this plan. Optional for a single `queue-plan` (the `--type` flag wins, else this, else `dev`); **required on every plan when clustering**. |
+| `*Research-Model:* / *Dev-Model:* / *QA-Model:* / *Review-Model:* <model>` | Per-kind model pin. The matching `--r/d/q/rvw-model` flag wins, else this annotation, else the configured default. |
 
 CLI flags override annotations — useful for one-off overrides without editing the plan.
 
@@ -932,6 +934,8 @@ Clear dependencies: `--depends ""`
 
 **Circular dependencies** (A depends on B, B depends on A) deadlock both rows indefinitely. Resolve by clearing `depends_on` manually.
 
+**Cross-project prerequisites.** A prerequisite token may name another registered project as `project:feature` (e.g. `example-service:PROJ-102-example-research`). The gate releases when that other-project row reaches `done`. Cross-project prerequisites are `depends_on`-only — they are never auto-promoted to `waits_on`, and an explicit cross-project `--waits-on` is rejected (its ancestor check only works within one repo). `queue-plan` validates the named project is registered.
+
 ### Prerequisite chaining (`waits_on` + `base_branch`)
 
 `depends_on` is a soft list gate (all prerequisites `done`). For a single strict prerequisite plus base-branch chaining, use `waits_on` / `base_branch`:
@@ -953,7 +957,9 @@ For a dependency chain of plans, queue them together and let the orchestrator ch
 pipeline queue-cluster <project> <plan1.md> <plan2.md> ...
 ```
 
-`queue-cluster` reads each plan's `*Prerequisites:*`, infers the dependency graph among the supplied plans, prints the execution groups (`[level-0] → [level-1] → ...`), then queues every plan with `waits_on` + `base_branch` wired for within-cluster prerequisites. Out-of-cluster prerequisites fall back to the plan's own annotation. Refuses on a dependency cycle.
+`queue-cluster` reads each plan's `*Prerequisites:*`, infers the dependency graph among the supplied plans, prints the execution groups (`[level-0] → [level-1] → ...`), then queues every plan with `waits_on` + `base_branch` wired for within-cluster prerequisites. Out-of-cluster prerequisites (including cross-project `project:feature` tokens) fall back to the plan's own `depends_on`. Refuses on a dependency cycle.
+
+`queue-cluster` is a full superset of `queue-plan`: each node is queued at its own session type and models, read from the plan's annotations (`*Type:*`, `*…-Model:*`, `*Branch:*`, `*Target-Branch:*`). Because there is no per-node `--type`, **`*Type:*` is required on every clustered plan** — `queue-cluster` errors (listing the offenders) if any plan lacks it. The `/queue` skill prompts for a missing type and writes it into the plan before clustering.
 
 ---
 
