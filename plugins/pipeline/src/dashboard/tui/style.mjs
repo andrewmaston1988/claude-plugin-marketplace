@@ -59,6 +59,16 @@ export function bold(s) {
   return `{bold}${s}{/bold}`;
 }
 
+// Neutralise literal braces in dynamic/untrusted text (log lines, commit
+// messages, feature names, notes) before it is composed into tagged content.
+// blessed parses any `{...}` matching /{\/?[\w\-,;!#]*}/ as markup; a data
+// sequence like `{a;b}` is read as a multi-part colour tag and throws inside
+// blessed's _attr() on a null `.slice` (program.js). `{open}`/`{close}` are
+// blessed's own escapes for a literal `{`/`}`, so the text round-trips intact.
+export function escapeTags(s) {
+  return String(s ?? "").replace(/[{}]/g, (ch) => (ch === "{" ? "{open}" : "{close}"));
+}
+
 // Render a stage cell with the canonical label + color (no shimmer; the
 // shimmer variant lives in anim.mjs and pulses on the stage that's
 // currently transitioning).
