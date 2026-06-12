@@ -626,7 +626,8 @@ export function renderIndex({ projects, active }) {
   // only, no innerHTML rewrite) so hover state stays alive.
   setInterval(() => {
     if (!state) return;
-    renderAgentsPanel();
+    // Orch view: no spinners, and its row must stay clickable -- skip the tick rebuild.
+    if (agentsView !== "orch") renderAgentsPanel();
     const qf = queueSpin();
     document.querySelectorAll(".row.pipeline .queue-spin").forEach(el => { el.textContent = qf; });
     const cf = claudeSpin();
