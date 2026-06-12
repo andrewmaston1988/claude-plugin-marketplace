@@ -40,7 +40,7 @@ import { openOrchestratorModal } from "./orchestrator-modal.mjs";
 import {
   C_BG, C_BORDER_ACT, C_BORDER_IDLE, C_TEXT, C_DIM,
   C_GREEN, C_CYAN, C_HASH, C_KEY_BG, C_HEADER_HL, C_SELECTED,
-  fg, bg, bold,
+  fg, bg, bold, escapeTags,
 } from "./style.mjs";
 import {
   spin, queueSpin, claudeSpin,
@@ -89,8 +89,8 @@ function _renderHeader(project, allProjects) {
   // All separators + "autonomous pipeline" + clock are dim; only the repo
   // tag draws attention in terracotta.
   const projTag = allProjects.length > 1
-    ? `${fg(C_HEADER_HL, bold(project.name))} ${fg(C_DIM, `[${allProjects.indexOf(project)+1}/${allProjects.length}]`)}`
-    : fg(C_HEADER_HL, bold(project.name));
+    ? `${fg(C_HEADER_HL, bold(escapeTags(project.name)))} ${fg(C_DIM, `[${allProjects.indexOf(project)+1}/${allProjects.length}]`)}`
+    : fg(C_HEADER_HL, bold(escapeTags(project.name)));
   return ` ${projTag} ${fg(C_DIM, "·")} ${fg(C_DIM, "autonomous pipeline")} ${fg(C_DIM, "·")} ${fg(C_DIM, ts)}`;
 }
 
@@ -159,7 +159,7 @@ function _renderAgentsPanel(sessions, orch, progressBySlug, panelW, view) {
   for (const m of models) {
     const glyphChar = m.glyph.spinning ? spin() : m.glyph.char;
     const sp      = fg(m.glyph.glyphColor, glyphChar);
-    const name    = _padRight(_truncate(m.feature, W_NAME), W_NAME);
+    const name    = _padRight(escapeTags(_truncate(m.feature, W_NAME)), W_NAME);
     const bar     = _bar(m.progress.step, m.progress.total, W_BAR);
     const count   = `${m.progress.step}/${m.progress.total}`.padStart(W_COUNT);
     const time    = m.age.padStart(W_TIME);
@@ -198,9 +198,9 @@ function _renderAgentLogPanel(entries, panelW) {
   return entries.map(e => {
     if (e.kind === "tool") {
       const body = `${e.name}: ${e.label || ""}`;
-      return ` ${fg(C_CYAN, "▶")} ${fg(C_DIM, _truncate(body, textW))}`;
+      return ` ${fg(C_CYAN, "▶")} ${fg(C_DIM, escapeTags(_truncate(body, textW)))}`;
     }
-    return ` ${fg(C_DIM, "»")} ${fg(C_TEXT, _truncate(e.text || "", textW))}`;
+    return ` ${fg(C_DIM, "»")} ${fg(C_TEXT, escapeTags(_truncate(e.text || "", textW)))}`;
   }).join("\n");
 }
 
@@ -236,10 +236,10 @@ function _renderPipelineRows(rows, panelW) {
 
   if (rows.length === 0) return [fg(C_DIM, "  nothing active")];
   return rows.map((r) => {
-    const feature = _padRight(fg(r.featureColor, _truncate(r.feature, wFeature)), wFeature);
+    const feature = _padRight(fg(r.featureColor, escapeTags(_truncate(r.feature, wFeature))), wFeature);
     const icon    = _iconCell(r);
     const stageC  = _padRight(_stageCell(r), 12);
-    const notes   = _padRight(fg(r.notesColor, marquee(r.notes, wNotes - 2)), wNotes);
+    const notes   = _padRight(fg(r.notesColor, escapeTags(marquee(r.notes, wNotes - 2))), wNotes);
     return ` ${feature}  ${icon}  ${stageC}  ${notes}`;
   });
 }
@@ -266,7 +266,7 @@ function _renderGitLogPanel(commits, panelW) {
   const msgW   = Math.max(panelW - W_HASH - W_WHEN - SEPS - 2, 20);
   return commits.map(c => {
     const h = _padRight(c.hash || "", W_HASH);
-    const m = _padRight(_truncate(c.msg || "", msgW), msgW);
+    const m = _padRight(escapeTags(_truncate(c.msg || "", msgW)), msgW);
     const w = _truncate(String(c.when || ""), W_WHEN).padStart(W_WHEN);
     return `  ${fg(C_HASH, h)}  ${fg(C_TEXT, m)}  ${fg(C_DIM, w)}`;
   }).join("\n");

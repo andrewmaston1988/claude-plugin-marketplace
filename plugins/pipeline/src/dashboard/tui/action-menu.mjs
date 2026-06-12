@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 import {
   C_BG, C_BORDER_ACT, C_TEXT, C_DIM, C_HEADER_HL, C_SELECTED, C_RED,
   STAGE_COLOR,
-  fg,
+  fg, escapeTags,
 } from "./style.mjs";
 
 const HERE       = fileURLToPath(new URL(".", import.meta.url));
@@ -126,7 +126,7 @@ export async function runAction(screen, project, row, action, refreshFn) {
   }
   // delete → confirm + row-delete + unlink plan file
   if (action === "delete") {
-    const ok = await confirm(screen, `Delete ${row.feature}? plan file will also be removed.`);
+    const ok = await confirm(screen, `Delete ${escapeTags(row.feature)}? plan file will also be removed.`);
     if (!ok) return { ok: true, message: "cancelled" };
     const r = await runPipeline(["row-delete", project, row.feature]);
     if (row.plan_file && existsSync(row.plan_file)) {
@@ -159,7 +159,7 @@ export function openActionMenu(screen, project, row, refreshFn) {
     // Label includes the row's stage tag —
     // `<feature>  <stage>` in the modal's border title.
     const stageColor = STAGE_COLOR[row.stage] || C_DIM;
-    const labelText  = ` ${fg(C_HEADER_HL, ` ${row.feature} `)}${fg(C_DIM, "·")} ${fg(stageColor, row.stage)} `;
+    const labelText  = ` ${fg(C_HEADER_HL, ` ${escapeTags(row.feature)} `)}${fg(C_DIM, "·")} ${fg(stageColor, row.stage)} `;
     const box = blessed.box({
       parent: screen,
       top: "center", left: "center", width: 60, height: opts.length + 4,
