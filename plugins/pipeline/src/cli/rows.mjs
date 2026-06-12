@@ -412,13 +412,30 @@ export async function run(cmd, argv) {
     const qModel   = (getFlag("--q-model",   flags) || "—").toLowerCase();
     const rvwModel = (getFlag("--rvw-model", flags) || "—").toLowerCase();
 
+    // Stored plan paths must be absolute — the orchestrator reads plan_file
+    // verbatim at spawn time (no re-resolution) and parks the row at manual
+    // with [plan-file-missing] when the path doesn't exist on disk. Resolve
+    // with the same rules as queue-plan and fail here instead.
+    const looksLikePath = devPlanFile.includes("/") || devPlanFile.includes("\\");
+    let devPlanPath =
+      isAbsolute(devPlanFile) ? devPlanFile
+      : looksLikePath         ? resolve(process.cwd(), devPlanFile)
+      :                         resolvePlanFile(devPlanFile, { project: ctx.project, projectRoot: ctx.projectRoot });
+    if (!devPlanPath.endsWith(".md")) devPlanPath += ".md";
+
+    if (!existsSync(devPlanPath)) {
+      close(ctx.db);
+      process.stderr.write(`dev plan file not found: ${devPlanPath}\n`);
+      return 1;
+    }
+
     try {
       if (researchFeature === devFeature) {
         rowUpdate(ctx.db, ctx.project, researchFeature, { stage: "queued", ...(notes ? { notes_extra: notes } : {}) });
       } else {
         rowUpdate(ctx.db, ctx.project, researchFeature, { stage: "done", notes_extra: "type=research" });
         rowAdd(ctx.db, ctx.project, {
-          feature: devFeature, planFile: devPlanFile, stage: "queued",
+          feature: devFeature, planFile: devPlanPath, stage: "queued",
           rModel:   rModel   !== "—" ? rModel   : null,
           dModel:   dModel   !== "—" ? dModel   : null,
           qModel:   qModel   !== "—" ? qModel   : null,
