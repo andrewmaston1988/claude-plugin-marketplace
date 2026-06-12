@@ -202,10 +202,11 @@ export async function run(cmd, argv) {
       process.stderr.write(
         "usage: queue-plan <project> <plan-file-path> [--branch <name>] " +
         "[--depends <slug,...>] [--waits-on <slug>] [--base-branch <name>] " +
-        "[--target-branch <name>] [--type dev|research|review|test] " +
+        "[--target-branch <name>] [--title <text>] [--type dev|research|review|test] " +
         "[--r-model] [--d-model] [--q-model] [--rvw-model]\n" +
         "  plan-file-path is the absolute or cwd-relative path to a markdown file.\n" +
-        "  Falls back to plan-content extraction when --branch / --depends / --target-branch are absent.\n" +
+        "  Falls back to plan-content extraction when --branch / --depends / --target-branch / --title are absent.\n" +
+        "  --title sets the PR title (else the plan's *Title:* annotation, else the feature slug).\n" +
         "  --waits-on gates the spawn until <slug> is done + landed on the target (auto-set from the first *Prerequisites:* slug).\n" +
         "  --base-branch creates the feature worktree from <name> (e.g. autonomous/<prereq>) instead of the target branch.\n"
       );
@@ -224,6 +225,7 @@ export async function run(cmd, argv) {
     const dependsFlag = getFlag("--depends", flags) || null;
     const waitsOnFlag = getFlag("--waits-on", flags) || null;
     const baseBranchFlag = getFlag("--base-branch", flags) || null;
+    const titleFlag   = getFlag("--title", flags) || null;
 
     // Resolve plan path. Three modes:
     //   1. Absolute path → use as-is.
@@ -260,7 +262,10 @@ export async function run(cmd, argv) {
     // CLI flag wins; fall back to plan-content extraction if a flag is absent.
     let branch  = branchFlag  ?? queueBranchExtract(planPath);
     let depends = dependsFlag ?? queueDepsExtract(planPath);
-    const prTitle = queueTitleExtract(planPath);
+    // --title lets an operator set the PR title at queue time without editing
+    // the plan. Flag wins, else the plan's *Title:* annotation; when both are
+    // absent, merge falls back to the feature slug (e.g. an unhelpful 'ESG-1234').
+    const prTitle = (titleFlag ?? queueTitleExtract(planPath)).trim().slice(0, 256);
 
     if (targetBranch === null) {
       const [ok, msg] = lintTargetBranchProse(planPath);
