@@ -29,10 +29,12 @@ function queueNameDerive(brief) {
   return parts[0].slice(0, 30);
 }
 
-function queueBranchExtract(planFilePath) {
+export function queueBranchExtract(planFilePath) {
   try {
     const content = readFileSync(planFilePath, "utf8");
-    const m = content.match(/\*Branch:\*?\s*`?(autonomous\/[\w-]+|interactive\/[\w-]+)`?/);
+    // Accept any git branch name (any prefix). Capture the first token after
+    // the annotation, stopping at whitespace, backtick, or a wrapping asterisk.
+    const m = content.match(/\*Branch:\*?\s*`?([^\s`*]+)`?/);
     return m ? m[1] : "";
   } catch { return ""; }
 }
