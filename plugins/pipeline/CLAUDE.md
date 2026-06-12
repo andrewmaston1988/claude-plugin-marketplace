@@ -29,6 +29,8 @@ All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DE
 
 Override via `cfg.worktree_base`. The orchestrator creates the worktree on first spawn for a feature; review/test sessions create it on demand if the feature was queued straight to them.
 
+The **branch checked out** inside that worktree is whatever the row declares (`row.branch`, set by `queue-plan --branch` or a plan's `*Branch:*` annotation), resolved through `resolveRowBranch` — authoritative for any name. It defaults to `autonomous/<plan-stem>` when nothing is declared. The worktree **directory** name stays plan-stem-derived regardless of the branch, so a directory like `…/feat-x` may hold a branch such as `anm/SYM-8773_tooltips`. The session templates verify `{{BRANCH}}` (the resolved branch), and `spawn.mjs` refuses to launch — parking the row at `manual` with `[branch-equals-target]` — if the resolved branch equals the merge target or repo default.
+
 The fresh-install wizard prompts for this in `Step 7/11 — Worktree layout` (`src/setup/wizard.mjs`); the conversational walkthrough lives under `Question 3f — Worktree layout` in `skills/pipeline-setup/SKILL.md`.
 
 ### Reports are published to side-branches
