@@ -32,10 +32,33 @@ If the current directory's project isn't registered, tell the user and exit:
 
 If the plan file doesn't exist, tell the user the resolved path and stop.
 
-## Step 3 — Queue it
+## Step 3 — Secure a PR title
+
+When this work merges, the PR title comes from — first hit wins:
+
+1. `--title "<text>"` flag on the queue command.
+2. The plan's `*Title:* <text>*` annotation under the H1.
+3. The feature slug (the plan filename).
+
+The slug fallback is the trap: a plan named `ESG-1234.md` with no title lands a PR titled **`ESG-1234`** — unhelpful in Bitbucket/GitHub. So a title is worth securing at queue time, and you don't need to edit the plan to do it.
+
+- **If the operator's request already gave a title**, use it directly via `--title` — don't prompt.
+- **If the plan has a `*Title:*` annotation**, that's enough — proceed.
+- **Otherwise, recommend one:** read the plan's first H1 heading (`# …`) and ask:
+
+  > No PR title set for `<slug>`.
+  > Use the plan heading as the PR title?
+  >
+  >   "<H1 heading>"
+  >
+  > [Y]es / [e]dit / [s]kip (use slug `<slug>`)
+
+  On **Yes**/**edit**, pass the chosen text via `--title` (shell-quote it). On **skip**, queue without `--title` and the slug is used.
+
+## Step 4 — Queue it
 
 ```bash
-pipeline queue-plan <project> <PLAN_FILE> --type <STYPE>
+pipeline queue-plan <project> <PLAN_FILE> --type <STYPE> [--title "<PR title>"]
 ```
 
 Report the resulting row to the user and tell them to watch progress with:
