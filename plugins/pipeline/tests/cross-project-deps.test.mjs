@@ -7,6 +7,7 @@ import { join } from "node:path";
 process.env.PIPELINE_SUPPRESS_DEPRECATED = "1";
 
 import { depsMet, parseDepRef } from "../scripts/orchestrator/deps.mjs";
+import { validateCrossProjectDep } from "../src/cli/queue.mjs";
 import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
 import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
 import { rowAdd, rowUpdate } from "../scripts/pipeline-db/rows.mjs";
@@ -31,6 +32,18 @@ test("depsMet: cross-project dep holds until the other project's row is done", (
     equal(depsMet(row, [], log, null, db), false, "holds while prereq not done");
     rowUpdate(db, "proj-b", "dep", { stage: "done" });
     equal(depsMet(row, [], log, null, db), true, "releases when prereq done");
+  } finally { close(db); rmSync(root, { recursive: true, force: true }); }
+});
+
+test("validateCrossProjectDep: ok when referenced project registered; error otherwise", () => {
+  const root = mkdtempSync(join(tmpdir(), "xproj-val-"));
+  mkdirSync(join(root, ".git"), { recursive: true });
+  const db = connectPath(join(root, ".pipeline", "pipeline.db"));
+  try {
+    projectAdd(db, { name: "esg", rootPath: root });
+    equal(validateCrossProjectDep("esg:feat-x", db)[0], true);
+    equal(validateCrossProjectDep("ghost:feat-x", db)[0], false);
+    equal(validateCrossProjectDep("bare-same-project", db)[0], true); // not cross-project → ok
   } finally { close(db); rmSync(root, { recursive: true, force: true }); }
 });
 

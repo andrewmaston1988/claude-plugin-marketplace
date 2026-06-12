@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, basename, isAbsolute, resolve, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
-import { close, rowGet, rowAdd, rowUpdate } from "../../scripts/pipeline-db/index.mjs";
+import { close, rowGet, rowAdd, rowUpdate, projectGetByName } from "../../scripts/pipeline-db/index.mjs";
 import { getFlag, detectDefaultBranch, formatRow } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { loadPipelineConfig } from "../pipeline-config.mjs";
@@ -81,6 +81,18 @@ export function queueTypeExtract(planFilePath) {
     const t = m[1].toLowerCase();
     return ["dev", "research", "review", "test"].includes(t) ? t : "";
   } catch { return ""; }
+}
+
+// A cross-project dep (`project:feature`) is valid only if the named project is
+// registered. Bare (same-project) tokens pass through — validated elsewhere.
+export function validateCrossProjectDep(token, db) {
+  const i = token.indexOf(":");
+  if (i === -1) return [true, ""];
+  const project = token.slice(0, i);
+  let row = null;
+  try { row = projectGetByName(db, project); } catch {}
+  if (!row) return [false, `cross-project prerequisite names an unregistered project: '${project}'`];
+  return [true, ""];
 }
 
 const _MODEL_LABEL = { research: "Research", dev: "Dev", qa: "QA", review: "Review" };
@@ -329,6 +341,13 @@ export async function run(cmd, argv) {
       const missing = [];
       const validated = [];
       for (const slug of depends.split(",").map(s => s.trim()).filter(Boolean)) {
+        if (slug.includes(":")) {
+          // Cross-project prerequisite — validate the referenced project is registered.
+          const [okX, msgX] = validateCrossProjectDep(slug, ctx.db);
+          if (!okX) { close(ctx.db); process.stderr.write(`ERROR: queue-plan: ${msgX}\n`); return 1; }
+          validated.push(slug);
+          continue;
+        }
         const inActive   = existsSync(join(plansDir, slug + ".md"));
         const inComplete = existsSync(join(completeDir, slug + ".md"));
         if (inActive || inComplete) validated.push(slug);
@@ -349,7 +368,18 @@ export async function run(cmd, argv) {
     // auto-populate from the first *Prerequisites:* slug (the 90% case is one
     // prerequisite). base_branch is opt-in only (--base-branch) since branching
     // a dependent off an unmerged prerequisite branch is a deliberate choice.
-    const waitsOn = waitsOnFlag || (depends ? depends.split(",")[0] : null);
+    // waits_on is same-project only (its ancestor check lives in one repo).
+    if (waitsOnFlag && waitsOnFlag.includes(":")) {
+      close(ctx.db);
+      process.stderr.write(`ERROR: --waits-on must be same-project; '${waitsOnFlag}' is cross-project (use depends_on)\n`);
+      return 1;
+    }
+    // Auto-populate from the first SAME-PROJECT prerequisite; cross-project deps
+    // (project:feature) are depends_on-only and never become waits_on.
+    const firstSameProjectDep = depends
+      ? depends.split(",").map(s => s.trim()).find(s => s && !s.includes(":")) || null
+      : null;
+    const waitsOn = waitsOnFlag || firstSameProjectDep;
     const baseBranch = baseBranchFlag || null;
 
     try {
