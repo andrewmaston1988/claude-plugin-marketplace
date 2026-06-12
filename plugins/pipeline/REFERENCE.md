@@ -499,7 +499,7 @@ Optional plan annotations the pipeline understands:
 |------------|--------------|
 | `*Branch: \`<name>\`*` | Branch the orchestrator's worktree gets. Accepts **any** branch name (any prefix), not only `autonomous/`/`interactive/`. Default: `autonomous/<plan-stem>`. The session never commits to the target branch — see Failure handling. |
 | `*Target-Branch: <name>*` | Branch the merge layer merges into. Default: `main`. |
-| `*Prerequisites:* \`autonomous/<slug>\`` | Row holds until each named prerequisite row is `done`. Comma-separate multiple slugs. A token may be cross-project as `project:feature` (e.g. `esg-ng-core-linux:SYM-8617-esg-research`) — those are `depends_on`-only (never `waits_on`). Omit the line entirely when there are no dependencies. |
+| `*Prerequisites:* \`autonomous/<slug>\`` | Row holds until each named prerequisite row is `done` (**soft**, the default). Comma-separate multiple slugs. Prefix a token with `!` for **strict** (`done` **and** its branch is an ancestor of the target) — at most one `!` per plan (maps to `waits_on`). A `project:feature` token is cross-project and always soft; `!project:feature` is rejected. Omit the line entirely when there are no dependencies. |
 | `*Type:* <dev\|research\|review\|test>` | Session type for this plan. Optional for a single `queue-plan` (the `--type` flag wins, else this, else `dev`); **required on every plan when clustering**. |
 | `*Research-Model:* / *Dev-Model:* / *QA-Model:* / *Review-Model:* <model>` | Per-kind model pin. The matching `--r/d/q/rvw-model` flag wins, else this annotation, else the configured default. |
 
@@ -935,7 +935,9 @@ Clear dependencies: `--depends ""`
 
 **Circular dependencies** (A depends on B, B depends on A) deadlock both rows indefinitely. Resolve by clearing `depends_on` manually.
 
-**Cross-project prerequisites.** A prerequisite token may name another registered project as `project:feature` (e.g. `esg-ng-core-linux:SYM-8617-esg-research`). The gate releases when that other-project row reaches `done`. Cross-project prerequisites are `depends_on`-only — they are never auto-promoted to `waits_on`, and an explicit cross-project `--waits-on` is rejected (its ancestor check only works within one repo). `queue-plan` validates the named project is registered.
+**Soft vs strict (one declaration, per-token behavior).** A `*Prerequisites:*` token is **soft** by default (holds until the prereq is `done`). Prefix with `!` for **strict** — `done` **and** its branch is an ancestor of the target. Strict maps to the single `waits_on`; **at most one `!` token per plan** (more is an error). No implicit promotion — a bare slug is soft (earlier versions auto-promoted the first slug to `waits_on`; that is removed). `queue-plan` splits the declaration into `depends_on` (soft) + `waits_on` (the one strict) under the hood; gate and storage are unchanged.
+
+**Cross-project prerequisites.** A prerequisite token may name another registered project as `project:feature` (e.g. `esg-ng-core-linux:SYM-8617-esg-research`). The gate releases when that other-project row reaches `done`. Cross-project prerequisites are always soft — never `waits_on`; `!project:feature` and an explicit cross-project `--waits-on` are rejected (the ancestor check only works within one repo). `queue-plan` validates the named project is registered.
 
 ### Prerequisite chaining (`waits_on` + `base_branch`)
 
@@ -947,7 +949,7 @@ pipeline queue-plan <project> <plan-file> \
   --base-branch autonomous/auth-refactor
 ```
 
-- `--waits-on <slug>` — the row holds until `<slug>` is `done` **and** `autonomous/<slug>` is an ancestor of this row's `target_branch`. The ancestor check is what `depends_on` lacks: a remote squash-merge can mark a row `done` before the commit is reachable from the local target, and a dependent must not start from a base that lacks the prerequisite's code. Auto-populated from the first `*Prerequisites:*` slug when the flag is omitted.
+- `--waits-on <slug>` — the row holds until `<slug>` is `done` **and** `autonomous/<slug>` is an ancestor of this row's `target_branch`. The ancestor check is what `depends_on` lacks: a remote squash-merge can mark a row `done` before the commit is reachable from the local target, and a dependent must not start from a base that lacks the prerequisite's code. Set from a `!`-prefixed `*Prerequisites:*` token, or via this flag directly. (A bare prerequisite is soft — there is no auto-promotion.)
 - `--base-branch <name>` — the feature worktree is created from `<name>` instead of `target_branch`. Point it at `autonomous/<prereq>` so the dependent's worktree contains the prerequisite's code from day one (before it merges). Opt-in only.
 
 ### Queueing a cluster
