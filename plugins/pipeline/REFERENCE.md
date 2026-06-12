@@ -33,7 +33,7 @@ queued → dev → review → test → merge → done
 | `feature` | Feature slug (primary key) |
 | `stage` | Current stage: queued, dev, review, test, manual, merge, or done |
 | `branch` | Git branch name (null if not yet created) |
-| `pr_title` | PR title for GitHub PR; extracted from plan's `*Title:*` annotation at queue time |
+| `pr_title` | PR title for GitHub PR; set at queue time from the `--title` flag, else the plan's `*Title:*` annotation |
 | `qa_pass` | Test result: true, false, or null (untested) |
 | `notes_extra` | Operator notes |
 | `rebase_required` | Flag if branch needs rebase before merge |
@@ -337,7 +337,7 @@ The hook has a 15-second hard timeout; its exit code is ignored (fire-and-forget
 
 #### Row Data
 
-The `pr_title` column is populated at queue time by extracting the plan's `*Title:* <text>*` annotation. Use `row-get` to retrieve the full row (including `pr_title`, `d_model`, `target_branch`) in a single call:
+The `pr_title` column is populated at queue time from `queue-plan`'s `--title` flag, falling back to the plan's `*Title:* <text>*` annotation. Use `row-get` to retrieve the full row (including `pr_title`, `d_model`, `target_branch`) in a single call:
 
 ```js
 const rowResult = spawnSync(pipelineBin, ["row-get", project, feature], { encoding: "utf8" });
