@@ -240,6 +240,7 @@ export function renderIndex({ projects, active }) {
   let agentsView = "agents"; // "agents" | "orch"
   let selectedFeature = null;
   let showAll = false;
+  let expandedAgent = null;
 
   const SPIN_FRAMES = ["⠋","⠙","⠹","⠸","⠼","⠴","⠦","⠧","⠇","⠏"];
   const QUEUE_SPIN  = ["⠁","⠂","⠄","⠂"];
@@ -344,23 +345,55 @@ export function renderIndex({ projects, active }) {
       return;
     }
     // Pre-derived in the shared agents view-model (server-side). Each entry:
-    // { feature, glyph:{char,spinning,glyphColor}, progress, stageColor, age }.
+    // { feature, glyph:{char,spinning,glyphColor}, progress, stageColor, age, steps, stepsOverflow, stepsOverflowDone }.
     const agents = state.agents || [];
     if (agents.length === 0) {
       inner.innerHTML = '<div class="dim" style="padding:8px;">no sessions</div>';
       return;
     }
+    if (!expandedAgent && agents.length > 0) expandedAgent = agents[0].feature;
     inner.innerHTML = agents.map(a => {
-      const glyphChar = a.glyph.spinning ? spin() : a.glyph.char;
+      const glyphChar = a.glyph.spinning
+        ? '<span class="agent-spin">'+spin()+'</span>'
+        : a.glyph.char;
       const prog = a.progress;
-      return '<div class="row agents">'
+      const isExpanded = a.feature === expandedAgent;
+      let stepsHtml = "";
+      if (isExpanded && a.steps && a.steps.length > 0) {
+        let _nextShown = false;
+        stepsHtml = a.steps.map(s => {
+          let glyph, col;
+          if (s.state === "completed") {
+            glyph = '<span style="color:var(--green)">✓</span>'; col = "var(--green)";
+          } else if (s.state === "in_progress" || !_nextShown) {
+            glyph = '<span class="step-spin" style="color:var(--green)">'+spin()+'</span>'; col = "var(--text)"; _nextShown = true;
+          } else {
+            glyph = '<span class="step-queue-spin" style="color:var(--dim)">'+queueSpin()+'</span>'; col = "var(--dim)";
+          }
+          return '<div style="line-height:1.3;">'
+            + glyph + '&thinsp;<span style="color:' + col + '">' + esc(s.text) + '</span></div>';
+        }).join("");
+        if (a.stepsOverflow > 0) {
+          const doneTag = a.stepsOverflowDone > 0 ? ' (' + a.stepsOverflowDone + ' done)' : '';
+          stepsHtml += '<div style="color:var(--dim);line-height:1.3;">+' + a.stepsOverflow + ' more' + doneTag + '</div>';
+        }
+      }
+      return '<div class="row agents clickable" data-feature="'+esc(a.feature)+'">'
         + '<div class="cell center" style="color:'+a.glyph.glyphColor+'">'+glyphChar+'</div>'
         + '<div class="cell">'+esc(a.feature)+'</div>'
         + '<div>'+bar(prog.step, prog.total)+'</div>'
         + '<div class="cell right dim">'+prog.step+'/'+prog.total+'</div>'
         + '<div class="cell right" style="color:'+a.stageColor+'">'+esc(a.age)+'</div>'
+        + (stepsHtml ? '<div style="grid-column:2/-1;padding:0 0 3px 0;">'+stepsHtml+'</div>' : '')
         + '</div>';
     }).join("");
+    inner.querySelectorAll(".row.agents[data-feature]").forEach(el => {
+      el.onclick = () => {
+        const feature = el.getAttribute("data-feature");
+        expandedAgent = expandedAgent === feature ? null : feature;
+        renderAgentsPanel();
+      };
+    });
   }
 
   // Skip-re-render signature: rebuilding innerHTML restarts CSS animations.
@@ -621,13 +654,18 @@ export function renderIndex({ projects, active }) {
 
   fetchState();
   setInterval(fetchState, 3000);
-  // Animation tick — re-render agents panel (active spinners) every frame,
-  // and update queue-spin chars in the pipeline panel in-place (textContent
-  // only, no innerHTML rewrite) so hover state stays alive.
+  // Animation tick — all spinner/shimmer updates are in-place (textContent only,
+  // no innerHTML rewrite) so hover state stays alive across frames.
   setInterval(() => {
     if (!state) return;
     // Orch view: no spinners, and its row must stay clickable -- skip the tick rebuild.
-    if (agentsView !== "orch") renderAgentsPanel();
+    // Update agent + step spinners in-place — avoids innerHTML rebuild that resets hover state.
+    if (agentsView !== "orch") {
+      const sp2 = spin();
+      document.querySelectorAll(".row.agents .agent-spin, .row.agents .step-spin").forEach(el => { el.textContent = sp2; });
+      const sq = queueSpin();
+      document.querySelectorAll(".row.agents .step-queue-spin").forEach(el => { el.textContent = sq; });
+    }
     const qf = queueSpin();
     document.querySelectorAll(".row.pipeline .queue-spin").forEach(el => { el.textContent = qf; });
     const cf = claudeSpin();
