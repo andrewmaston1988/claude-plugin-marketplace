@@ -326,8 +326,27 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
       if (ensureWorktree(projectRoot, wtPath, branch, baseBranch, logFn)) {
         cwd = wtPath;
       } else {
-        logFn(`[${project}] worktree unavailable — falling back to project dir`, "WARN");
-        cwd = projectRoot;
+        const ts = new Date().toISOString().slice(0, 16);
+        const note = `[worktree-unavailable ${ts}]`;
+        logFn(`[${project}] '${feature}' worktree unavailable — parking at manual`, "ERROR");
+        try {
+          const r = rowGet(db, project, feature);
+          const existing = r ? (r.notes_extra || "") : "";
+          rowUpdate(db, project, feature, {
+            stage:       "manual",
+            notes_extra: existing ? `${existing} ${note}` : note,
+          });
+        } catch {}
+        publishNotification({
+          title:    `Spawn Blocked: ${feature} (worktree-unavailable)`,
+          message:  (
+            `${stype} session for '${feature}' in ${project} blocked.\n` +
+            `Worktree could not be created at ${wtPath}.\n` +
+            `Check if branch '${branch}' is already checked out in another worktree.`
+          ),
+          priority: "high",
+        }).catch(() => {});
+        return null;
       }
     } else {
       cwd = projectRoot;
