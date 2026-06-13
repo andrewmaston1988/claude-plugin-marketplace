@@ -16,12 +16,13 @@ queued → dev → review → test → merge → done
                manual (parked-review-budget-exhausted)
 ```
 
-- **`queued`** — row is waiting; orchestrator will spawn a session of the type named in the row.
-- **`dev`** — autonomous dev session implements the plan on `autonomous/<feature>`.
+- **`queued`** — row is waiting; orchestrator will spawn a dev session by default, or research/review/test if type hint is in notes_extra (legacy) or resolved from the queue command.
+- **`dev`** — autonomous dev session implements the plan on `autonomous/<feature>`. The orchestrator spawns this stage directly without needing a `type=` hint. If a dev session dies without handoff (no review verdict), the orchestrator automatically recovers to `review` if within retry budget, otherwise parks at `manual`.
+- **`research`** — autonomous research session spawned directly by the orchestrator when the row stage is `research`. Dies without auto-recovery — parks at `manual` on PID death.
+- **`test`** — autonomous test session spawned directly by the orchestrator when row stage is `test`, runs the suite and sets `qa_pass`.
 - **`review`** — autonomous peer-review pass on the dev diff. Emits one of two verdicts:
   - `ready_to_ship` → advances to `test`.
   - `needs_work` → bounces back to `dev` (`review_retries += 1`). After `review_retry_budget` exhausted, parks at `manual`.
-- **`test`** — autonomous test session runs the suite and sets `qa_pass`.
 - **`manual`** — operator-actionable parking lot (test failure, reviewer-stuck, budget exhausted, or `[blocked: ...]`).
 - **`merge`** — passed `qa_pass=true`, waiting for squash-merge via `/merge`.
 - **`done`** — merged to main; row preserved for audit.
@@ -44,6 +45,8 @@ queued → dev → review → test → merge → done
 **Invariant:** A row cannot reach `stage=merge` without a gate verdict — either `qa_pass=true` (test path) or `review_verdict=ready_to_ship`. The merge runner enforces this before squash-merging.
 
 **Auto-spawn:** The orchestrator automatically spawns merge children when a pipeline row reaches `stage=merge` with no `rebase_required` flag and all dependencies satisfied. Each project is limited to one concurrent merge to avoid rebase/commit races. On successful exit (code 0), the merge script advances the row to `done`; on failure, the row remains at `merge` and an operator notification is sent.
+
+**Stage-driven spawn:** The orchestrator polls for spawnable rows across multiple stages — `queued`, `dev`, `research`, `test`, and `review` — and spawns the appropriate session type directly from the stage. A row that dies without a session (e.g., dev session with no handoff) can be revived by advancing it to the next stage (e.g., `pipeline stage-set <project> <feature> review`) without needing `type=` hints in notes. This mechanism enables recovery via a single command instead of requiring notes manipulation. For backward compatibility, `queued` rows with `type=` hints in `notes_extra` still route correctly; all other active stages prefer the stage column directly. Spawn attempts are rate-limited by a 60-second grace period per (project, feature) pair to give freshly-spawned sessions time to register in the database.
 
 ---
 

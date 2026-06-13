@@ -46,7 +46,7 @@ Group the output by stage (merge / manual / test / dev / research / queued / bac
 
 - If the orchestrator is off and there are queued rows: suggest starting it (`o` in the TUI agents panel, then Enter).
 - If everything is `done`: suggest `/queue <plan-file>` to add new work.
-- If something is `manual` due to an expired/dead session (`[dev-no-handoff]`, `[review-stuck-no-report]`): restore with `stage=queued` + `notes_extra=type=dev` (or `type=review` as appropriate). The orchestrator reads the `type=` prefix from `notes_extra` to pick the session template — without it the row sits queued but won't dispatch. `pipeline stage-set` doesn't set `notes_extra`; update the DB directly if needed.
+- If something is `manual` due to an expired/dead session (`[dev-no-handoff]`, `[review-stuck-no-report]`): restore with `stage=dev` (or `stage=review` as appropriate). The orchestrator uses the stage directly to spawn the session, so no `notes_extra` manipulation is needed. Restore with `pipeline stage-set <project> <feature> dev`.
 - If something is `manual` and `blocked:`: surface the block reason and ask whether they want to clear it (`pipeline stage-set <project> <feature> backlog` typically).
 
 For the full CLI surface (all subcommands, flags, orchestrator management): read `../../REFERENCE.md` (relative to this skill's base directory).

@@ -44,7 +44,7 @@ test("reaper: dev-no-handoff recovers when a CUSTOM branch carries commits", () 
       db.prepare(
         "UPDATE pipeline_rows SET notes_extra=?, target_branch=?, review_retries=?, review_retry_budget=? " +
         "WHERE project=? AND feature=?"
-      ).run("type=dev sessions/dev-2026-06-12-feat-x.md", "main", 0, 3, "p", "feat-x");
+      ).run("", "main", 0, 3, "p", "feat-x");
       db.prepare(
         "INSERT INTO sessions (correlation_id, project, feature, session_type, cwd, session_file, spawn_time, pid, is_active) " +
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)"
@@ -56,8 +56,7 @@ test("reaper: dev-no-handoff recovers when a CUSTOM branch carries commits", () 
       const row = db.prepare(
         "SELECT stage, notes_extra FROM pipeline_rows WHERE project=? AND feature=?"
       ).get("p", "feat-x");
-      strictEqual(row.stage, "queued", "custom-branch commits should make it recoverable");
-      match(row.notes_extra, /\btype=review\b/);
+      strictEqual(row.stage, "review", "custom-branch commits should advance directly to review");
       match(row.notes_extra, /dev-no-handoff-recovered/);
 
       // Handoff threading: the generated review session carries the custom branch.
