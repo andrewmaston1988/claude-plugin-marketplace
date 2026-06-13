@@ -48,16 +48,16 @@ test("escalation: does NOT escalate when review_retries = 0", () => {
     });
 
     const row = rowGet(db, PROJECT, feature);
-    row.notes_extra = "type=dev model=claude-haiku-4-5";
+    row.notes_extra = "type=dev model=claude-haiku-4-5-20251001 effort=medium";
 
     const logFn = createMockLog();
     spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
 
-    ok(!logFn.hasMessage("auto-escalating"), "Should not escalate when review_retries = 0");
+    ok(!logFn.hasMessage("escalating"), "Should not escalate when review_retries = 0");
   } finally { teardown(tmp, db); }
 });
 
-test("escalation: does NOT escalate when review_retries = 1", () => {
+test("escalation: ESCALATES effort within tier when review_retries = 1", () => {
   const { tmp, db, projectRoot } = setup();
   try {
     const feature = "test-feat-1";
@@ -74,16 +74,17 @@ test("escalation: does NOT escalate when review_retries = 1", () => {
     });
 
     const row = rowGet(db, PROJECT, feature);
-    row.notes_extra = "type=dev model=claude-haiku-4-5";
+    row.notes_extra = "type=dev model=claude-haiku-4-5-20251001 effort=medium";
 
     const logFn = createMockLog();
     spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
 
-    ok(!logFn.hasMessage("auto-escalating"), "Should not escalate when review_retries = 1");
+    ok(logFn.hasMessage("escalating effort"), "Should escalate effort within tier at review_retries >= 1");
+    ok(logFn.hasMessage("medium→high"), "Should escalate from medium to high");
   } finally { teardown(tmp, db); }
 });
 
-test("escalation: ESCALATES when review_retries >= 2 and model is Haiku", () => {
+test("escalation: escalates model tier when effort is exhausted", () => {
   const { tmp, db, projectRoot } = setup();
   try {
     const feature = "test-feat-2";
@@ -96,21 +97,22 @@ test("escalation: ESCALATES when review_retries >= 2 and model is Haiku", () => 
       feature,
       planFile,
       stage: "queued",
-      reviewRetries: 2,
+      reviewRetries: 5,
     });
 
     const row = rowGet(db, PROJECT, feature);
-    row.notes_extra = "type=dev model=claude-haiku-4-5";
+    row.notes_extra = "type=dev model=claude-haiku-4-5-20251001 effort=max";
 
     const logFn = createMockLog();
     spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
 
-    ok(logFn.hasMessage("auto-escalating"), "Should escalate at review_retries >= 2");
+    ok(logFn.hasMessage("escalating model"), "Should escalate model tier");
     ok(logFn.hasMessage("claude-sonnet-4-6"), "Should escalate to Sonnet");
+    ok(logFn.hasMessage("effort→medium"), "Should reset effort to medium");
   } finally { teardown(tmp, db); }
 });
 
-test("escalation: does NOT escalate when already Sonnet", () => {
+test("escalation: escalates effort when on Sonnet", () => {
   const { tmp, db, projectRoot } = setup();
   try {
     const feature = "test-feat-sonnet";
@@ -123,16 +125,17 @@ test("escalation: does NOT escalate when already Sonnet", () => {
       feature,
       planFile,
       stage: "queued",
-      reviewRetries: 2,
+      reviewRetries: 1,
     });
 
     const row = rowGet(db, PROJECT, feature);
-    row.notes_extra = "type=dev model=claude-sonnet-4-6";
+    row.notes_extra = "type=dev model=claude-sonnet-4-6 effort=medium";
 
     const logFn = createMockLog();
     spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
 
-    ok(!logFn.hasMessage("auto-escalating"), "Should not escalate when already Sonnet");
+    ok(logFn.hasMessage("escalating effort"), "Should escalate effort within tier");
+    ok(logFn.hasMessage("medium→high"), "Should escalate from medium to high");
   } finally { teardown(tmp, db); }
 });
 
@@ -149,20 +152,20 @@ test("escalation: does NOT escalate for review stype", () => {
       feature,
       planFile,
       stage: "queued",
-      reviewRetries: 2,
+      reviewRetries: 1,
     });
 
     const row = rowGet(db, PROJECT, feature);
-    row.notes_extra = "type=review model=claude-haiku-4-5";
+    row.notes_extra = "type=review model=claude-haiku-4-5-20251001 effort=medium";
 
     const logFn = createMockLog();
     spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
 
-    ok(!logFn.hasMessage("auto-escalating"), "Should not escalate for review stype");
+    ok(!logFn.hasMessage("escalating"), "Should not escalate dev model for review stype");
   } finally { teardown(tmp, db); }
 });
 
-test("escalation: persists d_model to DB", () => {
+test("escalation: persists d_effort to DB", () => {
   const { tmp, db, projectRoot } = setup();
   try {
     const feature = "test-feat-persist";
@@ -175,16 +178,16 @@ test("escalation: persists d_model to DB", () => {
       feature,
       planFile,
       stage: "queued",
-      reviewRetries: 2,
+      reviewRetries: 1,
     });
 
     const row = rowGet(db, PROJECT, feature);
-    row.notes_extra = "type=dev model=claude-haiku-4-5";
+    row.notes_extra = "type=dev model=claude-haiku-4-5-20251001 effort=medium";
 
     const logFn = createMockLog();
     spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
 
     const updated = rowGet(db, PROJECT, feature);
-    equal(updated.d_model, "claude-sonnet-4-6", "d_model should be updated in DB");
+    equal(updated.d_effort, "high", "d_effort should be escalated to high in DB");
   } finally { teardown(tmp, db); }
 });

@@ -29,6 +29,25 @@ const STAGE = {
   test:     "test",
 };
 
+// ── two-axis escalation constants ─────────────────────────────────────────────
+const HAIKU_MODELS = new Set(["claude-haiku-4-5-20251001"]);
+const SONNET_MODELS = new Set(["claude-sonnet-4-6"]);
+const OPUS_MODELS = new Set(["claude-opus-4-8", "claude-opus-4-7"]);
+const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"];
+
+function nextEffortLevel(current) {
+  const idx = EFFORT_LEVELS.indexOf(current);
+  return idx >= 0 && idx < EFFORT_LEVELS.length - 1
+    ? EFFORT_LEVELS[idx + 1]
+    : null;  // Already at max
+}
+
+function nextModelTier(current) {
+  if (HAIKU_MODELS.has(current)) return "claude-sonnet-4-6";
+  if (SONNET_MODELS.has(current)) return "claude-opus-4-8";
+  return null;  // Already at top
+}
+
 export function sessionTypeFromNotes(notes) {
   const m = String(notes).match(/\btype=(dev|research|test|review)\b/);
   return m ? m[1] : "dev";
@@ -53,6 +72,14 @@ export function modelFromNotes(notes, project, feature, stype, logFn, row) {
 export function budgetFromNotes(notes) {
   const m = String(notes).match(/\bbudget=([\d.]+)\b/);
   return m ? m[1] : "10.00";
+}
+
+export function effortFromNotes(notes, stype = "dev") {
+  const m = String(notes).match(/\beffort=([\w]+)\b/);
+  if (m) return m[1];
+  // Defaults per role, matching schema defaults
+  const defaults = { dev: "medium", review: "high", qa: "low" };
+  return defaults[stype] || "medium";
 }
 
 // ── worktree helpers ──────────────────────────────────────────────────────────
@@ -174,21 +201,54 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   // and backward compatibility with legacy rows that carry type= hints.
   const stype    = stageSessionType || sessionTypeFromNotes(notes);
   let model      = modelFromNotes(notes, project, feature, stype, logFn, row);
+  let effort     = effortFromNotes(notes, stype);
   const budget   = budgetFromNotes(notes);
   const newStage = STAGE[stype] || "dev";
   const tools    = TOOLS[stype] || TOOLS.dev;
 
-  // Auto-escalate any Haiku variant → Sonnet on second review retry
-  if (stype === "dev" && (row.review_retries || 0) >= 2 && /haiku/i.test(model)) {
-    const newModel = "claude-sonnet-4-6";
-    rowUpdate(db, project, feature, { d_model: newModel });
-    logFn(`[${project}] '${feature}' auto-escalating d_model ${model}→${newModel} (review_retries=${row.review_retries})`, "WARN");
-    publishNotification({
-      title:    `Model escalated: ${feature}`,
-      message:  `d_model auto-escalated Haiku→Sonnet for ${feature} (review_retries=${row.review_retries})`,
-      priority: "low",
-    }).catch(() => {});
-    model = newModel;
+  // ── Two-axis escalation on review retry ───────────────────────────────────
+  if (stype === "dev" && (row.review_retries || 0) >= 1) {
+    const nextEffort = nextEffortLevel(effort);
+    const nextModel = nextEffortLevel(effort) ? null : nextModelTier(model);
+
+    if (nextEffort) {
+      // Bump effort one rung within the current model tier
+      effort = nextEffort;
+      rowUpdate(db, project, feature, { d_effort: effort });
+      logFn(
+        `[${project}] '${feature}' escalating effort ${EFFORT_LEVELS[EFFORT_LEVELS.indexOf(effort) - 1]}→${effort} ` +
+        `(model=${model}, review_retries=${row.review_retries})`,
+        "WARN"
+      );
+      publishNotification({
+        title: `Effort escalated: ${feature}`,
+        message: `d_effort escalated to ${effort} for ${feature} (review_retries=${row.review_retries})`,
+        priority: "low",
+      }).catch(() => {});
+    } else if (nextModel && !OPUS_MODELS.has(model)) {
+      // Exhausted effort rungs within this tier; jump to next model tier, reset effort to medium
+      model = nextModel;
+      effort = "medium";
+      rowUpdate(db, project, feature, { d_model: model, d_effort: effort });
+      logFn(
+        `[${project}] '${feature}' escalating model ${modelFromNotes(notes, project, feature, stype, null, row)} ` +
+        `→${model} + effort→medium (review_retries=${row.review_retries})`,
+        "WARN"
+      );
+      publishNotification({
+        title: `Model escalated: ${feature}`,
+        message: `d_model auto-escalated to ${model} (effort reset to medium) for ${feature} ` +
+        `(review_retries=${row.review_retries})`,
+        priority: "low",
+      }).catch(() => {});
+    } else if (nextModel && OPUS_MODELS.has(model)) {
+      // Already at Opus; no further escalation (Opus→? requires human gate)
+      logFn(
+        `[${project}] '${feature}' escalation would require Opus→higher; manual intervention needed ` +
+        `(review_retries=${row.review_retries})`,
+        "WARN"
+      );
+    }
   }
 
   if (dryRun) {
@@ -372,6 +432,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   const args = [
     "-p", prompt,
     "--model", model,
+    "--effort", effort,
     "--allowedTools", tools,
     "--max-budget-usd", budget,
   ];
