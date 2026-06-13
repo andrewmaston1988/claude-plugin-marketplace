@@ -188,6 +188,12 @@ function validateTargetBranch(value) {
 
 const DEFAULT_RECOGNISED_BRANCH_TYPES = ["autonomous", "interactive"];
 
+const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
+function validateEffort(val) {
+  return val === null || VALID_EFFORTS.has(val);
+}
+
 function warnUnrecognisedTargetPrefix(targetBranch, recognised) {
   if (!targetBranch || !targetBranch.includes("/")) return;
   const types = (recognised && recognised.length) ? recognised : DEFAULT_RECOGNISED_BRANCH_TYPES;
@@ -279,7 +285,8 @@ export async function run(cmd, argv) {
         "usage: queue-plan <project> <plan-file-path> [--branch <name>] " +
         "[--depends <slug,...>] [--waits-on <slug>] [--base-branch <name>] " +
         "[--target-branch <name>] [--title <text>] [--type dev|research|review|test] " +
-        "[--r-model] [--d-model] [--q-model] [--rvw-model]\n" +
+        "[--r-model] [--d-model] [--q-model] [--rvw-model] " +
+        "[--r-effort low|medium|high|xhigh|max] [--d-effort ...] [--q-effort ...]\n" +
         "  plan-file-path is the absolute or cwd-relative path to a markdown file.\n" +
         "  Falls back to plan-content extraction when --branch / --depends / --target-branch / --title are absent.\n" +
         "  --title sets the PR title (else the plan's *Title:* annotation, else the feature slug).\n" +
@@ -296,6 +303,9 @@ export async function run(cmd, argv) {
     const dModelFlag   = getFlag("--d-model", flags) || null;
     const qModelFlag   = getFlag("--q-model", flags) || null;
     const rvwModelFlag = getFlag("--rvw-model", flags) || null;
+    const rEffortFlag  = getFlag("--r-effort", flags) || null;
+    const dEffortFlag  = getFlag("--d-effort", flags) || null;
+    const qEffortFlag  = getFlag("--q-effort", flags) || null;
     let targetBranch  = getFlag("--target-branch", flags) || null;
     const branchFlag  = getFlag("--branch", flags) || null;
     const dependsFlag = getFlag("--depends", flags) || null;
@@ -369,6 +379,15 @@ export async function run(cmd, argv) {
     const dModel   = dModelFlag   || queueModelExtract(planPath, "dev")      || "—";
     const qModel   = qModelFlag   || queueModelExtract(planPath, "qa")       || "—";
     const rvwModel = rvwModelFlag || queueModelExtract(planPath, "review")   || "—";
+
+    // Validate effort values.
+    for (const [name, val] of [["r_effort", rEffortFlag], ["d_effort", dEffortFlag], ["q_effort", qEffortFlag]]) {
+      if (val !== null && !validateEffort(val)) {
+        close(ctx.db);
+        process.stderr.write(`invalid ${name}: ${val} — must be one of ${Array.from(VALID_EFFORTS).join(", ")}\n`);
+        return 1;
+      }
+    }
 
     if (targetBranch === null) {
       const [ok, msg] = lintTargetBranchProse(planPath);
@@ -457,6 +476,9 @@ export async function run(cmd, argv) {
           dModel: dModel !== "—" ? dModel : null,
           qModel: qModel !== "—" ? qModel : null,
           rvwModel: rvwModel !== "—" ? rvwModel : null,
+          rEffort: rEffortFlag || null,
+          dEffort: dEffortFlag || null,
+          qEffort: qEffortFlag || null,
           dependsOn: dependsArg, targetBranch,
           prTitle: prTitle || null,
           waitsOn, baseBranch,
@@ -472,6 +494,9 @@ export async function run(cmd, argv) {
         if (dModel !== "—") fields.d_model = dModel;
         if (qModel !== "—") fields.q_model = qModel;
         if (rvwModel !== "—") fields.rvw_model = rvwModel;
+        if (rEffortFlag) fields.r_effort = rEffortFlag;
+        if (dEffortFlag) fields.d_effort = dEffortFlag;
+        if (qEffortFlag) fields.q_effort = qEffortFlag;
         rowUpdate(ctx.db, ctx.project, feature, fields);
       }
       const finalRow = rowGet(ctx.db, ctx.project, feature);

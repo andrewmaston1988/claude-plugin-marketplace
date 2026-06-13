@@ -202,7 +202,7 @@ export async function publishReport(reportFile, { dryRun = false, _cfg, _paths }
     process.stderr.write(`Report file not found: ${reportFile}\n`);
     return false;
   }
-  const cfg   = _cfg   ?? loadPipelineConfig();
+  const cfg   = _cfg   ?? (process.env.PIPELINE_NO_HOOKS ? {} : loadPipelineConfig());
   const paths = _paths ?? getPaths();
 
   const body = readFileSync(reportFile, "utf8");
@@ -240,7 +240,7 @@ export async function publishNotification({ title, message, messageFile, priorit
     process.stderr.write("publishNotification: message or messageFile is required\n");
     return false;
   }
-  const cfg   = _cfg   ?? loadPipelineConfig();
+  const cfg   = _cfg   ?? (process.env.PIPELINE_NO_HOOKS ? {} : loadPipelineConfig());
   const paths = _paths ?? getPaths();
 
   const body = messageFile && existsSync(messageFile) ? readFileSync(messageFile, "utf8") : (message ?? "");
