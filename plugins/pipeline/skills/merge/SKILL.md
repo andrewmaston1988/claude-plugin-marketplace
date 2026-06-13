@@ -170,3 +170,29 @@ If the BLOCKER is `plan has (needs testing) items`, do not re-run silently. Surf
 On `yes`: add `--skip-testing` to the runner command and re-spawn. The flag rewrites `(needs testing)` → `(skipped)` in the plan with a WARNING in the merge log so the override is visible.
 
 On `no` (or any other response): stop and tell the user to complete testing first.
+
+## Recovery — squash-merged-history branches (`--no-rebase`)
+
+`step0aRebase` runs `git rebase <target_branch>` on each feature branch. This fails when the branch's earlier commits were already squash-merged into the target: the squash carries a combined patch-id that doesn't match the individual commits, so `git rebase` replays them, conflicts against their already-present content, and aborts the whole merge. This is a git limitation — the script cannot infer the fork-point automatically.
+
+The operator-driven recipe:
+
+1. **Linearise the branch manually** using `--onto` to skip past the already-squashed commits. `<fork-point>` is the sha of the last commit on the branch that pre-dates the upstream squash (typically the commit where the branch diverged from the pre-squash state):
+
+   ```bash
+   git checkout <branch>
+   git rebase --onto <target_branch> <fork-point> <branch>
+   # Resolve any conflicts on the genuinely new commits, then continue.
+   ```
+
+2. **Invoke the merge with `--no-rebase`** so `step0aRebase` is skipped and the runner goes straight to the 3-way squash merge against the linearised branch:
+
+   ```bash
+   node <PLUGIN_ROOT>/skills/merge/scripts/merge.mjs \
+     --branches <branch> \
+     --project-dir <PROJECT_DIR> \
+     --no-rebase \
+     <PLANS_DIR_FLAG>
+   ```
+
+All other behaviour (DoD checks, squash, plan move to `complete/`, project commit, smoke check) is preserved. `--no-rebase` is operator-only: the default merge path still runs `step0aRebase` and should not be changed for branches that haven't hit this exact failure mode.

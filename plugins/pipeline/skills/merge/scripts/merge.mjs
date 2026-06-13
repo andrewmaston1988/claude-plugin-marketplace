@@ -297,6 +297,7 @@ function parseArgs(argv) {
     dryRun: false,
     skipSmoke: false,
     skipTesting: false,
+    noRebase: false,
     parent: null,
     targetBranch: null,
   };
@@ -311,6 +312,7 @@ function parseArgs(argv) {
       case "--dry-run":       args.dryRun = true; break;
       case "--skip-smoke":    args.skipSmoke = true; break;
       case "--skip-testing":  args.skipTesting = true; break;
+      case "--no-rebase":     args.noRebase = true; break;
     }
   }
   return args;
@@ -409,8 +411,12 @@ async function main() {
 
     // Step 0a (idx 0)
     mark(0, "inprogress");
-    const rebaseOk = await step0aRebase(projectDir, branches, targetBranch);
-    if (!rebaseOk) { exitCode = 3; return; }
+    if (args.noRebase) {
+      logOut("[0a] --no-rebase: skipping rebase as requested by operator");
+    } else {
+      const rebaseOk = await step0aRebase(projectDir, branches, targetBranch);
+      if (!rebaseOk) { exitCode = 3; return; }
+    }
     mark(0, "done");
 
     // Step 1 (idx 1)
