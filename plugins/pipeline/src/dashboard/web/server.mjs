@@ -12,7 +12,7 @@ import { loadPipelineConfig } from "../../pipeline-config.mjs";
 import { projectList } from "../../../scripts/pipeline-db/projects.mjs";
 import { loadOrchState } from "../shared/load-orch-state.mjs";
 import { loadActiveSessions } from "../shared/load-sessions.mjs";
-import { loadProgressBySlug, progressKey } from "../shared/load-progress.mjs";
+import { loadProgressBySlug, loadStepsBySlug, sliceSteps, progressKey } from "../shared/load-progress.mjs";
 import { loadGitLog } from "../shared/load-git-log.mjs";
 import { loadAgentLog } from "../shared/load-agent-log.mjs";
 import { loadBacklog } from "../shared/load-backlog.mjs";
@@ -127,7 +127,13 @@ function _buildPayload(db, projectName) {
   // surfaces can't drift. The server holds the transition tracker (the client
   // is stateless between polls). The web omits pidAlive: cross-process liveness
   // is the orchestrator/DB's job, and is_active already reflects it here.
-  const agents   = agentsViewModel(sessions, progress);
+  const agentsBase = agentsViewModel(sessions, progress);
+  const agents = agentsBase.map(a => {
+    const s    = sessions.find(s => s.is_active === 1 && s.feature === a.feature);
+    const slug = s ? progressKey(s) : null;
+    const { visible, overflow, overflowDone } = sliceSteps(loadStepsBySlug(db, slug));
+    return { ...a, steps: visible, stepsOverflow: overflow, stepsOverflowDone: overflowDone };
+  });
   const pipeline  = pipelineViewModel(rows, { showAll: true, sessions, tracker: _trackerFor(projectName) });
   const orchView = orchViewModel(orch);
 
