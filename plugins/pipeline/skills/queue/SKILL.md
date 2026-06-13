@@ -102,7 +102,9 @@ pipeline queue-plan <project> <PLAN_FILE> --type <STYPE> \
   --base-branch autonomous/<prereq-feature-slug>
 ```
 
-**Cross-project prerequisites.** A `*Prerequisites:*` token may name another project as `project:feature` (e.g. `esg-ng-core-linux:SYM-8617-esg-research`). These are **`depends_on`-only** — the row holds until that other-project row reaches `done`. They are never auto-set as `waits_on` (a cross-project `--waits-on` is rejected, because its ancestor check only works within one git repo). `queue-plan` validates that the named project is registered.
+**Soft vs strict.** A `*Prerequisites:*` token is **soft** by default (holds until the prereq is `done`). Prefix it with `!` (e.g. `` `!autonomous/auth-refactor` ``) for **strict** — `done` AND its branch is an ancestor of the target (the `waits_on` gate). At most one `!` token per plan. There is no implicit auto-strict on the first slug.
+
+**Cross-project prerequisites.** A `*Prerequisites:*` token may name another project as `project:feature` (e.g. `esg-ng-core-linux:SYM-8617-esg-research`). These are always **soft** — the row holds until that other-project row reaches `done`. They are never `waits_on` (`!project:feature` and a cross-project `--waits-on` are rejected, because the ancestor check only works within one git repo). `queue-plan` validates that the named project is registered.
 
 ## Queueing a whole cluster at once
 
