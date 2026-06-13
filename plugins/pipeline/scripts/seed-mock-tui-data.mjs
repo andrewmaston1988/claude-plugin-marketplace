@@ -15,7 +15,7 @@ const noteUpdates = [
   ["test-merge",    "branch ahead of master by 18 commits; PR description drafted; squash-merge gate green"],
   ["test-manual",   "blocked: needs operator to choose between option A (rebuild the index) and option B (add a fallback path)"],
   ["test-backlog",  "deferred to next iteration — relates to the cycle_log observability work in plan-12"],
-  ["test-queued",   "stage=dev; awaiting orchestrator spawn in the next poll tick"],
+  ["test-queued",   "autonomous spawn pending; expecting session in the next orchestrator poll"],
 ];
 
 const stmt = db.prepare("UPDATE pipeline_rows SET notes_extra = ? WHERE project = ? AND feature = ?");

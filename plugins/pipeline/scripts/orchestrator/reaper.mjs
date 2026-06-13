@@ -195,7 +195,8 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
                   cwd,
                 });
                 const relPath = relative(projectRoot, sessionPath).replace(/\\/g, "/");
-                const notes = `${relPath} [dev-no-handoff-recovered ${ts}]`;
+                // Replace notes write with stage-set to review; the next poll will spawn directly.
+                const notes = `${existing}${existing ? " " : ""}${relPath} [dev-no-handoff-recovered ${ts}]`;
                 rowUpdate(db, project, feature, {
                   stage:       "review",
                   notes_extra: notes,

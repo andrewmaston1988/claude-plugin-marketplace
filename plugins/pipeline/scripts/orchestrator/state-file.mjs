@@ -12,7 +12,7 @@ export function readState() {
 // Atomic write — write to <STATE_FILE>.tmp then renameSync over the
 // destination so a concurrent reader never sees a partial JSON payload
 // (rename is atomic on Win/POSIX for same-volume targets).
-export function writeState(status, { startedAt = null } = {}) {
+export function writeState(status, { startedAt = null, last_spawn_times = null } = {}) {
   const now = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
   const state = readState() || {};
   state.status = status;
@@ -21,6 +21,7 @@ export function writeState(status, { startedAt = null } = {}) {
   // the state file was wiped and re-created mid-run by a non-startedAt poll.
   state.pid = process.pid;
   if (startedAt) state.started_at = startedAt;
+  if (last_spawn_times) state.last_spawn_times = last_spawn_times;
   try {
     mkdirSync(dirname(STATE_FILE), { recursive: true });
     const tmp = `${STATE_FILE}.${process.pid}.tmp`;
