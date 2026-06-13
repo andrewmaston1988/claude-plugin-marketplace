@@ -119,14 +119,14 @@ Read this row's `review_retries` from the pipeline DB:
     {{PROJECT}} --feature {{FEATURE}} --format json | head -50
 ```
 
-If any review-report filenames matched, inspect each filename's `retry<N>` token and pick the file whose `<N>` equals `review_retries - 1`:
+If any review-report filenames matched, inspect each filename's `retry<N>` token and pick the file whose `<N>` equals `review_retries`:
 
-> **Why `review_retries - 1`:** The report is written *before* `review-complete` increments the counter. A report written when `review_retries=0` is named `retry0`; after the bounce, the DB shows `review_retries=1`. Always match on `review_retries - 1`, not `review_retries`.
+> **Why `review_retries`:** The report filename uses a 1-based index (`retry$((N+1))`), so a report written when `review_retries=0` is named `retry1`. After the bounce the DB shows `review_retries=1`, which matches the filename directly.
 
 - **If a matching report exists**: this is a re-spawn after a `needs_work` verdict. Read the matching report in full. **You MUST list each Concern from the report as a sub-bullet under your implementation plan with the specific action you intend to take to address it.** Re-implementing the same shape that was rejected wastes the retry budget and parks the row at `manual`. The reviewer's Concerns take priority over any new improvements you might want to add.
 
   > **Cost of a missed `[BLOCKER]`:** Each unresolved `[BLOCKER]` triggers another `needs_work` verdict, burning a retry. When `review_retries` reaches `review_retry_budget`, the row parks at `manual` and a human must intervene — all work since the last manual fix is stalled. Every `[BLOCKER]` from the report must be demonstrably fixed before you call `dev-complete`.
-- **If filenames matched but no `<N>` equals `review_retries - 1`**: the reports are stale from earlier bounce cycles. Ignore.
+- **If filenames matched but no `<N>` equals `review_retries`**: the reports are stale from earlier bounce cycles. Ignore.
 - **If no report matched**: this is a fresh dev attempt (review_retries=0); proceed normally.
 
 ---

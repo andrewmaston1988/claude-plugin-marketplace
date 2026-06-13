@@ -173,7 +173,7 @@ Anything other than `ready_to_ship` or `needs_work` passed to `review-complete` 
 **Define the report path ONCE as a shell variable** — the path is used three times below (mkdir, heredoc target, `review-complete --report`, and in the notify message), and drift between any two of them causes a silent `Report not found` failure. **You MUST set `REPORT_PATH` in your shell session and reference `$REPORT_PATH` in every place it appears** — do not retype the path inline:
 
 ```bash
-REPORT_PATH={{REVIEW_REPORTS_DIR}}/review-report-<date>-{{FEATURE}}-retry<N>-${CORRELATION_ID}.md
+REPORT_PATH={{REVIEW_REPORTS_DIR}}/review-report-<date>-{{FEATURE}}-retry$((N+1))-${CORRELATION_ID}.md
 ```
 
 `{{REVIEW_REPORTS_DIR}}` is the absolute reports directory inside the code-review worktree; it's substituted by session-gen from a single config source so the reaper and the template can't drift. Never reconstruct this path inline — bash tool cwd resets between calls and a relative form would silently fail with `Report not found`.
@@ -211,7 +211,7 @@ review_verdict: <ready_to_ship | needs_work>
 PIPELINE_REVIEW_REPORT_SENTINEL_END
 # 4. Stage and commit the report.
 git add "$REPORT_PATH"
-git commit -m "code-review: {{FEATURE}} retry${N}"
+git commit -m "code-review: {{FEATURE}} retry$((N+1))"
 # 5. Return to the dev branch.
 git checkout {{BRANCH}}
 # 6. Restore WIP (only if step 1 actually stashed something).
