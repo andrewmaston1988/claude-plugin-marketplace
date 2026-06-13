@@ -208,9 +208,9 @@ test("reportPath: glob matches retry-N report when retryN given", () => {
   const { glob } = reportPath({
     kind: "code-review", project: "p", projectRoot: "/x/p", feature: "feat-y", retryN: 2, _config: {},
   });
-  ok(glob.test("review-report-2026-06-10-feat-y-retry2-corr123.md"));
-  equal(false, glob.test("review-report-2026-06-10-feat-y-retry0-corr123.md"));
+  ok(glob.test("review-report-2026-06-10-feat-y-retry3-corr123.md"));
   equal(false, glob.test("review-report-2026-06-10-feat-y-retry1-corr123.md"));
+  equal(false, glob.test("review-report-2026-06-10-feat-y-retry2-corr123.md"));
 });
 
 test("reportPath: glob matches across retries when retryN null", () => {
@@ -233,9 +233,9 @@ test("reportPath: feature with regex metachars is escaped in glob", () => {
   const { glob } = reportPath({
     kind: "code-review", project: "p", projectRoot: "/x/p", feature: "feat.x+y", retryN: 0, _config: {},
   });
-  ok(glob.test("review-report-2026-06-10-feat.x+y-retry0-corr.md"));
+  ok(glob.test("review-report-2026-06-10-feat.x+y-retry1-corr.md"));
   // The literal-dot escape means an *unrelated* feature like 'featXxXy' must not match.
-  equal(false, glob.test("review-report-2026-06-10-featXxXy-retry0-corr.md"));
+  equal(false, glob.test("review-report-2026-06-10-featXxXy-retry1-corr.md"));
 });
 
 // ── featureWorktreePath ──────────────────────────────────────────────────────
