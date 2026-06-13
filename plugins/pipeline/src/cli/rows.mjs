@@ -40,67 +40,6 @@ function gitErrDetail(r) {
   return stderr || stdout || "(no output)";
 }
 
-async function detectStaleRaise(reportPath, reviewWorktreeProbe, publishBranch, reviewRetries, feature) {
-  // Extract concern bullet points from a report and return 80-char normalized fingerprints.
-  function extractConcernHeadings(content) {
-    if (!content) return [];
-    const lines = content.split("\n");
-    // Match concern bullet lines: "- **[BLOCKER]** ..." or "- **[ADVISORY]** ..."
-    const concerns = lines
-      .filter(l => /^\s*-\s+\*\*\[(BLOCKER|ADVISORY|ABORT)\]\*\*/.test(l))
-      .map(l => l.replace(/^\s*-\s+/, "").trim().slice(0, 80).toLowerCase());
-    return concerns;
-  }
-
-  if (reviewRetries < 1) return "skip"; // No prior report to compare.
-
-  try {
-    // Read current report from disk or publish branch.
-    let currentContent = "";
-    if (existsSync(reportPath)) {
-      currentContent = readFileSync(reportPath, "utf8");
-    } else if (publishBranch && existsSync(reviewWorktreeProbe)) {
-      const relPath = relative(reviewWorktreeProbe, reportPath).replaceAll("\\", "/");
-      const r = git(["show", `${publishBranch}:${relPath}`], reviewWorktreeProbe);
-      if (r.status === 0) {
-        currentContent = r.stdout.toString();
-      }
-    }
-
-    // Read previous report from publish branch (retry<N-1>).
-    // Correlation IDs use format: <feature>-<datetime>Z (e.g., feature-20260613T160320Z.md).
-    // Simply replace retry<N> with retry<N-1>, keeping CORRELATION_ID intact.
-    let prevContent = "";
-    if (publishBranch && existsSync(reviewWorktreeProbe)) {
-      const relPath = relative(reviewWorktreeProbe, reportPath).replaceAll("\\", "/");
-      const prevPath = relPath.replace(`retry${reviewRetries}-`, `retry${reviewRetries - 1}-`);
-      const r = git(["show", `${publishBranch}:${prevPath}`], reviewWorktreeProbe);
-      if (r.status === 0) {
-        prevContent = r.stdout.toString();
-      }
-    }
-
-    if (!currentContent || !prevContent) return "skip"; // Can't read one or both reports.
-
-    const currentConcerns = new Set(extractConcernHeadings(currentContent));
-    const prevConcerns = new Set(extractConcernHeadings(prevContent));
-
-    // Check if every current concern matches a prior concern (all_stale = 100% match).
-    if (currentConcerns.size === 0) return "skip"; // No concerns to compare.
-
-    const allMatch = [...currentConcerns].every(c => prevConcerns.has(c));
-    if (allMatch) return "all_stale";
-
-    const someMatch = [...currentConcerns].some(c => prevConcerns.has(c));
-    if (someMatch) return "partial";
-
-    return "none";
-  } catch (e) {
-    process.stderr.write(`WARNING: detectStaleRaise failed: ${e.message}\n`);
-    return "skip"; // Never throw; detection is advisory only.
-  }
-}
-
 function backlogScan(db, project, plansDir) {
   let allRows;
   try { allRows = rowsList(db, project); } catch { return []; }
@@ -123,6 +62,72 @@ function backlogScan(db, project, plansDir) {
     if (!tracked.has(name)) untracked.push(name);
   }
   return untracked;
+}
+
+// Detect stale re-raises by comparing concern fingerprints across reports
+async function detectStaleRaise(reportPath, worktreePath, publishBranch, reviewRetries, feature) {
+  if (reviewRetries < 1) return "skip"; // no previous report to compare
+
+  try {
+    let currentConcerns = [];
+    let prevConcerns = [];
+
+    // Read current report
+    if (existsSync(reportPath)) {
+      const content = readFileSync(reportPath, "utf8");
+      currentConcerns = extractConcernHeadings(content);
+    } else {
+      return "skip"; // can't read current
+    }
+
+    // Read previous report from publish branch
+    const prevReportPath = reportPath.replace(
+      new RegExp(`retry${reviewRetries}`, "g"),
+      `retry${reviewRetries - 1}`
+    );
+    const relPath = relative(worktreePath, prevReportPath).replaceAll("\\", "/");
+    const r = git(
+      ["show", `${publishBranch}:${relPath}`],
+      worktreePath
+    );
+
+    if (r.status === 0) {
+      const prevContent = r.stdout.toString("utf8");
+      prevConcerns = extractConcernHeadings(prevContent);
+    } else {
+      return "skip"; // can't read previous
+    }
+
+    if (currentConcerns.length === 0) return "none";
+    if (prevConcerns.length === 0) return "none";
+
+    // Fingerprint: first 80 chars of normalized heading text
+    const fingerprint = (concern) =>
+      concern.toLowerCase().replace(/\s+/g, " ").trim().substring(0, 80);
+
+    const prevFingerprints = new Set(prevConcerns.map(fingerprint));
+    const currentFingerprints = currentConcerns.map(fingerprint);
+
+    const allMatch = currentFingerprints.every(fp => prevFingerprints.has(fp));
+    if (allMatch) return "all_stale";
+
+    const anyMatch = currentFingerprints.some(fp => prevFingerprints.has(fp));
+    return anyMatch ? "partial" : "none";
+  } catch (e) {
+    // Never throw — detection is advisory
+    return "skip";
+  }
+}
+
+function extractConcernHeadings(content) {
+  const lines = content.split("\n");
+  const concerns = [];
+  for (const line of lines) {
+    if (/^###\s/.test(line)) {
+      concerns.push(line.replace(/^###\s+/, ""));
+    }
+  }
+  return concerns;
 }
 
 // ── subcommands ────────────────────────────────────────────────────────────────
@@ -572,7 +577,7 @@ export async function run(cmd, argv) {
       && publishBranch
       && existsSync(reviewWorktreeProbe)
       && git(["cat-file", "-e", `${publishBranch}:${relative(reviewWorktreeProbe, reportPath).replaceAll("\\","/")}`], reviewWorktreeProbe).status === 0;
-    if (!existsSync(reportPath) && !reviewReportOnPublishBranch) {
+    if (!forceApprove && !existsSync(reportPath) && !reviewReportOnPublishBranch) {
       close(ctx.db);
       process.stderr.write(`ERROR: report not found at ${reportPath}\n`);
       await notify(`Review Failed: ${feature} — report missing`,
@@ -653,13 +658,18 @@ export async function run(cmd, argv) {
 
     // Branch on verdict
     try {
-      if (verdict === "ready_to_ship") {
-        const ok = rowUpdate(ctx.db, ctx.project, feature, { stage: "merge", review_verdict: "ready_to_ship", review_retries: 0, qa_pass: 1 });
+      if (verdict === "ready_to_ship" || forceApprove) {
+        const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+        const noteAppend = forceApprove ? ` [operator-override ${ts}]` : "";
+        const ok = rowUpdate(ctx.db, ctx.project, feature, { stage: "merge", review_verdict: "ready_to_ship", review_retries: 0, qa_pass: 1, notes_extra: noteAppend });
         if (!ok) {
           process.stderr.write(`ERROR: stage-set failed\n`);
           await notify(`Review Failed: ${feature} — stage-set error`,
             `Failed to advance to merge stage.`, "high");
           return 6;
+        }
+        if (forceApprove) {
+          process.stderr.write(`INFO: force-approve bypassed report check and advanced to merge\n`);
         }
       } else if (verdict === "abort") {
         const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
@@ -675,27 +685,11 @@ export async function run(cmd, argv) {
         }
         notifyTitle   = `Review Aborted: ${feature} — approach rejected`;
         notifyPriority = "high";
-      } else if (forceApprove) {
-        const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-        const overrideNote = `[operator-override ${ts}]`;
-        const ok = rowUpdate(ctx.db, ctx.project, feature, {
-          stage: "merge", review_verdict: "ready_to_ship", review_retries: 0,
-          notes_extra: overrideNote,
-        });
-        if (!ok) {
-          process.stderr.write(`ERROR: --force-approve stage-set to merge failed\n`);
-          await notify(`Review Force-Approved: ${feature} — stage-set error`,
-            `Failed to advance to merge stage with --force-approve.`, "high");
-          return 6;
-        }
-        notifyTitle = `Review Force-Approved: ${feature} — operator override`;
       } else if (reviewRetries + 1 < reviewRetryBudget) {
         // Stale-raise detection: if every concern in this report fingerprint-matches
         // the previous report, warn the operator before burning another dev cycle.
         if (reviewRetries >= 1 && publishBranch) {
-          const staleness = await detectStaleRaise(
-            reportPath, reviewWorktreeProbe, publishBranch, reviewRetries, feature
-          );
+          const staleness = await detectStaleRaise(reportPath, reviewWorktreeProbe, publishBranch, reviewRetries, feature);
           if (staleness === "all_stale") {
             await notify(
               `Review Warning: ${feature} — possible stale re-raise (retry ${reviewRetries + 1}/${reviewRetryBudget})`,
@@ -705,7 +699,6 @@ export async function run(cmd, argv) {
             );
           }
         }
-
         const ok = autoRequeueDevFromReview(ctx.db, ctx.project, feature, reviewRetries);
         if (!ok) {
           process.stderr.write(
