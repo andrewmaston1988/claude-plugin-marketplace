@@ -178,9 +178,8 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   const newStage = STAGE[stype] || "dev";
   const tools    = TOOLS[stype] || TOOLS.dev;
 
-  // Auto-escalate Haiku → Sonnet on second review retry
-  const HAIKU_MODELS = new Set(["claude-haiku-4-5-20251001"]);
-  if (stype === "dev" && (row.review_retries || 0) >= 2 && HAIKU_MODELS.has(model)) {
+  // Auto-escalate any Haiku variant → Sonnet on second review retry
+  if (stype === "dev" && (row.review_retries || 0) >= 2 && /haiku/i.test(model)) {
     const newModel = "claude-sonnet-4-6";
     rowUpdate(db, project, feature, { d_model: newModel });
     logFn(`[${project}] '${feature}' auto-escalating d_model ${model}→${newModel} (review_retries=${row.review_retries})`, "WARN");
