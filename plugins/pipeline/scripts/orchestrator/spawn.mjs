@@ -167,10 +167,12 @@ export function isProtectedBranch(branch, targetBranch, defaultBranch) {
 
 // Spawn a Claude session for one queued pipeline row. Takes the unified DB,
 // project name, registered project root, and pipeline row.
-export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRun, logFn }) {
+export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRun, logFn, stageSessionType }) {
   const feature  = row.feature;
   const notes    = row.notes_extra || "";
-  const stype    = sessionTypeFromNotes(notes);
+  // Prefer stage-mapped type; fall back to notes-based lookup for queued rows
+  // and backward compatibility with legacy rows that carry type= hints.
+  const stype    = stageSessionType || sessionTypeFromNotes(notes);
   let model      = modelFromNotes(notes, project, feature, stype, logFn, row);
   const budget   = budgetFromNotes(notes);
   const newStage = STAGE[stype] || "dev";
