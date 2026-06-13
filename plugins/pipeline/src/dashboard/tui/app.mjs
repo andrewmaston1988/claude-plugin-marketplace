@@ -28,7 +28,7 @@ import { loadProjects, loadRows } from "../shared/load-rows.mjs";
 import { loadBacklog } from "../shared/load-backlog.mjs";
 import { loadOrchState } from "../shared/load-orch-state.mjs";
 import { loadActiveSessions } from "../shared/load-sessions.mjs";
-import { loadProgressBySlug, progressKey } from "../shared/load-progress.mjs";
+import { loadProgressBySlug, loadStepsBySlug, sliceSteps, progressKey } from "../shared/load-progress.mjs";
 import { agentsViewModel } from "../shared/view-model/agents.mjs";
 import { pipelineViewModel, sortRows, createTransitionTracker } from "../shared/view-model/pipeline.mjs";
 import { orchViewModel } from "../shared/view-model/orch.mjs";
@@ -96,7 +96,7 @@ function _renderHeader(project, allProjects) {
 
 function _renderFooter() {
   const k = (key, label) => `${bg(C_KEY_BG, fg("#ffffff", ` ${key} `))} ${fg(C_DIM, label)}`;
-  return ` ${k("q", "Quit")} ${k("r", "Refresh")} ${k("Tab", "Next Project")} ${k("d", "Done")} ${k("↑↓", "Cursor")} ${k("Enter", "Actions")}`;
+  return ` ${k("q", "Quit")} ${k("r", "Refresh")} ${k("Tab", "Next Project")} ${k("d", "Done")} ${k("↑↓", "Cursor")} ${k("Enter", "Actions")} ${k("[]", "Focus Agent")}`;
 }
 
 // ── agents panel (left top) ─────────────────────────────────────────────────
@@ -142,17 +142,13 @@ function _renderOrchView(orch, panelW) {
   return `${lead}${seg1}${pad}${fg(C_DIM, sep)}${seg2}${pad}${fg(C_DIM, sep)}${seg3}`;
 }
 
-function _renderAgentsPanel(sessions, orch, progressBySlug, panelW, view) {
+function _renderAgentsPanel(sessions, orch, progressBySlug, panelW, view, focusedFeature, focusedSteps, focusedOverflow, focusedOverflowDone) {
   if (view === "orch") return _renderOrchView(orch, panelW);
   const models = agentsViewModel(sessions, progressBySlug, { pidAlive: _pidAlive });
   if (models.length === 0) return fg(C_DIM, "  no sessions");
-  // Column widths — name flexes to fill panelW.
-  //   "  <sp> <name flex>  <bar 8>  <count 6 right>  <time 6 right>"
   const W_BAR   = 8;
   const W_COUNT = 6;
   const W_TIME  = 6;
-  // Leading space is just one cell so the icon sits flush against the
-  // panel's left padding (single-cell inset).
   const SEPS    = 1 /* leading " " */ + 1 /* sp+name sep */ + 2 + 2 + 2 + 1 /* trailing margin */;
   const W_NAME  = Math.max(panelW - 1 /* sp */ - W_BAR - W_COUNT - W_TIME - SEPS, 12);
   const lines = [];
@@ -164,6 +160,25 @@ function _renderAgentsPanel(sessions, orch, progressBySlug, panelW, view) {
     const count   = `${m.progress.step}/${m.progress.total}`.padStart(W_COUNT);
     const time    = m.age.padStart(W_TIME);
     lines.push(` ${sp} ${fg(m.glyph.nameColor, name)}  ${bar}  ${fg(C_DIM, count)}  ${fg(m.glyph.timeColor, time)}`);
+    if (m.feature === focusedFeature && focusedSteps && focusedSteps.length > 0) {
+      const textW = Math.max(panelW - 6, 10);
+      let nextShown = false;
+      for (const s of focusedSteps) {
+        let glyph, stepColor;
+        if (s.state === "completed") {
+          glyph = fg(C_GREEN, "✓"); stepColor = C_GREEN;
+        } else if (s.state === "in_progress" || !nextShown) {
+          glyph = fg(C_GREEN, spin()); stepColor = C_TEXT; nextShown = true;
+        } else {
+          glyph = fg(C_DIM, queueSpin()); stepColor = C_DIM;
+        }
+        lines.push(`   ${glyph} ${fg(stepColor, escapeTags(_truncate(s.text, textW)))}`);
+      }
+      if (focusedOverflow > 0) {
+        const doneTag = focusedOverflowDone > 0 ? ` (${focusedOverflowDone} done)` : "";
+        lines.push(`   ${fg(C_DIM, `+${focusedOverflow} more${doneTag}`)}`);
+      }
+    }
   }
   return lines.join("\n");
 }
@@ -297,6 +312,10 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
   let cachedProgress = {};
   let cachedGitLog = [];
   let cachedAgentLog = [];
+  let focusedFeature = null;
+  let cachedFocusedSteps = null;
+  let cachedFocusedOverflow = 0;
+  let cachedFocusedOverflowDone = 0;
 
   // Clear the visible screen + scrollback before initialising blessed so the
   // dashboard renders into a clean viewport. Without this, prior terminal
@@ -410,6 +429,15 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
   let dataIntervalHandle = null;
   let animIntervalHandle = null;
 
+  function _loadFocusedSteps() {
+    const s = cachedSessions.find(s => s.is_active === 1 && s.feature === focusedFeature);
+    const slug = s ? progressKey(s) : null;
+    const { visible, overflow, overflowDone } = sliceSteps(loadStepsBySlug(db, slug));
+    cachedFocusedSteps = visible;
+    cachedFocusedOverflow = overflow;
+    cachedFocusedOverflowDone = overflowDone;
+  }
+
   function fetchData() {
     const project = projects[selectedProjectIdx];
     const dbRows = loadRows(db, project.name, { showAll: true });
@@ -423,6 +451,11 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
     cachedProgress = loadProgressBySlug(db, slugs);
     cachedGitLog   = loadGitLog(project.root_path, { limit: 8 });
     cachedAgentLog = loadAgentLog(cachedSessions, project.root_path, { limit: 20 });
+    if (focusedFeature === null) {
+      const first = cachedSessions.find(s => s.is_active === 1);
+      if (first) focusedFeature = first.feature;
+    }
+    _loadFocusedSteps();
   }
 
   function renderFrame() {
@@ -434,7 +467,7 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
     footer.setContent(_renderFooter());
 
     _centerLabel(agentsBox,    ` ${_agentsPanelLabel(cachedSessions, cachedOrch, agentsView)} `);
-    agentsBox.setContent(_renderAgentsPanel(cachedSessions, cachedOrch, cachedProgress, agentsBox.width - 4, agentsView));
+    agentsBox.setContent(_renderAgentsPanel(cachedSessions, cachedOrch, cachedProgress, agentsBox.width - 4, agentsView, focusedFeature, cachedFocusedSteps, cachedFocusedOverflow, cachedFocusedOverflowDone));
 
     _centerLabel(agentLogBox,  ` ${fg(C_HEADER_HL, " activity ")} `);
     agentLogBox.setContent(_renderAgentLogPanel(cachedAgentLog, agentLogBox.width - 4));
@@ -501,6 +534,24 @@ export function runTui({ paths, refreshMs = 10000 } = {}) {
       pipelineBox.focus();
       refresh();
     }
+  });
+  screen.key(["["], () => {
+    if (menuOpen) return;
+    const active = cachedSessions.filter(s => s.is_active === 1);
+    if (active.length === 0) return;
+    const idx = active.findIndex(s => s.feature === focusedFeature);
+    focusedFeature = active[Math.max(0, idx - 1)].feature;
+    _loadFocusedSteps();
+    renderFrame();
+  });
+  screen.key(["]"], () => {
+    if (menuOpen) return;
+    const active = cachedSessions.filter(s => s.is_active === 1);
+    if (active.length === 0) return;
+    const idx = active.findIndex(s => s.feature === focusedFeature);
+    focusedFeature = active[Math.min(active.length - 1, idx + 1)].feature;
+    _loadFocusedSteps();
+    renderFrame();
   });
   // `o` toggles the agents panel between agent-list view and orchestrator
   // summary view. To open the orchestrator start/stop modal, press Enter
