@@ -4,9 +4,12 @@ import { close, rowGet, rowsList, rowUpdate } from "../../scripts/pipeline-db/in
 import { getFlag, formatRow } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 
+const VALID_EFFORTS = new Set(["low", "medium", "high", "xhigh", "max"]);
+
 function buildStageSetFields(newStage, opts = {}) {
   const { notes, qaPass, branch, rModel, dModel, qModel, rvwModel,
-          reviewVerdict, reviewRetries, dependsOn, rebaseRequired, targetBranch } = opts;
+          reviewVerdict, reviewRetries, dependsOn, rebaseRequired, targetBranch,
+          rEffort, dEffort, qEffort } = opts;
   const fields = { stage: newStage };
   if (branch !== null && branch !== undefined && branch !== "—") fields.branch = branch;
   if (qaPass !== null && qaPass !== undefined) {
@@ -29,6 +32,14 @@ function buildStageSetFields(newStage, opts = {}) {
   }
   if (reviewRetries !== null && reviewRetries !== undefined) {
     fields.review_retries = parseInt(String(reviewRetries), 10);
+  }
+  for (const [col, val] of [["r_effort", rEffort], ["d_effort", dEffort], ["q_effort", qEffort]]) {
+    if (val !== null && val !== undefined) {
+      if (!VALID_EFFORTS.has(val)) {
+        throw new Error(`invalid ${col}: ${val}`);
+      }
+      fields[col] = val;
+    }
   }
   return fields;
 }
@@ -61,6 +72,9 @@ export async function run(cmd, argv) {
         dModel:         getFlag("--d-model", flags),
         qModel:         getFlag("--q-model", flags),
         rvwModel:       getFlag("--rvw-model", flags),
+        rEffort:        getFlag("--r-effort", flags),
+        dEffort:        getFlag("--d-effort", flags),
+        qEffort:        getFlag("--q-effort", flags),
         reviewVerdict:  getFlag("--review-verdict", flags),
         reviewRetries:  getFlag("--review-retries", flags),
         dependsOn:      getFlag("--depends", flags),
