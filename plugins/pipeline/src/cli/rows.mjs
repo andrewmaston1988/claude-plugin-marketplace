@@ -41,14 +41,15 @@ function gitErrDetail(r) {
 }
 
 async function detectStaleRaise(reportPath, reviewWorktreeProbe, publishBranch, reviewRetries, feature) {
-  // Extract concern headings from a report and return 80-char normalized fingerprints.
+  // Extract concern bullet points from a report and return 80-char normalized fingerprints.
   function extractConcernHeadings(content) {
     if (!content) return [];
     const lines = content.split("\n");
-    const headings = lines
-      .filter(l => /^#+\s+/.test(l) && !l.includes("Concern Continuity") && !l.includes("Code Review Report"))
-      .map(l => l.replace(/^#+\s+/, "").trim().slice(0, 80).toLowerCase());
-    return headings;
+    // Match concern bullet lines: "- **[BLOCKER]** ..." or "- **[ADVISORY]** ..."
+    const concerns = lines
+      .filter(l => /^\s*-\s+\*\*\[(BLOCKER|ADVISORY|ABORT)\]\*\*/.test(l))
+      .map(l => l.replace(/^\s*-\s+/, "").trim().slice(0, 80).toLowerCase());
+    return concerns;
   }
 
   if (reviewRetries < 1) return "skip"; // No prior report to compare.
@@ -67,10 +68,12 @@ async function detectStaleRaise(reportPath, reviewWorktreeProbe, publishBranch, 
     }
 
     // Read previous report from publish branch (retry<N-1>).
+    // Correlation IDs use format: <feature>-<datetime>Z (e.g., feature-20260613T160320Z.md).
+    // Simply replace retry<N> with retry<N-1>, keeping CORRELATION_ID intact.
     let prevContent = "";
     if (publishBranch && existsSync(reviewWorktreeProbe)) {
       const relPath = relative(reviewWorktreeProbe, reportPath).replaceAll("\\", "/");
-      const prevPath = relPath.replace(new RegExp(`retry${reviewRetries}(?=[^/]*-\\d+\\.md$)`), `retry${reviewRetries - 1}`);
+      const prevPath = relPath.replace(`retry${reviewRetries}-`, `retry${reviewRetries - 1}-`);
       const r = git(["show", `${publishBranch}:${prevPath}`], reviewWorktreeProbe);
       if (r.status === 0) {
         prevContent = r.stdout.toString();
@@ -676,7 +679,7 @@ export async function run(cmd, argv) {
         const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
         const overrideNote = `[operator-override ${ts}]`;
         const ok = rowUpdate(ctx.db, ctx.project, feature, {
-          stage: "merge", review_verdict: "ready_to_ship", review_retries: 0, qa_pass: 1,
+          stage: "merge", review_verdict: "ready_to_ship", review_retries: 0,
           notes_extra: overrideNote,
         });
         if (!ok) {
