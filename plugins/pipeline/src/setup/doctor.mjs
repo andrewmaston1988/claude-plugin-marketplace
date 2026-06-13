@@ -370,6 +370,19 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
     push("governor-env-contract", true, false, "governor disabled — skipped");
   }
 
+  // 16. zombie-rows: stage=done without merge, orphan branches, stuck merge-ready
+  if (db) {
+    try {
+      const { runDoctorChecks } = await import("../doctor/index.mjs");
+      const zombieResults = await runDoctorChecks({ db, paths });
+      results.push(...zombieResults);
+    } catch (e) {
+      push("zombie-rows-check", false, true, `check failed: ${e.message || "unknown error"}`);
+    }
+  } else {
+    push("zombie-rows-check", true, false, "(skipped — no pipeline DB)");
+  }
+
   if (weOpenedDb && db) {
     try { close(db); } catch {}
   }
