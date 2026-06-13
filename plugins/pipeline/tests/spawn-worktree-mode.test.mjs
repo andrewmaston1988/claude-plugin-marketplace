@@ -85,7 +85,7 @@ test("stash-switchback dance: pop conflict leaves stash preserved", () => {
     writeFileSync(join(tmp, "clash.txt"), "review-published\n");
     writeFileSync(join(tmp, "reports", "review-report.md"), "verdict\n");
     git(tmp, "add", "clash.txt", "reports/review-report.md");
-    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "code-review: feat-y retry0");
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "code-review: feat-y retry1");
     // Step 4: back to dev branch. clash.txt from publish branch is gone
     // because dev branch never had it... actually checkout removes it. Force
     // an untracked clash by writing it after the checkout.
@@ -101,7 +101,7 @@ test("stash-switchback dance: pop conflict leaves stash preserved", () => {
 
     // Publish-branch commit landed.
     const log = git(tmp, "log", "--format=%s", "code-review/feat-y");
-    ok(log.includes("code-review: feat-y retry0"), `publish commit missing: ${log}`);
+    ok(log.includes("code-review: feat-y retry1"), `publish commit missing: ${log}`);
   } finally {
     try { rmSync(tmp, { recursive: true, force: true, maxRetries: 3 }); } catch {}
   }
@@ -175,9 +175,9 @@ test("review-session dance: write-after-stash ordering reaches the publish branc
     writeFileSync(join(tmp, "reports", "review-report.md"), "verdict: ready_to_ship\n");
     // Step 4: add + commit must succeed.
     git(tmp, "add", "reports/review-report.md");
-    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "code-review: feat-y retry0");
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "code-review: feat-y retry1");
     const log = git(tmp, "log", "--format=%s", "code-review/feat-y");
-    ok(log.includes("code-review: feat-y retry0"), `publish commit missing: ${log}`);
+    ok(log.includes("code-review: feat-y retry1"), `publish commit missing: ${log}`);
   } finally {
     try { rmSync(tmp, { recursive: true, force: true, maxRetries: 3 }); } catch {}
   }
@@ -267,10 +267,10 @@ test("post-dance: report absent from working tree but reachable from publish bra
         "stash", "push", "-u", "-m", "auto: code-review-feat-y");
     git(tmp, "checkout", "-B", "code-review/feat-y");
     mkdirSync(join(tmp, "reports"), { recursive: true });
-    const reportRel = "reports/review-report-2026-06-10-feat-y-retry0.md";
+    const reportRel = "reports/review-report-2026-06-10-feat-y-retry1.md";
     writeFileSync(join(tmp, reportRel), "verdict: needs_work\n");
     git(tmp, "add", reportRel);
-    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "code-review: feat-y retry0");
+    git(tmp, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", "code-review: feat-y retry1");
     git(tmp, "checkout", "autonomous/feat-y");
 
     // Post-dance precondition: file is GONE from working tree on the dev branch.

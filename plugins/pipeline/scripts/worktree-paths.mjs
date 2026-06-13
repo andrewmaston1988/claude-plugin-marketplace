@@ -189,7 +189,8 @@ export function handlerWorktreePath({ project, projectRoot, kind, feature, _conf
 
 // Single source of truth for review-report and test-report locations.
 // Returns { wt, dir, glob, publishBranch }. Templates / session-gen / reaper all call this.
-// retryN narrows the code-review glob to a specific cycle; null matches all.
+// retryN is the raw DB value (0-based); null matches all cycles. The glob matches
+// retry<N+1> in the filename because filenames use 1-based human-readable indexing.
 // Phase 3b: reports live under the single feature worktree (featureWorktreePath);
 // `publishBranch` is the side-branch the stash-switchback dance commits the report to.
 export function reportPath({ kind, feature, projectRoot, project, retryN, _config } = {}) {
@@ -208,7 +209,7 @@ export function reportPath({ kind, feature, projectRoot, project, retryN, _confi
     ? new RegExp(
         retryN == null
           ? `^review-report-.*${featureEsc}.*\\.md$`
-          : `^review-report-.*${featureEsc}.*retry${retryN}.*\\.md$`,
+          : `^review-report-.*${featureEsc}.*retry${retryN + 1}.*\\.md$`,
       )
     : new RegExp(`^test-report-.*${featureEsc}.*\\.md$`);
   const publishBranchTemplate = cfg.report_publish_branch_template || DEFAULT_PUBLISH_BRANCH_TEMPLATE;
