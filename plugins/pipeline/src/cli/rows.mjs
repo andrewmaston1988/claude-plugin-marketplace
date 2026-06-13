@@ -40,6 +40,64 @@ function gitErrDetail(r) {
   return stderr || stdout || "(no output)";
 }
 
+async function detectStaleRaise(reportPath, reviewWorktreeProbe, publishBranch, reviewRetries, feature) {
+  // Extract concern headings from a report and return 80-char normalized fingerprints.
+  function extractConcernHeadings(content) {
+    if (!content) return [];
+    const lines = content.split("\n");
+    const headings = lines
+      .filter(l => /^#+\s+/.test(l) && !l.includes("Concern Continuity") && !l.includes("Code Review Report"))
+      .map(l => l.replace(/^#+\s+/, "").trim().slice(0, 80).toLowerCase());
+    return headings;
+  }
+
+  if (reviewRetries < 1) return "skip"; // No prior report to compare.
+
+  try {
+    // Read current report from disk or publish branch.
+    let currentContent = "";
+    if (existsSync(reportPath)) {
+      currentContent = readFileSync(reportPath, "utf8");
+    } else if (publishBranch && existsSync(reviewWorktreeProbe)) {
+      const relPath = relative(reviewWorktreeProbe, reportPath).replaceAll("\\", "/");
+      const r = git(["show", `${publishBranch}:${relPath}`], reviewWorktreeProbe);
+      if (r.status === 0) {
+        currentContent = r.stdout.toString();
+      }
+    }
+
+    // Read previous report from publish branch (retry<N-1>).
+    let prevContent = "";
+    if (publishBranch && existsSync(reviewWorktreeProbe)) {
+      const relPath = relative(reviewWorktreeProbe, reportPath).replaceAll("\\", "/");
+      const prevPath = relPath.replace(new RegExp(`retry${reviewRetries}(?=[^/]*-\\d+\\.md$)`), `retry${reviewRetries - 1}`);
+      const r = git(["show", `${publishBranch}:${prevPath}`], reviewWorktreeProbe);
+      if (r.status === 0) {
+        prevContent = r.stdout.toString();
+      }
+    }
+
+    if (!currentContent || !prevContent) return "skip"; // Can't read one or both reports.
+
+    const currentConcerns = new Set(extractConcernHeadings(currentContent));
+    const prevConcerns = new Set(extractConcernHeadings(prevContent));
+
+    // Check if every current concern matches a prior concern (all_stale = 100% match).
+    if (currentConcerns.size === 0) return "skip"; // No concerns to compare.
+
+    const allMatch = [...currentConcerns].every(c => prevConcerns.has(c));
+    if (allMatch) return "all_stale";
+
+    const someMatch = [...currentConcerns].some(c => prevConcerns.has(c));
+    if (someMatch) return "partial";
+
+    return "none";
+  } catch (e) {
+    process.stderr.write(`WARNING: detectStaleRaise failed: ${e.message}\n`);
+    return "skip"; // Never throw; detection is advisory only.
+  }
+}
+
 function backlogScan(db, project, plansDir) {
   let allRows;
   try { allRows = rowsList(db, project); } catch { return []; }
@@ -482,6 +540,7 @@ export async function run(cmd, argv) {
     let message         = getFlag("--message", flags);
     const priority      = getFlag("--priority", flags) || "default";
     const publishBranch = getFlag("--publish-branch", flags) || "";
+    const forceApprove  = flags.includes("--force-approve");
     let notifyTitle     = title;
     let notifyPriority  = priority;
 
@@ -613,7 +672,37 @@ export async function run(cmd, argv) {
         }
         notifyTitle   = `Review Aborted: ${feature} — approach rejected`;
         notifyPriority = "high";
+      } else if (forceApprove) {
+        const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
+        const overrideNote = `[operator-override ${ts}]`;
+        const ok = rowUpdate(ctx.db, ctx.project, feature, {
+          stage: "merge", review_verdict: "ready_to_ship", review_retries: 0, qa_pass: 1,
+          notes_extra: overrideNote,
+        });
+        if (!ok) {
+          process.stderr.write(`ERROR: --force-approve stage-set to merge failed\n`);
+          await notify(`Review Force-Approved: ${feature} — stage-set error`,
+            `Failed to advance to merge stage with --force-approve.`, "high");
+          return 6;
+        }
+        notifyTitle = `Review Force-Approved: ${feature} — operator override`;
       } else if (reviewRetries + 1 < reviewRetryBudget) {
+        // Stale-raise detection: if every concern in this report fingerprint-matches
+        // the previous report, warn the operator before burning another dev cycle.
+        if (reviewRetries >= 1 && publishBranch) {
+          const staleness = await detectStaleRaise(
+            reportPath, reviewWorktreeProbe, publishBranch, reviewRetries, feature
+          );
+          if (staleness === "all_stale") {
+            await notify(
+              `Review Warning: ${feature} — possible stale re-raise (retry ${reviewRetries + 1}/${reviewRetryBudget})`,
+              `All concerns in retry${reviewRetries + 1} fingerprint-match retry${reviewRetries}. ` +
+              `Check the report before the next dev cycle starts.`,
+              "low"
+            );
+          }
+        }
+
         const ok = autoRequeueDevFromReview(ctx.db, ctx.project, feature, reviewRetries);
         if (!ok) {
           process.stderr.write(
