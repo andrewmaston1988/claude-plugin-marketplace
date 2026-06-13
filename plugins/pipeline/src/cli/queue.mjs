@@ -66,13 +66,7 @@ export function queueDepsExtract(planFilePath) {
 
   slugs = [...crossSlugs, ...slugs];
 
-  if (!slugs.length) {
-    process.stderr.write(
-      `WARN: queue-deps-extract: *Prerequisites:* annotation found in ${basename(planFilePath)} ` +
-      "but no plan slugs could be parsed -- check the plan's formatting or pass --depends manually.\n"
-    );
-    return "";
-  }
+  if (!slugs.length) return null;
 
   return [...new Set(slugs)].join(",");
 }
@@ -252,7 +246,15 @@ export async function run(cmd, argv) {
   if (cmd === "queue-deps-extract") {
     const [planFile] = argv;
     if (!planFile) { process.stderr.write("usage: queue-deps-extract <plan-file>\n"); return 1; }
-    process.stdout.write(`depends=${queueDepsExtract(planFile)}\n`);
+    const deps = queueDepsExtract(planFile);
+    if (deps === null) {
+      process.stderr.write(
+        `WARN: queue-deps-extract: *Prerequisites:* annotation found in ${basename(planFile)} ` +
+        "but no plan slugs could be parsed -- check the plan's formatting or pass --depends manually.\n"
+      );
+      return 1;
+    }
+    process.stdout.write(`depends=${deps}\n`);
     return 0;
   }
 
@@ -335,7 +337,16 @@ export async function run(cmd, argv) {
 
     // CLI flag wins; fall back to plan-content extraction if a flag is absent.
     let branch  = branchFlag  ?? queueBranchExtract(planPath);
-    let depends = dependsFlag ?? queueDepsExtract(planPath);
+    const rawDepends = dependsFlag !== null ? dependsFlag : queueDepsExtract(planPath);
+    if (rawDepends === null) {
+      close(ctx.db);
+      process.stderr.write(
+        `ERROR: queue-plan: *Prerequisites:* annotation found in ${basename(planPath)} ` +
+        "but no plan slugs could be parsed -- fix the annotation or pass --depends manually.\n"
+      );
+      return 1;
+    }
+    let depends = rawDepends;
     // --title lets an operator set the PR title at queue time without editing
     // the plan. Flag wins, else the plan's *Title:* annotation; when both are
     // absent, merge falls back to the feature slug (e.g. an unhelpful 'PROJ-104').
@@ -538,7 +549,15 @@ export async function run(cmd, argv) {
       // Strip any leading `!` (strict marker) — within a cluster, in-cluster
       // prerequisites are made strict by the auto-wired --waits-on regardless, so
       // the marker must not break feature-name matching in the graph.
-      const prereqs = (queueDepsExtract(planPath) || "").split(",").map(s => s.trim().replace(/^!/, "")).filter(Boolean);
+      const rawPrereqs = queueDepsExtract(planPath);
+      if (rawPrereqs === null) {
+        process.stderr.write(
+          `ERROR: queue-cluster: *Prerequisites:* annotation found in ${basename(planPath)} ` +
+          "but no plan slugs could be parsed -- fix the annotation before clustering.\n"
+        );
+        return 1;
+      }
+      const prereqs = (rawPrereqs || "").split(",").map(s => s.trim().replace(/^!/, "")).filter(Boolean);
       nodes.push({ feature, planPath, prereqs });
     }
 

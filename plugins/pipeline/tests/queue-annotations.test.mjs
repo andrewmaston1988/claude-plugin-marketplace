@@ -44,3 +44,13 @@ test("queueDepsExtract: autonomous-only still strips to bare slug", () => {
   withPlan("# T\n*Prerequisites:* `autonomous/theme-refactor`\n", (p) =>
     equal(queueDepsExtract(p), "theme-refactor"));
 });
+
+test("queueDepsExtract: annotation present but value unparseable → null", () => {
+  withPlan("# T\n*Prerequisites:* see the other plan\n", (p) =>
+    equal(queueDepsExtract(p), null));
+});
+
+test("queueDepsExtract: no annotation at all → empty string (not null)", () => {
+  withPlan("# T\n\nno prerequisites line at all\n", (p) =>
+    equal(queueDepsExtract(p), ""));
+});
