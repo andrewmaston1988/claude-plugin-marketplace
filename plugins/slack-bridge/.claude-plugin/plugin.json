@@ -1,7 +1,6 @@
 {
   "name": "slack-bridge",
   "description": "Two-way Slack ↔ Claude Code bridge via Socket Mode. Zero dependencies, Node 22+.",
-  "version": "0.1.0",
   "author": {
     "name": "Andrew Maston",
     "email": "andrew.maston1988@gmail.com"

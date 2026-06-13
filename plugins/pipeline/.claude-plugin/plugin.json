@@ -1,7 +1,6 @@
 {
   "name": "pipeline",
   "description": "Pipeline orchestration — queue, dev/test/review automation, merge runner, spend governance.",
-  "version": "0.1.0",
   "author": {
     "name": "Andrew Maston",
     "email": "andrew.maston1988@gmail.com"
