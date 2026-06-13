@@ -65,8 +65,7 @@ test("reaper: dev-no-handoff inside review-bounce → recovers to review", () =>
       "SELECT stage, notes_extra FROM pipeline_rows WHERE project=? AND feature=?"
     ).get("p", "feat-x");
 
-    strictEqual(row.stage, "queued", "row should be requeued, not parked");
-    match(row.notes_extra, /\btype=review\b/, "notes_extra should now route to review");
+    strictEqual(row.stage, "review", "row should advance to review directly (stage-driven spawn)");
     match(row.notes_extra, /dev-no-handoff-recovered/, "notes_extra should carry an audit marker");
     ok(
       logs.some(l => l.msg.includes("advancing to review") && l.level === "WARN"),
