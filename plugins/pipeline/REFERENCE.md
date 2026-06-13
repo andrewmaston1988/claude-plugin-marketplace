@@ -16,12 +16,13 @@ queued → dev → review → test → merge → done
                manual (parked-review-budget-exhausted)
 ```
 
-- **`queued`** — row is waiting; orchestrator will spawn a session of the type named in the row.
-- **`dev`** — autonomous dev session implements the plan on `autonomous/<feature>`.
+- **`queued`** — row is waiting; orchestrator will spawn a dev session by default, or research/review/test if `type=` is in notes_extra (legacy) or resolved from the queue command.
+- **`dev`** — autonomous dev session implements the plan on `autonomous/<feature>`. If a dev session dies without handoff (no review verdict), the orchestrator automatically recovers to `review` if within retry budget, otherwise parks at `manual`.
+- **`research`** — autonomous research session (spawned directly from `dev` when row stage is `research`). Dies without auto-recovery — parks at `manual` on PID death.
+- **`test`** — autonomous test session runs the suite and sets `qa_pass` (spawned directly from `review` when row stage is `test`).
 - **`review`** — autonomous peer-review pass on the dev diff. Emits one of two verdicts:
   - `ready_to_ship` → advances to `test`.
   - `needs_work` → bounces back to `dev` (`review_retries += 1`). After `review_retry_budget` exhausted, parks at `manual`.
-- **`test`** — autonomous test session runs the suite and sets `qa_pass`.
 - **`manual`** — operator-actionable parking lot (test failure, reviewer-stuck, budget exhausted, or `[blocked: ...]`).
 - **`merge`** — passed `qa_pass=true`, waiting for squash-merge via `/merge`.
 - **`done`** — merged to main; row preserved for audit.

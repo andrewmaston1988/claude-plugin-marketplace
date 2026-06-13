@@ -27,6 +27,10 @@ import { spawnGovernor, spawnMonthlyGovernor } from "./governor.mjs";
 
 const POLL_DEFAULT = 30;
 const MAX_CONCURRENT_DEFAULT = 3;
+const SPAWNABLE_STAGES = new Set(["queued", "research", "dev", "test", "review"]);
+const STAGE_SESSION_TYPE = { research: "research", dev: "dev", test: "test", review: "review" };
+const SPAWN_GRACE_PERIOD_SECS = 60;
+const LAST_SPAWN_TIMES = new Map(); // Map<"project:feature", timestamp>
 
 // ── logger ────────────────────────────────────────────────────────────────────
 
@@ -188,7 +192,34 @@ async function pollOnce({
     const nBlocked   = allQueued.length - queued.length;
     if (nBlocked) logFn(`[${project}] ${nBlocked} queued row(s) holding on unmet deps`);
 
-    if (!queued.length) continue;
+    // Collect spawnable rows: queued (deps-met) + any non-queued stage needing spawn
+    const spawnableRows = [
+      ...queued,
+      ...rows.filter(r => {
+        if (!SPAWNABLE_STAGES.has(r.stage) || r.stage === "queued") return false;
+        if (!depsMet(r, rows, logFn, projectRoot, db)) return false;
+        // Grace-period guard: skip if last spawn was within SPAWN_GRACE_PERIOD_SECS
+        const key = `${project}:${r.feature}`;
+        const lastSpawn = LAST_SPAWN_TIMES.get(key);
+        const now = Date.now();
+        if (lastSpawn && (now - lastSpawn) < (SPAWN_GRACE_PERIOD_SECS * 1000)) {
+          logFn(`[${project}] '${r.feature}' at stage ${r.stage} grace-period active — deferring spawn`);
+          return false;
+        }
+        // Review retry-budget guard: skip if review_retries >= review_retry_budget
+        if (r.stage === "review") {
+          const retries = r.review_retries || 0;
+          const budget = r.review_retry_budget || 3;
+          if (retries >= budget) {
+            logFn(`[${project}] '${r.feature}' review retries exhausted (${retries}/${budget}) — skipping spawn`);
+            return false;
+          }
+        }
+        return true;
+      }),
+    ];
+
+    if (!spawnableRows.length) continue;
 
     if (projectIsActive(db, project)) {
       logFn(`[${project}] session active — skipping`);
@@ -201,7 +232,7 @@ async function pollOnce({
       continue;
     }
 
-    const row = queued[0];
+    const row = spawnableRows[0];
     const rowForSession = { ...row, notes: row.notes_extra || "", plan: row.plan_file || "" };
     // cwd = spawn worktree path. Same path the orchestrator hands to spawnSession
     // below, so the template's `{{CWD}}/reports/...` resolves to the actual
@@ -214,6 +245,7 @@ async function pollOnce({
       projectRoot,
       dry: dryRun,
       cwd: cwdForSession,
+      stage: row.stage,
     });
 
     if (!sessionFile) {
@@ -224,6 +256,9 @@ async function pollOnce({
     spawnSession(project, row, sessionFile, projectRoot, {
       db, dryRun, logFn,
     });
+    // Record spawn time for grace-period tracking
+    const spawnKey = `${project}:${row.feature}`;
+    LAST_SPAWN_TIMES.set(spawnKey, Date.now());
   }
 
   // Second pass: stage=merge rows. One merge per project per tick.

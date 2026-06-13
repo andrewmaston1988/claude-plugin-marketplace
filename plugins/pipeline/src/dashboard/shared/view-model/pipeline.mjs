@@ -82,9 +82,11 @@ export function pipelineViewModel(rows, { showAll = false, sessions = [], tracke
     let stageColor = STAGE_COLOR[r.stage] || PALETTE.text;
     let stageBold  = !!STAGE_STYLE[r.stage]?.bold;
     if (qaFail || blocked) stageColor = PALETTE.red;
+    // For queued rows, fall back to type= parse for legacy rows
     if (r.stage === "queued") {
       const m = /\btype=(\w+)\b/.exec(notes);
       if (m) {
+        // Only use type= label if stage is queued and no explicit stage mapping
         stageLabel = STAGE_STYLE[m[1]]?.label || m[1];
         stageColor = STAGE_COLOR[m[1]] || PALETTE.dim;
       }

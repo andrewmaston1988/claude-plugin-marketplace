@@ -125,8 +125,7 @@ export function autoRequeueDev(db, project, feature, newRetryCount) {
 export function autoRequeueDevFromReview(db, project, feature, expectedRetries) {
   const result = db.prepare(`
     UPDATE pipeline_rows
-       SET stage          = 'queued',
-           notes_extra    = 'type=dev',
+       SET stage          = 'dev',
            review_retries = review_retries + 1,
            review_verdict = NULL,
            updated_at     = CURRENT_TIMESTAMP

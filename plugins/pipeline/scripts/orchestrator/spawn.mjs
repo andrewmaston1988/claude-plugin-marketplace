@@ -29,9 +29,25 @@ const STAGE = {
   test:     "test",
 };
 
+const STAGE_SESSION_TYPE = {
+  research: "research",
+  dev:      "dev",
+  test:     "test",
+  review:   "review",
+};
+
 export function sessionTypeFromNotes(notes) {
   const m = String(notes).match(/\btype=(dev|research|test|review)\b/);
   return m ? m[1] : "dev";
+}
+
+export function resolveSessionType(row, notes) {
+  // Prefer stage-based routing for non-queued stages
+  if (row.stage && row.stage !== "queued" && STAGE_SESSION_TYPE[row.stage]) {
+    return STAGE_SESSION_TYPE[row.stage];
+  }
+  // Fall back to notes-based routing for queued or unknown stages
+  return sessionTypeFromNotes(notes);
 }
 
 export function modelFromNotes(notes, project, feature, stype, logFn, row) {
@@ -170,7 +186,7 @@ export function isProtectedBranch(branch, targetBranch, defaultBranch) {
 export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRun, logFn }) {
   const feature  = row.feature;
   const notes    = row.notes_extra || "";
-  const stype    = sessionTypeFromNotes(notes);
+  const stype    = resolveSessionType(row, notes);
   let model      = modelFromNotes(notes, project, feature, stype, logFn, row);
   const budget   = budgetFromNotes(notes);
   const newStage = STAGE[stype] || "dev";
