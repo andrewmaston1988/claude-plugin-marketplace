@@ -24,6 +24,7 @@ import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { getPaths } from "../../src/paths.mjs";
 import { resolveTemplate } from "../worktree-paths.mjs";
 import { updateSpend } from "../metrics/spend.mjs";
+import { updateSessions, updateSessionsFromProjects } from "../metrics/sessions.mjs";
 
 const _BUNDLED_GOVERNOR_TEMPLATE = fileURLToPath(
   new URL("../../templates/governor-session.md", import.meta.url)
@@ -220,6 +221,14 @@ async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour
       await updateSpend(db, reportDate);
     } catch (e) {
       logFn(`Warning: update-spend failed (non-fatal): ${e.message}`, "WARN");
+    }
+
+    // Refresh session-level metrics so the governor sees workload data, not just spend.
+    try {
+      updateSessions(db);
+      updateSessionsFromProjects(db);
+    } catch (e) {
+      logFn(`Warning: update-sessions failed (non-fatal): ${e.message}`, "WARN");
     }
 
     const prompt = (
