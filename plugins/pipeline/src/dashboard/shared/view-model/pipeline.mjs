@@ -74,14 +74,15 @@ export function pipelineViewModel(rows, { showAll = false, sessions = [], tracke
     const blocked = r.stage === "manual" && notes.startsWith("blocked:");
     const parked  = r.stage === "manual" && /\[parked-review-budget-exhausted/.test(notes);
 
-    // Stage cell: queued rows substitute the queued-type label; parked rows
-    // render as "blocked" (red, bold) — both blocked: notes and the parked
-    // marker mean "needs human triage", the only distinction the dashboard
-    // owes the operator.
+    // Stage cell: queued rows substitute the queued-type label (from notes);
+    // active-stage rows use the stage directly; parked rows render as "blocked"
+    // (red, bold) — both blocked: notes and the parked marker mean "needs human
+    // triage", the only distinction the dashboard owes the operator.
     let stageLabel = STAGE_STYLE[r.stage]?.label || r.stage;
     let stageColor = STAGE_COLOR[r.stage] || PALETTE.text;
     let stageBold  = !!STAGE_STYLE[r.stage]?.bold;
     if (qaFail || blocked) stageColor = PALETTE.red;
+    // For queued rows, fall back to type= in notes; for active stages, use the stage directly.
     if (r.stage === "queued") {
       const m = /\btype=(\w+)\b/.exec(notes);
       if (m) {

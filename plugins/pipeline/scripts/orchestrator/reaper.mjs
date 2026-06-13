@@ -172,8 +172,6 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
       } else if (resolvedStype === "dev") {
         if (!row || row.stage !== "dev") {
           // No recovery needed — row already advanced past dev stage
-        } else if (!(row.notes_extra || "").startsWith("type=dev")) {
-          // Not a type=dev session, skip recovery
         } else {
           try {
             const existing    = row.notes_extra || "";
@@ -197,9 +195,10 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
                   cwd,
                 });
                 const relPath = relative(projectRoot, sessionPath).replace(/\\/g, "/");
-                const notes = `type=review ${relPath} [dev-no-handoff-recovered ${ts}]`;
+                // Replace notes write with stage-set to review; the next poll will spawn directly.
+                const notes = `${existing}${existing ? " " : ""}${relPath} [dev-no-handoff-recovered ${ts}]`;
                 rowUpdate(db, project, feature, {
-                  stage:       "queued",
+                  stage:       "review",
                   notes_extra: notes,
                 });
                 logFn(

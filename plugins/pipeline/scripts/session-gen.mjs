@@ -164,7 +164,7 @@ export function generateSessionFile(
 // Resolve a session file path for a given pipeline row + project. If the
 // row's notes carry an explicit session-file ref, use that. Otherwise
 // generate a fresh session via the template.
-export function resolveSessionFile(row, project, { projectRoot, dry, cwd } = {}) {
+export function resolveSessionFile(row, project, { projectRoot, dry, cwd, stageSessionType } = {}) {
   const notes = (row.notes || "").trim();
   const notesPath = notes.split(/\s+/).find((t) => t.endsWith(".md")) || null;
   if (notesPath && projectRoot) {
@@ -176,7 +176,8 @@ export function resolveSessionFile(row, project, { projectRoot, dry, cwd } = {})
   if (!projectRoot) return null;
 
   const planFile = row.plan || "";
-  const stype = _sessionTypeFromNotes(notes);
+  // Prefer stage-mapped session type; fall back to notes-based lookup.
+  const stype = stageSessionType || _sessionTypeFromNotes(notes);
   const feature = row.feature || basename(planFile, ".md");
   const planStem = basename(planFile, ".md");
   const branch = resolveRowBranch(row, planStem);
