@@ -21,6 +21,25 @@
 
 Invoke `{{REVIEW_SKILL}}` against the source branch, write the structured report to the code-review worktree, then call `{{PIPELINE_BIN}} review-complete`. One session reviews one feature.
 
+### Reviewer Checklist
+
+**Scope gate:** Before raising any concern, verify the file is listed in the plan's Files Changed section. If it is not, note it as "out of scope" in Open Questions only — do **not** raise it as a concern that blocks approval.
+
+### Concern Continuity (if retry > 0)
+
+When reviewing a retry, add a **Concern Continuity** section to your report. Track each concern from the previous cycle:
+
+```markdown
+### Concern Continuity
+| Concern | Prior report | Status | Notes |
+|---------|-------------|--------|-------|
+| <concern summary> | retry<N> | resolved / persists / new | <one line> |
+```
+
+- **Resolved** — prior concern has been credibly fixed.
+- **Persists** — concern still present; quote the code showing it was NOT addressed.
+- **New** — concern not present in prior reports.
+
 ---
 
 ## Token Governance — Self-Policing
