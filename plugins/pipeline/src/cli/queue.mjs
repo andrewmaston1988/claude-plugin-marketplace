@@ -51,16 +51,18 @@ export function queueDepsExtract(planFilePath) {
   const value = m[1].trim();
   if (/^none\s*$/i.test(value)) return "";
 
-  // Cross-project tokens: `project:feature` (kept whole). Strip them out before
-  // the same-project patterns so a project name isn't mis-read as a bare slug.
-  const crossSlugs = [...value.matchAll(/`?([\w.-]+:[\w.-]+)`?/g)].map(r => r[1]);
-  const sameValue  = value.replace(/`?[\w.-]+:[\w.-]+`?/g, " ");
+  // A leading `!` marks a strict prerequisite (classifyPrereqs interprets it);
+  // it is preserved on the returned token. Cross-project tokens (`project:feature`,
+  // kept whole) are stripped out before the same-project patterns so a project
+  // name isn't mis-read as a bare slug.
+  const crossSlugs = [...value.matchAll(/`?(!?)([\w.-]+:[\w.-]+)`?/g)].map(r => r[1] + r[2]);
+  const sameValue  = value.replace(/`?!?[\w.-]+:[\w.-]+`?/g, " ");
 
-  let slugs = [...sameValue.matchAll(/`autonomous\/([a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
+  let slugs = [...sameValue.matchAll(/`(!?)autonomous\/([a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1] + r[2]);
   if (!slugs.length)
-    slugs = [...sameValue.matchAll(/autonomous\/([a-z0-9][a-z0-9-]*)/gi)].map(r => r[1]);
+    slugs = [...sameValue.matchAll(/(!?)autonomous\/([a-z0-9][a-z0-9-]*)/gi)].map(r => r[1] + r[2]);
   if (!slugs.length)
-    slugs = [...sameValue.matchAll(/`([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1]);
+    slugs = [...sameValue.matchAll(/`(!?)([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1] + r[2]);
 
   slugs = [...crossSlugs, ...slugs];
 
@@ -73,6 +75,30 @@ export function queueDepsExtract(planFilePath) {
   }
 
   return [...new Set(slugs)].join(",");
+}
+
+// Split prerequisite tokens into soft (depends_on) + the single strict (waits_on).
+// A `!` prefix marks strict (done + branch-ancestor-of-target). Soft is the
+// default. At most one strict per row (it maps to the single waits_on column),
+// and cross-project (`project:feature`) tokens cannot be strict (the ancestor
+// check can't span repos). Returns { soft: string[], strict: string|null, error: string|null }.
+export function classifyPrereqs(tokens) {
+  const soft = [];
+  let strict = null;
+  for (const raw of tokens) {
+    const t = String(raw).trim();
+    if (!t) continue;
+    if (!t.startsWith("!")) { soft.push(t); continue; }
+    const slug = t.slice(1);
+    if (slug.includes(":")) {
+      return { soft, strict, error: `cross-project prerequisite cannot be strict: '${slug}'` };
+    }
+    if (strict) {
+      return { soft, strict, error: `at most one strict (!) prerequisite per row (got '${strict}' and '${slug}')` };
+    }
+    strict = slug;
+  }
+  return { soft, strict, error: null };
 }
 
 export function queueTypeExtract(planFilePath) {
@@ -315,6 +341,17 @@ export async function run(cmd, argv) {
     // absent, merge falls back to the feature slug (e.g. an unhelpful 'PROJ-104').
     const prTitle = (titleFlag ?? queueTitleExtract(planPath)).trim().slice(0, 256);
 
+    // Unify prerequisites: classify the declared tokens into soft (depends_on)
+    // and the single strict (waits_on). A leading `!` marks strict; soft is the
+    // default (no implicit auto-strict). depends_on becomes the soft list.
+    const prereqCls = classifyPrereqs((depends || "").split(",").map(s => s.trim()).filter(Boolean));
+    if (prereqCls.error) {
+      close(ctx.db);
+      process.stderr.write(`ERROR: queue-plan: ${prereqCls.error}\n`);
+      return 1;
+    }
+    depends = prereqCls.soft.join(",");
+
     // Type/model: CLI flag wins, else plan annotation, else default.
     const stype    = stypeFlag    || queueTypeExtract(planPath)             || "dev";
     const rModel   = rModelFlag   || queueModelExtract(planPath, "research") || "—";
@@ -349,22 +386,21 @@ export async function run(cmd, argv) {
       targetBranch = defaultBranch;
     }
 
-    if (depends) {
+    // Validate every prerequisite (soft + the strict one). Cross-project tokens
+    // need a registered project; same-project tokens need an existing plan file.
+    const allPrereqs = [...prereqCls.soft, prereqCls.strict].filter(Boolean);
+    if (allPrereqs.length) {
       const completeDir = join(plansDir, "complete");
       const missing = [];
-      const validated = [];
-      for (const slug of depends.split(",").map(s => s.trim()).filter(Boolean)) {
+      for (const slug of allPrereqs) {
         if (slug.includes(":")) {
-          // Cross-project prerequisite — validate the referenced project is registered.
           const [okX, msgX] = validateCrossProjectDep(slug, ctx.db);
           if (!okX) { close(ctx.db); process.stderr.write(`ERROR: queue-plan: ${msgX}\n`); return 1; }
-          validated.push(slug);
           continue;
         }
         const inActive   = existsSync(join(plansDir, slug + ".md"));
         const inComplete = existsSync(join(completeDir, slug + ".md"));
-        if (inActive || inComplete) validated.push(slug);
-        else missing.push(slug);
+        if (!inActive && !inComplete) missing.push(slug);
       }
       if (missing.length) {
         close(ctx.db);
@@ -374,25 +410,18 @@ export async function run(cmd, argv) {
         );
         return 1;
       }
-      depends = validated.join(",");
     }
 
-    // waits_on — strict single-prerequisite chain. --waits-on wins; otherwise
-    // auto-populate from the first *Prerequisites:* slug (the 90% case is one
-    // prerequisite). base_branch is opt-in only (--base-branch) since branching
-    // a dependent off an unmerged prerequisite branch is a deliberate choice.
-    // waits_on is same-project only (its ancestor check lives in one repo).
+    // waits_on — the single strict prerequisite (`done` AND its branch is an
+    // ancestor of the target). It comes from a `!`-marked prerequisite; an
+    // explicit --waits-on flag overrides. Same-project only (the ancestor check
+    // lives in one repo). base_branch is a separate opt-in (--base-branch).
     if (waitsOnFlag && waitsOnFlag.includes(":")) {
       close(ctx.db);
       process.stderr.write(`ERROR: --waits-on must be same-project; '${waitsOnFlag}' is cross-project (use depends_on)\n`);
       return 1;
     }
-    // Auto-populate from the first SAME-PROJECT prerequisite; cross-project deps
-    // (project:feature) are depends_on-only and never become waits_on.
-    const firstSameProjectDep = depends
-      ? depends.split(",").map(s => s.trim()).find(s => s && !s.includes(":")) || null
-      : null;
-    const waitsOn = waitsOnFlag || firstSameProjectDep;
+    const waitsOn = waitsOnFlag || prereqCls.strict || null;
     const baseBranch = baseBranchFlag || null;
 
     try {
@@ -506,7 +535,10 @@ export async function run(cmd, argv) {
       const planPath = resolvePlan(arg);
       if (!existsSync(planPath)) { process.stderr.write(`not found: ${planPath}\n`); return 1; }
       const feature = basename(planPath, ".md");
-      const prereqs = (queueDepsExtract(planPath) || "").split(",").map(s => s.trim()).filter(Boolean);
+      // Strip any leading `!` (strict marker) — within a cluster, in-cluster
+      // prerequisites are made strict by the auto-wired --waits-on regardless, so
+      // the marker must not break feature-name matching in the graph.
+      const prereqs = (queueDepsExtract(planPath) || "").split(",").map(s => s.trim().replace(/^!/, "")).filter(Boolean);
       nodes.push({ feature, planPath, prereqs });
     }
 
