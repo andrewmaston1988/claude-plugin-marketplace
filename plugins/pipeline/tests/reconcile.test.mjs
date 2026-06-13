@@ -254,10 +254,9 @@ test("reconcileSessions recovers dev with review_retries > 0 and budget remainin
     const logFn = createMockLog();
     reconcileSessions(db, { logFn, dryRun: true });
 
-    // Row should advance to queued with type=review
+    // Row should advance directly to review (stage-driven spawn)
     const row = rowGet(db, "proj", "my-feature");
-    strictEqual(row.stage, "queued");
-    ok(row.notes_extra.includes("type=review"));
+    strictEqual(row.stage, "review");
     ok(logFn.hasMessage("recoverable"));
   } finally {
     cleanupDb(db, dbDir);

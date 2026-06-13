@@ -122,13 +122,16 @@ export function autoRequeueDev(db, project, feature, newRetryCount) {
 // CAS bounce-back from review → dev on needs_work.
 // Predicate: WHERE project=? AND feature=? AND review_retries=expectedRetries.
 // Returns false if a concurrent caller already incremented review_retries.
+// notes_extra is intentionally cleared: stage-driven spawn routes via row.stage,
+// so any residual session-path or type= token from the prior review cycle must
+// not survive into the next dev spawn. Model/budget pins use dedicated columns.
 export function autoRequeueDevFromReview(db, project, feature, expectedRetries) {
   const result = db.prepare(`
     UPDATE pipeline_rows
-       SET stage          = 'queued',
-           notes_extra    = 'type=dev',
+       SET stage          = 'dev',
            review_retries = review_retries + 1,
            review_verdict = NULL,
+           notes_extra    = '',
            updated_at     = CURRENT_TIMESTAMP
      WHERE project        = ?
        AND feature        = ?
