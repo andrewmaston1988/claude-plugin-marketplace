@@ -186,6 +186,8 @@ Row subcommands (all take <project> = registered project name):
   test-complete     <project> <feature> --branch-slug <slug> --report <path> ...
   dev-complete      <project> <plan-file> <feature> --title <text> --message <text>
   review-complete   <project> <feature> --report <path> --verdict <v> ...
+  plans-list        [<project>] [--status active|complete]
+  plans-search      <query>
 
 Progress subcommands (slug is globally unique — <project> arg accepted but only used by progress-create):
   progress-create   <project> <slug> [--steps ...]
