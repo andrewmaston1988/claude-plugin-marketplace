@@ -182,8 +182,8 @@ export function resolveSessionFile(row, project, { projectRoot, dry, cwd } = {})
   const branch = resolveRowBranch(row, planStem);
   const targetBranch = row.target_branch || "main";
   // review_retries flows from the row so the review-session template can stamp
-  // the right retry-N in its report filename (the reaper looks at the same
-  // filename for the "exit 0 with no verdict" branch).
+  // the right retry-(N+1) in its report filename (1-based, matching the Slack label)
+  // (the reaper looks at the same filename for the "exit 0 with no verdict" branch).
   const reviewRetries = row.review_retries ?? 0;
 
   return generateSessionFile(project, planFile, stype, { projectRoot, feature, targetBranch, branch, reviewRetries, cwd });
