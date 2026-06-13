@@ -26,6 +26,7 @@ import {
   connectUnified, close,
   rowGet, rowUpdate,
   progressMark,
+  planSetStatus,
 } from "../../../scripts/pipeline-db/index.mjs";
 import {
   GitError,
@@ -451,6 +452,13 @@ async function main() {
     // Step 6 — move plans (idx 6)
     mark(6, "inprogress");
     step6MovePlans(plFiles);
+    // Mark plans complete in the DB
+    for (const branch of branches) {
+      const slug = branchSlug(branch);
+      try {
+        planSetStatus(db, project, slug, 'complete');
+      } catch { /* ignore if plan not in DB */ }
+    }
     mark(6, "done");
 
     // Step 6b — archive orphaned done plans (no dedicated progress step)

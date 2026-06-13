@@ -7,6 +7,7 @@ import {
   rowGet, rowsList, rowAdd, rowUpdate, rowDelete,
   autoRequeueDevFromReview,
   loadCycleLog,
+  planUpsert, plansFtsRebuild,
 } from "../../scripts/pipeline-db/index.mjs";
 import { generateSessionFile } from "../../scripts/session-gen.mjs";
 import { publishNotification } from "../../scripts/publisher.mjs";
@@ -270,8 +271,30 @@ export async function run(cmd, argv) {
       const untracked = backlogScan(ctx.db, ctx.project, plansDir);
       for (const name of untracked) {
         const feature = basename(name, ".md");
-        rowAdd(ctx.db, ctx.project, { feature, planFile: join(plansDir, name), stage: "backlog" });
+        const filePath = join(plansDir, name);
+        rowAdd(ctx.db, ctx.project, { feature, planFile: filePath, stage: "backlog" });
         added++;
+
+        // Index plan content: extract title, branch, and full body.
+        const body = readFileSync(filePath, "utf8");
+        const titleMatch = body.match(/^#\s+(.+)/m);
+        const title = titleMatch ? titleMatch[1].trim() : null;
+        const branchMatch = body.match(/\*Branch:\*?\s*`?([^\s`*]+)`?/);
+        const branch = branchMatch ? branchMatch[1] : null;
+
+        planUpsert(ctx.db, {
+          project: ctx.project,
+          slug: feature,
+          filePath,
+          status: 'active',
+          branch,
+          title,
+          body,
+        });
+      }
+      // Rebuild FTS index once after all upserts.
+      if (added > 0) {
+        plansFtsRebuild(ctx.db);
       }
     } finally { close(ctx.db); }
     process.stdout.write(added > 0 ? `Added ${added} backlog row(s)\n` : "0 new backlog rows\n");
@@ -687,6 +710,61 @@ export async function run(cmd, argv) {
     const rc = await notify(title, message, priority);
     if (rc !== 0) { process.stderr.write(`WARNING: notify failed with exit code ${rc}\n`); return 4; }
     return 0;
+  }
+
+  // ── plans-list ────────────────────────────────────────────────────────────────
+  if (cmd === "plans-list") {
+    const [projectArg, ...flags] = argv;
+    let project = projectArg;
+    const statusFilter = getFlag("--status", flags);
+
+    const { listEnabledProjects } = await import("../../scripts/pipeline-db/projects.mjs");
+    const { plansList } = await import("../../scripts/pipeline-db/index.mjs");
+    const { connectUnified, close: closeDb } = await import("../../scripts/pipeline-db/index.mjs");
+
+    try {
+      const db = connectUnified();
+      try {
+        // If no project specified, list all projects
+        const projects = project ? [project] : listEnabledProjects(db);
+        for (const proj of projects) {
+          const plans = plansList(db, { project: proj, status: statusFilter || undefined });
+          for (const plan of plans) {
+            process.stdout.write(`${plan.project}\t${plan.slug}\t${plan.title || ''}\t${plan.status}\n`);
+          }
+        }
+      } finally { closeDb(db); }
+      return 0;
+    } catch (e) {
+      process.stderr.write(`ERROR: ${e.message}\n`);
+      return 1;
+    }
+  }
+
+  // ── plans-search ──────────────────────────────────────────────────────────────
+  if (cmd === "plans-search") {
+    const [query] = argv;
+    if (!query) {
+      process.stderr.write("usage: plans-search <query>\n");
+      return 1;
+    }
+
+    const { plansSearch } = await import("../../scripts/pipeline-db/index.mjs");
+    const { connectUnified, close: closeDb } = await import("../../scripts/pipeline-db/index.mjs");
+
+    try {
+      const db = connectUnified();
+      try {
+        const results = plansSearch(db, query);
+        for (const result of results) {
+          process.stdout.write(`${result.project}\t${result.slug}\t${result.title || ''}\t${result.status}\n`);
+        }
+      } finally { closeDb(db); }
+      return 0;
+    } catch (e) {
+      process.stderr.write(`ERROR: ${e.message}\n`);
+      return 1;
+    }
   }
 
   return null;
