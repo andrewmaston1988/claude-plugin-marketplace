@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS pipeline_rows (
   r_model TEXT,
   d_model TEXT,
   q_model TEXT,
+  r_effort TEXT DEFAULT 'high',
+  d_effort TEXT DEFAULT 'medium',
+  q_effort TEXT DEFAULT 'low',
   rvw_model TEXT DEFAULT 'claude-sonnet-4-6',
   session_type TEXT,
   session_file TEXT,
@@ -222,6 +225,10 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (3);
 // prerequisite's autonomous branch so it sees that code before it merges.
 const SCHEMA_V4_VERSION = 4;
 
+// Add effort columns: r_effort, d_effort, q_effort with role-appropriate defaults
+// ('high' for review, 'medium' for dev, 'low' for queue)
+const SCHEMA_V5_VERSION = 5;
+
 function _applyMigrations(db) {
   let currentVersion = 0;
   try {
@@ -256,6 +263,20 @@ function _applyMigrations(db) {
       db.exec("ALTER TABLE pipeline_rows ADD COLUMN base_branch TEXT");
     }
     db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V4_VERSION})`);
+  }
+  if (currentVersion < SCHEMA_V5_VERSION) {
+    // Add effort columns: r_effort, d_effort, q_effort for pipeline effort dimension
+    const cols = db.prepare("PRAGMA table_info(pipeline_rows)").all().map(c => c.name);
+    if (!cols.includes("r_effort")) {
+      db.exec("ALTER TABLE pipeline_rows ADD COLUMN r_effort TEXT DEFAULT 'high'");
+    }
+    if (!cols.includes("d_effort")) {
+      db.exec("ALTER TABLE pipeline_rows ADD COLUMN d_effort TEXT DEFAULT 'medium'");
+    }
+    if (!cols.includes("q_effort")) {
+      db.exec("ALTER TABLE pipeline_rows ADD COLUMN q_effort TEXT DEFAULT 'low'");
+    }
+    db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V5_VERSION})`);
   }
 }
 
