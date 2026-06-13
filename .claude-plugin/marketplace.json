@@ -9,7 +9,6 @@
     {
       "name": "slack-bridge",
       "description": "Two-way Slack ↔ Claude Code bridge via Socket Mode",
-      "version": "0.1.0",
       "source": "./plugins/slack-bridge",
       "author": {
         "name": "Andrew Maston",
@@ -19,7 +18,6 @@
     {
       "name": "pipeline",
       "description": "Pipeline orchestration — queue plans, autonomous dev/test/review sessions, merge runner, TUI + web dashboards, spend governance",
-      "version": "0.1.0",
       "source": "./plugins/pipeline",
       "author": {
         "name": "Andrew Maston",
