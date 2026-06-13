@@ -12,7 +12,7 @@
     "pipeline": "bin/pipeline.mjs"
   },
   "scripts": {
-    "test":        "node --test tests/*.mjs",
+    "test":        "node --env-file=.env.test --test tests/*.mjs",
     "verify":      "node tests/live-verify/harness.mjs",
     "postinstall": "node scripts/postinstall/patch-blessed-borders.mjs"
   },
