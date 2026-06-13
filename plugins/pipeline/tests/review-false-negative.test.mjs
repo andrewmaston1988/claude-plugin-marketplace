@@ -226,22 +226,83 @@ Ready to ship`;
   ok(concerns.some(c => c.includes("naming convention")), "Should extract advisory concern");
 });
 
-test("Row DB update with forceApprove flag preserves verdict and appends audit note", async () => {
-  // Simulate the DB row update that happens with --force-approve
-  // Verify that: stage -> merge, review_verdict -> ready_to_ship, notes_extra appended
+test("--force-approve advances row to merge and appends operator-override to notes_extra", async () => {
+  const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { connectPath, close, projectAdd, rowAdd, rowGet } = await import("../scripts/pipeline-db/index.mjs");
+  const { rowUpdate } = await import("../scripts/pipeline-db/rows.mjs");
 
-  const ts = "2026-06-13T16:12:00Z";
-  const overrideNote = `[operator-override ${ts}]`;
+  const tmp = mkdtempSync(join(tmpdir(), "force-approve-test-"));
+  const repo = join(tmp, "repo");
+  mkdirSync(join(repo, ".git"), { recursive: true });
+  const db = connectPath(join(tmp, "pipeline.db"));
+  try {
+    projectAdd(db, { name: "testproject", rootPath: repo });
+    rowAdd(db, "testproject", {
+      feature: "my-feature",
+      planFile: join(repo, "plans", "my-feature.md"),
+      stage: "review",
+      branch: "autonomous/my-feature",
+    });
 
-  // Simulate the update object that would be created
-  const update = {
-    stage: "merge",
-    review_verdict: "ready_to_ship",
-    review_retries: 0,
-    notes_extra: overrideNote,
-  };
+    // Simulate what review-complete --force-approve does to the row
+    const existingNotes = "";
+    const ts = "2026-06-13T16:12:00Z";
+    const overrideNote = existingNotes ? `${existingNotes} [operator-override ${ts}]` : `[operator-override ${ts}]`;
+    rowUpdate(db, "testproject", "my-feature", {
+      stage: "merge",
+      review_verdict: "ready_to_ship",
+      review_retries: 0,
+      qa_pass: 1,
+      notes_extra: overrideNote,
+    });
 
-  strictEqual(update.stage, "merge", "Stage should be set to merge");
-  strictEqual(update.review_verdict, "ready_to_ship", "Verdict should be ready_to_ship");
-  ok(update.notes_extra.includes("operator-override"), "Notes should contain operator-override audit trail");
+    const updated = rowGet(db, "testproject", "my-feature");
+    strictEqual(updated.stage, "merge", "stage should advance to merge");
+    strictEqual(updated.review_verdict, "ready_to_ship", "verdict should be ready_to_ship");
+    ok(updated.notes_extra.includes("operator-override"), "notes_extra should contain operator-override audit trail");
+  } finally {
+    try { close(db); } catch {}
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test("ready_to_ship without --force-approve does not clobber existing notes_extra", async () => {
+  const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const { connectPath, close, projectAdd, rowAdd, rowGet } = await import("../scripts/pipeline-db/index.mjs");
+  const { rowUpdate } = await import("../scripts/pipeline-db/rows.mjs");
+
+  const tmp = mkdtempSync(join(tmpdir(), "no-clobber-test-"));
+  const repo = join(tmp, "repo");
+  mkdirSync(join(repo, ".git"), { recursive: true });
+  const db = connectPath(join(tmp, "pipeline.db"));
+  try {
+    projectAdd(db, { name: "testproject", rootPath: repo });
+    rowAdd(db, "testproject", {
+      feature: "my-feature",
+      planFile: join(repo, "plans", "my-feature.md"),
+      stage: "review",
+      branch: "autonomous/my-feature",
+    });
+    // Seed existing notes (e.g. a prior recovery marker)
+    rowUpdate(db, "testproject", "my-feature", { notes_extra: "[dev-no-handoff-recovered 2026-06-13T16:00Z]" });
+
+    // Simulate ready_to_ship without forceApprove — must NOT pass notes_extra
+    rowUpdate(db, "testproject", "my-feature", {
+      stage: "merge",
+      review_verdict: "ready_to_ship",
+      review_retries: 0,
+      qa_pass: 1,
+    });
+
+    const updated = rowGet(db, "testproject", "my-feature");
+    strictEqual(updated.stage, "merge");
+    ok(updated.notes_extra.includes("dev-no-handoff-recovered"), "existing notes_extra must survive a genuine ready_to_ship");
+  } finally {
+    try { close(db); } catch {}
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });

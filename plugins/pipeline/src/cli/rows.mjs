@@ -123,8 +123,8 @@ function extractConcernHeadings(content) {
   const lines = content.split("\n");
   const concerns = [];
   for (const line of lines) {
-    if (/^###\s/.test(line)) {
-      concerns.push(line.replace(/^###\s+/, ""));
+    if (/^\s*-\s+\*\*\[(BLOCKER|ADVISORY|ABORT)\]\*\*/.test(line)) {
+      concerns.push(line.replace(/^\s*-\s+/, "").trim().slice(0, 80).toLowerCase());
     }
   }
   return concerns;
@@ -660,8 +660,15 @@ export async function run(cmd, argv) {
     try {
       if (verdict === "ready_to_ship" || forceApprove) {
         const ts = new Date().toISOString().replace(/\.\d+Z$/, "Z");
-        const noteAppend = forceApprove ? ` [operator-override ${ts}]` : "";
-        const ok = rowUpdate(ctx.db, ctx.project, feature, { stage: "merge", review_verdict: "ready_to_ship", review_retries: 0, qa_pass: 1, notes_extra: noteAppend });
+        const updateFields = { stage: "merge", review_verdict: "ready_to_ship", review_retries: 0, qa_pass: 1 };
+        if (forceApprove) {
+          // Re-read notes_extra immediately before writing to minimise the
+          // window between read and write (async git ops above could race).
+          const fresh = rowGet(ctx.db, ctx.project, feature);
+          const existing = ((fresh || row).notes_extra || "").trim();
+          updateFields.notes_extra = existing ? `${existing} [operator-override ${ts}]` : `[operator-override ${ts}]`;
+        }
+        const ok = rowUpdate(ctx.db, ctx.project, feature, updateFields);
         if (!ok) {
           process.stderr.write(`ERROR: stage-set failed\n`);
           await notify(`Review Failed: ${feature} — stage-set error`,
