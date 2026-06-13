@@ -29,3 +29,6 @@ export {
   getBridgeSessionChildren, backfillSpawnParent,
   appendCycleLog, loadCycleLog,
 } from "./analytics.mjs";
+export {
+  planUpsert, planSetStatus, planGet, plansList, plansSearch, plansFtsRebuild,
+} from "./plans.mjs";

@@ -222,6 +222,31 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (3);
 // prerequisite's autonomous branch so it sees that code before it merges.
 const SCHEMA_V4_VERSION = 4;
 
+const SCHEMA_V5 = `
+CREATE TABLE IF NOT EXISTS plans (
+  project     TEXT NOT NULL,
+  slug        TEXT NOT NULL,
+  file_path   TEXT NOT NULL,
+  status      TEXT NOT NULL DEFAULT 'active',
+  branch      TEXT,
+  title       TEXT,
+  body        TEXT,
+  indexed_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (project, slug)
+);
+CREATE INDEX IF NOT EXISTS idx_plans_project ON plans(project);
+CREATE INDEX IF NOT EXISTS idx_plans_status  ON plans(status);
+
+CREATE VIRTUAL TABLE IF NOT EXISTS plans_fts USING fts5(
+  slug, title, body,
+  content='plans',
+  content_rowid='rowid',
+  tokenize='unicode61'
+);
+
+INSERT OR IGNORE INTO schema_version(version) VALUES(5);
+`;
+
 function _applyMigrations(db) {
   let currentVersion = 0;
   try {
@@ -256,6 +281,9 @@ function _applyMigrations(db) {
       db.exec("ALTER TABLE pipeline_rows ADD COLUMN base_branch TEXT");
     }
     db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V4_VERSION})`);
+  }
+  if (currentVersion < 5) {
+    db.exec(SCHEMA_V5);
   }
 }
 
