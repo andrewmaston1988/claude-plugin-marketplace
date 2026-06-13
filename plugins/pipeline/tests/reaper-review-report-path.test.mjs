@@ -17,7 +17,7 @@ function hasReportGlobMatch(reportsDir, feature, retryN) {
 
   const escapedFeature = feature.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const pattern = new RegExp(
-    `^review-report-.*${escapedFeature}.*retry${retryN}.*\\.md$`
+    `^review-report-.*${escapedFeature}.*retry${retryN + 1}.*\\.md$`
   );
 
   try {
@@ -34,7 +34,7 @@ test("hasReport detection with matching file", () => {
   mkdirSync(reportsDir, { recursive: true });
 
   // Create a report matching the template's naming pattern
-  const reportFile = "review-report-2026-06-10-my-feature-retry0-corr123.md";
+  const reportFile = "review-report-2026-06-10-my-feature-retry1-corr123.md";
   writeFileSync(join(reportsDir, reportFile), "# Review Report\n");
 
   const hasReport = hasReportGlobMatch(reportsDir, "my-feature", 0);
@@ -70,11 +70,11 @@ test("hasReport detection with different retry number", () => {
   const reportsDir = join(tempDir, "reports");
   mkdirSync(reportsDir, { recursive: true });
 
-  // Create a report for retry 0
-  const reportFile = "review-report-2026-06-10-my-feature-retry0-corr123.md";
+  // Create a report for retry 1 (retryN=0 produces retry1 filename)
+  const reportFile = "review-report-2026-06-10-my-feature-retry1-corr123.md";
   writeFileSync(join(reportsDir, reportFile), "# Review Report\n");
 
-  // Should not match when looking for retry 1
+  // Should not match when looking for retry 2 (retryN=1 looks for retry2 filename)
   const hasReport = hasReportGlobMatch(reportsDir, "my-feature", 1);
   assert.strictEqual(hasReport, false, "Should not match different retry number");
 
@@ -87,7 +87,7 @@ test("hasReport detection with different feature name", () => {
   mkdirSync(reportsDir, { recursive: true });
 
   // Create a report for feature-a
-  const reportFile = "review-report-2026-06-10-feature-a-retry0-corr123.md";
+  const reportFile = "review-report-2026-06-10-feature-a-retry1-corr123.md";
   writeFileSync(join(reportsDir, reportFile), "# Review Report\n");
 
   // Should not match when looking for feature-b
@@ -103,8 +103,8 @@ test("hasReport detection with exact date+corr format from template", () => {
   mkdirSync(reportsDir, { recursive: true });
 
   // Create a report with the exact format from review-session.md template:
-  // review-report-<date>-{{FEATURE}}-retry<N>-${CORRELATION_ID}.md
-  const reportFile = "review-report-2026-06-10-my-awesome-feature-retry2-reaper-review-report-path-fix-20260610T014600Z.md";
+  // review-report-<date>-{{FEATURE}}-retry$((N+1))-${CORRELATION_ID}.md
+  const reportFile = "review-report-2026-06-10-my-awesome-feature-retry3-reaper-review-report-path-fix-20260610T014600Z.md";
   writeFileSync(join(reportsDir, reportFile), "# Review Report\n");
 
   const hasReport = hasReportGlobMatch(reportsDir, "my-awesome-feature", 2);
