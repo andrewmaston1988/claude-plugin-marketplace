@@ -338,9 +338,6 @@ async function pollOnce({
     const targetBranch = mergeRow.target_branch || detectDefaultBranch(projectRoot);
 
     if (!cfg.autoMerge) continue;
-    if (activeProcs.has(project)) continue;
-    if (projectIsActive(db, project)) continue;
-    if (activeProcs.size >= maxConcurrent) continue;
 
     const diverged = !isMergedInto(targetBranch, branch, projectRoot);
     const dirty    = isDirtyTree(projectRoot);
@@ -366,6 +363,7 @@ async function pollOnce({
   const force          = argv.includes("--force");
   const statusMode     = argv.includes("--status");
   const shutdownMode   = argv.includes("--shutdown");
+  const onceMode       = argv.includes("--once");
 
   const paths = getPaths();
   const logFile = join(paths.logDir, "orchestrator.jsonl");
@@ -440,6 +438,33 @@ async function pollOnce({
       setTimeout(() => process.exit(1), 150);
     }
     return;
+  }
+
+  // --once: single-shot poll for CI / external scripts. Intentionally skips
+  // the daemon's state-file + signal-handler setup. The 150ms setTimeout-flush
+  // before exit matches --status / --shutdown and prevents stdout truncation
+  // when stdio is a pipe (Node's process.exit does not flush stdio).
+  if (onceMode) {
+    let db;
+    try {
+      db = connectUnified(paths);
+    } catch (e) {
+      process.stderr.write(`Failed to open unified DB: ${e.message}\n`);
+      setTimeout(() => process.exit(1), 150);
+      return;
+    }
+    try {
+      const result = await pollOnce({ db, projectFilter, dryRun, maxConcurrent, logFn: log });
+      process.stdout.write(JSON.stringify(result) + "\n");
+      setTimeout(() => process.exit(0), 150);
+      return;
+    } catch (e) {
+      process.stderr.write(`poll_once error: ${e.message}\n`);
+      setTimeout(() => process.exit(1), 150);
+      return;
+    } finally {
+      try { close(db); } catch {}
+    }
   }
 
   // ── startup ─────────────────────────────────────────────────────────────────
