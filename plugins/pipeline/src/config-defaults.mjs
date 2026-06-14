@@ -72,4 +72,10 @@ export const PIPELINE_DEFAULTS = {
     session_dir:   null,
     log_dir:       null,
   },
+  orch: {
+    // "feature" (default): each feature gets its own concurrency slot; multiple
+    // features in the same project can run concurrently up to --max-concurrent.
+    // "project": legacy behaviour — at most one session per project at a time.
+    concurrency_scope: "feature",
+  },
 };

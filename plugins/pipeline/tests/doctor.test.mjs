@@ -28,12 +28,12 @@ function findCheck(results, label) {
   return results.find(r => r.label === label) ?? null;
 }
 
-test("doctor: returns exactly 19 results", async () => {
-  // 15 prior checks + worktree-layout-stale + web-port-conflict + governor-env-contract + zombie-rows-check.
+test("doctor: returns exactly 20 results", async () => {
+  // 15 prior checks + worktree-layout-stale + web-port-conflict + governor-env-contract + zombie-rows-check + concurrency-scope.
   const { tmp, paths, cfgPath } = freshPaths();
   try {
     const results = await runDoctor({ paths, configPath: cfgPath });
-    equal(results.length, 19);
+    equal(results.length, 20);
   } finally { cleanup(tmp); }
 });
 
