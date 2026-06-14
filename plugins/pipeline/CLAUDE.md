@@ -14,6 +14,8 @@ All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DE
 | `governor.session_dir` | `<project-root>/sessions` | Where governor session files are written. |
 | `governor.log_dir` | `<project-root>/logs` | Where governor stdout/stderr logs go. |
 | `web.host` | `"127.0.0.1"` | Network interface the dashboard binds to. `"127.0.0.1"` = loopback-only; `"0.0.0.0"` = all interfaces (LAN access). Override with `--host` on the CLI for a single session. |
+| `tiers` | `{haiku: "claude-haiku-4-5", sonnet: "claude-sonnet-4-6", opus: "claude-opus-4-8"}` | Canonical model string per tier. Used by auto-escalation to resolve tier-jumps (e.g., Haiku → Sonnet). Update when new models release or default recommendations change. |
+| `tier_efforts` | `{haiku: ["low", "medium", "high"], sonnet: ["low", "medium", "high", "max"], opus: ["low", "medium", "high", "xhigh", "max"]}` | Supported effort levels per tier. Auto-escalation respects these when walking the ladder (+2 per retry within tier, clamped to ceiling). Update if models gain/lose effort support. |
 
 **Slack-bridge tokens**: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `CLAUDE_CWD` are env-var overrides for the slack-bridge's `tokens.bot`, `tokens.app`, and `claude.cwd` config keys respectively. Env vars win over config values. Full mapping: `plugins/slack-bridge/CONFIG.md`.
 

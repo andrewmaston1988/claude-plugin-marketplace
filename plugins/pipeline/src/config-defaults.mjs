@@ -4,6 +4,16 @@ export const PIPELINE_DEFAULTS = {
     review_default: "claude-sonnet-4-6",
     governor:       "claude-sonnet-4-6",
   },
+  tiers: {
+    haiku:  "claude-haiku-4-5",
+    sonnet: "claude-sonnet-4-6",
+    opus:   "claude-opus-4-8",
+  },
+  tier_efforts: {
+    haiku:  ["low", "medium", "high"],
+    sonnet: ["low", "medium", "high", "max"],
+    opus:   ["low", "medium", "high", "xhigh", "max"],
+  },
   notifications: {
     // Governance / reports channel — where Cache Health, monthly governance,
     // ad-hoc reports go. Distinct from pipeline_channel so report content
