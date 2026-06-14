@@ -23,6 +23,24 @@
         "name": "Andrew Maston",
         "email": "andrew.maston1988@gmail.com"
       }
+    },
+    {
+      "name": "agent-investigation",
+      "description": "Investigate agent transcripts and subagent investigation tooling",
+      "source": "./plugins/agent-investigation",
+      "author": {
+        "name": "Andrew Maston",
+        "email": "andrew.maston1988@gmail.com"
+      }
+    },
+    {
+      "name": "checkpoint",
+      "description": "Durable cross-session handoff via STATE.md, /checkpoint skill, SessionStart resume offer, PreCompact backstop, and an observable self-correcting cache-keepalive.",
+      "source": "./plugins/checkpoint",
+      "author": {
+        "name": "Andrew Maston",
+        "email": "andrew.maston1988@gmail.com"
+      }
     }
   ]
 }
