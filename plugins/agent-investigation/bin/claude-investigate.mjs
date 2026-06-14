@@ -147,18 +147,7 @@ Run 'claude-investigate doctor' to check prerequisites.
     return;
   }
 
-  // Check Python is available
-  if (!checkPython()) {
-    console.error(
-      "Error: Python ≥3.9 not found or not on PATH\n" +
-        "  Set PIPELINE_PYTHON=/path/to/python3 and try again\n" +
-        "  Or run: claude-investigate doctor"
-    );
-    setTimeout(() => process.exit(1), 150);
-    return;
-  }
-
-  // For locate subcommand, use our mjs implementation
+  // For locate subcommand, use our mjs implementation (no Python needed)
   if (cmd === "locate") {
     const agentId = args[1];
     if (!agentId) {
@@ -178,6 +167,17 @@ Run 'claude-investigate doctor' to check prerequisites.
       console.error(`No agent transcript found for ID: ${agentId}`);
       setTimeout(() => process.exit(1), 150);
     }
+    return;
+  }
+
+  // Check Python is available for other subcommands
+  if (!checkPython()) {
+    console.error(
+      "Error: Python ≥3.9 not found or not on PATH\n" +
+        "  Set PIPELINE_PYTHON=/path/to/python3 and try again\n" +
+        "  Or run: claude-investigate doctor"
+    );
+    setTimeout(() => process.exit(1), 150);
     return;
   }
 
