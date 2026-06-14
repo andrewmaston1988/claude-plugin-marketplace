@@ -376,6 +376,12 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
     push("concurrency-scope", true, false, `Concurrency scope: ${scope}`);
   }
 
+  // 16b. max-concurrent — informational: global session cap.
+  {
+    const cap = resolved?.orch?.max_concurrent ?? 3;
+    push("max-concurrent", true, false, `Max concurrent: ${cap}`);
+  }
+
   // 17. zombie-rows: stage=done without merge, orphan branches, stuck merge-ready
   if (db) {
     try {

@@ -358,7 +358,6 @@ async function pollOnce({
   }
   const projectFilter  = getFlag("--project");
   const intervalSec    = parseInt(getFlag("--interval") || String(POLL_DEFAULT), 10) || POLL_DEFAULT;
-  const maxConcurrent  = parseInt(getFlag("--max-concurrent") || String(MAX_CONCURRENT_DEFAULT), 10) || MAX_CONCURRENT_DEFAULT;
   const dryRun         = argv.includes("--dry-run");
   const force          = argv.includes("--force");
   const statusMode     = argv.includes("--status");
@@ -368,6 +367,16 @@ async function pollOnce({
   const paths = getPaths();
   const logFile = join(paths.logDir, "orchestrator.jsonl");
   const log = makeLogger(logFile);
+
+  // Precedence: --max-concurrent CLI flag > cfg.orch.max_concurrent > MAX_CONCURRENT_DEFAULT
+  const _startupCfg   = loadPipelineConfig();
+  const _cliCap       = getFlag("--max-concurrent");
+  const _cfgCap       = _startupCfg?.orch?.max_concurrent;
+  const maxConcurrent = _cliCap != null
+    ? (parseInt(_cliCap,        10) || MAX_CONCURRENT_DEFAULT)
+    : (_cfgCap != null
+        ? (parseInt(String(_cfgCap), 10) || MAX_CONCURRENT_DEFAULT)
+        : MAX_CONCURRENT_DEFAULT);
 
   // ── --shutdown ──────────────────────────────────────────────────────────────
   if (shutdownMode) {
