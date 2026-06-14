@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS pipeline_rows (
   d_effort TEXT DEFAULT 'medium',
   q_effort TEXT DEFAULT 'low',
   rvw_model TEXT DEFAULT 'claude-sonnet-4-6',
+  rvw_effort TEXT DEFAULT 'high',
   session_type TEXT,
   session_file TEXT,
   budget_usd REAL,
@@ -262,6 +263,7 @@ const SCHEMA_V6_VERSION = 6;
 // - user_ts REAL NOT NULL (last user-prompt timestamp, not updated by keepalive)
 // - summary TEXT (peer-visible summary)
 const SCHEMA_V7_VERSION = 7;
+const SCHEMA_V9_VERSION = 9;
 
 const SCHEMA_V7 = `
 CREATE TABLE IF NOT EXISTS claude_sessions (
@@ -344,6 +346,13 @@ function _applyMigrations(db) {
       db.exec("ALTER TABLE claude_sessions ADD COLUMN last_checkpoint_size INTEGER");
     }
     db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V8_VERSION})`);
+  }
+  if (currentVersion < SCHEMA_V9_VERSION) {
+    const cols = db.prepare("PRAGMA table_info(pipeline_rows)").all().map(c => c.name);
+    if (!cols.includes("rvw_effort")) {
+      db.exec("ALTER TABLE pipeline_rows ADD COLUMN rvw_effort TEXT DEFAULT 'high'");
+    }
+    db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V9_VERSION})`);
   }
 }
 

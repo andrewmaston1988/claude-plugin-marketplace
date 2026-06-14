@@ -286,7 +286,7 @@ export async function run(cmd, argv) {
         "[--depends <slug,...>] [--waits-on <slug>] [--base-branch <name>] " +
         "[--target-branch <name>] [--title <text>] [--type dev|research|review|test] " +
         "[--r-model] [--d-model] [--q-model] [--rvw-model] " +
-        "[--r-effort low|medium|high|xhigh|max] [--d-effort ...] [--q-effort ...]\n" +
+        "[--r-effort low|medium|high|xhigh|max] [--d-effort ...] [--q-effort ...] [--rvwe low|medium|high|xhigh|max]\n" +
         "  plan-file-path is the absolute or cwd-relative path to a markdown file.\n" +
         "  Falls back to plan-content extraction when --branch / --depends / --target-branch / --title are absent.\n" +
         "  --title sets the PR title (else the plan's *Title:* annotation, else the feature slug).\n" +
@@ -306,6 +306,7 @@ export async function run(cmd, argv) {
     const rEffortFlag  = getFlag("--r-effort", flags) || null;
     const dEffortFlag  = getFlag("--d-effort", flags) || null;
     const qEffortFlag  = getFlag("--q-effort", flags) || null;
+    const rvwEffortFlag = getFlag("--rvwe", flags) || null;
     let targetBranch  = getFlag("--target-branch", flags) || null;
     const branchFlag  = getFlag("--branch", flags) || null;
     const dependsFlag = getFlag("--depends", flags) || null;
@@ -381,7 +382,7 @@ export async function run(cmd, argv) {
     const rvwModel = rvwModelFlag || queueModelExtract(planPath, "review")   || "—";
 
     // Validate effort values.
-    for (const [name, val] of [["r_effort", rEffortFlag], ["d_effort", dEffortFlag], ["q_effort", qEffortFlag]]) {
+    for (const [name, val] of [["r_effort", rEffortFlag], ["d_effort", dEffortFlag], ["q_effort", qEffortFlag], ["rvw_effort", rvwEffortFlag]]) {
       if (val !== null && !validateEffort(val)) {
         close(ctx.db);
         process.stderr.write(`invalid ${name}: ${val} — must be one of ${Array.from(VALID_EFFORTS).join(", ")}\n`);
@@ -479,6 +480,7 @@ export async function run(cmd, argv) {
           rEffort: rEffortFlag || null,
           dEffort: dEffortFlag || null,
           qEffort: qEffortFlag || null,
+          rvwEffort: rvwEffortFlag || null,
           dependsOn: dependsArg, targetBranch,
           prTitle: prTitle || null,
           waitsOn, baseBranch,
@@ -497,6 +499,7 @@ export async function run(cmd, argv) {
         if (rEffortFlag) fields.r_effort = rEffortFlag;
         if (dEffortFlag) fields.d_effort = dEffortFlag;
         if (qEffortFlag) fields.q_effort = qEffortFlag;
+        if (rvwEffortFlag) fields.rvw_effort = rvwEffortFlag;
         rowUpdate(ctx.db, ctx.project, feature, fields);
       }
       const finalRow = rowGet(ctx.db, ctx.project, feature);
