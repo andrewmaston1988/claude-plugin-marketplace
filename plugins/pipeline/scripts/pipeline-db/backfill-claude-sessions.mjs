@@ -1,4 +1,4 @@
-import { resolve, expandUser } from "node:path";
+import { resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { connectUnified } from "./connection.mjs";
 
