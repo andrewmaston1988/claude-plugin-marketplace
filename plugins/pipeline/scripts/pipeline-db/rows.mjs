@@ -29,7 +29,7 @@ export function rowAdd(db, project, {
   branch = "—",
   rModel = null, dModel = null, qModel = null,
   rEffort = null, dEffort = null, qEffort = null,
-  rvwModel = null,
+  rvwModel = null, rvwEffort = null,
   sessionType = null, sessionFile = null, budgetUsd = null,
   dependsOn = null, targetBranch = "main",
   reviewRetries = null, reviewRetryBudget = null, reviewVerdict = null,
@@ -52,6 +52,7 @@ export function rowAdd(db, project, {
   ];
 
   if (rvwModel !== null)         { cols.push("rvw_model");           vals.push(rvwModel); }
+  if (rvwEffort !== null)        { cols.push("rvw_effort");          vals.push(rvwEffort); }
   if (reviewRetries !== null)    { cols.push("review_retries");      vals.push(reviewRetries); }
   if (reviewRetryBudget !== null){ cols.push("review_retry_budget"); vals.push(reviewRetryBudget); }
   if (reviewVerdict !== null)    { cols.push("review_verdict");      vals.push(reviewVerdict); }

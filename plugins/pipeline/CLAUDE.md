@@ -18,6 +18,15 @@ All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DE
 | `tiers` | `{haiku: "claude-haiku-4-5", sonnet: "claude-sonnet-4-6", opus: "claude-opus-4-8"}` | Canonical model string per tier. Used by auto-escalation to resolve tier-jumps (e.g., Haiku → Sonnet). Update when new models release or default recommendations change. |
 | `tier_efforts` | `{haiku: ["low", "medium", "high"], sonnet: ["low", "medium", "high", "max"], opus: ["low", "medium", "high", "xhigh", "max"]}` | Supported effort levels per tier. Auto-escalation respects these when walking the ladder (+2 per retry within tier, clamped to ceiling). Update if models gain/lose effort support. |
 
+**Per-row effort column defaults** (set at queue time via `pipeline queue-plan`, not in config.json):
+
+| Column | Default | Notes |
+|---|---|---|
+| `r_effort` | `high` | Research session effort. Passed as `--effort` to `claude -p` on the research spawn. Rarely downgraded; research benefits from deeper reasoning. |
+| `d_effort` | `medium` | Development session effort. Walked by auto-escalation (+2 per retry within tier). |
+| `q_effort` | `low` | QA/test session effort. Most test runs are mechanical; elevate only when test reasoning is required. |
+| `rvw_effort` | `high` | Review session effort. Passed as `--effort` to `claude -p` on the review spawn. NOT walked by auto-escalation — review effort is queue-time-pinned. Elevate to `max` for security/concurrency/cross-module diffs. |
+
 **Slack-bridge tokens**: `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, and `CLAUDE_CWD` are env-var overrides for the slack-bridge's `tokens.bot`, `tokens.app`, and `claude.cwd` config keys respectively. Env vars win over config values. Full mapping: `plugins/slack-bridge/CONFIG.md`.
 
 **Governor spawn contract**: when the governor is enabled, the orchestrator sets `CORRELATION_ID`, `REPORT_TYPE`, `REPORT_DATE`, `REPORT_MONTH`, `PIPELINE_DB`, and `PLUGIN_DIR` in the child process env before launching the governor session. Doctor check `governor-env-contract` verifies the template doesn't reference vars outside this set.

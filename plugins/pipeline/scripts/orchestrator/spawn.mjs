@@ -54,12 +54,14 @@ export function modelFromNotes(notes, project, feature, stype, logFn, row) {
 export function effortFromNotes(notes, stype, row) {
   const m = String(notes).match(/\beffort=([\w-]+)\b/);
   if (m) return m[1];
-  // Fall back to the row's typed effort columns (set via --d-effort / --rvw-effort at queue time)
+  // Fall back to the row's typed effort columns (set via --r-effort / --d-effort / --rvw-effort at queue time)
   if (row) {
-    const col = stype === "review" ? row.rvw_effort : row.d_effort;
+    let col;
+    if (stype === "review")   col = row.rvw_effort;
+    else if (stype === "research") col = row.r_effort;
+    else                      col = row.d_effort;
     if (col && col !== "—") return col;
   }
-  // Default to "medium" if not specified
   return "medium";
 }
 
