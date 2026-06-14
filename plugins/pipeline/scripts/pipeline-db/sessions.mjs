@@ -68,3 +68,9 @@ export function countActiveSessions(db) {
   ).get();
   return result?.count ?? 0;
 }
+
+export function featureIsActive(db, project, feature) {
+  return !!db.prepare(
+    "SELECT 1 FROM sessions WHERE project = ? AND feature = ? AND is_active = 1 LIMIT 1"
+  ).get(project, feature);
+}

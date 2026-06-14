@@ -18,7 +18,7 @@ export {
 } from "./progress.mjs";
 export {
   sessionRecordSpawn, sessionSetId, sessionFinish,
-  sessionsActive, projectHasActiveSession, countActiveSessions,
+  sessionsActive, projectHasActiveSession, countActiveSessions, featureIsActive,
 } from "./sessions.mjs";
 export { stateGet, stateSet, stateDump, getMeta, setMeta } from "./state.mjs";
 export {
