@@ -9,6 +9,7 @@ import {
   appendSpawn,
 } from "../pipeline-db/index.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
+import { PIPELINE_DEFAULTS } from "../../src/config-defaults.mjs";
 import { featureWorktreePath, resolveRowBranch } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
@@ -48,6 +49,18 @@ export function modelFromNotes(notes, project, feature, stype, logFn, row) {
     : cfg.models.dev_default;
   if (logFn) logFn(`[${project}] row '${feature}' has no model= pin — defaulting to ${defaultModel}`, "WARN");
   return defaultModel;
+}
+
+export function effortFromNotes(notes, stype, row) {
+  const m = String(notes).match(/\beffort=([\w-]+)\b/);
+  if (m) return m[1];
+  // Fall back to the row's typed effort columns (set via --d-effort / --rvw-effort at queue time)
+  if (row) {
+    const col = stype === "review" ? row.rvw_effort : row.d_effort;
+    if (col && col !== "—") return col;
+  }
+  // Default to "medium" if not specified
+  return "medium";
 }
 
 export function budgetFromNotes(notes) {
@@ -155,6 +168,38 @@ export function proxyEnvFor(model) {
   };
 }
 
+// Classify a model string into tier. Tolerates dated suffixes (claude-haiku-4-5-20251001).
+export function tierFromModel(model) {
+  if (/haiku/i.test(model))         return "haiku";
+  if (/sonnet/i.test(model))        return "sonnet";
+  if (/opus/i.test(model))          return "opus";
+  if (/fable|mythos/i.test(model))  return "fable";
+  return null;
+}
+
+// Step the escalation ladder within a tier's effort bounds, or jump to the next tier.
+const TIER_ORDER = ["haiku", "sonnet", "opus"];
+export function nextEscalationStep(tier, effort, tierEfforts) {
+  const levels = tierEfforts[tier];
+  if (!levels) return null;
+
+  const idx = levels.indexOf(effort);
+  // +2 within tier
+  if (idx >= 0 && idx + 2 < levels.length) {
+    return { tier, effort: levels[idx + 2], action: "effort+2" };
+  }
+  // +2 would overflow but ceiling not yet reached → clamp
+  if (idx >= 0 && idx < levels.length - 1) {
+    return { tier, effort: levels[levels.length - 1], action: "effort-clamp" };
+  }
+  // At ceiling (or current effort not in this tier's list) → tier-jump
+  const currIdx = TIER_ORDER.indexOf(tier);
+  const nextTier = currIdx >= 0 ? TIER_ORDER[currIdx + 1] : null;
+  if (nextTier) return { tier: nextTier, effort: "medium", action: "tier-jump" };
+  // At top tier ceiling → stay; budget exhausts elsewhere
+  return { tier, effort, action: "stay" };
+}
+
 // A worktree-eligible session must never run on the merge destination — that
 // would commit straight to main. A declared branch is authoritative for its
 // NAME, but the name must not BE the target/default branch.
@@ -174,21 +219,38 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   // and backward compatibility with legacy rows that carry type= hints.
   const stype    = stageSessionType || sessionTypeFromNotes(notes);
   let model      = modelFromNotes(notes, project, feature, stype, logFn, row);
+  let effort     = effortFromNotes(notes, stype, row);
   const budget   = budgetFromNotes(notes);
   const newStage = STAGE[stype] || "dev";
   const tools    = TOOLS[stype] || TOOLS.dev;
 
-  // Auto-escalate any Haiku variant → Sonnet on second review retry
-  if (stype === "dev" && (row.review_retries || 0) >= 2 && /haiku/i.test(model)) {
-    const newModel = "claude-sonnet-4-6";
-    rowUpdate(db, project, feature, { d_model: newModel });
-    logFn(`[${project}] '${feature}' auto-escalating d_model ${model}→${newModel} (review_retries=${row.review_retries})`, "WARN");
-    publishNotification({
-      title:    `Model escalated: ${feature}`,
-      message:  `d_model auto-escalated Haiku→Sonnet for ${feature} (review_retries=${row.review_retries})`,
-      priority: "low",
-    }).catch(() => {});
-    model = newModel;
+  // Per-tier effort escalation: +2 within tier, tier-jump on ceiling
+  if (stype === "dev" && (row.review_retries || 0) >= 1) {
+    const cfg = loadPipelineConfig();
+    const tiers = cfg.tiers || PIPELINE_DEFAULTS.tiers;
+    const tierEfforts = cfg.tier_efforts || PIPELINE_DEFAULTS.tier_efforts;
+    const currTier = tierFromModel(model);
+    if (currTier) {
+      const step = nextEscalationStep(currTier, effort, tierEfforts);
+      if (step && step.action !== "stay") {
+        const newModel = step.tier === currTier ? model : tiers[step.tier];
+        const dbUpdate = { d_effort: step.effort };
+        if (step.tier !== currTier) { dbUpdate.d_model = tiers[step.tier]; }
+        rowUpdate(db, project, feature, dbUpdate);
+        logFn(
+          `[${project}] '${feature}' escalating ${currTier}/${effort}→${step.tier}/${step.effort} ` +
+          `(${step.action}, review_retries=${row.review_retries})`,
+          "WARN"
+        );
+        publishNotification({
+          title:    `Escalated: ${feature}`,
+          message:  `${currTier}/${effort} → ${step.tier}/${step.effort} (${step.action})`,
+          priority: "low",
+        }).catch(() => {});
+        model  = newModel;
+        effort = step.effort;
+      }
+    }
   }
 
   if (dryRun) {
