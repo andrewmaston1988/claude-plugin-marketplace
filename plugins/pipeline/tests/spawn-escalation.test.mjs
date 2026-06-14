@@ -8,6 +8,11 @@ import { spawnSession, tierFromModel, nextEscalationStep } from "../scripts/orch
 
 const PROJECT = "testproject";
 
+// Hermetic stub: spawnSession's escalation/spawn-blocked paths publish real
+// notification envelopes (forwarded to Slack by the live orchestrator) unless
+// the sink is injected. Tests must never touch the real notifier.
+const noopNotify = async () => true;
+
 function createMockLog() {
   const logs = [];
   const fn = (msg, level = "INFO") => { logs.push({ msg, level }); };
@@ -141,7 +146,7 @@ test("escalation: does NOT escalate when review_retries = 0", () => {
     row.notes_extra = "type=dev model=claude-haiku-4-5";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(!logFn.hasMessage("escalating"), "Should not escalate when review_retries = 0");
   } finally { teardown(tmp, db); }
@@ -168,7 +173,7 @@ test("escalation: ESCALATES when review_retries >= 1 (Haiku medium → high, eff
     row.notes_extra = "type=dev model=claude-haiku-4-5";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(logFn.hasMessage("escalating"), "Should escalate at review_retries >= 1");
     ok(logFn.hasMessage("effort-clamp"), "Should show effort-clamp action (Haiku has only 3 rungs)");
@@ -197,7 +202,7 @@ test("escalation: Haiku high → Sonnet medium (tier-jump)", () => {
     row.d_effort = "high";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(logFn.hasMessage("escalating"), "Should escalate");
     ok(logFn.hasMessage("tier-jump"), "Should show tier-jump action");
@@ -226,7 +231,7 @@ test("escalation: Sonnet medium → max (effort+2, skip-rung)", () => {
     row.d_effort = "medium";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(logFn.hasMessage("escalating"), "Should escalate");
     ok(logFn.hasMessage("effort+2"), "Should show effort+2 action");
@@ -255,7 +260,7 @@ test("escalation: Sonnet high → max (effort-clamp)", () => {
     row.d_effort = "high";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(logFn.hasMessage("escalating"), "Should escalate");
     ok(logFn.hasMessage("effort-clamp"), "Should show effort-clamp action");
@@ -284,7 +289,7 @@ test("escalation: Sonnet max → Opus medium (tier-jump)", () => {
     row.d_effort = "max";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(logFn.hasMessage("escalating"), "Should escalate");
     ok(logFn.hasMessage("tier-jump"), "Should show tier-jump action");
@@ -313,7 +318,7 @@ test("escalation: Opus max → Opus max (stay, no escalation)", () => {
     row.d_effort = "max";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(!logFn.hasMessage("escalating"), "Should not escalate at top tier ceiling");
   } finally { teardown(tmp, db); }
@@ -340,7 +345,7 @@ test("escalation: illegal pin (Haiku/max) → tier-jump to Sonnet/medium", () =>
     row.d_effort = "max";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(logFn.hasMessage("escalating"), "Should escalate from illegal pin");
     ok(logFn.hasMessage("tier-jump"), "Should perform tier-jump");
@@ -369,7 +374,7 @@ test("escalation: does NOT escalate for review stype", () => {
     row.rvw_effort = "medium";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(!logFn.hasMessage("escalating"), "Should not escalate for review stype");
   } finally { teardown(tmp, db); }
@@ -396,7 +401,7 @@ test("escalation: dated suffix classified correctly", () => {
     row.d_effort = "medium";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     ok(logFn.hasMessage("escalating"), "Should escalate dated model");
     ok(logFn.hasMessage("haiku/medium→haiku/high"), "Should show correct transition");
@@ -424,7 +429,7 @@ test("escalation: persists both d_model and d_effort to DB (tier-jump)", () => {
     row.d_effort = "high";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     const updated = rowGet(db, PROJECT, feature);
     equal(updated.d_model, "claude-sonnet-4-6", "d_model should be updated to sonnet");
@@ -454,7 +459,7 @@ test("escalation: persists d_effort to DB (effort-only escalation, d_model stays
     row.d_effort = "medium";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     const updated = rowGet(db, PROJECT, feature);
     // Effort-only escalation (Haiku medium → high, no tier change) must NOT write d_model
@@ -484,7 +489,7 @@ test("escalation: log line carries action label", () => {
     row.d_effort = "medium";
 
     const logFn = createMockLog();
-    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
+    spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn, _publishNotification: noopNotify });
 
     const logs = logFn.getLogs();
     const escalateLog = logs.find(l => l.msg.includes("escalating") && l.level === "WARN");

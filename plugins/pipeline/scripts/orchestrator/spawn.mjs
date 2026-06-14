@@ -212,7 +212,7 @@ export function isProtectedBranch(branch, targetBranch, defaultBranch) {
 
 // Spawn a Claude session for one queued pipeline row. Takes the unified DB,
 // project name, registered project root, and pipeline row.
-export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRun, logFn, stageSessionType }) {
+export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRun, logFn, stageSessionType, _publishNotification = publishNotification }) {
   const feature  = row.feature;
   const notes    = row.notes_extra || "";
   // Prefer stage-mapped type; fall back to notes-based lookup for queued rows
@@ -242,7 +242,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
           `(${step.action}, review_retries=${row.review_retries})`,
           "WARN"
         );
-        publishNotification({
+        _publishNotification({
           title:    `Escalated: ${feature}`,
           message:  `${currTier}/${effort} → ${step.tier}/${step.effort} (${step.action})`,
           priority: "low",
@@ -280,7 +280,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
         notes_extra: existing ? `${existing} ${note}` : note,
       });
     } catch {}
-    publishNotification({
+    _publishNotification({
       title: `Spawn Blocked: ${feature} (${reason})`,
       message: (
         `${stype} session for '${feature}' in ${project} blocked before spawn.\n` +
@@ -313,7 +313,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
           notes_extra: existing ? `${existing} ${note}` : note,
         });
       } catch {}
-      publishNotification({
+      _publishNotification({
         title: `Spawn Blocked: ${feature} (branch-equals-target)`,
         message: (
           `${stype} session for '${feature}' in ${project} blocked before spawn.\n` +
@@ -399,7 +399,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
             notes_extra: existing ? `${existing} ${note}` : note,
           });
         } catch {}
-        publishNotification({
+        _publishNotification({
           title:    `Spawn Blocked: ${feature} (worktree-unavailable)`,
           message:  (
             `${stype} session for '${feature}' in ${project} blocked.\n` +
