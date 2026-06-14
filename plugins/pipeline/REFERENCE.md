@@ -291,7 +291,7 @@ Hooks ending in `.mjs` / `.js` are auto-prefixed with `node`; everything else is
 
 ### on_merge hook
 
-Fires at the point of merge — invoked by `merge.mjs` (step 5) for each branch being squash-merged. When set, **the hook owns the git operation**: the normal squash-merge logic is skipped entirely and the hook is responsible for performing the merge itself. A non-zero exit code aborts the merge with an error.
+Fires at the point of merge — invoked by `merge.mjs` (step 5) for each branch being squash-merged. When set, **the hook is the single merge authority**: `merge.mjs` skips its local squash-merge and delegates the entire git operation to the hook. A non-zero exit code aborts the merge with an error.
 
 ```json
 { "hooks": { "on_merge": "/abs/path/to/hook.mjs" } }
@@ -303,15 +303,25 @@ The hook receives the same four environment variables as `on_merge_ready`:
 |----------|-------|
 | `PIPELINE_PROJECT` | Project name |
 | `PIPELINE_FEATURE` | Feature slug |
-| `PIPELINE_BRANCH` | Full branch name |
+| `PIPELINE_BRANCH` | Full branch name **or bare slug** — the hook normalises to `autonomous/<slug>` |
 | `PIPELINE_TARGET_BRANCH` | Merge target |
+
+**Single-authority contract:** `merge.mjs` performs either (a) a local squash-merge *or* (b) delegates to `on_merge` — never both. When the hook is configured:
+
+1. `merge.mjs` checks whether the branch has any commits ahead of the target. If already integrated (0 ahead), it fast-forwards local target to `origin/<target>` and skips the hook.
+2. If there are commits to merge, `merge.mjs` invokes the hook. The hook does `gh pr merge --squash` on origin.
+3. After the hook exits successfully, `merge.mjs` fast-forwards local target to `origin/<target>` so `local == origin` and the next merge starts clean.
+
+This prevents the double-squash problem where a local commit and an origin GitHub commit diverge after the merge.
 
 **Enriched squash commit message (bundled template):** the bundled `on-merge.mjs` template (see `src/setup/wizard-hooks.mjs`) builds a richer squash commit than GitHub's default:
 
 1. Calls `row-get <project> <feature>` to read `pr_title`, `d_model`, and `target_branch` in a single DB call.
-2. Runs `git diff <target>...<branch> --stat --no-color` and passes the output to `claude -p` (Haiku, temperature=0) to generate a 2-3 bullet plain-text commit body.
-3. Appends a `Co-Authored-By: <Model Display Name> <noreply@anthropic.com>` trailer using the `d_model` from the DB row.
-4. Calls `gh pr merge --squash --subject <pr_title> --body <bullets+trailer>`.
+2. Checks if the PR is already `MERGED` via `gh pr view` — skips the merge and fast-forwards local target if so (already-merged guard).
+3. Runs `git diff <target>...<branch> --stat --no-color` and passes the output to `claude -p` (Haiku, temperature=0) to generate a 2-3 bullet plain-text commit body.
+4. Appends a `Co-Authored-By: <Model Display Name> <noreply@anthropic.com>` trailer using the `d_model` from the DB row.
+5. Calls `gh pr merge --squash --subject <pr_title> --body <bullets+trailer>` using the fully-qualified branch ref (`autonomous/<slug>`).
+6. Fast-forwards local target to `origin/<target>` after a successful GitHub merge.
 
 If `pr_title` is empty (old rows), the feature slug is used as the subject — identical to GitHub's default. If `claude -p` fails or times out, the body falls back to the trailer alone.
 
@@ -321,7 +331,7 @@ If `pr_title` is empty (old rows), the feature slug is used as the subject — i
 
 ### on_merge_ready hook
 
-Fires whenever a pipeline row reaches `stage=merge` — for every project, regardless of whether `autoMerge` is enabled. Common use: post a Slack ping, trigger a CI system, or log the event.
+Fires whenever a pipeline row reaches `stage=merge`. **Gated by `autoMerge`:** when `autoMerge: false` (the default), the bundled `on-merge-ready.mjs` template exits immediately without pushing or creating a PR — automatic PR creation is opt-in. Set `"autoMerge": true` in `~/.pipeline/config.json` to enable it. Common uses when enabled: push the branch, open a GitHub PR, post a Slack ping.
 
 ```json
 { "hooks": { "on_merge_ready": "/abs/path/to/hook.mjs" } }
