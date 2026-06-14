@@ -1,0 +1,5 @@
+{
+  "name": "checkpoint",
+  "description": "Durable cross-session handoff via STATE.md. /checkpoint skill (reconciles state), SessionStart resume offer, PreCompact backstop, and an observable self-correcting cache-keepalive.",
+  "author": { "name": "Andrew Maston" }
+}
