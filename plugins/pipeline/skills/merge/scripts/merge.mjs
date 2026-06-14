@@ -139,21 +139,44 @@ async function step5SquashMerge(db, project, projectDir, branches, planFiles, ta
     const slug = branchSlug(branch);
 
     if (onMergeHook) {
-      // Delegate the merge to hooks.on_merge — it owns the git operation.
-      // Env vars match the on_merge_ready pattern for consistency.
-      logOut(`[5] Invoking hooks.on_merge for ${branch}`);
-      const env = {
-        ...process.env,
-        PIPELINE_PROJECT: project,
-        PIPELINE_FEATURE: slug,
-        PIPELINE_BRANCH: branch,
-        PIPELINE_TARGET_BRANCH: targetBranch,
-      };
-      const result = spawnSync(process.execPath, [onMergeHook], { env, stdio: "inherit" });
-      if (result.status !== 0) {
-        throw new GitError(`hooks.on_merge failed for ${branch} (exit ${result.status})`);
+      // Already-integrated guard for hook path: 0 commits ahead means the work is
+      // already on origin (e.g. from a prior run). Skip the hook to avoid a
+      // double-merge that leaves local and origin in diverging states.
+      const aheadResult = runGit(
+        ["rev-list", "--left-right", "--count", `${targetBranch}...${branch}`],
+        projectDir, { check: false },
+      );
+      const aheadCount = aheadResult.code === 0
+        ? parseInt(aheadResult.stdout.trim().split(/\s+/)[1] ?? "0", 10)
+        : -1;
+
+      if (aheadCount === 0) {
+        logOut(`[5] ${branch} has 0 commits ahead of ${targetBranch} — already integrated, skipping hook`);
+        runGit(["fetch", "origin", targetBranch], projectDir, { check: false });
+        const ffSkip = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+        if (ffSkip.code !== 0) logErr(`[5] WARN: ff-sync failed after already-integrated skip: ${ffSkip.stderr.trim()}`);
+      } else {
+        // Delegate the merge to hooks.on_merge — it owns the git operation.
+        // Env vars match the on_merge_ready pattern for consistency.
+        logOut(`[5] Invoking hooks.on_merge for ${branch}`);
+        const env = {
+          ...process.env,
+          PIPELINE_PROJECT: project,
+          PIPELINE_FEATURE: slug,
+          PIPELINE_BRANCH: branch,
+          PIPELINE_TARGET_BRANCH: targetBranch,
+        };
+        const result = spawnSync(process.execPath, [onMergeHook], { env, stdio: "inherit" });
+        if (result.status !== 0) {
+          throw new GitError(`hooks.on_merge failed for ${branch} (exit ${result.status})`);
+        }
+        logOut(`[5] hooks.on_merge completed for ${branch}`);
+        // Fast-forward local target to origin — the hook merged via gh pr merge on
+        // origin, so local master is now behind by one squash commit.
+        runGit(["fetch", "origin", targetBranch], projectDir, { check: false });
+        const ffPost = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+        if (ffPost.code !== 0) logErr(`[5] WARN: ff-sync failed after hook merge: ${ffPost.stderr.trim()}`);
       }
-      logOut(`[5] hooks.on_merge completed for ${branch}`);
     } else {
       logOut(`[5] Squash-merging ${branch}`);
 
