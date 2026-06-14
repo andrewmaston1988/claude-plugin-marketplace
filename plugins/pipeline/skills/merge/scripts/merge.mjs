@@ -153,7 +153,8 @@ async function step5SquashMerge(db, project, projectDir, branches, planFiles, ta
       if (aheadCount === 0) {
         logOut(`[5] ${branch} has 0 commits ahead of ${targetBranch} — already integrated, skipping hook`);
         runGit(["fetch", "origin", targetBranch], projectDir, { check: false });
-        runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+        const ffSkip = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+        if (ffSkip.code !== 0) logErr(`[5] WARN: ff-sync failed after already-integrated skip: ${ffSkip.stderr.trim()}`);
       } else {
         // Delegate the merge to hooks.on_merge — it owns the git operation.
         // Env vars match the on_merge_ready pattern for consistency.
@@ -173,7 +174,8 @@ async function step5SquashMerge(db, project, projectDir, branches, planFiles, ta
         // Fast-forward local target to origin — the hook merged via gh pr merge on
         // origin, so local master is now behind by one squash commit.
         runGit(["fetch", "origin", targetBranch], projectDir, { check: false });
-        runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+        const ffPost = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+        if (ffPost.code !== 0) logErr(`[5] WARN: ff-sync failed after hook merge: ${ffPost.stderr.trim()}`);
       }
     } else {
       logOut(`[5] Squash-merging ${branch}`);
