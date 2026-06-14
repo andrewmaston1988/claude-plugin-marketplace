@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { connectPath, close, projectAdd, rowAdd, rowGet } from "../scripts/pipeline-db/index.mjs";
-import { spawnSession, tierFromModel, nextEscalationStep } from "../scripts/orchestrator/spawn.mjs";
+import { spawnSession, tierFromModel, nextEscalationStep, effortFromNotes } from "../scripts/orchestrator/spawn.mjs";
 
 const PROJECT = "testproject";
 
@@ -466,6 +466,32 @@ test("escalation: persists d_effort to DB (effort-only escalation, d_model stays
     equal(updated.d_model, null, "d_model must not be pinned by effort-only escalation");
     equal(updated.d_effort, "high", "d_effort should be updated to high");
   } finally { teardown(tmp, db); }
+});
+
+// effortFromNotes unit tests — verify per-role effort column routing
+test("effortFromNotes: notes effort= pin wins over row columns", () => {
+  equal(effortFromNotes("effort=max", "dev", { d_effort: "low", r_effort: "low", rvw_effort: "low" }), "max");
+});
+
+test("effortFromNotes: review stype reads rvw_effort", () => {
+  equal(effortFromNotes("", "review", { rvw_effort: "max", d_effort: "low", r_effort: "low" }), "max");
+});
+
+test("effortFromNotes: research stype reads r_effort", () => {
+  equal(effortFromNotes("", "research", { r_effort: "high", d_effort: "low", rvw_effort: "low" }), "high");
+});
+
+test("effortFromNotes: dev stype reads d_effort", () => {
+  equal(effortFromNotes("", "dev", { d_effort: "xhigh", r_effort: "low", rvw_effort: "low" }), "xhigh");
+});
+
+test("effortFromNotes: falls back to medium when row col is absent", () => {
+  equal(effortFromNotes("", "dev", {}), "medium");
+});
+
+test("effortFromNotes: falls back to medium when row col is '—'", () => {
+  equal(effortFromNotes("", "review", { rvw_effort: "—" }), "medium");
+  equal(effortFromNotes("", "research", { r_effort: "—" }), "medium");
 });
 
 test("escalation: log line carries action label", () => {

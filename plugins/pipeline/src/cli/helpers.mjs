@@ -39,6 +39,7 @@ export function formatRow(r) {
     d_effort:            r.d_effort || "—",
     q_effort:            r.q_effort || "—",
     rvw_model:           r.rvw_model || "—",
+    rvw_effort:          r.rvw_effort || "—",
     session_type:        r.session_type || "",
     session_file:        r.session_file || "",
     budget_usd:          r.budget_usd,
