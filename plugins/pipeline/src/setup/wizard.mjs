@@ -11,7 +11,7 @@ import { loadPipelineConfig } from "../pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../config-defaults.mjs";
 import { renderTemplate, installAutostart, verifyAutostart } from "./autostart.mjs";
 import { runDoctor, printDoctor } from "./doctor.mjs";
-import { mergePsProfile, mergeUnixRc, applyPsProfiles } from "./wizard-profile.mjs";
+import { mergeUnixRc, applyPsProfiles } from "./wizard-profile.mjs";
 import { connectUnified, close as dbClose, projectAdd, projectList } from "../../scripts/pipeline-db/index.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
 import { detectDefaultBranch } from "../cli/helpers.mjs";
