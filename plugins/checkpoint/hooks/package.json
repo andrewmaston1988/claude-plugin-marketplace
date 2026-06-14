@@ -1,0 +1,6 @@
+{
+  "name": "checkpoint-hooks",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}
