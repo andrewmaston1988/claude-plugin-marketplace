@@ -180,6 +180,7 @@ async function pollOnce({
     catch (e) { logFn(`notify-drain error: ${e.message}`, "WARN"); }
   }
 
+  const cfg = loadPipelineConfig();
   const pipelinePaths = listEnabledProjects(db);
   let nProjects = 0, nQueued = 0, nActive = 0;
 
@@ -298,7 +299,6 @@ async function pollOnce({
   }
 
   // Second pass: stage=merge rows. One merge per project per tick.
-  const cfg = loadPipelineConfig();
   for (const [project, projectRoot] of pipelinePaths) {
     if (projectFilter && project !== projectFilter) continue;
 

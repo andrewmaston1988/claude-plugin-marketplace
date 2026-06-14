@@ -60,7 +60,7 @@ If step 5 conflicts, the row parks at `manual` with `[stash-pop-conflict]` and t
 
 ### Serial-session invariant — load-bearing
 
-This design depends on the orchestrator's existing per-project serialisation: at most one session per project is active at a time. If concurrency policy ever relaxes — two sessions on the same feature concurrently — the one-worktree-per-feature model breaks (two processes racing on `git checkout` and the stash slot). The doctor's `worktree-layout-stale` check warns when on-disk worktrees diverge from the resolved template; treat that as the manual-migration nudge.
+The load-bearing constraint is **per-feature**: at most one session per feature may be active at any time. The orchestrator defaults to `orch.concurrency_scope: "feature"` — multiple features in the same project can run concurrently up to `--max-concurrent`. Two sessions on the **same** feature concurrently would break the one-worktree-per-feature model (two processes racing on `git checkout` and the stash slot). Operators who want the old per-project serialisation can set `orch.concurrency_scope: "project"` in `~/.pipeline/config.json`. The doctor's `worktree-layout-stale` check warns when on-disk worktrees diverge from the resolved template; treat that as the manual-migration nudge.
 
 ### Migration
 
