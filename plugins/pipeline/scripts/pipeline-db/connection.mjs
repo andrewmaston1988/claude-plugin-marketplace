@@ -275,6 +275,14 @@ CREATE INDEX IF NOT EXISTS idx_claude_sessions_cwd ON claude_sessions(cwd);
 INSERT OR IGNORE INTO schema_version (version) VALUES (7);
 `;
 
+// Add last_checkpoint_size column to claude_sessions for size-aware compact+ trigger
+const SCHEMA_V8_VERSION = 8;
+
+const SCHEMA_V8 = `
+ALTER TABLE claude_sessions ADD COLUMN last_checkpoint_size INTEGER;
+INSERT OR IGNORE INTO schema_version (version) VALUES (8);
+`;
+
 function _applyMigrations(db) {
   let currentVersion = 0;
   try {
@@ -329,6 +337,13 @@ function _applyMigrations(db) {
   }
   if (currentVersion < SCHEMA_V7_VERSION) {
     db.exec(SCHEMA_V7);
+  }
+  if (currentVersion < SCHEMA_V8_VERSION) {
+    const cols = db.prepare("PRAGMA table_info(claude_sessions)").all().map(c => c.name);
+    if (!cols.includes("last_checkpoint_size")) {
+      db.exec("ALTER TABLE claude_sessions ADD COLUMN last_checkpoint_size INTEGER");
+    }
+    db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V8_VERSION})`);
   }
 }
 
