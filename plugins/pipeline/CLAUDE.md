@@ -6,6 +6,12 @@ All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DE
 
 | Key | Default | Notes |
 |---|---|---|
+| `tiers.haiku` | `"claude-haiku-4-5"` | Canonical Haiku model name. Used by auto-escalation ladder to identify tier and resolve tier-jumps. Update when Anthropic releases a new Haiku version. |
+| `tiers.sonnet` | `"claude-sonnet-4-6"` | Canonical Sonnet model name. Used by auto-escalation ladder. |
+| `tiers.opus` | `"claude-opus-4-8"` | Canonical Opus model name. Used by auto-escalation ladder. |
+| `tier_efforts.haiku` | `["low", "medium", "high"]` | Haiku-supported effort levels. Auto-escalation steps effort +2 within this list; at ceiling, tier-jumps to Sonnet. |
+| `tier_efforts.sonnet` | `["low", "medium", "high", "max"]` | Sonnet-supported effort levels. Sonnet has no `xhigh` level. |
+| `tier_efforts.opus` | `["low", "medium", "high", "xhigh", "max"]` | Opus-supported effort levels. Full scale. |
 | `web.port` | `8765` | Port the web dashboard listens on. Override with `--port` on the CLI for a single session. Doctor check `web-port-conflict` warns when a foreign process occupies this port. |
 | `governor.enabled` | `false` | Opt-in to scheduled background governance reports. Also set `governor.project`. |
 | `governor.project` | `null` | Name of the registered project whose root is used as fallback for `reports_dir`, `session_dir`, `log_dir`. |
