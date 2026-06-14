@@ -1,0 +1,74 @@
+# Scout ignore patterns. Same shape as .gitignore.
+#
+# How lines are interpreted:
+#   - Bare directory names (no slash, no wildcard, no leading "!")
+#     feed the fast directory-prune optimisation in os.walk — these
+#     subtrees are never descended into. Use them for caches, build
+#     output, vendored dependencies.
+#   - Anything else (contains "/", "*", "?", or starts with "!") falls
+#     through to per-file fnmatch and is matched against the path
+#     relative to the repo root, plus the bare filename.
+#
+# scout install drops this template into <repo>/.scoutignore on first
+# `scout index` if no .scoutignore exists. Edit per-repo to add project-
+# specific exclusions (e.g. `**/Third Party/**`, `vendor/`, `*.generated.cs`).
+
+# VCS
+.git
+.svn
+.hg
+
+# Editors / IDEs
+.vs
+.idea
+.vscode
+
+# Python
+__pycache__
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.venv
+venv
+env
+
+# JS / Node
+node_modules
+.next
+.nuxt
+
+# Lockfiles + machine-generated content — no useful code, but
+# vendored/minified files routinely chunk to 800-1500 embeddings each,
+# exhausting the CUDA arena and collapsing throughput.
+# Leading `*` makes these globs (classifier needs `*`/`?`/`/`/`!`);
+# fnmatch's `*` matches any chars including `/`, so one pattern catches
+# both root-level and nested occurrences.
+*.lock
+*package-lock.json
+*pnpm-lock.yaml
+*go.sum
+*.min.js
+*.min.css
+
+# Build output
+dist
+build
+out
+bin
+obj
+
+# .NET / NuGet
+packages
+TestResults
+
+# C/C++ / JVM dependency caches
+vcpkg_installed
+.gradle
+
+# Web / generated
+wwwroot
+coverage
+cldr-data
+
+# Scout itself
+.scout
