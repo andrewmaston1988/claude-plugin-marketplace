@@ -4,10 +4,10 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { execSync } from "node:child_process";
 import { connectPath, upsertClaudeSession, getClaudeSession, getLastCheckpointSize, setLastCheckpointSize } from "../pipeline-db/index.mjs";
 
-// Import the exported functions for testing
-import userPromptSubmitModule from "./user-prompt-submit.mjs";
+const NODE_PATH = process.execPath;
 
 test("resolveSessionId: returns sessionId from stdin when provided", () => {
   const stdinJson = { session_id: "test-123" };
@@ -88,7 +88,7 @@ test("upsertClaudeSession: preserves user_ts on null update", () => {
 });
 
 test("hook stdout contract: valid JSON on empty stdin", (t, done) => {
-  const result = spawnSync("node", [
+  const result = spawnSync(NODE_PATH, [
     join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
   ], {
     input: "",
@@ -108,7 +108,7 @@ test("hook stdout contract: valid JSON on empty stdin", (t, done) => {
 });
 
 test("hook stdout contract: valid JSON on malformed stdin", (t, done) => {
-  const result = spawnSync("node", [
+  const result = spawnSync(NODE_PATH, [
     join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
   ], {
     input: "not valid json{{{",
@@ -135,7 +135,7 @@ test("hook: CORRELATION_ID suppresses keepalive-init injection", (t, done) => {
     cwd: process.cwd(),
   });
 
-  const result = spawnSync("node", [
+  const result = spawnSync(NODE_PATH, [
     join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
   ], {
     input,
@@ -162,7 +162,7 @@ test("hook: database write on valid JSON", (t, done) => {
     cwd: process.cwd(),
   });
 
-  const result = spawnSync("node", [
+  const result = spawnSync(NODE_PATH, [
     join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
   ], {
     input,
