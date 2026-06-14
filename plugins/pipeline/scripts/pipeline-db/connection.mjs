@@ -254,6 +254,27 @@ INSERT OR IGNORE INTO schema_version(version) VALUES(5);
 // ('high' for review, 'medium' for dev, 'low' for queue)
 const SCHEMA_V6_VERSION = 6;
 
+// Add claude_sessions table for absorbing claude.db.claude_sessions into pipeline.db
+// Schema mirrors claude.db.claude_sessions exactly:
+// - session_id TEXT PRIMARY KEY
+// - cwd TEXT
+// - started_at REAL (unix epoch seconds)
+// - user_ts REAL (last user-prompt timestamp, not updated by keepalive)
+// - summary TEXT (peer-visible summary)
+const SCHEMA_V7_VERSION = 7;
+
+const SCHEMA_V7 = `
+CREATE TABLE IF NOT EXISTS claude_sessions (
+  session_id TEXT PRIMARY KEY,
+  cwd TEXT NOT NULL,
+  started_at REAL NOT NULL,
+  user_ts REAL NOT NULL,
+  summary TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_claude_sessions_cwd ON claude_sessions(cwd);
+INSERT OR IGNORE INTO schema_version (version) VALUES (7);
+`;
+
 function _applyMigrations(db) {
   let currentVersion = 0;
   try {
@@ -305,6 +326,9 @@ function _applyMigrations(db) {
       db.exec("ALTER TABLE pipeline_rows ADD COLUMN q_effort TEXT DEFAULT 'low'");
     }
     db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V6_VERSION})`);
+  }
+  if (currentVersion < SCHEMA_V7_VERSION) {
+    db.exec(SCHEMA_V7);
   }
 }
 
