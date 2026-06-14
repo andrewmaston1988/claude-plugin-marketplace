@@ -12,6 +12,10 @@ import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
 import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
 import { rowAdd, rowGet, rowUpdate } from "../scripts/pipeline-db/rows.mjs";
 
+// Hermetic stub — keep spawnSession's spawn-blocked notification off the real
+// (Slack-forwarded) sink. See spawn-escalation.test.mjs.
+const noopNotify = async () => true;
+
 test("isProtectedBranch: true when branch equals target or default", () => {
   ok(isProtectedBranch("main", "main", "master"));
   ok(isProtectedBranch("master", "main", "master"));
@@ -41,7 +45,7 @@ test("spawnSession: resolved branch == target parks at manual, returns null, nev
 
       const logs = [];
       const proc = spawnSession("p", row, "sessions/dev.md", root,
-        { db, dryRun: false, logFn: (m, l) => logs.push({ m, l: l || "INFO" }) });
+        { db, dryRun: false, logFn: (m, l) => logs.push({ m, l: l || "INFO" }), _publishNotification: noopNotify });
 
       equal(proc, null, "must not spawn a process");
       const after = rowGet(db, "p", "feat-x");
