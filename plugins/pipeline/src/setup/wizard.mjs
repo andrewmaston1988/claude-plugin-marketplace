@@ -548,12 +548,15 @@ export async function runWizard({ paths, log, opts = {} }) {
     hr();
     say("Step 8/11 — Autostart\n");
     const nodePath    = process.execPath;
-    // Autostart targets the orchestrator entry directly, not the CLI binary.
-    // Previously this pointed at bin/pipeline.mjs — the OS scheduler would
-    // launch the CLI, which prints "unknown subcommand" and exits 0 with no
-    // orchestrator ever running. The CLI bin is the user-facing entry; the
-    // orchestrator's index.mjs is the long-running daemon.
-    const bridgeEntry = fileURLToPath(new URL("../../scripts/orchestrator/index.mjs", import.meta.url));
+    // Route autostart through the self-resolving shim so sha bumps don't strand
+    // the scheduled task on a stale install. Falls back to the pinned entry if
+    // the resolver couldn't be installed (mirrors Step 9's PATH-alias fallback).
+    const resolverPath   = join(homedir(), ".local", "bin", "pipeline-resolver.mjs");
+    const pinnedEntry    = fileURLToPath(new URL("../../scripts/orchestrator/index.mjs", import.meta.url));
+    const useResolver    = existsSync(resolverPath);
+    const dispatchTarget = useResolver
+      ? `${resolverPath} orchestrator`
+      : pinnedEntry;
     const doAutostart = nonInteractive
       ? (niYes("installAutostart") ? "y" : "n")
       : await ask(`Install autostart for ${process.platform}? [Y/n] `);
@@ -561,7 +564,7 @@ export async function runWizard({ paths, log, opts = {} }) {
       try {
         const rendered = renderTemplate(process.platform, {
           nodePath,
-          bridgeEntry,
+          bridgeEntry: dispatchTarget,
           configDir: paths.configDir,
           logDir:    paths.logDir,
         });
