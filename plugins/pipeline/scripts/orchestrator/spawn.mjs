@@ -434,6 +434,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   const args = [
     "-p", prompt,
     "--model", model,
+    "--effort", effort,
     "--allowedTools", tools,
     "--max-budget-usd", budget,
   ];
