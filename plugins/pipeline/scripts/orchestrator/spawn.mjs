@@ -51,7 +51,7 @@ export function modelFromNotes(notes, project, feature, stype, logFn, row) {
   return defaultModel;
 }
 
-export function effortFromNotes(notes, stype, logFn, row) {
+export function effortFromNotes(notes, stype, row) {
   const m = String(notes).match(/\beffort=([\w-]+)\b/);
   if (m) return m[1];
   // Fall back to the row's typed effort columns (set via --d-effort / --rvw-effort at queue time)
@@ -219,7 +219,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   // and backward compatibility with legacy rows that carry type= hints.
   const stype    = stageSessionType || sessionTypeFromNotes(notes);
   let model      = modelFromNotes(notes, project, feature, stype, logFn, row);
-  let effort     = effortFromNotes(notes, stype, logFn, row);
+  let effort     = effortFromNotes(notes, stype, row);
   const budget   = budgetFromNotes(notes);
   const newStage = STAGE[stype] || "dev";
   const tools    = TOOLS[stype] || TOOLS.dev;
@@ -234,7 +234,9 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
       const step = nextEscalationStep(currTier, effort, tierEfforts);
       if (step && step.action !== "stay") {
         const newModel = step.tier === currTier ? model : tiers[step.tier];
-        rowUpdate(db, project, feature, { d_model: newModel, d_effort: step.effort });
+        const dbUpdate = { d_effort: step.effort };
+        if (step.tier !== currTier) { dbUpdate.d_model = tiers[step.tier]; }
+        rowUpdate(db, project, feature, dbUpdate);
         logFn(
           `[${project}] '${feature}' escalating ${currTier}/${effort}→${step.tier}/${step.effort} ` +
           `(${step.action}, review_retries=${row.review_retries})`,

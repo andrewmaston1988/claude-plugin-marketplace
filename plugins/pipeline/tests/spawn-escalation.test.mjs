@@ -432,7 +432,7 @@ test("escalation: persists both d_model and d_effort to DB (tier-jump)", () => {
   } finally { teardown(tmp, db); }
 });
 
-test("escalation: persists d_effort to DB (effort-only escalation)", () => {
+test("escalation: persists d_effort to DB (effort-only escalation, d_model stays unpinned)", () => {
   const { tmp, db, projectRoot } = setup();
   try {
     const feature = "test-feat-persist-effort";
@@ -449,14 +449,16 @@ test("escalation: persists d_effort to DB (effort-only escalation)", () => {
     });
 
     const row = rowGet(db, PROJECT, feature);
-    row.notes_extra = "type=dev model=claude-haiku-4-5";
+    // No model= in notes — modelFromNotes resolves from config default, not pinned
+    row.notes_extra = "type=dev";
     row.d_effort = "medium";
 
     const logFn = createMockLog();
     spawnSession(PROJECT, row, sessionFile, projectRoot, { db, dryRun: true, logFn });
 
     const updated = rowGet(db, PROJECT, feature);
-    equal(updated.d_model, "claude-haiku-4-5", "d_model should remain haiku");
+    // Effort-only escalation (Haiku medium → high, no tier change) must NOT write d_model
+    equal(updated.d_model, null, "d_model must not be pinned by effort-only escalation");
     equal(updated.d_effort, "high", "d_effort should be updated to high");
   } finally { teardown(tmp, db); }
 });
