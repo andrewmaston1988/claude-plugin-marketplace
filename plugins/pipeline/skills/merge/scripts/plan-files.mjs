@@ -114,6 +114,19 @@ function normalizePlanPath(claimed, project) {
   return p;
 }
 
+// Returns true when a plan-claimed path is outside the project tree and can
+// never appear in a squash diff. Two cases:
+//   1. HOME-relative shorthands (~/, $HOME/, ${HOME}/) — operator-installed
+//      hooks and user-global skills live here by design.
+//   2. Absolute paths that normalizePlanPath couldn't reduce (project name not
+//      in their segments) — they resolve outside the repo root.
+export function isExternalPath(rawPath, normalizedPath) {
+  const p = rawPath.replace(/\\/g, "/").trim();
+  if (p.startsWith("~/") || p.startsWith("$HOME/") || p.startsWith("${HOME}/")) return true;
+  const n = (normalizedPath || "").replace(/\\/g, "/");
+  return /^[A-Za-z]:\//.test(n) || n.startsWith("/");
+}
+
 function extractPlanFiles(planText) {
   const hm = /^#{1,6}\s*Files Changed\s*$/m.exec(planText);
   if (!hm) return [];
@@ -149,6 +162,10 @@ function verifyPlanFilesInDiff(planText, branch, projectDir, targetBranch, proje
 
   for (const [path, verb] of claimed) {
     const norm = normalizePlanPath(path, project);
+    if (isExternalPath(path, norm)) {
+      process.stdout.write(`[2] WARN: [external-skip] ${path} — not in squash diff (outside project tree)\n`);
+      continue;
+    }
     if (diffFiles.has(norm)) continue;
     if ([...diffFiles].some(df => df.endsWith("/" + norm) || norm.endsWith("/" + df))) continue;
     missing.push(`  - \`${path}\` (claimed: ${verb || "changed"})`);

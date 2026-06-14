@@ -636,6 +636,23 @@ Plan file paths are read from the pipeline DB row (stored at queue time). `--pla
 | manual → merge | Human confirms physical steps done | Human via `/pipeline done` |
 | any → main | All plan items `✓` + QA Pass = `true` + stage = `merge` | `/merge` (hard stop on failure) |
 
+### DoD — plan-files check (`verifyPlanFilesInDiff`)
+
+`/merge` cross-checks every path listed under `## Files Changed` in the plan against the squash diff. A claimed path that does not appear in the diff causes a hard stop.
+
+**External paths are skipped automatically.** A path is considered external when it:
+
+- Starts with `~/`, `$HOME/`, or `${HOME}/` (operator HOME — hooks, global skills, config files)
+- Is an absolute path that resolves outside the project tree (a `C:/` or `/` prefix that `normalizePlanPath` cannot strip because the project name is absent from the segments)
+
+For each skipped external path the merge runner emits:
+
+```
+WARN: [external-skip] <path> — not in squash diff (outside project tree)
+```
+
+The merge continues; the operator is responsible for confirming those files were updated on disk. External paths should **not** be listed under `--skip-testing` — that flag silences `(needs testing)` items and has a wider blast radius.
+
 ---
 
 ## Failure handling
