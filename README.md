@@ -9,6 +9,7 @@ A collection of [Claude Code](https://claude.ai/code) plugins.
 | checkpoint | Durable cross-session handoff via STATE.md. /checkpoint skill, SessionStart resume offer, PreCompact backstop, observable cache-keepalive | beta | [Setup guide](./plugins/checkpoint/README.md) |
 | slack-bridge | Two-way Slack ↔ Claude Code bridge via Socket Mode | beta | [Setup guide](./plugins/slack-bridge/README.md) |
 | pipeline | Pipeline orchestrator — queue plans, autonomous dev/test/review sessions, TUI + web dashboards, spend governance, conversational `/pipeline-setup` skill | beta | [Setup guide](./plugins/pipeline/README.md) |
+| xquik | Xquik guidance for X data extraction, automation, webhooks, REST API, and MCP workflows | beta | [Setup guide](./plugins/xquik/README.md) |
 
 ## Using the marketplace
 

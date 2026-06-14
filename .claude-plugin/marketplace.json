@@ -41,6 +41,14 @@
         "name": "Andrew Maston",
         "email": "andrew.maston1988@gmail.com"
       }
+    },
+    {
+      "name": "xquik",
+      "description": "Xquik guidance for X data extraction, automation, webhooks, REST API, and MCP workflows.",
+      "source": "./plugins/xquik",
+      "author": {
+        "name": "Xquik"
+      }
     }
   ]
 }
