@@ -11,10 +11,25 @@ import { loadPipelineConfig } from "../pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../config-defaults.mjs";
 import { renderTemplate, installAutostart, verifyAutostart } from "./autostart.mjs";
 import { runDoctor, printDoctor } from "./doctor.mjs";
-import { mergePsProfile, mergeUnixRc } from "./wizard-profile.mjs";
+import { mergePsProfile, mergeUnixRc, applyPsProfiles } from "./wizard-profile.mjs";
 import { connectUnified, close as dbClose, projectAdd, projectList } from "../../scripts/pipeline-db/index.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
 import { detectDefaultBranch } from "../cli/helpers.mjs";
+
+// Collects all PowerShell flavors present on this machine so Step 9 can write
+// the pipeline function to every profile rather than just the first one found.
+function resolvePsProfiles() {
+  const profiles = [];
+  for (const exe of ["pwsh", "powershell"]) {
+    try {
+      const path = execSync(`${exe} -NoProfile -Command $PROFILE`, {
+        encoding: "utf8", timeout: 5000
+      }).trim();
+      if (path) profiles.push({ exe, path });
+    } catch { /* shell not installed; skip */ }
+  }
+  return profiles;
+}
 
 // Non-interactive defaults — applied when `opts.nonInteractive === true` and the
 // caller didn't override the specific key. Designed so a future Claude (or CI)
@@ -607,30 +622,16 @@ export async function runWizard({ paths, log, opts = {} }) {
     const dispatchPath = resolverInstalled || cliEntry;
 
     if (process.platform === "win32") {
-      let profile = "";
-      try { profile = execSync("pwsh -NoProfile -Command $PROFILE", { encoding: "utf8", timeout: 5000 }).trim(); } catch {}
-      if (!profile) { try { profile = execSync("powershell -NoProfile -Command $PROFILE", { encoding: "utf8", timeout: 5000 }).trim(); } catch {} }
-      const profilePath = profile || "$PROFILE";
       const fn = `function pipeline { & "${nodePath}" "${dispatchPath}" @args }`;
+      const psProfiles = resolvePsProfiles();
+      const profileDesc = psProfiles.length > 0
+        ? psProfiles.map(p => p.path).join(", ")
+        : "$PROFILE";
       const addIt = nonInteractive
         ? (niYes("installPathAlias") ? "y" : "n")
-        : await ask(`Append pipeline function to ${profilePath}? [Y/n] `);
+        : await ask(`Append pipeline function to PowerShell profile(s) [${profileDesc}]? [Y/n] `);
       if (!addIt.trim().toLowerCase().startsWith("n")) {
-        try {
-          if (profile) {
-            const dir = profile.substring(0, profile.lastIndexOf("\\"));
-            mkdirSync(dir, { recursive: true });
-            let existing = "";
-            try { existing = readFileSync(profile, "utf8"); } catch {}
-            writeFileSync(profile, mergePsProfile(existing, fn));
-            say(`✓ Wired pipeline function in ${profile} — restart PowerShell or: . "${profile}"`);
-          } else {
-            say(`Add this to your PowerShell profile manually:\n  ${fn}`);
-          }
-        } catch (e) {
-          say(`✗ Could not write profile: ${e.message}`);
-          say(`Add manually to your PowerShell profile:\n  ${fn}`);
-        }
+        applyPsProfiles(psProfiles, fn, say);
 
         // ALSO install a .cmd shim in ~/.local/bin so non-interactive shells
         // (Claude Code's Bash/PowerShell tools, CI runners, automation) can
