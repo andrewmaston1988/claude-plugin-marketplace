@@ -1,0 +1,13 @@
+{
+  "hooks": {
+    "PreCompact": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-compact-snapshot.mjs\"" } ] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/prompt-submit-checkpoint.mjs\"" } ] }
+    ],
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-resume.mjs\"" } ] }
+    ]
+  }
+}
