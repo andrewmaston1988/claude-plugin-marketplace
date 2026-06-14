@@ -178,6 +178,12 @@ function ensureRuntimeDeps(argv) {
     return;
   }
 
+  if (cmd === "orchestrator" || cmd === "orchestrate") {
+    const here = fileURLToPath(new URL("../scripts/orchestrator/index.mjs", import.meta.url));
+    await import(here); // hands off; orchestrator daemon keeps the process alive
+    return;
+  }
+
   if (!cmd || cmd === "--help" || cmd === "-h") {
     process.stdout.write(`
 pipeline — Pipeline CLI for Claude Code
