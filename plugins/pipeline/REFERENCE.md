@@ -716,6 +716,104 @@ Unknown placeholders are left untouched in output so missed substitutions are vi
 
 ---
 
+## Hooks
+
+### UserPromptSubmit hook registration
+
+The pipeline plugin wires a `UserPromptSubmit` hook into Claude Code that fires on every user prompt. This hook is registered in `plugins/pipeline/hooks/hooks.json` and dispatches to a Node.js script via the polyglot wrapper.
+
+**Registration schema (`hooks.json`):**
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}/hooks/run-hook.cmd\" user-prompt-submit",
+            "async": false
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Implementation path:** `plugins/pipeline/hooks/user-prompt-submit` (bash shim) → `plugins/pipeline/scripts/hooks/user-prompt-submit.mjs` (Node.js)
+
+### Dual-writer phase (phases 2–4)
+
+During the `pipeline-absorb-claude-db` migration phases 2–4, two hooks fire on every prompt:
+1. **Python hook** (`C:/code/CLAUDE/scripts/session_user_submit_hook.py`) — writes to `C:/code/CLAUDE/claude.db` (legacy)
+2. **mjs hook** (pipeline plugin) — writes to `~/.pipeline/pipeline.db` (new)
+
+Both hooks inject identical `additionalContext` to Claude Code. This dual-writer state ensures:
+- Real production traffic feeds `pipeline.db.claude_sessions` without depending on a backfill
+- The new hook is soaked against the Python hook as a safety net before phase 3 retires the reader dependencies
+- Phase 4 can retire the Python hook with confidence
+
+**To remove the Python hook (phase 4 operation):** Delete the following entry from **both**:
+- `~/.claude/settings.json`
+- `C:/code/CLAUDE/settings.json`
+
+Entry to remove:
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "command": "python ${CLAUDE_HOME}/scripts/session_user_submit_hook.py",
+        "async": false
+      }
+    ]
+  }
+}
+```
+
+(Only the `pipeline@marketplace` entry remains.)
+
+### Hook logging
+
+The mjs hook appends one line per invocation to `~/.pipeline/logs/user-prompt-submit.log`:
+```
+<iso-timestamp> <session-id> <cwd> <keepalive> <transcript-size> <prev-any-ts> <injected-templates>
+```
+
+On error, appends:
+```
+<iso-timestamp> Error: <stack-trace>
+```
+
+No rotation — operator truncates manually if needed during the soak phase; phase 5 retirement removes the log entirely.
+
+### Template-file divergence from Python hook
+
+The Python hook crashes on missing template files. The mjs hook wraps each template read in try/catch and falls back to empty string if missing. This divergence is intentional for robustness — template files live outside the plugin tree and may not exist on all user machines.
+
+**Affected templates:**
+- `~/.claude/templates/session-context.md`
+- `~/.claude/templates/keepalive-tick.md`
+- `~/.claude/templates/keepalive-init.md`
+- `~/.claude/templates/compact-resume.md`
+- `~/.claude/templates/session-checkpoint.md`
+
+If any template is missing, its section is skipped but the hook still emits valid JSON stdout.
+
+### Hooks pattern for future plugins
+
+The bash shim pattern (`plugins/pipeline/hooks/user-prompt-submit` → `plugins/pipeline/scripts/hooks/user-prompt-submit.mjs`) is the new standard for plugin hooks. Slack-bridge's `session-start` hook does all its work inline in bash; for larger logic (session DB upserts, checkpoint triggers, multiple template reads), this dispatch pattern is cleaner. New plugin hooks should follow it:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+exec node "${SCRIPT_DIR}/../scripts/hooks/hook-name.mjs" "$@"
+```
+
+---
+
 ## Session types
 
 The orchestrator supports four session types: `dev`, `research`, `review`, `test`. They share one worktree per pipeline row (git semantics: one branch → one worktree).

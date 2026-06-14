@@ -9,6 +9,8 @@ import {
   upsertClaudeSession,
   getClaudeSession,
   listActiveClaudeSessionsByCwd,
+  getLastCheckpointSize,
+  setLastCheckpointSize,
   backfillFromClaudeDb,
 } from "./claude-sessions.mjs";
 
@@ -22,8 +24,8 @@ test("claude_sessions table migration creates table with correct schema", (t) =>
   const colNames = cols.map(c => c.name);
   assert.deepEqual(
     colNames,
-    ["session_id", "cwd", "started_at", "user_ts", "summary"],
-    "Should have exactly 5 columns in order"
+    ["session_id", "cwd", "started_at", "user_ts", "summary", "last_checkpoint_size"],
+    "Should have 6 columns in order (including last_checkpoint_size from SCHEMA_V8)"
   );
 
   const pkCol = cols.find(c => c.pk === 1);
@@ -158,19 +160,21 @@ test("listActiveClaudeSessionsByCwd filters by cwd", (t) => {
 
 test("backfillFromClaudeDb copies rows preserving started_at, safe to re-run", (t) => {
   // Build a fixture claude.db with the claude_sessions table
+  // claude.db uses 'ts' not 'started_at', so the backfill must map it
   const fixturePath = join(tmpdir(), `claude-sessions-fixture-${process.pid}.db`);
   const fixtureDb = new DatabaseSync(fixturePath);
   fixtureDb.exec(`
     CREATE TABLE claude_sessions (
       session_id TEXT PRIMARY KEY,
       cwd TEXT NOT NULL,
-      started_at REAL NOT NULL,
-      user_ts REAL NOT NULL,
-      summary TEXT
+      ts TEXT NOT NULL,
+      user_ts TEXT NOT NULL,
+      summary TEXT,
+      last_checkpoint_size INTEGER
     )
   `);
-  fixtureDb.prepare("INSERT INTO claude_sessions VALUES (?,?,?,?,?)").run("bf-1", "/proj/a", 100.0, 200.0, "Backfill A");
-  fixtureDb.prepare("INSERT INTO claude_sessions VALUES (?,?,?,?,?)").run("bf-2", "/proj/b", 300.0, 400.0, "Backfill B");
+  fixtureDb.prepare("INSERT INTO claude_sessions VALUES (?,?,?,?,?,?)").run("bf-1", "/proj/a", "100.0", "200.0", "Backfill A", null);
+  fixtureDb.prepare("INSERT INTO claude_sessions VALUES (?,?,?,?,?,?)").run("bf-2", "/proj/b", "300.0", "400.0", "Backfill B", null);
   fixtureDb.close();
 
   try {
@@ -181,7 +185,7 @@ test("backfillFromClaudeDb copies rows preserving started_at, safe to re-run", (
     const rows = db.prepare("SELECT * FROM claude_sessions ORDER BY session_id").all();
     assert.equal(rows.length, 2, "Should have 2 rows after backfill");
     assert.equal(rows[0].session_id, "bf-1");
-    assert.equal(rows[0].started_at, 100.0, "started_at must be preserved");
+    assert.equal(rows[0].started_at, 100.0, "ts from claude.db must be mapped to started_at as REAL");
     assert.equal(rows[1].session_id, "bf-2");
 
     // Idempotent re-run — should not duplicate or change rows
@@ -201,5 +205,113 @@ test("backfillFromClaudeDb throws on path containing single quote", (t) => {
     () => backfillFromClaudeDb(db, "/path/with'quote/claude.db"),
     /must not contain single quotes/
   );
+  db.close();
+});
+
+test("SCHEMA_V8 migration adds last_checkpoint_size column", (t) => {
+  const db = connectPath(":memory:");
+  const cols = db.prepare("PRAGMA table_info(claude_sessions)").all();
+  const colNames = cols.map(c => c.name);
+  assert(
+    colNames.includes("last_checkpoint_size"),
+    "Should have last_checkpoint_size column after SCHEMA_V8"
+  );
+  db.close();
+});
+
+test("SCHEMA_V8 migration is idempotent", (t) => {
+  const db = connectPath(":memory:");
+
+  // Insert a row
+  upsertClaudeSession(db, {
+    sessionId: "v8-test",
+    cwd: "/test",
+    startedAt: 1000.0,
+    userTs: 2000.0,
+    summary: "Test",
+  });
+
+  // Re-apply the V8 migration manually (idempotency check)
+  const cols = db.prepare("PRAGMA table_info(claude_sessions)").all().map(c => c.name);
+  if (!cols.includes("last_checkpoint_size")) {
+    db.exec("ALTER TABLE claude_sessions ADD COLUMN last_checkpoint_size INTEGER");
+  }
+
+  const row = db.prepare("SELECT * FROM claude_sessions WHERE session_id = 'v8-test'").get();
+  assert(row, "Row should still exist after idempotent re-run");
+  assert.equal(row.session_id, "v8-test");
+
+  db.close();
+});
+
+test("getLastCheckpointSize returns null for unknown session", (t) => {
+  const db = connectPath(":memory:");
+  const result = getLastCheckpointSize(db, "unknown-session-xyz");
+  assert.equal(result, null, "Should return null for non-existent session");
+  db.close();
+});
+
+test("getLastCheckpointSize returns null when column is NULL", (t) => {
+  const db = connectPath(":memory:");
+  upsertClaudeSession(db, {
+    sessionId: "size-test-1",
+    cwd: "/test",
+    startedAt: 1000.0,
+    userTs: 2000.0,
+    summary: "Test",
+  });
+  const result = getLastCheckpointSize(db, "size-test-1");
+  assert.equal(result, null, "Should return null when last_checkpoint_size is not set");
+  db.close();
+});
+
+test("setLastCheckpointSize stores and retrieves value", (t) => {
+  const db = connectPath(":memory:");
+  upsertClaudeSession(db, {
+    sessionId: "size-test-2",
+    cwd: "/test",
+    startedAt: 1000.0,
+    userTs: 2000.0,
+    summary: "Test",
+  });
+  setLastCheckpointSize(db, "size-test-2", 5000000);
+  const result = getLastCheckpointSize(db, "size-test-2");
+  assert.equal(result, 5000000, "Should retrieve stored checkpoint size");
+  db.close();
+});
+
+test("checkpoint size survives subsequent upsertClaudeSession (keepalive turn)", (t) => {
+  const db = connectPath(":memory:");
+
+  // Initial insert with user_ts
+  upsertClaudeSession(db, {
+    sessionId: "keepalive-test",
+    cwd: "/test",
+    startedAt: 1000.0,
+    userTs: 2000.0,
+    summary: "Test",
+  });
+
+  // Set checkpoint size
+  setLastCheckpointSize(db, "keepalive-test", 5000000);
+
+  // Keepalive tick: upsert with the same user_ts (simulating keepalive behavior)
+  // The hook passes null, but the COALESCE in the SQL preserves the old value
+  upsertClaudeSession(db, {
+    sessionId: "keepalive-test",
+    cwd: "/test",
+    startedAt: 1000.0,
+    userTs: null,
+    summary: "Test",
+  });
+
+  // Check checkpoint size is preserved even after the upsert
+  const checkpointSize = getLastCheckpointSize(db, "keepalive-test");
+  assert.equal(checkpointSize, 5000000, "checkpoint size should survive keepalive upsert");
+
+  // Also verify user_ts is preserved (COALESCE logic in the SQL)
+  const session = getClaudeSession(db, "keepalive-test");
+  assert.equal(session.user_ts, 2000.0, "user_ts should be preserved by COALESCE when null is passed");
+
   db.close();
 });
