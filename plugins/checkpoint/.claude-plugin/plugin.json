@@ -1,5 +1,17 @@
 {
   "name": "checkpoint",
   "description": "Durable cross-session handoff via STATE.md. /checkpoint skill (reconciles state), SessionStart resume offer, PreCompact backstop, and an observable self-correcting cache-keepalive.",
-  "author": { "name": "Andrew Maston" }
+  "author": {
+    "name": "Andrew Maston",
+    "email": "andrew.maston1988@gmail.com"
+  },
+  "homepage": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "repository": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "checkpoint",
+    "keepalive",
+    "cache",
+    "state-management"
+  ]
 }
