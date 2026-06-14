@@ -5,7 +5,7 @@ Durable cross-session **handoff** via `STATE.md`. Compaction is just one discont
 ## Pieces
 
 1. **`/checkpoint` skill** — writes/**reconciles** a 7-section STATE.md (handoff artifact). Model-invocable; reconciles an existing file rather than rewriting it.
-2. **SessionStart hook** — on a fresh start (`startup`/`clear`) with an existing STATE.md, offers to resume. Opt out: `amag-checkpoint.sessionStartResume: false`.
+2. **SessionStart hook** — on a fresh start (`startup`/`clear`) with an existing STATE.md, offers to resume. Opt out: `checkpoint.sessionStartResume: false`.
 3. **UserPromptSubmit hook** — nudges `/checkpoint` when context utilisation (from transcript `usage`) crosses ~75%; consumes the post-compact marker; runs the opt-in keepalive.
 4. **PreCompact hook** — skeletal STATE.md backstop before auto-compaction (the fallback when you don't checkpoint in time).
 
@@ -22,7 +22,7 @@ Context heavy → nudge → `/checkpoint` → start a fresh session → SessionS
 Set in `~/.claude/settings.json`:
 
 ```json
-{ "amag-checkpoint": { "keepalive": true } }
+{ "checkpoint": { "keepalive": true } }
 ```
 
 The UserPromptSubmit hook owns a **self-correcting** cadence (target ~255s, jitter-aware) and logs each tick to `~/.claude/.amag-checkpoint-keepalive.jsonl`. Verify with `/keepalive-status`.

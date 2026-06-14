@@ -20,7 +20,9 @@ export function readJSON(p, fallback) {
 export function writeJSON(p, obj) {
   try {
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, JSON.stringify(obj, null, 2), 'utf8');
+    const tmp = p + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(obj, null, 2), 'utf8');
+    fs.renameSync(tmp, p);
   } catch { /* non-fatal */ }
 }
 

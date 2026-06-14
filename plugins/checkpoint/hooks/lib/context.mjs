@@ -65,8 +65,7 @@ export function readRecentAssistantTurns(transcriptPath, count = 2, tailBytes = 
     const start = Math.max(0, stat.size - tailBytes);
     const fd = fs.openSync(transcriptPath, 'r');
     const buf = Buffer.alloc(stat.size - start);
-    fs.readSync(fd, buf, 0, buf.length, start);
-    fs.closeSync(fd);
+    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { try { fs.closeSync(fd); } catch {} }
     const turns = [];
     for (const line of buf.toString('utf8').split('\n')) {
       const t = line.trim();

@@ -9,7 +9,7 @@ import { KEEPALIVE_LOG, readJSON } from '../../../hooks/lib/paths.mjs';
 import { cacheState, readRecentAssistantTurns } from '../../../hooks/lib/context.mjs';
 
 const SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
-const enabled = readJSON(SETTINGS, {})?.['amag-checkpoint']?.keepalive === true;
+const enabled = readJSON(SETTINGS, {})?.['checkpoint']?.keepalive === true;
 
 function readTicks(limit = 50) {
   try {
@@ -20,7 +20,7 @@ function readTicks(limit = 50) {
 
 console.log(enabled
   ? 'keepalive: ENABLED'
-  : 'keepalive: DISABLED (set "amag-checkpoint": { "keepalive": true } in ~/.claude/settings.json)');
+  : 'keepalive: DISABLED (set "checkpoint": { "keepalive": true } in ~/.claude/settings.json)');
 
 const ticks = readTicks();
 if (ticks.length) {

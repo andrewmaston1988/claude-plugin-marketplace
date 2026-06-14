@@ -1,10 +1,5 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook. Three jobs, any combination may fire:
-//   1. Context-pressure nudge — when context utilisation crosses CONTEXT_NUDGE_PCT,
-//      nudge Claude to invoke the `checkpoint` skill (does NOT inline the template).
-//   2. Post-compact pickup — consume the PreCompact marker, nudge a richer reconcile.
-//   3. Keepalive cadence (opt-in) — hook-owned self-correcting delay + cadence-only tick log.
-// Always exits 0. Skips silently if CORRELATION_ID is set.
+// UserPromptSubmit hook: context nudge, post-compact pickup, keepalive (opt-in). Always exits 0; skips if CORRELATION_ID set.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -75,7 +70,7 @@ async function main() {
   const sessionId = String(payload.session_id || '');
 
   const settings = readJSON(SETTINGS, {});
-  const keepaliveEnabled = settings?.['amag-checkpoint']?.keepalive === true;
+  const keepaliveEnabled = settings?.['checkpoint']?.keepalive === true;
   const isTick = prompt.startsWith('Cache keepalive tick');
   if (isTick && !keepaliveEnabled) process.exit(0);
 

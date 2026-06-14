@@ -1,20 +1,5 @@
 #!/usr/bin/env node
-// pre-compact-snapshot.mjs — PreCompact hook.
-//
-// Fires BEFORE Claude Code auto-compacts. PreCompact cannot inject context
-// (Claude isn't running a turn), so we can't ask Claude to write a rich STATE.md
-// from here. What we CAN do: snapshot a minimal "where we were" record from the
-// transcript JSONL tail and leave a marker file the next UserPromptSubmit can
-// pick up (if a UserPromptSubmit hook is wired).
-//
-// Always exits 0 — never blocks compaction.
-//
-// STATE.md path (in resolution order):
-//   --state-path <p>           explicit override
-//   $CLAUDE_STATE_PATH         env override
-//   ~/.claude/projects/<encoded-cwd>/STATE.md   (Claude Code per-project default)
-//
-// Wired in hooks/hooks.json under hooks.PreCompact.
+// PreCompact hook: writes a skeletal STATE.md backstop. Always exits 0.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -55,8 +40,7 @@ function readTranscriptTail(transcriptPath) {
     const fd = fs.openSync(transcriptPath, 'r');
     const start = Math.max(0, stat.size - TRANSCRIPT_TAIL_BYTES);
     const buf = Buffer.alloc(stat.size - start);
-    fs.readSync(fd, buf, 0, buf.length, start);
-    fs.closeSync(fd);
+    try { fs.readSync(fd, buf, 0, buf.length, start); } finally { try { fs.closeSync(fd); } catch {} }
     const text = buf.toString('utf8');
     const entries = [];
     for (const line of text.split('\n')) {

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // SessionStart hook — offers (does not auto-load) a STATE.md resume on a fresh start.
-// Fires only on source 'startup'|'clear'. Opt out via amag-checkpoint.sessionStartResume=false.
+// Fires only on source 'startup'|'clear'. Opt out via checkpoint.sessionStartResume=false.
 // Never throws; exits 0 with optional additionalContext.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,7 +38,7 @@ function main() {
     const cwd = String(payload.cwd || process.cwd());
 
     const settings = readJSON(SETTINGS, {});
-    const enabled = settings?.['amag-checkpoint']?.sessionStartResume !== false; // default on
+    const enabled = settings?.['checkpoint']?.sessionStartResume !== false; // default on
     const correlation = !!process.env.CORRELATION_ID;
 
     let statePath, stateExists = false, mtimeMs = 0;

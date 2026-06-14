@@ -31,7 +31,7 @@ Writes (or reconciles) a structured `STATE.md` so a *fresh session* can resume t
 | **UserPromptSubmit** | Nudges you to invoke this skill when context utilisation crosses ~75%; consumes the post-compact marker; runs the opt-in keepalive. |
 | **SessionStart** | On a fresh start with an existing STATE.md, offers to resume. |
 
-Optional cache keepalive: set `amag-checkpoint.keepalive: true`. See the plugin README.
+Optional cache keepalive: set `checkpoint.keepalive: true`. See the plugin README.
 
 ## Anti-patterns
 
