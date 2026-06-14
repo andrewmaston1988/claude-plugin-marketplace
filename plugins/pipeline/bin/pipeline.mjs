@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { existsSync } from "node:fs";
+import { execSync } from "node:child_process";
 import { run as runDispatch  } from "../src/cli/dispatch.mjs";
 import { run as runSession   } from "../src/cli/session.mjs";
 import { run as runNotify    } from "../src/cli/notify.mjs";
@@ -12,6 +14,34 @@ import { run as runProjects  } from "../src/cli/projects.mjs";
 import { getFlag, detectDefaultBranch } from "../src/cli/helpers.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
+
+// TUI launch self-heals runtime deps so users never have to run `pipeline setup`
+// after a /reload-plugins. Two failure modes: (a) node_modules missing entirely
+// — npm install fires, postinstall patches blessed; (b) node_modules present but
+// blessed source files were reset by reload-plugins, undoing the patch — re-run
+// the patch script (idempotent, ~50ms, prints "already patched" when no-op).
+// Gated on dashboard tui because it's the only blessed consumer; other
+// commands (orchestrator, web, CLI) don't pay the cost.
+function ensureRuntimeDeps(argv) {
+  if (argv.includes("--no-auto-install")) return;
+  const blessedPkg  = join(PLUGIN_ROOT, "node_modules", "blessed", "package.json");
+  const patchScript = join(PLUGIN_ROOT, "scripts", "postinstall", "patch-blessed-borders.mjs");
+  if (!existsSync(blessedPkg)) {
+    process.stderr.write("pipeline: installing runtime deps (one-time per install)…\n");
+    try {
+      execSync("npm install --no-audit --no-fund --silent", { cwd: PLUGIN_ROOT, stdio: "inherit" });
+      return;  // npm postinstall already ran the patch
+    } catch (e) {
+      process.stderr.write(`pipeline: npm install failed: ${e.message}\n`);
+      process.stderr.write(`  Try manually: cd "${PLUGIN_ROOT}" && npm install\n`);
+      process.exit(1);
+    }
+  }
+  if (existsSync(patchScript)) {
+    try { execSync(`"${process.execPath}" "${patchScript}"`, { cwd: PLUGIN_ROOT, stdio: "ignore" }); }
+    catch { /* non-fatal — patch is cosmetic; TUI still launches */ }
+  }
+}
 
 (async () => {
   const [,, cmd, ...argv] = process.argv;
@@ -123,6 +153,7 @@ const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
       return;
     }
     if (subcmd === "tui") {
+      ensureRuntimeDeps(argv);
       const refreshMs = parseInt(getFlag("--refresh-ms", argv.slice(1)) || "10000", 10);
       const { runTui } = await import("../src/dashboard/tui/app.mjs");
       runTui({ refreshMs });
