@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import {
   readFileSync, writeFileSync, renameSync,
-  mkdirSync, existsSync, appendFileSync, copyFileSync,
+  mkdirSync, existsSync, copyFileSync,
 } from "node:fs";
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
@@ -11,6 +11,7 @@ import { loadPipelineConfig } from "../pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../config-defaults.mjs";
 import { renderTemplate, installAutostart, verifyAutostart } from "./autostart.mjs";
 import { runDoctor, printDoctor } from "./doctor.mjs";
+import { mergePsProfile, mergeUnixRc } from "./wizard-profile.mjs";
 import { connectUnified, close as dbClose, projectAdd, projectList } from "../../scripts/pipeline-db/index.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
 import { detectDefaultBranch } from "../cli/helpers.mjs";
@@ -619,8 +620,10 @@ export async function runWizard({ paths, log, opts = {} }) {
           if (profile) {
             const dir = profile.substring(0, profile.lastIndexOf("\\"));
             mkdirSync(dir, { recursive: true });
-            appendFileSync(profile, `\n# pipeline (added by setup)\n${fn}\n`);
-            say(`✓ Added — restart PowerShell or: . "${profile}"`);
+            let existing = "";
+            try { existing = readFileSync(profile, "utf8"); } catch {}
+            writeFileSync(profile, mergePsProfile(existing, fn));
+            say(`✓ Wired pipeline function in ${profile} — restart PowerShell or: . "${profile}"`);
           } else {
             say(`Add this to your PowerShell profile manually:\n  ${fn}`);
           }
@@ -658,8 +661,10 @@ export async function runWizard({ paths, log, opts = {} }) {
         : await ask(`Append shell alias to ${rcFile}? [Y/n] `);
       if (!addIt.trim().toLowerCase().startsWith("n")) {
         try {
-          appendFileSync(rcFile, `\n# pipeline (added by setup)\n${alias}\n`);
-          say(`✓ Added — restart shell or: source ${rcFile}`);
+          let existing = "";
+          try { existing = readFileSync(rcFile, "utf8"); } catch {}
+          writeFileSync(rcFile, mergeUnixRc(existing, alias));
+          say(`✓ Wired pipeline alias in ${rcFile} — restart shell or: source ${rcFile}`);
         } catch (e) {
           say(`✗ Could not write ${rcFile}: ${e.message}`);
           say(`Add manually:\n  ${alias}`);
