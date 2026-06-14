@@ -1,7 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import {
   readFileSync, writeFileSync, renameSync,
-  mkdirSync, existsSync, appendFileSync,
+  mkdirSync, existsSync, appendFileSync, copyFileSync,
 } from "node:fs";
 import { execSync } from "node:child_process";
 import { homedir } from "node:os";
@@ -583,12 +583,34 @@ export async function runWizard({ paths, log, opts = {} }) {
     // scheduler); for shell aliases users need bin/pipeline.mjs so subcommands
     // like `pipeline dashboard tui` actually dispatch.
     const cliEntry = fileURLToPath(new URL("../../bin/pipeline.mjs", import.meta.url));
+
+    // Install a self-resolving shim — a tiny node script that reads
+    // installed_plugins.json on every invocation and dispatches to whatever
+    // pipeline install is currently active. Without this, the shim's path is
+    // baked at setup time and goes stale every /reload-plugins sha bump. With
+    // this, the wrapper paths never need updating again.
+    const resolverSource = fileURLToPath(new URL("./pipeline-resolver.mjs", import.meta.url));
+    const userBin        = join(homedir(), ".local", "bin");
+    let resolverInstalled = null;
+    try {
+      mkdirSync(userBin, { recursive: true });
+      const dest = join(userBin, "pipeline-resolver.mjs");
+      copyFileSync(resolverSource, dest);
+      resolverInstalled = dest;
+      say(`✓ Installed self-resolving shim: ${dest}`);
+    } catch (e) {
+      say(`⚠ Could not install resolver script: ${e.message} — falling back to pinned-path shim`);
+    }
+    // dispatchPath is what wrappers exec; falls back to the pinned cliEntry if
+    // resolver install failed (preserves pre-self-heal behaviour).
+    const dispatchPath = resolverInstalled || cliEntry;
+
     if (process.platform === "win32") {
       let profile = "";
       try { profile = execSync("pwsh -NoProfile -Command $PROFILE", { encoding: "utf8", timeout: 5000 }).trim(); } catch {}
       if (!profile) { try { profile = execSync("powershell -NoProfile -Command $PROFILE", { encoding: "utf8", timeout: 5000 }).trim(); } catch {} }
       const profilePath = profile || "$PROFILE";
-      const fn = `function pipeline { & "${nodePath}" "${cliEntry}" @args }`;
+      const fn = `function pipeline { & "${nodePath}" "${dispatchPath}" @args }`;
       const addIt = nonInteractive
         ? (niYes("installPathAlias") ? "y" : "n")
         : await ask(`Append pipeline function to ${profilePath}? [Y/n] `);
@@ -613,12 +635,11 @@ export async function runWizard({ paths, log, opts = {} }) {
         // The PS function above is for interactive shells; this shim is
         // for everything else.
         try {
-          const userBin = join(homedir(), ".local", "bin");
           mkdirSync(userBin, { recursive: true });
-          const cmdShim = `@echo off\r\n"${nodePath}" "${cliEntry}" %*\r\n`;
+          const cmdShim = `@echo off\r\n"${nodePath}" "${dispatchPath}" %*\r\n`;
           writeFileSync(join(userBin, "pipeline.cmd"), cmdShim);
           // Also extensionless for Git Bash / MSYS environments.
-          writeFileSync(join(userBin, "pipeline"), `#!/usr/bin/env bash\nexec "${nodePath}" "${cliEntry}" "$@"\n`);
+          writeFileSync(join(userBin, "pipeline"), `#!/usr/bin/env bash\nexec "${nodePath}" "${dispatchPath}" "$@"\n`);
           say(`✓ Installed shim: ${join(userBin, "pipeline.cmd")} (works in all shells if ~/.local/bin is on PATH)`);
         } catch (e) {
           say(`⚠ Could not install ~/.local/bin shim: ${e.message}`);
@@ -631,7 +652,7 @@ export async function runWizard({ paths, log, opts = {} }) {
       const rcFile = shell.includes("zsh")
         ? `${process.env.HOME}/.zshrc`
         : `${process.env.HOME}/.bashrc`;
-      const alias = `alias pipeline='${nodePath} ${cliEntry}'`;
+      const alias = `alias pipeline='${nodePath} ${dispatchPath}'`;
       const addIt = nonInteractive
         ? (niYes("installPathAlias") ? "y" : "n")
         : await ask(`Append shell alias to ${rcFile}? [Y/n] `);
