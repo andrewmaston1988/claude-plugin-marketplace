@@ -178,3 +178,29 @@ test("hook: database write on valid JSON", (t, done) => {
     done(err);
   }
 });
+
+test("hook stdout contract: valid JSON when session_id absent from stdin (exercises sessions-dir fallback)", (t, done) => {
+  const input = JSON.stringify({
+    prompt: "hello",
+    transcript_path: "/tmp/fake.jsonl",
+    cwd: process.cwd(),
+  });
+
+  const result = spawnSync(NODE_PATH, [
+    join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
+  ], {
+    input,
+    encoding: "utf-8",
+  });
+
+  try {
+    const output = result.stdout.trim().split("\n").pop();
+    const parsed = JSON.parse(output);
+    assert(parsed.hookSpecificOutput, "should have hookSpecificOutput");
+    assert.equal(parsed.hookSpecificOutput.hookEventName, "UserPromptSubmit");
+    assert.equal(typeof parsed.hookSpecificOutput.additionalContext, "string", "additionalContext should be a string");
+    done();
+  } catch (err) {
+    done(err);
+  }
+});

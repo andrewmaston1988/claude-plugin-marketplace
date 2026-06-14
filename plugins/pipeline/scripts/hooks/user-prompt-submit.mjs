@@ -1,7 +1,6 @@
-import { readFileSync, statSync, unlinkSync, existsSync } from "node:fs";
+import { readFileSync, statSync, unlinkSync, existsSync, readdirSync, appendFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { createRequire } from "node:module";
 import crypto from "node:crypto";
 import { connectUnified, getClaudeSession, listActiveClaudeSessionsByCwd, getLastCheckpointSize, setLastCheckpointSize, upsertClaudeSession } from "../pipeline-db/index.mjs";
 
@@ -24,6 +23,16 @@ function readTemplateFile(path) {
 function normalizePathForMatch(path) {
   if (!path) return "";
   return path.replace(/\\/g, "/").toLowerCase();
+}
+
+function writeLog(line) {
+  const logDir = join(homedir(), ".pipeline", "logs");
+  try {
+    mkdirSync(logDir, { recursive: true });
+    appendFileSync(join(logDir, "user-prompt-submit.log"), line + "\n");
+  } catch {
+    // ignore log write failures
+  }
 }
 
 function resolveSessionId(stdinJson, { fsListSessions, fsReadSession }) {
@@ -51,7 +60,7 @@ function resolveSessionId(stdinJson, { fsListSessions, fsReadSession }) {
   } else {
     try {
       if (existsSync(sessionsDir)) {
-        const files = require("node:fs").readdirSync(sessionsDir);
+        const files = readdirSync(sessionsDir);
         for (const fileName of files) {
           try {
             const filePath = join(sessionsDir, fileName);
@@ -94,6 +103,7 @@ function buildAdditionalContext(params, { fsReadTemplate }) {
     compactMarkerExists = false,
     env = process.env,
     baseContext = "",
+    injected = [],
   } = params;
 
   let ctx = baseContext;
@@ -107,6 +117,7 @@ function buildAdditionalContext(params, { fsReadTemplate }) {
 
     if (tick && init) {
       ctx += "\n\n" + init.replace("{tick}", tick);
+      injected.push("keepalive-init");
     }
   }
 
@@ -114,6 +125,7 @@ function buildAdditionalContext(params, { fsReadTemplate }) {
     ctx += (
       "\n\n**Scout reminder (one-time):** This machine has a `scout` MCP indexed across all projects (CLAUDE, torrent-hub, scout, nova-*). For any \"find / where is / look for / what calls / how does X work\" intent, use Scout (mcp__scout__*) BEFORE Read/Grep/Glob — it is faster, ranked, and cross-repo. Invoke the `scout` skill for the tool-selection guide."
     );
+    injected.push("scout-reminder");
   }
 
   let shouldCheckpoint = false;
@@ -135,6 +147,7 @@ function buildAdditionalContext(params, { fsReadTemplate }) {
         .replace("{sp}", sp)
         .replace("{resume}", resume);
       ctx = checkpoint;
+      injected.push("checkpoint");
     }
   }
 
@@ -142,6 +155,7 @@ function buildAdditionalContext(params, { fsReadTemplate }) {
     ctx += (
       "\n\n**Compaction just happened.** A skeletal STATE.md was written by the PreCompact backstop. While your post-compact summary is still in context, invoke `/compact+` to write a richer version reflecting the current state of work."
     );
+    injected.push("post-compact");
   }
 
   return ctx;
@@ -214,6 +228,7 @@ async function main() {
     const compactMarkerPath = join(homedir(), ".claude", ".compact_just_ran");
     const compactMarkerExists = existsSync(compactMarkerPath);
 
+    const injected = [];
     ctx = buildAdditionalContext(
       {
         prevAnyTs,
@@ -224,6 +239,7 @@ async function main() {
         compactMarkerExists,
         env: process.env,
         baseContext: ctx,
+        injected,
       },
       {
         fsReadTemplate: null,
@@ -257,15 +273,10 @@ async function main() {
     };
 
     process.stdout.write(JSON.stringify(output) + "\n");
+
+    writeLog(JSON.stringify({ ts: new Date().toISOString(), sessionId: resolvedSessionId, cwd, isKeepalive, transcriptSize, prevAnyTs, injected }));
   } catch (err) {
-    const logPath = join(homedir(), ".pipeline", "logs", "user-prompt-submit.log");
-    try {
-      const { appendFileSync } = require("node:fs");
-      const isoTimestamp = new Date().toISOString();
-      appendFileSync(logPath, `${isoTimestamp} Error: ${err.stack}\n`);
-    } catch {
-      // ignore logging errors
-    }
+    writeLog(new Date().toISOString() + " Error: " + (err.stack || String(err)));
 
     const fallbackOutput = {
       hookSpecificOutput: {
