@@ -9,6 +9,9 @@
       "r_model": "claude-haiku-4-5-20251001",
       "d_model": "claude-sonnet-4-6",
       "q_model": "claude-sonnet-4-6",
+      "r_effort": null,
+      "d_effort": null,
+      "q_effort": null,
       "rvw_model": "claude-sonnet-4-6",
       "session_type": "dev",
       "session_file": "",
@@ -24,7 +27,9 @@
       "review_retries": 0,
       "review_retry_budget": 3,
       "review_verdict": null,
-      "pr_title": null
+      "pr_title": null,
+      "waits_on": null,
+      "base_branch": null
     },
     {
       "project": "testproject",
@@ -35,6 +40,9 @@
       "r_model": "claude-haiku-4-5-20251001",
       "d_model": "claude-sonnet-4-6",
       "q_model": "claude-sonnet-4-6",
+      "r_effort": null,
+      "d_effort": null,
+      "q_effort": null,
       "rvw_model": "claude-sonnet-4-6",
       "session_type": "dev",
       "session_file": "",
@@ -50,7 +58,9 @@
       "review_retries": 0,
       "review_retry_budget": 3,
       "review_verdict": null,
-      "pr_title": null
+      "pr_title": null,
+      "waits_on": null,
+      "base_branch": null
     }
   ],
   "progress_files": [],
