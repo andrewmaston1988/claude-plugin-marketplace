@@ -1,0 +1,6 @@
+{
+  "name": "agent-investigation",
+  "version": "1.0.0",
+  "description": "Investigate agent transcripts and subagent investigation tooling",
+  "bin": "claude-investigate"
+}
