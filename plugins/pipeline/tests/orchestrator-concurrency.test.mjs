@@ -132,9 +132,13 @@ test("countActiveSessions: reflects all active sessions across projects", () => 
   }
 });
 
-// 6. Default config value
+// 6. Default config values
 test("PIPELINE_DEFAULTS.orch.concurrency_scope defaults to 'feature'", () => {
   strictEqual(PIPELINE_DEFAULTS.orch.concurrency_scope, "feature");
+});
+
+test("PIPELINE_DEFAULTS.orch.max_concurrent defaults to 3", () => {
+  strictEqual(PIPELINE_DEFAULTS.orch.max_concurrent, 3);
 });
 
 // 7. Doctor surfaces concurrency scope
@@ -155,6 +159,29 @@ test("doctor: concurrency-scope check surfaces the configured scope", async () =
     const results2 = await runDoctor({ paths, configPath: cfgPath });
     const check2 = results2.find(r => r.label === "concurrency-scope");
     ok(check2.detail.includes("project"), "detail mentions 'project' scope");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// 8. Doctor surfaces max-concurrent cap
+test("doctor: max-concurrent check surfaces the configured cap", async () => {
+  const tmp = mkdtempSync(join(tmpdir(), "orch-doctor-mc-"));
+  const cfgPath = join(tmp, "config.json");
+  const paths = { stateDir: join(tmp, "state"), dataDir: join(tmp, "data") };
+  try {
+    // Default (no config file) → cap is 3
+    const results = await runDoctor({ paths, configPath: cfgPath });
+    const check = results.find(r => r.label === "max-concurrent");
+    ok(check, "max-concurrent check is present");
+    ok(check.ok, "check passes (informational)");
+    ok(check.detail.includes("3"), "detail shows default cap of 3");
+
+    // Explicit cap of 1
+    writeFileSync(cfgPath, JSON.stringify({ orch: { max_concurrent: 1 } }), "utf8");
+    const results2 = await runDoctor({ paths, configPath: cfgPath });
+    const check2 = results2.find(r => r.label === "max-concurrent");
+    ok(check2.detail.includes("1"), "detail shows configured cap of 1");
   } finally {
     rmSync(tmp, { recursive: true, force: true });
   }
