@@ -32,3 +32,7 @@ export {
 export {
   planUpsert, planSetStatus, planGet, plansList, plansSearch, plansFtsRebuild,
 } from "./plans.mjs";
+export {
+  upsertClaudeSession, getClaudeSession, listActiveClaudeSessionsByCwd,
+  backfillFromClaudeDb,
+} from "./claude-sessions.mjs";
