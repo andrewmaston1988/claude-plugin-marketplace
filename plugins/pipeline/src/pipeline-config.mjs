@@ -3,6 +3,8 @@ import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { PIPELINE_DEFAULTS } from "./config-defaults.mjs";
 
+export { PIPELINE_DEFAULTS };
+
 function deepMerge(base, override) {
   const out = { ...base };
   for (const [k, v] of Object.entries(override ?? {})) {
