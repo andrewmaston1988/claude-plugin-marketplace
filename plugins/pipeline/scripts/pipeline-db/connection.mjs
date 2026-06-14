@@ -257,9 +257,9 @@ const SCHEMA_V6_VERSION = 6;
 // Add claude_sessions table for absorbing claude.db.claude_sessions into pipeline.db
 // Schema mirrors claude.db.claude_sessions exactly:
 // - session_id TEXT PRIMARY KEY
-// - cwd TEXT
-// - started_at REAL (unix epoch seconds)
-// - user_ts REAL (last user-prompt timestamp, not updated by keepalive)
+// - cwd TEXT NOT NULL
+// - started_at REAL NOT NULL (unix epoch seconds)
+// - user_ts REAL NOT NULL (last user-prompt timestamp, not updated by keepalive)
 // - summary TEXT (peer-visible summary)
 const SCHEMA_V7_VERSION = 7;
 

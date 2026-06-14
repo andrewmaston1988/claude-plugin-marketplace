@@ -7,7 +7,6 @@ export function upsertClaudeSession(db, { sessionId, cwd, startedAt, userTs, sum
     VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(session_id) DO UPDATE SET
       cwd = excluded.cwd,
-      started_at = excluded.started_at,
       user_ts = excluded.user_ts,
       summary = excluded.summary
   `);
@@ -27,16 +26,23 @@ export function listActiveClaudeSessionsByCwd(db, cwd) {
 // Backfill: copy rows from claude.db into pipeline.db.claude_sessions
 // Safe to re-run: uses INSERT OR REPLACE, preserves started_at for existing sessions
 export function backfillFromClaudeDb(db, claudeDbPath) {
-  // ATTACH claude.db for the copy operation
+  if (claudeDbPath.includes("'")) {
+    throw new Error(`claudeDbPath must not contain single quotes: ${claudeDbPath}`);
+  }
   db.exec(`ATTACH DATABASE '${claudeDbPath}' AS claude_attached`);
-
   try {
-    // Copy existing sessions from claude.db, preserving started_at
-    db.exec(`
-      INSERT OR REPLACE INTO claude_sessions (session_id, cwd, started_at, user_ts, summary)
-      SELECT session_id, cwd, started_at, user_ts, summary
-      FROM claude_attached.claude_sessions
-    `);
+    db.exec("BEGIN");
+    try {
+      db.exec(`
+        INSERT OR REPLACE INTO claude_sessions (session_id, cwd, started_at, user_ts, summary)
+        SELECT session_id, cwd, started_at, user_ts, summary
+        FROM claude_attached.claude_sessions
+      `);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
   } finally {
     db.exec("DETACH DATABASE claude_attached");
   }
