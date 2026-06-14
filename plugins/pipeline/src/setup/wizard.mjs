@@ -3,7 +3,8 @@ import {
   readFileSync, writeFileSync, renameSync,
   mkdirSync, existsSync, copyFileSync,
 } from "node:fs";
-import { execSync } from "node:child_process";
+import { execSync, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { homedir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +31,9 @@ function resolvePsProfiles() {
   }
   return profiles;
 }
+
+const execFileAsync = promisify(execFile);
+const AUTOSTART_TASK_NAME = "ClaudePipelineOrchestrator";
 
 // Non-interactive defaults — applied when `opts.nonInteractive === true` and the
 // caller didn't override the specific key. Designed so a future Claude (or CI)
@@ -58,10 +62,13 @@ export async function runWizard({ paths, log, opts = {} }) {
 
   const rl  = nonInteractive ? null : createInterface({ input: process.stdin, output: process.stdout });
   const ask = (q) => rl.question(q);
-  const say = (s) => process.stdout.write(s + "\n");
+  const _hooks = opts._testHooks || {};
+  const say = _hooks.say || ((s) => process.stdout.write(s + "\n"));
   const hr  = ()  => say("\n" + "─".repeat(60));
   // True iff non-interactive *and* the caller explicitly asked for it (or NI default says yes).
   const niYes = (key) => opts[key] !== undefined ? !!opts[key] : !!NI_DEFAULTS[key];
+
+  const setupErrors = [];
 
   try {
     hr();
@@ -576,17 +583,39 @@ export async function runWizard({ paths, log, opts = {} }) {
       ? (niYes("installAutostart") ? "y" : "n")
       : await ask(`Install autostart for ${process.platform}? [Y/n] `);
     if (!doAutostart.trim().toLowerCase().startsWith("n")) {
+      if (process.platform === "win32") {
+        let existingTask = false;
+        try {
+          const querySchtasks = _hooks.querySchtasks ||
+            (() => execFileAsync("schtasks", ["/Query", "/TN", AUTOSTART_TASK_NAME], { timeout: 5_000 }));
+          await querySchtasks();
+          existingTask = true;
+        } catch { /* not present */ }
+        if (existingTask) {
+          say("ℹ Existing scheduled task detected. Re-install may require elevation.");
+        }
+      }
       try {
-        const rendered = renderTemplate(process.platform, {
+        const _renderTemplate = _hooks.renderTemplate || renderTemplate;
+        const _installAutostart = _hooks.installAutostart || installAutostart;
+        const _verifyAutostart = _hooks.verifyAutostart || verifyAutostart;
+        const rendered = _renderTemplate(process.platform, {
           nodePath,
           bridgeEntry: dispatchTarget,
           configDir: paths.configDir,
           logDir:    paths.logDir,
         });
-        await installAutostart(process.platform, rendered, { log });
-        const { ok, detail } = await verifyAutostart(process.platform);
+        await _installAutostart(process.platform, rendered, { log });
+        const { ok, detail } = await _verifyAutostart(process.platform);
         say(`${ok ? "✓" : "✗"} Autostart: ${detail}`);
       } catch (e) {
+        setupErrors.push({
+          step: "autostart",
+          message: e.message,
+          hint: process.platform === "win32"
+            ? `Existing task may need to be deleted first (admin PowerShell): \`schtasks /Delete /TN ${AUTOSTART_TASK_NAME} /F\``
+            : "Check filesystem permissions for the autostart directory.",
+        });
         say(`✗ Autostart install failed: ${e.message}`);
         say("  You can retry with: pipeline setup");
       }
@@ -695,6 +724,18 @@ export async function runWizard({ paths, log, opts = {} }) {
     }
     say(`\nRun: node "${cliEntry}" doctor`);
     say("Setup complete!");
+
+    if (setupErrors.length > 0) {
+      hr();
+      say("\n⚠ Setup completed with errors:");
+      for (const err of setupErrors) {
+        say(`  ✗ ${err.step}: ${err.message}`);
+        if (err.hint) say(`    → ${err.hint}`);
+      }
+      process.exitCode = 2;
+    }
+
+    return { setupErrors };
 
   } finally {
     if (rl) { try { rl.close(); } catch { /* already closed */ } }
