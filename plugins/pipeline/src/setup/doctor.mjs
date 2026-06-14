@@ -370,7 +370,13 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
     push("governor-env-contract", true, false, "governor disabled — skipped");
   }
 
-  // 16. zombie-rows: stage=done without merge, orphan branches, stuck merge-ready
+  // 16. concurrency-scope — informational: what scope the orchestrator enforces.
+  {
+    const scope = resolved?.orch?.concurrency_scope ?? "feature";
+    push("concurrency-scope", true, false, `Concurrency scope: ${scope}`);
+  }
+
+  // 17. zombie-rows: stage=done without merge, orphan branches, stuck merge-ready
   if (db) {
     try {
       const { runDoctorChecks } = await import("../doctor/index.mjs");

@@ -13,6 +13,7 @@ All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DE
 | `governor.reports_dir` | `<project-root>/reports` | Where governance markdown reports land. |
 | `governor.session_dir` | `<project-root>/sessions` | Where governor session files are written. |
 | `governor.log_dir` | `<project-root>/logs` | Where governor stdout/stderr logs go. |
+| `orch.concurrency_scope` | `"feature"` | Serialization granularity for orchestrator spawns. `"feature"` (default): multiple features in the same project can run concurrently up to `--max-concurrent`. `"project"`: legacy — at most one session per project at any time. Surface in `pipeline doctor` as `Concurrency scope: <value>`. |
 | `web.host` | `"127.0.0.1"` | Network interface the dashboard binds to. `"127.0.0.1"` = loopback-only; `"0.0.0.0"` = all interfaces (LAN access). Override with `--host` on the CLI for a single session. |
 | `tiers` | `{haiku: "claude-haiku-4-5", sonnet: "claude-sonnet-4-6", opus: "claude-opus-4-8"}` | Canonical model string per tier. Used by auto-escalation to resolve tier-jumps (e.g., Haiku → Sonnet). Update when new models release or default recommendations change. |
 | `tier_efforts` | `{haiku: ["low", "medium", "high"], sonnet: ["low", "medium", "high", "max"], opus: ["low", "medium", "high", "xhigh", "max"]}` | Supported effort levels per tier. Auto-escalation respects these when walking the ladder (+2 per retry within tier, clamped to ceiling). Update if models gain/lose effort support. |
@@ -59,7 +60,7 @@ If step 5 conflicts, the row parks at `manual` with `[stash-pop-conflict]` and t
 
 ### Serial-session invariant — load-bearing
 
-This design depends on the orchestrator's existing per-project serialisation: at most one session per project is active at a time. If concurrency policy ever relaxes — two sessions on the same feature concurrently — the one-worktree-per-feature model breaks (two processes racing on `git checkout` and the stash slot). The doctor's `worktree-layout-stale` check warns when on-disk worktrees diverge from the resolved template; treat that as the manual-migration nudge.
+The load-bearing constraint is **per-feature**: at most one session per feature may be active at any time. The orchestrator defaults to `orch.concurrency_scope: "feature"` — multiple features in the same project can run concurrently up to `--max-concurrent`. Two sessions on the **same** feature concurrently would break the one-worktree-per-feature model (two processes racing on `git checkout` and the stash slot). Operators who want the old per-project serialisation can set `orch.concurrency_scope: "project"` in `~/.pipeline/config.json`. The doctor's `worktree-layout-stale` check warns when on-disk worktrees diverge from the resolved template; treat that as the manual-migration nudge.
 
 ### Migration
 

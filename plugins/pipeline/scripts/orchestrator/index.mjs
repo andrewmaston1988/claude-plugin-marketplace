@@ -5,7 +5,7 @@ import {
   connectUnified, close,
   rowsList, rowUpdate,
   progressDelete, progressListActive,
-  projectHasActiveSession, sessionFinish, countActiveSessions,
+  projectHasActiveSession, sessionFinish, countActiveSessions, featureIsActive,
   listEnabledProjects,
 } from "../pipeline-db/index.mjs";
 import { getPaths } from "../../src/paths.mjs";
@@ -180,6 +180,7 @@ async function pollOnce({
     catch (e) { logFn(`notify-drain error: ${e.message}`, "WARN"); }
   }
 
+  const cfg = loadPipelineConfig();
   const pipelinePaths = listEnabledProjects(db);
   let nProjects = 0, nQueued = 0, nActive = 0;
 
@@ -220,8 +221,10 @@ async function pollOnce({
 
     if (!spawnableRows.length) continue;
 
-    if (projectIsActive(db, project)) {
-      logFn(`[${project}] session active — skipping`);
+    const scope = cfg.orch?.concurrency_scope || "feature";
+    const blocked = scope === "project" ? projectIsActive(db, project) : false;
+    if (blocked) {
+      logFn(`[${project}] session active (scope=${scope}) — skipping`);
       nActive++;
       continue;
     }
@@ -235,6 +238,11 @@ async function pollOnce({
     const now = Date.now();
     let rowToSpawn = null;
     for (const row of spawnableRows) {
+      if (scope === "feature" && featureIsActive(db, project, row.feature)) {
+        logFn(`[${project}] '${row.feature}' already has active session — skipping row`);
+        continue;
+      }
+
       const key = `${project}:${row.feature}`;
       const lastSpawnTime = lastSpawnTimes[key] || 0;
       const ageSeconds = (now - lastSpawnTime) / 1000;
@@ -291,7 +299,6 @@ async function pollOnce({
   }
 
   // Second pass: stage=merge rows. One merge per project per tick.
-  const cfg = loadPipelineConfig();
   for (const [project, projectRoot] of pipelinePaths) {
     if (projectFilter && project !== projectFilter) continue;
 
