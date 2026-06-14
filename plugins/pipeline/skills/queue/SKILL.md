@@ -34,7 +34,7 @@ If the plan file doesn't exist, tell the user the resolved path and stop.
 
 ## Step 2a — Model and effort columns
 
-Each pipeline row carries per-stage model and effort pins (`R-Model`, `D-Model`, `Q-Model`, `Rvw-Model`, `D-Effort`, `R-Effort`, `Q-Effort`). These must be set before the orchestrator can spawn any session.
+Each pipeline row carries per-stage model and effort pins (`R-Model`, `D-Model`, `Q-Model`, `Rvw-Model`, `R-Effort`, `D-Effort`, `Q-Effort`, `Rvw-Effort`). These must be set before the orchestrator can spawn any session.
 
 Invoke `/pipeline:model-selection` before deciding any column value — it owns the tier guide (Haiku/Sonnet/Opus), the per-tier effort table, and the Opus confirmation gate.
 

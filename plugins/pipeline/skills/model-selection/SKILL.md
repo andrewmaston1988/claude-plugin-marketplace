@@ -61,24 +61,28 @@ Model selection for pipeline rows is a **human decision made at `/queue` time**.
 
 The orchestrator reads these columns mechanically: if a stage's model column is `—` or empty, the row is skipped with an ERROR log (no silent defaults, no escalation). Don't try to be clever; if a stage isn't running, the column is `—`.
 
-### Effort columns (d_effort, r_effort, q_effort)
+### Effort columns (r_effort, d_effort, q_effort, rvw_effort)
 
-Per-role effort pins (added 2026-06-10 to support fine-tuning within model tiers).
+Per-role effort pins to support fine-tuning within model tiers.
+
+- `R-Effort` — effort for research session. **Default high.**
+  - Research benefits from deeper reasoning to surface non-obvious sources and connections.
+  - Rarely downgraded; only when the research scope is well-bounded and mechanical.
 
 - `D-Effort` — effort for development session. **Default medium.**
   - Downgrade to low only for provably mechanical work.
   - Elevate to high/xhigh/max for plans with cross-file invariants or complex interface design.
   - See `/pipeline:queue` Step 2a for operator decision guidance.
 
-- `R-Effort` — effort for research session. **Default high.**
-  - Research benefits from deeper reasoning to surface non-obvious sources and connections.
-  - Rarely downgraded; only when the research scope is well-bounded and mechanical.
-
 - `Q-Effort` — effort for QA/test session. **Default low.**
   - Most test automation is mechanical (run suite, check outcomes).
   - Elevate to medium/high only if test interpretation or edge-case reasoning is required.
 
-**Note:** `rvw_effort` does not exist in the schema — review effort has no column yet. See follow-up plan stub `pipeline-rvw-effort-column.md`.
+- `Rvw-Effort` — effort for the autonomous review session. **Default high.**
+  - Review sessions are judgement-heavy; depth matters for catching real blockers.
+  - Auto-escalation does NOT walk `rvw_effort` on review retries — review effort is queue-time-pinned. A stuck review is more likely a stuck dev path than an under-powered reviewer.
+  - Elevate to max when the diff has security, concurrency, or cross-module implications.
+  - Drop to medium only for mechanical / prose-only diffs.
 
 When paired with model, effort allows cost-conscious tuning: `(model, effort)` is a 2D grid, not a 1D tier list.
 
