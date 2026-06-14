@@ -7,6 +7,9 @@
     "r_model": "claude-haiku-4-5-20251001",
     "d_model": "claude-sonnet-4-6",
     "q_model": "claude-sonnet-4-6",
+    "r_effort": "—",
+    "d_effort": "—",
+    "q_effort": "—",
     "rvw_model": "claude-sonnet-4-6",
     "session_type": "dev",
     "session_file": "",
@@ -22,7 +25,9 @@
     "target_branch": "main",
     "last_error": null,
     "pr_title": null,
-    "depends_on": null
+    "depends_on": null,
+    "waits_on": null,
+    "base_branch": null
   },
   {
     "feature": "second-feature",
@@ -32,6 +37,9 @@
     "r_model": "claude-haiku-4-5-20251001",
     "d_model": "claude-sonnet-4-6",
     "q_model": "claude-sonnet-4-6",
+    "r_effort": "—",
+    "d_effort": "—",
+    "q_effort": "—",
     "rvw_model": "claude-sonnet-4-6",
     "session_type": "dev",
     "session_file": "",
@@ -47,6 +55,8 @@
     "target_branch": "main",
     "last_error": null,
     "pr_title": null,
-    "depends_on": null
+    "depends_on": null,
+    "waits_on": null,
+    "base_branch": null
   }
 ]
