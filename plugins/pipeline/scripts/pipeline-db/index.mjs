@@ -34,6 +34,6 @@ export {
 } from "./plans.mjs";
 export {
   upsertClaudeSession, getClaudeSession, listActiveClaudeSessionsByCwd,
-  getLastCheckpointSize, setLastCheckpointSize,
+  getLastCheckpointSize, setLastCheckpointSize, listAllClaudeSessionIds,
   backfillFromClaudeDb,
 } from "./claude-sessions.mjs";
