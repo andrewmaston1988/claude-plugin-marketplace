@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir, homedir } from "node:os";
+import { tmpdir } from "node:os";
 import {
   connectPath, close, projectAdd,
   upsertClaudeSession, listAllClaudeSessionIds,
@@ -158,29 +158,28 @@ test("claude_sessions presence overrides user_type=external slack fallback on in
   // match. Without the fix, the slack fallback wins because the interactiveIds
   // override was guarded by `!commandType || commandType === "unknown"`.
   const { tmp, db } = setup();
-  const sessionId = "interactive-branch-sess-regression";
-  const projectPath = `C:/__test_classifier_${Date.now()}__/repo`;
-  const projectsDir = join(homedir(), ".claude", "projects");
-  const encoded = projectPath.replace(/[^a-zA-Z0-9]/g, "-");
-  const sessionDir = join(projectsDir, encoded);
-  const sessionFile = join(sessionDir, `${sessionId}.jsonl`);
-
-  mkdirSync(sessionDir, { recursive: true });
-  writeFileSync(
-    sessionFile,
-    JSON.stringify({
-      type: "user",
-      sessionId,
-      timestamp: new Date().toISOString(),
-      gitBranch: "interactive/metrics-fix",
-      cwd: projectPath,
-      userType: "external",
-      message: { content: "Lets pick up again" },
-    }) + "\n",
-    "utf8",
-  );
-
   try {
+    const sessionId = "interactive-branch-sess-regression";
+    const projectPath = "/test-classifier/repo";
+    // Route session JSONL through a temp projectsDir so the test never touches ~/.claude/
+    const projectsDir = join(tmp, "projects");
+    const encoded = projectPath.replace(/[^a-zA-Z0-9]/g, "-");
+    const sessionDir = join(projectsDir, encoded);
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, `${sessionId}.jsonl`),
+      JSON.stringify({
+        type: "user",
+        sessionId,
+        timestamp: new Date().toISOString(),
+        gitBranch: "interactive/metrics-fix",
+        cwd: projectPath,
+        userType: "external",
+        message: { content: "Lets pick up again" },
+      }) + "\n",
+      "utf8",
+    );
+
     const now = Date.now() / 1000;
     upsertClaudeSession(db, {
       sessionId,
@@ -197,6 +196,7 @@ test("claude_sessions presence overrides user_type=external slack fallback on in
         duration: 1800,
         project: projectPath,
       }],
+      _projectsDir: projectsDir,
     });
 
     const rows = loadMetricSessions(db);
@@ -208,6 +208,5 @@ test("claude_sessions presence overrides user_type=external slack fallback on in
     );
   } finally {
     teardown(tmp, db);
-    rmSync(sessionDir, { recursive: true, force: true });
   }
 });
