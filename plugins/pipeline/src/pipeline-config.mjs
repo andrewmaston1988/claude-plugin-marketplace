@@ -17,7 +17,8 @@ function deepMerge(base, override) {
 
 // Read ~/.pipeline/config.json and deep-merge with PIPELINE_DEFAULTS.
 // Always returns a complete config object; missing keys fall back to defaults.
-export function loadPipelineConfig(configPath = join(homedir(), ".pipeline", "config.json")) {
+export function loadPipelineConfig(configPath) {
+  if (configPath === undefined) configPath = join(homedir(), ".pipeline", "config.json");
   if (!existsSync(configPath)) return deepMerge({}, PIPELINE_DEFAULTS);
   try {
     return deepMerge(PIPELINE_DEFAULTS, JSON.parse(readFileSync(configPath, "utf8")));
@@ -30,7 +31,8 @@ export function loadPipelineConfig(configPath = join(homedir(), ".pipeline", "co
 // atomically (.tmp -> rename, mode 0o600). Returns the mutated config.
 // Reads the raw on-disk JSON (not the defaults-merged copy) so the write does
 // not balloon the file with every default key.
-export function updatePipelineConfig(mutator, configPath = join(homedir(), ".pipeline", "config.json")) {
+export function updatePipelineConfig(mutator, configPath) {
+  if (configPath === undefined) configPath = join(homedir(), ".pipeline", "config.json");
   let raw = {};
   if (existsSync(configPath)) {
     try { raw = JSON.parse(readFileSync(configPath, "utf8")); } catch { raw = {}; }

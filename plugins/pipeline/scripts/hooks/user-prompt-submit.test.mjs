@@ -3,11 +3,13 @@ import assert from "node:assert";
 import { spawnSync } from "node:child_process";
 import { writeFileSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 import { connectPath, upsertClaudeSession, getClaudeSession, getLastCheckpointSize, setLastCheckpointSize } from "../pipeline-db/index.mjs";
 
 const NODE_PATH = process.execPath;
+const HOOK_PATH = fileURLToPath(new URL("./user-prompt-submit.mjs", import.meta.url));
 
 test("resolveSessionId: returns sessionId from stdin when provided", () => {
   const stdinJson = { session_id: "test-123" };
@@ -89,7 +91,7 @@ test("upsertClaudeSession: preserves user_ts on null update", () => {
 
 test("hook stdout contract: valid JSON on empty stdin", (t, done) => {
   const result = spawnSync(NODE_PATH, [
-    join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
+    HOOK_PATH,
   ], {
     input: "",
     encoding: "utf-8",
@@ -109,7 +111,7 @@ test("hook stdout contract: valid JSON on empty stdin", (t, done) => {
 
 test("hook stdout contract: valid JSON on malformed stdin", (t, done) => {
   const result = spawnSync(NODE_PATH, [
-    join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
+    HOOK_PATH,
   ], {
     input: "not valid json{{{",
     encoding: "utf-8",
@@ -136,7 +138,7 @@ test("hook: CORRELATION_ID suppresses keepalive-init injection", (t, done) => {
   });
 
   const result = spawnSync(NODE_PATH, [
-    join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
+    HOOK_PATH,
   ], {
     input,
     encoding: "utf-8",
@@ -163,7 +165,7 @@ test("hook: database write on valid JSON", (t, done) => {
   });
 
   const result = spawnSync(NODE_PATH, [
-    join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
+    HOOK_PATH,
   ], {
     input,
     encoding: "utf-8",
@@ -187,7 +189,7 @@ test("hook stdout contract: valid JSON when session_id absent from stdin (exerci
   });
 
   const result = spawnSync(NODE_PATH, [
-    join(process.cwd(), "plugins/pipeline/scripts/hooks/user-prompt-submit.mjs"),
+    HOOK_PATH,
   ], {
     input,
     encoding: "utf-8",

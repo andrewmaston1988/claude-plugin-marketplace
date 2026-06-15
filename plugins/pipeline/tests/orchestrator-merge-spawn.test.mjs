@@ -39,19 +39,36 @@ function addFeatureBranch(root, branch) {
   spawnSync("git", ["checkout", "-q", "master"], { cwd: root });
 }
 
+// Compute platform-appropriate dirs matching getPaths() output for a given home.
+// On Linux getPaths() uses XDG; on Windows/macOS it uses <home>/.pipeline.
+function platformDirs(home) {
+  if (process.platform === "linux") {
+    const data  = join(home, ".local", "share");
+    const state = join(home, ".local", "state");
+    return {
+      dataDir:  join(data,  "pipeline"),
+      logDir:   join(state, "pipeline", "logs"),
+      xdgEnv: { XDG_CONFIG_HOME: join(home, ".config"), XDG_DATA_HOME: data, XDG_STATE_HOME: state },
+    };
+  }
+  return {
+    dataDir:  join(home, ".pipeline"),
+    logDir:   join(home, ".pipeline", "logs"),
+    xdgEnv: {},
+  };
+}
+
 function freshFixture() {
   const root = mkdtempSync(join(tmpdir(), "orch-merge-spawn-"));
   initRepo(root);
   addFeatureBranch(root, "autonomous/feat");
 
-  // The orchestrator resolves the DB at <HOME>/.pipeline/pipeline.db and
-  // reads its config from <HOME>/.pipeline/config.json. Mirror that layout
-  // so the child process finds the seeded DB and the autoMerge: true config.
-  const pipelineDir = join(root, ".pipeline");
-  mkdirSync(pipelineDir, { recursive: true });
-  mkdirSync(join(pipelineDir, "logs"), { recursive: true });
+  const { dataDir, logDir, xdgEnv } = platformDirs(root);
+  mkdirSync(dataDir, { recursive: true });
+  mkdirSync(logDir,  { recursive: true });
 
-  const db = connectPath(join(pipelineDir, "pipeline.db"));
+  // DB at dataDir (connectUnified uses paths.dataDir, not stateDir).
+  const db = connectPath(join(dataDir, "pipeline.db"));
   projectAdd(db, { name: "test-proj", rootPath: root });
 
   rowAdd(db, "test-proj", {
@@ -62,9 +79,9 @@ function freshFixture() {
     targetBranch: "master",
   });
 
-  // Merge PIPELINE_DEFAULTS with autoMerge: true at the top level. loadPipelineConfig
-  // deep-merges the on-disk config over the defaults, so we only need to set the
-  // keys we want to deviate from the defaults.
+  // Config at ~/.pipeline/config.json (loadPipelineConfig reads homedir()/.pipeline).
+  const pipelineDir = join(root, ".pipeline");
+  mkdirSync(pipelineDir, { recursive: true });
   const config = {
     ...PIPELINE_DEFAULTS,
     autoMerge: true,
@@ -72,17 +89,17 @@ function freshFixture() {
   };
   writeFileSync(join(pipelineDir, "config.json"), JSON.stringify(config, null, 2), "utf8");
 
-  return { root, db, pipelineDir };
+  return { root, db, logDir, xdgEnv };
 }
 
 test("pollOnce: merge-spawn path does not throw ReferenceError (activeProcs regression)", () => {
-  const { root, db, pipelineDir } = freshFixture();
-  const logFile = join(pipelineDir, "logs", "orchestrator.jsonl");
+  const { root, db, logDir, xdgEnv } = freshFixture();
+  const logFile = join(logDir, "orchestrator.jsonl");
   try {
     const r = spawnSync(process.execPath, [
       ORCHESTRATOR, "--once", "--dry-run", "--project", "test-proj",
     ], {
-      env: { ...process.env, HOME: root, USERPROFILE: root },
+      env: { ...process.env, HOME: root, USERPROFILE: root, ...xdgEnv },
       encoding: "utf8",
       timeout: 10_000,
     });
