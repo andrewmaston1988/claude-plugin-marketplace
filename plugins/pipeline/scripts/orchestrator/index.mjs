@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdirSync, statSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
@@ -44,15 +44,51 @@ const STAGE_SESSION_TYPE = {
 // Gives the just-spawned session time to register in the sessions table.
 const SPAWN_GRACE_PERIOD_SECONDS = 60;
 
+// ── log rotation ──────────────────────────────────────────────────────────────
+
+export function rotateLogs(logFile) {
+  let size;
+  try { size = statSync(logFile).size; } catch { return; }
+  if (size <= 1_048_576) return;
+  try { renameSync(logFile + ".2", logFile + ".3"); } catch {}
+  try { renameSync(logFile + ".1", logFile + ".2"); } catch {}
+  try { renameSync(logFile, logFile + ".1"); } catch {}
+}
+
 // ── logger ────────────────────────────────────────────────────────────────────
 
-function makeLogger(logFile) {
-  return function log(msg, level = "INFO") {
-    const entry = JSON.stringify({
-      ts:    new Date().toISOString().slice(0, 19),
-      level,
-      msg,
-    });
+// In dedup mode, routine messages (tagged { routine: true } at call sites) are
+// suppressed when identical to a prior emission of the same key. A flush line
+// "[N repeated]" is written for each key when a non-routine message is emitted.
+// Non-routine messages always land. Dedup map resets on restart.
+export function makeLogger(logFile, { dedup = false } = {}) {
+  // key -> { count, level } — tracks suppressed routine message runs
+  const dedupMap = new Map();
+
+  return function log(msg, level = "INFO", { routine = false } = {}) {
+    const ts = new Date().toISOString().slice(0, 19);
+
+    if (dedup && routine) {
+      const key = level + msg.slice(0, 40);
+      const prev = dedupMap.get(key);
+      if (prev) {
+        prev.count++;
+        return;
+      }
+      dedupMap.set(key, { count: 1, level });
+      // fall through to write first occurrence
+    } else if (dedup) {
+      // Non-routine: flush all accumulated routine suppression counts.
+      for (const [, e] of dedupMap) {
+        if (e.count > 1) {
+          const flush = JSON.stringify({ ts, level: e.level, msg: `[${e.count - 1} repeated]` });
+          try { appendFileSync(logFile, flush + "\n", "utf8"); } catch {}
+        }
+      }
+      dedupMap.clear();
+    }
+
+    const entry = JSON.stringify({ ts, level, msg });
     try {
       mkdirSync(dirname(logFile), { recursive: true });
       appendFileSync(logFile, entry + "\n", "utf8");
@@ -207,7 +243,7 @@ async function pollOnce({
     const queued     = allQueued.filter(r => depsMet(r, rows, logFn, projectRoot, db));
     nQueued         += allQueued.length;
     const nBlocked   = allQueued.length - queued.length;
-    if (nBlocked) logFn(`[${project}] ${nBlocked} queued row(s) holding on unmet deps`);
+    if (nBlocked) logFn(`[${project}] ${nBlocked} queued row(s) holding on unmet deps`, "INFO", { routine: true });
 
     // Collect all spawnable rows: queued (already filtered by deps) plus any
     // at an active stage (dev, test, research, review) that have no live session.
@@ -224,13 +260,13 @@ async function pollOnce({
     const scope = cfg.orch?.concurrency_scope || "feature";
     const blocked = scope === "project" ? projectIsActive(db, project) : false;
     if (blocked) {
-      logFn(`[${project}] session active (scope=${scope}) — skipping`);
+      logFn(`[${project}] session active (scope=${scope}) — skipping`, "INFO", { routine: true });
       nActive++;
       continue;
     }
 
     if (countActiveSessions(db) >= maxConcurrent) {
-      logFn(`global cap ${maxConcurrent} reached — deferring [${project}]`);
+      logFn(`global cap ${maxConcurrent} reached — deferring [${project}]`, "INFO", { routine: true });
       continue;
     }
 
@@ -239,7 +275,7 @@ async function pollOnce({
     let rowToSpawn = null;
     for (const row of spawnableRows) {
       if (scope === "feature" && featureIsActive(db, project, row.feature)) {
-        logFn(`[${project}] '${row.feature}' already has active session — skipping row`);
+        logFn(`[${project}] '${row.feature}' already has active session — skipping row`, "INFO", { routine: true });
         continue;
       }
 
@@ -249,13 +285,13 @@ async function pollOnce({
 
       // Grace-period check: skip if spawned within 60s.
       if (ageSeconds < SPAWN_GRACE_PERIOD_SECONDS) {
-        logFn(`[${project}] '${row.feature}' in grace period (${Math.round(ageSeconds)}s < ${SPAWN_GRACE_PERIOD_SECONDS}s) — deferring`);
+        logFn(`[${project}] '${row.feature}' in grace period (${Math.round(ageSeconds)}s < ${SPAWN_GRACE_PERIOD_SECONDS}s) — deferring`, "INFO", { routine: true });
         continue;
       }
 
       // Retry-budget check: skip review-stage rows that have exhausted retries.
       if (row.stage === "review" && row.review_retries >= (row.review_retry_budget || 3)) {
-        logFn(`[${project}] '${row.feature}' review retry budget exhausted (${row.review_retries}/${row.review_retry_budget}) — skipping`);
+        logFn(`[${project}] '${row.feature}' review retry budget exhausted (${row.review_retries}/${row.review_retry_budget}) — skipping`, "INFO", { routine: true });
         continue;
       }
 
@@ -366,7 +402,8 @@ async function pollOnce({
 
   const paths = getPaths();
   const logFile = join(paths.logDir, "orchestrator.jsonl");
-  const log = makeLogger(logFile);
+  rotateLogs(logFile);
+  const log = makeLogger(logFile, { dedup: true });
 
   // Precedence: --max-concurrent CLI flag > cfg.orch.max_concurrent > MAX_CONCURRENT_DEFAULT
   const _startupCfg   = loadPipelineConfig();
@@ -519,7 +556,7 @@ async function pollOnce({
       const parts = [`polling… ${nProjects} project${nProjects !== 1 ? "s" : ""}`];
       if (nQueued) parts.push(`${nQueued} queued`);
       if (nActive) parts.push(`${nActive} active`);
-      log(parts.join(", "));
+      log(parts.join(", "), "INFO", { routine: true });
     } catch (e) {
       log(`poll_once error: ${e.message}`, "ERROR");
       notifyPollError(e.message);
