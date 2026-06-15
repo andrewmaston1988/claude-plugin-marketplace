@@ -19,7 +19,7 @@ import { spawnSession, spawnMerge, isDirtyTree, isMergedInto } from "./spawn.mjs
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 import { reconcileSessions } from "./reaper.mjs";
 import { depsMet } from "./deps.mjs";
-import { orchestratorWorktreePath, resolveHookFirstToken } from "../worktree-paths.mjs";
+import { featureWorktreePath, resolveHookFirstToken } from "../worktree-paths.mjs";
 import { fileURLToPath } from "node:url";
 import { spawnGovernor, spawnMonthlyGovernor } from "./governor.mjs";
 
@@ -306,9 +306,11 @@ async function pollOnce({
     // cwd = spawn worktree path. Same path the orchestrator hands to spawnSession
     // below, so the template's `{{CWD}}/reports/...` resolves to the actual
     // working dir the agent runs in.
-    const planStem = (row.plan_file || "").replace(/\.md$/, "").split(/[\\/]/).pop();
-    const cwdForSession = orchestratorWorktreePath({
-      project, projectRoot, branch: `autonomous/${planStem}`,
+    // Phase 3b: featureWorktreePath gives every feature its own worktree at
+    // {root_parent}/.worktrees/{project}/{feature}. The deprecated
+    // orchestratorWorktreePath used {branch_type}-{branch_local} and broke isolation.
+    const cwdForSession = featureWorktreePath({
+      project, projectRoot, feature: row.feature,
     });
     const sessionFile = resolveSessionFile(rowForSession, project, {
       projectRoot,
