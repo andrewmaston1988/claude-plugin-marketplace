@@ -544,11 +544,7 @@ export function isDirtyTree(projectRoot) {
   } catch { return true; }
 }
 
-// NOTE: the orchestrator's waits_on gate no longer relies on this function.
-// It was replaced by isPrereqLanded() in landed.mjs, which handles squash-merges
-// via git cherry / gh pr list / ls-remote as fallbacks when ancestry is absent.
-// isMergedInto remains exported for use by spawnMerge and any callers that need
-// a strict ancestry check (regular/FF merges only).
+// For strict ancestry checks (spawnMerge); waits_on gate uses isPrereqLanded() instead.
 export function isMergedInto(targetBranch, featureBranch, projectRoot) {
   try {
     const r = spawnSync("git", ["merge-base", "--is-ancestor", targetBranch, featureBranch], {
