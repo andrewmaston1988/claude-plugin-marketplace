@@ -257,10 +257,20 @@ function runFixture(caseDir, op) {
   const input    = migrateInput(caseDir, op, rawInput);
 
   const tmp = mkdtempSync(join(tmpdir(), "parity-"));
-  const env = { ...process.env, HOME: tmp, USERPROFILE: tmp };
+  const isLinux = process.platform === "linux";
+  const dataDir = isLinux
+    ? join(tmp, ".local", "share", "pipeline")
+    : join(tmp, ".pipeline");
+  const xdgEnv = isLinux ? {
+    XDG_CONFIG_HOME: join(tmp, ".config"),
+    XDG_DATA_HOME:   join(tmp, ".local", "share"),
+    XDG_STATE_HOME:  join(tmp, ".local", "state"),
+  } : {};
+  const env = { ...process.env, HOME: tmp, USERPROFILE: tmp, ...xdgEnv };
   try {
     const repo   = makeFakeRepo(tmp);
-    const dbPath = join(tmp, ".pipeline", "pipeline.db");
+    mkdirSync(dataDir, { recursive: true });
+    const dbPath = join(dataDir, "pipeline.db");
 
     const db = connectPath(dbPath);
     try {
