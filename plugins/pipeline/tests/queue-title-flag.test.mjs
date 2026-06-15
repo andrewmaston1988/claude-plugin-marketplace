@@ -30,11 +30,20 @@ function queue(planBody, extraArgs) {
     spawnSync("git", ["init", "--quiet"], { cwd: repo, stdio: "ignore" });
     writeFileSync(join(repo, "plans", FEATURE + ".md"), planBody);
 
-    const dbPath = join(tmp, ".pipeline", "pipeline.db");
+    // Use XDG-aware paths matching getPaths() on each platform.
+    const isLinux = process.platform === "linux";
+    const stateDir = isLinux ? join(tmp, ".local", "state", "pipeline") : join(tmp, ".pipeline");
+    const xdgEnv = isLinux ? {
+      XDG_CONFIG_HOME: join(tmp, ".config"),
+      XDG_DATA_HOME: join(tmp, ".local", "share"),
+      XDG_STATE_HOME: join(tmp, ".local", "state"),
+    } : {};
+    mkdirSync(stateDir, { recursive: true });
+    const dbPath = join(stateDir, "pipeline.db");
     const db = connectPath(dbPath);
     try { projectAdd(db, { name: PROJECT, rootPath: repo }); } finally { close(db); }
 
-    const env = { ...process.env, HOME: tmp, USERPROFILE: tmp };
+    const env = { ...process.env, HOME: tmp, USERPROFILE: tmp, ...xdgEnv };
     const r = spawnSync(
       process.execPath,
       [BIN, "queue-plan", PROJECT, FEATURE, "--target-branch", "main", ...extraArgs],
