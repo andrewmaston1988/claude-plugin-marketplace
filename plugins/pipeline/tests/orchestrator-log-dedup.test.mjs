@@ -1,6 +1,6 @@
 // Tests for makeLogger dedup and rotateLogs helpers (orchestrator-log-dedup plan).
 import { test } from "node:test";
-import { equal, ok, deepEqual } from "node:assert/strict";
+import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
