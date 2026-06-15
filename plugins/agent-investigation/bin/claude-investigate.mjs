@@ -5,7 +5,7 @@ import { execSync, spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
-import { locateAgent } from "../scripts/locate-agent.mjs";
+import { locateAgentInProject } from "../scripts/locate-agent.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const pluginRoot = dirname(here);
@@ -142,9 +142,7 @@ Run 'claude-investigate doctor' to check prerequisites.
       return;
     }
 
-    // Default to current working directory's sessions
-    const sessionsDir = process.cwd();
-    const result = locateAgent(sessionsDir, agentId);
+    const result = locateAgentInProject(agentId);
 
     if (result) {
       console.log(result);
@@ -176,8 +174,7 @@ Run 'claude-investigate doctor' to check prerequisites.
   }
 
   // Locate the agent first
-  const sessionsDir = process.cwd();
-  const agentPath = locateAgent(sessionsDir, agentId);
+  const agentPath = locateAgentInProject(agentId);
   if (!agentPath) {
     console.error(`No agent transcript found for ID: ${agentId}`);
     setTimeout(() => process.exit(1), 150);

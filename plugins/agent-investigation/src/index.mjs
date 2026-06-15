@@ -1,1 +1,1 @@
-export { locateAgent } from "../scripts/locate-agent.mjs";
+export { locateAgent, locateAgentInProject } from "../scripts/locate-agent.mjs";
