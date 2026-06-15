@@ -73,7 +73,10 @@ test("wizard: autostart error captured in setupErrors with correct shape", async
   ok(ret.setupErrors[0].hint, "hint is present");
 });
 
-test("wizard: autostart failure surfaces in final summary with hint", async () => {
+// schtasks hint is Windows-only; the Linux hint is a different string.
+const testWin = process.platform === "win32" ? test : test.skip;
+
+testWin("wizard: autostart failure surfaces in final summary with hint", async () => {
   const ctx = freshPaths();
   const col = makeSayCollector();
   const prevExitCode = process.exitCode;
@@ -127,7 +130,7 @@ test("wizard: process.exitCode is 2 when setupErrors non-empty", async () => {
   }
 });
 
-test("wizard: existing-task pre-warning printed when schtasks /Query resolves", async () => {
+testWin("wizard: existing-task pre-warning printed when schtasks /Query resolves", async () => {
   const ctx = freshPaths();
   const col = makeSayCollector();
   const prevExitCode = process.exitCode;
