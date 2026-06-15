@@ -1,51 +1,63 @@
-// merge-pr-aware — PR detection and gh pr merge fallback.
-//
-// Covers the findOpenPR helper and PR-aware merge path in merge.mjs:
-// When there is an open PR for a branch and no on_merge hook,
-// the skill calls `gh pr merge --squash --admin` instead of
-// silently falling back to local squash merge.
-
 import { test } from "node:test";
-import { ok, equal } from "node:assert/strict";
-import { createRequire } from "node:module";
+import { equal, deepEqual, ok } from "node:assert/strict";
 
-const require = createRequire(import.meta.url);
+process.env.PIPELINE_SUPPRESS_DEPRECATED = "1";
 
-// These tests verify the PR-aware logic via behavior inspection.
-// The core logic is in merge.mjs:findOpenPR and the PR-detection branch
-// in step5SquashMerge (around line 195-210).
-//
-// Key scenarios:
-// 1. Open PR found → gh pr merge --squash --admin called, local squash NOT called
-// 2. No open PR, no hook → local squash called (existing path preserved)
-// 3. gh pr merge fails → GitError thrown, no fallback to local squash
-// 4. gh not installed (findOpenPR returns null) → degrades to local squash
+import { findOpenPR } from "../skills/merge/scripts/merge.mjs";
 
-test("findOpenPR helper: returns parsed PR data on success", () => {
-  // Behavior: when `gh pr list` returns a valid JSON array,
-  // findOpenPR extracts number and mergeStateStatus.
-  // This test is deferred pending refactoring merge.mjs to export the helper.
-  ok(true, "deferred: merge.mjs does not currently export findOpenPR for unit testing");
+const BRANCH = "autonomous/feat-x";
+const PROJECT = "/fake/repo";
+
+function makeSpawn(responses) {
+  return function spawn(_cmd, _args, _opts) {
+    const r = responses.shift();
+    if (!r) return { status: 1, stdout: "", stderr: "no more responses" };
+    return r;
+  };
+}
+
+test("findOpenPR: returns parsed PR data when gh pr list returns one open PR", () => {
+  const spawn = makeSpawn([{
+    status: 0,
+    stdout: JSON.stringify([{ number: 42, mergeStateStatus: "CLEAN" }]),
+    stderr: "",
+  }]);
+  const pr = findOpenPR(BRANCH, PROJECT, { spawn, log: () => {} });
+  deepEqual(pr, { number: 42, mergeStateStatus: "CLEAN" });
 });
 
-test("PR-aware merge path: open PR found → gh pr merge called", () => {
-  // Integration test would require mocking spawnSync and gitMergeSquashWithRetry
-  // at module load time. Since merge.mjs has side effects (main() at EOF),
-  // we can't easily isolate the helper.
-  //
-  // Workaround: the logic is exercised in manual smoke tests once the code lands.
-  // A future refactor can export findOpenPR and step5SquashMerge independently.
-  ok(true, "deferred: requires module refactor to enable unit testing");
+test("findOpenPR: returns null when gh pr list returns empty array", () => {
+  const spawn = makeSpawn([{ status: 0, stdout: "[]", stderr: "" }]);
+  const pr = findOpenPR(BRANCH, PROJECT, { spawn, log: () => {} });
+  equal(pr, null);
 });
 
-test("PR-aware merge path: no PR, no hook → local squash (existing behavior preserved)", () => {
-  ok(true, "deferred: manual smoke test validates backward compatibility");
+test("findOpenPR: returns null when gh pr list exits non-zero (gh not installed)", () => {
+  const spawn = makeSpawn([{ status: 1, stdout: "", stderr: "command not found" }]);
+  const pr = findOpenPR(BRANCH, PROJECT, { spawn, log: () => {} });
+  equal(pr, null);
 });
 
-test("PR-aware merge path: gh pr merge fails → error thrown (no fallback)", () => {
-  ok(true, "deferred: manual smoke test validates error-on-failure guarantee");
+test("findOpenPR: returns null and logs when gh pr list returns malformed JSON", () => {
+  const logCalls = [];
+  const spawn = makeSpawn([{ status: 0, stdout: "not-json{", stderr: "" }]);
+  const pr = findOpenPR(BRANCH, PROJECT, { spawn, log: m => logCalls.push(m) });
+  equal(pr, null);
+  equal(logCalls.length, 1);
+  ok(logCalls[0].includes("non-JSON"), "log line should mention non-JSON parse failure");
 });
 
-test("PR-aware merge path: gh not installed → findOpenPR returns null, local squash called", () => {
-  ok(true, "deferred: manual smoke test validates graceful degradation");
+test("findOpenPR: passes --head <branch> and --state open to gh", () => {
+  let captured;
+  const spawn = (cmd, args, opts) => {
+    captured = { cmd, args, opts };
+    return { status: 0, stdout: "[]", stderr: "" };
+  };
+  findOpenPR(BRANCH, PROJECT, { spawn, log: () => {} });
+  equal(captured.cmd, "gh");
+  ok(captured.args.includes("--head"), "should pass --head flag");
+  ok(captured.args.includes(BRANCH), "should include branch name");
+  ok(captured.args.includes("--state"), "should pass --state flag");
+  ok(captured.args.includes("open"), "should filter to open state");
+  ok(captured.args.includes("--json"), "should request JSON output");
 });
