@@ -240,6 +240,17 @@ function dumpDb(db) {
 
 // ── Per-fixture execution ─────────────────────────────────────────────────────
 
+// Strip Node runtime diagnostics that vary across Node versions and are not
+// part of the CLI's contract — e.g. `ExperimentalWarning: SQLite is an
+// experimental feature` from `node:sqlite` on Node 22.5+. The PID prefix
+// `(node:1234) ` is present when stderr comes from a child Node process; the
+// hint line `(Use \`node --trace-warnings ...\` to show where ...)` follows
+// each warning.
+const NODE_NOISE = /^(?:\(node:\d+\) )?(ExperimentalWarning: |\(Use `node --trace-warnings)/;
+function stripRuntimeWarnings(text) {
+  return text.split("\n").filter(line => !NODE_NOISE.test(line)).join("\n");
+}
+
 function makeFakeRepo(parent) {
   const repo = join(parent, "repo");
   mkdirSync(repo, { recursive: true });
@@ -308,7 +319,7 @@ function runFixture(caseDir, op) {
       input: input.stdin_text || undefined,
     });
     const rawStdout = result.stdout ? result.stdout.toString() : "";
-    const stderr    = result.stderr ? result.stderr.toString() : "";
+    const stderr    = stripRuntimeWarnings(result.stderr ? result.stderr.toString() : "");
     const exitCode  = result.status;
 
     const db2 = connectPath(dbPath);
@@ -357,6 +368,29 @@ const cases = discoverCases();
 if (cases.length === 0) {
   test("fixtures present", () => assert.fail(`no fixtures at ${ROOT}`));
 }
+
+// Self-test for the runtime-warning filter — locks the regex against drift so
+// a future Node version that emits a new warning variant gets caught here
+// instead of as 19 fixture-mismatch failures in CI.
+test("stripRuntimeWarnings", () => {
+  const sample = [
+    "(node:1234) ExperimentalWarning: SQLite is an experimental feature and might change at any time",
+    "(node:1234) (Use `node --trace-warnings ...` to show where the warning was created)",
+    "real stderr line 1",
+    "real stderr line 2",
+    "",
+  ].join("\n");
+  assert.equal(
+    stripRuntimeWarnings(sample),
+    "real stderr line 1\nreal stderr line 2\n"
+  );
+  assert.equal(stripRuntimeWarnings(""), "");
+  assert.equal(stripRuntimeWarnings("plain text\n"), "plain text\n");
+  assert.equal(
+    stripRuntimeWarnings("ExperimentalWarning: no-pid\nnext"),
+    "next"
+  );
+});
 
 if (REGEN) {
   for (const c of cases) {
