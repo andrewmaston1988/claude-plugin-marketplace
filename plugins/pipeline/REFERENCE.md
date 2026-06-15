@@ -763,7 +763,7 @@ The pipeline plugin wires a `UserPromptSubmit` hook into Claude Code that fires 
 ### Dual-writer phase (phases 2–4)
 
 During the `pipeline-absorb-claude-db` migration phases 2–4, two hooks fire on every prompt:
-1. **Python hook** (`C:/code/CLAUDE/scripts/session_user_submit_hook.py`) — writes to `C:/code/CLAUDE/claude.db` (legacy)
+1. **Python hook** (`<claude-base>/scripts/session_user_submit_hook.py`) — writes to `<claude-base>/claude.db` (legacy)
 2. **mjs hook** (pipeline plugin) — writes to `~/.pipeline/pipeline.db` (new)
 
 Both hooks inject identical `additionalContext` to Claude Code. This dual-writer state ensures:
@@ -773,7 +773,7 @@ Both hooks inject identical `additionalContext` to Claude Code. This dual-writer
 
 **To remove the Python hook (phase 4 operation):** Delete the following entry from **both**:
 - `~/.claude/settings.json`
-- `C:/code/CLAUDE/settings.json`
+- `<claude-base>/settings.json`
 
 Entry to remove:
 ```json
