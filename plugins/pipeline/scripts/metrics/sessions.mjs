@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { appendMetricSession, loadMetricSessions, loadSpawnMap } from "../pipeline-db/index.mjs";
+import { appendMetricSession, loadMetricSessions, loadSpawnMap, listAllClaudeSessionIds } from "../pipeline-db/index.mjs";
 import { estimateTokens } from "./ccusage.mjs";
 import { orchestratorWorktreePath } from "../worktree-paths.mjs";
 
@@ -13,6 +13,11 @@ const _BUILTIN_FIRST_PROMPT_TYPES = [
   { prefix: "Read sessions/research-", type: "research" },
   { prefix: "Read sessions/test-",     type: "test" },
   { prefix: "Read sessions/gov-",      type: "governor" },
+];
+
+// Synthetic type — never matched by classifyFirstPrompt, only assigned via fallback.
+const _BUILTIN_SYNTHETIC_TYPES = [
+  { type: "interactive" },
 ];
 
 function loadUserClassifications() {
@@ -92,13 +97,17 @@ export function extractCommandTypeFromBranch(branch) {
  */
 export function getAllCommandTypes() {
   const user = loadUserClassifications();
-  const builtinTypes = ["queue", ..._BUILTIN_FIRST_PROMPT_TYPES.map(e => e.type)];
+  const builtinTypes = ["queue", ..._BUILTIN_FIRST_PROMPT_TYPES.map(e => e.type), ..._BUILTIN_SYNTHETIC_TYPES.map(e => e.type)];
   const seen = new Set();
   const all = [];
   for (const t of [...user.map(e => e.type), ...builtinTypes]) {
     if (!seen.has(t)) { seen.add(t); all.push(t); }
   }
   return all;
+}
+
+export function loadInteractiveSessionIds(db) {
+  return new Set(listAllClaudeSessionIds(db));
 }
 
 // Compute orchestrator-worktree path prefixes per branch type at module load
@@ -303,6 +312,7 @@ export function updateSessions(db) {
     if (r.session_id) existingMap[r.session_id] = r;
   }
   const spawnMap = loadSpawnMap(db);
+  const interactiveIds = loadInteractiveSessionIds(db);
 
   const sessionsByIdSeen = {};
   for (const record of historyRecords) {
@@ -352,6 +362,10 @@ export function updateSessions(db) {
         );
         if (inferred) commandType = inferred;
       }
+    }
+
+    if (!commandType || commandType === "unknown") {
+      if (interactiveIds.has(sessionId)) commandType = "interactive";
     }
 
     if (full?.user_type === "external" && ["unknown", null].includes(commandType)) {
@@ -413,6 +427,7 @@ export function updateSessionsFromProjects(db) {
     if (r.session_id) existingMap[r.session_id] = r;
   }
   const spawnMap = loadSpawnMap(db);
+  const interactiveIds = loadInteractiveSessionIds(db);
 
   let added = 0, skippedEmpty = 0;
 
@@ -449,6 +464,10 @@ export function updateSessionsFromProjects(db) {
           const inferred = extractCommandTypeFromProject(data.cwd ?? "");
           if (inferred) commandType = inferred;
         }
+      }
+
+      if (!commandType || commandType === "unknown") {
+        if (interactiveIds.has(data.session_id)) commandType = "interactive";
       }
 
       if (data.user_type === "external" && ["unknown", null].includes(commandType)) {
