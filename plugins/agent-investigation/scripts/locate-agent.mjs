@@ -1,18 +1,7 @@
 import { readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
-/**
- * Locate an agent transcript JSONL by ID.
- *
- * Search strategy:
- * 1. Standard subagent: agent-<id>.jsonl in sessionsDir
- * 2. Workflow subagent: subagents/workflows/<wf-id>/agent-<id>.jsonl
- * 3. Prefix match: if agentId is < 6 chars, find first agent-<id>* or agent-*<id>*
- *
- * @param {string} sessionsDir - Base sessions directory (e.g., claude-plugin-marketplace/sessions/)
- * @param {string} agentId - Full or partial agent ID
- * @returns {string|null} - Absolute path to agent-<id>.jsonl, or null if not found
- */
+// Checks: (1) standard agent-<id>.jsonl, (2) workflow subagents/workflows/<wf>/ path, (3) prefix match for short IDs
 export function locateAgent(sessionsDir, agentId) {
   if (!agentId || agentId.trim().length === 0) {
     return null;
