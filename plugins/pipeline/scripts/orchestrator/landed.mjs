@@ -3,7 +3,10 @@ import { spawnSync as _spawnSync } from "node:child_process";
 // Execute gh CLI and return parsed JSON output, or null on failure.
 function _gh(args, cwd) {
   try {
-    const r = _spawnSync("gh", args, { cwd, encoding: "utf8", windowsHide: true });
+    const r = _spawnSync("gh", args, {
+      cwd, encoding: "utf8", windowsHide: true, timeout: 30000,
+      env: { ...process.env, GH_PROMPT_DISABLED: "1" },
+    });
     if (r.status !== 0) return null;
     return JSON.parse(r.stdout.trim());
   } catch { return null; }
@@ -17,7 +20,7 @@ export function isPrereqLanded(prereqBranch, targetBranch, projectRoot, {
 } = {}) {
   const run = (cmd, args) => {
     try {
-      return spawnSync(cmd, args, { cwd: projectRoot, encoding: "utf8", windowsHide: true });
+      return spawnSync(cmd, args, { cwd: projectRoot, encoding: "utf8", windowsHide: true, timeout: 30000 });
     } catch { return { status: 1, stdout: "", stderr: "" }; }
   };
 
