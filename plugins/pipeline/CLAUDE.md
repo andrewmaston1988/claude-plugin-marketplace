@@ -18,6 +18,8 @@ All keys live in `~/.pipeline/config.json` and are deep-merged over `PIPELINE_DE
 | `web.host` | `"127.0.0.1"` | Network interface the dashboard binds to. `"127.0.0.1"` = loopback-only; `"0.0.0.0"` = all interfaces (LAN access). Override with `--host` on the CLI for a single session. |
 | `tiers` | `{haiku: "claude-haiku-4-5", sonnet: "claude-sonnet-4-6", opus: "claude-opus-4-8"}` | Canonical model string per tier. Used by auto-escalation to resolve tier-jumps (e.g., Haiku → Sonnet). Update when new models release or default recommendations change. |
 | `tier_efforts` | `{haiku: ["low", "medium", "high"], sonnet: ["low", "medium", "high", "max"], opus: ["low", "medium", "high", "xhigh", "max"]}` | Supported effort levels per tier. Auto-escalation respects these when walking the ladder (+2 per retry within tier, clamped to ceiling). Update if models gain/lose effort support. |
+| `proxy.url` | `"http://localhost:18081"` | Anthropic-format proxy URL. Any model string that doesn't start with `claude-` (Ollama tags like `gemma4:31b-cloud`, `MiniMax-M3`, `qwen2.5-coder:32b`) routes through this URL with `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` env vars. Anthropic models are unaffected. The proxy must speak the Anthropic Messages format — the canonical implementation is `claude-code-proxy` running on this port. |
+| `proxy.auth_token` | `"dummy-local-key"` | Bearer token for the proxy. Ignored by Ollama-served models (Ollama doesn't validate); set to whatever the proxy expects for cloud endpoints. |
 
 **Per-row effort column defaults** (set at queue time via `pipeline queue-plan`, not in config.json):
 
