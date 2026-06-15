@@ -1,7 +1,7 @@
 // Dependency gate for queued pipeline rows. Extracted from index.mjs so it can
 // be imported by tests without triggering index.mjs's top-level orchestrator IIFE.
 import { rowGet } from "../pipeline-db/index.mjs";
-import { isMergedInto } from "./spawn.mjs";
+import { isPrereqLanded } from "./landed.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 
 // "proj:feat" → {project:"proj", feature:"feat"}; "bare" → {project:null, feature:"bare"}.
@@ -58,12 +58,12 @@ export function depsMet(row, allRows, logFn, projectRoot, db) {
     if (projectRoot) {
       const prereqBranch = (prereq.branch && prereq.branch !== "—") ? prereq.branch : `autonomous/${waitsOn}`;
       const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
-      // isMergedInto(a, b) → true when `a` is an ancestor of `b`. Here: has the
-      // prerequisite's branch landed on the target?
-      if (!isMergedInto(prereqBranch, targetBranch, projectRoot)) {
-        logFn(`  [${feature}] waits_on '${waitsOn}' done but ${prereqBranch} not yet on ${targetBranch} — holding`);
+      const { landed, signal } = isPrereqLanded(prereqBranch, targetBranch, projectRoot);
+      if (!landed) {
+        logFn(`  [${feature}] waits_on '${waitsOn}' done but ${prereqBranch} not yet on ${targetBranch} — holding [signal:${signal}]`);
         return false;
       }
+      logFn(`  [${feature}] waits_on '${waitsOn}' landed via ${signal}`);
     }
   }
 
