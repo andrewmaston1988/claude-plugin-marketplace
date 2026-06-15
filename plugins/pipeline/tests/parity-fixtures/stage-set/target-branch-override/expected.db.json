@@ -13,6 +13,7 @@
       "d_effort": null,
       "q_effort": null,
       "rvw_model": "claude-sonnet-4-6",
+      "rvw_effort": "high",
       "session_type": "dev",
       "session_file": "",
       "budget_usd": 5,
