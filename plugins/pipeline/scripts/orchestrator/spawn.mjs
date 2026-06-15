@@ -544,6 +544,7 @@ export function isDirtyTree(projectRoot) {
   } catch { return true; }
 }
 
+// For strict ancestry checks (spawnMerge); waits_on gate uses isPrereqLanded() instead.
 export function isMergedInto(targetBranch, featureBranch, projectRoot) {
   try {
     const r = spawnSync("git", ["merge-base", "--is-ancestor", targetBranch, featureBranch], {
