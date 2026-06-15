@@ -456,12 +456,18 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
 
   const claudePath = findClaude();
   const prompt = `export CORRELATION_ID='${correlationId}'; Read '${sessionFile}' in full and execute the session.`;
+  const proxyEnv = proxyEnvFor(model);
+  const isProxyModel = Object.keys(proxyEnv).length > 0;
+
   const args = [
     "-p", prompt,
     "--model", model,
     "--effort", effort,
     "--allowedTools", tools,
-    "--max-budget-usd", budget,
+    // Non-Claude models route through a local proxy where cost is $0; Claude
+    // Code still applies Anthropic pricing to token counts and would hit the
+    // budget ceiling prematurely. Skip the flag for proxy-routed models.
+    ...(!isProxyModel ? ["--max-budget-usd", budget] : []),
   ];
 
   const env = { ...process.env };
@@ -471,8 +477,7 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   const localBin = join(homedir(), ".local", "bin");
   env.PATH = [localBin, env.PATH || ""].filter(Boolean).join(pathDelimiter);
 
-  const proxyEnv = proxyEnvFor(model);
-  if (Object.keys(proxyEnv).length) {
+  if (isProxyModel) {
     Object.assign(env, proxyEnv);
     logFn(`[${project}] proxy model detected — routing '${model}' via local proxy`);
   }
