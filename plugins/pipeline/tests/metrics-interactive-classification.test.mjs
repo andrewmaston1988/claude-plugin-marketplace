@@ -7,10 +7,10 @@ import { tmpdir } from "node:os";
 import {
   connectPath, close, projectAdd,
   upsertClaudeSession, listAllClaudeSessionIds,
-  appendMetricSession, loadMetricSessions,
+  loadMetricSessions,
 } from "../scripts/pipeline-db/index.mjs";
 import {
-  loadInteractiveSessionIds, updateSessions,
+  loadInteractiveSessionIds, updateSessions, classifyFirstPrompt,
 } from "../scripts/metrics/sessions.mjs";
 
 const PROJECT = "testproject";
@@ -93,7 +93,6 @@ test("updateSessions classifies as interactive when no prefix/branch/project mat
     const now = Date.now() / 1000;
     const sessionId = "interactive-sess-xyz";
 
-    // Seed claude_sessions with this session ID
     upsertClaudeSession(db, {
       sessionId,
       cwd: "/some/path",
@@ -102,34 +101,21 @@ test("updateSessions classifies as interactive when no prefix/branch/project mat
       summary: null,
     });
 
-    // Seed metric_sessions with a history-like record:
-    // first_prompt that doesn't match any prefix, no recognizable branch
-    appendMetricSession(db, {
-      session_id:       sessionId,
-      timestamp:        new Date(now * 1000).toISOString(),
-      command_type:     "unknown", // will be overwritten by updateSessions logic
-      branch:           "unknown",
-      correlation_id:   null,
-      duration_seconds: 1800,
-      files_indexed:    20,
-      plan_file:        null,
-      cache_create_tokens: 100,
-      cache_read_tokens:   50,
-      token_source:     "estimation",
-      estimation_method: "formula",
-      cache_read_ratio: 0.5,
-      turn_count:       5,
+    // Inject a synthetic history record with project="" so updateSessions finds no
+    // session file on disk — firstPrompt stays "", no prefix/branch/project match,
+    // and the interactive fallback fires because sessionId is in claude_sessions.
+    updateSessions(db, {
+      historyOverride: [{
+        sessionId,
+        timestamp: new Date(now * 1000).toISOString(),
+        duration: 1800,
+        project: "",
+      }],
     });
 
-    // After updateSessions processes the DB, the interactive fallback should apply
-    const before = loadMetricSessions(db);
-    equal(before[0].command_type, "unknown");
-
-    // Manually verify the interactive fallback logic:
-    // If sessionId is in claude_sessions and commandType is unknown,
-    // it should be reclassified to "interactive"
-    const interactiveIds = loadInteractiveSessionIds(db);
-    ok(interactiveIds.has(sessionId), "session should be in interactive IDs");
+    const rows = loadMetricSessions(db);
+    equal(rows.length, 1, "one session was inserted");
+    equal(rows[0].command_type, "interactive", "interactive fallback applied");
   } finally { teardown(tmp, db); }
 });
 
@@ -139,7 +125,6 @@ test("prefix classification wins over interactive fallback", () => {
     const now = Date.now() / 1000;
     const sessionId = "dev-prefix-sess";
 
-    // Seed claude_sessions
     upsertClaudeSession(db, {
       sessionId,
       cwd: "/some/path",
@@ -148,29 +133,20 @@ test("prefix classification wins over interactive fallback", () => {
       summary: null,
     });
 
-    // Seed metric_sessions with a dev-prefix first_prompt
-    appendMetricSession(db, {
-      session_id:        sessionId,
-      timestamp:         new Date(now * 1000).toISOString(),
-      command_type:      "unknown",
-      branch:            "unknown",
-      correlation_id:    null,
-      duration_seconds:  1800,
-      files_indexed:     20,
-      plan_file:         null,
-      cache_create_tokens: 100,
-      cache_read_tokens:   50,
-      token_source:      "estimation",
-      estimation_method: "formula",
-      cache_read_ratio:  0.5,
-      turn_count:        5,
-    });
-
     const interactiveIds = loadInteractiveSessionIds(db);
-    ok(interactiveIds.has(sessionId), "session is in interactive IDs");
+    ok(interactiveIds.has(sessionId), "session is in interactiveIds");
 
-    // But the prefix should take priority in the fallback chain:
-    // If classifyFirstPrompt returned "dev", it should not be overwritten
-    // to "interactive". This is checked by the caller in updateSessions logic.
+    // classifyFirstPrompt for a dev-prefix prompt returns "dev", not null.
+    // The updateSessions chain only reaches the interactive fallback when
+    // commandType === "unknown" — a non-null prefixType short-circuits the chain.
+    const [prefixType] = classifyFirstPrompt("Read sessions/dev-foo.md", null);
+    equal(prefixType, "dev", "dev prefix classifies as dev");
+
+    // Simulate the priority check: prefix wins, interactive fallback is skipped.
+    const commandType = prefixType ?? "unknown";
+    const finalType = (!commandType || commandType === "unknown")
+      ? (interactiveIds.has(sessionId) ? "interactive" : commandType)
+      : commandType;
+    equal(finalType, "dev", "dev prefix wins over interactive fallback for same session");
   } finally { teardown(tmp, db); }
 });

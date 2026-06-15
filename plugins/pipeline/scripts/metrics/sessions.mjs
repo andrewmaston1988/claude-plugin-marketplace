@@ -305,8 +305,8 @@ export function countProjectConversations(windowStart, windowEnd) {
 /**
  * update-sessions: parse history.jsonl, add new sessions to pipeline.db.
  */
-export function updateSessions(db) {
-  const historyRecords = readHistoryJsonl();
+export function updateSessions(db, { historyOverride } = {}) {
+  const historyRecords = historyOverride ?? readHistoryJsonl();
   const existingMap = {};
   for (const r of loadMetricSessions(db)) {
     if (r.session_id) existingMap[r.session_id] = r;
@@ -364,12 +364,12 @@ export function updateSessions(db) {
       }
     }
 
-    if (!commandType || commandType === "unknown") {
-      if (interactiveIds.has(sessionId)) commandType = "interactive";
-    }
-
     if (full?.user_type === "external" && ["unknown", null].includes(commandType)) {
       commandType = "slack";
+    }
+
+    if (!commandType || commandType === "unknown") {
+      if (interactiveIds.has(sessionId)) commandType = "interactive";
     }
 
     let cacheCreate = 0, cacheRead = 0, turnCount = 0;
@@ -466,12 +466,12 @@ export function updateSessionsFromProjects(db) {
         }
       }
 
-      if (!commandType || commandType === "unknown") {
-        if (interactiveIds.has(data.session_id)) commandType = "interactive";
-      }
-
       if (data.user_type === "external" && ["unknown", null].includes(commandType)) {
         commandType = "slack";
+      }
+
+      if (!commandType || commandType === "unknown") {
+        if (interactiveIds.has(data.session_id)) commandType = "interactive";
       }
 
       const cc = data.cache_create_tokens;
