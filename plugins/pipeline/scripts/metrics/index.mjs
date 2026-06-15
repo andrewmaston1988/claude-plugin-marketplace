@@ -9,6 +9,7 @@ import { updateSessions, updateSessionsFromProjects } from "./sessions.mjs";
 import { updateBaselines } from "./baselines.mjs";
 import { detectAnomalies, perSessionAnomaly } from "./anomaly.mjs";
 import { generateReport, generateStatusReport } from "./report.mjs";
+import { reclassifyHistorical } from "./reclassify.mjs";
 import { publishReport } from "../publisher.mjs";
 
 // Resolve pipeline.db — env override, then default ~/.pipeline/pipeline.db.
@@ -49,6 +50,7 @@ function resolveAlertsDir() {
       "  monthly-metrics <YYYYMM>",
       "  post-report <file> [--dry-run]",
       "  per-session-anomaly <YYYYMMDD>",
+      "  reclassify [--dry-run]",
       "",
     ].join("\n"));
     process.exit(0);
@@ -176,6 +178,15 @@ function resolveAlertsDir() {
     }
     const ok = await perSessionAnomaly(dateStr);
     setTimeout(() => process.exit(ok ? 0 : 1), 150);
+    return;
+  }
+
+  if (cmd === "reclassify") {
+    const dryRun = rest.includes("--dry-run");
+    const db = connectPath(resolveDbPath());
+    try { reclassifyHistorical(db, { dryRun }); }
+    finally { db.close(); }
+    setTimeout(() => process.exit(0), 150);
     return;
   }
 
