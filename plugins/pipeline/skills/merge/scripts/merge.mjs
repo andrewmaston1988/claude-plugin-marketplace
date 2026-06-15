@@ -105,6 +105,22 @@ function _writeCommitMessage(projectDir, branch, planPath, targetBranch = "main"
   return fileCount ? `${title}\n\n- ${fileCount} file(s) changed` : title;
 }
 
+export function findOpenPR(branch, projectDir, { spawn = spawnSync, log = logErr } = {}) {
+  const result = spawn("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "number,mergeStateStatus"], {
+    cwd: projectDir,
+    encoding: "utf8",
+  });
+  if (result.status !== 0 || !result.stdout) return null;
+  try {
+    const prs = JSON.parse(result.stdout);
+    if (!Array.isArray(prs) || prs.length === 0) return null;
+    return { number: prs[0].number, mergeStateStatus: prs[0].mergeStateStatus };
+  } catch (e) {
+    log(`[findOpenPR] gh pr list returned non-JSON: ${result.stdout.slice(0, 120)}`);
+    return null;
+  }
+}
+
 export function verifyAlreadyIntegrated(planPath, projectDir) {
   if (!planPath || !existsSync(planPath)) return [];
   const text = readFileSync(planPath, "utf8");
@@ -178,51 +194,70 @@ async function step5SquashMerge(db, project, projectDir, branches, planFiles, ta
         if (ffPost.code !== 0) logErr(`[5] WARN: ff-sync failed after hook merge: ${ffPost.stderr.trim()}`);
       }
     } else {
-      logOut(`[5] Squash-merging ${branch}`);
-
-      const aheadBehind = runGit(
-        ["rev-list", "--left-right", "--count", `${targetBranch}...${branch}`],
-        projectDir, { check: false },
-      );
-      const ahead = aheadBehind.code === 0
-        ? parseInt(aheadBehind.stdout.trim().split(/\s+/)[1], 10)
-        : -1;
-
-      let alreadyIntegrated = false;
-      if (ahead === 0) {
-        logOut(`[5] ${branch} is already integrated into ${targetBranch} — verifying`);
-        const planPath = planFiles[branch];
-        const guardBlockers = verifyAlreadyIntegrated(planPath, projectDir);
-        if (guardBlockers.length) {
-          for (const b of guardBlockers) logErr(`BLOCKER: ${b}`);
-          throw new GitError(
-            `${branch}: already-integrated check failed — branch may have committed to detached HEAD. ` +
-            `Inspect dangling commits via \`git fsck --lost-found\` and recover manually.`,
-          );
+      // Check for open PR before falling back to local squash
+      const pr = findOpenPR(branch, projectDir);
+      if (pr) {
+        logOut(`[5] Open PR found (${pr.number}) for ${branch} — using gh pr merge`);
+        const mergeResult = spawnSync("gh", ["pr", "merge", String(pr.number), "--squash", "--admin"], {
+          cwd: projectDir,
+          stdio: "inherit",
+          windowsHide: true,
+        });
+        if (mergeResult.status !== 0) {
+          throw new GitError(`gh pr merge #${pr.number} failed (exit ${mergeResult.status}). Refusing local fallback.`);
         }
-        logOut(`[5] ${branch} verified as integrated — skipping squash merge, running cleanup`);
-        alreadyIntegrated = true;
+        logOut(`[5] PR #${pr.number} merged via gh pr merge`);
+        // Fast-forward local target to origin — the PR merge happened on remote
+        runGit(["fetch", "origin", targetBranch], projectDir, { check: false });
+        const ffPost = runGit(["merge", "--ff-only", `origin/${targetBranch}`], projectDir, { check: false });
+        if (ffPost.code !== 0) logErr(`[5] WARN: ff-sync failed after gh pr merge: ${ffPost.stderr.trim()}`);
       } else {
-        const mergeResult = await gitMergeSquashWithRetry(projectDir, branch);
-        if (mergeResult.code !== 0) {
-          const combined = (mergeResult.stdout + mergeResult.stderr).toLowerCase();
-          if (combined.includes("already up to date") || combined.includes("nothing to commit")) {
-            logOut(`[5] ${branch} had no changes to merge — treating as already integrated`);
-            alreadyIntegrated = true;
-          } else {
-            throw new GitError(`squash merge failed for ${branch}: ${mergeResult.stderr.trim()}`);
+        logOut(`[5] No open PR for ${branch} — squash-merging locally`);
+
+        const aheadBehind = runGit(
+          ["rev-list", "--left-right", "--count", `${targetBranch}...${branch}`],
+          projectDir, { check: false },
+        );
+        const ahead = aheadBehind.code === 0
+          ? parseInt(aheadBehind.stdout.trim().split(/\s+/)[1], 10)
+          : -1;
+
+        let alreadyIntegrated = false;
+        if (ahead === 0) {
+          logOut(`[5] ${branch} is already integrated into ${targetBranch} — verifying`);
+          const planPath = planFiles[branch];
+          const guardBlockers = verifyAlreadyIntegrated(planPath, projectDir);
+          if (guardBlockers.length) {
+            for (const b of guardBlockers) logErr(`BLOCKER: ${b}`);
+            throw new GitError(
+              `${branch}: already-integrated check failed — branch may have committed to detached HEAD. ` +
+              `Inspect dangling commits via \`git fsck --lost-found\` and recover manually.`,
+            );
+          }
+          logOut(`[5] ${branch} verified as integrated — skipping squash merge, running cleanup`);
+          alreadyIntegrated = true;
+        } else {
+          const mergeResult = await gitMergeSquashWithRetry(projectDir, branch);
+          if (mergeResult.code !== 0) {
+            const combined = (mergeResult.stdout + mergeResult.stderr).toLowerCase();
+            if (combined.includes("already up to date") || combined.includes("nothing to commit")) {
+              logOut(`[5] ${branch} had no changes to merge — treating as already integrated`);
+              alreadyIntegrated = true;
+            } else {
+              throw new GitError(`squash merge failed for ${branch}: ${mergeResult.stderr.trim()}`);
+            }
           }
         }
-      }
 
-      if (!alreadyIntegrated) {
-        const message = _writeCommitMessage(projectDir, branch, planFiles[branch], targetBranch);
-        await gitCommitWithRetry(projectDir, "-m", message);
-        const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir).stdout.trim();
-        logOut(`[5] Committed ${commitHash}`);
-      } else {
-        const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir, { check: false }).stdout.trim();
-        logOut(`[5] ${branch} cleanup path — head at ${commitHash}, no new commit`);
+        if (!alreadyIntegrated) {
+          const message = _writeCommitMessage(projectDir, branch, planFiles[branch], targetBranch);
+          await gitCommitWithRetry(projectDir, "-m", message);
+          const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir).stdout.trim();
+          logOut(`[5] Committed ${commitHash}`);
+        } else {
+          const commitHash = runGit(["rev-parse", "--short", "HEAD"], projectDir, { check: false }).stdout.trim();
+          logOut(`[5] ${branch} cleanup path — head at ${commitHash}, no new commit`);
+        }
       }
     }
 
