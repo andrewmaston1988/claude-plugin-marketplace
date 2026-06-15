@@ -39,18 +39,27 @@ export function isPrereqLanded(prereqBranch, targetBranch, projectRoot, {
   // Signal 1: ancestry (works for regular and fast-forward merges)
   const ancestorResult = run("git", ["merge-base", "--is-ancestor", prereqBranch, targetBranch]);
   if (ancestorResult.status === 0) {
+    logFn(`  [landed] ${prereqBranch} → ${targetBranch}: signal=ancestor`);
     return { landed: true, signal: "ancestor" };
   }
 
   // Signal 2: git cherry — lists commits in prereqBranch not equivalent in targetBranch.
   // A squash-merge preserves the diff, so all commits show as "-" (already in target).
   // If there are no "+" lines, the content landed.
-  const cherryResult = run("git", ["cherry", targetBranch, prereqBranch]);
-  if (cherryResult.status === 0) {
-    const plusLines = (cherryResult.stdout || "").split("\n").filter(l => l.startsWith("+"));
-    if (plusLines.length === 0) {
-      return { landed: true, signal: "cherry" };
+  // Guard: verify prereqBranch exists before cherry — git cherry exits 0 with empty
+  // stdout on some versions when the head ref is unknown, which would be a false positive.
+  const verifyResult = run("git", ["rev-parse", "--verify", prereqBranch]);
+  if (verifyResult.status === 0) {
+    const cherryResult = run("git", ["cherry", targetBranch, prereqBranch]);
+    if (cherryResult.status === 0) {
+      const plusLines = (cherryResult.stdout || "").split("\n").filter(l => l.startsWith("+"));
+      if (plusLines.length === 0) {
+        logFn(`  [landed] ${prereqBranch} → ${targetBranch}: signal=cherry`);
+        return { landed: true, signal: "cherry" };
+      }
     }
+  } else {
+    logFn(`  [landed] ${prereqBranch} unknown to git — skipping cherry`);
   }
 
   // Signal 3: gh pr list — canonical signal for GitHub squash-merge flow.
@@ -59,6 +68,7 @@ export function isPrereqLanded(prereqBranch, targetBranch, projectRoot, {
   const prData = gh(["pr", "list", "--head", prereqBranch, "--state", "merged",
     "--json", "mergedAt", "-L", "1"], projectRoot);
   if (Array.isArray(prData) && prData.length > 0 && prData[0].mergedAt) {
+    logFn(`  [landed] ${prereqBranch} → ${targetBranch}: signal=pr-merged (mergedAt=${prData[0].mergedAt})`);
     return { landed: true, signal: "pr-merged" };
   }
 
@@ -66,8 +76,10 @@ export function isPrereqLanded(prereqBranch, targetBranch, projectRoot, {
   // Weakest signal; tie-breaker only.
   const lsResult = run("git", ["ls-remote", "--heads", "origin", prereqBranch]);
   if (lsResult.status === 0 && (lsResult.stdout || "").trim() === "") {
+    logFn(`  [landed] ${prereqBranch} → ${targetBranch}: signal=branch-deleted`);
     return { landed: true, signal: "branch-deleted" };
   }
 
+  logFn(`  [landed] ${prereqBranch} → ${targetBranch}: signal=none (all probes negative)`);
   return { landed: false, signal: "none" };
 }
