@@ -397,7 +397,7 @@ test("escalation: dated suffix classified correctly", () => {
     });
 
     const row = rowGet(db, PROJECT, feature);
-    row.notes_extra = "type=dev model=claude-haiku-4-5";
+    row.notes_extra = "type=dev model=claude-haiku-4-5-20260101";
     row.d_effort = "medium";
 
     const logFn = createMockLog();

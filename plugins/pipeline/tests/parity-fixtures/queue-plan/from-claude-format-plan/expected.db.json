@@ -9,7 +9,11 @@
       "r_model": null,
       "d_model": null,
       "q_model": null,
+      "r_effort": null,
+      "d_effort": null,
+      "q_effort": null,
       "rvw_model": "claude-sonnet-4-6",
+      "rvw_effort": "high",
       "session_type": null,
       "session_file": null,
       "budget_usd": null,
@@ -24,7 +28,9 @@
       "review_retries": 0,
       "review_retry_budget": 3,
       "review_verdict": null,
-      "pr_title": null
+      "pr_title": null,
+      "waits_on": null,
+      "base_branch": null
     }
   ],
   "progress_files": [],
