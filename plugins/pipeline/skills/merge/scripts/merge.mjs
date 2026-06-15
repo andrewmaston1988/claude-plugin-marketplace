@@ -201,6 +201,7 @@ async function step5SquashMerge(db, project, projectDir, branches, planFiles, ta
         const mergeResult = spawnSync("gh", ["pr", "merge", String(pr.number), "--squash", "--admin"], {
           cwd: projectDir,
           stdio: "inherit",
+          windowsHide: true,
         });
         if (mergeResult.status !== 0) {
           throw new GitError(`gh pr merge #${pr.number} failed (exit ${mergeResult.status}). Refusing local fallback.`);
