@@ -1,0 +1,51 @@
+name: Tests
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+jobs:
+  checkpoint:
+    name: checkpoint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run tests
+        run: node --test plugins/checkpoint/hooks/tests/*.test.mjs
+
+  slack-bridge:
+    name: slack-bridge
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Unit tests
+        run: node --test plugins/slack-bridge/tests/*.test.mjs
+      - name: Integration tests
+        run: node --test plugins/slack-bridge/tests/integration/*.test.mjs
+
+  pipeline:
+    name: pipeline
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: plugins/pipeline/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: plugins/pipeline
+      - name: Core tests
+        working-directory: plugins/pipeline
+        run: node --env-file=.env.test --test tests/*.mjs
+      - name: Script tests
+        working-directory: plugins/pipeline
+        run: node --test scripts/hooks/*.test.mjs scripts/pipeline-db/*.test.mjs skills/merge/scripts/*.test.mjs
