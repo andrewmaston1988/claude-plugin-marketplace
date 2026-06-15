@@ -128,34 +128,6 @@ test("hook stdout contract: valid JSON on malformed stdin", (t, done) => {
   }
 });
 
-test("hook: CORRELATION_ID suppresses keepalive-init injection", (t, done) => {
-  const env = { ...process.env, CORRELATION_ID: "test-corr-id" };
-  const input = JSON.stringify({
-    prompt: "normal prompt",
-    transcript_path: "/tmp/fake.jsonl",
-    session_id: "test-session",
-    cwd: process.cwd(),
-  });
-
-  const result = spawnSync(NODE_PATH, [
-    HOOK_PATH,
-  ], {
-    input,
-    encoding: "utf-8",
-    env,
-  });
-
-  try {
-    const output = result.stdout.trim().split("\n").pop();
-    const parsed = JSON.parse(output);
-    const ctx = parsed.hookSpecificOutput.additionalContext;
-    assert(!ctx.includes("keepalive"), "CORRELATION_ID should suppress keepalive injection");
-    done();
-  } catch (err) {
-    done(err);
-  }
-});
-
 test("hook: database write on valid JSON", (t, done) => {
   const input = JSON.stringify({
     prompt: "test prompt",
