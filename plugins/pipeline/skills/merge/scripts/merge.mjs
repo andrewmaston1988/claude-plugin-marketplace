@@ -105,8 +105,8 @@ function _writeCommitMessage(projectDir, branch, planPath, targetBranch = "main"
   return fileCount ? `${title}\n\n- ${fileCount} file(s) changed` : title;
 }
 
-function findOpenPR(branch, projectDir) {
-  const result = spawnSync("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "number,mergeStateStatus"], {
+export function findOpenPR(branch, projectDir, { spawn = spawnSync, log = logErr } = {}) {
+  const result = spawn("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "number,mergeStateStatus"], {
     cwd: projectDir,
     encoding: "utf8",
   });
@@ -115,7 +115,8 @@ function findOpenPR(branch, projectDir) {
     const prs = JSON.parse(result.stdout);
     if (!Array.isArray(prs) || prs.length === 0) return null;
     return { number: prs[0].number, mergeStateStatus: prs[0].mergeStateStatus };
-  } catch {
+  } catch (e) {
+    log(`[findOpenPR] gh pr list returned non-JSON: ${result.stdout.slice(0, 120)}`);
     return null;
   }
 }
