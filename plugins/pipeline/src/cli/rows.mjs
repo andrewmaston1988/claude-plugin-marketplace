@@ -15,6 +15,7 @@ import { getFlag, formatRow } from "./helpers.mjs";
 import { featureWorktreePath, resolveRowBranch } from "../../scripts/worktree-paths.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { resolvePlansDir, resolvePlanFile } from "../plans-resolver.mjs";
+import { reclaimPlanIfMisplaced } from "../../scripts/plans/reclaim.mjs";
 
 const FOOTER = "\n" + ":black_small_square:".repeat(14) + "\n";
 
@@ -768,6 +769,13 @@ export async function run(cmd, argv) {
       // strips every separator. Fall back to argv only when the row is
       // missing the column.
       const planFileTrusted = devCompleteRow?.plan_file || planFile;
+      const reclaimed = reclaimPlanIfMisplaced(planFileTrusted);
+      if (reclaimed.moved) {
+        process.stderr.write(`[reclaim] restored ${basename(planFileTrusted)} from complete/\n`);
+        await notify("Plan File Restored",
+          `${feature}: plan file was prematurely moved to complete/; restored before review handoff.`,
+          "low");
+      }
       const cwd = featureWorktreePath({
         project: ctx.project, projectRoot: ctx.projectRoot, feature,
       });

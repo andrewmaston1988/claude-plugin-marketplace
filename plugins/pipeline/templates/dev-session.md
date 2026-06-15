@@ -262,6 +262,13 @@ each item (see "Update the plan as you go" below).
 files are symlinked — edits modify the real file on disk but are not committed by the
 project repo. The human commits them to `CLAUDE` at merge time. Edit them anyway.
 
+**Do not move the plan file to `complete/`.** Never run `mv`, `git mv`, or any rename
+that moves the plan file into the `complete/` subdirectory during a dev session. The
+`/merge` skill owns plan-file moves and performs them at merge time. Moving the plan
+early breaks the review stage (`[plan-file-missing]`). The `dev-complete` command
+will detect and revert a premature move — but it produces a warning, and that warning
+is a signal that this rule was violated.
+
 **Before generating the next session, close all documentation gaps:**
 - **Plan Current Status:** every `(needs testing)` item must be flipped to `✓` (smoke
   check passed) or left with an explicit note if genuinely uncertain. Update the status
