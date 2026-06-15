@@ -5,6 +5,17 @@ import { platform } from "node:os";
 
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
+// Claude Code stores transcripts under ~/.claude/projects/<slug>/<session-id>/...
+export function getClaudeProjectsDir() {
+  return join(homedir(), ".claude", "projects");
+}
+
+// Claude Code's project-slug encoding: every non-alphanumeric char in the absolute
+// cwd becomes '-' (e.g. C:\code\foo-bar → C--code-foo-bar).
+export function getProjectSlug(cwd) {
+  return cwd.replace(/[^a-zA-Z0-9]/g, "-");
+}
+
 export function getPaths() {
   const isWindows = platform() === "win32";
   const isMac = platform() === "darwin";
