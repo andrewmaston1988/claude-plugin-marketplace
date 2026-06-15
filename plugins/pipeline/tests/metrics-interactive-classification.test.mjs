@@ -1,7 +1,7 @@
 // Interactive session classification tests
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -149,4 +149,64 @@ test("prefix classification wins over interactive fallback", () => {
       : commandType;
     equal(finalType, "dev", "dev prefix wins over interactive fallback for same session");
   } finally { teardown(tmp, db); }
+});
+
+test("claude_sessions presence overrides user_type=external slack fallback on interactive/* branch", () => {
+  // Regression for plan metrics-interactive-session-classifier-fix:
+  // an interactive session on an `interactive/*` branch has user_type=external
+  // (set by the Slack bridge route) and no recognised prefix or branch-pattern
+  // match. Without the fix, the slack fallback wins because the interactiveIds
+  // override was guarded by `!commandType || commandType === "unknown"`.
+  const { tmp, db } = setup();
+  try {
+    const sessionId = "interactive-branch-sess-regression";
+    const projectPath = "/test-classifier/repo";
+    // Route session JSONL through a temp projectsDir so the test never touches ~/.claude/
+    const projectsDir = join(tmp, "projects");
+    const encoded = projectPath.replace(/[^a-zA-Z0-9]/g, "-");
+    const sessionDir = join(projectsDir, encoded);
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, `${sessionId}.jsonl`),
+      JSON.stringify({
+        type: "user",
+        sessionId,
+        timestamp: new Date().toISOString(),
+        gitBranch: "interactive/metrics-fix",
+        cwd: projectPath,
+        userType: "external",
+        message: { content: "Lets pick up again" },
+      }) + "\n",
+      "utf8",
+    );
+
+    const now = Date.now() / 1000;
+    upsertClaudeSession(db, {
+      sessionId,
+      cwd: projectPath,
+      startedAt: now,
+      userTs: now,
+      summary: null,
+    });
+
+    updateSessions(db, {
+      historyOverride: [{
+        sessionId,
+        timestamp: new Date(now * 1000).toISOString(),
+        duration: 1800,
+        project: projectPath,
+      }],
+      _projectsDir: projectsDir,
+    });
+
+    const rows = loadMetricSessions(db);
+    equal(rows.length, 1, "one session was inserted");
+    equal(
+      rows[0].command_type,
+      "interactive",
+      "claude_sessions presence overrides external-slack fallback on interactive/* branch",
+    );
+  } finally {
+    teardown(tmp, db);
+  }
 });
