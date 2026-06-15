@@ -11,12 +11,6 @@ import {
 } from "./sessions.mjs";
 import { loadSpawnMap } from "../pipeline-db/index.mjs";
 
-/**
- * Re-classify every row in metric_sessions using current classifier logic.
- *
- * @param {import("better-sqlite3").Database} db
- * @param {{ dryRun?: boolean, deps?: { readSessionFull?: Function, projectsDir?: string } }} [opts]
- */
 export function reclassifyHistorical(db, opts = {}) {
   const { dryRun = false, deps = {} } = opts;
   const readFn  = deps.readSessionFull ?? readSessionFull;
@@ -69,7 +63,6 @@ export function reclassifyHistorical(db, opts = {}) {
       const inferred = extractCommandTypeFromProject(data.cwd ?? "");
       if (inferred) commandType = inferred;
     }
-    // Slack fallback: external user with no other classification (this replaces the bridge_sessions fallback in the Python original)
     if (data.user_type === "external" && ["unknown", null, undefined].includes(commandType)) {
       commandType = "slack";
     }
