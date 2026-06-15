@@ -168,9 +168,9 @@ function normalizeProjectPath(projectPath) {
   return projectPath.replace(/[^a-zA-Z0-9]/g, "-");
 }
 
-function findSessionFile(projectPath, sessionUuid) {
+function findSessionFile(projectPath, sessionUuid, _projectsDir) {
   const normalized = normalizeProjectPath(projectPath);
-  const projectsDir = join(homedir(), ".claude", "projects");
+  const projectsDir = _projectsDir ?? join(homedir(), ".claude", "projects");
   for (const candidate of new Set([normalized, normalized.replace(/-+$/, "")])) {
     if (!candidate) continue;
     const f = join(projectsDir, candidate, `${sessionUuid}.jsonl`);
@@ -305,7 +305,7 @@ export function countProjectConversations(windowStart, windowEnd) {
 /**
  * update-sessions: parse history.jsonl, add new sessions to pipeline.db.
  */
-export function updateSessions(db, { historyOverride } = {}) {
+export function updateSessions(db, { historyOverride, _projectsDir } = {}) {
   const historyRecords = historyOverride ?? readHistoryJsonl();
   const existingMap = {};
   for (const r of loadMetricSessions(db)) {
@@ -334,7 +334,7 @@ export function updateSessions(db, { historyOverride } = {}) {
     const filesIndexed = historyRecord.fileCounts?.totalCount ?? 20;
     const projectPath = historyRecord.project ?? "";
 
-    const sessionFile = projectPath ? findSessionFile(projectPath, sessionId) : null;
+    const sessionFile = projectPath ? findSessionFile(projectPath, sessionId, _projectsDir) : null;
     let full = null, firstPrompt = "";
     if (sessionFile) {
       full = readSessionFull(sessionFile);
