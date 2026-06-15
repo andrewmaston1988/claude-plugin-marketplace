@@ -213,8 +213,8 @@ test("orchestrator spawn-path routes session cwd through featureWorktreePath, no
   // Must not call the deprecated function (a comment mention is fine).
   ok(!/[^/]orchestratorWorktreePath\s*\(/.test(src),
     "orchestrator/index.mjs must not call orchestratorWorktreePath on the spawn path");
-  // Must use featureWorktreePath keyed on planStem for the per-session cwd.
-  match(src, /featureWorktreePath\s*\(\s*\{[\s\S]*?feature\s*:\s*planStem/);
+  // Must use featureWorktreePath keyed on row.feature for the per-session cwd.
+  match(src, /featureWorktreePath\s*\(\s*\{[\s\S]*?feature\s*:\s*row\.feature/);
 
   // End-to-end: the cwd the orchestrator hands to resolveSessionFile should
   // be the per-feature worktree path. resolveSessionFile forwards `cwd` into

@@ -306,14 +306,11 @@ async function pollOnce({
     // cwd = spawn worktree path. Same path the orchestrator hands to spawnSession
     // below, so the template's `{{CWD}}/reports/...` resolves to the actual
     // working dir the agent runs in.
-    const planStem = (row.plan_file || "").replace(/\.md$/, "").split(/[\\/]/).pop();
-    // Phase 3b: use featureWorktreePath so every session lands in the
-    // per-feature worktree ({root_parent}/.worktrees/{project}/{feature}).
-    // orchestratorWorktreePath would route through the deprecated
-    // {branch_type}-{branch_local} template and re-share worktrees across
-    // branches, defeating the isolation model.
+    // Phase 3b: featureWorktreePath gives every feature its own worktree at
+    // {root_parent}/.worktrees/{project}/{feature}. The deprecated
+    // orchestratorWorktreePath used {branch_type}-{branch_local} and broke isolation.
     const cwdForSession = featureWorktreePath({
-      project, projectRoot, feature: planStem,
+      project, projectRoot, feature: row.feature,
     });
     const sessionFile = resolveSessionFile(rowForSession, project, {
       projectRoot,
