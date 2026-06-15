@@ -1,14 +1,4 @@
-// Re-reads each session's JSONL first_prompt and re-applies the classifier
-// to fix stale command_type / correlation_id in metric_sessions. Used after
-// deploying classifier fixes to backfill historical rows.
-//
-// Ported from CLAUDE repo's cache_metrics.py::reclassify_historical (which
-// read claude.db). After the pipeline absorb migration, metric_sessions and
-// claude_sessions live in pipeline.db — this port targets the unified DB.
-//
-// The bridge_sessions fallback is intentionally omitted: the bridge_sessions
-// table never existed in pipeline.db, and Slack-bridge sessions are correctly
-// classified via user_type=external + absence from claude_sessions.
+// Reclassify metric_sessions using current classifier; ports cache_metrics.py::reclassify_historical, dropping the never-existing bridge_sessions fallback.
 import { readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -79,7 +69,7 @@ export function reclassifyHistorical(db, opts = {}) {
       const inferred = extractCommandTypeFromProject(data.cwd ?? "");
       if (inferred) commandType = inferred;
     }
-    // Slack fallback: external user with no other classification
+    // Slack fallback: external user with no other classification (this replaces the bridge_sessions fallback in the Python original)
     if (data.user_type === "external" && ["unknown", null, undefined].includes(commandType)) {
       commandType = "slack";
     }
