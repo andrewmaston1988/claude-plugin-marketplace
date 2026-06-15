@@ -260,7 +260,8 @@ export async function publishNotification({ title, message, messageFile, priorit
 
   const target = _writeEnvelope(envelope, paths, cfg);
   process.stdout.write(`Notification published: ${target}\n`);
-  await _spawnHook(cfg, target, paths);
+  const ok = await _spawnHook(cfg, target, paths);
+  if (ok) _markSent(target, cfg, paths);  // else: left for orch drain pass
   return true;
 }
 // Spawn on_merge_ready hook — fires when a row reaches stage=merge.
