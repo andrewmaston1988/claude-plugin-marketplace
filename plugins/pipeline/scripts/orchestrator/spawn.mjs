@@ -170,7 +170,7 @@ export function proxyEnvFor(model) {
   };
 }
 
-// Classify a model string into tier. Tolerates dated suffixes (claude-haiku-4-5-20251001).
+// Classify a model string into tier. Tolerates dated suffixes (e.g. claude-haiku-4-5-YYYYMMDD).
 export function tierFromModel(model) {
   if (/haiku/i.test(model))         return "haiku";
   if (/sonnet/i.test(model))        return "sonnet";

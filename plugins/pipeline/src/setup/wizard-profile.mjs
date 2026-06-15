@@ -6,6 +6,7 @@
 // leaves the stale block ahead of any new definition.
 
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 
 export const MARKER = "# pipeline (added by setup)";
 
@@ -50,7 +51,7 @@ export function applyPsProfiles(profiles, fnLine, say = console.log) {
   }
   for (const { exe, path } of profiles) {
     try {
-      const dir = path.substring(0, path.lastIndexOf("\\"));
+      const dir = dirname(path);
       mkdirSync(dir, { recursive: true });
       let existing = "";
       try { existing = readFileSync(path, "utf8"); } catch {}
