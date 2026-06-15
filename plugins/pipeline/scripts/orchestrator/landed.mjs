@@ -9,22 +9,7 @@ function _gh(args, cwd) {
   } catch { return null; }
 }
 
-/**
- * Detect whether a prerequisite branch's content has landed on a target branch,
- * even after a squash-merge (which breaks git ancestry).
- *
- * Probes in order — first truthy result wins:
- *   1. ancestor  — git merge-base --is-ancestor (fast path; regular/FF merges)
- *   2. cherry    — git cherry shows zero unmerged commits (squash/rebase aware)
- *   3. pr-merged — gh pr list --state merged confirms the PR landed on GitHub
- *   4. branch-deleted — remote no longer carries the branch (post-squash cleanup)
- *
- * @param {string} prereqBranch  e.g. "autonomous/pipeline-absorb-phase-3-readers"
- * @param {string} targetBranch  e.g. "master"
- * @param {string} projectRoot   absolute path to the git repo
- * @param {object} opts          injectable deps for testing
- * @returns {{ landed: boolean, signal: string }}
- */
+// Detect whether prereqBranch content landed on targetBranch via 4-signal cascade (ancestor → cherry → pr-merged → branch-deleted).
 export function isPrereqLanded(prereqBranch, targetBranch, projectRoot, {
   spawnSync = _spawnSync,
   gh = _gh,
