@@ -77,5 +77,7 @@ export const PIPELINE_DEFAULTS = {
     // features in the same project can run concurrently up to --max-concurrent.
     // "project": legacy behaviour — at most one session per project at a time.
     concurrency_scope: "feature",
+    // Global cap on concurrent sessions. CLI --max-concurrent overrides this.
+    max_concurrent: 3,
   },
 };
