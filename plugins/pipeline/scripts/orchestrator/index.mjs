@@ -386,7 +386,9 @@ async function pollOnce({
 
 // ── main ──────────────────────────────────────────────────────────────────────
 
-(async () => {
+// Guard: only run the daemon IIFE when this file is the entry point, not when
+// imported by tests or other modules.
+if (process.argv[1] === fileURLToPath(import.meta.url)) (async () => {
   const argv = process.argv.slice(2);
   function getFlag(name) {
     const i = argv.indexOf(name);
