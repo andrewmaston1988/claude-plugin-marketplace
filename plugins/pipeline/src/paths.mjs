@@ -7,7 +7,7 @@ function _xdg(envName, fallback) {
 
 export function getPaths() {
   if (process.platform === "linux") {
-    const home = homedir();
+    const home = process.env.HOME || homedir();
     const cfgBase   = _xdg("XDG_CONFIG_HOME", join(home, ".config"));
     const dataBase  = _xdg("XDG_DATA_HOME",   join(home, ".local", "share"));
     const stateBase = _xdg("XDG_STATE_HOME",  join(home, ".local", "state"));

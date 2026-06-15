@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import { equal, match, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { publishReport, publishNotification } from "../scripts/publisher.mjs";
 
@@ -139,9 +139,10 @@ test("on_write hook is spawned with envelope path as argv", async () => {
     // argv = [node, hook.mjs, <envelope-file>]
     equal(argv.length, 3);
     match(argv[2], /hooked\.json$/);
-    // Envelope should exist at the path the hook saw
-    ok(existsSync(argv[2]));
-    const env = JSON.parse(readFileSync(argv[2], "utf8"));
+    // After hook exits 0, publisher renames envelope to sent/ — check there
+    const sentPath = join(dirname(argv[2]), "sent", basename(argv[2]));
+    ok(existsSync(sentPath), "envelope should be in sent/ after successful hook");
+    const env = JSON.parse(readFileSync(sentPath, "utf8"));
     equal(env.title, "Hooked");
   } finally { rmSync(tmp, { recursive: true, force: true }); }
 });

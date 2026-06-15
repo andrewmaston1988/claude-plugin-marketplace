@@ -39,7 +39,7 @@ function teardown(tmp, db) {
 // Unit tests for tierFromModel
 test("tierFromModel: classify Haiku", () => {
   equal(tierFromModel("claude-haiku-4-5"), "haiku");
-  equal(tierFromModel("claude-haiku-4-5-20251001"), "haiku");
+  equal(tierFromModel("claude-haiku-4-5-20991231"), "haiku");
   equal(tierFromModel("CLAUDE-HAIKU-4-5"), "haiku");
 });
 
@@ -397,7 +397,7 @@ test("escalation: dated suffix classified correctly", () => {
     });
 
     const row = rowGet(db, PROJECT, feature);
-    row.notes_extra = "type=dev model=claude-haiku-4-5-20251001";
+    row.notes_extra = "type=dev model=claude-haiku-4-5";
     row.d_effort = "medium";
 
     const logFn = createMockLog();

@@ -97,7 +97,7 @@ If the user says "Sonnet" when you proposed Opus, that's a Sonnet decision — d
 - **Implicit default.** Any `claude -p` invocation without `--model <id>` is a bug — pin it before merging.
 - **Silent escalation.** Bumping a script from Haiku → Sonnet → Opus without surfacing the cost change. Always say what tier and why.
 - **Defaulting Opus.** "Just use Opus to be safe" — Opus is rarely the right answer. Sonnet is the floor for reasoning tasks; Opus is the ceiling for cross-cutting ones.
-- **Defaulting Haiku for analysis.** Haiku is for mechanical work. Asking it to "be skeptical" or "synthesise" produces template-imitation, not analysis (this lesson was learned the hard way on the governor — see `repos/CLAUDE/plans/complete/governor-cache-calibration.md`).
+- **Defaulting Haiku for analysis.** Haiku is for mechanical work. Asking it to "be skeptical" or "synthesise" produces template-imitation, not analysis — learned the hard way on the governor-cache-calibration work.
 - **Pipeline-row model written without `/queue`.** Manually setting model columns via DB writes bypasses the human-decision gate — use `/queue`.
 - **Pinning an effort level the model doesn't support.** For example, `--effort xhigh` on Haiku or `--effort xhigh` on Sonnet. The API rejects this at runtime; see per-tier supported effort table above. Doctor check pending.
 
