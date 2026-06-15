@@ -43,6 +43,10 @@ export function setLastCheckpointSize(db, sessionId, bytes) {
   stmt.run(bytes, sessionId);
 }
 
+export function listAllClaudeSessionIds(db) {
+  return db.prepare("SELECT session_id FROM claude_sessions").all().map(r => r.session_id);
+}
+
 // Backfill: copy rows from claude.db into pipeline.db.claude_sessions
 // Safe to re-run: uses INSERT OR REPLACE, maps ts column to started_at
 export function backfillFromClaudeDb(db, claudeDbPath) {
