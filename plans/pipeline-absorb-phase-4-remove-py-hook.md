@@ -116,7 +116,7 @@ This is the load-bearing point of this plan: **the substantive change lives enti
 
 ### Verbatim JSON block to remove
 
-The entry being removed from `C:/code/CLAUDE/settings.json` is the `UserPromptSubmit` hook entry whose `command` ends with `session_user_submit_hook.py`. The literal block (to be reproduced verbatim from the operator's pre-edit snapshot at queue time, and pinned here before the autonomous PR opens) follows the canonical shape:
+The entry being removed from `C:/code/CLAUDE/settings.json` is the `UserPromptSubmit` hook entry whose `command` ends with `session_user_submit_hook.py`. The exact block to be removed (captured from the operator's pre-edit snapshot at queue time) follows:
 
 ```json
 "UserPromptSubmit": [
@@ -124,14 +124,14 @@ The entry being removed from `C:/code/CLAUDE/settings.json` is the `UserPromptSu
     "hooks": [
       {
         "type": "command",
-        "command": "<absolute path to session_user_submit_hook.py>"
+        "command": "python -c \"import os,sys; p=os.path.dirname(os.path.realpath(os.path.expanduser('~/.claude/settings.json'))); fp=p+'/scripts/session_user_submit_hook.py'; exec(compile(open(fp).read(),fp,'exec'),{'__file__':fp,'__name__':'__main__'})\""
       }
     ]
   }
 ]
 ```
 
-If `precondition 1.d.2` finds additional entries (e.g., checkpoint-plugin added its own), the operator removes only the matching `hooks` entry (not the entire array) and pastes the exact removed object verbatim into the merge commit message for rollback parity. Pin the exact byte-level content here before opening the autonomous PR — do not leave this as a placeholder past queue time.
+If `precondition 1.d.2` finds additional entries (e.g., checkpoint-plugin added its own), the operator removes only the matching `hooks` entry (not the entire array) and pastes the exact removed object verbatim into the merge commit message for rollback parity. This block is now pinned and ready for operator hand-application.
 
 ### Who does what
 
@@ -161,7 +161,7 @@ The single-symlink correction matters: umbrella plan refers to "BOTH edits" in `
 
 - [ ] Preconditions gate passed (all 9 items confirmed by operator)
 - [ ] Snapshot `settings.json` -> `.pre-phase4.bak`
-- [ ] JSON removal block pinned in Cross-repo coordination
+- [x] JSON removal block pinned in Cross-repo coordination ✓
 - [ ] Plan file authored and committed
 - [ ] Post-edit JSON validation passes
 - [ ] Hook block contains no entry pointing at `session_user_submit_hook.py`
