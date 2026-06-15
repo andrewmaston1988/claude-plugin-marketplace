@@ -1,19 +1,8 @@
 import { existsSync, renameSync, realpathSync } from "node:fs";
 import { dirname, basename, join } from "node:path";
 
-/**
- * If planPath is missing but the same basename exists under the sibling
- * `complete/` directory, move it back and return { moved: true, from }.
- * Returns { moved: false } when the file is already at planPath (no-op) or
- * genuinely absent from both locations.
- *
- * Note: if a plan was intentionally retired mid-cycle, the developer should
- * have run `pipeline row-delete` first — with no row, dev-complete never fires
- * and this helper is never invoked.
- *
- * @param {string} planPath - absolute path where the plan file should reside
- * @param {{ fsImpl?: object }} [opts]
- */
+// If planPath is absent but complete/<basename> exists, move it back.
+// Intentional mid-cycle plan retirement requires `pipeline row-delete` first.
 export function reclaimPlanIfMisplaced(planPath, { fsImpl = null } = {}) {
   const { existsSync: exists, renameSync: rename, realpathSync: realpath } =
     fsImpl || { existsSync, renameSync, realpathSync };
