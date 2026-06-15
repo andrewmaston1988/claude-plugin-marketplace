@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { generateSessionFile, resolveSessionFile } from "../scripts/session-gen.mjs";
+import { featureWorktreePath } from "../scripts/worktree-paths.mjs";
 
 const SPAWN_MJS_PATH = fileURLToPath(new URL("../scripts/orchestrator/spawn.mjs", import.meta.url));
 
@@ -192,5 +193,43 @@ test("test template checkout returns to {{BRANCH}}", () => {
     const content = readFileSync(out, "utf8");
     match(content, /git checkout anm\/custom_x/);
     ok(!content.includes("autonomous/feat-x"));
+  });
+});
+
+// [REGRESSION] session CWD uses per-feature worktree, not deprecated branch-based.
+// The spawn path in scripts/orchestrator/index.mjs was routing through
+// orchestratorWorktreePath (deprecated phase-2 template
+// {branch_type}-{branch_local}), which re-shared worktrees across branches and
+// broke per-feature isolation. It must call featureWorktreePath so every
+// session lands in {root_parent}/.worktrees/{project}/{feature}/.
+test("orchestrator spawn-path routes session cwd through featureWorktreePath, not deprecated branch template", () => {
+  const src = readFileSync(
+    fileURLToPath(new URL("../scripts/orchestrator/index.mjs", import.meta.url)),
+    "utf8"
+  );
+  // Must not import the deprecated function.
+  ok(!/from\s+["'][^"']*worktree-paths\.mjs["'][^;]*orchestratorWorktreePath/.test(src),
+    "orchestrator/index.mjs must not import orchestratorWorktreePath on the spawn path");
+  // Must not call the deprecated function (a comment mention is fine).
+  ok(!/[^/]orchestratorWorktreePath\s*\(/.test(src),
+    "orchestrator/index.mjs must not call orchestratorWorktreePath on the spawn path");
+  // Must use featureWorktreePath keyed on planStem for the per-session cwd.
+  match(src, /featureWorktreePath\s*\(\s*\{[\s\S]*?feature\s*:\s*planStem/);
+
+  // End-to-end: the cwd the orchestrator hands to resolveSessionFile should
+  // be the per-feature worktree path. resolveSessionFile forwards `cwd` into
+  // {{CWD}} in the rendered session template, so we can read it back from
+  // the "Working directory:" header.
+  withTempProject("# Plan\n", (root, planPath) => {
+    const row = { feature: "feat-x", plan: planPath, notes: "type=dev",
+                  branch: "autonomous/feat-x", target_branch: "main" };
+    // Mirrors what the orchestrator computes at spawn time after the fix.
+    const cwd = featureWorktreePath({ project: "p", projectRoot: root, feature: "feat-x" });
+    const out = resolveSessionFile(row, "p", { projectRoot: root, cwd });
+    const content = readFileSync(out, "utf8");
+    match(content, new RegExp(`Working directory: \`${cwd.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\``));
+    // And the deprecated {branch_type}-{branch_local} shape must not appear.
+    ok(!content.includes("autonomous-feat-x"),
+      "session cwd must not embed deprecated {branch_type}-{branch_local} path");
   });
 });
