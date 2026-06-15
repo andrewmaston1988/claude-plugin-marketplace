@@ -111,16 +111,6 @@ function buildAdditionalContext(params, { fsReadTemplate }) {
   const CHECKPOINT_SIZE_THRESHOLD = 2_000_000;
   const CHECKPOINT_SIZE_GROWTH = 1_000_000;
 
-  if (!isKeepalive && (now - prevAnyTs) >= 240 && !env.CORRELATION_ID) {
-    const tick = fsReadTemplate?.("~/.claude/templates/keepalive-tick.md") || readTemplateFile("~/.claude/templates/keepalive-tick.md");
-    const init = fsReadTemplate?.("~/.claude/templates/keepalive-init.md") || readTemplateFile("~/.claude/templates/keepalive-init.md");
-
-    if (tick && init) {
-      ctx += "\n\n" + init.replace("{tick}", tick);
-      injected.push("keepalive-init");
-    }
-  }
-
   if (prevAnyTs === 0 && !isKeepalive) {
     ctx += (
       "\n\n**Scout reminder (one-time):** This machine has a `scout` MCP indexed across all projects (CLAUDE, torrent-hub, scout, nova-*). For any \"find / where is / look for / what calls / how does X work\" intent, use Scout (mcp__scout__*) BEFORE Read/Grep/Glob — it is faster, ranked, and cross-repo. Invoke the `scout` skill for the tool-selection guide."
