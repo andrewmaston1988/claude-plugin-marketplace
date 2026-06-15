@@ -75,52 +75,20 @@ claude-investigate report <agent-id>
 
 ~39× compression vs raw JSONL (1 MB → ~30 KB). Bundles summary + tools + ngrams + agents + skills + errors + retries + pivots + phases + patterns.
 
-### Fallback: manual grep + python (use only if plugin is absent)
+### Fallback: Grep (plugin absent)
 
-If the `claude-investigate` CLI isn't available, use the legacy recipe with `transcript_mine.py`:
-
-```bash
-python <path-to-transcript-mine.py> summary <agent-jsonl>
-python <path-to-transcript-mine.py> errors <agent-jsonl>
-python <path-to-transcript-mine.py> retries <agent-jsonl>
-```
-
-If even `transcript_mine.py` isn't available, use grep:
+If the `claude-investigate` CLI isn't available, scan the JSONL directly:
 
 ```text
 Grep(
-  pattern="error|fatal|BLOCKER|exit code|Traceback|AssertionError|Exception",
+  pattern="is_error.*true|BLOCKER|AssertionError|Exception",
   path="<agent-jsonl>",
   output_mode="content",
-  -n=true,
   head_limit=20
 )
 ```
 
-If empty, extract `message.content[].text` via a one-off Python loop:
-
-```python
-import json
-with open('<transcript-path>', 'r') as f:
-    for i, line in enumerate(f, 1):
-        try:
-            event = json.loads(line)
-            msg = event.get('message') or {}
-            content = msg.get('content') or []
-            # Subagent JSONLs have content as either a list of blocks OR a plain string
-            if isinstance(content, str):
-                print(f"L{i}: {content[:500]}")
-                continue
-            for block in content:
-                if block.get('type') == 'text':
-                    text = block.get('text', '')
-                    if text:
-                        print(f"L{i}: {text[:500]}")
-        except json.JSONDecodeError:
-            pass
-```
-
-Note the `content` may be a string (workflow subagents' initial user message) or a list of blocks (mid-conversation events) — the fallback handles both.
+Event content lives in `message.content[].text` (list of blocks) or `message.content` (plain string for workflow subagents). If Grep returns nothing, use `Read` with `offset`/`limit` to sample representative lines.
 
 ## Anti-patterns
 
