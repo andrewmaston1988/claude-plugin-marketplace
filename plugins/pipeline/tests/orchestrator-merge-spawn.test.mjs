@@ -43,19 +43,17 @@ function addFeatureBranch(root, branch) {
 // On Linux getPaths() uses XDG; on Windows/macOS it uses <home>/.pipeline.
 function platformDirs(home) {
   if (process.platform === "linux") {
-    const cfg   = join(home, ".config");
+    const data  = join(home, ".local", "share");
     const state = join(home, ".local", "state");
     return {
-      configDir: join(cfg,   "pipeline"),
-      stateDir:  join(state, "pipeline"),
-      logDir:    join(state, "pipeline", "logs"),
-      xdgEnv: { XDG_CONFIG_HOME: cfg, XDG_DATA_HOME: join(home, ".local", "share"), XDG_STATE_HOME: state },
+      dataDir:  join(data,  "pipeline"),
+      logDir:   join(state, "pipeline", "logs"),
+      xdgEnv: { XDG_CONFIG_HOME: join(home, ".config"), XDG_DATA_HOME: data, XDG_STATE_HOME: state },
     };
   }
   return {
-    configDir: join(home, ".pipeline"),
-    stateDir:  join(home, ".pipeline"),
-    logDir:    join(home, ".pipeline", "logs"),
+    dataDir:  join(home, ".pipeline"),
+    logDir:   join(home, ".pipeline", "logs"),
     xdgEnv: {},
   };
 }
@@ -65,12 +63,12 @@ function freshFixture() {
   initRepo(root);
   addFeatureBranch(root, "autonomous/feat");
 
-  const { configDir, stateDir, logDir, xdgEnv } = platformDirs(root);
-  mkdirSync(stateDir,  { recursive: true });
-  mkdirSync(configDir, { recursive: true });
-  mkdirSync(logDir,    { recursive: true });
+  const { dataDir, logDir, xdgEnv } = platformDirs(root);
+  mkdirSync(dataDir, { recursive: true });
+  mkdirSync(logDir,  { recursive: true });
 
-  const db = connectPath(join(stateDir, "pipeline.db"));
+  // DB at dataDir (connectUnified uses paths.dataDir, not stateDir).
+  const db = connectPath(join(dataDir, "pipeline.db"));
   projectAdd(db, { name: "test-proj", rootPath: root });
 
   rowAdd(db, "test-proj", {
@@ -81,12 +79,15 @@ function freshFixture() {
     targetBranch: "master",
   });
 
+  // Config at ~/.pipeline/config.json (loadPipelineConfig reads homedir()/.pipeline).
+  const pipelineDir = join(root, ".pipeline");
+  mkdirSync(pipelineDir, { recursive: true });
   const config = {
     ...PIPELINE_DEFAULTS,
     autoMerge: true,
     governor:  { ...PIPELINE_DEFAULTS.governor, enabled: false },
   };
-  writeFileSync(join(configDir, "config.json"), JSON.stringify(config, null, 2), "utf8");
+  writeFileSync(join(pipelineDir, "config.json"), JSON.stringify(config, null, 2), "utf8");
 
   return { root, db, logDir, xdgEnv };
 }

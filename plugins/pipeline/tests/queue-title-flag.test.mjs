@@ -30,16 +30,16 @@ function queue(planBody, extraArgs) {
     spawnSync("git", ["init", "--quiet"], { cwd: repo, stdio: "ignore" });
     writeFileSync(join(repo, "plans", FEATURE + ".md"), planBody);
 
-    // Use XDG-aware paths matching getPaths() on each platform.
+    // DB lives at paths.dataDir (connectUnified uses dataDir, not stateDir).
     const isLinux = process.platform === "linux";
-    const stateDir = isLinux ? join(tmp, ".local", "state", "pipeline") : join(tmp, ".pipeline");
+    const dataDir = isLinux ? join(tmp, ".local", "share", "pipeline") : join(tmp, ".pipeline");
     const xdgEnv = isLinux ? {
       XDG_CONFIG_HOME: join(tmp, ".config"),
       XDG_DATA_HOME: join(tmp, ".local", "share"),
       XDG_STATE_HOME: join(tmp, ".local", "state"),
     } : {};
-    mkdirSync(stateDir, { recursive: true });
-    const dbPath = join(stateDir, "pipeline.db");
+    mkdirSync(dataDir, { recursive: true });
+    const dbPath = join(dataDir, "pipeline.db");
     const db = connectPath(dbPath);
     try { projectAdd(db, { name: PROJECT, rootPath: repo }); } finally { close(db); }
 
