@@ -368,9 +368,9 @@ export function updateSessions(db, { historyOverride } = {}) {
       commandType = "slack";
     }
 
-    if (!commandType || commandType === "unknown") {
-      if (interactiveIds.has(sessionId)) commandType = "interactive";
-    }
+    // claude_sessions presence always wins: UserPromptSubmit only fires in non-`-p` sessions,
+    // so anything here is definitionally an interactive session, not a Slack bridge call.
+    if (interactiveIds.has(sessionId)) commandType = "interactive";
 
     let cacheCreate = 0, cacheRead = 0, turnCount = 0;
     let tokenSource = "estimation", estimationMethod = "formula";
@@ -470,9 +470,9 @@ export function updateSessionsFromProjects(db) {
         commandType = "slack";
       }
 
-      if (!commandType || commandType === "unknown") {
-        if (interactiveIds.has(data.session_id)) commandType = "interactive";
-      }
+      // claude_sessions presence always wins: UserPromptSubmit only fires in non-`-p` sessions,
+      // so anything here is definitionally an interactive session, not a Slack bridge call.
+      if (interactiveIds.has(data.session_id)) commandType = "interactive";
 
       const cc = data.cache_create_tokens;
       const cr = data.cache_read_tokens;
