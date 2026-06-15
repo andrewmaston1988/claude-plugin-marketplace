@@ -178,7 +178,7 @@ async function main() {
   const prompt = stdinJson.prompt || "";
   const transcriptPath = stdinJson.transcript_path || "";
   const sessionId = stdinJson.session_id || null;
-  const cwd = stdinJson.cwd || process.cwd();
+  const cwd = normalizePathForMatch(stdinJson.cwd || process.cwd());
   const isKeepalive = prompt.startsWith("Cache keepalive tick");
 
   let ctx = "";
