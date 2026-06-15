@@ -46,9 +46,8 @@ jobs:
         run: |
           FILES=$(ls tests/*.mjs | grep -v parity-runner)
           node --env-file=.env.test --test $FILES
-      - name: Parity tests (pre-existing failures — informational)
+      - name: Parity tests
         working-directory: plugins/pipeline
-        continue-on-error: true
         run: node --env-file=.env.test --test tests/parity-runner.mjs
       - name: Script tests
         working-directory: plugins/pipeline
