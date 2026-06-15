@@ -1,19 +1,5 @@
 #!/usr/bin/env node
-/**
- * claude-investigate — CLI dispatcher for agent transcript investigation.
- *
- * Usage:
- *   claude-investigate locate <agent-id>
- *   claude-investigate summary <agent-id>
- *   claude-investigate errors <agent-id>
- *   claude-investigate retries <agent-id>
- *   claude-investigate pivots <agent-id>
- *   claude-investigate report <agent-id>
- *   claude-investigate doctor
- *   claude-investigate --help
- *
- * Python dependency: requires Python ≥ 3.9 on PATH or PIPELINE_PYTHON env var.
- */
+// claude-investigate — agent transcript investigation CLI. Run --help for usage.
 
 import { execSync, spawn } from "node:child_process";
 import { resolve } from "node:path";

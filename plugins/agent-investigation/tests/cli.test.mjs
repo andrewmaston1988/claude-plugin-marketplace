@@ -1,19 +1,35 @@
 import { test } from "node:test";
 import { strict as assert } from "node:assert";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 
-test("CLI — subcommand validation", () => {
-  // This is a placeholder test. Full CLI testing requires spawning child processes
-  // and handling the IIFE async context, which is complex to mock.
-  // For now, we verify the structure exists.
+const here = dirname(fileURLToPath(import.meta.url));
+const cli = join(here, "..", "bin", "claude-investigate.mjs");
 
-  // Import the CLI entry point to ensure it has no syntax errors
-  const cliPath = "../bin/claude-investigate.mjs";
-  assert.ok(cliPath, "CLI entry point path should be valid");
+function runCli(...args) {
+  return spawnSync(process.execPath, [cli, ...args], {
+    encoding: "utf-8",
+    timeout: 5000,
+  });
+}
+
+test("CLI — help lists all subcommands", () => {
+  const { stdout, status } = runCli("--help");
+  assert.equal(status, 0, "exit code should be 0");
+  for (const sub of ["locate", "summary", "errors", "retries", "pivots", "report", "doctor"]) {
+    assert.ok(stdout.includes(sub), `help should mention '${sub}'`);
+  }
 });
 
-test("CLI — help output", () => {
-  // The help() function is local to the IIFE, so we can't test it directly.
-  // This is a design tradeoff: simpler code at the cost of reduced unit testability.
-  // The dash command provides smoke testing.
-  assert.ok(true, "help output is manually smoke-tested");
+test("CLI — unknown subcommand exits 1", () => {
+  const { stderr, status } = runCli("bogus-subcommand");
+  assert.equal(status, 1, "exit code should be 1");
+  assert.ok(stderr.includes("Unknown subcommand"), "should report unknown subcommand");
+});
+
+test("CLI — locate requires agent-id arg", () => {
+  const { stderr, status } = runCli("locate");
+  assert.equal(status, 1, "exit code should be 1");
+  assert.ok(stderr.includes("locate"), "should echo usage with 'locate'");
 });
