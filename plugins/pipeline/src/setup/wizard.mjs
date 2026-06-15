@@ -558,6 +558,23 @@ export async function runWizard({ paths, log, opts = {} }) {
     config.report_subpath = JSON.parse(JSON.stringify(defReportSub));
     config.report_publish_branch_template = defPublishTpl;
 
+    // Step 7b — Orchestrator concurrency cap
+    hr();
+    say("Step 7b/11 — Orchestrator concurrency cap\n");
+    if (!nonInteractive) {
+      say("  How many Claude sessions may run concurrently? (global cap)");
+      say("  Lower values reduce API spend near usage limits; default is 3.\n");
+    }
+    let capRaw;
+    if (nonInteractive) {
+      capRaw = opts.maxConcurrent != null ? String(opts.maxConcurrent) : "";
+    } else {
+      capRaw = (await ask("  Max concurrent sessions [3]: ")).trim();
+    }
+    const capParsed = parseInt(capRaw, 10);
+    config.orch = config.orch || {};
+    config.orch.max_concurrent = (capParsed >= 1) ? capParsed : 3;
+
     // Write config (atomic .tmp → rename). Deferred until after the worktree
     // step so all keys land in one write.
     mkdirSync(paths.configDir, { recursive: true });

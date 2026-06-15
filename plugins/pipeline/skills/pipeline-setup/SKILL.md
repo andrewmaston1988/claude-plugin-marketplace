@@ -355,7 +355,25 @@ Pass the answer as `--worktree-layout 1` (default) or `--worktree-layout 2 --wor
 
 **Upgrade nudge for existing installs**: mention that `pipeline doctor`'s `worktree-layout-stale` check warns when on-disk worktrees diverge from the resolved template and prints copy-pasteable `git worktree remove` lines for cleanup. No automatic migration runs.
 
-### Question 3g — Governor (optional)
+### Question 3g — Orchestrator concurrency cap
+
+**What this does**: sets `cfg.orch.max_concurrent` — the global limit on how many Claude sessions the orchestrator may run simultaneously, across all projects. The orchestrator checks this cap on every poll cycle; sessions beyond the cap are deferred.
+
+**Default**: 3.
+
+**When to lower it**: near API usage limits, set it to 1 or 2 to slow throughput without manually restarting the orchestrator with a flag. After editing `~/.pipeline/config.json`, restart the orchestrator (TUI `o` key, or `pipeline orchestrator --shutdown` then auto-restart).
+
+**When to raise it**: if you have high quota headroom and want faster parallel processing of queued rows.
+
+**Precedence**: `--max-concurrent <n>` CLI flag overrides `cfg.orch.max_concurrent` for a single launch; the config key is the persistent default.
+
+**Config key**: `orch.max_concurrent` in `~/.pipeline/config.json`. Verify the live value with `pipeline doctor` (`Max concurrent: <n>` line).
+
+**Wizard flag**: `--max-concurrent <n>` (integer ≥ 1).
+
+**SKIP** if the user is happy with the default (3) — it's a fine choice for most setups.
+
+### Question 3h — Governor (optional)
 
 The governor is an optional background agent that generates daily/status/monthly spend reports and posts them to the `governance` Slack channel. It is opt-in: set `cfg.governor.enabled = true` to activate it.
 
