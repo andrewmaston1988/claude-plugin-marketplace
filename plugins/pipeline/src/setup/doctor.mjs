@@ -12,6 +12,7 @@ import { readState, pidAlive } from "../../scripts/orchestrator/state-file.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
 import { resolveTemplate, resolveHookFirstToken, featureWorktreePath } from "../../scripts/worktree-paths.mjs";
 import { spawnSync } from "node:child_process";
+import { CONTRACT_VARS, ALWAYS_PRESENT, findUnknownTemplateVars } from "../../scripts/governor/env-contract.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -338,10 +339,6 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
   // 15. governor-env-contract — when the governor is enabled, confirm the
   // template references only placeholders/vars that the spawn contract provides.
   if (resolved?.governor?.enabled) {
-    const contractVars = new Set([
-      "CORRELATION_ID", "REPORT_TYPE", "REPORT_DATE", "REPORT_MONTH",
-      "PIPELINE_DB", "PLUGIN_DIR",
-    ]);
     const templatePath = resolved.governor.template_path
       ? (resolved.governor.template_path.startsWith("~")
           ? join(homedir(), resolved.governor.template_path.slice(1))
@@ -355,8 +352,7 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
     let unknown = [];
     if (existsSync(tplPath)) {
       const tplContent = readFileSync(tplPath, "utf8");
-      const varRefs = [...tplContent.matchAll(/\$([A-Z_][A-Z0-9_]*)/g)].map(m => m[1]);
-      unknown = [...new Set(varRefs)].filter(v => !contractVars.has(v) && !["PATH", "HOME", "USER", "SHELL"].includes(v));
+      unknown = findUnknownTemplateVars(tplContent);
     }
     if (unknown.length === 0) {
       push("governor-env-contract", true, false, "all template $VAR refs are in spawn contract");
