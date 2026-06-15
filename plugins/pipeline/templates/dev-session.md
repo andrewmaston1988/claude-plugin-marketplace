@@ -19,7 +19,7 @@
 
 ## Mission
 
-Implement the plan above. One session covers exactly one plan file — no exceptions. Work through items in the order listed in the plan's Current Status table; state any skips and why. The branch name is derived from the plan file name — do not invent a different name.
+{{PRIOR_TEST_FEEDBACK}}Implement the plan above. One session covers exactly one plan file — no exceptions. Work through items in the order listed in the plan's Current Status table; state any skips and why. The branch name is derived from the plan file name — do not invent a different name.
 
 ---
 

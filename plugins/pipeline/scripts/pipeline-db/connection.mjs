@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS pipeline_rows (
   budget_usd REAL,
   qa_pass INTEGER,
   dev_retries INTEGER DEFAULT 0,
+  dev_retry_budget INTEGER DEFAULT 2,
   spawn_failed INTEGER DEFAULT 0,
   notes_extra TEXT,
   depends_on TEXT,
@@ -264,6 +265,7 @@ const SCHEMA_V6_VERSION = 6;
 // - summary TEXT (peer-visible summary)
 const SCHEMA_V7_VERSION = 7;
 const SCHEMA_V9_VERSION = 9;
+const SCHEMA_V10_VERSION = 10;
 
 const SCHEMA_V7 = `
 CREATE TABLE IF NOT EXISTS claude_sessions (
@@ -283,6 +285,12 @@ const SCHEMA_V8_VERSION = 8;
 const SCHEMA_V8 = `
 ALTER TABLE claude_sessions ADD COLUMN last_checkpoint_size INTEGER;
 INSERT OR IGNORE INTO schema_version (version) VALUES (8);
+`;
+
+// Add dev_retry_budget column to pipeline_rows for configurable dev retry ceiling
+const SCHEMA_V10 = `
+ALTER TABLE pipeline_rows ADD COLUMN dev_retry_budget INTEGER DEFAULT 2;
+INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V10_VERSION});
 `;
 
 function _applyMigrations(db) {
@@ -353,6 +361,13 @@ function _applyMigrations(db) {
       db.exec("ALTER TABLE pipeline_rows ADD COLUMN rvw_effort TEXT DEFAULT 'high'");
     }
     db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V9_VERSION})`);
+  }
+  if (currentVersion < SCHEMA_V10_VERSION) {
+    const cols = db.prepare("PRAGMA table_info(pipeline_rows)").all().map(c => c.name);
+    if (!cols.includes("dev_retry_budget")) {
+      db.exec("ALTER TABLE pipeline_rows ADD COLUMN dev_retry_budget INTEGER DEFAULT 2");
+    }
+    db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V10_VERSION})`);
   }
 }
 

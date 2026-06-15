@@ -113,12 +113,13 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
             const qaPass = row.qa_pass;
             if (qaPass === 0) {
               const retries = row.dev_retries || 0;
-              if (retries < 2) {
+              const budget = row.dev_retry_budget || 2;
+              if (retries < budget) {
                 autoRequeueDev(db, project, feature, retries + 1);
                 outcome = "retry";
-                logFn(`[${project}] test failed — auto-requeueing for dev (attempt ${retries + 1}/2)`);
+                logFn(`[${project}] test failed — auto-requeueing for dev (attempt ${retries + 1}/${budget})`);
               } else {
-                logFn(`[${project}] test failed 3 times — parking at test for human review`, "WARN");
+                logFn(`[${project}] test failed ${budget + 1} times — parking at test for human review`, "WARN");
               }
             } else if (qaPass === 1) {
               resetDevRetries(db, project, feature);
