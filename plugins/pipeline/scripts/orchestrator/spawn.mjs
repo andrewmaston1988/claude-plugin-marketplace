@@ -159,13 +159,18 @@ export function findClaude() {
   return "claude";
 }
 
-// Non-Claude models route through the local proxy (claude-code-proxy on :18081).
+// Non-Claude models route through the local proxy (claude-code-proxy on :18081 by
+// default; override via cfg.proxy.url / cfg.proxy.auth_token in ~/.pipeline/config.json).
 // Returns env-var overrides to merge; empty for native Claude models.
-export function proxyEnvFor(model) {
+// Optional `cfg` lets tests inject a config snapshot; internal callers pass nothing
+// and we read the live on-disk config here.
+export function proxyEnvFor(model, cfg) {
   if (!model || model.startsWith("claude-")) return {};
+  if (!cfg) cfg = loadPipelineConfig();
+  const proxy = cfg.proxy || PIPELINE_DEFAULTS.proxy;
   return {
-    ANTHROPIC_BASE_URL: "http://localhost:18081",
-    ANTHROPIC_API_KEY:  "dummy-local-key",
+    ANTHROPIC_BASE_URL: proxy.url,
+    ANTHROPIC_API_KEY:  proxy.auth_token,
     ANTHROPIC_MODEL:    model,
   };
 }

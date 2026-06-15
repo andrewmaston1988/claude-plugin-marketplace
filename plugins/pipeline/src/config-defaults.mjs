@@ -14,6 +14,13 @@ export const PIPELINE_DEFAULTS = {
     sonnet: ["low", "medium", "high", "max"],
     opus:   ["low", "medium", "high", "xhigh", "max"],
   },
+  proxy: {
+    // Anthropic-format proxy URL that any non-claude-* model routes through.
+    // Operator runs the proxy (e.g. claude-code-proxy on this port) with
+    // OPENAI_BASE_URL set to the real upstream (Ollama, cloud endpoint, etc.).
+    url:        "http://localhost:18081",
+    auth_token: "dummy-local-key",
+  },
   notifications: {
     // Governance / reports channel — where Cache Health, monthly governance,
     // ad-hoc reports go. Distinct from pipeline_channel so report content

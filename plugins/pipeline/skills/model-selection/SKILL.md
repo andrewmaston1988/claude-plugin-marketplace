@@ -1,6 +1,11 @@
 ---
 name: model-selection
-description: Use when pinning a Claude model — `claude -p` call sites, or pipeline row model columns at `/queue` time. Triggers — editing a file containing `claude -p`; the `/queue` command (loads this explicitly); "which model for X"; about to write model ID to a pipeline column. SKIP for: `/model` session switcher; reading the model table.
+description: >-
+  Use when pinning a Claude model — `claude -p` call sites, or pipeline row
+  model columns at `/queue` time. Triggers — editing a file containing
+  `claude -p`; the `/queue` command (loads this explicitly); "which model for
+  X"; about to write model ID to a pipeline column. SKIP for: `/model` session
+  switcher; reading the model table.
 ---
 
 # Model selection
@@ -104,3 +109,53 @@ If the user says "Sonnet" when you proposed Opus, that's a Sonnet decision — d
 ## Why this skill exists
 
 Model choice has high leverage on both cost and quality. Without explicit guidance, scripts default to whatever model name was at the top of the model docs at the time of writing, which drifts, gets stale, and silently degrades when a new model lands. Pinning every call site keeps the system inspectable; the tier guide here is the canonical reference for which tier is right for what kind of task.
+
+## Non-Anthropic models (Ollama / gemma / MiniMax / open model)
+
+The pipeline is not Anthropic-only. Any model the local proxy can serve — Ollama-served models, cloud endpoints fronted by an Anthropic-format proxy, anything reachable through `cfg.proxy.url` — is a valid row model. The Anthropic path (`model.startsWith("claude-")`) is unaffected; this is **additive**, not a replacement.
+
+### Routing rule
+
+`proxyEnvFor(model)` in `scripts/orchestrator/spawn.mjs:165` returns `{}` for `claude-*` models (no env override — they go straight to `api.anthropic.com`). For any other model name, it returns:
+
+```js
+{
+  ANTHROPIC_BASE_URL: cfg.proxy.url,        // default "http://localhost:18081"
+  ANTHROPIC_API_KEY:  cfg.proxy.auth_token, // default "dummy-local-key"
+  ANTHROPIC_MODEL:    model,                // passed through verbatim
+}
+```
+
+`ANTHROPIC_BASE_URL` redirects the SDK's outbound calls; the proxy then translates Anthropic Messages format to whatever upstream it knows about (Ollama, OpenAI-compatible, etc.). The proxy's `OPENAI_BASE_URL` is its own concern — the pipeline just hands it the model name.
+
+### Operator setup
+
+A proxy must be listening on `cfg.proxy.url`. The canonical implementation is `claude-code-proxy` (1rgs fork) at `C:\local-llm\claude-code-proxy`. Start it with:
+
+```bash
+cd C:\local-llm\claude-code-proxy && uv run uvicorn server:app --host 0.0.0.0 --port 18081
+```
+
+Smoke-test before queueing a non-Anthropic row:
+
+```bash
+curl -s -X POST http://localhost:18081/v1/messages \
+  -H 'x-api-key: dummy' -H 'anthropic-version: 2023-06-01' \
+  -d '{"model":"<name>","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}'
+```
+
+Expect a non-error response. `server.py` only remaps a fixed set of names (haiku/sonnet/opus/fable/claude-*); anything else passes through verbatim to `OPENAI_BASE_URL`.
+
+### Auto-escalation is a no-op
+
+Non-Anthropic models do **not** auto-escalate on dev retry. `tierFromModel` returns `null` for anything that doesn't match `/haiku|sonnet|opus/i`, so the dev-retry counter does not trigger effort+2 or tier-jump. If a non-Anthropic row bounces through review, pin a new model in the row's `notes_extra` (`model=…`) or in `*Dev-Model:*` and re-queue — there is no auto-walk.
+
+### When the operator asks to queue via Ollama / open model
+
+When the user's request contains phrases like "via ollama", "via open model", "local model", or names a specific non-Anthropic model (`MiniMax-M3`, `gemma4:31b-cloud`, `qwen2.5-coder:32b`), emit a **structured confirmation block** before constructing the `pipeline queue-plan` command:
+
+1. **Confirm intent + collect model name** — "You asked to queue this via Ollama / an open model. Confirm by providing the model name (e.g. `MiniMax-M3`, `gemma4:31b-cloud`, `qwen2.5-coder:32b`). The row will route through `cfg.proxy.url` (default `http://localhost:18081`). Auto-escalation is a no-op for non-Anthropic tiers."
+2. **Verify the proxy is live** — "Is `claude-code-proxy` running on the configured port? The smoke-test command above should return a non-error response."
+3. **Confirm the upstream knows the model** — "If the upstream is Ollama, is the model pulled? `ollama list` should show it. If the upstream is a cloud endpoint, is the model name spelled correctly?"
+
+Take the operator's next response (model name + yes/no on the proxy) and construct the `pipeline queue-plan` command with `--d-model <name>` (and the corresponding R/Q/Rvw columns if the row uses non-Anthropic models for those stages too).
