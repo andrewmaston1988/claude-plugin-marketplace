@@ -19,7 +19,7 @@ import { spawnSession, spawnMerge, isDirtyTree, isMergedInto } from "./spawn.mjs
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 import { reconcileSessions } from "./reaper.mjs";
 import { depsMet } from "./deps.mjs";
-import { orchestratorWorktreePath, resolveHookFirstToken } from "../worktree-paths.mjs";
+import { featureWorktreePath, resolveHookFirstToken } from "../worktree-paths.mjs";
 import { fileURLToPath } from "node:url";
 import { spawnGovernor, spawnMonthlyGovernor } from "./governor.mjs";
 
@@ -307,8 +307,13 @@ async function pollOnce({
     // below, so the template's `{{CWD}}/reports/...` resolves to the actual
     // working dir the agent runs in.
     const planStem = (row.plan_file || "").replace(/\.md$/, "").split(/[\\/]/).pop();
-    const cwdForSession = orchestratorWorktreePath({
-      project, projectRoot, branch: `autonomous/${planStem}`,
+    // Phase 3b: use featureWorktreePath so every session lands in the
+    // per-feature worktree ({root_parent}/.worktrees/{project}/{feature}).
+    // orchestratorWorktreePath would route through the deprecated
+    // {branch_type}-{branch_local} template and re-share worktrees across
+    // branches, defeating the isolation model.
+    const cwdForSession = featureWorktreePath({
+      project, projectRoot, feature: planStem,
     });
     const sessionFile = resolveSessionFile(rowForSession, project, {
       projectRoot,
