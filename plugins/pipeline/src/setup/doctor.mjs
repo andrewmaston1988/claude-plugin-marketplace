@@ -303,30 +303,10 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
   // web.port and it does NOT look like our own dashboard server.
   {
     const cfgPort = resolved?.web?.port ?? 8765;
-    let portInUse = false;
-    let portOurServer = false;
-    try {
-      const r = spawnSync(
-        process.platform === "win32"
-          ? "cmd"
-          : "bash",
-        process.platform === "win32"
-          ? ["/c", `netstat -ano -p TCP 2>nul | findstr ":${cfgPort} "`]
-          : ["-c", `ss -tlnp 2>/dev/null | grep ':${cfgPort} ' || lsof -iTCP:${cfgPort} -sTCP:LISTEN -n -P 2>/dev/null | head -2`],
-        { encoding: "utf8", windowsHide: true, timeout: 3000 }
-      );
-      if (r.stdout && r.stdout.includes(String(cfgPort))) {
-        portInUse = true;
-        // Heuristic: if the dashboard is running, its process title contains "pipeline"
-        // or the parent process is node running pipeline.mjs.  We can't be definitive
-        // here so this is a warn-only check.
-        portOurServer = /pipeline/i.test(r.stdout);
-      }
-    } catch { /* non-fatal */ }
-
-    if (!portInUse) {
+    const verdict = detectPortOccupant({ port: cfgPort });
+    if (!verdict.inUse) {
       push("web-port-conflict", true, false, `port ${cfgPort} is free`);
-    } else if (portOurServer) {
+    } else if (verdict.ours) {
       push("web-port-conflict", true, false, `port ${cfgPort} in use by dashboard (expected)`);
     } else {
       push("web-port-conflict", false, true,
@@ -396,6 +376,130 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
   }
 
   return results;
+}
+
+// --- web-port-conflict helpers -------------------------------------------------
+//
+// On Linux/macOS, `ss -tlnp` / `lsof` include the process name in their output
+// and the "is this our server?" heuristic is a simple regex. On Windows,
+// `netstat -ano` returns only PIDs — we have to round-trip through `tasklist`
+// (PID → image name) and, for `node.exe` candidates, `wmic` to read the
+// command line, before we can decide. The functions below are split out so
+// they can be unit-tested with synthetic `spawnSync` output.
+
+const DEFAULT_RUNNER = (cmd, args, opts) => spawnSync(cmd, args, opts);
+
+/** Extract listener PIDs from a `netstat -ano` LISTEN block. */
+export function parseNetstatPids(stdout, port) {
+  if (!stdout || !port) return [];
+  const needle = `:${port} `;
+  const pids = new Set();
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line.includes(needle)) continue;
+    const trimmed = line.trim();
+    if (!/LISTENING/i.test(trimmed)) continue;
+    const tokens = trimmed.split(/\s+/);
+    const pid = tokens[tokens.length - 1];
+    if (/^\d+$/.test(pid)) pids.add(pid);
+  }
+  return [...pids];
+}
+
+/** Build a {pid: imageName} map from `tasklist /FO CSV /NH` output. */
+export function parseTasklist(stdout) {
+  const map = new Map();
+  if (!stdout) return map;
+  for (const line of stdout.split(/\r?\n/)) {
+    if (!line) continue;
+    // CSV row — strip outer quotes, split on '","'
+    const cells = line.replace(/^"|"$/g, "").split(/","/);
+    if (cells.length < 2) continue;
+    const name = cells[0];
+    const pid  = cells[1];
+    if (/^\d+$/.test(pid) && name) map.set(pid, name);
+  }
+  return map;
+}
+
+/** Extract the command line from `wmic ... get CommandLine` output. */
+export function parseWmicCommandLine(stdout) {
+  if (!stdout) return "";
+  // wmic emits a header line ("CommandLine") then the value, then blanks.
+  const lines = stdout.split(/\r?\n/).map(l => l.replace(/\r$/, ""));
+  const value = lines.find(l => l && l.trim() !== "CommandLine");
+  return (value ?? "").trim();
+}
+
+/**
+ * Run the platform-appropriate port probe and decide whether the process bound
+ * on `port` looks like our own dashboard server.
+ *
+ * @param {object}        opts
+ * @param {number|string} opts.port   — port to probe
+ * @param {Function}      [opts.run]  — spawnSync-compatible runner for tests
+ * @returns {{inUse: boolean, ours: boolean}}
+ */
+export function detectPortOccupant({ port, run = DEFAULT_RUNNER } = {}) {
+  const result = { inUse: false, ours: false };
+  if (!port) return result;
+  const platform = process.platform;
+
+  if (platform === "win32") {
+    // 1) netstat — list PIDs bound on the port.
+    let pids = [];
+    try {
+      const r = run(
+        "cmd",
+        ["/c", `netstat -ano -p TCP 2>nul | findstr ":${port} "`],
+        { encoding: "utf8", windowsHide: true, timeout: 3000 }
+      );
+      if (r?.stdout) pids = parseNetstatPids(r.stdout, port);
+    } catch { /* non-fatal */ }
+    if (pids.length === 0) return result;
+    result.inUse = true;
+
+    // 2) tasklist — PID → image name.
+    let pidMap = new Map();
+    try {
+      const r = run("tasklist", ["/FO", "CSV", "/NH"],
+        { encoding: "utf8", windowsHide: true, timeout: 3000 });
+      if (r?.stdout) pidMap = parseTasklist(r.stdout);
+    } catch { /* non-fatal */ }
+
+    // 3) For every PID whose image is `node.exe`, inspect the command line.
+    for (const pid of pids) {
+      const image = pidMap.get(pid);
+      if (!image) continue;
+      if (image.toLowerCase() !== "node.exe") continue;
+      let cmdline = "";
+      try {
+        const r = run("wmic",
+          ["process", "where", `ProcessId=${pid}`, "get", "CommandLine"],
+          { encoding: "utf8", windowsHide: true, timeout: 3000 });
+        if (r?.status === 0) cmdline = parseWmicCommandLine(r.stdout);
+      } catch { /* wmic may be absent on Server 2022+ */ }
+      if (cmdline && /pipeline\.mjs/i.test(cmdline)) {
+        result.ours = true;
+        return result;
+      }
+    }
+    return result;
+  }
+
+  // POSIX: ss / lsof already include the process name — the legacy regex
+  // heuristic still works on the platforms we ship for.
+  try {
+    const r = run(
+      "bash",
+      ["-c", `ss -tlnp 2>/dev/null | grep ':${port} ' || lsof -iTCP:${port} -sTCP:LISTEN -n -P 2>/dev/null | head -2`],
+      { encoding: "utf8", windowsHide: true, timeout: 3000 }
+    );
+    if (r?.stdout && r.stdout.includes(String(port))) {
+      result.inUse = true;
+      result.ours = /pipeline/i.test(r.stdout);
+    }
+  } catch { /* non-fatal */ }
+  return result;
 }
 
 export function printDoctor(results) {
