@@ -3,11 +3,11 @@
 // Focused per-check tests rather than end-to-end, so test results don't depend
 // on the host's `claude` CLI presence.
 import { test } from "node:test";
-import { equal, ok, match } from "node:assert/strict";
+import { equal, ok, match, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runDoctor, printDoctor, doctorExitCode } from "../src/setup/doctor.mjs";
+import { runDoctor, printDoctor, doctorExitCode, parseNetstatPids, parseTasklist, parseWmicCommandLine, detectPortOccupant } from "../src/setup/doctor.mjs";
 import { connectUnified, close } from "../scripts/pipeline-db/connection.mjs";
 import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
 
@@ -176,4 +176,168 @@ test("doctor: paths missing throws clear error", async () => {
   } catch (e) {
     match(e.message, /paths is required/);
   }
+});
+
+// --- web-port-conflict helpers (Windows PID → process name) --------------------
+
+const NETSTAT_PORT_OCCUPIED = [
+  "Active Connections",
+  "",
+  "  Proto  Local Address          Foreign Address        State           PID",
+  "  TCP    0.0.0.0:8765           0.0.0.0:0              LISTENING       1234",
+  "  TCP    [::]:8765              [::]:0                 LISTENING       5678",
+  "  TCP    0.0.0.0:80             0.0.0.0:0              LISTENING       9999",
+  "",
+].join("\r\n");
+
+const NETSTAT_PORT_FREE = [
+  "Active Connections",
+  "",
+  "  Proto  Local Address          Foreign Address        State           PID",
+  "  TCP    0.0.0.0:9999           0.0.0.0:0              LISTENING       4321",
+  "",
+].join("\r\n");
+
+const TASKLIST_PLAIN = [
+  '"node.exe","1234","Console","1","12,345 K"',
+  '"cmd.exe","5678","Console","1","2,000 K"',
+  '"chrome.exe","9999","Console","1","80,000 K"',
+].join("\r\n");
+
+const WMIC_PIPELINE_CMDLINE = [
+  "CommandLine",
+  '"C:\\Program Files\\nodejs\\node.exe" "C:\\code\\claude-plugin-marketplace\\plugins\\pipeline\\bin\\pipeline.mjs" dashboard web',
+  "",
+].join("\r\n");
+
+const WMIC_OTHER_NODE_CMDLINE = [
+  "CommandLine",
+  '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Andrew\\Documents\\some-script.js"',
+  "",
+].join("\r\n");
+
+/** Stub a `run` function that returns canned output keyed by command+args. */
+function fakeRunner(scripts) {
+  const calls = [];
+  return {
+    calls,
+    run(cmd, args /*, opts */) {
+      calls.push({ cmd, args });
+      const key = `${cmd} ${args[0]}`;
+      const script = scripts[key];
+      if (!script) return { status: 0, stdout: "", stderr: "" };
+      const step = script.shift();
+      if (step && step.__throw) throw new Error("simulated");
+      return step ?? { status: 0, stdout: "", stderr: "" };
+    },
+  };
+}
+
+test("parseNetstatPids: extracts LISTENING PIDs for the target port", () => {
+  const pids = parseNetstatPids(NETSTAT_PORT_OCCUPIED, 8765);
+  deepEqual(pids.sort(), ["1234", "5678"]);
+});
+
+test("parseNetstatPids: ignores other ports and non-LISTENING rows", () => {
+  const pids = parseNetstatPids(NETSTAT_PORT_OCCUPIED, 80);
+  deepEqual(pids, ["9999"]);
+});
+
+test("parseNetstatPids: empty input → empty list", () => {
+  deepEqual(parseNetstatPids("", 8765), []);
+  deepEqual(parseNetstatPids(null, 8765), []);
+  deepEqual(parseNetstatPids(NETSTAT_PORT_OCCUPIED, 0), []);
+});
+
+test("parseTasklist: builds PID → image name map from CSV rows", () => {
+  const map = parseTasklist(TASKLIST_PLAIN);
+  equal(map.size, 3);
+  equal(map.get("1234"), "node.exe");
+  equal(map.get("5678"), "cmd.exe");
+  equal(map.get("9999"), "chrome.exe");
+});
+
+test("parseTasklist: empty input → empty map", () => {
+  equal(parseTasklist("").size, 0);
+  equal(parseTasklist(null).size, 0);
+});
+
+test("parseWmicCommandLine: strips header and trims", () => {
+  equal(parseWmicCommandLine(WMIC_PIPELINE_CMDLINE),
+    '"C:\\Program Files\\nodejs\\node.exe" "C:\\code\\claude-plugin-marketplace\\plugins\\pipeline\\bin\\pipeline.mjs" dashboard web');
+});
+
+test("parseWmicCommandLine: empty input → empty string", () => {
+  equal(parseWmicCommandLine(""), "");
+  equal(parseWmicCommandLine(null), "");
+});
+
+test("detectPortOccupant (win32): port free → not in use, not ours", () => {
+  const f = fakeRunner({
+    "cmd /c": [{ status: 0, stdout: NETSTAT_PORT_FREE, stderr: "" }],
+    "tasklist /FO": [{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
+    "wmic process":   [{ status: 0, stdout: WMIC_PIPELINE_CMDLINE, stderr: "" }],
+  });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
+  equal(verdict.inUse, false);
+  equal(verdict.ours, false);
+});
+
+test("detectPortOccupant (win32): port held by node.exe running pipeline.mjs → ours", () => {
+  const f = fakeRunner({
+    "cmd /c": [{ status: 0, stdout: NETSTAT_PORT_OCCUPIED, stderr: "" }],
+    "tasklist /FO": [{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
+    "wmic process":   [{ status: 0, stdout: WMIC_PIPELINE_CMDLINE, stderr: "" }],
+  });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
+  equal(verdict.inUse, true);
+  equal(verdict.ours, true);
+  // Only the node.exe PID should have triggered a wmic call.
+  equal(f.calls.filter(c => c.cmd === "wmic").length, 1);
+  deepEqual(f.calls.find(c => c.cmd === "wmic").args,
+    ["process", "where", "ProcessId=1234", "get", "CommandLine"]);
+});
+
+test("detectPortOccupant (win32): port held by non-node process → not ours", () => {
+  // 5678 = cmd.exe, 1234 = node.exe running something else.
+  const f = fakeRunner({
+    "cmd /c": [{ status: 0, stdout: NETSTAT_PORT_OCCUPIED, stderr: "" }],
+    "tasklist /FO": [{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
+    "wmic process":   [{ status: 0, stdout: WMIC_OTHER_NODE_CMDLINE, stderr: "" }],
+  });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
+  equal(verdict.inUse, true);
+  equal(verdict.ours, false);
+  // Both node.exe and cmd.exe PIDs are seen; wmic only fires for node.exe.
+  // (cmd.exe PID 5678 is not a node.exe, so wmic is called once for PID 1234.)
+  equal(f.calls.filter(c => c.cmd === "wmic").length, 1);
+});
+
+test("detectPortOccupant (win32): unknown PID in tasklist → not ours", () => {
+  // Port 8765 listener PID 1234 is NOT in the tasklist snapshot.
+  const f = fakeRunner({
+    "cmd /c": [{ status: 0, stdout: NETSTAT_PORT_OCCUPIED, stderr: "" }],
+    "tasklist /FO": [{ status: 0, stdout: "", stderr: "" }],
+    "wmic process":   [{ status: 0, stdout: WMIC_PIPELINE_CMDLINE, stderr: "" }],
+  });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
+  equal(verdict.inUse, true);
+  equal(verdict.ours, false);
+});
+
+test("detectPortOccupant (win32): wmic failure (deprecated on Server 2022+) → not ours, no throw", () => {
+  const f = fakeRunner({
+    "cmd /c":     [{ status: 0, stdout: NETSTAT_PORT_OCCUPIED, stderr: "" }],
+    "tasklist /FO":[{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
+    "wmic process":[{ __throw: true }],
+  });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
+  equal(verdict.inUse, true);
+  equal(verdict.ours, false);
+});
+
+test("detectPortOccupant: missing port → {inUse:false, ours:false}", () => {
+  const verdict = detectPortOccupant({ port: 0, run: () => ({ status: 0, stdout: "" }) });
+  equal(verdict.inUse, false);
+  equal(verdict.ours, false);
 });
