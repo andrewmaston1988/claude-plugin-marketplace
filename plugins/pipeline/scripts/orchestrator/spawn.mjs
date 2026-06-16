@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { join, basename, delimiter as pathDelimiter } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -74,8 +74,14 @@ export function budgetFromNotes(notes) {
 
 export function ensureWorktree(projectDir, wtPath, branch, baseBranch, logFn) {
   if (existsSync(wtPath)) {
-    logFn(`Reusing worktree at ${wtPath} for branch ${branch}`);
-    return true;
+    if (existsSync(join(wtPath, ".git"))) {
+      logFn(`Reusing worktree at ${wtPath} for branch ${branch}`);
+      return true;
+    }
+    // Ghost directory: exists on disk but not registered with git. Remove it
+    // so the git worktree add below can proceed cleanly.
+    logFn(`Removing ghost worktree at ${wtPath} (directory exists but no .git)`, "WARN");
+    rmSync(wtPath, { recursive: true, force: true });
   }
   mkdirSync(join(wtPath, ".."), { recursive: true });
   spawnSync("git", ["-C", projectDir, "fetch", "--quiet"], { timeout: 30000, windowsHide: true });
