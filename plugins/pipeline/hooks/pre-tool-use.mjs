@@ -16,7 +16,9 @@ const SQLITE_PATTERNS = [
   /node:sqlite/,
   /from ['"]node:sqlite['"]/,
   /import\(['"]node:sqlite['"]\)/,
-  /sqlite3\b/,
+  // sqlite3 as a command invocation — followed by a path/flag, not prose words
+  /sqlite3\s+['"~\/\.]/, // sqlite3 "path", ~/..., /path, ./path
+  /sqlite3\s+--/,        // sqlite3 --flag
 ];
 
 function looksLikeDirectDbAccess(cmd) {
