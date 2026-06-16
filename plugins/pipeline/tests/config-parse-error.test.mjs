@@ -1,8 +1,6 @@
 // verify the parse-error contract for loadPipelineConfig / updatePipelineConfig.
-//
-// Plan: pipeline-config-parse-error-abort — abort on parse error instead of
-// silently resetting to `{}` on the write path. Reads fall back to defaults
-// and emit a stderr warning.
+// Reads fall back to defaults and emit a stderr warning; writes throw before
+// touching the file so a mutator cannot blow away unrelated keys.
 import { test } from "node:test";
 import { equal, deepEqual, match, ok } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
@@ -22,13 +20,15 @@ function withTempConfig(content, fn) {
 test("updatePipelineConfig: malformed JSON throws and file is unchanged on disk", () => {
   withTempConfig("{ not valid json", (file) => {
     const original = readFileSync(file, "utf8");
+    let mutatorRan = false;
     let thrown = null;
     try {
-      updatePipelineConfig(() => { throw new Error("mutator should not run"); }, file);
+      updatePipelineConfig(() => { mutatorRan = true; }, file);
     } catch (err) { thrown = err; }
     ok(thrown, "updatePipelineConfig must throw on invalid JSON");
     match(thrown.message, /could not parse/);
     match(thrown.message, /config\.json/);
+    equal(mutatorRan, false, "mutator must not run when parse fails");
     equal(readFileSync(file, "utf8"), original, "on-disk file must be unchanged");
   });
 });
