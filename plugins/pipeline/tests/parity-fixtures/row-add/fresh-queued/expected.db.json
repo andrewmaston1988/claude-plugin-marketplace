@@ -19,6 +19,7 @@
       "budget_usd": null,
       "qa_pass": null,
       "dev_retries": 0,
+      "dev_retry_budget": 2,
       "spawn_failed": 0,
       "notes_extra": "type=dev",
       "depends_on": null,
