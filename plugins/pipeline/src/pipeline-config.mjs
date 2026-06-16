@@ -17,9 +17,9 @@ function deepMerge(base, override) {
 
 // Read ~/.pipeline/config.json and deep-merge with PIPELINE_DEFAULTS.
 // Always returns a complete config object; missing or unparseable files
-// fall back to defaults. Unparseable files also warn to stderr so the
-// operator notices the on-disk file is unreadable (caller-driven, read-only
-// path — the write path throws on the same condition; see updatePipelineConfig).
+// fall back to defaults. On parse error, also warns to stderr
+// (caller-driven, read-only path — the write path throws on the same
+// condition; see updatePipelineConfig).
 export function loadPipelineConfig(configPath) {
   if (configPath === undefined) configPath = join(homedir(), ".pipeline", "config.json");
   if (!existsSync(configPath)) return deepMerge({}, PIPELINE_DEFAULTS);
