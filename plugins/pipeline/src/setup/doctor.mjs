@@ -439,10 +439,9 @@ export function parseWmicCommandLine(stdout) {
  * @param {Function}      [opts.run]  — spawnSync-compatible runner for tests
  * @returns {{inUse: boolean, ours: boolean}}
  */
-export function detectPortOccupant({ port, run = DEFAULT_RUNNER } = {}) {
+export function detectPortOccupant({ port, run = DEFAULT_RUNNER, platform = process.platform } = {}) {
   const result = { inUse: false, ours: false };
   if (!port) return result;
-  const platform = process.platform;
 
   if (platform === "win32") {
     // 1) netstat — list PIDs bound on the port.

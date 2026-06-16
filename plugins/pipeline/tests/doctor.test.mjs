@@ -278,7 +278,7 @@ test("detectPortOccupant (win32): port free → not in use, not ours", () => {
     "tasklist /FO": [{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
     "wmic process":   [{ status: 0, stdout: WMIC_PIPELINE_CMDLINE, stderr: "" }],
   });
-  const verdict = detectPortOccupant({ port: 8765, run: f.run });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
   equal(verdict.inUse, false);
   equal(verdict.ours, false);
 });
@@ -289,7 +289,7 @@ test("detectPortOccupant (win32): port held by node.exe running pipeline.mjs →
     "tasklist /FO": [{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
     "wmic process":   [{ status: 0, stdout: WMIC_PIPELINE_CMDLINE, stderr: "" }],
   });
-  const verdict = detectPortOccupant({ port: 8765, run: f.run });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
   equal(verdict.inUse, true);
   equal(verdict.ours, true);
   // Only the node.exe PID should have triggered a wmic call.
@@ -305,7 +305,7 @@ test("detectPortOccupant (win32): port held by non-node process → not ours", (
     "tasklist /FO": [{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
     "wmic process":   [{ status: 0, stdout: WMIC_OTHER_NODE_CMDLINE, stderr: "" }],
   });
-  const verdict = detectPortOccupant({ port: 8765, run: f.run });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
   equal(verdict.inUse, true);
   equal(verdict.ours, false);
   // Both node.exe and cmd.exe PIDs are seen; wmic only fires for node.exe.
@@ -320,7 +320,7 @@ test("detectPortOccupant (win32): unknown PID in tasklist → not ours", () => {
     "tasklist /FO": [{ status: 0, stdout: "", stderr: "" }],
     "wmic process":   [{ status: 0, stdout: WMIC_PIPELINE_CMDLINE, stderr: "" }],
   });
-  const verdict = detectPortOccupant({ port: 8765, run: f.run });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
   equal(verdict.inUse, true);
   equal(verdict.ours, false);
 });
@@ -331,7 +331,7 @@ test("detectPortOccupant (win32): wmic failure (deprecated on Server 2022+) → 
     "tasklist /FO":[{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
     "wmic process":[{ __throw: true }],
   });
-  const verdict = detectPortOccupant({ port: 8765, run: f.run });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
   equal(verdict.inUse, true);
   equal(verdict.ours, false);
 });
