@@ -213,6 +213,7 @@ Row subcommands (all take <project> = registered project name):
   row-add           <project> <feature> <plan-file> <stage>
   rows              <project> [--format json|plain|md]
   row-delete        <project> <feature>
+  retry-budget-set  <project> <feature> <budget>
   done              <project> <feature>
   next-actions     <project>
   row-audit         <project> [--verbose]

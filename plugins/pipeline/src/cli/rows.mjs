@@ -197,6 +197,33 @@ export async function run(cmd, argv) {
     } finally { close(ctx.db); }
   }
 
+  // ── retry-budget-set ─────────────────────────────────────────────────────────
+  if (cmd === "retry-budget-set") {
+    const [project, feature, budgetStr] = argv;
+    if (!project || !feature || !budgetStr) {
+      process.stderr.write("usage: retry-budget-set <project> <feature> <budget>\n");
+      return 1;
+    }
+    const budget = parseInt(budgetStr, 10);
+    if (isNaN(budget) || budget < 0) {
+      process.stderr.write("error: budget must be a non-negative integer\n");
+      return 1;
+    }
+    const ctx = lookupProjectOrFail(project);
+    if (!ctx) return 1;
+    try {
+      const existing = rowGet(ctx.db, ctx.project, feature);
+      if (!existing) {
+        process.stderr.write(`not found: feature '${feature}'\n`);
+        return 1;
+      }
+      const ok = rowUpdate(ctx.db, ctx.project, feature, { dev_retry_budget: budget });
+      if (ok) { process.stdout.write("OK\n"); return 0; }
+      process.stderr.write(`failed to update feature '${feature}'\n`);
+      return 1;
+    } finally { close(ctx.db); }
+  }
+
   // ── rows ─────────────────────────────────────────────────────────────────────
   if (cmd === "rows") {
     const [project, ...flags] = argv;

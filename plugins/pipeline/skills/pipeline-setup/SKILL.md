@@ -373,6 +373,20 @@ Pass the answer as `--worktree-layout 1` (default) or `--worktree-layout 2 --wor
 
 **SKIP** if the user is happy with the default (3) — it's a fine choice for most setups.
 
+### Question 3g — Dev retry budget (optional)
+
+**What this does**: sets `cfg.devRetryBudget` — how many times the orchestrator may requeue a feature at `dev` stage after a QA failure before giving up and moving the row to `manual`. Each retry reinjects the prior test report path into the new dev session's Mission header so the agent can read the failure before starting.
+
+**Default**: 2.
+
+**When to change it**: raise to 3–4 for features known to need multiple passes; lower to 1 if you prefer manual control after a single QA failure.
+
+**Per-feature override**: `pipeline retry-budget-set <project> <feature> <n>` sets the budget on one row without changing the project-wide default.
+
+**Config key**: `devRetryBudget` in `~/.pipeline/config.json`.
+
+**SKIP** if the user is happy with the default (2).
+
 ### Question 3h — Governor (optional)
 
 The governor is an optional background agent that generates daily/status/monthly spend reports and posts them to the `governance` Slack channel. It is opt-in: set `cfg.governor.enabled = true` to activate it.

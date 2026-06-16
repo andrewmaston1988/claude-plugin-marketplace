@@ -1,5 +1,6 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { join, basename } from "node:path";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { reportPath, featureWorktreePath, resolveTemplate, resolveRowBranch } from "./worktree-paths.mjs";
@@ -63,6 +64,35 @@ function _expand(content, vars) {
   return out;
 }
 
+// Find the most recent test report for a feature.
+// Returns { type: "path", value } for merged filesystem reports, or
+// { type: "git", ref, worktree } for post-3b publish-branch reports.
+function _findMostRecentTestReport(feature, testReportsDir, worktree, publishBranch) {
+  // 1. Filesystem (merged qa/ branches land here)
+  if (testReportsDir && existsSync(testReportsDir)) {
+    try {
+      const reports = readdirSync(testReportsDir)
+        .filter(f => f.startsWith("test-report-") && f.includes(`-${feature}-`) && f.endsWith(".md"))
+        .sort().reverse();
+      if (reports.length > 0) return { type: "path", value: join(testReportsDir, reports[0]) };
+    } catch { /* ignore */ }
+  }
+  // 2. Git publish branch (post-3b — dev-branch working tree is empty after stash-switchback)
+  if (worktree && publishBranch) {
+    try {
+      const ls = execSync(
+        `git -C "${worktree}" ls-tree -r --name-only "${publishBranch}" -- test-reports/`,
+        { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
+      );
+      const reports = ls.trim().split("\n")
+        .filter(f => f && f.includes(feature))
+        .sort().reverse();
+      if (reports.length > 0) return { type: "git", ref: `${publishBranch}:${reports[0]}`, worktree };
+    } catch { /* branch doesn't exist or worktree absent — ignore */ }
+  }
+  return null;
+}
+
 // Generate a session file from a plugin-owned template + plan.
 //
 // projectRoot is required; everything else is optional with sensible defaults.
@@ -79,6 +109,8 @@ export function generateSessionFile(
     cwd,
     reviewSkill,
     reviewRetries = 0,
+    devRetries = 0,
+    devRetryBudget = 2,
     _cfg,
   } = {}
 ) {
@@ -130,6 +162,23 @@ export function generateSessionFile(
   const reviewRP       = reportPath({ project, projectRoot, kind: "code-review", feature, _config: cfg });
   const testRP         = reportPath({ project, projectRoot, kind: "qa-test",     feature, _config: cfg });
 
+  // When re-spawning after QA failure, find and surface the prior test report
+  let priorTestFeedbackBlock = "";
+  if (devRetries > 0) {
+    const found = _findMostRecentTestReport(feature, testRP.dir, worktree, testRP.publishBranch);
+    if (found) {
+      const readInstruction = found.type === "path"
+        ? `\`${found.value}\``
+        : `run: \`git -C ${found.worktree} show ${found.ref}\``;
+      priorTestFeedbackBlock = `## Prior test feedback
+
+Attempt ${devRetries} of ${devRetryBudget}. Prior attempt failed QA — read this before starting:
+${readInstruction}
+
+`;
+    }
+  }
+
   const content = _expand(template, {
     PROGRESS_TRACKING: progressBlock,
     PIPELINE_BIN:      _PIPELINE_BIN,
@@ -145,6 +194,9 @@ export function generateSessionFile(
     TARGET_BRANCH:     targetBranch,
     REVIEW_SKILL:      reviewSkill,
     REVIEW_RETRIES:    reviewRetries,
+    DEV_RETRIES:       devRetries,
+    DEV_RETRY_BUDGET:  devRetryBudget,
+    PRIOR_TEST_FEEDBACK: priorTestFeedbackBlock,
     WORKTREE:          worktree,
     CODE_REVIEW_WT:    worktree,
     QA_TEST_WT:        worktree,
@@ -186,8 +238,11 @@ export function resolveSessionFile(row, project, { projectRoot, dry, cwd, stageS
   // the right retry-(N+1) in its report filename (1-based, matching the Slack label)
   // (the reaper looks at the same filename for the "exit 0 with no verdict" branch).
   const reviewRetries = row.review_retries ?? 0;
+  // dev_retries flows from the row for prior-test-feedback injection
+  const devRetries = row.dev_retries ?? 0;
+  const devRetryBudget = row.dev_retry_budget ?? 2;
 
-  return generateSessionFile(project, planFile, stype, { projectRoot, feature, targetBranch, branch, reviewRetries, cwd });
+  return generateSessionFile(project, planFile, stype, { projectRoot, feature, targetBranch, branch, reviewRetries, devRetries, devRetryBudget, cwd });
 }
 
 export function validateSessionSlug(sessionFile, planStem) {
