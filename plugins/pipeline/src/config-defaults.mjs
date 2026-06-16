@@ -47,6 +47,7 @@ export const PIPELINE_DEFAULTS = {
   },
   autoMerge:  false,
   review:     { skill: "/code-review", deep_flag: "" },
+  devRetryBudget: 2,
   plansDir:   "plans",
   // Branch-name prefixes recognised as orchestration branches. Used by the
   // queue lint to warn (not error) when --target-branch carries an unfamiliar

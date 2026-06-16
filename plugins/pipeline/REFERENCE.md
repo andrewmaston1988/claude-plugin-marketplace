@@ -189,6 +189,7 @@ Written to `~/.pipeline/config.json` by `pipeline setup`. All keys are optional 
 | `autoMerge` | boolean | `false` | When `true`, the orchestrator automatically spawns the merge agent for rows at `stage=merge` |
 | `review.skill` | string | `"/code-review"` | Slash-command invoked by review sessions |
 | `review.deep_flag` | string | `""` | Extra flag appended to the review skill invocation (any string; empty disables) |
+| `devRetryBudget` | integer | `2` | Max times a dev session may retry after QA failure; per-feature override via `pipeline retry-budget-set` |
 
 Example `~/.pipeline/config.json`:
 
@@ -962,6 +963,7 @@ cd plugins/pipeline && npm test
 | `row-add <root> <feature> <plan-file> <stage>` | Add a new pipeline row |
 | `rows <root> [--format json\|plain\|md]` | List all rows |
 | `row-delete <root> <feature>` | Remove a pipeline row |
+| `retry-budget-set <root> <feature> <budget>` | Set the max dev retry budget for a feature (overrides config default) |
 | `done <root> <feature>` | Mark a feature complete (only valid from `manual` stage — `stage-set … done` works from any stage, but directly advancing a non-manual row to done is unusual and skips all quality gates) |
 | `cycle-log <project> [--feature <slug>] [--limit N] [--format json\|plain]` | Per-session timing + spend + outcome log (one row per finished session) |
 | `next-actions <root>` | Show what the orchestrator would act on next |

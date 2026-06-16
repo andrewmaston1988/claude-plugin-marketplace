@@ -575,6 +575,22 @@ export async function runWizard({ paths, log, opts = {} }) {
     config.orch = config.orch || {};
     config.orch.max_concurrent = (capParsed >= 1) ? capParsed : 3;
 
+    // Step 7c — Dev retry budget
+    hr();
+    say("Step 7c/11 — Dev retry budget\n");
+    if (!nonInteractive) {
+      say("  How many times may a dev session retry after QA failure? (default is 2)");
+      say("  Configure per-feature via 'pipeline retry-budget-set <project> <feature> <n>'.\n");
+    }
+    let budgetRaw;
+    if (nonInteractive) {
+      budgetRaw = opts.devRetryBudget != null ? String(opts.devRetryBudget) : "";
+    } else {
+      budgetRaw = (await ask("  Dev retry budget [2]: ")).trim();
+    }
+    const budgetParsed = parseInt(budgetRaw, 10);
+    config.devRetryBudget = (budgetParsed >= 0) ? budgetParsed : 2;
+
     // Write config (atomic .tmp → rename). Deferred until after the worktree
     // step so all keys land in one write.
     mkdirSync(paths.configDir, { recursive: true });
