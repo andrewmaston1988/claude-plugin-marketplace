@@ -37,3 +37,7 @@ export {
   getLastCheckpointSize, setLastCheckpointSize, listAllClaudeSessionIds,
   backfillFromClaudeDb,
 } from "./claude-sessions.mjs";
+export {
+  setCoordinatorGoal, getCoordinatorGoal, clearCoordinatorGoal,
+  listCoordinatorGoals, backfillFromClaudeDb as backfillCoordinatorGoalsFromClaudeDb,
+} from "./coordinator-goals.mjs";
