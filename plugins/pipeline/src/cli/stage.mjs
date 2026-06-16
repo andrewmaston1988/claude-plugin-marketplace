@@ -18,7 +18,7 @@ function buildStageSetFields(newStage, opts = {}) {
   if (notes !== null && notes !== undefined) fields.notes_extra = notes;
   for (const [col, val] of [["r_model", rModel], ["d_model", dModel],
                              ["q_model", qModel], ["rvw_model", rvwModel]]) {
-    if (val !== null && val !== undefined) fields[col] = val === "—" ? null : val;
+    if (val !== null && val !== undefined) fields[col] = val === "—" ? null : val.toLowerCase();
   }
   if (dependsOn !== null && dependsOn !== undefined) {
     fields.depends_on = dependsOn.trim() || null;

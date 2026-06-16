@@ -147,10 +147,10 @@ export async function run(cmd, argv) {
 
     const notes      = getFlag("--notes", flags) || "";
     const branch     = getFlag("--branch", flags) || "—";
-    const rModel     = getFlag("--r-model", flags) || "—";
-    const dModel     = getFlag("--d-model", flags) || "—";
-    const qModel     = getFlag("--q-model", flags) || "—";
-    const rvwModel   = getFlag("--rvw-model", flags) || "—";
+    const rModel     = (getFlag("--r-model", flags) || "—").toLowerCase();
+    const dModel     = (getFlag("--d-model", flags) || "—").toLowerCase();
+    const qModel     = (getFlag("--q-model", flags) || "—").toLowerCase();
+    const rvwModel   = (getFlag("--rvw-model", flags) || "—").toLowerCase();
     const dependsOn  = getFlag("--depends", flags) || null;
     const tgtBranch  = getFlag("--target-branch", flags) || "main";
 
@@ -407,9 +407,9 @@ export async function run(cmd, argv) {
     const ctx = lookupProjectOrFail(project);
     if (!ctx) return 1;
     const notes  = getFlag("--notes", flags) || "";
-    const rModel = getFlag("--r-model", flags) || "—";
-    const dModel = getFlag("--d-model", flags) || "—";
-    const qModel = getFlag("--q-model", flags) || "—";
+    const rModel = (getFlag("--r-model", flags) || "—").toLowerCase();
+    const dModel = (getFlag("--d-model", flags) || "—").toLowerCase();
+    const qModel = (getFlag("--q-model", flags) || "—").toLowerCase();
 
     try {
       if (researchFeature === devFeature) {
