@@ -23,9 +23,9 @@ export function setCoordinatorGoal(db, { cwd, ttlSeconds, reasonMessage = null, 
 export function getCoordinatorGoal(db, cwd) {
   const stmt = db.prepare(
     "SELECT cwd, set_at, ttl_seconds, reason_message, set_by_session " +
-    "FROM coordinator_goals WHERE cwd = ?"
+    "FROM coordinator_goals WHERE cwd = ? AND (set_at + ttl_seconds) > ?"
   );
-  return stmt.get(cwd) || null;
+  return stmt.get(cwd, Date.now() / 1000) || null;
 }
 
 export function clearCoordinatorGoal(db, cwd) {
