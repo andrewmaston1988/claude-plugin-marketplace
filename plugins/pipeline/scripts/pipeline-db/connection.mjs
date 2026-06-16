@@ -267,6 +267,25 @@ const SCHEMA_V7_VERSION = 7;
 const SCHEMA_V9_VERSION = 9;
 const SCHEMA_V10_VERSION = 10;
 const SCHEMA_V11_VERSION = 11;
+const SCHEMA_V12_VERSION = 12;
+
+// Add coordinator_goals table — absorbs claude.db.coordinator_goals into pipeline.db.
+// Schema mirrors scripts/claude_db_migrations/004_coordinator_goals.sql exactly:
+// - cwd TEXT PRIMARY KEY (one row per working-directory sentinel)
+// - set_at REAL NOT NULL (unix epoch seconds)
+// - ttl_seconds INTEGER NOT NULL
+// - reason_message TEXT (per-cwd override of the Stop hook's DEFAULT_REASON)
+// - set_by_session TEXT (audit trail — which session armed this goal)
+const SCHEMA_V12 = `
+CREATE TABLE IF NOT EXISTS coordinator_goals (
+  cwd             TEXT PRIMARY KEY,
+  set_at          REAL NOT NULL,
+  ttl_seconds     INTEGER NOT NULL,
+  reason_message  TEXT,
+  set_by_session  TEXT
+);
+INSERT OR IGNORE INTO schema_version (version) VALUES (12);
+`;
 
 const SCHEMA_V7 = `
 CREATE TABLE IF NOT EXISTS claude_sessions (
@@ -375,6 +394,9 @@ function _applyMigrations(db) {
     db.exec("UPDATE pipeline_rows SET d_effort = 'medium' WHERE d_effort IS NULL");
     db.exec("UPDATE pipeline_rows SET q_effort = 'low'    WHERE q_effort IS NULL");
     db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V11_VERSION})`);
+  }
+  if (currentVersion < SCHEMA_V12_VERSION) {
+    db.exec(SCHEMA_V12);
   }
 }
 
