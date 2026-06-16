@@ -45,6 +45,7 @@ export function formatRow(r) {
     budget_usd:          r.budget_usd,
     qa_pass:             qa === 1 ? "true" : (qa === 0 ? "false" : "—"),
     dev_retries:         r.dev_retries || 0,
+    dev_retry_budget:    r.dev_retry_budget ?? 2,
     review_retries:      r.review_retries ?? 0,
     review_retry_budget: r.review_retry_budget ?? 3,
     review_verdict:      r.review_verdict,
