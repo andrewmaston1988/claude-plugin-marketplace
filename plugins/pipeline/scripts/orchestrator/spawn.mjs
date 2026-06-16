@@ -75,12 +75,24 @@ export function budgetFromNotes(notes) {
 export function ensureWorktree(projectDir, wtPath, branch, baseBranch, logFn) {
   if (existsSync(wtPath)) {
     if (existsSync(join(wtPath, ".git"))) {
-      logFn(`Reusing worktree at ${wtPath} for branch ${branch}`);
-      return true;
+      // Verify the worktree is on the expected branch before reusing.
+      const actual = spawnSync(
+        "git", ["-C", wtPath, "branch", "--show-current"],
+        { timeout: 10000, windowsHide: true, encoding: "utf8" }
+      ).stdout.trim();
+      if (actual === branch) {
+        logFn(`Reusing worktree at ${wtPath} for branch ${branch}`);
+        return true;
+      }
+      // Wrong branch — remove and recreate on the correct one.
+      logFn(`Removing stale worktree at ${wtPath} (on '${actual}', expected '${branch}')`, "WARN");
+      spawnSync("git", ["-C", projectDir, "worktree", "remove", "--force", wtPath],
+        { timeout: 30000, windowsHide: true });
+    } else {
+      // Ghost directory: exists on disk but not registered with git. Remove it
+      // so the git worktree add below can proceed cleanly.
+      logFn(`Removing ghost worktree at ${wtPath} (directory exists but no .git)`, "WARN");
     }
-    // Ghost directory: exists on disk but not registered with git. Remove it
-    // so the git worktree add below can proceed cleanly.
-    logFn(`Removing ghost worktree at ${wtPath} (directory exists but no .git)`, "WARN");
     rmSync(wtPath, { recursive: true, force: true });
   }
   mkdirSync(join(wtPath, ".."), { recursive: true });
