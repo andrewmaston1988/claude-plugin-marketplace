@@ -57,7 +57,7 @@ export function autoCommitWorktree(wtPath, feature, ts, logFn) {
   }
   try {
     const status = spawnSync("git", ["-C", wtPath, "status", "--porcelain"],
-      { encoding: "utf8", windowsHide: true });
+      { encoding: "utf8", windowsHide: true, timeout: 30000 });
     if (status.status !== 0) {
       logFn(`[auto-commit] ${feature} status failed: ${(status.stderr || "").trim()}`, "WARN");
       return false;
@@ -66,7 +66,7 @@ export function autoCommitWorktree(wtPath, feature, ts, logFn) {
       return false; // nothing to commit
     }
     const add = spawnSync("git", ["-C", wtPath, "add", "-A"],
-      { encoding: "utf8", windowsHide: true });
+      { encoding: "utf8", windowsHide: true, timeout: 30000 });
     if (add.status !== 0) {
       logFn(`[auto-commit] ${feature} add failed: ${(add.stderr || "").trim()}`, "WARN");
       return false;
@@ -75,7 +75,7 @@ export function autoCommitWorktree(wtPath, feature, ts, logFn) {
       "-C", wtPath, "commit", "--no-gpg-sign",
       "-m", `wip: reaper auto-commit [dev-no-handoff ${ts}]`,
     ], {
-      encoding: "utf8", windowsHide: true,
+      encoding: "utf8", windowsHide: true, timeout: 30000,
       env: { ...process.env, GIT_AUTHOR_NAME: "Pipeline Reaper", GIT_AUTHOR_EMAIL: "reaper@pipeline",
         GIT_COMMITTER_NAME: "Pipeline Reaper", GIT_COMMITTER_EMAIL: "reaper@pipeline" },
     });
@@ -83,7 +83,7 @@ export function autoCommitWorktree(wtPath, feature, ts, logFn) {
       logFn(`[auto-commit] ${feature} commit failed: ${(commit.stderr || "").trim()}`, "WARN");
       return false;
     }
-    logFn(`[auto-commit] ${feature} committed worktree changes before recovery decision`, "WARN");
+    logFn(`[auto-commit] ${feature} committed worktree changes before recovery decision`, "INFO");
     return true;
   } catch (e) {
     logFn(`[auto-commit] ${feature} unexpected error: ${e.message}`, "WARN");
