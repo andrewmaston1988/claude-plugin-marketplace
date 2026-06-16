@@ -39,18 +39,21 @@ export function rowAdd(db, project, {
   const cols = [
     "project", "feature", "plan_file", "stage", "branch",
     "r_model", "d_model", "q_model",
-    "r_effort", "d_effort", "q_effort",
     "session_type", "session_file", "budget_usd",
     "depends_on", "target_branch",
   ];
   const vals = [
     project, feature, planFile, stage, branch,
     rModel, dModel, qModel,
-    rEffort, dEffort, qEffort,
     sessionType, sessionFile, budgetUsd,
     dependsOn ?? null, targetBranch,
   ];
 
+  // Effort columns use conditional-push so SQLite DEFAULTs ('high'/'medium'/'low')
+  // fire when the caller omits the value. Explicit null would override DEFAULT.
+  if (rEffort !== null)          { cols.push("r_effort");            vals.push(rEffort); }
+  if (dEffort !== null)          { cols.push("d_effort");            vals.push(dEffort); }
+  if (qEffort !== null)          { cols.push("q_effort");            vals.push(qEffort); }
   if (rvwModel !== null)         { cols.push("rvw_model");           vals.push(rvwModel); }
   if (rvwEffort !== null)        { cols.push("rvw_effort");          vals.push(rvwEffort); }
   if (reviewRetries !== null)    { cols.push("review_retries");      vals.push(reviewRetries); }
