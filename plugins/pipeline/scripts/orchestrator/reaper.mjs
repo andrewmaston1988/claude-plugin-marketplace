@@ -1,5 +1,5 @@
 import { existsSync, readdirSync } from "node:fs";
-import { basename, relative } from "node:path";
+import { basename, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
   rowGet, rowUpdate, setLastError,
@@ -46,6 +46,49 @@ function branchHasCommits(projectRoot, branch, targetBranch) {
       { encoding: "utf8", windowsHide: true });
     return r.status === 0 && parseInt(r.stdout.trim(), 10) > 0;
   } catch { return false; }
+}
+
+// Auto-commit any staged/unstaged changes sitting in a feature worktree so
+// the no-handoff recovery path can see them via branchHasCommits. Best-effort:
+// any failure logs at WARN and returns false — never throws.
+export function autoCommitWorktree(wtPath, feature, ts, logFn) {
+  if (!wtPath || !existsSync(wtPath) || !existsSync(join(wtPath, ".git"))) {
+    return false;
+  }
+  try {
+    const status = spawnSync("git", ["-C", wtPath, "status", "--porcelain"],
+      { encoding: "utf8", windowsHide: true, timeout: 30000 });
+    if (status.status !== 0) {
+      logFn(`[auto-commit] ${feature} status failed: ${(status.stderr || "").trim()}`, "WARN");
+      return false;
+    }
+    if (!status.stdout.trim()) {
+      return false; // nothing to commit
+    }
+    const add = spawnSync("git", ["-C", wtPath, "add", "-A"],
+      { encoding: "utf8", windowsHide: true, timeout: 30000 });
+    if (add.status !== 0) {
+      logFn(`[auto-commit] ${feature} add failed: ${(add.stderr || "").trim()}`, "WARN");
+      return false;
+    }
+    const commit = spawnSync("git", [
+      "-C", wtPath, "commit", "--no-gpg-sign",
+      "-m", `wip: reaper auto-commit [dev-no-handoff ${ts}]`,
+    ], {
+      encoding: "utf8", windowsHide: true, timeout: 30000,
+      env: { ...process.env, GIT_AUTHOR_NAME: "Pipeline Reaper", GIT_AUTHOR_EMAIL: "reaper@pipeline",
+        GIT_COMMITTER_NAME: "Pipeline Reaper", GIT_COMMITTER_EMAIL: "reaper@pipeline" },
+    });
+    if (commit.status !== 0) {
+      logFn(`[auto-commit] ${feature} commit failed: ${(commit.stderr || "").trim()}`, "WARN");
+      return false;
+    }
+    logFn(`[auto-commit] ${feature} committed worktree changes before recovery decision`, "INFO");
+    return true;
+  } catch (e) {
+    logFn(`[auto-commit] ${feature} unexpected error: ${e.message}`, "WARN");
+    return false;
+  }
 }
 
 // Reconcile sessions based on process state (DB-driven, no activeProcs).
@@ -180,6 +223,12 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
             const budget      = row.review_retry_budget || 3;
             const planStem    = basename(row.plan_file || "", ".md") || feature;
             const targetBranch = row.target_branch || detectDefaultBranch(projectRoot);
+            // Auto-commit any uncommitted WIP in the feature worktree so
+            // branchHasCommits sees the work. Best-effort — never blocks recovery.
+            if (projectRoot) {
+              const wtPath = featureWorktreePath({ project, projectRoot, feature: planStem });
+              autoCommitWorktree(wtPath, planStem, ts, logFn);
+            }
             const hasWork     = branchHasCommits(projectRoot, resolveRowBranch(row, planStem), targetBranch);
             const recoverable = !!projectRoot && retries < budget && (retries > 0 || hasWork);
 
