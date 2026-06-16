@@ -266,6 +266,7 @@ const SCHEMA_V6_VERSION = 6;
 const SCHEMA_V7_VERSION = 7;
 const SCHEMA_V9_VERSION = 9;
 const SCHEMA_V10_VERSION = 10;
+const SCHEMA_V11_VERSION = 11;
 
 const SCHEMA_V7 = `
 CREATE TABLE IF NOT EXISTS claude_sessions (
@@ -363,6 +364,17 @@ function _applyMigrations(db) {
       db.exec("ALTER TABLE pipeline_rows ADD COLUMN dev_retry_budget INTEGER DEFAULT 2");
     }
     db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V10_VERSION})`);
+  }
+  if (currentVersion < SCHEMA_V11_VERSION) {
+    // Backfill NULL effort columns to their documented defaults. rowAdd used
+    // to insert NULL explicitly for omitted effort args, overriding the
+    // column DEFAULTs; V11+ rowAdd omits the column when null, so DEFAULTs
+    // apply for new rows. This catches existing rows that slipped through
+    // before the fix landed.
+    db.exec("UPDATE pipeline_rows SET r_effort = 'high'   WHERE r_effort IS NULL");
+    db.exec("UPDATE pipeline_rows SET d_effort = 'medium' WHERE d_effort IS NULL");
+    db.exec("UPDATE pipeline_rows SET q_effort = 'low'    WHERE q_effort IS NULL");
+    db.exec(`INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V11_VERSION})`);
   }
 }
 
