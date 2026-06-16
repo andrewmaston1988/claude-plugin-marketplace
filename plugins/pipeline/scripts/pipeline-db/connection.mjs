@@ -287,11 +287,6 @@ ALTER TABLE claude_sessions ADD COLUMN last_checkpoint_size INTEGER;
 INSERT OR IGNORE INTO schema_version (version) VALUES (8);
 `;
 
-// Add dev_retry_budget column to pipeline_rows for configurable dev retry ceiling
-const SCHEMA_V10 = `
-ALTER TABLE pipeline_rows ADD COLUMN dev_retry_budget INTEGER DEFAULT 2;
-INSERT OR IGNORE INTO schema_version (version) VALUES (${SCHEMA_V10_VERSION});
-`;
 
 function _applyMigrations(db) {
   let currentVersion = 0;

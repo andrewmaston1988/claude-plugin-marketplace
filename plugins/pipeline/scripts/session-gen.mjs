@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { join, basename } from "node:path";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 import { reportPath, featureWorktreePath, resolveTemplate, resolveRowBranch } from "./worktree-paths.mjs";
@@ -64,19 +65,30 @@ function _expand(content, vars) {
 }
 
 // Find the most recent test report for a feature.
-function _findMostRecentTestReport(feature, testReportsDir) {
-  if (!testReportsDir || !existsSync(testReportsDir)) return null;
-  try {
-    const files = readdirSync(testReportsDir);
-    const reports = files
-      .filter(f => f.startsWith(`test-report-`) && f.includes(`-${feature}-`) && f.endsWith(".md"))
-      .sort()
-      .reverse();
-    if (reports.length > 0) {
-      return join(testReportsDir, reports[0]);
-    }
-  } catch (e) {
-    // silently ignore errors reading the directory
+// Returns { type: "path", value } for merged filesystem reports, or
+// { type: "git", ref, worktree } for post-3b publish-branch reports.
+function _findMostRecentTestReport(feature, testReportsDir, worktree, publishBranch) {
+  // 1. Filesystem (merged qa/ branches land here)
+  if (testReportsDir && existsSync(testReportsDir)) {
+    try {
+      const reports = readdirSync(testReportsDir)
+        .filter(f => f.startsWith("test-report-") && f.includes(`-${feature}-`) && f.endsWith(".md"))
+        .sort().reverse();
+      if (reports.length > 0) return { type: "path", value: join(testReportsDir, reports[0]) };
+    } catch { /* ignore */ }
+  }
+  // 2. Git publish branch (post-3b — dev-branch working tree is empty after stash-switchback)
+  if (worktree && publishBranch) {
+    try {
+      const ls = execSync(
+        `git -C "${worktree}" ls-tree -r --name-only "${publishBranch}" -- test-reports/`,
+        { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }
+      );
+      const reports = ls.trim().split("\n")
+        .filter(f => f && f.includes(feature))
+        .sort().reverse();
+      if (reports.length > 0) return { type: "git", ref: `${publishBranch}:${reports[0]}`, worktree };
+    } catch { /* branch doesn't exist or worktree absent — ignore */ }
   }
   return null;
 }
@@ -153,12 +165,15 @@ export function generateSessionFile(
   // When re-spawning after QA failure, find and surface the prior test report
   let priorTestFeedbackBlock = "";
   if (devRetries > 0) {
-    const reportPath = _findMostRecentTestReport(feature, testRP.dir);
-    if (reportPath) {
+    const found = _findMostRecentTestReport(feature, testRP.dir, worktree, testRP.publishBranch);
+    if (found) {
+      const readInstruction = found.type === "path"
+        ? `\`${found.value}\``
+        : `run: \`git -C ${found.worktree} show ${found.ref}\``;
       priorTestFeedbackBlock = `## Prior test feedback
 
 Attempt ${devRetries} of ${devRetryBudget}. Prior attempt failed QA — read this before starting:
-\`${reportPath}\`
+${readInstruction}
 
 `;
     }
