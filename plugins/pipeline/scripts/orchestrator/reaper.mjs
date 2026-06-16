@@ -83,7 +83,7 @@ export function autoCommitWorktree(wtPath, feature, ts, logFn) {
       logFn(`[auto-commit] ${feature} commit failed: ${(commit.stderr || "").trim()}`, "WARN");
       return false;
     }
-    logFn(`[auto-commit] ${feature} committed worktree changes before recovery decision`, "INFO");
+    logFn(`[auto-commit] ${feature} committed worktree changes before recovery decision`, "WARN");
     return true;
   } catch (e) {
     logFn(`[auto-commit] ${feature} unexpected error: ${e.message}`, "WARN");
