@@ -407,9 +407,10 @@ export async function run(cmd, argv) {
     const ctx = lookupProjectOrFail(project);
     if (!ctx) return 1;
     const notes  = getFlag("--notes", flags) || "";
-    const rModel = (getFlag("--r-model", flags) || "—").toLowerCase();
-    const dModel = (getFlag("--d-model", flags) || "—").toLowerCase();
-    const qModel = (getFlag("--q-model", flags) || "—").toLowerCase();
+    const rModel   = (getFlag("--r-model",   flags) || "—").toLowerCase();
+    const dModel   = (getFlag("--d-model",   flags) || "—").toLowerCase();
+    const qModel   = (getFlag("--q-model",   flags) || "—").toLowerCase();
+    const rvwModel = (getFlag("--rvw-model", flags) || "—").toLowerCase();
 
     try {
       if (researchFeature === devFeature) {
@@ -418,9 +419,10 @@ export async function run(cmd, argv) {
         rowUpdate(ctx.db, ctx.project, researchFeature, { stage: "done", notes_extra: "type=research" });
         rowAdd(ctx.db, ctx.project, {
           feature: devFeature, planFile: devPlanFile, stage: "queued",
-          rModel: rModel !== "—" ? rModel : null,
-          dModel: dModel !== "—" ? dModel : null,
-          qModel: qModel !== "—" ? qModel : null,
+          rModel:   rModel   !== "—" ? rModel   : null,
+          dModel:   dModel   !== "—" ? dModel   : null,
+          qModel:   qModel   !== "—" ? qModel   : null,
+          rvwModel: rvwModel !== "—" ? rvwModel : null,
         });
         if (notes) rowUpdate(ctx.db, ctx.project, devFeature, { notes_extra: notes });
       }
