@@ -126,6 +126,15 @@ test("listCoordinatorGoals: orders by set_at desc", () => {
   } finally { teardown(tmp, db); }
 });
 
+test("getCoordinatorGoal: returns null for expired goals", () => {
+  const { tmp, db } = setup();
+  try {
+    // Backdate set_at so ttl_seconds has already elapsed.
+    db.prepare("INSERT INTO coordinator_goals (cwd, set_at, ttl_seconds) VALUES (?,?,?)").run("/c", Date.now() / 1000 - 10, 1);
+    equal(getCoordinatorGoal(db, "/c"), null, "expired goal must return null");
+  } finally { teardown(tmp, db); }
+});
+
 test("backfillCoordinatorGoalsFromClaudeDb: copies rows from claude.db fixture", () => {
   // Build a fixture claude.db with a coordinator_goals table
   const fixturePath = join(tmpdir(), `coordinator-goals-fixture-${process.pid}.db`);
@@ -148,22 +157,24 @@ test("backfillCoordinatorGoalsFromClaudeDb: copies rows from claude.db fixture",
   const { tmp, db } = setup();
   try {
     backfillCoordinatorGoalsFromClaudeDb(db, fixturePath);
-    const a = getCoordinatorGoal(db, "/proj/a");
+    // Use listCoordinatorGoals: backfilled rows may have expired TTLs and are
+    // invisible to getCoordinatorGoal, but must still be present in the DB.
+    const rows = listCoordinatorGoals(db);
+    const a = rows.find(r => r.cwd === "/proj/a");
     ok(a, "row a should exist");
     equal(a.ttl_seconds, 600);
     equal(a.reason_message, "A reason");
     equal(a.set_by_session, "sess-a");
     equal(a.set_at, 1718366400, "set_at should be cast to REAL");
 
-    const b = getCoordinatorGoal(db, "/proj/b");
+    const b = rows.find(r => r.cwd === "/proj/b");
     ok(b);
     equal(b.reason_message, null);
     equal(b.set_by_session, null);
 
     // Idempotent re-run
     backfillCoordinatorGoalsFromClaudeDb(db, fixturePath);
-    const all = listCoordinatorGoals(db);
-    equal(all.length, 2, "re-run must not duplicate rows");
+    equal(listCoordinatorGoals(db).length, 2, "re-run must not duplicate rows");
   } finally {
     teardown(tmp, db);
     try { rmSync(fixturePath, { force: true }); } catch {}
