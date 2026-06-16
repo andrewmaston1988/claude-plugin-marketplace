@@ -111,12 +111,6 @@ function buildAdditionalContext(params, { fsReadTemplate }) {
   const CHECKPOINT_SIZE_THRESHOLD = 2_000_000;
   const CHECKPOINT_SIZE_GROWTH = 1_000_000;
 
-  if (prevAnyTs === 0 && !isKeepalive) {
-    ctx += (
-      "\n\n**Scout reminder (one-time):** This machine has a `scout` MCP indexed across all projects (CLAUDE, torrent-hub, scout, nova-*). For any \"find / where is / look for / what calls / how does X work\" intent, use Scout (mcp__scout__*) BEFORE Read/Grep/Glob — it is faster, ranked, and cross-repo. Invoke the `scout` skill for the tool-selection guide."
-    );
-    injected.push("scout-reminder");
-  }
 
   let shouldCheckpoint = false;
   if (!isKeepalive && !env.CORRELATION_ID && transcriptSize >= CHECKPOINT_SIZE_THRESHOLD) {
