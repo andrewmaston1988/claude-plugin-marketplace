@@ -67,16 +67,6 @@ When the breaker trips: append the cause via `{{PIPELINE_BIN}} progress-note {{P
 
 ---
 
-## Environment
-
-**Orchestrator preflight:** if this session needs to start or restart the orchestrator (`watch_queue.py`), always run `--status` first:
-```bash
-python {{PROJECT_ROOT}}/scripts/watch_queue.py --status
-```
-Exit code 0 = already running — do not start a second instance. Only use `--force` if `--status` confirms the prior instance is stale or dead. Never use `Start-Process` in a loop.
-
----
-
 ## Authority
 
 You have full autonomy to:
