@@ -11,6 +11,9 @@ import { run as runStage     } from "../src/cli/stage.mjs";
 import { run as runRows      } from "../src/cli/rows.mjs";
 import { run as runQueue     } from "../src/cli/queue.mjs";
 import { run as runProjects  } from "../src/cli/projects.mjs";
+import { run as runPlanFamily } from "../src/cli/plan-family.mjs";
+import { run as runPlanFamilySweep } from "../src/cli/plan-family-sweep.mjs";
+import { run as runLintPlanFamily } from "../src/cli/lint-plan-family.mjs";
 import { getFlag, detectDefaultBranch } from "../src/cli/helpers.mjs";
 
 const PLUGIN_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -257,6 +260,20 @@ Other:
   rebase-required-set  <project> <feature> <0|1>
   plugin-root          Print the absolute path to this plugin's root directory
   config-get <key>     Print a single config value (empty output if unset)
+
+Plan families:
+  plan-family          <project> <parent> [--format json|plain]
+                       List an umbrella plan and all its children (by
+                       '*Parent:*' annotation or naming inference), with
+                       pipeline row stages.
+  plan-family-sweep    <project> [--apply]
+                       Move umbrella plan + active children into
+                       'complete/' when all children are already in
+                       'complete/'. Dry-run by default.
+  lint-plan-family     <project> [--plans-dir <path>] [--json]
+                       Lint plans for parent/child annotation hygiene.
+                       Exits 1 if any child plan lacks a '*Parent:*'
+                       annotation or references a missing umbrella.
 `);
     setTimeout(() => process.exit(0), 150);
     return;
@@ -266,7 +283,8 @@ Other:
   let handlerFound = false;
   try {
     for (const handler of [runProjects, runDispatch, runSession, runNotify,
-                            runProgress, runStage, runRows, runQueue]) {
+                            runProgress, runStage, runRows, runQueue,
+                            runPlanFamily, runPlanFamilySweep, runLintPlanFamily]) {
       const result = await handler(cmd, argv);
       if (result !== null && result !== undefined) {
         exitCode = result;
