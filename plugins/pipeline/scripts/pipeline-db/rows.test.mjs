@@ -79,3 +79,72 @@ test("schema_version: SCHEMA_V8 applied (rvw_effort column exists)", () => {
     ok(version.v >= 8, `schema_version must be >= 8, got ${version.v}`);
   } finally { teardown(tmp, db); }
 });
+
+test("effort: r_effort defaults to 'high' on fresh row (omitted arg)", () => {
+  const { tmp, db } = setup();
+  try {
+    rowAdd(db, PROJECT, { feature: "feat-r-default", planFile: "/p.md", stage: "queued" });
+    const row = rowGet(db, PROJECT, "feat-r-default");
+    equal(row.r_effort, "high", "r_effort should default to 'high'");
+  } finally { teardown(tmp, db); }
+});
+
+test("effort: d_effort defaults to 'medium' on fresh row (omitted arg)", () => {
+  const { tmp, db } = setup();
+  try {
+    rowAdd(db, PROJECT, { feature: "feat-d-default", planFile: "/p.md", stage: "queued" });
+    const row = rowGet(db, PROJECT, "feat-d-default");
+    equal(row.d_effort, "medium", "d_effort should default to 'medium'");
+  } finally { teardown(tmp, db); }
+});
+
+test("effort: q_effort defaults to 'low' on fresh row (omitted arg)", () => {
+  const { tmp, db } = setup();
+  try {
+    rowAdd(db, PROJECT, { feature: "feat-q-default", planFile: "/p.md", stage: "queued" });
+    const row = rowGet(db, PROJECT, "feat-q-default");
+    equal(row.q_effort, "low", "q_effort should default to 'low'");
+  } finally { teardown(tmp, db); }
+});
+
+test("effort: explicit values round-trip", () => {
+  const { tmp, db } = setup();
+  try {
+    rowAdd(db, PROJECT, {
+      feature: "feat-explicit-efforts",
+      planFile: "/p.md",
+      stage: "queued",
+      rEffort: "max",
+      dEffort: "max",
+      qEffort: "max",
+    });
+    const row = rowGet(db, PROJECT, "feat-explicit-efforts");
+    equal(row.r_effort, "max");
+    equal(row.d_effort, "max");
+    equal(row.q_effort, "max");
+  } finally { teardown(tmp, db); }
+});
+
+test("effort: partial set — omitted columns keep defaults", () => {
+  const { tmp, db } = setup();
+  try {
+    rowAdd(db, PROJECT, {
+      feature: "feat-partial",
+      planFile: "/p.md",
+      stage: "queued",
+      dEffort: "max",
+    });
+    const row = rowGet(db, PROJECT, "feat-partial");
+    equal(row.r_effort, "high",   "r_effort should still default to 'high'");
+    equal(row.d_effort, "max",    "d_effort should be the explicit 'max'");
+    equal(row.q_effort, "low",    "q_effort should still default to 'low'");
+  } finally { teardown(tmp, db); }
+});
+
+test("schema_version: SCHEMA_V11 applied (backfill migration)", () => {
+  const { tmp, db } = setup();
+  try {
+    const version = db.prepare("SELECT MAX(version) AS v FROM schema_version").get();
+    ok(version.v >= 11, `schema_version must be >= 11, got ${version.v}`);
+  } finally { teardown(tmp, db); }
+});
