@@ -241,15 +241,19 @@ CREATE TABLE IF NOT EXISTS plans (
 );
 CREATE INDEX IF NOT EXISTS idx_plans_project ON plans(project);
 CREATE INDEX IF NOT EXISTS idx_plans_status  ON plans(status);
+INSERT OR IGNORE INTO schema_version(version) VALUES(5);
+`;
 
+// FTS5 is compiled in by default on Node 24+ bundled SQLite but not guaranteed
+// on earlier builds. Kept separate so a missing FTS5 extension degrades
+// plans-search to a no-op rather than crashing connectUnified.
+const SCHEMA_V5_FTS = `
 CREATE VIRTUAL TABLE IF NOT EXISTS plans_fts USING fts5(
   slug, title, body,
   content='plans',
   content_rowid='rowid',
   tokenize='unicode61'
 );
-
-INSERT OR IGNORE INTO schema_version(version) VALUES(5);
 `;
 
 // Add effort columns: r_effort, d_effort, q_effort with role-appropriate defaults
@@ -345,6 +349,7 @@ function _applyMigrations(db) {
   }
   if (currentVersion < 5) {
     db.exec(SCHEMA_V5);
+    try { db.exec(SCHEMA_V5_FTS); } catch { /* FTS5 not compiled in — plans-search unavailable */ }
   }
   if (currentVersion < SCHEMA_V6_VERSION) {
     // Add effort columns: r_effort, d_effort, q_effort for pipeline effort dimension
