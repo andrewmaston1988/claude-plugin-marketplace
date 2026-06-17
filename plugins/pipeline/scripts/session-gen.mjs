@@ -214,7 +214,12 @@ ${readInstruction}
 // generate a fresh session via the template.
 export function resolveSessionFile(row, project, { projectRoot, dry, cwd, stageSessionType } = {}) {
   const notes = (row.notes || "").trim();
-  const notesPath = notes.split(/\s+/).find((t) => t.endsWith(".md")) || null;
+  // Filter notes-mentioned session files by intended session-type prefix:
+  // a stale review-…md in dev-row notes must not be reused for a dev spawn.
+  const sTypePrefix = stageSessionType || _sessionTypeFromNotes(notes);
+  const notesPath = sTypePrefix
+    ? notes.split(/\s+/).find((t) => t.endsWith(".md") && basename(t).startsWith(sTypePrefix)) || null
+    : null;
   if (notesPath && projectRoot) {
     const candidate = join(projectRoot, notesPath);
     if (existsSync(candidate)) return candidate;
