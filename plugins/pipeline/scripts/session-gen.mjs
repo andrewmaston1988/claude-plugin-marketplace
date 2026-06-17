@@ -1,5 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs";
 import { join, basename } from "node:path";
+import { homedir } from "node:os";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
@@ -19,17 +20,12 @@ function _sessionTypeFromNotes(notes) {
 // Plugin-bundled templates live next to this script under ../templates/.
 const _BUNDLED_TEMPLATES_DIR = fileURLToPath(new URL("../templates", import.meta.url));
 
-// Absolute path to the plugin's CLI entry. Substituted into templates as
-// `{{PIPELINE_BIN}}` so spawned `claude -p` sessions can invoke it directly,
-// without relying on a PATH alias (which lives in the user's shell profile
-// and is unavailable in the spawned env).
-// Absolute paths to BOTH node and the plugin's pipeline.mjs. The bare `node`
-// binary is on PATH for the operator's shell (Bash) but NOT for the PowerShell
-// the autonomous claude session uses — agents have been failing to call
-// pipeline subcommands because PowerShell couldn't resolve `node`. Using the
-// orchestrator's own `process.execPath` guarantees the same node runtime is
-// used downstream and works in both shells.
-const _PIPELINE_BIN = `"${process.execPath}" "${fileURLToPath(new URL("../bin/pipeline.mjs", import.meta.url))}"`;
+// Stable CLI entry for spawned sessions. Uses the same node binary as the
+// orchestrator (process.execPath, bypassing PATH) and the setup wizard's
+// pipeline-resolver.mjs shim, which looks up the active plugin version at
+// runtime via installed_plugins.json — so sessions survive /reload-plugins
+// version bumps without regeneration.
+const _PIPELINE_BIN = `"${process.execPath}" "${join(homedir(), ".local", "bin", "pipeline-resolver.mjs")}"`;
 
 // Resolve the template file for a session type. Honours
 // `cfg.session_templates_dir` override with per-file fallback to bundled —
