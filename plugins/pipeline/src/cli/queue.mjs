@@ -376,10 +376,10 @@ export async function run(cmd, argv) {
 
     // Type/model: CLI flag wins, else plan annotation, else default.
     const stype    = stypeFlag    || queueTypeExtract(planPath)             || "dev";
-    const rModel   = rModelFlag   || queueModelExtract(planPath, "research") || "—";
-    const dModel   = dModelFlag   || queueModelExtract(planPath, "dev")      || "—";
-    const qModel   = qModelFlag   || queueModelExtract(planPath, "qa")       || "—";
-    const rvwModel = rvwModelFlag || queueModelExtract(planPath, "review")   || "—";
+    const rModel   = (rModelFlag   || queueModelExtract(planPath, "research") || "—").toLowerCase();
+    const dModel   = (dModelFlag   || queueModelExtract(planPath, "dev")      || "—").toLowerCase();
+    const qModel   = (qModelFlag   || queueModelExtract(planPath, "qa")       || "—").toLowerCase();
+    const rvwModel = (rvwModelFlag || queueModelExtract(planPath, "review")   || "—").toLowerCase();
 
     // Validate effort values.
     for (const [name, val] of [["r_effort", rEffortFlag], ["d_effort", dEffortFlag], ["q_effort", qEffortFlag], ["rvw_effort", rvwEffortFlag]]) {
