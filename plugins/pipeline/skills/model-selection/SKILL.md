@@ -8,6 +8,10 @@ description: >-
   switcher; reading the model table.
 ---
 
+<HARD-GATE>
+**When a plan has no model annotation and you're queuing it, YOU MUST recommend a specific model and get the user to confirm before proceeding.** Do not queue silently with defaults. Read the plan, reason about scope/complexity, recommend (Haiku/Sonnet/Opus), prompt the user to confirm or override, then return the choice to the queue skill.
+</HARD-GATE>
+
 # Model selection
 
 Two contexts need explicit model decisions: `claude -p` callers (scripts spawning Claude subprocesses) and pipeline rows (per-stage model pins read by the orchestrator). Both must pin a model — no implicit defaults — and both default toward the cheapest tier that can do the job.
@@ -130,32 +134,18 @@ The pipeline is not Anthropic-only. Any model the local proxy can serve — Olla
 
 ### Operator setup
 
-A proxy must be listening on `cfg.proxy.url`. The canonical implementation is `claude-code-proxy` (1rgs fork) at `C:\local-llm\claude-code-proxy`. Start it with:
+Non-Anthropic models route through `cfg.proxy.url` in `~/.pipeline/config.json`. Ensure the proxy is running before queueing a row with a non-Anthropic model.
 
-```bash
-cd C:\local-llm\claude-code-proxy && uv run uvicorn server:app --host 0.0.0.0 --port 18081
-```
+Model names are **lowercase only** (e.g., `minimax-m3:cloud`, `gemma4:31b-cloud`, `qwen2.5-coder:32b`).
 
-Smoke-test before queueing a non-Anthropic row:
+### Auto-escalation — effort only
 
-```bash
-curl -s -X POST http://localhost:18081/v1/messages \
-  -H 'x-api-key: dummy' -H 'anthropic-version: 2023-06-01' \
-  -d '{"model":"<name>","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}'
-```
+Non-Anthropic models escalate **effort only** on dev retry (no tier jump). `tierFromModel` returns `null` for anything that doesn't match `/haiku|sonnet|opus/i`, so auto-escalation uses Opus-shaped effort defaults: `low` → `medium` → `high` → `xhigh` → `max` (+2 per retry, clamped to max). Many non-Anthropic models (e.g., minimax-m3) respond meaningfully to effort changes; escalation can improve results even though the scale is Anthropic-tuned. If a non-Anthropic row bounces through review, pin a new model in the row's `notes_extra` (`model=…`) or in `*Dev-Model:*` and re-queue.
 
-Expect a non-error response. `server.py` only remaps a fixed set of names (haiku/sonnet/opus/fable/claude-*); anything else passes through verbatim to `OPENAI_BASE_URL`.
+### When the operator asks to queue via non-Anthropic model
 
-### Auto-escalation is a no-op
+When the user's request contains phrases like "via ollama", "via open model", "local model", or names a specific non-Anthropic model (e.g., `minimax-m3:cloud`, `gemma4:31b-cloud`, `qwen2.5-coder:32b`), confirm the model name and collect it for the queue command:
 
-Non-Anthropic models do **not** auto-escalate on dev retry. `tierFromModel` returns `null` for anything that doesn't match `/haiku|sonnet|opus/i`, so the dev-retry counter does not trigger effort+2 or tier-jump. If a non-Anthropic row bounces through review, pin a new model in the row's `notes_extra` (`model=…`) or in `*Dev-Model:*` and re-queue — there is no auto-walk.
+1. **Confirm intent + collect model name** — "You asked to queue this with a non-Anthropic model. What's the exact model name? (e.g., `minimax-m3:cloud`, `gemma4:31b-cloud`, `qwen2.5-coder:32b`). The row will route through the proxy configured in `~/.pipeline/config.json`. Auto-escalation is a no-op for non-Anthropic models."
 
-### When the operator asks to queue via Ollama / open model
-
-When the user's request contains phrases like "via ollama", "via open model", "local model", or names a specific non-Anthropic model (`MiniMax-M3`, `gemma4:31b-cloud`, `qwen2.5-coder:32b`), emit a **structured confirmation block** before constructing the `pipeline queue-plan` command:
-
-1. **Confirm intent + collect model name** — "You asked to queue this via Ollama / an open model. Confirm by providing the model name (e.g. `MiniMax-M3`, `gemma4:31b-cloud`, `qwen2.5-coder:32b`). The row will route through `cfg.proxy.url` (default `http://localhost:18081`). Auto-escalation is a no-op for non-Anthropic tiers."
-2. **Verify the proxy is live** — "Is `claude-code-proxy` running on the configured port? The smoke-test command above should return a non-error response."
-3. **Confirm the upstream knows the model** — "If the upstream is Ollama, is the model pulled? `ollama list` should show it. If the upstream is a cloud endpoint, is the model name spelled correctly?"
-
-Take the operator's next response (model name + yes/no on the proxy) and construct the `pipeline queue-plan` command with `--d-model <name>` (and the corresponding R/Q/Rvw columns if the row uses non-Anthropic models for those stages too).
+Then construct the `pipeline queue-plan` command with `--d-model <name>` (and the corresponding R/Q/Rvw columns if the row uses non-Anthropic models for those stages too). Proxy setup and verification belong in the `/queue` skill.
