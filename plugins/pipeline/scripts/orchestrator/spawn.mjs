@@ -182,8 +182,9 @@ export function findClaude() {
 // Returns env-var overrides to merge; empty for native Claude models.
 // Optional `cfg` lets tests inject a config snapshot; internal callers pass nothing
 // and we read the live on-disk config here.
+const CLAUDE_ALIASES = new Set(["haiku", "sonnet", "opus"]);
 export function proxyEnvFor(model, cfg) {
-  if (!model || model.startsWith("claude-")) return {};
+  if (!model || model.startsWith("claude-") || CLAUDE_ALIASES.has(model.toLowerCase())) return {};
   if (!cfg) cfg = loadPipelineConfig();
   const proxy = cfg.proxy || PIPELINE_DEFAULTS.proxy;
   return {
