@@ -171,10 +171,10 @@ If `$N == 0` (fresh first attempt), skip this step entirely — no prior-cycle s
 
 **Truncate large Bash outputs.** Any command that may produce large output (`git log`, `git diff` against a big branch) must be piped through `| head -200` or similar. Don't let raw diff output flood your context — the `/code-review` skill reads the diff itself; you don't need to inline the full content.
 
-**Invoke `/code-review` against the source branch.** Default mode (not `--fresh` — your session is already fresh-context from the orchestrator's perspective). Pass the source branch as the skill's positional argument:
+**Invoke `/code-review` against the target branch.** Default mode (not `--fresh` — your session is already fresh-context from the orchestrator's perspective). Pass the merge target as the base so the skill diffs `{{TARGET_BRANCH}}...HEAD` — showing only this feature's commits, not the full staging lineage:
 
 ```
-/code-review {{BRANCH}}
+/code-review {{TARGET_BRANCH}}
 ```
 
 The skill emits four sections (Concerns, Open questions, Pride, Verdict). Capture the entire output — you will paste it verbatim into the report file in the next step.
