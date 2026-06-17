@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, rmSync, readFileSync, writeFileSync } from "node:fs";
-import { join, basename, delimiter as pathDelimiter } from "node:path";
+import { join, dirname, basename, delimiter as pathDelimiter } from "node:path";
 import { spawnSync, spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
@@ -13,6 +13,40 @@ import { PIPELINE_DEFAULTS } from "../../src/config-defaults.mjs";
 import { featureWorktreePath, resolveRowBranch } from "../worktree-paths.mjs";
 import { publishNotification } from "../publisher.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
+
+// Windows: a spawned session's Bash tool falls back to PowerShell — where `git`
+// is not on PATH and quoted-path invocations throw ParserErrors — unless
+// CLAUDE_CODE_GIT_BASH_PATH points at Git Bash. The orchestrator may be launched
+// from a GUI / PowerShell with no SHELL set, so we resolve and inject it here,
+// making spawned sessions shell-correct regardless of how the orchestrator
+// itself was started. Returns null on non-Windows (no injection needed).
+function _gitBashPath() {
+  if (process.platform !== "win32") return null;
+  if (process.env.CLAUDE_CODE_GIT_BASH_PATH) return process.env.CLAUDE_CODE_GIT_BASH_PATH;
+  const candidates = [];
+  // Prefer deriving bash.exe from the installed git.exe — robust to non-default
+  // install drives/dirs. `where git` may resolve to <Git>\cmd\git.exe or
+  // <Git>\mingw64\bin\git.exe, so walk ancestors looking for a sibling bin\bash.exe.
+  try {
+    const out = spawnSync("where", ["git"], { encoding: "utf8", windowsHide: true, timeout: 5000 }).stdout || "";
+    const gitExe = out.split(/\r?\n/).map((s) => s.trim()).find(Boolean);
+    if (gitExe) {
+      let dir = dirname(gitExe);
+      for (let i = 0; i < 4; i++) {
+        candidates.push(join(dir, "bin", "bash.exe"));
+        const up = dirname(dir);
+        if (up === dir) break;
+        dir = up;
+      }
+    }
+  } catch { /* `where` unavailable — fall through to standard locations */ }
+  candidates.push(
+    join(process.env.ProgramFiles || "C:\\Program Files", "Git", "bin", "bash.exe"),
+    join(process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)", "Git", "bin", "bash.exe"),
+    join(process.env.LOCALAPPDATA || "", "Programs", "Git", "bin", "bash.exe"),
+  );
+  return candidates.find((p) => p && existsSync(p)) || null;
+}
 
 // ── session type routing ──────────────────────────────────────────────────────
 
@@ -477,6 +511,8 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   env.CORRELATION_ID   = correlationId;
   const localBin = join(homedir(), ".local", "bin");
   env.PATH = [localBin, env.PATH || ""].filter(Boolean).join(pathDelimiter);
+  const gitBash = _gitBashPath();
+  if (gitBash) env.CLAUDE_CODE_GIT_BASH_PATH = gitBash;
 
   if (isProxyModel) {
     Object.assign(env, proxyEnv);
@@ -639,6 +675,8 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
   const env = { ...process.env, CORRELATION_ID: correlationId };
   const localBin = join(homedir(), ".local", "bin");
   env.PATH = [localBin, env.PATH || ""].filter(Boolean).join(pathDelimiter);
+  const gitBash = _gitBashPath();
+  if (gitBash) env.CLAUDE_CODE_GIT_BASH_PATH = gitBash;
 
   {
     const proxyEnv = proxyEnvFor(model);
