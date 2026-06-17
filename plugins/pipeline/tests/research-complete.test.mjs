@@ -19,7 +19,12 @@ function setup() {
   const tmp  = mkdtempSync(join(tmpdir(), "research-complete-"));
   const repo = join(tmp, "repo");
   mkdirSync(join(repo, ".git"), { recursive: true });
-  const dbPath = join(tmp, ".pipeline", "pipeline.db");
+  // On Linux getPaths() uses XDG — point XDG_DATA_HOME into tmp so the
+  // subprocess opens the same DB that this process creates here.
+  const xdgData = join(tmp, ".local", "share");
+  const dbPath  = process.platform === "linux"
+    ? join(xdgData, "pipeline", "pipeline.db")
+    : join(tmp, ".pipeline", "pipeline.db");
   const db = connectPath(dbPath);
   projectAdd(db, { name: PROJECT, rootPath: repo });
   rowAdd(db, PROJECT, {
@@ -28,7 +33,7 @@ function setup() {
     stage: "research",
   });
   close(db);
-  const env = { ...process.env, HOME: tmp, USERPROFILE: tmp };
+  const env = { ...process.env, HOME: tmp, USERPROFILE: tmp, XDG_DATA_HOME: xdgData };
   return { tmp, repo, dbPath, env };
 }
 
