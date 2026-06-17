@@ -4,6 +4,10 @@ description: Use when the user wants to queue a plan file for the pipeline orche
 argument-hint: <plan-file-path> [dev|research|test|review]
 ---
 
+<HARD-GATE>
+**When queue-plan has no model annotation, YOU MUST invoke /model-selection to get a recommendation and user confirmation before queuing.** Never queue silently with config defaults; the user must see and approve the model choice.
+</HARD-GATE>
+
 Queue a plan file so the orchestrator spawns an autonomous session for it.
 
 **Arguments:** `$ARGUMENTS`
@@ -34,9 +38,11 @@ If the plan file doesn't exist, tell the user the resolved path and stop.
 
 ## Step 2a — Model and effort columns
 
-Each pipeline row carries per-stage model and effort pins (`R-Model`, `D-Model`, `Q-Model`, `Rvw-Model`, `R-Effort`, `D-Effort`, `Q-Effort`, `Rvw-Effort`). These must be set before the orchestrator can spawn any session.
+Each pipeline row carries per-stage model and effort pins (`R-Model`, `D-Model`, `Q-Model`, `Rvw-Model`, `R-Effort`, `D-Effort`, `Q-Effort`, `Rvw-Effort`).
 
-Invoke `/pipeline:model-selection` before deciding any column value — it owns the tier guide (Haiku/Sonnet/Opus), the per-tier effort table, and the Opus confirmation gate.
+**If the plan has a `*Dev-Model:*` or `*Type:*` annotation:** use it, no additional model decision needed.
+
+**If the plan has no model annotation:** invoke `/model-selection`. It will read the plan, recommend a model (Haiku/Sonnet/Opus) with reasoning, and prompt the user to confirm or override. Collect the user's choice, then proceed with that model for `--d-model` and `--rvw-model` flags.
 
 ## Step 3 — Secure a PR title
 
