@@ -153,6 +153,81 @@ test("resolveSessionFile: row.branch flows into {{BRANCH}}", () => {
   });
 });
 
+// resolveSessionFile must filter notes-mentioned session files by the intended
+// session-type prefix. Real-world trigger: a dev row's notes accumulated a
+// stale `sessions/review-…md` from a prior review attempt; the unfiltered code
+// picked that file when spawning a dev session, so the model ran review
+// content while the orchestrator advanced the row as a dev spawn — the reaper
+// then burned a review retry recovering it.
+test("resolveSessionFile: notes-mentioned .md filtered by stageSessionType prefix", () => {
+  withTempProject("# Plan body\n", (root, planPath) => {
+    const sessionsDir = join(root, "sessions");
+    mkdirSync(sessionsDir, { recursive: true });
+    // Both files exist on disk; only the dev-prefixed one should be picked
+    // when the spawn is for a dev session.
+    const reviewSession = join(sessionsDir, "review-2026-06-17-feat-x.md");
+    const devSession    = join(sessionsDir, "dev-2026-06-17-feat-x.md");
+    writeFileSync(reviewSession, "stale review session content", "utf8");
+    writeFileSync(devSession,    "fresh dev session content",    "utf8");
+
+    const row = {
+      feature: "feat-x",
+      plan: planPath,
+      notes: "type=dev sessions/review-2026-06-17-feat-x.md sessions/dev-2026-06-17-feat-x.md",
+      branch: "autonomous/feat-x",
+      target_branch: "main",
+    };
+    const out = resolveSessionFile(row, "p", { projectRoot: root, stageSessionType: "dev" });
+    equal(out, devSession, "dev spawn must reuse dev-prefixed notes path, not stale review file");
+  });
+});
+
+test("resolveSessionFile: wrong-type notes .md falls through to fresh template", () => {
+  withTempProject("# Plan body\n", (root, planPath) => {
+    const sessionsDir = join(root, "sessions");
+    mkdirSync(sessionsDir, { recursive: true });
+    // Only a wrong-type session file exists in notes. A dev spawn must NOT
+    // reuse it — it must generate a fresh dev session.
+    const reviewSession = join(sessionsDir, "review-2026-06-17-feat-x.md");
+    writeFileSync(reviewSession, "stale review session content", "utf8");
+
+    const row = {
+      feature: "feat-x",
+      plan: planPath,
+      notes: "type=dev sessions/review-2026-06-17-feat-x.md",
+      branch: "autonomous/feat-x",
+      target_branch: "main",
+    };
+    const out = resolveSessionFile(row, "p", {
+      projectRoot: root, stageSessionType: "dev", _cfg: { review: {} },
+    });
+    ok(out !== reviewSession, "must not reuse wrong-type session file");
+    match(out, /[\\/]sessions[\\/]dev-/, "generated path must be a dev-* session");
+  });
+});
+
+test("resolveSessionFile: no session-type hint anywhere → notes path skipped", () => {
+  withTempProject("# Plan body\n", (root, planPath) => {
+    const sessionsDir = join(root, "sessions");
+    mkdirSync(sessionsDir, { recursive: true });
+    const reviewSession = join(sessionsDir, "review-2026-06-17-feat-x.md");
+    writeFileSync(reviewSession, "stale review", "utf8");
+
+    // No stageSessionType opt + notes lacks `type=…` token — the prefix is
+    // null, so the notes path must be skipped rather than coerced into a
+    // bogus String(null).startsWith() check.
+    const row = {
+      feature: "feat-x",
+      plan: planPath,
+      notes: "sessions/review-2026-06-17-feat-x.md",
+      branch: "autonomous/feat-x",
+      target_branch: "main",
+    };
+    const out = resolveSessionFile(row, "p", { projectRoot: root, dry: true });
+    equal(out, null, "dry resolve with null sTypePrefix must skip notes path and return null");
+  });
+});
+
 test("resolveSessionFile: blank branch defaults to autonomous/<feature>", () => {
   withTempProject("# Plan body\n", (root, planPath) => {
     const row = { feature: "feat-x", plan: planPath, notes: "type=dev",
