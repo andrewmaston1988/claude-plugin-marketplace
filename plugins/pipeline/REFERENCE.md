@@ -54,9 +54,9 @@ queued → dev → review → test → merge → done
 
 | Skill | When to use |
 |-------|-------------|
-| `/pipeline-setup` | Conversational setup walkthrough — use instead of the TTY wizard when running inside Claude Code. Covers all 11 wizard steps interactively. |
-| `/pipeline` | Show and manage pipeline rows for a project — stages, blocked rows, manual recovery. |
-| `/pipeline-demo` | Narrated hands-on demo in a self-contained sandbox. Spins up a throwaway project + 4 plan files, walks rows through all stages on a ~10-minute timeline, narrates each transition while you watch the dashboard. Good for new users or showing the plugin to someone. |
+| `/pipeline [<project>]` | Show and manage pipeline rows for a project — stages, blocked rows, manual recovery. Without an argument, derives project from your current git repo. |
+| `/pipeline setup` | Conversational setup walkthrough — use instead of the TTY wizard when running inside Claude Code. Covers all 11 wizard steps interactively. |
+| `/pipeline demo` | Narrated hands-on demo in a self-contained sandbox. Spins up a throwaway project + 4 plan files, walks rows through all stages on a ~10-minute timeline, narrates each transition while you watch the dashboard. Good for new users or showing the plugin to someone. |
 | `/queue` | Queue a plan file for orchestration. |
 | `/merge` | Squash-merge one or more tested branches to main. Invokes the `hooks.on_merge` hook if configured (hook owns the git operation when set). |
 

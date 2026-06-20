@@ -1,9 +1,3 @@
----
-name: pipeline-demo
-description: Use when the user is new to the plugin and wants a narrated, hands-on walkthrough — Claude spins up a self-contained sandbox in the background (no real Claude install, no risk to real projects) and narrates each pipeline transition in near-real-time while the user watches the dashboard. Triggers — "/pipeline-demo", "show me how the pipeline works", "demo mode". SKIP for — real project workflow (use /queue), debugging an existing pipeline (use /pipeline).
-argument-hint: (no arguments)
----
-
 Drive a narrated walkthrough of the pipeline. Claude engineers all the commands in the background — the user never has to type a `pipeline …` line. Claude tails a structured event stream from the demo process and posts one short paragraph in the conversation for each event, in a light first-person voice ("I'm queueing X now since it has no deps…"). The user watches the dashboard for the visual; the conversation supplies the *why*.
 
 **Tone**: warm, conversational, a touch of roleplay — Claude narrates as if Claude were the one driving the queue. Avoid condescension; the user is a peer who just wants to understand what's moving and why.
@@ -18,7 +12,7 @@ Confirm `pipeline` resolves:
 pipeline --version
 ```
 
-If it errors with command-not-found: hand off to `/pipeline-setup` and resume here once setup reports success.
+If it errors with command-not-found: hand off to `/pipeline setup` and resume here once setup reports success.
 
 ## Step 1 — Start the dashboard (background, hidden from the user)
 
@@ -40,7 +34,7 @@ Background bash task. The demo:
 - walks the rows through their stages on a deterministic ~10-minute timeline
 - emits structured `[event]` lines to stdout at every transition
 
-**Do not** show the user the `pipeline demo` invocation. The user invoked `/pipeline-demo` — that's the only command they need to know.
+**Do not** show the user the `pipeline demo` invocation. The user invoked `/pipeline demo` — that's the only command they need to know.
 
 ## Step 3 — Tell the user to open a dashboard
 
@@ -113,7 +107,7 @@ When the user is done (or says "stop", "tear down", "clean up"):
 
 ## Anti-patterns
 
-- **Don't show the user `pipeline demo` or `pipeline dashboard web`.** They invoked `/pipeline-demo` — that's the only command surface they should see. Engineer the rest in the background.
+- **Don't show the user `pipeline demo` or `pipeline dashboard web`.** They invoked `/pipeline demo` — that's the only command surface they should see. Engineer the rest in the background.
 - **Don't narrate animation-only events** (`session_start`/`session_end` are signals for you, not the user — they fire alongside `stage` events which carry the real story).
 - **Don't ask the user to wait between events.** Just narrate as the events arrive; the user reads the conversation while watching the dashboard.
 - **Don't drone.** One short paragraph per event, light first-person voice, always one sentence about the UI. No "let me explain how the pipeline works in general" — show, don't lecture.

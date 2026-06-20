@@ -1,12 +1,28 @@
 ---
 name: pipeline
-description: Use when the user wants to inspect or manage a project's pipeline — rows in flight, queued, blocked, recently done, or needing manual recovery. Triggers — "show pipeline status", "what's in flight", "is anything blocked", "rows in manual", "restore pipeline row", "pipeline rows", any question about pipeline queue state. SKIP for — queueing new work (use /queue), deep cross-project triage (use /pipeline-review), or starting a demo (use /pipeline-demo).
-argument-hint: [<project>]
+description: Use when the user wants to inspect or manage a project's pipeline, or run plugin onboarding (setup, demo). Triggers — "show pipeline status", "what's in flight", "is anything blocked", "rows in manual", "restore pipeline row", "/pipeline-setup", "/pipeline-demo". Subcommands: `/pipeline setup`, `/pipeline demo`, `/pipeline [<project>]`. SKIP for — queueing new work (use /queue).
+argument-hint: [setup | demo | <project>]
 ---
 
-Show the pipeline rows for a project. Without an argument, derives the project from the current git repo.
+Show the pipeline rows for a project, or run onboarding flows. Without an argument, derives the project from the current git repo.
 
 **Arguments:** `$ARGUMENTS`
+
+## Step 0 — Route on first argument
+
+Extract the first token from `$ARGUMENTS`:
+
+```bash
+FIRST_TOKEN=$(echo "$ARGUMENTS" | awk '{print $1}')
+```
+
+Route based on the first token:
+
+- If `FIRST_TOKEN` is `setup` → read `setup.md` and follow it verbatim. Stop here.
+- If `FIRST_TOKEN` is `demo` → read `demo.md` and follow it verbatim. Stop here.
+- Otherwise → proceed to Step 1 (status flow).
+
+**Reserved names:** `setup` and `demo` are reserved subcommand names. If a registered project happens to be literally named `setup` or `demo`, the subcommand wins. This is a theoretical risk — the pipeline plugin has never registered such a project.
 
 ## Step 1 — Pick the project
 
