@@ -15,7 +15,7 @@ In Claude Code:
 ## Configure
 
 ```
-/pipeline-setup
+/pipeline setup
 ```
 
 Walks through config conversationally. You'll be asked about: project to register, Slack channel (optional), model defaults, autostart, PATH alias. Each choice is explained as it's asked — defaults are sensible, you can press through if unsure.
@@ -23,7 +23,7 @@ Walks through config conversationally. You'll be asked about: project to registe
 ## Try it (optional)
 
 ```
-/pipeline-demo
+/pipeline demo
 ```
 
 Spins up a self-contained sandbox in the background — no real Claude install needed, no risk to your projects — and narrates a full lifecycle end-to-end: one main feature plus three dependents, going through queue → research → dev → review → merge, including a `[BLOCKER]` / "Fixed it!" loop and parallel dependent processing. Claude tells you why each row moves; you watch the dashboard. ~10 min, Ctrl-friendly teardown.

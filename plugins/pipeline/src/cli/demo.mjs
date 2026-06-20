@@ -185,7 +185,7 @@ const TOOL_TEMPLATES = {
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Structured event stream — the /pipeline-demo skill tails this and narrates
+// Structured event stream — the /pipeline demo subcommand tails this and narrates
 // each event in user-facing prose. Format: [event] <kind> key=value ...
 function _emitEvent(kind, fields = {}) {
   const parts = [`[event] ${kind}`];
