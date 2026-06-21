@@ -1,9 +1,3 @@
----
-name: pipeline-setup
-description: Use when a user wants to set up (or re-configure) the pipeline plugin and you can walk them through it conversationally — bypasses the TTY-only wizard. Triggers — "/pipeline-setup", "set up the pipeline plugin", "configure pipeline for me", "I just installed pipeline, what now". SKIP for — debugging a broken setup (use /pipeline + doctor), or when a TTY is available and the user prefers driving the wizard themselves.
-argument-hint: (no arguments)
----
-
 Walk the user through pipeline setup conversationally, **explaining each choice** as you go, then drive the non-interactive wizard with the answers. This skill exists because the wizard's `readline` needs an interactive TTY (which Claude Code's `!` bash session doesn't have) — but a Claude conversation has all the input it needs, plus the room to explain what each option actually changes.
 
 **Tone**: warm, peer-level. Each question gets a one-sentence "what this does" + a one-sentence "default behaviour" + a one-sentence "implication if you change it". The user shouldn't have to read source to know what they're agreeing to.
@@ -433,7 +427,7 @@ These mirror the `{{…}}` template placeholders expanded at render time. Custom
 
 **Default**: YES.
 
-**If you skip**: you'll have to type `node <abs-path>/pipeline.mjs` every time, OR manage the alias yourself. The non-interactive shim is the bit that makes `/queue`, `/pipeline`, `/pipeline-demo` in Claude Code work without a shell restart, so skipping it is rarely worth it.
+**If you skip**: you'll have to type `node <abs-path>/pipeline.mjs` every time, OR manage the alias yourself. The non-interactive shim is the bit that makes `/queue`, `/pipeline`, `/pipeline demo` in Claude Code work without a shell restart, so skipping it is rarely worth it.
 
 **Bundle 4 + 5 in one AskUserQuestion** — both default YES, both are independently skippable:
 
@@ -495,7 +489,7 @@ After success, summarise what just changed and what they can do now:
 Suggested next moves:
 
 - `pipeline doctor` to confirm everything's wired (works without shell restart via the shim)
-- `/pipeline-demo` to see the full lifecycle end-to-end with narration
+- `/pipeline demo` to see the full lifecycle end-to-end with narration
 - `/queue <plan-file> dev` to queue real work in a registered project
 
 ## Anti-patterns
