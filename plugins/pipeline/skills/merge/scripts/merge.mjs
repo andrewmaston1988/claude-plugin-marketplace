@@ -520,7 +520,7 @@ async function main() {
     mark(6, "done");
 
     // Step 6b — archive orphaned done plans (no dedicated progress step)
-    step6bArchiveOrphanedPlans(db, project);
+    step6bArchiveOrphanedPlans(db, project, { plansDir: args.plansDir });
 
     // Step 7 — commit project (idx 7)
     mark(7, "inprogress");
