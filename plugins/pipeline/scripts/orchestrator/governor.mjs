@@ -288,9 +288,25 @@ async function _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType, slotHour
   }
 }
 
+// In-process attempt cooldown. The DB-backed 5-min cooldown (see
+// `shouldSpawnGovernor` / GOVERNOR_COOLDOWN_MS) is only consulted AFTER
+// `appendGovernorSpawn` succeeds — if the DB is locked, the cooldown state
+// is never persisted and each 30s pollOnce tick re-fires another spawn
+// against the same locked DB (observed: 119 spawns in 60 min on 2026-06-22).
+// This guard uses in-process state so the rate-limit survives a DB lock
+// rather than being disabled by one. Reset on process restart — a single
+// lost cooldown window is fine; a 100-spawn storm is not.
+let _lastGovernorAttemptMs = 0;
+const GOVERNOR_ATTEMPT_COOLDOWN_MS = 60 * 1000;  // 1 min, longer than the 30s tick
+
 export async function spawnGovernor(db, { dryRun, logFn }) {
   const ctx = resolveGovernorContext(db);
   if (!ctx) return false;
+  if (Date.now() - _lastGovernorAttemptMs < GOVERNOR_ATTEMPT_COOLDOWN_MS) {
+    logFn(`Governor: spawn suppressed — last attempt ${Math.round((Date.now() - _lastGovernorAttemptMs) / 1000)}s ago`, "WARN");
+    return false;
+  }
+  _lastGovernorAttemptMs = Date.now();
   const { should, reportType, slotHour, skippedReason } = shouldSpawnGovernor(ctx.reportsDir, db);
   if (!should) {
     if (skippedReason === "cooldown") {
@@ -304,6 +320,11 @@ export async function spawnGovernor(db, { dryRun, logFn }) {
 export async function spawnMonthlyGovernor(db, { dryRun, logFn }) {
   const ctx = resolveGovernorContext(db);
   if (!ctx) return false;
+  if (Date.now() - _lastGovernorAttemptMs < GOVERNOR_ATTEMPT_COOLDOWN_MS) {
+    logFn(`Monthly governor: spawn suppressed — last attempt ${Math.round((Date.now() - _lastGovernorAttemptMs) / 1000)}s ago`, "WARN");
+    return false;
+  }
+  _lastGovernorAttemptMs = Date.now();
   if (!shouldSpawnMonthlyGovernor(db)) return false;
   return _spawnGovernorImpl(db, { dryRun, logFn, ctx, reportType: "monthly", slotHour: "monthly", kind: "monthly" });
 }
