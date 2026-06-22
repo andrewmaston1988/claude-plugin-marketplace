@@ -336,14 +336,16 @@ export function step6MovePlans(planFiles) {
 
 // Walk distinct plan dirs from done-rows' plan_files. Within each dir, move
 // any .md file matching a done-slug into <dir>/complete/ if not already there.
-export function step6bArchiveOrphanedPlans(db, project) {
+export function step6bArchiveOrphanedPlans(db, project, { plansDir } = {}) {
   if (!db || !project) return;
   const rows = rowsList(db, project);
   const doneRows = rows.filter(r => r.stage === "done" && r.plan_file);
   if (!doneRows.length) return;
 
   const doneSlugs = new Set(doneRows.map(r => r.feature));
-  const plansDirs = new Set(doneRows.map(r => dirname(r.plan_file)));
+  const plansDirs = plansDir
+    ? new Set([plansDir])
+    : new Set(doneRows.map(r => dirname(r.plan_file)).filter(d => basename(d) !== "complete"));
 
   const archived = [];
   for (const plansDir of plansDirs) {

@@ -138,6 +138,56 @@ test("step6bArchiveOrphanedPlans: no-op when no done rows", () => {
   } finally { teardown(tmp, db); }
 });
 
+test("step6bArchiveOrphanedPlans: uses configured plansDir, ignores done-row paths", () => {
+  const { tmp, db, repo } = setup();
+  try {
+    // Synthetic done row with plan_file already in complete/ (backfill scenario)
+    const completeDir = join(repo, "plans", "complete");
+    mkdirSync(completeDir, { recursive: true });
+    const archivedPlan = join(completeDir, "synthetic.md");
+    writeFileSync(archivedPlan, "# synthetic\n", "utf8");
+    rowAdd(db, PROJECT, { feature: "synthetic", planFile: archivedPlan, stage: "queued" });
+    rowUpdate(db, PROJECT, "synthetic", { stage: "done" });
+
+    // A legitimate orphaned done plan in the configured plansDir
+    const configuredDir = join(repo, "plans");
+    const orphan = join(configuredDir, "orphan.md");
+    writeFileSync(orphan, "# orphan\n", "utf8");
+    rowAdd(db, PROJECT, { feature: "orphan", planFile: orphan, stage: "queued" });
+    rowUpdate(db, PROJECT, "orphan", { stage: "done" });
+
+    step6bArchiveOrphanedPlans(db, PROJECT, { plansDir: configuredDir });
+
+    ok(existsSync(join(configuredDir, "complete", "orphan.md")), "orphan should be archived");
+    ok(!existsSync(join(completeDir, "complete")), "complete/complete/ must not be created");
+  } finally { teardown(tmp, db); }
+});
+
+test("step6bArchiveOrphanedPlans: complete/ filtered from auto-derive, no complete/complete/ loop", () => {
+  const { tmp, db, repo } = setup();
+  try {
+    // Synthetic done row with plan_file already in complete/ (backfill scenario — no plansDir configured)
+    const plansDir = join(repo, "plans");
+    const completeDir = join(plansDir, "complete");
+    mkdirSync(completeDir, { recursive: true });
+    const archivedPlan = join(completeDir, "synthetic.md");
+    writeFileSync(archivedPlan, "# synthetic\n", "utf8");
+    rowAdd(db, PROJECT, { feature: "synthetic", planFile: archivedPlan, stage: "queued" });
+    rowUpdate(db, PROJECT, "synthetic", { stage: "done" });
+
+    // A legitimate orphaned done plan sitting in plans/ (not yet archived)
+    const orphan = join(plansDir, "orphan.md");
+    writeFileSync(orphan, "# orphan\n", "utf8");
+    rowAdd(db, PROJECT, { feature: "orphan", planFile: orphan, stage: "queued" });
+    rowUpdate(db, PROJECT, "orphan", { stage: "done" });
+
+    step6bArchiveOrphanedPlans(db, PROJECT);
+
+    ok(!existsSync(join(completeDir, "complete")), "complete/complete/ must not be created");
+    ok(existsSync(join(completeDir, "orphan.md")), "legitimate orphan should still be archived");
+  } finally { teardown(tmp, db); }
+});
+
 test("queue-plan stores absolute path in row.plan_file (smoke via subprocess)", async () => {
   // Subprocess-based test would be heavy here; rely on parity-runner fixture
   // (queue-plan/from-claude-format-plan) which asserts plan_file is the
