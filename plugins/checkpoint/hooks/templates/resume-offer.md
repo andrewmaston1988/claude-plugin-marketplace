@@ -1,1 +1,1 @@
-A STATE.md handoff from {age} exists for this directory ({path}). Read it to resume that work, or ignore it to start clean.
+A STATE.md handoff from {age} exists for this directory ({path}). Read it to resume that work, or ignore it to start clean. (Per-session file — multiple sessions may have hand-offs here; the most recent by filename timestamp wins.)
