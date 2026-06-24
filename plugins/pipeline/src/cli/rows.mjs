@@ -199,9 +199,9 @@ export async function run(cmd, argv) {
 
   // ── retry-budget-set ─────────────────────────────────────────────────────────
   if (cmd === "retry-budget-set") {
-    const [project, feature, budgetStr] = argv;
+    const [project, feature, budgetStr, ...flags] = argv;
     if (!project || !feature || !budgetStr) {
-      process.stderr.write("usage: retry-budget-set <project> <feature> <budget>\n");
+      process.stderr.write("usage: retry-budget-set <project> <feature> <budget> [--review]\n");
       return 1;
     }
     const budget = parseInt(budgetStr, 10);
@@ -209,6 +209,7 @@ export async function run(cmd, argv) {
       process.stderr.write("error: budget must be a non-negative integer\n");
       return 1;
     }
+    const isReview = getFlag("--review", flags) === true;
     const ctx = lookupProjectOrFail(project);
     if (!ctx) return 1;
     try {
@@ -217,7 +218,10 @@ export async function run(cmd, argv) {
         process.stderr.write(`not found: feature '${feature}'\n`);
         return 1;
       }
-      const ok = rowUpdate(ctx.db, ctx.project, feature, { dev_retry_budget: budget });
+      const fields = isReview
+        ? { review_retry_budget: budget, review_retries: 0 }
+        : { dev_retry_budget: budget };
+      const ok = rowUpdate(ctx.db, ctx.project, feature, fields);
       if (ok) { process.stdout.write("OK\n"); return 0; }
       process.stderr.write(`failed to update feature '${feature}'\n`);
       return 1;
