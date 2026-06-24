@@ -209,7 +209,11 @@ export async function run(cmd, argv) {
       process.stderr.write("error: budget must be a non-negative integer\n");
       return 1;
     }
-    const isReview = getFlag("--review", flags) === true;
+    // boolean-presence flag: detect by membership, since getFlag returns the
+    // value-after-the-flag (a string) or null when absent or last-position —
+    // neither is a boolean. `flags.includes("--review")` matches both
+    // `... --review` and `... --review anything` as "flag present".
+    const isReview = flags.includes("--review");
     const ctx = lookupProjectOrFail(project);
     if (!ctx) return 1;
     try {
