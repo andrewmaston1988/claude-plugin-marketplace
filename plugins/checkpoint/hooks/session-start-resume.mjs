@@ -1,12 +1,13 @@
 #!/usr/bin/env node
-// SessionStart hook — offers (does not auto-load) a STATE.md resume on a fresh start.
-// Fires only on source 'startup'|'clear'. Opt out via checkpoint.sessionStartResume=false.
+// SessionStart hook — offers (does not auto-load) the most-recent per-session
+// STATE_<sid>_<stamp>.md as a resume candidate on a fresh start. Fires only on
+// source 'startup'|'clear'. Opt out via checkpoint.sessionStartResume=false.
 // Never throws; exits 0 with optional additionalContext.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { resolveStatePath, readJSON } from './lib/paths.mjs';
+import { resolveLatestStatePath, readJSON } from './lib/paths.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
@@ -41,13 +42,15 @@ function main() {
     const enabled = settings?.['checkpoint']?.sessionStartResume !== false; // default on
     const correlation = !!process.env.CORRELATION_ID;
 
-    let statePath, stateExists = false, mtimeMs = 0;
+    let statePath = '', stateExists = false, mtimeMs = 0;
     try {
-      statePath = resolveStatePath(cwd);
-      const st = fs.statSync(statePath);
-      stateExists = true;
-      mtimeMs = st.mtimeMs;
-    } catch { /* no STATE.md */ }
+      statePath = resolveLatestStatePath(cwd);
+      if (statePath) {
+        const st = fs.statSync(statePath);
+        stateExists = true;
+        mtimeMs = st.mtimeMs;
+      }
+    } catch { /* no STATE_* */ }
 
     if (!shouldOffer({ source, enabled, correlation, stateExists })) process.exit(0);
 

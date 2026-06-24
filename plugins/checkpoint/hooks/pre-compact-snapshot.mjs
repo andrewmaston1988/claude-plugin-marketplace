@@ -1,30 +1,20 @@
 #!/usr/bin/env node
-// PreCompact hook: writes a skeletal STATE.md backstop. Always exits 0.
+// PreCompact hook: writes a skeletal STATE_<sid>_<stamp>.md backstop for the
+// OWN session only. Always exits 0.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
+import { resolveOwnStatePath, isMeaningfulState } from './lib/paths.mjs';
+
 const MARKER = path.join(os.homedir(), '.claude', '.compact_just_ran');
-// Don't clobber a Claude-authored STATE.md modified within this window;
-// treat anything older as stale and worth overwriting with at least a fresh skeleton.
-const FRESH_STATE_MTIME_WINDOW_SECONDS = 3600;
 // Read this much from the end of the JSONL — enough to find the last user/assistant
 // pair + recent tool uses without slurping multi-MB transcripts.
 const TRANSCRIPT_TAIL_BYTES = 250_000;
 const LAST_TEXT_CHARS = 500;
 const LAST_TOOL_USES = 10;
-
-// ---- path resolution ----
-function encodeProject(p) {
-  return p.replace(/[\\/:]/g, '-');
-}
-function resolveStatePath(cwd, flag) {
-  if (flag) return flag;
-  if (process.env.CLAUDE_STATE_PATH) return process.env.CLAUDE_STATE_PATH;
-  return path.join(os.homedir(), '.claude', 'projects', encodeProject(cwd), 'STATE.md');
-}
 
 // ---- argv: read flags from process.argv (--state-path X) ----
 let stateFlag = null;
@@ -149,16 +139,20 @@ function main() {
     if (!cwd) process.exit(0);
 
     let statePath;
-    try { statePath = resolveStatePath(cwd, stateFlag); }
+    try { statePath = stateFlag || resolveOwnStatePath(cwd, sid); }
     catch { process.exit(0); }
+    if (!statePath) process.exit(0); // no session_id → nothing per-session to write
 
-    // Don't clobber a fresh Claude-authored STATE.md
+    // Content guard: never overwrite a non-empty per-session STATE with a
+    // skeletal backstop, regardless of age. (Replaces the old mtime-window
+    // guard, which let stale-but-rich STATE.md get clobbered by an empty
+    // snapshot — the bug that prompted this rewrite.) Per-session filenames
+    // prevent *cross-session* clobber; this guard prevents self-clobber.
     try {
-      if (fs.existsSync(statePath)) {
-        const ageSec = (Date.now() - fs.statSync(statePath).mtimeMs) / 1000;
-        if (ageSec < FRESH_STATE_MTIME_WINDOW_SECONDS) process.exit(0);
+      if (fs.existsSync(statePath) && isMeaningfulState(fs.readFileSync(statePath, 'utf8'))) {
+        process.exit(0);
       }
-    } catch { /* fall through */ }
+    } catch { /* fall through to write */ }
 
     let size = 0;
     try { if (transcriptPath) size = fs.statSync(transcriptPath).size; } catch {}
