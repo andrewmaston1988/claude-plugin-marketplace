@@ -12,7 +12,7 @@ Writes (or reconciles) a structured `STATE.md` so a *fresh session* can resume t
 
 1. **Read the format** in `templates/state-template.md` (relative to this skill dir). The 7-section shape is **rigid** — do not add or drop sections.
 
-2. **Compute the path.** `~/.claude/projects/<encoded-cwd>/STATE.md`, where `<encoded-cwd>` is the cwd with `\`, `/`, `:` all rewritten to `-` (e.g. `C:/code/foo` → `C--code-foo`). Override via `CLAUDE_STATE_PATH`.
+2. **Compute the path.** `~/.claude/projects/<encoded-cwd>/STATE_<sessionId>_<YYYYMMDDTHHMMSSZ>.md`, where `<encoded-cwd>` is the cwd with `\`, `/`, `:` all rewritten to `-` (e.g. `C:/code/foo` → `C--code-foo`). The filename is **per-session** — only your own sessionId owns the file. If a file already exists for your sessionId, write into it (preserve the original timestamp in the filename); otherwise mint a new one with the current UTC stamp. Override via `CLAUDE_STATE_PATH`.
 
 3. **Read any existing STATE.md, then branch — reconcile, don't rewrite:**
    - **Absent** → write fresh, all sections.

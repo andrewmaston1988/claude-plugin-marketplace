@@ -15,7 +15,7 @@ Context heavy → nudge → `/checkpoint` → start a fresh session → SessionS
 
 ## STATE.md location
 
-`~/.claude/projects/<encoded-cwd>/STATE.md` (cwd with `\`, `/`, `:` rewritten to `-`). Override with `CLAUDE_STATE_PATH`.
+`~/.claude/projects/<encoded-cwd>/STATE_<sessionId>_<YYYYMMDDTHHMMSSZ>.md` (cwd with `\`, `/`, `:` rewritten to `-`). One file per session, UTC-stamped — multiple sessions sharing a cwd no longer clobber each other. SessionStart offers the **most recent** `STATE_*` file as the resume candidate. Override with `CLAUDE_STATE_PATH`.
 
 ## Cache keepalive (opt-in)
 
