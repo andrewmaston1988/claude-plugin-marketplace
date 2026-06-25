@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   sanitizeSid, nowStamp, sessionStateFilename,
   resolveOwnStatePath, resolveLatestStatePath,
-  isMeaningfulState, resolveStatePath,
+  isMeaningfulState, resolveStatePath, projectDir,
 } from '../lib/paths.mjs';
 
 // ---- pure helpers ----
@@ -127,4 +127,16 @@ test('resolveLatestStatePath: CLAUDE_STATE_PATH returns empty when file does not
   } finally {
     delete process.env.CLAUDE_STATE_PATH;
   }
+});
+
+// ---- projectDir (now exported for the SessionStart hook to render) ----
+
+test('projectDir: encodes the cwd into ~/.claude/projects/<sanitized>', () => {
+  const cwd = 'C:\\code\\foo';
+  assert.equal(projectDir(cwd), path.join(os.homedir(), '.claude', 'projects', 'C--code-foo'));
+});
+
+test('projectDir: forward-slash cwd is encoded the same way', () => {
+  const cwd = '/home/u/work';
+  assert.equal(projectDir(cwd), path.join(os.homedir(), '.claude', 'projects', '-home-u-work'));
 });

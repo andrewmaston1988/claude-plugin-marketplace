@@ -30,7 +30,7 @@ export function nowStamp(d = new Date()) {
   );
 }
 
-function projectDir(cwd) {
+export function projectDir(cwd) {
   return path.join(os.homedir(), '.claude', 'projects', encodeProject(cwd));
 }
 
