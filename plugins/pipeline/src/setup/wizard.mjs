@@ -660,7 +660,7 @@ export async function runWizard({ paths, log, opts = {} }) {
     hr();
     say("Step 9/11 — Add pipeline to PATH\n");
     // PATH alias targets the user-facing CLI dispatcher, NOT the daemon entry.
-    // bridgeEntry above is scripts/orchestrator/index.mjs (correct for the OS
+    // bridgeEntry above is src/orchestrator/index.mjs (correct for the OS
     // scheduler); for shell aliases users need bin/pipeline.mjs so subcommands
     // like `pipeline dashboard tui` actually dispatch.
     const cliEntry = fileURLToPath(new URL("../../bin/pipeline.mjs", import.meta.url));

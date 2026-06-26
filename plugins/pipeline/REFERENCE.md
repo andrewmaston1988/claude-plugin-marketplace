@@ -124,7 +124,7 @@ The hook is spawned once per envelope with the file path as its only argv. Stdio
 
 ### Bundled Slack forwarder
 
-The plugin ships `scripts/forwarders/claude-slack.mjs`. The setup wizard wires it as `hooks.on_notification` automatically when:
+The plugin ships `src/forwarders/claude-slack.mjs`. The setup wizard wires it as `hooks.on_notification` automatically when:
 
 - A Slack channel is set (`notifications.governance_channel` or `notifications.pipeline_channel`)
 - `claude-slack` is on PATH (installable via the `slack-bridge` plugin in this same marketplace)
@@ -133,7 +133,7 @@ Channel resolution: `pipeline_channel || governance_channel`. So pipeline events
 
 ### Bringing your own forwarder
 
-Replace `hooks.on_notification` with your own executable — anything that takes a JSON envelope path and forwards it. Read `scripts/forwarders/claude-slack.mjs` as a 50-line reference implementation. Common patterns:
+Replace `hooks.on_notification` with your own executable — anything that takes a JSON envelope path and forwards it. Read `src/forwarders/claude-slack.mjs` as a 50-line reference implementation. Common patterns:
 
 - **Different notifier** (Discord, MS Teams, email, webhook): substitute the underlying API call; the envelope format stays the same.
 - **Routing**: parse `envelope.priority` or `envelope.title` to choose the destination channel.
@@ -382,7 +382,7 @@ A Bitbucket implementation is a ~40-line script: query `GET /2.0/repositories/<w
 
 Every config-driven path key in the plugin is resolved through one helper:
 `resolveTemplate(template, vars, { resolveBase, configDir })` in
-`scripts/worktree-paths.mjs`. The rule:
+`src/worktree-paths.mjs`. The rule:
 
 1. Substitute `{placeholder}` tokens from `vars`; unknown placeholders pass through literally. `{config_dir}` is filled from the `configDir` option.
 2. Expand a leading `~/` to `os.homedir()`.
@@ -415,11 +415,11 @@ Hook values are command strings — only the first whitespace-separated token is
 | `{branch_local}`     | branch minus the first slash-segment |
 | `{config_dir}`       | `paths.configDir` |
 
-The canonical exported list is `PLACEHOLDER_KEYS` in `scripts/worktree-paths.mjs`; a test pins this table to that constant so the two cannot drift.
+The canonical exported list is `PLACEHOLDER_KEYS` in `src/worktree-paths.mjs`; a test pins this table to that constant so the two cannot drift.
 
 ### Helpers
 
-`scripts/worktree-paths.mjs` exposes three feature-aware wrappers over `resolveTemplate`:
+`src/worktree-paths.mjs` exposes three feature-aware wrappers over `resolveTemplate`:
 
 | Helper | Template key | Default | Notes |
 |---|---|---|---|
@@ -759,7 +759,7 @@ The pipeline plugin wires a `UserPromptSubmit` hook into Claude Code that fires 
 }
 ```
 
-**Implementation path:** `plugins/pipeline/hooks/user-prompt-submit` (bash shim) → `plugins/pipeline/scripts/hooks/user-prompt-submit.mjs` (Node.js)
+**Implementation path:** `plugins/pipeline/hooks/user-prompt-submit` (bash shim) → `plugins/pipeline/src/hooks/user-prompt-submit.mjs` (Node.js)
 
 ### Dual-writer phase (phases 2–4)
 
@@ -819,13 +819,13 @@ If any template is missing, its section is skipped but the hook still emits vali
 
 ### Hooks pattern for future plugins
 
-The bash shim pattern (`plugins/pipeline/hooks/user-prompt-submit` → `plugins/pipeline/scripts/hooks/user-prompt-submit.mjs`) is the new standard for plugin hooks. Slack-bridge's `session-start` hook does all its work inline in bash; for larger logic (session DB upserts, checkpoint triggers, multiple template reads), this dispatch pattern is cleaner. New plugin hooks should follow it:
+The bash shim pattern (`plugins/pipeline/hooks/user-prompt-submit` → `plugins/pipeline/src/hooks/user-prompt-submit.mjs`) is the new standard for plugin hooks. Slack-bridge's `session-start` hook does all its work inline in bash; for larger logic (session DB upserts, checkpoint triggers, multiple template reads), this dispatch pattern is cleaner. New plugin hooks should follow it:
 
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-exec node "${SCRIPT_DIR}/../scripts/hooks/hook-name.mjs" "$@"
+exec node "${SCRIPT_DIR}/../src/hooks/hook-name.mjs" "$@"
 ```
 
 ---
@@ -856,7 +856,7 @@ If gate passes: sets pipeline row to `queued` with `type=dev`, notifies, and exi
 
 ## Governor and metrics — future direction
 
-The plugin currently bundles a `governor` scheduler, a metrics CLI under `scripts/metrics/`, and the spend / baseline / anomaly / governor-spawn tables in `pipeline.db`. The governor runs scheduled background sessions that produce daily and monthly governance reports; the metrics CLI rolls up session-level analytics for those reports.
+The plugin currently bundles a `governor` scheduler, a metrics CLI under `src/metrics/`, and the spend / baseline / anomaly / governor-spawn tables in `pipeline.db`. The governor runs scheduled background sessions that produce daily and monthly governance reports; the metrics CLI rolls up session-level analytics for those reports.
 
 These features **work today** when configured (see the `governor` config block below) — they're not stubs. But they're conceptually separate from pipelining: they're observability, not autonomous dev orchestration.
 

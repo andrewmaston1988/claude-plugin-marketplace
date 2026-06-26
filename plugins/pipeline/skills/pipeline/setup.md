@@ -14,7 +14,7 @@ For every key the skill surfaces:
 4. **Document consequences**: which files land where; what re-resolves on each plugin run; whether existing on-disk state has to migrate when the value changes.
 5. **Accept follow-ups** ("why?", "what if I set X?") from the same understanding — don't push the user back through the prompt to ask a clarifying question.
 
-Path-shaped values must go through `resolveTemplate(value, vars, { resolveBase, configDir })` exported from `plugins/pipeline/scripts/worktree-paths.mjs`. The placeholder vocabulary and `resolveBase` category for each key are defined in `plugins/pipeline/CLAUDE.md` "Path resolution"; do not invent ad-hoc resolution rules.
+Path-shaped values must go through `resolveTemplate(value, vars, { resolveBase, configDir })` exported from `plugins/pipeline/src/worktree-paths.mjs`. The placeholder vocabulary and `resolveBase` category for each key are defined in `plugins/pipeline/CLAUDE.md` "Path resolution"; do not invent ad-hoc resolution rules.
 
 The two environment-check values this skill always surfaces:
 
@@ -419,7 +419,7 @@ These mirror the `{{…}}` template placeholders expanded at render time. Custom
 
 **Default**: YES.
 
-**If you skip**: you need to start the orchestrator manually each session — from the dashboard's agents panel (`o` key, then Enter) or by running `node scripts/orchestrator/index.mjs` from the plugin dir. Pipeline rows still get queued just fine, they just won't be picked up until something starts the orchestrator.
+**If you skip**: you need to start the orchestrator manually each session — from the dashboard's agents panel (`o` key, then Enter) or by running `node src/orchestrator/index.mjs` from the plugin dir. Pipeline rows still get queued just fine, they just won't be picked up until something starts the orchestrator.
 
 ### Question 5 — PATH alias
 
