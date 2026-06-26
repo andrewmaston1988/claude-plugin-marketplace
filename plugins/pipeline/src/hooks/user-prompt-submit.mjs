@@ -2,7 +2,7 @@ import { readFileSync, statSync, unlinkSync, existsSync, readdirSync, appendFile
 import { join } from "node:path";
 import { homedir } from "node:os";
 import crypto from "node:crypto";
-import { connectUnified, getClaudeSession, listActiveClaudeSessionsByCwd, getLastCheckpointSize, setLastCheckpointSize, upsertClaudeSession } from "../db/index.mjs";
+import { connectUnified, getClaudeSession, listActiveClaudeSessionsByCwd, upsertClaudeSession } from "../db/index.mjs";
 
 function expandUserPath(path) {
   if (!path || typeof path !== "string") return path;
@@ -98,7 +98,6 @@ function buildAdditionalContext(params, { fsReadTemplate }) {
     prevAnyTs = 0,
     now = Date.now() / 1000,
     transcriptSize = 0,
-    lastCheckpointSize = 0,
     isKeepalive = false,
     compactMarkerExists = false,
     env = process.env,
@@ -108,32 +107,9 @@ function buildAdditionalContext(params, { fsReadTemplate }) {
 
   let ctx = baseContext;
 
-  const CHECKPOINT_SIZE_THRESHOLD = 2_000_000;
-  const CHECKPOINT_SIZE_GROWTH = 1_000_000;
-
-
-  let shouldCheckpoint = false;
-  if (!isKeepalive && !env.CORRELATION_ID && transcriptSize >= CHECKPOINT_SIZE_THRESHOLD) {
-    const lcs = lastCheckpointSize ?? 0;
-    if (lcs === 0 || (transcriptSize - lcs) >= CHECKPOINT_SIZE_GROWTH) {
-      shouldCheckpoint = true;
-    }
-  }
-
-  if (shouldCheckpoint) {
-    const resume = fsReadTemplate?.("~/.claude/templates/compact-resume.md") || readTemplateFile("~/.claude/templates/compact-resume.md");
-    const template = fsReadTemplate?.("~/.claude/templates/session-checkpoint.md") || readTemplateFile("~/.claude/templates/session-checkpoint.md");
-
-    if (resume && template) {
-      const sp = join(process.cwd(), "STATE.md");
-      const checkpoint = template
-        .replace("{n}", `${Math.floor(transcriptSize / 1024)} KB transcript`)
-        .replace("{sp}", sp)
-        .replace("{resume}", resume);
-      ctx = checkpoint;
-      injected.push("checkpoint");
-    }
-  }
+  // The 2 MB threshold + last_checkpoint_size growth gate was removed: the
+  // checkpoint plugin owns context-pressure now. Hooks only emit the
+  // post-compact marker notice below.
 
   if (!isKeepalive && compactMarkerExists) {
     ctx += (
@@ -201,14 +177,6 @@ async function main() {
       }
     }
 
-    let lastCheckpointSize = 0;
-    try {
-      const sizeOrNull = getLastCheckpointSize(db, resolvedSessionId);
-      lastCheckpointSize = sizeOrNull ?? 0;
-    } catch {
-      lastCheckpointSize = 0;
-    }
-
     const compactMarkerPath = join(homedir(), ".claude", ".compact_just_ran");
     const compactMarkerExists = existsSync(compactMarkerPath);
 
@@ -218,7 +186,6 @@ async function main() {
         prevAnyTs,
         now,
         transcriptSize,
-        lastCheckpointSize,
         isKeepalive,
         compactMarkerExists,
         env: process.env,
@@ -229,17 +196,6 @@ async function main() {
         fsReadTemplate: null,
       }
     );
-
-    if (transcriptSize >= 2_000_000 && !isKeepalive && !process.env.CORRELATION_ID) {
-      const lcs = lastCheckpointSize ?? 0;
-      if (lcs === 0 || (transcriptSize - lcs) >= 1_000_000) {
-        try {
-          setLastCheckpointSize(db, resolvedSessionId, transcriptSize);
-        } catch {
-          // ignore DB update failure for checkpoint size
-        }
-      }
-    }
 
     if (compactMarkerExists && !isKeepalive) {
       try {

@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
-  rowGet, rowUpdate,
+  rowGet, rowUpdate, setLastError,
   autoRequeueDev, resetDevRetries,
   sessionFinish, sessionsActive, projectGetByName,
   appendCycleLog,
@@ -171,6 +171,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
           }
         } catch (e) {
           logFn(`[${project}] test-reaper update failed: ${e.message}`, "ERROR");
+          try { setLastError(db, project, feature, `test-reaper: ${e.message}`); } catch {}
         }
 
       } else if (resolvedStype === "review") {
@@ -210,6 +211,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
             }
           } catch (e) {
             logFn(`[${project}] review-reaper update failed: ${e.message}`, "ERROR");
+            try { setLastError(db, project, feature, `review-reaper: ${e.message}`); } catch {}
           }
         }
 
@@ -278,6 +280,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
             }
           } catch (e) {
             logFn(`[${project}] dev-reaper update failed: ${e.message}`, "ERROR");
+            try { setLastError(db, project, feature, `dev-reaper: ${e.message}`); } catch {}
           }
         }
 
@@ -289,6 +292,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
             stage:       "manual",
             notes_extra: appendNote(existing, `[merge-crashed ${ts}]`),
           });
+          try { setLastError(db, project, feature, `merge-crashed ${ts}`); } catch {}
           notifyFailure(project, feature, "merge-crashed", { dryRun });
         }
       }
