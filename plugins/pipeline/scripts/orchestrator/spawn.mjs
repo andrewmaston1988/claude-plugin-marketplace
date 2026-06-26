@@ -260,6 +260,20 @@ export function nextEscalationStep(tier, effort, tierEfforts) {
   return { tier, effort, action: "stay" };
 }
 
+// Walk the opus-shaped effort ladder for a non-Anthropic, proxy-routed model.
+// No tier-jump — the model is pinned. +2 per retry within the levels list,
+// clamp at the last rung.
+export function nextEscalationStepPinned(effort, levels) {
+  const idx = levels.indexOf(effort);
+  if (idx >= 0 && idx + 2 < levels.length) {
+    return { effort: levels[idx + 2], action: "effort+2" };
+  }
+  if (idx >= 0 && idx < levels.length - 1) {
+    return { effort: levels[levels.length - 1], action: "effort-clamp" };
+  }
+  return { effort, action: "stay" };
+}
+
 // A worktree-eligible session must never run on the merge destination — that
 // would commit straight to main. A declared branch is authoritative for its
 // NAME, but the name must not BE the target/default branch.
@@ -284,7 +298,9 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
   const newStage = STAGE[stype] || "dev";
   const tools    = TOOLS[stype] || TOOLS.dev;
 
-  // Per-tier effort escalation: +2 within tier, tier-jump on ceiling
+  // Per-tier effort escalation: +2 within tier, tier-jump on ceiling.
+  // Non-Anthropic (proxy-routed) models are auto-pinned: walk the opus-shaped
+  // effort ladder and never change the model.
   if (stype === "dev" && (row.review_retries || 0) >= 1) {
     const cfg = loadPipelineConfig();
     const tiers = cfg.tiers || PIPELINE_DEFAULTS.tiers;
@@ -308,6 +324,24 @@ export function spawnSession(project, row, sessionFile, projectRoot, { db, dryRu
           priority: "low",
         }).catch(() => {});
         model  = newModel;
+        effort = step.effort;
+      }
+    } else if (Object.keys(proxyEnvFor(model, cfg)).length > 0) {
+      // Non-Anthropic, proxy-routed model — auto-pin, walk opus-shaped ladder.
+      const pinnedLevels = tierEfforts.opus || ["low", "medium", "high", "xhigh", "max"];
+      const step = nextEscalationStepPinned(effort, pinnedLevels);
+      if (step.action !== "stay") {
+        rowUpdate(db, project, feature, { d_effort: step.effort });
+        logFn(
+          `[${project}] '${feature}' escalating pinned/${effort}→pinned/${step.effort} ` +
+          `(${step.action}, review_retries=${row.review_retries})`,
+          "WARN"
+        );
+        _publishNotification({
+          title:    `Escalated: ${feature}`,
+          message:  `pinned/${effort} → pinned/${step.effort} (${step.action})`,
+          priority: "low",
+        }).catch(() => {});
         effort = step.effort;
       }
     }
