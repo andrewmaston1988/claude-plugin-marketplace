@@ -23,10 +23,10 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
-import { rowAdd, rowUpdate } from "../scripts/pipeline-db/rows.mjs";
-import { progressCreate, progressMark } from "../scripts/pipeline-db/progress.mjs";
+import { connectPath, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
+import { rowAdd, rowUpdate } from "../src/db/rows.mjs";
+import { progressCreate, progressMark } from "../src/db/progress.mjs";
 
 const _here   = dirname(fileURLToPath(import.meta.url));
 const ROOT    = join(_here, "parity-fixtures");

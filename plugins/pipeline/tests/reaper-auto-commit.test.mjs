@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { autoCommitWorktree } from "../scripts/orchestrator/reaper.mjs";
+import { autoCommitWorktree } from "../src/orchestrator/reaper.mjs";
 
 const TS = "2026-06-16T040100Z";
 const FEATURE = "reaper-auto-commit-test";

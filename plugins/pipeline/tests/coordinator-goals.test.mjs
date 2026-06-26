@@ -9,7 +9,7 @@ import {
   connectPath, close, projectAdd,
   setCoordinatorGoal, getCoordinatorGoal, clearCoordinatorGoal,
   listCoordinatorGoals, backfillCoordinatorGoalsFromClaudeDb,
-} from "../scripts/pipeline-db/index.mjs";
+} from "../src/db/index.mjs";
 
 const PROJECT = "testproject";
 

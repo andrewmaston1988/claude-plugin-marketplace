@@ -142,7 +142,7 @@ test("session-gen: cfg.plansDir = '../shared/plans' picks up plan from sibling d
     mkdirSync(sharedPlans, { recursive: true });
     writeFileSync(join(sharedPlans, "demo-feat.md"), "# demo content body\n");
 
-    const { generateSessionFile } = await import("../scripts/session-gen.mjs");
+    const { generateSessionFile } = await import("../src/session-gen.mjs");
     const out = generateSessionFile("proj", "demo-feat.md", "dev", {
       projectRoot,
       _cfg: { plansDir: "../shared/plans" },

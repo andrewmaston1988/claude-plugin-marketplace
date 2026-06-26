@@ -9,7 +9,7 @@ import {
   loadInteractiveSessionIds,
   readSessionFull,
 } from "./sessions.mjs";
-import { loadSpawnMap } from "../pipeline-db/index.mjs";
+import { loadSpawnMap } from "../db/index.mjs";
 
 export function reclassifyHistorical(db, opts = {}) {
   const { dryRun = false, deps = {} } = opts;
@@ -101,8 +101,19 @@ export function reclassifyHistorical(db, opts = {}) {
   const stmt = db.prepare(
     "UPDATE metric_sessions SET command_type = ?, correlation_id = COALESCE(?, correlation_id) WHERE id = ?"
   );
-  for (const { id, newType, newCorr } of changes) {
-    stmt.run(newType, newCorr ?? null, id);
+  // Wrap the N UPDATEs in a transaction so a mid-loop failure doesn't leave
+  // the metric_sessions table half-reclassified. node:sqlite's DatabaseSync
+  // does not expose .transaction() (better-sqlite3-only), so we drive the
+  // BEGIN/COMMIT ourselves.
+  db.exec("BEGIN");
+  try {
+    for (const { id, newType, newCorr } of changes) {
+      stmt.run(newType, newCorr ?? null, id);
+    }
+    db.exec("COMMIT");
+  } catch (e) {
+    try { db.exec("ROLLBACK"); } catch {}
+    throw e;
   }
   process.stdout.write(`updated ${changes.length} rows\n`);
 }

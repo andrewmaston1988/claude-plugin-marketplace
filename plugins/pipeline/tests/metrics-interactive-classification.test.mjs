@@ -8,10 +8,10 @@ import {
   connectPath, close, projectAdd,
   upsertClaudeSession, listAllClaudeSessionIds,
   loadMetricSessions,
-} from "../scripts/pipeline-db/index.mjs";
+} from "../src/db/index.mjs";
 import {
   loadInteractiveSessionIds, updateSessions, classifyFirstPrompt,
-} from "../scripts/metrics/sessions.mjs";
+} from "../src/metrics/sessions.mjs";
 
 const PROJECT = "testproject";
 

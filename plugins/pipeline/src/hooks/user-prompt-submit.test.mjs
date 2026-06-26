@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { homedir } from "node:os";
 import { execSync } from "node:child_process";
-import { connectPath, upsertClaudeSession, getClaudeSession, getLastCheckpointSize, setLastCheckpointSize } from "../pipeline-db/index.mjs";
+import { connectPath, upsertClaudeSession, getClaudeSession, getLastCheckpointSize, setLastCheckpointSize } from "../db/index.mjs";
 
 const NODE_PATH = process.execPath;
 const HOOK_PATH = fileURLToPath(new URL("./user-prompt-submit.mjs", import.meta.url));

@@ -11,13 +11,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
-import { rowAdd } from "../scripts/pipeline-db/rows.mjs";
+import { connectPath, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
+import { rowAdd } from "../src/db/rows.mjs";
 import { PIPELINE_DEFAULTS } from "../src/config-defaults.mjs";
 
 import { fileURLToPath } from "node:url";
-const ORCHESTRATOR = fileURLToPath(new URL("../scripts/orchestrator/index.mjs", import.meta.url));
+const ORCHESTRATOR = fileURLToPath(new URL("../src/orchestrator/index.mjs", import.meta.url));
 
 function initRepo(dir) {
   mkdirSync(dir, { recursive: true });

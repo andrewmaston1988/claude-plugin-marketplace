@@ -5,12 +5,12 @@ import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { connectPath, close, projectAdd, rowAdd } from "../scripts/pipeline-db/index.mjs";
+import { connectPath, close, projectAdd, rowAdd } from "../src/db/index.mjs";
 import { loadProjects, loadRows } from "../src/dashboard/shared/load-rows.mjs";
 import { loadActiveSessions } from "../src/dashboard/shared/load-sessions.mjs";
 import { loadRecentCycles } from "../src/dashboard/shared/load-cycle-log.mjs";
 import { loadOrchState } from "../src/dashboard/shared/load-orch-state.mjs";
-import { appendCycleLog } from "../scripts/pipeline-db/index.mjs";
+import { appendCycleLog } from "../src/db/index.mjs";
 
 const PROJECT = "testproject";
 

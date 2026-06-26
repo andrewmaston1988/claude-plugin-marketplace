@@ -7,7 +7,7 @@ import { equal, match, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readdirSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join, dirname, basename } from "node:path";
 import { tmpdir } from "node:os";
-import { publishReport, publishNotification } from "../scripts/publisher.mjs";
+import { publishReport, publishNotification } from "../src/publisher.mjs";
 
 function freshPaths() {
   const tmp = mkdtempSync(join(tmpdir(), "smoke16-"));

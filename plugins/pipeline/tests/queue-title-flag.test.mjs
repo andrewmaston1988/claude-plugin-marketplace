@@ -10,8 +10,8 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
+import { connectPath, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
 
 const PLUGIN  = dirname(dirname(fileURLToPath(import.meta.url)));
 const BIN     = join(PLUGIN, "bin", "pipeline.mjs");

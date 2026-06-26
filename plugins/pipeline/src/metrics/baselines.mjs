@@ -1,7 +1,7 @@
 // Baseline computation: 7-day rolling averages per command type.
 import { readFileSync, writeFileSync, mkdirSync, existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadMetricSessions } from "../pipeline-db/index.mjs";
+import { loadMetricSessions } from "../db/index.mjs";
 import { parseTimestamp, getAllCommandTypes } from "./sessions.mjs";
 
 const COMMAND_TYPES = getAllCommandTypes();

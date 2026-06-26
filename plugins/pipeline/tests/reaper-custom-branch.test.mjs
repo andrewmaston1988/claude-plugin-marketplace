@@ -7,10 +7,10 @@ import { spawnSync } from "node:child_process";
 
 process.env.PIPELINE_SUPPRESS_DEPRECATED = "1";
 
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
-import { rowAdd } from "../scripts/pipeline-db/rows.mjs";
-import { reconcileSessions } from "../scripts/orchestrator/reaper.mjs";
+import { connectPath, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
+import { rowAdd } from "../src/db/rows.mjs";
+import { reconcileSessions } from "../src/orchestrator/reaper.mjs";
 
 const DEAD_PID = 999999;
 function git(cwd, ...args) {

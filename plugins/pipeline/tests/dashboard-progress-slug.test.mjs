@@ -4,8 +4,8 @@ import { equal, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { connectPath, close, projectAdd, progressCreate } from "../scripts/pipeline-db/index.mjs";
-import { sessionRecordSpawn } from "../scripts/pipeline-db/sessions.mjs";
+import { connectPath, close, projectAdd, progressCreate } from "../src/db/index.mjs";
+import { sessionRecordSpawn } from "../src/db/sessions.mjs";
 import { loadActiveSessions } from "../src/dashboard/shared/load-sessions.mjs";
 import { loadProgressBySlug } from "../src/dashboard/shared/load-progress.mjs";
 

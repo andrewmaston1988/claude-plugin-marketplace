@@ -13,11 +13,11 @@ test("bin/pipeline.mjs has orchestrator/orchestrate subcommand", () => {
   );
 });
 
-test("orchestrator subcommand imports scripts/orchestrator/index.mjs", () => {
+test("orchestrator subcommand imports src/orchestrator/index.mjs", () => {
   const src = readFileSync(BIN, "utf8");
   ok(
-    src.includes("scripts/orchestrator/index.mjs"),
-    "should import scripts/orchestrator/index.mjs"
+    src.includes("src/orchestrator/index.mjs"),
+    "should import src/orchestrator/index.mjs"
   );
   // Verify the import is inside the orchestrator subcommand block
   const orchBlock = src.slice(

@@ -3,7 +3,7 @@ import { equal, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { connectPath, close, projectAdd, progressCreate } from "../scripts/pipeline-db/index.mjs";
+import { connectPath, close, projectAdd, progressCreate } from "../src/db/index.mjs";
 import { loadStepsBySlug, sliceSteps } from "../src/dashboard/shared/load-progress.mjs";
 
 const PROJECT = "testproject";

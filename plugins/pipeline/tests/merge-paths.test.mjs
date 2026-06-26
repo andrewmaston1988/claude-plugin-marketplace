@@ -9,7 +9,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { connectPath, close, projectAdd, rowAdd, rowUpdate } from "../scripts/pipeline-db/index.mjs";
+import { connectPath, close, projectAdd, rowAdd, rowUpdate } from "../src/db/index.mjs";
 import { lookupPlanFile, step1IdentifyPlans, step6bArchiveOrphanedPlans } from "../skills/merge/scripts/plan-files.mjs";
 import { verifyAlreadyIntegrated, step7CommitProject } from "../skills/merge/scripts/merge.mjs";
 
