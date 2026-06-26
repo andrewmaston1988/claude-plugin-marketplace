@@ -12,7 +12,11 @@ Writes (or reconciles) a structured `STATE.md` so a *fresh session* can resume t
 
 1. **Read the format** in `templates/state-template.md` (relative to this skill dir). The 7-section shape is **rigid** — do not add or drop sections.
 
-2. **Compute the path.** `~/.claude/projects/<encoded-cwd>/STATE_<sessionId>_<YYYYMMDDTHHMMSSZ>.md`, where `<encoded-cwd>` is the cwd with `\`, `/`, `:` all rewritten to `-` (e.g. `C:/code/foo` → `C--code-foo`). The filename is **per-session** — only your own sessionId owns the file. If a file already exists for your sessionId, write into it (preserve the original timestamp in the filename); otherwise mint a new one with the current UTC stamp. Override via `CLAUDE_STATE_PATH`.
+2. **Compute the path.** `~/.claude/projects/<encoded-cwd>/STATE_<sessionId>_<YYYYMMDDTHHMMSSZ>.md`, where `<encoded-cwd>` is the cwd with `\`, `/`, `:` all rewritten to `-` (e.g. `C:/code/foo` → `C--code-foo`). The filename is **per-session** — only your own sessionId owns the file. The embedded `YYYYMMDDTHHMMSSZ` is the canonical "freshness" signal: `resolveLatestStatePath` (in `plugins/checkpoint/hooks/lib/paths.mjs`) compares stamps embedded in filenames, not file mtimes, so a stale filename invites a parallel session's newer file to win even when yours is fresher. Override via `CLAUDE_STATE_PATH`.
+
+   **Every successful checkpoint write must end with the file living at a filename whose embedded timestamp is the current UTC moment:**
+   - If no STATE file exists for your sessionId → mint with the current UTC stamp.
+   - If a STATE file already exists for your sessionId → reconcile the content, **write the new content into the existing filename first**, then `renameStateToNow(oldPath, new Date())` so the embedded stamp advances. The sessionId portion of the filename does not change. Recommended ordering (atomicity): write into the existing path, then rename — if the rename fails, the freshest content is still preserved at the old name. Use `renameStateToNow` from `plugins/checkpoint/hooks/lib/paths.mjs` (canonical helper) rather than re-implementing the regex split.
 
 3. **Read any existing STATE.md, then branch — reconcile, don't rewrite:**
    - **Absent** → write fresh, all sections.
@@ -39,3 +43,4 @@ Optional cache keepalive: set `checkpoint.keepalive: true`. See the plugin READM
 - **Adding or dropping sections.** The 7-section format is exact; drift breaks the resume contract.
 - **Dumping whole files into KEY FILES.** `path:line` pointers plus critical signatures only.
 - **Writing to the wrong path.** Always use the `<encoded-cwd>` rule (or `CLAUDE_STATE_PATH`).
+- **Leaving a stale filename timestamp after a reconcile.** The SessionStart resume picker compares timestamps embedded in filenames, not mtimes — a frozen stamp invites a parallel session's newer file to win even when yours is fresher. Always call `renameStateToNow(oldPath, new Date())` after writing.
