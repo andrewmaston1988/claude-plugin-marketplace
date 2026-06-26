@@ -7,7 +7,7 @@ import { equal, ok, match, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runDoctor, printDoctor, doctorExitCode, parseNetstatPids, parseTasklist, parseWmicCommandLine, detectPortOccupant } from "../src/setup/doctor.mjs";
+import { runDoctor, printDoctor, doctorExitCode, parseNetstatPids, parseTasklist, parseWmicCommandLine, parseCimCommandLine, detectPortOccupant } from "../src/setup/doctor.mjs";
 import { connectUnified, close } from "../scripts/pipeline-db/connection.mjs";
 import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
 
@@ -178,6 +178,64 @@ test("doctor: paths missing throws clear error", async () => {
   }
 });
 
+// BLOCKER 3 — governor-env-contract must use resolveTemplate so the doctor
+// and the runtime agree on path resolution. A templated path like
+// "{project}/templates/governor.md" must be resolved via the same function
+// the runtime uses, not a bespoke ~/ / absolute / ~/.pipeline ternary.
+test("doctor: governor-env-contract reads templated template_path", async () => {
+  const { tmp, paths, cfgPath } = freshPaths();
+  try {
+    // Write a config that enables the governor with an absolute template_path
+    // pointing at a real file containing a CONTRACT-known var. The check
+    // passes when the doctor resolves the path AND the template's $VAR refs
+    // match the spawn contract — proving the new resolveTemplate path is
+    // wired in end-to-end.
+    const tplDir = join(tmp, "templates");
+    mkdirSync(tplDir, { recursive: true });
+    const tplPath = join(tplDir, "governor.md");
+    writeFileSync(tplPath, "governor for $CORRELATION_ID\n", "utf8");
+    writeFileSync(cfgPath, JSON.stringify({
+      governor: {
+        enabled: true,
+        template_path: tplPath,
+      },
+    }), "utf8");
+    const results = await runDoctor({ paths, configPath: cfgPath });
+    const gov = findCheck(results, "governor-env-contract");
+    ok(gov, "governor-env-contract check should exist");
+    equal(gov.ok, true);
+  } finally { cleanup(tmp); }
+});
+
+// BLOCKER 3 (negative) — the doctor must read the template file (via the
+// resolveTemplate path) and surface a warn when the template references vars
+// not in the spawn contract. The old three-shape ternary missed this because
+// existsSync returned false on the unsubstituted string and `unknown=[]`
+// passed vacuously. The new resolveTemplate path resolves the template file
+// first, so an unknown $VAR in the file is now visible.
+test("doctor: governor-env-contract warns when template references unknown $VAR", async () => {
+  const { tmp, paths, cfgPath } = freshPaths();
+  try {
+    const tplDir = join(tmp, "templates");
+    mkdirSync(tplDir, { recursive: true });
+    const tplPath = join(tplDir, "governor.md");
+    // $BOGUS_VAR is not in the spawn contract — doctor must warn.
+    writeFileSync(tplPath, "governor for $BOGUS_VAR\n", "utf8");
+    writeFileSync(cfgPath, JSON.stringify({
+      governor: {
+        enabled: true,
+        template_path: tplPath,
+      },
+    }), "utf8");
+    const results = await runDoctor({ paths, configPath: cfgPath });
+    const gov = findCheck(results, "governor-env-contract");
+    ok(gov, "governor-env-contract check should exist");
+    equal(gov.ok, false);
+    equal(gov.warn, true);
+    match(gov.detail, /BOGUS_VAR/);
+  } finally { cleanup(tmp); }
+});
+
 // --- web-port-conflict helpers (Windows PID → process name) --------------------
 
 const NETSTAT_PORT_OCCUPIED = [
@@ -215,6 +273,11 @@ const WMIC_OTHER_NODE_CMDLINE = [
   '"C:\\Program Files\\nodejs\\node.exe" "C:\\Users\\Andrew\\Documents\\some-script.js"',
   "",
 ].join("\r\n");
+
+// PowerShell's Get-CimInstance emits one line per object: "CommandLine : ...".
+const CIM_PIPELINE_CMDLINE = "CommandLine : \"C:\\Program Files\\nodejs\\node.exe\" \"C:\\code\\claude-plugin-marketplace\\plugins\\pipeline\\bin\\pipeline.mjs\" dashboard web";
+
+const CIM_OTHER_NODE_CMDLINE = "CommandLine : \"C:\\Program Files\\nodejs\\node.exe\" \"C:\\Users\\Andrew\\Documents\\some-script.js\"";
 
 /** Stub a `run` function that returns canned output keyed by command+args. */
 function fakeRunner(scripts) {
@@ -272,11 +335,25 @@ test("parseWmicCommandLine: empty input → empty string", () => {
   equal(parseWmicCommandLine(null), "");
 });
 
+test("parseCimCommandLine: extracts the CommandLine value", () => {
+  equal(parseCimCommandLine(CIM_PIPELINE_CMDLINE),
+    '"C:\\Program Files\\nodejs\\node.exe" "C:\\code\\claude-plugin-marketplace\\plugins\\pipeline\\bin\\pipeline.mjs" dashboard web');
+});
+
+test("parseCimCommandLine: empty input → empty string", () => {
+  equal(parseCimCommandLine(""), "");
+  equal(parseCimCommandLine(null), "");
+});
+
+test("parseCimCommandLine: no CommandLine line → empty string", () => {
+  equal(parseCimCommandLine("ProcessId : 1234\nName : node.exe"), "");
+});
+
 test("detectPortOccupant (win32): port free → not in use, not ours", () => {
   const f = fakeRunner({
     "cmd /c": [{ status: 0, stdout: NETSTAT_PORT_FREE, stderr: "" }],
     "tasklist /FO": [{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
-    "wmic process":   [{ status: 0, stdout: WMIC_PIPELINE_CMDLINE, stderr: "" }],
+    "powershell -NoProfile": [{ status: 0, stdout: CIM_PIPELINE_CMDLINE, stderr: "" }],
   });
   const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
   equal(verdict.inUse, false);
@@ -287,15 +364,16 @@ test("detectPortOccupant (win32): port held by node.exe running pipeline.mjs →
   const f = fakeRunner({
     "cmd /c": [{ status: 0, stdout: NETSTAT_PORT_OCCUPIED, stderr: "" }],
     "tasklist /FO": [{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
-    "wmic process":   [{ status: 0, stdout: WMIC_PIPELINE_CMDLINE, stderr: "" }],
+    "powershell -NoProfile": [{ status: 0, stdout: CIM_PIPELINE_CMDLINE, stderr: "" }],
   });
   const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
   equal(verdict.inUse, true);
   equal(verdict.ours, true);
-  // Only the node.exe PID should have triggered a wmic call.
-  equal(f.calls.filter(c => c.cmd === "wmic").length, 1);
-  deepEqual(f.calls.find(c => c.cmd === "wmic").args,
-    ["process", "where", "ProcessId=1234", "get", "CommandLine"]);
+  // Only the node.exe PID should have triggered a PowerShell probe.
+  equal(f.calls.filter(c => c.cmd === "powershell").length, 1);
+  // args[3] is the -Command script body — must include ProcessId=1234.
+  // args[2] is the "-Command" flag itself.
+  match(f.calls.find(c => c.cmd === "powershell").args[3], /ProcessId=1234/);
 });
 
 test("detectPortOccupant (win32): port held by non-node process → not ours", () => {
@@ -303,14 +381,14 @@ test("detectPortOccupant (win32): port held by non-node process → not ours", (
   const f = fakeRunner({
     "cmd /c": [{ status: 0, stdout: NETSTAT_PORT_OCCUPIED, stderr: "" }],
     "tasklist /FO": [{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
-    "wmic process":   [{ status: 0, stdout: WMIC_OTHER_NODE_CMDLINE, stderr: "" }],
+    "powershell -NoProfile": [{ status: 0, stdout: CIM_OTHER_NODE_CMDLINE, stderr: "" }],
   });
   const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
   equal(verdict.inUse, true);
   equal(verdict.ours, false);
-  // Both node.exe and cmd.exe PIDs are seen; wmic only fires for node.exe.
-  // (cmd.exe PID 5678 is not a node.exe, so wmic is called once for PID 1234.)
-  equal(f.calls.filter(c => c.cmd === "wmic").length, 1);
+  // Both node.exe and cmd.exe PIDs are seen; PowerShell probe only fires for node.exe.
+  // (cmd.exe PID 5678 is not a node.exe, so PowerShell is called once for PID 1234.)
+  equal(f.calls.filter(c => c.cmd === "powershell").length, 1);
 });
 
 test("detectPortOccupant (win32): unknown PID in tasklist → not ours", () => {
@@ -318,17 +396,35 @@ test("detectPortOccupant (win32): unknown PID in tasklist → not ours", () => {
   const f = fakeRunner({
     "cmd /c": [{ status: 0, stdout: NETSTAT_PORT_OCCUPIED, stderr: "" }],
     "tasklist /FO": [{ status: 0, stdout: "", stderr: "" }],
-    "wmic process":   [{ status: 0, stdout: WMIC_PIPELINE_CMDLINE, stderr: "" }],
+    "powershell -NoProfile": [{ status: 0, stdout: CIM_PIPELINE_CMDLINE, stderr: "" }],
   });
   const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
   equal(verdict.inUse, true);
   equal(verdict.ours, false);
 });
 
-test("detectPortOccupant (win32): wmic failure (deprecated on Server 2022+) → not ours, no throw", () => {
+test("detectPortOccupant (win32): CIM probe failure → fall back to wmic → not ours", () => {
+  // CIM throws (e.g. Windows PowerShell missing) and wmic returns other-node
+  // command line (so the port-occupant probe cannot claim ownership).
   const f = fakeRunner({
     "cmd /c":     [{ status: 0, stdout: NETSTAT_PORT_OCCUPIED, stderr: "" }],
     "tasklist /FO":[{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
+    "powershell -NoProfile":[{ __throw: true }],
+    "wmic process":[{ status: 0, stdout: WMIC_OTHER_NODE_CMDLINE, stderr: "" }],
+  });
+  const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });
+  equal(verdict.inUse, true);
+  equal(verdict.ours, false);
+  // Both probes were tried in order: PowerShell first, then wmic.
+  equal(f.calls.filter(c => c.cmd === "powershell").length, 1);
+  equal(f.calls.filter(c => c.cmd === "wmic").length, 1);
+});
+
+test("detectPortOccupant (win32): CIM AND wmic both fail → not ours, no throw", () => {
+  const f = fakeRunner({
+    "cmd /c":     [{ status: 0, stdout: NETSTAT_PORT_OCCUPIED, stderr: "" }],
+    "tasklist /FO":[{ status: 0, stdout: TASKLIST_PLAIN, stderr: "" }],
+    "powershell -NoProfile":[{ __throw: true }],
     "wmic process":[{ __throw: true }],
   });
   const verdict = detectPortOccupant({ port: 8765, run: f.run, platform: "win32" });

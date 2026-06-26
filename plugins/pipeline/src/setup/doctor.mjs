@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { join, isAbsolute, dirname } from "node:path";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -12,7 +12,7 @@ import { readState, pidAlive } from "../../scripts/orchestrator/state-file.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
 import { resolveTemplate, resolveHookFirstToken, featureWorktreePath } from "../../scripts/worktree-paths.mjs";
 import { spawnSync } from "node:child_process";
-import { CONTRACT_VARS, ALWAYS_PRESENT, findUnknownTemplateVars } from "../../scripts/governor/env-contract.mjs";
+import { findUnknownTemplateVars } from "../../scripts/governor/env-contract.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -319,12 +319,15 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
   // 15. governor-env-contract — when the governor is enabled, confirm the
   // template references only placeholders/vars that the spawn contract provides.
   if (resolved?.governor?.enabled) {
+    // Use the runtime's resolveTemplate so the doctor and the spawn path agree
+    // on path resolution (supports {root}, {project}, {root_parent}, {config_dir}
+    // and tilde expansion). resolveBase = configDir so relative paths land in
+    // the user's pipeline config dir, matching the spawn path.
+    const cfgDir = dirname(cfgPath);
     const templatePath = resolved.governor.template_path
-      ? (resolved.governor.template_path.startsWith("~")
-          ? join(homedir(), resolved.governor.template_path.slice(1))
-          : isAbsolute(resolved.governor.template_path)
-              ? resolved.governor.template_path
-              : join(homedir(), ".pipeline", resolved.governor.template_path))
+      ? resolveTemplate(resolved.governor.template_path, {}, {
+          resolveBase: cfgDir, configDir: cfgDir,
+        })
       : null;
     // Read whichever template will be used (custom or bundled path from governor.mjs).
     const bundledPath = join(fileURLToPath(new URL("../../templates/governor-session.md", import.meta.url)));
@@ -383,9 +386,14 @@ export async function runDoctor({ paths, configPath, timeout = 5000, db: injecte
 // On Linux/macOS, `ss -tlnp` / `lsof` include the process name in their output
 // and the "is this our server?" heuristic is a simple regex. On Windows,
 // `netstat -ano` returns only PIDs — we have to round-trip through `tasklist`
-// (PID → image name) and, for `node.exe` candidates, `wmic` to read the
-// command line, before we can decide. The functions below are split out so
-// they can be unit-tested with synthetic `spawnSync` output.
+// (PID → image name) and, for `node.exe` candidates, a command-line probe
+// to read the executable args before we can decide. `wmic` is the legacy probe
+// but is deprecated/removed on Windows 11+ and Server 2022+; `Get-CimInstance`
+// is the modern equivalent. The probe tries Get-CimInstance first, falls back
+// to wmic, and finally to a PID-only tasklist (no command line → "unknown")
+// so the doctor still runs even on hosts where both WMI tools are absent.
+// The functions below are split out so they can be unit-tested with synthetic
+// `spawnSync` output.
 
 const DEFAULT_RUNNER = (cmd, args, opts) => spawnSync(cmd, args, opts);
 
@@ -430,6 +438,61 @@ export function parseWmicCommandLine(stdout) {
   return (value ?? "").trim();
 }
 
+/** Extract the command line from `Get-CimInstance Win32_Process` output. */
+export function parseCimCommandLine(stdout) {
+  if (!stdout) return "";
+  // PowerShell emits one line per object: "ProcessId : 1234  CommandLine : ...".
+  // We don't need a structured parse — just grab the value column.
+  const lines = stdout.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    const m = line.match(/^CommandLine\s*:\s*(.*)$/i);
+    if (m) return m[1].trim();
+  }
+  return "";
+}
+
+/**
+ * Probe the command line for `pid` on Windows. Tries Get-CimInstance first,
+ * then wmic (legacy), then gives up (returns null). Caller treats null as
+ * "couldn't read command line — cannot confirm or deny".
+ */
+function _probeWindowsCommandLine(pid, run) {
+  // 1) Get-CimInstance — modern, available on Windows 11+ and PowerShell hosts.
+  try {
+    const r = run(
+      "powershell",
+      [
+        "-NoProfile", "-NonInteractive",
+        "-Command",
+        `Get-CimInstance Win32_Process -Filter "ProcessId=${pid}" ` +
+        `| Select-Object -ExpandProperty CommandLine`,
+      ],
+      { encoding: "utf8", windowsHide: true, timeout: 3000 },
+    );
+    if (r?.status === 0) {
+      const cmdline = parseCimCommandLine(r.stdout ?? "");
+      if (cmdline) return cmdline;
+    }
+  } catch { /* Get-CimInstance unavailable */ }
+
+  // 2) wmic — deprecated on Windows 11+ and Server 2022+, but still present on
+  // older hosts. Kept as a fallback.
+  try {
+    const r = run(
+      "wmic",
+      ["process", "where", `ProcessId=${pid}`, "get", "CommandLine"],
+      { encoding: "utf8", windowsHide: true, timeout: 3000 },
+    );
+    if (r?.status === 0) {
+      const cmdline = parseWmicCommandLine(r.stdout ?? "");
+      if (cmdline) return cmdline;
+    }
+  } catch { /* wmic may be absent on Server 2022+ */ }
+
+  // 3) Give up — caller treats null as "unknown".
+  return null;
+}
+
 /**
  * Run the platform-appropriate port probe and decide whether the process bound
  * on `port` looks like our own dashboard server.
@@ -470,13 +533,7 @@ export function detectPortOccupant({ port, run = DEFAULT_RUNNER, platform = proc
       const image = pidMap.get(pid);
       if (!image) continue;
       if (image.toLowerCase() !== "node.exe") continue;
-      let cmdline = "";
-      try {
-        const r = run("wmic",
-          ["process", "where", `ProcessId=${pid}`, "get", "CommandLine"],
-          { encoding: "utf8", windowsHide: true, timeout: 3000 });
-        if (r?.status === 0) cmdline = parseWmicCommandLine(r.stdout);
-      } catch { /* wmic may be absent on Server 2022+ */ }
+      const cmdline = _probeWindowsCommandLine(pid, run) ?? "";
       if (cmdline && /pipeline\.mjs/i.test(cmdline)) {
         result.ours = true;
         return result;
