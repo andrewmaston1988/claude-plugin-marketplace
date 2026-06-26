@@ -51,7 +51,7 @@ Not every effort level is valid for every model tier. Pinning an unsupported lev
 | Sonnet | `low`, `medium`, `high`, `max` | No `xhigh` |
 | Opus / Fable | `low`, `medium`, `high`, `xhigh`, `max` | Full scale |
 
-The pipeline's escalation logic (`scripts/orchestrator/spawn.mjs`) honours this asymmetry. The queue command currently does not — a (model, effort) pair that passes the queue form will fail at spawn time if the combination is unsupported. The live matrix is `cfg.tier_efforts` — run `pipeline doctor` to see supported levels for each tier on this install.
+The pipeline's escalation logic (`src/orchestrator/spawn.mjs`) honours this asymmetry. The queue command currently does not — a (model, effort) pair that passes the queue form will fail at spawn time if the combination is unsupported. The live matrix is `cfg.tier_efforts` — run `pipeline doctor` to see supported levels for each tier on this install.
 
 ## `claude -p` call sites
 
@@ -120,7 +120,7 @@ The pipeline is not Anthropic-only. Any model the local proxy can serve — Olla
 
 ### Routing rule
 
-`proxyEnvFor(model)` in `scripts/orchestrator/spawn.mjs:165` returns `{}` for `claude-*` models (no env override — they go straight to `api.anthropic.com`). For any other model name, it returns:
+`proxyEnvFor(model)` in `src/orchestrator/spawn.mjs` returns `{}` for `claude-*` models (no env override — they go straight to `api.anthropic.com`). For any other model name, it returns:
 
 ```js
 {

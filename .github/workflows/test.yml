@@ -51,4 +51,4 @@ jobs:
         run: node --env-file=.env.test --test tests/parity-runner.mjs
       - name: Script tests
         working-directory: plugins/pipeline
-        run: node --test scripts/hooks/*.test.mjs scripts/pipeline-db/*.test.mjs skills/merge/scripts/*.test.mjs
+        run: node --test src/hooks/*.test.mjs src/db/*.test.mjs skills/merge/scripts/*.test.mjs
