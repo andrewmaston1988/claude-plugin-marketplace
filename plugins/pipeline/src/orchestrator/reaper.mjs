@@ -6,7 +6,7 @@ import {
   autoRequeueDev, resetDevRetries,
   sessionFinish, sessionsActive, projectGetByName,
   appendCycleLog,
-} from "../pipeline-db/index.mjs";
+} from "../db/index.mjs";
 import { gitWorktreeClean, sessionTypeFromNotes } from "./spawn.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 import { featureWorktreePath, reportPath, resolveRowBranch } from "../worktree-paths.mjs";

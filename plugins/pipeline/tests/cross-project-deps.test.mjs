@@ -6,11 +6,11 @@ import { join } from "node:path";
 
 process.env.PIPELINE_SUPPRESS_DEPRECATED = "1";
 
-import { depsMet, parseDepRef } from "../scripts/orchestrator/deps.mjs";
+import { depsMet, parseDepRef } from "../src/orchestrator/deps.mjs";
 import { validateCrossProjectDep, clusterTypeAudit } from "../src/cli/queue.mjs";
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
-import { rowAdd, rowUpdate } from "../scripts/pipeline-db/rows.mjs";
+import { connectPath, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
+import { rowAdd, rowUpdate } from "../src/db/rows.mjs";
 
 test("parseDepRef: splits project:feature; bare stays same-project", () => {
   equal(parseDepRef("esg:feat-x").project, "esg");

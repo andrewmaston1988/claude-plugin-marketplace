@@ -6,13 +6,13 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadPipelineConfig } from "../pipeline-config.mjs";
 import { resolvePlansDir } from "../plans-resolver.mjs";
-import { connectUnified, close, dbPathUnified } from "../../scripts/pipeline-db/connection.mjs";
-import { projectList } from "../../scripts/pipeline-db/projects.mjs";
-import { readState, pidAlive } from "../../scripts/orchestrator/state-file.mjs";
+import { connectUnified, close, dbPathUnified } from "../db/connection.mjs";
+import { projectList } from "../db/projects.mjs";
+import { readState, pidAlive } from "../orchestrator/state-file.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
-import { resolveTemplate, resolveHookFirstToken, featureWorktreePath } from "../../scripts/worktree-paths.mjs";
+import { resolveTemplate, resolveHookFirstToken, featureWorktreePath } from "../worktree-paths.mjs";
 import { spawnSync } from "node:child_process";
-import { findUnknownTemplateVars } from "../../scripts/governor/env-contract.mjs";
+import { findUnknownTemplateVars } from "../governor/env-contract.mjs";
 
 const execFileAsync = promisify(execFile);
 

@@ -4,8 +4,8 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync, readdirSync } from "node:fs";
 import { join, basename, relative, dirname } from "node:path";
 import { runGit, gitAddWithRetry, gitCommitWithRetry } from "./rebase.mjs";
-import { rowGet, rowsList, rowUpdate } from "../../../scripts/pipeline-db/index.mjs";
-import { orchestratorWorktreePath } from "../../../scripts/worktree-paths.mjs";
+import { rowGet, rowsList, rowUpdate } from "../../../src/db/index.mjs";
+import { orchestratorWorktreePath } from "../../../src/worktree-paths.mjs";
 
 // ── Path helpers ───────────────────────────────────────────────────────────────
 

@@ -20,7 +20,7 @@ import {
   connectPath, close,
   projectAdd, projectUpdate, rowAdd,
   rowsList,
-} from "../scripts/pipeline-db/index.mjs";
+} from "../src/db/index.mjs";
 import { loadBacklog } from "../src/dashboard/shared/load-backlog.mjs";
 
 // Pin the default plansDir template so the suite never reads the operator's real

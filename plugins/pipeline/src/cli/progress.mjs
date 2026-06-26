@@ -4,7 +4,7 @@ import {
   progressListActive, progressResumeIndex, progressMdString,
   progressSetPid, progressNoteAppend,
   progressListActiveAcrossProjects,
-} from "../../scripts/pipeline-db/index.mjs";
+} from "../db/index.mjs";
 import { lookupProjectOrFail, openUnifiedOrFail } from "./project-lookup.mjs";
 
 const ACTIVE_VERBS = {

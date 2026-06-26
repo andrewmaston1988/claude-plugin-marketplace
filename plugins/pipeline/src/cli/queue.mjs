@@ -2,7 +2,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, basename, isAbsolute, resolve, dirname } from "node:path";
 import { spawnSync } from "node:child_process";
-import { close, rowGet, rowAdd, rowUpdate, projectGetByName } from "../../scripts/pipeline-db/index.mjs";
+import { close, rowGet, rowAdd, rowUpdate, projectGetByName } from "../db/index.mjs";
 import { getFlag, detectDefaultBranch, formatRow } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { loadPipelineConfig } from "../pipeline-config.mjs";

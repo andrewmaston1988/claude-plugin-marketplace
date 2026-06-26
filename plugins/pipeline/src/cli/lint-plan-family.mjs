@@ -15,10 +15,10 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolvePlansDir } from "../plans-resolver.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
-import { close } from "../../scripts/pipeline-db/index.mjs";
+import { close } from "../db/index.mjs";
 import {
   parsePlanFile, requiresParentAnnotation, readParentAnnotation, inferParentStem,
-} from "../../scripts/plans/family-parse.mjs";
+} from "../plans/family-parse.mjs";
 import { getFlag } from "./helpers.mjs";
 
 export async function run(cmd, argv) {

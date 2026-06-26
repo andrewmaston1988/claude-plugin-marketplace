@@ -14,7 +14,7 @@ import { dirname, resolve } from "node:path";
 
 const __dir = dirname(fileURLToPath(import.meta.url));
 const spawnSrc = readFileSync(
-  resolve(__dir, "../scripts/orchestrator/spawn.mjs"),
+  resolve(__dir, "../src/orchestrator/spawn.mjs"),
   "utf8",
 );
 

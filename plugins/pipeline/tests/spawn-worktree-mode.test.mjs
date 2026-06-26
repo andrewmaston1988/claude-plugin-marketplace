@@ -11,7 +11,7 @@ import { spawnSync } from "node:child_process";
 // Suppress deprecation warns from compat wrappers that some imports still trigger.
 process.env.PIPELINE_SUPPRESS_DEPRECATED = "1";
 
-import { featureWorktreePath, reportPath } from "../scripts/worktree-paths.mjs";
+import { featureWorktreePath, reportPath } from "../src/worktree-paths.mjs";
 
 const FEATURE  = "feat-y";
 const PROJECT  = "p";
@@ -221,10 +221,10 @@ test("doctor worktree-layout-stale: warns on path that doesn't match template", 
     writeFileSync(cfgPath, JSON.stringify({}, null, 2), "utf8");
 
     // Build a fake unified DB via the real connector so projectList works.
-    const { connectUnified } = await import("../scripts/pipeline-db/connection.mjs");
+    const { connectUnified } = await import("../src/db/connection.mjs");
     const paths = { stateDir, dataDir, configDir };
     const db = connectUnified(paths);
-    const { projectAdd } = await import("../scripts/pipeline-db/projects.mjs");
+    const { projectAdd } = await import("../src/db/projects.mjs");
     projectAdd(db, { name: "myproj", rootPath: projectRoot });
 
     const results = await runDoctor({ paths, configPath: cfgPath, db });
@@ -233,7 +233,7 @@ test("doctor worktree-layout-stale: warns on path that doesn't match template", 
     ok(stale.warn || !stale.ok, `stale warning expected, got: ${JSON.stringify(stale)}`);
     ok(stale.detail.includes("autonomous-feat-x") || stale.detail.includes(legacy),
        `legacy path should appear in detail: ${stale.detail}`);
-    const { close } = await import("../scripts/pipeline-db/connection.mjs");
+    const { close } = await import("../src/db/connection.mjs");
     try { close(db); } catch {}
   } finally {
     try { rmSync(root, { recursive: true, force: true, maxRetries: 5 }); } catch {}

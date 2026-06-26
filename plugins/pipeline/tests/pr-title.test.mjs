@@ -101,8 +101,8 @@ Test.
 // Test 5: pr-title-get CLI command
 test("pr-title-get: reads pr_title from database", async () => {
   try {
-    const { connectPath, close } = await import("../scripts/pipeline-db/connection.mjs");
-    const { rowAdd, rowGet } = await import("../scripts/pipeline-db/index.mjs");
+    const { connectPath, close } = await import("../src/db/connection.mjs");
+    const { rowAdd, rowGet } = await import("../src/db/index.mjs");
 
     const db = connectPath(":memory:");
 
@@ -127,8 +127,8 @@ test("pr-title-get: reads pr_title from database", async () => {
 // Test 6: pr_title column handles NULL values
 test("pr_title: database column handles NULL values", async () => {
   try {
-    const { connectPath, close } = await import("../scripts/pipeline-db/connection.mjs");
-    const { rowAdd, rowGet } = await import("../scripts/pipeline-db/index.mjs");
+    const { connectPath, close } = await import("../src/db/connection.mjs");
+    const { rowAdd, rowGet } = await import("../src/db/index.mjs");
 
     const db = connectPath(":memory:");
 
@@ -152,8 +152,8 @@ test("pr_title: database column handles NULL values", async () => {
 // Test 7: pr-title-get returns empty when column is NULL
 test("pr-title-get: returns empty string when pr_title is NULL", async () => {
   try {
-    const { connectPath, close } = await import("../scripts/pipeline-db/connection.mjs");
-    const { rowAdd, rowGet } = await import("../scripts/pipeline-db/index.mjs");
+    const { connectPath, close } = await import("../src/db/connection.mjs");
+    const { rowAdd, rowGet } = await import("../src/db/index.mjs");
 
     const db = connectPath(":memory:");
     rowAdd(db, "test-project", {

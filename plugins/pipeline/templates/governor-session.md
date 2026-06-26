@@ -36,7 +36,7 @@ The orchestrator sets the following environment variables before launching this 
 | `REPORT_DATE` | `{{REPORT_DATE}}` | `YYYYMMDD` for full/status; `YYYYMM` for monthly. |
 | `REPORT_MONTH` | _(YYYYMM)_ | Always the month identifier (`YYYYMM`), regardless of report type. Convenient for monthly-specific CLI calls. |
 | `PIPELINE_DB` | _(absolute path)_ | SQLite database path. Equivalent to `{{PIPELINE_DB}}`; use `$PIPELINE_DB` in shell commands. |
-| `PLUGIN_DIR` | _(absolute path)_ | Root directory of the installed pipeline plugin. Use as the base for `node $PLUGIN_DIR/scripts/…` calls. |
+| `PLUGIN_DIR` | _(absolute path)_ | Root directory of the installed pipeline plugin. Use as the base for `node $PLUGIN_DIR/src/…` calls. |
 
 The template placeholders `{{…}}` above are expanded at template render time. The env vars `$…` are available to every shell command the session runs.
 
@@ -64,19 +64,19 @@ console.log(row ? JSON.stringify(row, null, 2) : 'MISSING');
 The metrics CLI is also available if you want pre-aggregated values rather than rolling your own SQL:
 
 ```bash
-node $PLUGIN_DIR/scripts/metrics/index.mjs monthly-metrics  $REPORT_MONTH   # JSON dump for monthly
+node $PLUGIN_DIR/src/metrics/index.mjs monthly-metrics  $REPORT_MONTH   # JSON dump for monthly
 ```
 
 You compose the prose yourself either way — `generate-report` / `generate-status-report` produce templated baseline reports that are explicitly NOT the bar for narrative quality; prefer reading the raw DB and writing the analysis as instructed below.
 
 **Execute (publish step only):**
 
-- `node $PLUGIN_DIR/scripts/metrics/index.mjs post-report <file>` — wraps the report in a `kind: "report"` JSON envelope and writes it to `<pipeline-state-dir>/notifications/`. The configured `notifications.on_write` hook (claude-slack forwarder etc.) routes reports to the operator's governance channel.
+- `node $PLUGIN_DIR/src/metrics/index.mjs post-report <file>` — wraps the report in a `kind: "report"` JSON envelope and writes it to `<pipeline-state-dir>/notifications/`. The configured `notifications.on_write` hook (claude-slack forwarder etc.) routes reports to the operator's governance channel.
 
 **Do NOT execute:**
 
 - `bunx ccusage` (in any form) — the orchestrator already ran it; re-running wastes tokens and adds latency. If `daily_spend` has no row for `{{REPORT_DATE}}` when you query it, that is an orchestrator bug — surface it via `{{PIPELINE_BIN}} notify` and stop, do not paper over with a manual fetch.
-- `node $PLUGIN_DIR/scripts/metrics/index.mjs update-spend` — same reason; orchestrator pre-runs it.
+- `node $PLUGIN_DIR/src/metrics/index.mjs update-spend` — same reason; orchestrator pre-runs it.
 
 **Write:**
 
@@ -112,7 +112,7 @@ Check `$REPORT_TYPE`:
 1. **Load the data**
 
    ```bash
-   node $PLUGIN_DIR/scripts/metrics/index.mjs monthly-metrics $REPORT_MONTH
+   node $PLUGIN_DIR/src/metrics/index.mjs monthly-metrics $REPORT_MONTH
    ```
 
    This prints a JSON object with totals, week-over-week breakdowns, model mix evolution, session-type table, prior-month comparison, and circuit status. Capture and parse it. No prose templating happens in this script — that is intentionally your job.
@@ -173,7 +173,7 @@ Check `$REPORT_TYPE`:
 5. **Publish the report**
 
    ```bash
-   node $PLUGIN_DIR/scripts/metrics/index.mjs post-report \
+   node $PLUGIN_DIR/src/metrics/index.mjs post-report \
      {{REPORTS_DIR}}/governance-$REPORT_MONTH-monthly.md
    ```
 
@@ -260,7 +260,7 @@ Check `$REPORT_TYPE`:
 4. **Publish the report**
 
    ```bash
-   node $PLUGIN_DIR/scripts/metrics/index.mjs post-report \
+   node $PLUGIN_DIR/src/metrics/index.mjs post-report \
      {{REPORTS_DIR}}/<report-file>.md
    ```
 
@@ -300,7 +300,7 @@ For a manual end-to-end test outside the orchestrator:
 
 ```bash
 # Archive yesterday's spend data — this is what the orchestrator does automatically before each governor spawn.
-node $PLUGIN_DIR/scripts/metrics/index.mjs update-spend $(date -d yesterday +%Y%m%d)
+node $PLUGIN_DIR/src/metrics/index.mjs update-spend $(date -d yesterday +%Y%m%d)
 
 # Verify the data landed:
 node -e "

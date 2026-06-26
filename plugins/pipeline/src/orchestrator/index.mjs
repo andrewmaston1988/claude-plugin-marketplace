@@ -7,7 +7,7 @@ import {
   progressDelete, progressListActive,
   projectHasActiveSession, sessionFinish, countActiveSessions, featureIsActive,
   listEnabledProjects,
-} from "../pipeline-db/index.mjs";
+} from "../db/index.mjs";
 import { getPaths } from "../../src/paths.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { publishNotification, spawnMergeReadyHook, drainNotifications } from "../publisher.mjs";

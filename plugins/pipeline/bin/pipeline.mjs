@@ -100,10 +100,10 @@ function ensureRuntimeDeps(argv) {
       setTimeout(() => process.exit(1), 150);
       return;
     }
-    const { connectUnified }      = await import("../scripts/pipeline-db/connection.mjs");
-    const { listEnabledProjects } = await import("../scripts/pipeline-db/projects.mjs");
-    const { rowsList }            = await import("../scripts/pipeline-db/rows.mjs");
-    const { spawnMerge, isDirtyTree, isMergedInto } = await import("../scripts/orchestrator/spawn.mjs");
+    const { connectUnified }      = await import("../src/db/connection.mjs");
+    const { listEnabledProjects } = await import("../src/db/projects.mjs");
+    const { rowsList }            = await import("../src/db/rows.mjs");
+    const { spawnMerge, isDirtyTree, isMergedInto } = await import("../src/orchestrator/spawn.mjs");
 
     const db          = connectUnified();
     const projectRoot = new Map(listEnabledProjects(db)).get(project);
@@ -182,7 +182,7 @@ function ensureRuntimeDeps(argv) {
   }
 
   if (cmd === "orchestrator" || cmd === "orchestrate") {
-    const here = fileURLToPath(new URL("../scripts/orchestrator/index.mjs", import.meta.url));
+    const here = fileURLToPath(new URL("../src/orchestrator/index.mjs", import.meta.url));
     await import(here); // hands off; orchestrator daemon keeps the process alive
     return;
   }

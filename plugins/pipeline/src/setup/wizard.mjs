@@ -13,7 +13,7 @@ import { PIPELINE_DEFAULTS } from "../config-defaults.mjs";
 import { renderTemplate, installAutostart, verifyAutostart } from "./autostart.mjs";
 import { runDoctor, printDoctor } from "./doctor.mjs";
 import { mergeUnixRc, applyPsProfiles } from "./wizard-profile.mjs";
-import { connectUnified, close as dbClose, projectAdd, projectList } from "../../scripts/pipeline-db/index.mjs";
+import { connectUnified, close as dbClose, projectAdd, projectList } from "../db/index.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
 import { detectDefaultBranch } from "../cli/helpers.mjs";
 
@@ -272,7 +272,7 @@ export async function runWizard({ paths, log, opts = {} }) {
     // on_write with a custom forwarder; setup won't clobber a non-default
     // hook on re-run.
     if (channelVal || pipelineVal) {
-      const forwarder = fileURLToPath(new URL("../../scripts/forwarders/claude-slack.mjs", import.meta.url));
+      const forwarder = fileURLToPath(new URL("../forwarders/claude-slack.mjs", import.meta.url));
       const bundledMarker = "/forwarders/claude-slack.mjs";
       const slackOk = !!findClaudeSlackPlugin().path;
       const existing = config.hooks?.on_notification || config.notifications?.on_write || "";
@@ -607,7 +607,7 @@ export async function runWizard({ paths, log, opts = {} }) {
     // the scheduled task on a stale install. Falls back to the pinned entry if
     // the resolver couldn't be installed (mirrors Step 9's PATH-alias fallback).
     const resolverPath   = join(homedir(), ".local", "bin", "pipeline-resolver.mjs");
-    const pinnedEntry    = fileURLToPath(new URL("../../scripts/orchestrator/index.mjs", import.meta.url));
+    const pinnedEntry    = fileURLToPath(new URL("../orchestrator/index.mjs", import.meta.url));
     const useResolver    = existsSync(resolverPath);
     const dispatchTarget = useResolver
       ? `${resolverPath} orchestrator`

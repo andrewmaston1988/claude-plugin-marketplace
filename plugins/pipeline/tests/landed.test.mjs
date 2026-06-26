@@ -3,7 +3,7 @@ import { equal, deepEqual } from "node:assert/strict";
 
 process.env.PIPELINE_SUPPRESS_DEPRECATED = "1";
 
-import { isPrereqLanded } from "../scripts/orchestrator/landed.mjs";
+import { isPrereqLanded } from "../src/orchestrator/landed.mjs";
 
 const PREREQ = "autonomous/pipeline-absorb-phase-3-readers";
 const TARGET  = "master";

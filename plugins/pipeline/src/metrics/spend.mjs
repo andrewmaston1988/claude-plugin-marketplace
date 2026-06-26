@@ -1,5 +1,5 @@
 // Spend archival: update-spend, monthly-metrics, daily avg.
-import { loadDailySpend, loadMetricSessions, upsertDailySpend } from "../pipeline-db/index.mjs";
+import { loadDailySpend, loadMetricSessions, upsertDailySpend } from "../db/index.mjs";
 import { getCcusageRangeData } from "./ccusage.mjs";
 import { parseTimestamp } from "./sessions.mjs";
 

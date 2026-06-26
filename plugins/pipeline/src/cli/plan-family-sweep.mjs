@@ -20,10 +20,10 @@ import { existsSync, renameSync, readdirSync } from "node:fs";
 import { join, basename } from "node:path";
 import { resolvePlansDir } from "../plans-resolver.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
-import { close } from "../../scripts/pipeline-db/index.mjs";
+import { close } from "../db/index.mjs";
 import {
   discoverFamilies, parsePlanFile,
-} from "../../scripts/plans/family-parse.mjs";
+} from "../plans/family-parse.mjs";
 
 export async function run(cmd, argv) {
   if (cmd !== "plan-family-sweep") return null;

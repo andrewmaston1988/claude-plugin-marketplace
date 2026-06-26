@@ -4,13 +4,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
-import { connectPath, close } from "../scripts/pipeline-db/index.mjs";
+import { connectPath, close } from "../src/db/index.mjs";
 import {
   sessionsActive, projectHasActiveSession, countActiveSessions,
   sessionRecordSpawn, sessionFinish, rowAdd, rowGet, rowUpdate,
   projectAdd, projectSetEnabled, sessionSetId,
-} from "../scripts/pipeline-db/index.mjs";
-import { reconcileSessions } from "../scripts/orchestrator/reaper.mjs";
+} from "../src/db/index.mjs";
+import { reconcileSessions } from "../src/orchestrator/reaper.mjs";
 
 function createMockLog() {
   const logs = [];

@@ -19,7 +19,7 @@ import {
   projectSetEnabled, projectRemove, listEnabledProjects,
   rowAdd, rowGet, rowsList, rowUpdate, rowDelete,
   validateProjectName, validateProjectPath,
-} from "../scripts/pipeline-db/index.mjs";
+} from "../src/db/index.mjs";
 
 function makeFakeRepo(parent, name) {
   const path = join(parent, name);

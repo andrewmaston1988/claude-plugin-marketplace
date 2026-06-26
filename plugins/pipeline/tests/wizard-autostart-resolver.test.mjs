@@ -20,7 +20,7 @@ test("wizard Step 8 uses pipeline-resolver.mjs path when building dispatch targe
 test("wizard Step 8 falls back to pinned entry when resolver absent", () => {
   const src = readFileSync(WIZARD, "utf8");
   ok(
-    src.includes("scripts/orchestrator/index.mjs"),
+    src.includes("orchestrator/index.mjs"),
     "should retain pinned orchestrator entry as fallback"
   );
   ok(

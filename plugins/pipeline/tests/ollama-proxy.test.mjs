@@ -3,7 +3,7 @@ import { strictEqual, deepStrictEqual, equal } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { modelFromNotes, proxyEnvFor } from "../scripts/orchestrator/spawn.mjs";
+import { modelFromNotes, proxyEnvFor } from "../src/orchestrator/spawn.mjs";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
 
 test("modelFromNotes: regex accepts colon (Ollama-style tag)", () => {
