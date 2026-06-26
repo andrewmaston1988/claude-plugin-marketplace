@@ -7,10 +7,10 @@ import { spawnSync } from "node:child_process";
 
 process.env.PIPELINE_SUPPRESS_DEPRECATED = "1";
 
-import { isProtectedBranch, spawnSession } from "../scripts/orchestrator/spawn.mjs";
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
-import { rowAdd, rowGet, rowUpdate } from "../scripts/pipeline-db/rows.mjs";
+import { isProtectedBranch, spawnSession } from "../src/orchestrator/spawn.mjs";
+import { connectPath, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
+import { rowAdd, rowGet, rowUpdate } from "../src/db/rows.mjs";
 
 // Hermetic stub — keep spawnSession's spawn-blocked notification off the real
 // (Slack-forwarded) sink. See spawn-escalation.test.mjs.

@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { spawnMerge, isDirtyTree, isMergedInto } from "../scripts/orchestrator/spawn.mjs";
+import { spawnMerge, isDirtyTree, isMergedInto } from "../src/orchestrator/spawn.mjs";
 
 function createMockLog() {
   const logs = [];

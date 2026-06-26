@@ -8,8 +8,8 @@
 import { resolvePlansDir } from "../plans-resolver.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { getFlag } from "./helpers.mjs";
-import { rowsList, close } from "../../scripts/pipeline-db/index.mjs";
-import { discoverFamilies, parsePlanFile } from "../../scripts/plans/family-parse.mjs";
+import { rowsList, close } from "../db/index.mjs";
+import { discoverFamilies, parsePlanFile } from "../plans/family-parse.mjs";
 import { existsSync, readdirSync } from "node:fs";
 
 export async function run(cmd, argv) {

@@ -8,14 +8,14 @@ import {
   autoRequeueDevFromReview,
   loadCycleLog,
   planUpsert, plansFtsRebuild,
-} from "../../scripts/pipeline-db/index.mjs";
-import { generateSessionFile } from "../../scripts/session-gen.mjs";
-import { publishNotification } from "../../scripts/publisher.mjs";
+} from "../db/index.mjs";
+import { generateSessionFile } from "../session-gen.mjs";
+import { publishNotification } from "../publisher.mjs";
 import { getFlag, formatRow } from "./helpers.mjs";
-import { featureWorktreePath, resolveRowBranch } from "../../scripts/worktree-paths.mjs";
+import { featureWorktreePath, resolveRowBranch } from "../worktree-paths.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { resolvePlansDir, resolvePlanFile } from "../plans-resolver.mjs";
-import { reclaimPlanIfMisplaced } from "../../scripts/plans/reclaim.mjs";
+import { reclaimPlanIfMisplaced } from "../plans/reclaim.mjs";
 
 const FOOTER = "\n" + ":black_small_square:".repeat(14) + "\n";
 
@@ -872,9 +872,9 @@ export async function run(cmd, argv) {
     let project = projectArg;
     const statusFilter = getFlag("--status", flags);
 
-    const { listEnabledProjects } = await import("../../scripts/pipeline-db/projects.mjs");
-    const { plansList } = await import("../../scripts/pipeline-db/index.mjs");
-    const { connectUnified, close: closeDb } = await import("../../scripts/pipeline-db/index.mjs");
+    const { listEnabledProjects } = await import("../db/projects.mjs");
+    const { plansList } = await import("../db/index.mjs");
+    const { connectUnified, close: closeDb } = await import("../db/index.mjs");
 
     try {
       const db = connectUnified();
@@ -903,8 +903,8 @@ export async function run(cmd, argv) {
       return 1;
     }
 
-    const { plansSearch } = await import("../../scripts/pipeline-db/index.mjs");
-    const { connectUnified, close: closeDb } = await import("../../scripts/pipeline-db/index.mjs");
+    const { plansSearch } = await import("../db/index.mjs");
+    const { connectUnified, close: closeDb } = await import("../db/index.mjs");
 
     try {
       const db = connectUnified();

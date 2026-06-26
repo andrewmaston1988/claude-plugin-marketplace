@@ -3,8 +3,8 @@ import { ok, equal } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { connectPath, close, projectAdd, rowAdd, rowGet } from "../scripts/pipeline-db/index.mjs";
-import { spawnSession, tierFromModel, nextEscalationStep, nextEscalationStepPinned, effortFromNotes, proxyEnvFor } from "../scripts/orchestrator/spawn.mjs";
+import { connectPath, close, projectAdd, rowAdd, rowGet } from "../src/db/index.mjs";
+import { spawnSession, tierFromModel, nextEscalationStep, nextEscalationStepPinned, effortFromNotes, proxyEnvFor } from "../src/orchestrator/spawn.mjs";
 
 const PROJECT = "testproject";
 

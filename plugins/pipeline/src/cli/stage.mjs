@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { close, rowGet, rowsList, rowUpdate } from "../../scripts/pipeline-db/index.mjs";
+import { close, rowGet, rowsList, rowUpdate } from "../db/index.mjs";
 import { getFlag, formatRow } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 

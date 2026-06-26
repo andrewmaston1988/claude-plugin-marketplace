@@ -3,7 +3,7 @@
 // Mirrors cache_metrics.py subcommand surface (CLAUDE-side functions dropped).
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { connectPath } from "../pipeline-db/index.mjs";
+import { connectPath } from "../db/index.mjs";
 import { updateSpend, computeMonthlyMetrics } from "./spend.mjs";
 import { updateSessions, updateSessionsFromProjects } from "./sessions.mjs";
 import { updateBaselines } from "./baselines.mjs";

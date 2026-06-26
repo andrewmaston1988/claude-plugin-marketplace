@@ -5,12 +5,12 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
+import { connectPath, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
 import {
   sessionRecordSpawn, countActiveSessions, sessionsActive,
   featureIsActive,
-} from "../scripts/pipeline-db/index.mjs";
+} from "../src/db/index.mjs";
 import { PIPELINE_DEFAULTS } from "../src/config-defaults.mjs";
 import { runDoctor } from "../src/setup/doctor.mjs";
 

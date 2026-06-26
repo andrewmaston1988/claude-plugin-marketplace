@@ -2,7 +2,7 @@ import { readFileSync, statSync, unlinkSync, existsSync, readdirSync, appendFile
 import { join } from "node:path";
 import { homedir } from "node:os";
 import crypto from "node:crypto";
-import { connectUnified, getClaudeSession, listActiveClaudeSessionsByCwd, getLastCheckpointSize, setLastCheckpointSize, upsertClaudeSession } from "../pipeline-db/index.mjs";
+import { connectUnified, getClaudeSession, listActiveClaudeSessionsByCwd, getLastCheckpointSize, setLastCheckpointSize, upsertClaudeSession } from "../db/index.mjs";
 
 function expandUserPath(path) {
   if (!path || typeof path !== "string") return path;

@@ -230,8 +230,8 @@ test("--force-approve advances row to merge and appends operator-override to not
   const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
-  const { connectPath, close, projectAdd, rowAdd, rowGet } = await import("../scripts/pipeline-db/index.mjs");
-  const { rowUpdate } = await import("../scripts/pipeline-db/rows.mjs");
+  const { connectPath, close, projectAdd, rowAdd, rowGet } = await import("../src/db/index.mjs");
+  const { rowUpdate } = await import("../src/db/rows.mjs");
 
   const tmp = mkdtempSync(join(tmpdir(), "force-approve-test-"));
   const repo = join(tmp, "repo");
@@ -272,8 +272,8 @@ test("ready_to_ship without --force-approve does not clobber existing notes_extr
   const { mkdtempSync, mkdirSync, rmSync } = await import("node:fs");
   const { join } = await import("node:path");
   const { tmpdir } = await import("node:os");
-  const { connectPath, close, projectAdd, rowAdd, rowGet } = await import("../scripts/pipeline-db/index.mjs");
-  const { rowUpdate } = await import("../scripts/pipeline-db/rows.mjs");
+  const { connectPath, close, projectAdd, rowAdd, rowGet } = await import("../src/db/index.mjs");
+  const { rowUpdate } = await import("../src/db/rows.mjs");
 
   const tmp = mkdtempSync(join(tmpdir(), "no-clobber-test-"));
   const repo = join(tmp, "repo");

@@ -8,10 +8,10 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync, mkdirSync, existsSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { generateSessionFile, resolveSessionFile } from "../scripts/session-gen.mjs";
-import { featureWorktreePath } from "../scripts/worktree-paths.mjs";
+import { generateSessionFile, resolveSessionFile } from "../src/session-gen.mjs";
+import { featureWorktreePath } from "../src/worktree-paths.mjs";
 
-const SPAWN_MJS_PATH = fileURLToPath(new URL("../scripts/orchestrator/spawn.mjs", import.meta.url));
+const SPAWN_MJS_PATH = fileURLToPath(new URL("../src/orchestrator/spawn.mjs", import.meta.url));
 
 function withTempProject(planContent, fn) {
   const root = mkdtempSync(join(tmpdir(), "pipeline-session-gen-"));
@@ -272,14 +272,14 @@ test("test template checkout returns to {{BRANCH}}", () => {
 });
 
 // [REGRESSION] session CWD uses per-feature worktree, not deprecated branch-based.
-// The spawn path in scripts/orchestrator/index.mjs was routing through
+// The spawn path in src/orchestrator/index.mjs was routing through
 // orchestratorWorktreePath (deprecated phase-2 template
 // {branch_type}-{branch_local}), which re-shared worktrees across branches and
 // broke per-feature isolation. It must call featureWorktreePath so every
 // session lands in {root_parent}/.worktrees/{project}/{feature}/.
 test("orchestrator spawn-path routes session cwd through featureWorktreePath, not deprecated branch template", () => {
   const src = readFileSync(
-    fileURLToPath(new URL("../scripts/orchestrator/index.mjs", import.meta.url)),
+    fileURLToPath(new URL("../src/orchestrator/index.mjs", import.meta.url)),
     "utf8"
   );
   // Must not import the deprecated function.

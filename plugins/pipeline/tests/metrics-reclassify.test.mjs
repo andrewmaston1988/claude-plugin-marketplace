@@ -10,8 +10,8 @@ import {
   connectPath, close, projectAdd,
   upsertClaudeSession,
   appendMetricSession, loadMetricSessions,
-} from "../scripts/pipeline-db/index.mjs";
-import { reclassifyHistorical } from "../scripts/metrics/reclassify.mjs";
+} from "../src/db/index.mjs";
+import { reclassifyHistorical } from "../src/metrics/reclassify.mjs";
 
 const PROJECT = "testproject";
 

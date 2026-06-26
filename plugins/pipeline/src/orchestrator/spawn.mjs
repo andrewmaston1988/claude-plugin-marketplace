@@ -7,7 +7,7 @@ import {
   rowGet, rowUpdate, setLastError,
   sessionRecordSpawn,
   appendSpawn,
-} from "../pipeline-db/index.mjs";
+} from "../db/index.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../../src/config-defaults.mjs";
 import { featureWorktreePath, resolveRowBranch } from "../worktree-paths.mjs";
@@ -664,7 +664,7 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
   }
 
   const cfg        = loadPipelineConfig();
-  const pluginRoot = fileURLToPath(new URL("../../..", import.meta.url)); // scripts/orchestrator → plugin root
+  const pluginRoot = fileURLToPath(new URL("../../..", import.meta.url)); // src/orchestrator → plugin root
   const plansDir   = cfg.plansDir
     ? cfg.plansDir.replace(/\{project\}/g, project)
     : null;

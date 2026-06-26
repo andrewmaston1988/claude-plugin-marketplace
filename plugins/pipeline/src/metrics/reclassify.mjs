@@ -9,7 +9,7 @@ import {
   loadInteractiveSessionIds,
   readSessionFull,
 } from "./sessions.mjs";
-import { loadSpawnMap } from "../pipeline-db/index.mjs";
+import { loadSpawnMap } from "../db/index.mjs";
 
 export function reclassifyHistorical(db, opts = {}) {
   const { dryRun = false, deps = {} } = opts;

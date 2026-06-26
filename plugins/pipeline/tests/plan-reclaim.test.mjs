@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { reclaimPlanIfMisplaced } from "../scripts/plans/reclaim.mjs";
+import { reclaimPlanIfMisplaced } from "../src/plans/reclaim.mjs";
 
 test("reclaimPlanIfMisplaced: no-op when plan file exists at expected path", () => {
   const tmp = mkdtempSync(join(tmpdir(), "reclaim-"));

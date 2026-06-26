@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { publishNotification } from "../../scripts/publisher.mjs";
+import { publishNotification } from "../publisher.mjs";
 import { getFlag } from "./helpers.mjs";
 
 const FOOTER = "\n" + ":black_small_square:".repeat(14) + "\n";

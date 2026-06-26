@@ -12,10 +12,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { mkdirSync } from "node:fs";
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
-import { rowAdd } from "../scripts/pipeline-db/rows.mjs";
-import { reconcileSessions } from "../scripts/orchestrator/reaper.mjs";
+import { connectPath, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
+import { rowAdd } from "../src/db/rows.mjs";
+import { reconcileSessions } from "../src/orchestrator/reaper.mjs";
 
 // High PID value that is guaranteed not to be a live process on this machine
 const DEAD_PID = 999999;

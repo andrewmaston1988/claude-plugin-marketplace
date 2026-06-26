@@ -1,4 +1,4 @@
-import { connectUnified, close, projectGetByName } from "../../scripts/pipeline-db/index.mjs";
+import { connectUnified, close, projectGetByName } from "../db/index.mjs";
 
 // Shared helper for CLI subcommands that take a registered <project> argument.
 // Returns { db, project, projectRoot } or writes an error to stderr and returns null.

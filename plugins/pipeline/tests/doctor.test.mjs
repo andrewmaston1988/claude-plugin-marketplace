@@ -8,8 +8,8 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runDoctor, printDoctor, doctorExitCode, parseNetstatPids, parseTasklist, parseWmicCommandLine, parseCimCommandLine, detectPortOccupant } from "../src/setup/doctor.mjs";
-import { connectUnified, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
+import { connectUnified, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
 
 function freshPaths() {
   const tmp = mkdtempSync(join(tmpdir(), "pipeline-doctor-"));

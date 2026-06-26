@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import {
   connectUnified, close,
   projectAdd, projectList, projectRemove, projectSetEnabled, projectUpdate,
-} from "../../scripts/pipeline-db/index.mjs";
+} from "../db/index.mjs";
 import { updatePipelineConfig } from "../pipeline-config.mjs";
 import { getFlag } from "./helpers.mjs";
 
