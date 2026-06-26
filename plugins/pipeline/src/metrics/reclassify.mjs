@@ -101,8 +101,12 @@ export function reclassifyHistorical(db, opts = {}) {
   const stmt = db.prepare(
     "UPDATE metric_sessions SET command_type = ?, correlation_id = COALESCE(?, correlation_id) WHERE id = ?"
   );
-  for (const { id, newType, newCorr } of changes) {
-    stmt.run(newType, newCorr ?? null, id);
-  }
+  // Wrap the N UPDATEs in a transaction so a mid-loop failure doesn't leave
+  // the metric_sessions table half-reclassified.
+  db.transaction(() => {
+    for (const { id, newType, newCorr } of changes) {
+      stmt.run(newType, newCorr ?? null, id);
+    }
+  })();
   process.stdout.write(`updated ${changes.length} rows\n`);
 }

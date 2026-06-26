@@ -2,7 +2,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { basename, join, relative } from "node:path";
 import { spawnSync } from "node:child_process";
 import {
-  rowGet, rowUpdate, setLastError,
+  rowGet, rowUpdate,
   autoRequeueDev, resetDevRetries,
   sessionFinish, sessionsActive, projectGetByName,
   appendCycleLog,

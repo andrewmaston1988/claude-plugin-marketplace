@@ -812,8 +812,6 @@ The Python hook crashes on missing template files. The mjs hook wraps each templ
 
 **Affected templates:**
 - `~/.claude/templates/session-context.md`
-- `~/.claude/templates/keepalive-tick.md`
-- `~/.claude/templates/keepalive-init.md`
 - `~/.claude/templates/compact-resume.md`
 - `~/.claude/templates/session-checkpoint.md`
 
