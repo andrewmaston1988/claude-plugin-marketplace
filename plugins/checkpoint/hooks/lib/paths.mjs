@@ -97,6 +97,34 @@ export function resolveStatePath(cwd, sid) {
 
 // True if `body` has user-meaningful content (not empty, not just whitespace).
 // Used by the snapshot hook to refuse self-clobber of a non-empty STATE.
+// Rename a STATE file to embed the *current* UTC stamp. The sessionId portion
+// of the filename is preserved; only the trailing `YYYYMMDDTHHMMSSZ` advances.
+// If the target name already exists in the same directory (e.g. another
+// checkpoint landed in the same second), bump `now` by one second until the
+// target is free — never clobber a parallel write. Returns the new absolute
+// path. Throws if `oldPath` is not a STATE file or does not exist.
+export function renameStateToNow(oldPath, now = new Date()) {
+  if (!oldPath) throw new Error('renameStateToNow: oldPath required');
+  if (!fs.existsSync(oldPath)) throw new Error(`renameStateToNow: source not found: ${oldPath}`);
+  const dir = path.dirname(oldPath);
+  const base = path.basename(oldPath);
+  const m = base.match(STATE_FILE_RE);
+  if (!m) throw new Error(`renameStateToNow: not a STATE file: ${base}`);
+  const sid = m[1];
+  let stamp = nowStamp(now);
+  // Bump by 1s on collision; cap at 60s to avoid runaway loops in degenerate cases.
+  for (let i = 0; i < 60; i++) {
+    const target = path.join(dir, sessionStateFilename(sid, stamp));
+    if (!fs.existsSync(target)) {
+      fs.renameSync(oldPath, target);
+      return target;
+    }
+    const d = new Date(now.getTime() + (i + 1) * 1000);
+    stamp = nowStamp(d);
+  }
+  throw new Error(`renameStateToNow: could not find free stamp in 60s window for ${oldPath}`);
+}
+
 export function isMeaningfulState(body) {
   if (typeof body !== 'string') return false;
   const stripped = body.replace(/[\s ]+/g, '');
