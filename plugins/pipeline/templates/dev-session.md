@@ -276,7 +276,7 @@ is a signal that this rule was violated.
 The merger is a gate check, not a documentation sprint. If these steps are skipped,
 the merger must do them — that is a session failure, not a handoff.
 
-**Progress mark each step.** As you complete each step, mark it via `{{PIPELINE_BIN}} progress-mark {{PROJECT}} $CORRELATION_ID <N> in_progress` then `... <N> completed`. Delete the progress entry when fully done: `{{PIPELINE_BIN}} progress-delete {{PROJECT}} $CORRELATION_ID`.
+**Progress mark each step.** Always mark `in_progress` before starting a step, then `completed` when done. Never jump straight to `completed` — the operator watches the spinner, and skipping the in_progress mark leaves the step grey for its entire duration. Delete the progress entry when fully done: `{{PIPELINE_BIN}} progress-delete {{PROJECT}} $CORRELATION_ID`.
 
 **Update session file Artifacts.** Before notifying on completion, confirm the Artifacts section of the session file reflects what was actually built — correct branch name, correct plan file. If the session file has no Artifacts section, add one.
 
