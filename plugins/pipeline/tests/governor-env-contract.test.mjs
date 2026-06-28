@@ -5,7 +5,7 @@ import { ok, strictEqual } from "node:assert/strict";
 import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { CONTRACT_VARS, ALWAYS_PRESENT, findUnknownTemplateVars } from "../scripts/governor/env-contract.mjs";
+import { CONTRACT_VARS, ALWAYS_PRESENT, findUnknownTemplateVars } from "../src/governor/env-contract.mjs";
 
 const TEMPLATE_PATH = fileURLToPath(
   new URL("../templates/governor-session.md", import.meta.url)
@@ -35,7 +35,7 @@ test("bundled template returns no unknown vars (regression)", () => {
 
 test("governor.mjs sets all spawn-contract vars", () => {
   const govPath = fileURLToPath(
-    new URL("../scripts/orchestrator/governor.mjs", import.meta.url)
+    new URL("../src/orchestrator/governor.mjs", import.meta.url)
   );
   const src = readFileSync(govPath, "utf8");
   for (const varName of CONTRACT_VARS) {

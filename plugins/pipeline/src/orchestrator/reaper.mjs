@@ -6,7 +6,7 @@ import {
   autoRequeueDev, resetDevRetries,
   sessionFinish, sessionsActive, projectGetByName,
   appendCycleLog,
-} from "../pipeline-db/index.mjs";
+} from "../db/index.mjs";
 import { gitWorktreeClean, sessionTypeFromNotes } from "./spawn.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 import { featureWorktreePath, reportPath, resolveRowBranch } from "../worktree-paths.mjs";
@@ -171,6 +171,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
           }
         } catch (e) {
           logFn(`[${project}] test-reaper update failed: ${e.message}`, "ERROR");
+          try { setLastError(db, project, feature, `test-reaper: ${e.message}`); } catch {}
         }
 
       } else if (resolvedStype === "review") {
@@ -210,6 +211,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
             }
           } catch (e) {
             logFn(`[${project}] review-reaper update failed: ${e.message}`, "ERROR");
+            try { setLastError(db, project, feature, `review-reaper: ${e.message}`); } catch {}
           }
         }
 
@@ -278,6 +280,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
             }
           } catch (e) {
             logFn(`[${project}] dev-reaper update failed: ${e.message}`, "ERROR");
+            try { setLastError(db, project, feature, `dev-reaper: ${e.message}`); } catch {}
           }
         }
 
@@ -289,6 +292,7 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
             stage:       "manual",
             notes_extra: appendNote(existing, `[merge-crashed ${ts}]`),
           });
+          try { setLastError(db, project, feature, `merge-crashed ${ts}`); } catch {}
           notifyFailure(project, feature, "merge-crashed", { dryRun });
         }
       }

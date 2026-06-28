@@ -1,7 +1,7 @@
 // Report generation: generate-report, generate-status-report.
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadMetricSessions, loadSpawnMap } from "../pipeline-db/index.mjs";
+import { loadMetricSessions, loadSpawnMap } from "../db/index.mjs";
 import {
   getCcusageRangeData, getCcusageSessionData,
 } from "./ccusage.mjs";

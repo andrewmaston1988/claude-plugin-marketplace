@@ -8,7 +8,7 @@ import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { connectPath, close, projectAdd, rowAdd, rowGet } from "../scripts/pipeline-db/index.mjs";
+import { connectPath, close, projectAdd, rowAdd, rowGet } from "../src/db/index.mjs";
 
 const PROJECT = "testproject";
 

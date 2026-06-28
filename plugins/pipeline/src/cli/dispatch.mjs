@@ -1,4 +1,4 @@
-import { close, rowGet, rowUpdate } from "../../scripts/pipeline-db/index.mjs";
+import { close, rowGet, rowUpdate } from "../db/index.mjs";
 import { formatRow } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 

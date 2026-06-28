@@ -7,7 +7,7 @@ import {
   rowGet, rowUpdate, setLastError,
   sessionRecordSpawn,
   appendSpawn,
-} from "../pipeline-db/index.mjs";
+} from "../db/index.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { PIPELINE_DEFAULTS } from "../../src/config-defaults.mjs";
 import { featureWorktreePath, resolveRowBranch } from "../worktree-paths.mjs";
@@ -664,7 +664,7 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
   }
 
   const cfg        = loadPipelineConfig();
-  const pluginRoot = fileURLToPath(new URL("../../..", import.meta.url)); // scripts/orchestrator → plugin root
+  const pluginRoot = fileURLToPath(new URL("../../..", import.meta.url)); // src/orchestrator → plugin root
   const plansDir   = cfg.plansDir
     ? cfg.plansDir.replace(/\{project\}/g, project)
     : null;
@@ -747,5 +747,20 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
   proc._project       = project;
   proc._projectRoot   = projectRoot;
   proc._startTime     = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+
+  // Record spawn in unified DB (sessions table) so the reaper's sessionsActive()
+  // reconcile can detect dead PIDs and surface a notification for crashed merges.
+  try {
+    sessionRecordSpawn(db, {
+      correlationId, project, feature,
+      sessionType: "merge",
+      cwd:         projectRoot,
+      sessionFile: mergeScript,
+      pid:         proc.pid,
+    });
+  } catch (e) {
+    logFn(`[${project}] warning: failed to record merge session in DB: ${e.message}`, "WARN");
+  }
+
   return proc;
 }

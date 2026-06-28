@@ -1,6 +1,6 @@
 // Smoke tests: session-gen.mjs — dead replacement removal + {CORRELATION_ID} regression
 
-import { generateSessionFile } from "../scripts/session-gen.mjs";
+import { generateSessionFile } from "../../src/session-gen.mjs";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

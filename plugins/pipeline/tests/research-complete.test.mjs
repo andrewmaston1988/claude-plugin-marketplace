@@ -8,7 +8,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
-import { connectPath, close, projectAdd, rowAdd, rowGet } from "../scripts/pipeline-db/index.mjs";
+import { connectPath, close, projectAdd, rowAdd, rowGet } from "../src/db/index.mjs";
 
 const _here   = dirname(fileURLToPath(import.meta.url));
 const PLUGIN  = dirname(_here);

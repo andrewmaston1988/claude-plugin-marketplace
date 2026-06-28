@@ -27,7 +27,7 @@ import {
   rowGet, rowUpdate,
   progressMark,
   planSetStatus,
-} from "../../../scripts/pipeline-db/index.mjs";
+} from "../../../src/db/index.mjs";
 import {
   GitError,
   runGit,
@@ -50,7 +50,7 @@ import {
 import { step0bProgress, step9Cleanup } from "./progress.mjs";
 import { loadPipelineConfig } from "../../../src/pipeline-config.mjs";
 import { getPaths } from "../../../src/paths.mjs";
-import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../scripts/worktree-paths.mjs";
+import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../src/worktree-paths.mjs";
 
 // ── Subprocess helpers ────────────────────────────────────────────────────────
 

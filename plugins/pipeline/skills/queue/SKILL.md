@@ -80,7 +80,7 @@ Report the resulting row to the user and tell them to watch progress with:
 
 If the orchestrator isn't running, surface a hint:
 
-> The orchestrator is not running. Start it with the `o` key in the TUI's agents panel, or run `node scripts/orchestrator/index.mjs` from the plugin dir.
+> The orchestrator is not running. Start it with the `o` key in the TUI's agents panel, or run `node src/orchestrator/index.mjs` from the plugin dir.
 
 ## Target branch resolution
 

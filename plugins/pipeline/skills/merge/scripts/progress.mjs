@@ -1,6 +1,6 @@
 // Steps 0b + 9 — progress file lifecycle.
 // Mirrors merge.py: step_0b_progress, step_9_cleanup.
-import { progressCreate, progressGet, progressDelete } from "../../../scripts/pipeline-db/index.mjs";
+import { progressCreate, progressGet, progressDelete } from "../../../src/db/index.mjs";
 
 const MERGE_STEPS = [
   "Step 0a — Rebase branches on main",

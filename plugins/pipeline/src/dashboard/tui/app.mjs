@@ -22,7 +22,7 @@
 //   d                — toggle show-done rows
 //   ↑ / ↓ / k / j    — move row cursor
 import blessed from "blessed";
-import { connectUnified, close } from "../../../scripts/pipeline-db/index.mjs";
+import { connectUnified, close } from "../../db/index.mjs";
 import { getPaths } from "../../paths.mjs";
 import { loadProjects, loadRows } from "../shared/load-rows.mjs";
 import { loadBacklog } from "../shared/load-backlog.mjs";

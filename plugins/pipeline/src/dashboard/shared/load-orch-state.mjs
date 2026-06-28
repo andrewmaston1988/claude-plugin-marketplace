@@ -1,5 +1,5 @@
 // Read the orchestrator's state file + liveness for the dashboard.
-import { readState, pidAlive, deleteState } from "../../../scripts/orchestrator/state-file.mjs";
+import { readState, pidAlive, deleteState } from "../../orchestrator/state-file.mjs";
 
 export function loadOrchState() {
   const state = readState();

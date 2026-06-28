@@ -1,7 +1,7 @@
 import { readdirSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
-import { projectGetByName } from "../../../scripts/pipeline-db/projects.mjs";
-import { rowsList } from "../../../scripts/pipeline-db/rows.mjs";
+import { projectGetByName } from "../../db/projects.mjs";
+import { rowsList } from "../../db/rows.mjs";
 import { resolvePlansDir } from "../../plans-resolver.mjs";
 
 // Load backlog rows (unqueued plan files) for a project.

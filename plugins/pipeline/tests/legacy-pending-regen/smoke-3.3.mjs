@@ -4,7 +4,7 @@ import { run as runStage    } from "../src/cli/stage.mjs";
 import { run as runProgress } from "../src/cli/progress.mjs";
 import { run as runQueue    } from "../src/cli/queue.mjs";
 import { run as runDispatch } from "../src/cli/dispatch.mjs";
-import { connectPath, rowAdd, close } from "../scripts/pipeline-db/index.mjs";
+import { connectPath, rowAdd, close } from "../../src/db/index.mjs";
 import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

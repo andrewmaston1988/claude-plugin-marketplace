@@ -1,9 +1,9 @@
 // Smoke tests for Unit 3.5 — orchestrator modules
-import { discoverProjects } from "../scripts/orchestrator/discovery.mjs";
-import { readState, writeState, deleteState, pidAlive, STATE_FILE } from "../scripts/orchestrator/state-file.mjs";
-import { sessionTypeFromNotes, modelFromNotes, budgetFromNotes, worktreePath, validateSessionSlug, gitWorktreeClean } from "../scripts/orchestrator/spawn.mjs";
-import { shouldSpawnGovernor, shouldSpawnMonthlyGovernor } from "../scripts/orchestrator/governor.mjs";
-import { connectPath, rowAdd, close, setMeta } from "../scripts/pipeline-db/index.mjs";
+import { discoverProjects } from "../../src/orchestrator/discovery.mjs";
+import { readState, writeState, deleteState, pidAlive, STATE_FILE } from "../../src/orchestrator/state-file.mjs";
+import { sessionTypeFromNotes, modelFromNotes, budgetFromNotes, worktreePath, validateSessionSlug, gitWorktreeClean } from "../../src/orchestrator/spawn.mjs";
+import { shouldSpawnGovernor, shouldSpawnMonthlyGovernor } from "../../src/orchestrator/governor.mjs";
+import { connectPath, rowAdd, close, setMeta } from "../../src/db/index.mjs";
 import { mkdtempSync, rmSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

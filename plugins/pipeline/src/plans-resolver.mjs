@@ -1,6 +1,6 @@
 import { basename, dirname, join } from "node:path";
 import { loadPipelineConfig } from "./pipeline-config.mjs";
-import { resolveTemplate } from "../scripts/worktree-paths.mjs";
+import { resolveTemplate } from "./worktree-paths.mjs";
 import { getPaths } from "./paths.mjs";
 
 // Canonical plans-directory resolver. Precedence + placeholders documented in REFERENCE.md.

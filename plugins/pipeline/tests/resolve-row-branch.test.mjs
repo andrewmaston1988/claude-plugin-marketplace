@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal } from "node:assert/strict";
-import { resolveRowBranch } from "../scripts/worktree-paths.mjs";
+import { resolveRowBranch } from "../src/worktree-paths.mjs";
 
 test("resolveRowBranch: a declared branch wins (any prefix)", () => {
   equal(resolveRowBranch({ branch: "anm/PROJ-101_tooltips" }, "tooltips"), "anm/PROJ-101_tooltips");

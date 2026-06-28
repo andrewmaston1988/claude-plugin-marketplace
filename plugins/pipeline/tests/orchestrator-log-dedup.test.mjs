@@ -4,7 +4,7 @@ import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { makeLogger, rotateLogs } from "../scripts/orchestrator/index.mjs";
+import { makeLogger, rotateLogs } from "../src/orchestrator/index.mjs";
 
 function setup() {
   const tmp = mkdtempSync(join(tmpdir(), "orch-dedup-"));
