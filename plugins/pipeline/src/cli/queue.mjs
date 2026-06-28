@@ -58,11 +58,13 @@ export function queueDepsExtract(planFilePath) {
   const crossSlugs = [...value.matchAll(/`?(!?)([\w.-]+:[\w.-]+)`?/g)].map(r => r[1] + r[2]);
   const sameValue  = value.replace(/`?!?[\w.-]+:[\w.-]+`?/g, " ");
 
-  let slugs = [...sameValue.matchAll(/`(!?)autonomous\/([a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1] + r[2]);
+  // Slug character class allows `.` so dotted-version stems like `0.9-…` parse
+  // verbatim instead of being truncated to the leading numeric segment.
+  let slugs = [...sameValue.matchAll(/`(!?)autonomous\/([a-z0-9][a-z0-9.-]*)`/gi)].map(r => r[1] + r[2]);
   if (!slugs.length)
-    slugs = [...sameValue.matchAll(/(!?)autonomous\/([a-z0-9][a-z0-9-]*)/gi)].map(r => r[1] + r[2]);
+    slugs = [...sameValue.matchAll(/(!?)autonomous\/([a-z0-9][a-z0-9.-]*)/gi)].map(r => r[1] + r[2]);
   if (!slugs.length)
-    slugs = [...sameValue.matchAll(/`(!?)([a-z0-9][a-z0-9-]+-[a-z0-9][a-z0-9-]*)`/gi)].map(r => r[1] + r[2]);
+    slugs = [...sameValue.matchAll(/`(!?)([a-z0-9][a-z0-9.-]+-[a-z0-9][a-z0-9.-]*)`/gi)].map(r => r[1] + r[2]);
 
   slugs = [...crossSlugs, ...slugs];
 
