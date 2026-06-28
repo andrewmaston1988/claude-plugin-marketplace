@@ -54,3 +54,23 @@ test("queueDepsExtract: no annotation at all → empty string (not null)", () =>
   withPlan("# T\n\nno prerequisites line at all\n", (p) =>
     equal(queueDepsExtract(p), ""));
 });
+
+test("queueDepsExtract: dotted-version slug (e.g. scout's 0.9-… stems) parses verbatim", () => {
+  // Regression for queue-plan: prerequisite slug parser mangles dotted-version slugs.
+  // The regex character class used to exclude `.`, truncating `0.9-foo` to `0`.
+  withPlan("# T\n*Prerequisites:* `autonomous/0.9-foo`\n", (p) =>
+    equal(queueDepsExtract(p), "0.9-foo"));
+  withPlan("# T\n*Prerequisites:* `autonomous/0.9-gdscript-language-pack-loader`\n", (p) =>
+    equal(queueDepsExtract(p), "0.9-gdscript-language-pack-loader"));
+});
+
+test("queueDepsExtract: dotted-version slug without backticks parses verbatim", () => {
+  // The "fallback" pattern (no backticks) had the same bug.
+  withPlan("# T\n*Prerequisites:* autonomous/0.9-foo\n", (p) =>
+    equal(queueDepsExtract(p), "0.9-foo"));
+});
+
+test("queueDepsExtract: strict (!) dotted-version slug preserves the marker", () => {
+  withPlan("# T\n*Prerequisites:* `!autonomous/0.9-foo`\n", (p) =>
+    equal(queueDepsExtract(p), "!0.9-foo"));
+});
