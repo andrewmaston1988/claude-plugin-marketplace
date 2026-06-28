@@ -190,7 +190,8 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
               });
               notifyFailure(project, feature, "review-touched-source", { dryRun });
             } else {
-              const retryN = row.review_retries || 0;
+              const retryN    = row.review_retries || 0;
+              const budget    = row.review_retry_budget || 3;
               const { dir: reportsDir, glob: pattern } = reportPath({
                 kind: "code-review", project, projectRoot, feature, retryN,
               });
@@ -200,13 +201,55 @@ export function reconcileSessions(db, { logFn, dryRun = false }) {
                   hasReport = readdirSync(reportsDir).some((file) => pattern.test(file));
                 } catch {}
               }
-              const note = hasReport ? "[review-stuck-cli-failed]" : "[review-stuck-no-report]";
-              logFn(`[${project}] review '${feature}' pid dead, no verdict — parking at manual ${note}`, "ERROR");
-              rowUpdate(db, project, feature, {
-                stage:       "manual",
-                notes_extra: appendNote(existing, `${note} ${ts}`),
-              });
-              notifyFailure(project, feature, note, { dryRun });
+              // review_retries < review_retry_budget: re-spawn the review with a
+              // fresh session (clean context) — the failure mode here is
+              // transient turn degeneration / context blowup, so a clean-context
+              // re-run is the natural recovery. Mirrors the dev-no-handoff path
+              // (which generates a review session via generateSessionFile(...,
+              // "review", { reviewRetries })) and test's autoRequeueDev budget.
+              if (retryN < budget) {
+                try {
+                  const cwd = featureWorktreePath({ project, projectRoot, feature: planStem });
+                  const sessionPath = generateSessionFile(project, row.plan_file, "review", {
+                    projectRoot,
+                    feature,
+                    reviewRetries: retryN,
+                    branch: resolveRowBranch(row, planStem),
+                    cwd,
+                  });
+                  const relPath = relative(projectRoot, sessionPath).replace(/\\/g, "/");
+                  const notes = `${existing}${existing ? " " : ""}${relPath} [review-no-verdict-retry ${retryN + 1}/${budget} ${ts}]`;
+                  rowUpdate(db, project, feature, {
+                    stage:         "review",
+                    review_retries: retryN + 1,
+                    notes_extra:   notes,
+                  });
+                  logFn(
+                    `[${project}] review '${feature}' pid dead, no verdict — ` +
+                    `re-spawning within budget (review_retries=${retryN + 1}/${budget})`,
+                    "WARN"
+                  );
+                } catch (gerr) {
+                  logFn(
+                    `[${project}] review '${feature}' re-spawn failed (${gerr.message}) — parking at manual`,
+                    "ERROR"
+                  );
+                  const failNote = hasReport ? "[review-stuck-cli-failed]" : "[review-stuck-no-report]";
+                  rowUpdate(db, project, feature, {
+                    stage:       "manual",
+                    notes_extra: appendNote(existing, `${failNote} ${ts}`),
+                  });
+                  notifyFailure(project, feature, failNote, { dryRun });
+                }
+              } else {
+                const note = hasReport ? "[review-stuck-cli-failed]" : "[review-stuck-no-report]";
+                logFn(`[${project}] review '${feature}' pid dead, no verdict — parking at manual ${note}`, "ERROR");
+                rowUpdate(db, project, feature, {
+                  stage:       "manual",
+                  notes_extra: appendNote(existing, `${note} ${ts}`),
+                });
+                notifyFailure(project, feature, note, { dryRun });
+              }
             }
           } catch (e) {
             logFn(`[${project}] review-reaper update failed: ${e.message}`, "ERROR");

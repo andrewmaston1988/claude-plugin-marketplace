@@ -145,6 +145,11 @@ test("reconcileSessions parks orphaned review (pid dead, stage unchanged)", () =
       stage: "review",
       branch: "autonomous/my-feature",
       targetBranch: "master",
+      // Terminal case: review_retries == review_retry_budget so the new
+      // budget-aware reaper parks instead of re-spawning. Within-budget
+      // re-spawn is covered by reaper-review-retry.test.mjs.
+      reviewRetries: 3,
+      reviewRetryBudget: 3,
     });
 
     // Record a review session with a fake pid
