@@ -26,7 +26,7 @@ import {
   projectAdd,
   sessionRecordSpawn, sessionFinish,
   progressCreate, progressMark, progressDelete,
-} from "../../scripts/pipeline-db/index.mjs";
+} from "../db/index.mjs";
 import { getPaths } from "../paths.mjs";
 import { resolvePlansDir } from "../plans-resolver.mjs";
 

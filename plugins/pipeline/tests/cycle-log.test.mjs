@@ -8,7 +8,7 @@ import {
   connectPath, close,
   projectAdd,
   appendCycleLog, loadCycleLog,
-} from "../scripts/pipeline-db/index.mjs";
+} from "../src/db/index.mjs";
 
 const PROJECT = "testproject";
 

@@ -14,7 +14,7 @@ import {
   orchestratorWorktreePath,
   handlerWorktreePath,
   reportPath,
-} from "../scripts/worktree-paths.mjs";
+} from "../src/worktree-paths.mjs";
 
 // ── branchLocal / branchType helpers ─────────────────────────────────────────
 

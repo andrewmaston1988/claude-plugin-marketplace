@@ -28,14 +28,9 @@ function main() {
         const context = [
           "# Pipeline plugin context",
           "",
-          `Pipeline DB: \`${dbPath}\` — run \`pipeline doctor\` to verify path and check health.`,
-          `Pipeline CLAUDE.md: \`${claudeMdPath}\` — config knobs, worktree layout, diagnostics.`,
+          `Pipeline DB: \`${dbPath}\` — \`pipeline doctor\` to verify path + health. See \`${claudeMdPath}\` for config / worktree / diagnostics.`,
           "",
-          "**DB access rule**: use \`pipeline\` CLI, never query pipeline.db directly.",
-          "  \`/pipeline:pipeline\` → row status for this project",
-          "  \`pipeline rows <project>\` → all rows",
-          "  \`pipeline doctor\` → health check and DB path",
-          "  \`pipeline progress-list-active\` → active sessions",
+          "**DB access rule**: use \`pipeline\` CLI, never query pipeline.db directly. The pre-tool-use hook enforces this.",
         ].join("\n");
 
         process.stdout.write(JSON.stringify({

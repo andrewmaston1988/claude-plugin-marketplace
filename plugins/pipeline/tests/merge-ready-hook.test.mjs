@@ -42,7 +42,7 @@ test("merge-ready hook: orchestrator places hook outside concurrency guards", ()
 // Test 3: rowUpdate is imported correctly
 test("orchestrator imports rowUpdate from pipeline-db", async () => {
   try {
-    const { rowUpdate } = await import("../scripts/pipeline-db/index.mjs");
+    const { rowUpdate } = await import("../src/db/index.mjs");
     ok(typeof rowUpdate === "function", "rowUpdate should be a function");
   } catch (e) {
     ok(false, `rowUpdate import failed: ${e.message}`);
@@ -52,7 +52,7 @@ test("orchestrator imports rowUpdate from pipeline-db", async () => {
 // Test 4: spawnMergeReadyHook signature accepts projectRoot
 test("spawnMergeReadyHook: function signature accepts projectRoot parameter", async () => {
   try {
-    const { spawnMergeReadyHook } = await import("../scripts/publisher.mjs");
+    const { spawnMergeReadyHook } = await import("../src/publisher.mjs");
     // Test that the function can be called with projectRoot
     // With empty config it should return a promise immediately
     const result = spawnMergeReadyHook("proj", "feat", "autonomous/feat", "master", "/path/to/root", { _cfg: {} });

@@ -4,9 +4,9 @@ import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
-import { projectAdd } from "../scripts/pipeline-db/projects.mjs";
-import { rowAdd, rowUpdate } from "../scripts/pipeline-db/rows.mjs";
+import { connectPath, close } from "../src/db/connection.mjs";
+import { projectAdd } from "../src/db/projects.mjs";
+import { rowAdd, rowUpdate } from "../src/db/rows.mjs";
 
 test("orchestrator stage-driven spawn: dev stage row", () => {
   const root = mkdtempSync(join(tmpdir(), "orch-spawn-"));

@@ -9,8 +9,8 @@ import { ok, equal } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, homedir } from "node:os";
-import { spawnMergeReadyHook } from "../scripts/publisher.mjs";
-import { resolveHookFirstToken } from "../scripts/worktree-paths.mjs";
+import { spawnMergeReadyHook } from "../src/publisher.mjs";
+import { resolveHookFirstToken } from "../src/worktree-paths.mjs";
 
 // Patch loadPipelineConfig so tests don't read the real ~/.pipeline/config.json
 // by intercepting the module. We use a temp-file side-channel instead: the
@@ -57,7 +57,7 @@ test("spawnMergeReadyHook: hook script receives correct PIPELINE_* env vars", as
 
     // Spawn a child that runs spawnMergeReadyHook with our HOME overridden.
     const { spawnSync } = await import("node:child_process");
-    const publisherUrl = new URL("../scripts/publisher.mjs", import.meta.url).href;
+    const publisherUrl = new URL("../src/publisher.mjs", import.meta.url).href;
     const script = [
       `import { spawnMergeReadyHook } from ${JSON.stringify(publisherUrl)};`,
       `await spawnMergeReadyHook("myproject", "my-feat", "autonomous/my-feat", "main", "/tmp/projroot");`,
@@ -98,7 +98,7 @@ test("spawnMergeReadyHook: array hook shape [{command}] is resolved correctly", 
     }), "utf8");
 
     const { spawnSync } = await import("node:child_process");
-    const publisherUrl2 = new URL("../scripts/publisher.mjs", import.meta.url).href;
+    const publisherUrl2 = new URL("../src/publisher.mjs", import.meta.url).href;
     const script = [
       `import { spawnMergeReadyHook } from ${JSON.stringify(publisherUrl2)};`,
       `await spawnMergeReadyHook("p", "f", "autonomous/f", "master", "/tmp/projroot");`,

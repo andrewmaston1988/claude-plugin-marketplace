@@ -3,7 +3,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { appendMetricSession, loadMetricSessions, loadSpawnMap, listAllClaudeSessionIds } from "../pipeline-db/index.mjs";
+import { appendMetricSession, loadMetricSessions, loadSpawnMap, listAllClaudeSessionIds } from "../db/index.mjs";
 import { estimateTokens } from "./ccusage.mjs";
 import { orchestratorWorktreePath } from "../worktree-paths.mjs";
 

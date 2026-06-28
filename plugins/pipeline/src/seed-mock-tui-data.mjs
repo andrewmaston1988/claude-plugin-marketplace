@@ -1,7 +1,7 @@
 // One-shot dashboard seed: long notes for marquee + mock active sessions
 // for the running-icon animation. Run from the plugin dir.
 //   node scripts/seed-mock-tui-data.mjs
-import { connectUnified, close } from "./pipeline-db/index.mjs";
+import { connectUnified, close } from "./db/index.mjs";
 import { getPaths } from "../src/paths.mjs";
 
 const paths = getPaths();

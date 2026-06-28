@@ -1,7 +1,7 @@
 // Anomaly detection: z-score on token rate + cold-cache R/C ratio checks.
 import { mkdirSync, existsSync, statSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { loadMetricSessions } from "../pipeline-db/index.mjs";
+import { loadMetricSessions } from "../db/index.mjs";
 import { parseTimestamp } from "./sessions.mjs";
 import { loadBaseline } from "./baselines.mjs";
 import { getCcusageSessionData } from "./ccusage.mjs";

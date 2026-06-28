@@ -1,6 +1,6 @@
 import { resolve } from "node:path";
-import { generateSessionFile } from "../../scripts/session-gen.mjs";
-import { connectUnified, projectGetByName, close } from "../../scripts/pipeline-db/index.mjs";
+import { generateSessionFile } from "../session-gen.mjs";
+import { connectUnified, projectGetByName, close } from "../db/index.mjs";
 import { getFlag } from "./helpers.mjs";
 
 export async function run(cmd, argv) {

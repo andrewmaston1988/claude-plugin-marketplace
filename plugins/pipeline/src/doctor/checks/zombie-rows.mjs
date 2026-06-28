@@ -1,8 +1,8 @@
 import { execSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { rowsList } from "../../../scripts/pipeline-db/rows.mjs";
-import { projectList } from "../../../scripts/pipeline-db/projects.mjs";
+import { rowsList } from "../../db/rows.mjs";
+import { projectList } from "../../db/projects.mjs";
 
 // Detect zombie rows: stage=done but plan_file is not under plans/complete/
 export function findZombieRows(db, project, projectRoot, { apply = false } = {}) {

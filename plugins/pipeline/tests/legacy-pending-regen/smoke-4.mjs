@@ -2,7 +2,7 @@
 
 import { renderTemplate } from "../src/setup/autostart.mjs";
 import { loadPipelineConfig } from "../src/pipeline-config.mjs";
-import { connectPath, close } from "../scripts/pipeline-db/connection.mjs";
+import { connectPath, close } from "../../src/db/connection.mjs";
 import { PIPELINE_DEFAULTS } from "../src/config-defaults.mjs";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";

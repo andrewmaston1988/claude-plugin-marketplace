@@ -8,12 +8,12 @@ import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { connectPath, close, projectAdd, appendGovernorSpawn } from "../scripts/pipeline-db/index.mjs";
+import { connectPath, close, projectAdd, appendGovernorSpawn } from "../src/db/index.mjs";
 import {
   resolveGovernorContext,
   shouldSpawnGovernor,
   shouldSpawnMonthlyGovernor,
-} from "../scripts/orchestrator/governor.mjs";
+} from "../src/orchestrator/governor.mjs";
 
 const PROJECT = "testproject";
 

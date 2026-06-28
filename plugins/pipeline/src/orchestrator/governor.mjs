@@ -18,7 +18,7 @@ import { fileURLToPath } from "node:url";
 import {
   appendGovernorSpawn, lastGovernorSpawnTime, lastGovernorSpawnAny, appendSpawn,
   projectGetByName,
-} from "../pipeline-db/index.mjs";
+} from "../db/index.mjs";
 import { findClaude } from "./spawn.mjs";
 import { loadPipelineConfig } from "../../src/pipeline-config.mjs";
 import { getPaths } from "../../src/paths.mjs";

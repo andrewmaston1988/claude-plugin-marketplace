@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { resolve } from "node:path";
 import { homedir } from "node:os";
-import { resolveTemplate, PLACEHOLDER_KEYS } from "../scripts/worktree-paths.mjs";
+import { resolveTemplate, PLACEHOLDER_KEYS } from "../src/worktree-paths.mjs";
 
 const PROJ = "/abs/projects/proj-a";
 const CFG  = "/abs/.pipeline";

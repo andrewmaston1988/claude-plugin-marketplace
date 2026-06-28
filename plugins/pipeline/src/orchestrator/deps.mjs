@@ -1,6 +1,6 @@
 // Dependency gate for queued pipeline rows. Extracted from index.mjs so it can
 // be imported by tests without triggering index.mjs's top-level orchestrator IIFE.
-import { rowGet } from "../pipeline-db/index.mjs";
+import { rowGet } from "../db/index.mjs";
 import { isPrereqLanded } from "./landed.mjs";
 import { detectDefaultBranch } from "../../src/cli/helpers.mjs";
 
