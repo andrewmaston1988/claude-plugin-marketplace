@@ -57,6 +57,12 @@ export function runClaude({ cwd, addDir, prompt, sessionId, model, proxy, timeou
     child.on("exit", code => {
       clearTimeout(timer);
       if (code !== 0) {
+        // --resume targeted a session that no longer exists (cleaned up / expired).
+        // Retry once as a fresh session; the caller persists the returned sessionId,
+        // so the store self-heals and subsequent turns resume the fresh one.
+        if (sessionId && /No conversation found with session ID/.test(stderr)) {
+          return resolve(runClaude({ cwd, addDir, prompt, sessionId: undefined, model, proxy, timeoutMs, onStarted, env }));
+        }
         return reject(new Error(`claude exited ${code}: ${stderr.slice(-300)}`));
       }
       try {
