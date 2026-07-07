@@ -66,6 +66,19 @@ async function cmdRun(manifestPath, force) {
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
+  // Fire-and-forget completion hook (e.g. "claude-slack notify --message {status}").
+  // Mechanical plumbing only: substitute tokens, spawn detached, swallow errors.
+  if (cfg.notifyCmd) {
+    const status = bad.length ? `swarm run finished with ${bad.length} failed/blocked` : "swarm run finished clean";
+    const cmdLine = cfg.notifyCmd
+      .replaceAll("{status}", status)
+      .replaceAll("{digest}", r.digestPath || "")
+      .replaceAll("{summary}", r.summaryPath || "");
+    try {
+      const { spawn } = await import("node:child_process");
+      spawn(cmdLine, { shell: true, detached: true, stdio: "ignore" }).unref();
+    } catch { /* notification is garnish, never a failure */ }
+  }
   if (bad.length) {
     out(`FAILED tasks: ${bad.map((t) => `${t.id} [${t.state}]`).join(", ")}`);
     out("resume: re-run the same command — ok results are skipped, failed/blocked work re-executes.");
