@@ -12,5 +12,6 @@
   "concurrency": 4,
   "timeoutMs": 600000,
   "resultInlineCap": 4000,
-  "worktreeBranchPrefix": "swarm/"
+  "worktreeBranchPrefix": "swarm/",
+  "notifyCmd": null
 }

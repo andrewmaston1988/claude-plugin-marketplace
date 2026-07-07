@@ -39,9 +39,10 @@ The manifest preview IS the approval: the user sees every model and every leaf b
 4. **Validate**: `node <engine> validate <manifest.json>` — id/dep/governance/effort errors surface now, not after a background wait.
 5. **Run**: `node <engine> run <manifest.json>` via `Bash run_in_background`. The completion notification is the "run finished" signal.
    **Immediately after dispatching**, give the user the live watch command for a separate terminal — `node <engine> status <ABSOLUTE resultsDir> --watch` — and copy it to their clipboard. Always the absolute path: a relative one resolves against whatever cwd their terminal is in and fails with "no run.log". NEVER poll status yourself while the run is live: dispatch in the background, continue other work, the completion notification will find you.
-   **Status asks**: you know the `resultsDir` (you authored the manifest — remember it). When the user asks how the swarm is doing ("/swarm status", "how far along…"), run `node <engine> status <resultsDir>` once and relay its table verbatim; for one specific leaf, tail `results/<id>.log`.
+   **Status asks**: you know the `resultsDir` (you authored the manifest — remember it). When the user asks how the swarm is doing ("/swarm status", "how far along…"), run `node <engine> status <resultsDir>` once and render its counts as a **markdown table** (state | count, glyphs kept — the TUI renders markdown; a table beats raw monospace). For one specific leaf, tail `results/<id>.log`.
 6. **Read `digest.md` ONLY**, then drill into `results/<id>.json` selectively — the digest's drill-down section says which raw results merit a full read. Never read all raw output.
-7. A failed run is reported with its failures and a resume offer (re-`run` skips `ok` results; `rate-limited` leaves are retryable) — never presented as complete.
+7. A failed run is reported with its failures — never presented as complete. Offer the choice via AskUserQuestion: **Resume (Recommended)** (re-`run` skips `ok`; `rate-limited` retries) / **Inspect failures** (open the failed `results/<id>.json|.log`) / **Accept partial** — failure list as the preview.
+8. After a substantial clean run you may offer (never auto-create) an HTML run report as an Artifact — leaf cards from `summary.json`, digest headlines, verdict colours — when the Artifact tool is available.
 
 ## Manifest quick reference
 
