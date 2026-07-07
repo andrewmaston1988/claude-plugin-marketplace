@@ -34,7 +34,7 @@ function _trackerFor(project) {
 
 const HERE         = fileURLToPath(new URL(".", import.meta.url));
 const PIPELINE_BIN = resolve(HERE, "..", "..", "..", "bin", "pipeline.mjs");
-const ORCH_ENTRY   = resolve(HERE, "..", "..", "..", "scripts", "orchestrator", "index.mjs");
+const ORCH_ENTRY   = resolve(HERE, "..", "..", "orchestrator", "index.mjs");
 
 const STAGE_ORDER = ["merge","manual","test","review","dev","research","queued","backlog","done"];
 function _stageRank(r) { const i = STAGE_ORDER.indexOf(r.stage); return i < 0 ? 99 : i; }
