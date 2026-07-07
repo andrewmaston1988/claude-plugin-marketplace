@@ -41,3 +41,14 @@ test("session resume and addDir survive alongside model", () => {
   assert.equal(args[args.indexOf("--resume") + 1], "s1");
   assert.equal(args[args.indexOf("--add-dir") + 1], "C:/x");
 });
+
+test("multi-line prompt is delivered via stdin, not as a -p argv element", () => {
+  // cmd.exe /d /s /c parses argv line-by-line: a literal newline inside a
+  // -p <prompt> element terminates the /c command and drops every arg after it
+  // (--output-format, --model, --resume). The fix is --print + stdin delivery.
+  const prompt = "line one\nline two";
+  const { args } = buildClaudeInvocation({ prompt, model: null, proxy: PROXY });
+  assert.equal(args.includes("-p"), false, "must not pass -p (cmd.exe /c cuts args at a newline)");
+  assert.equal(args.includes(prompt), false, "prompt must not appear as an argv element");
+  assert.equal(args.includes("--print"), true, "must use --print so the prompt is read from stdin");
+});

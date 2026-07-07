@@ -173,48 +173,22 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
       activeProcs.delete(channel);
       if (sessionId) store.set(key, sessionId);
 
-      heartbeat.stop();
+      // .py canon (slack_bridge.py:685-688): stop the heartbeat AND join it before
+      // posting the reply, so a final heartbeat tick can't land chatUpdate(text:"")
+      // after the reply and clobber the body. stop() returns the in-flight update's
+      // promise (capped at 3s) — awaiting it is the join.
+      await heartbeat.stop();
 
-      const title = (!existingSession && isFirstInSession) ? `*${cmdEcho}*\n\n` : null;
-      const responseText = title ? title + (claudeResult ?? "") : (claudeResult ?? "");
-
-      if (hasTable(responseText)) {
-        const blocks = mdToBlocks(responseText);
-        if (blocks) {
-          await web.chatDelete({ channel, ts: placeholderTs });
-          const postParams = { channel, text: cmdEcho, blocks };
-          if (threadTs) postParams.thread_ts = threadTs;
-          await web.chatPostMessage(postParams);
-          return;
-        }
-      }
-
-      const mrkdwn = mdToSlack(responseText);
-      const chunks = splitResponse(mrkdwn);
-
-      if (chunks.length === 1) {
-        await safeUpdate({
-          web, channel, ts: placeholderTs, threadTs,
-          params: { text: "", attachments: [{ color: "#36a64f", text: mrkdwn, mrkdwn_in: ["text"] }] },
-        });
-      } else {
-        await web.chatDelete({ channel, ts: placeholderTs });
-        for (const chunk of chunks) {
-          const postParams = { channel, text: chunk };
-          if (threadTs) postParams.thread_ts = threadTs;
-          await web.chatPostMessage(postParams);
-        }
-      }
+      await postResponse({
+        web, channel, placeholderTs, threadTs,
+        responseText: claudeResult, existingSession, isFirstInSession, cmdEcho,
+        extensions, sessionId, config,
+      });
     } catch (e) {
-      heartbeat?.stop();
+      await heartbeat?.stop();
       activeProcs.delete(channel);
       log.error("claude error", { channel, error: e.message });
-      try {
-        await safeUpdate({
-          web, channel, ts: placeholderTs, threadTs,
-          params: { text: "", attachments: [{ color: "#e01e5a", text: `_Error: ${e.message}_`, mrkdwn_in: ["text"] }] },
-        });
-      } catch { /* placeholder already gone; error was already logged above */ }
+      await postError({ web, channel, placeholderTs, threadTs, message: e.message });
     } finally {
       // One-shot restart signal — clear after first message in any session
       delete process.env.CLAUDE_BRIDGE_RESTARTED;
@@ -228,8 +202,116 @@ export function killActive(channel) {
   return false;
 }
 
+/**
+ * Post a standalone "🔄 *Bridge restarted*" notice to the most recent DM
+ * session on startup — mirrors the historic .py _post_startup_notification.
+ * The mjs port had dropped this (only the inject-into-claude-prompt path
+ * survived), so "Bridge restarted" stopped printing on restart. DM session
+ * keys are bare channel ids (no ":"); thread sessions are "channel:thread_ts",
+ * so the filter skips threads and targets the operator's DM.
+ */
+export async function postStartupNotification({ web, store, log }) {
+  const sessions = store.all();
+  // DM session keys are bare channel ids (no ":"); thread sessions are
+  // "channel:thread_ts". Skip internal keys like "__dedup__" — they're bare-id
+  // (no ":") so they'd pass the DM filter and get picked as the target channel,
+  // producing a channel_not_found error and swallowing the restart notice.
+  const dmChannels = Object.keys(sessions).filter(k => !k.includes(":") && !k.startsWith("__"));
+  if (!dmChannels.length) return;
+  const channel = dmChannels[dmChannels.length - 1];
+  try {
+    await web.chatPostMessage({ channel, text: "🔄 *Bridge restarted*" });
+    log?.info("startup notification posted", { channel });
+  } catch (e) {
+    log?.warn("startup notification failed", { error: e.message });
+  }
+}
+
+/**
+ * Post claude's reply — mirrors the historic .py recipe: the reply is the clean
+ * message body (chat_update text=response_text), NOT wrapped in a Slack attachment.
+ * The mjs port had put the whole reply inside attachments[].text, so it rendered
+ * inside the "|" attachment bar. Tables use Block Kit blocks; long replies split
+ * into multiple plain-text posts. The first-in-session title uses **bold** (md)
+ * so mdToSlack converts it to *bold* (mrkdwn), matching the .py.
+ */
+export async function postResponse({ web, channel, placeholderTs, threadTs, responseText, existingSession, isFirstInSession, cmdEcho, extensions, sessionId, config }) {
+  const title = (!existingSession && isFirstInSession) ? `**${cmdEcho}**\n\n` : null;
+  const fullText = title ? title + (responseText ?? "") : (responseText ?? "");
+
+  // End-of-turn progress attachment — historic .py parity (slack_bridge.py:711-714
+  // posted _progress_snippet() as a coloured attachment on the reply). Sourced from
+  // the pipeline progress-steps DB via the extension's responseAugment hook; null
+  // when there's no active progress or no extension. Never let it fail the reply.
+  let progressAttachment = null;
+  if (extensions) {
+    try {
+      const snippet = await extensions.runResponseAugment({ channel, sessionId, isFirstInSession, config });
+      if (snippet) progressAttachment = { color: "#808080", text: snippet, mrkdwn_in: ["text"] };
+    } catch { /* progress is a sidebar; never fail the response on it */ }
+  }
+
+  if (hasTable(fullText)) {
+    const blocks = mdToBlocks(fullText);
+    if (blocks) {
+      await web.chatDelete({ channel, ts: placeholderTs });
+      const postParams = { channel, text: cmdEcho, blocks };
+      if (threadTs) postParams.thread_ts = threadTs;
+      await web.chatPostMessage(postParams);
+      if (progressAttachment) await postProgressAttachment({ web, channel, threadTs, attachment: progressAttachment });
+      return;
+    }
+  }
+
+  const mrkdwn = mdToSlack(fullText);
+  const chunks = splitResponse(mrkdwn);
+
+  if (chunks.length === 1) {
+    // Reply as the message body — no attachment wraps it (the .py recipe).
+    // The progress attachment rides along on the same updated message (text + attachment).
+    const params = { text: mrkdwn };
+    if (progressAttachment) params.attachments = [progressAttachment];
+    await safeUpdate({ web, channel, ts: placeholderTs, threadTs, params });
+  } else {
+    await web.chatDelete({ channel, ts: placeholderTs });
+    for (let i = 0; i < chunks.length; i++) {
+      const postParams = { channel, text: chunks[i] };
+      if (threadTs) postParams.thread_ts = threadTs;
+      // Attach the progress snippet to the final chunk so it appears once, at the end.
+      if (progressAttachment && i === chunks.length - 1) postParams.attachments = [progressAttachment];
+      await web.chatPostMessage(postParams);
+    }
+  }
+}
+
+/**
+ * Post the end-of-turn progress snippet as a standalone coloured attachment —
+ * used when the reply itself is Block Kit blocks (blocks + attachments don't
+ * combine cleanly on one message). Swallows Slack errors; progress is a sidebar.
+ */
+async function postProgressAttachment({ web, channel, threadTs, attachment }) {
+  const postParams = { channel, text: "", attachments: [attachment] };
+  if (threadTs) postParams.thread_ts = threadTs;
+  try { await web.chatPostMessage(postParams); } catch { /* sidebar; ignore */ }
+}
+
+/**
+ * Post an error as plain message text — .py recipe: text="_Error: …_", attachments=[].
+ * The mjs port had wrapped it in a red attachment; restore plain text so the error
+ * isn't inside the "|" bar. Swallows Slack errors (placeholder may already be gone).
+ */
+export async function postError({ web, channel, placeholderTs, threadTs, message }) {
+  try {
+    await safeUpdate({ web, channel, ts: placeholderTs, threadTs, params: { text: `_Error: ${message}_` } });
+  } catch { /* placeholder already gone; error was already logged by the caller */ }
+}
+
 export function startBridge({ config, log, web, socket, store, queue, extensions }) {
   loadDedup(store);
+
+  // Fire-and-forget: tell the operator the bridge is back. Errors are swallowed
+  // inside postStartupNotification so a Slack hiccup can't block startup.
+  postStartupNotification({ web, store, log }).catch(() => {});
 
   let botUserId = null;
   const sessionFirstMessage = new Set();

@@ -28,6 +28,7 @@ export async function loadExtensions({ paths, log, hookTimeoutMs = 250 }) {
     async runHeartbeatAugment(ctx) { return callAll(loaded, "heartbeatAugment", ctx, log, "concat", hookTimeoutMs); },
     async runPromptInject(ctx)     { return callAll(loaded, "promptInject",     ctx, log, "concat", hookTimeoutMs); },
     async runToolVerb(ctx)         { return callAll(loaded, "toolVerb",         ctx, log, "first",  hookTimeoutMs); },
+    async runResponseAugment(ctx)  { return callAll(loaded, "responseAugment",  ctx, log, "concat", hookTimeoutMs); },
     list() { return loaded.map(e => e.name ?? "(unnamed)"); },
   };
 }
