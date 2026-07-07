@@ -7,11 +7,13 @@ export const CONTEXT_NUDGE_BANDS = [85, 95]; // ascending; fire once per band pe
 export const WARM_RATIO          = 0.5;  // cache_read share that counts as "warm"
 
 // [substring, window]. First match wins; unknown -> default.
+// Family names, not versioned ids — 'claude-sonnet' matches claude-sonnet-4-5,
+// claude-sonnet-5, and future family members alike.
 const MODEL_WINDOWS = [
-  ['claude-opus-4',   1_000_000],
-  ['claude-sonnet-4',   200_000],
-  ['claude-haiku-4',    200_000],
-  ['claude-fable-5',  1_000_000],
+  ['claude-opus',   1_000_000],
+  ['claude-sonnet',   200_000],
+  ['claude-haiku',    200_000],
+  ['claude-fable',  1_000_000],
 ];
 
 export function contextWindowFor(model) {

@@ -9,10 +9,12 @@ import {
 const warm   = { input_tokens: 200, cache_creation_input_tokens: 500, cache_read_input_tokens: 150000 };
 const busted = { input_tokens: 200, cache_creation_input_tokens: 150000, cache_read_input_tokens: 0 };
 
-test('contextWindowFor maps known models and defaults to 200k', () => {
+test('contextWindowFor maps model families and defaults to 200k', () => {
   assert.equal(contextWindowFor('claude-opus-4-8'), 1000000);
+  assert.equal(contextWindowFor('claude-opus-5'), 1000000);
   assert.equal(contextWindowFor('claude-fable-5'), 1000000);
   assert.equal(contextWindowFor('claude-sonnet-4-5'), 200000);
+  assert.equal(contextWindowFor('claude-sonnet-5'), 200000);
   assert.equal(contextWindowFor('claude-haiku-4-5-20251001'), 200000);
   assert.equal(contextWindowFor('something-unknown'), 200000);
   assert.equal(contextWindowFor(undefined), 200000);
