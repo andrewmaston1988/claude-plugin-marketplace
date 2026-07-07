@@ -4,7 +4,7 @@ import { execFile, execSync } from "node:child_process";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
 import { renderManifest } from "./manifest.mjs";
-import { renderTemplate, installAutostart, verifyAutostart } from "./autostart.mjs";
+import { renderTemplate, installAutostart, verifyAutostart, installStableEntry } from "./autostart.mjs";
 import { createWebClient } from "../web-api/index.mjs";
 import { runDoctor, printDoctor } from "../doctor/index.mjs";
 
@@ -111,7 +111,7 @@ export async function runWizard({ paths, log }) {
     if (!autostart.trim().toLowerCase().startsWith("n")) {
       try {
         const nodePath  = process.execPath;
-        const bridgeEntry = resolve(new URL("../../bin/claude-slack.mjs", import.meta.url).pathname.replace(/^\/([A-Z]:)/, "$1"));
+        const bridgeEntry = installStableEntry();
         const rendered = renderTemplate(process.platform, {
           nodePath, bridgeEntry,
           configDir: paths.configDir,

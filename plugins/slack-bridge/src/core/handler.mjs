@@ -163,6 +163,8 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
         addDir: config.claude.addDir,
         prompt: (inject ? inject + "\n" : "") + prelude + text,
         sessionId: existingSession ?? undefined,
+        model: config.claude.model,
+        proxy: config.proxy,
         timeoutMs: config.claude.timeout,
         onStarted: child => { activeProcs.set(channel, child); },
         env: {},

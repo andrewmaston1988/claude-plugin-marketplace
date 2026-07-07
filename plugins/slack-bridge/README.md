@@ -181,6 +181,9 @@ Edit `config.json` (path shown in Step 3 above) to adjust any of these:
 | `tokens.app` | *(required)* | App-level token (`xapp-...`) for Socket Mode |
 | `claude.cwd` | *(required)* | Working directory for `claude -p` invocations |
 | `claude.addDir` | `null` | Extra `--add-dir` path passed to claude |
+| `claude.model` | `null` | Agent model. `null` = Claude Code default. Claude names pass as `--model`; any other name (e.g. `minimax-m3:cloud`) routes via `proxy` — see [CONFIG.md](CONFIG.md) "Model routing" |
+| `proxy.url` | `http://localhost:11434` | Anthropic-format endpoint for non-Claude models (ollama direct) |
+| `proxy.authToken` | `"ollama"` | Pass-through placeholder — real auth is the ollama app's signin |
 | `claude.timeout` | `180000` | Subprocess timeout in ms |
 | `slack.onlyChannel` | `null` | If set, only respond in this channel ID |
 | `slack.historyLimit` | `0` | Messages to fetch for context bootstrap (0 = disabled) |
