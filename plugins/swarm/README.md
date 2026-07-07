@@ -44,7 +44,7 @@ In a session, the **swarm** skill drives this end-to-end: it drafts the manifest
 
 ```json
 {
-  "resultsDir": "swarm-results/auth-sweep",
+  "resultsDir": ".swarm/auth-sweep",
   "tasks": [
     {
       "id": "auth",
