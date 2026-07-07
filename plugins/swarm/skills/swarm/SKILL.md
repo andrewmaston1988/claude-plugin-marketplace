@@ -18,7 +18,7 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 
 - **Triage first**: when the whole job is under ~one leaf's cost (~30k tokens), read it yourself — don't swarm.
 - **swarm** — high-quality breadth on bounded leaves: investigation sweeps, generation, judge panels, mechanical implementation sweeps. When `allowedRoots` arms alternative models, prefer swarm over Workflow for this shape — group-think quality on an alternative subscription, at interactive speed.
-- **Workflow** — Claude-quality reasoning with harness integration: leaves that need harness tools, live session context, or subtle mid-flight judgement.
+- **Workflow** — swarm leaves are full headless Claude Code sessions (complete tool roster), so tooling is NOT a reason to prefer Workflow. Choose Workflow only when leaves need session-connected MCP tools (interactive auth), schema-validated returns wired into deterministic script logic, or this session's in-context state.
 - **pipeline** — durable queued throughput ending in PRs. Huge capacity, not fast.
 - **Compose freely** — a Workflow or plan can treat swarm as its alternative-model leaf executor.
 
