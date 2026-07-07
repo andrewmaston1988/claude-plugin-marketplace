@@ -24,12 +24,16 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 
 ## MANDATORY first step — the offer gate
 
-Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), draft the manifest and put it through AskUserQuestion:
+Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), draft the manifest and put it through ONE AskUserQuestion call carrying TWO questions:
 
-> "Fan this out via swarm — <n> leaves on <models>?"
-> Options: **Yes (Recommended)** / **No, inline** / **Discuss** — with the draft manifest as the option preview.
+1. > "Fan this out via swarm — <n> leaves on <models>?"
+   > Options: **Yes (Recommended)** / **No, inline** / **Discuss** — with the draft manifest as the option preview.
+2. > "Model mix?" — state the split explicitly in the question (e.g. "5 leaves alternative, digest on sonnet = 1 Anthropic call").
+   > Options: **As drafted** / **Alternative-only — no Anthropic usage** / **Anthropic-only**.
 
-The manifest preview IS the approval: the user sees every model and every leaf before anything runs. There is no separate Opus gate, no per-model approval, no cost interrogation. Do not start inline work on a fan-out-shaped task without this gate.
+Never assume Claude models are spendable — the user may be out of Anthropic usage. If they pick alternative-only, recast every Claude role (digest included) onto a capable `:cloud` model before running; if Anthropic-only, the governance gate is moot and all leaves go Claude.
+
+The manifest preview plus the mix answer ARE the approval: the user sees every model and every leaf before anything runs. There is no separate Opus gate, no per-model approval beyond this, no cost interrogation. Do not start inline work on a fan-out-shaped task without this gate.
 
 ## Procedure
 
