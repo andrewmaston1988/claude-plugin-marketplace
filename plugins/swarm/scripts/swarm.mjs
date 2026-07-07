@@ -11,7 +11,8 @@ const USAGE = `usage: swarm.mjs <command>
   models                     list launchable :cloud models (+ Claude aliases)
   validate <manifest.json>   lint a manifest; exit 1 with readable errors
   run <manifest.json> [--force]   execute the plan (use Bash run_in_background)
-  status <resultsDir>        one-shot progress view of a run (reads run.log)`;
+  status <resultsDir>        one-shot progress view of a run (reads run.log)
+  status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -90,6 +91,19 @@ async function main() {
       }
       case "status": {
         if (!rest[0]) { err(USAGE); return 1; }
+        if (rest.includes("--watch")) {
+          const ivIdx = rest.indexOf("--interval");
+          const secs = ivIdx >= 0 ? Math.max(1, Number(rest[ivIdx + 1]) || 5) : 5;
+          // Repaint until Ctrl-C. Env override lets tests bound the loop.
+          const maxTicks = Number(process.env.SWARM_WATCH_TICKS) || Infinity;
+          for (let i = 0; i < maxTicks; i++) {
+            process.stdout.write("\x1b[2J\x1b[H");
+            out(renderStatus(rest[0]));
+            out(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`);
+            await new Promise((r) => setTimeout(r, secs * 1000));
+          }
+          return 0;
+        }
         out(renderStatus(rest[0]));
         return 0;
       }
