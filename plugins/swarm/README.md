@@ -119,3 +119,7 @@ The plugin ships a `UserPromptSubmit` hook that is silent by default. It activat
 - `~/.swarm/config.json` sets `"swarm": { "always": true }`.
 
 When active it injects standing instructions to propose a swarm manifest via the question box for every substantive task, including the cached model list from the last `models` discovery so offers name real, launchable models.
+
+## Workflow nudge
+
+A `PreToolUse` hook on the **Workflow** tool: when alternative models are armed (`provider.allowedRoots` non-empty), the first Workflow call of a session is intercepted with a "consider swarm instead" reason — retrying Workflow passes straight through, and the reminder never repeats within the session. A speed bump, not a wall. Silent on unarmed machines and in pipeline child sessions; disable with `"swarm": { "workflowNudge": false }`.
