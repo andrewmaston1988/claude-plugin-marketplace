@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -75,9 +75,12 @@ export function formatStatusLine({ id, model, state, durationMs }) {
 // derived from run.log (JSONL state changes). The latest run-start line names
 // every task, so ids never seen since it are pending.
 export function renderStatus(dir, now = Date.now()) {
+  // Absolutise first: a relative resultsDir silently resolves against the
+  // *viewer's* cwd (watch terminal), not the run's — the classic mismatch.
+  dir = resolve(dir);
   const logPath = join(dir, "run.log");
   if (!existsSync(logPath)) {
-    return `no run.log at ${logPath} — has the run started?`;
+    return `no run.log at ${logPath} (absolute) — either the run has not started or this is not the run's resultsDir; pass the absolute path printed at dispatch.`;
   }
   let allTasks = [];
   const last = new Map(); // id -> { state, ts }
