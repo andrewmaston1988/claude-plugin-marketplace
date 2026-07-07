@@ -11,7 +11,7 @@ import {
 } from "./style.mjs";
 
 const HERE       = fileURLToPath(new URL(".", import.meta.url));
-const ORCH_ENTRY = resolve(HERE, "..", "..", "..", "scripts", "orchestrator", "index.mjs");
+const ORCH_ENTRY = resolve(HERE, "..", "..", "orchestrator", "index.mjs");
 
 function _options(orch) {
   const opts = [];
