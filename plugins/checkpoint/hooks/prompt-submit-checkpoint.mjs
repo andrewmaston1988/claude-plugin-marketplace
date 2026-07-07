@@ -43,8 +43,8 @@ export function resolveUtilisation(recentTurns, transcriptBytes) {
 }
 
 export function buildCheckpointNudge(pct) {
-  return `Context is ~${pct}% full — invoke the **checkpoint** skill to snapshot STATE.md, `
-    + `then consider starting a fresh session to resume clean.`;
+  return `Context is ~${pct}% full. No need to stop — at your next natural pause, invoke the `
+    + `**checkpoint** skill to write a STATE.md handover so a fresh session can pick up cleanly.`;
 }
 
 function emitContext(ctx) {
