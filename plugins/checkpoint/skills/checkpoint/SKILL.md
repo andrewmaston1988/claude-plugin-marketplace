@@ -12,7 +12,7 @@ Writes (or reconciles) a structured `STATE.md` so a *fresh session* can resume t
 
 1. **Read the format** in `templates/state-template.md` (relative to this skill dir). The 7-section shape is **rigid** — do not add or drop sections.
 
-2. **Compute the path.** `~/.claude/projects/<encoded-cwd>/STATE_<sessionId>_<YYYYMMDDTHHMMSSZ>.md`, where `<encoded-cwd>` is the cwd with `\`, `/`, `:` all rewritten to `-` (e.g. `C:/code/foo` → `C--code-foo`). The filename is **per-session** — only your own sessionId owns the file. The embedded `YYYYMMDDTHHMMSSZ` is the canonical "freshness" signal: `resolveLatestStatePath` (in `plugins/checkpoint/hooks/lib/paths.mjs`) compares stamps embedded in filenames, not file mtimes, so a stale filename invites a parallel session's newer file to win even when yours is fresher. Override via `CLAUDE_STATE_PATH`.
+2. **Compute the path.** `~/.claude/projects/<encoded-cwd>/STATE_<slug>_<sessionId>_<YYYYMMDDTHHMMSSZ>.md`, where `<encoded-cwd>` is the cwd with `\`, `/`, `:` all rewritten to `-` (e.g. `C:/code/foo` → `C--code-foo`) and `<slug>` is a short kebab-case task descriptor (2–4 words, e.g. `checkpoint-limits`) so the file is recognisable when browsing. Mint new files with a slug; if a file already exists for your sessionId keep its existing name (the slug — or its absence on PreCompact skeletons — is preserved; only the stamp advances). When replacing a skeleton wholesale you may write a fresh slugged file and delete the skeleton. The filename is **per-session** — only your own sessionId owns the file. The embedded `YYYYMMDDTHHMMSSZ` is the canonical "freshness" signal: `resolveLatestStatePath` (in `plugins/checkpoint/hooks/lib/paths.mjs`) compares stamps embedded in filenames, not file mtimes, so a stale filename invites a parallel session's newer file to win even when yours is fresher. Override via `CLAUDE_STATE_PATH`.
 
    **Every successful checkpoint write must end with the file living at a filename whose embedded timestamp is the current UTC moment:**
    - If no STATE file exists for your sessionId → mint with the current UTC stamp.
@@ -25,14 +25,20 @@ Writes (or reconciles) a structured `STATE.md` so a *fresh session* can resume t
 
 4. **Fill the header**: `branch` from `git rev-parse --abbrev-ref HEAD` (plus `git status --porcelain` → clean/dirty); `resume:` = the single first action (mirror NEXT ACTIONS #1).
 
-5. **Tell the user**: `STATE.md saved at <path>. Start a fresh session here to resume from it.`
+5. **Copy the resume prompt.** Build a one-line handover and put it on the clipboard so the user can paste it into the fresh session instead of typing it:
+
+   `Resume from the STATE handover: read "<abs STATE.md path>" and continue from its resume: action.`
+
+   Windows: `Set-Clipboard` (or pipe to `clip`); macOS: `pbcopy`; Linux: `xclip -selection clipboard`. If no clipboard tool is available, print the line for manual copying.
+
+6. **Tell the user**: `STATE.md saved at <path>. Resume prompt copied to the clipboard — paste it into a fresh session to resume.`
 
 ## Companion hooks (auto-wired by the plugin)
 
 | Hook | What it does |
 |---|---|
 | **PreCompact** | Writes a skeletal STATE.md backstop before auto-compaction; leaves a marker. Never blocks. |
-| **UserPromptSubmit** | Nudges you to invoke this skill when context utilisation crosses ~75%; consumes the post-compact marker; runs the opt-in keepalive. |
+| **UserPromptSubmit** | Nudges you to invoke this skill when context utilisation crosses the 85%/95% bands; consumes the post-compact marker; runs the opt-in keepalive. |
 | **SessionStart** | On a fresh start with an existing STATE.md, offers to resume. |
 
 Optional cache keepalive: set `checkpoint.keepalive: true`. See the plugin README.

@@ -3,16 +3,15 @@
 import fs from 'node:fs';
 
 const DEFAULT_CONTEXT_WINDOW = 200_000;
-export const CONTEXT_NUDGE_PCT  = 75;   // nudge a checkpoint at this utilisation
-export const CONTEXT_REFIRE_PCT = 10;   // re-fire only after another +N percentage points
-export const WARM_RATIO         = 0.5;  // cache_read share that counts as "warm"
+export const CONTEXT_NUDGE_BANDS = [85, 95]; // ascending; fire once per band per window cycle
+export const WARM_RATIO          = 0.5;  // cache_read share that counts as "warm"
 
 // [substring, window]. First match wins; unknown -> default.
 const MODEL_WINDOWS = [
-  ['claude-opus-4',   200_000],
-  ['claude-sonnet-4', 200_000],
-  ['claude-haiku-4',  200_000],
-  ['claude-fable-5',  200_000],
+  ['claude-opus-4',   1_000_000],
+  ['claude-sonnet-4',   200_000],
+  ['claude-haiku-4',    200_000],
+  ['claude-fable-5',  1_000_000],
 ];
 
 export function contextWindowFor(model) {
@@ -36,9 +35,12 @@ export function contextUtilization(usage, windowTokens) {
 }
 
 export function decideCheckpointNudge(pct, lastFiredPct) {
-  if (pct < CONTEXT_NUDGE_PCT) return false;
-  if (lastFiredPct == null) return true;
-  return pct >= lastFiredPct + CONTEXT_REFIRE_PCT;
+  // Utilisation falling below the last fired point means compaction reset the window — new cycle.
+  if (lastFiredPct != null && pct < lastFiredPct) lastFiredPct = null;
+  let band = null;
+  for (const b of CONTEXT_NUDGE_BANDS) if (pct >= b) band = b;
+  if (band == null) return false;
+  return lastFiredPct == null || band > lastFiredPct;
 }
 
 // 'warm' | 'busted' | 'cold' (cold = no usage tokens at all).

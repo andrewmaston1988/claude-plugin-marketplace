@@ -4,9 +4,9 @@ Durable cross-session **handoff** via `STATE.md`. Compaction is just one discont
 
 ## Pieces
 
-1. **`/checkpoint` skill** — writes/**reconciles** a 7-section STATE.md (handoff artifact). Model-invocable; reconciles an existing file rather than rewriting it.
+1. **`/checkpoint` skill** — writes/**reconciles** a 7-section STATE.md (handoff artifact). Model-invocable; reconciles an existing file rather than rewriting it. Ends by copying a one-line resume prompt (referencing the STATE file) to the clipboard for pasting into the fresh session.
 2. **SessionStart hook** — on a fresh start (`startup`/`clear`) with an existing STATE.md, offers to resume. Opt out: `checkpoint.sessionStartResume: false`.
-3. **UserPromptSubmit hook** — nudges `/checkpoint` when context utilisation (from transcript `usage`) crosses ~75%; consumes the post-compact marker; runs the opt-in keepalive.
+3. **UserPromptSubmit hook** — nudges `/checkpoint` when context utilisation (from transcript `usage`, against the model's real window: 1M opus/fable, 200k sonnet/haiku) crosses the 85% and 95% bands — once each per window cycle, re-arming after compaction. Framed as a handover, not a stop-work order. Also consumes the post-compact marker and runs the opt-in keepalive.
 4. **PreCompact hook** — skeletal STATE.md backstop before auto-compaction (the fallback when you don't checkpoint in time).
 
 ## The loop
@@ -15,7 +15,7 @@ Context heavy → nudge → `/checkpoint` → start a fresh session → SessionS
 
 ## STATE.md location
 
-`~/.claude/projects/<encoded-cwd>/STATE_<sessionId>_<YYYYMMDDTHHMMSSZ>.md` (cwd with `\`, `/`, `:` rewritten to `-`). One file per session, UTC-stamped — multiple sessions sharing a cwd no longer clobber each other. SessionStart offers the **most recent** `STATE_*` file as the resume candidate. Override with `CLAUDE_STATE_PATH`.
+`~/.claude/projects/<encoded-cwd>/STATE_<slug>_<sessionId>_<YYYYMMDDTHHMMSSZ>.md` (cwd with `\`, `/`, `:` rewritten to `-`; slug = short kebab-case task descriptor so files are recognisable when browsing — PreCompact skeletons omit it). One file per session, UTC-stamped — multiple sessions sharing a cwd no longer clobber each other. SessionStart offers the **most recent** `STATE_*` file as the resume candidate. Override with `CLAUDE_STATE_PATH`.
 
 ## Cache keepalive (opt-in)
 

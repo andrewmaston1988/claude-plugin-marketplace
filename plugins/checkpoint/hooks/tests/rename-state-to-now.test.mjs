@@ -28,6 +28,13 @@ test('renameStateToNow: renames existing STATE file so embedded stamp is now', (
   assert.equal(fs.readFileSync(newPath, 'utf8'), '# old', 'content survives rename');
 });
 
+test('renameStateToNow: slug is preserved across the rename', () => {
+  const dir = tmpDir();
+  const oldPath = writeState(dir, 'my-task_sid-x', '20260620T000000Z');
+  const newPath = renameStateToNow(oldPath, new Date('2026-06-26T15:30:00Z'));
+  assert.equal(path.basename(newPath), 'STATE_my-task_sid-x_20260626T153000Z.md');
+});
+
 test('renameStateToNow: sid is preserved across the rename', () => {
   const dir = tmpDir();
   const oldPath = writeState(dir, 'abc12345-1234-1234-1234-123456789012', '20260101T000000Z');
