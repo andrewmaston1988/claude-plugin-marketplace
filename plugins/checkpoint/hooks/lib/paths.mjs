@@ -8,13 +8,20 @@ export const KEEPALIVE_LOG = path.join(os.homedir(), '.claude', '.checkpoint-kee
 
 export function encodeProject(p) { return p.replace(/[\\/:]/g, '-'); }
 
-// Filename: STATE_<sanitizedSid>_<YYYYMMDDTHHMMSSZ>.md
+// Filename: STATE_[<slug>_]<sanitizedSid>_<YYYYMMDDTHHMMSSZ>.md
 // UTC ISO compact timestamp sorts lexicographically (descending = newest first).
+// Group 1 spans `_`, so it captures `slug_sid` on slugged names.
 const STATE_FILE_RE = /^STATE_([A-Za-z0-9_-]+)_(\d{8}T\d{6}Z)\.md$/;
 
 export function sanitizeSid(sid) {
   if (!sid) return '';
   return String(sid).replace(/[^A-Za-z0-9_-]/g, '');
+}
+
+// Slug is kebab-only (never `_`), so the trailing `_<sid>` stays unambiguous.
+export function sanitizeSlug(slug) {
+  if (!slug) return '';
+  return String(slug).replace(/[^A-Za-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
 
 export function nowStamp(d = new Date()) {
@@ -35,10 +42,11 @@ export function projectDir(cwd) {
 }
 
 // Compose the canonical per-session filename; empty sid yields ''.
-export function sessionStateFilename(sid, stamp) {
+export function sessionStateFilename(sid, stamp, slug = '') {
   const safe = sanitizeSid(sid);
   if (!safe) return '';
-  return `STATE_${safe}_${stamp}.md`;
+  const s = sanitizeSlug(slug);
+  return s ? `STATE_${s}_${safe}_${stamp}.md` : `STATE_${safe}_${stamp}.md`;
 }
 
 // Writer path: per-session file. If one already exists for this sid in the
@@ -54,12 +62,12 @@ export function resolveOwnStatePath(cwd, sid, opts = {}) {
   try {
     for (const name of fs.readdirSync(dir)) {
       const m = name.match(STATE_FILE_RE);
-      if (m && m[1] === safe) { existing = path.join(dir, name); break; }
+      if (m && (m[1] === safe || m[1].endsWith('_' + safe))) { existing = path.join(dir, name); break; }
     }
   } catch { /* dir missing yet — fine */ }
   if (existing) return existing;
   const stamp = (opts.now && nowStamp(opts.now)) || nowStamp();
-  return path.join(dir, sessionStateFilename(safe, stamp));
+  return path.join(dir, sessionStateFilename(safe, stamp, opts.slug || ''));
 }
 
 // Resume path: most-recent STATE_* by the UTC timestamp in the filename.

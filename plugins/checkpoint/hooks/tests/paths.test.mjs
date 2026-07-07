@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  sanitizeSid, nowStamp, sessionStateFilename,
+  sanitizeSid, sanitizeSlug, nowStamp, sessionStateFilename,
   resolveOwnStatePath, resolveLatestStatePath,
   isMeaningfulState, resolveStatePath, projectDir,
 } from '../lib/paths.mjs';
@@ -34,6 +34,18 @@ test('sessionStateFilename: composes the canonical pattern', () => {
   assert.equal(sessionStateFilename('', 'X'), '');
 });
 
+test('sanitizeSlug: kebab-cases, never emits underscores', () => {
+  assert.equal(sanitizeSlug('fix nudge_limits'), 'fix-nudge-limits');
+  assert.equal(sanitizeSlug('--Checkpoint Limits!--'), 'Checkpoint-Limits');
+  assert.equal(sanitizeSlug(''), '');
+  assert.equal(sanitizeSlug(undefined), '');
+});
+
+test('sessionStateFilename: slug prefixes the sid, kebab-sanitised', () => {
+  assert.equal(sessionStateFilename('sid123', '20260624T064645Z', 'fix nudge_limits'),
+    'STATE_fix-nudge-limits_sid123_20260624T064645Z.md');
+});
+
 // ---- filesystem-backed helpers ----
 
 function tmpCwd() {
@@ -56,6 +68,21 @@ test('resolveOwnStatePath: returns the same file (preserves original stamp) on r
   fs.writeFileSync(original, '# old', 'utf8');
   const p = resolveOwnStatePath(cwd, 'sid-bbbb', { now: new Date('2026-06-24T06:46:45Z') });
   assert.equal(p, original, 'must re-use the existing per-session file');
+});
+
+test('resolveOwnStatePath: finds an existing slugged file for the sid', () => {
+  const cwd = tmpCwd();
+  const dir = projectDir(cwd);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'STATE_my-task_sid-cccc_20260624T064645Z.md'), 'x', 'utf8');
+  const p = resolveOwnStatePath(cwd, 'sid-cccc');
+  assert.equal(path.basename(p), 'STATE_my-task_sid-cccc_20260624T064645Z.md');
+});
+
+test('resolveOwnStatePath: mints with opts.slug', () => {
+  const cwd = tmpCwd();
+  const p = resolveOwnStatePath(cwd, 'sid-dddd', { now: new Date('2026-06-24T06:46:45Z'), slug: 'checkpoint limits' });
+  assert.equal(path.basename(p), 'STATE_checkpoint-limits_sid-dddd_20260624T064645Z.md');
 });
 
 test('resolveOwnStatePath: empty sid → empty path (no file written)', () => {
