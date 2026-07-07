@@ -81,7 +81,27 @@ In a session, the **swarm** skill drives this end-to-end: it drafts the manifest
   run.log                    # JSONL, one line per task state change — tailable mid-run
 ```
 
-Stdout shows one status line per completed task and a closing block (digest path, summary path, kept worktrees) — never raw task output. Failed tasks block their dependents; independent branches continue; re-`run` resumes (completed work is skipped, `rate-limited` tasks retry).
+Stdout shows one status line per completed task and a closing block (digest path, summary path, kept worktrees) — never raw task output. On a TTY the view is coloured (state-coloured glyphs, bold ids); piped output stays byte-identical plain text, and `NO_COLOR` is honoured. Failed tasks block their dependents; independent branches continue; re-`run` resumes (completed work is skipped, `rate-limited` tasks retry).
+
+## Statusline segment
+
+Live progress of the most recent run in the Claude Code status bar — `🐝 5✓ 2▶ 1⧖` — appended to your existing statusLine command:
+
+```bash
+node "<abs-path-to>/swarm/statusline/swarm-glyph.mjs"
+```
+
+Shows nothing when no run has been active in the last 30 minutes; never errors.
+
+## Completion notification
+
+Set `notifyCmd` in `~/.swarm/config.json` to fire a command when a run finishes (tokens: `{status}`, `{digest}`, `{summary}`) — e.g. ping yourself via the slack-bridge plugin:
+
+```json
+{ "notifyCmd": "claude-slack notify --message \"{status} — digest: {digest}\"" }
+```
+
+Fire-and-forget: spawned detached, errors swallowed, never affects the run's exit code.
 
 ## The CLAUDE.md nudge
 

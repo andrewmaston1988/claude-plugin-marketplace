@@ -6,6 +6,7 @@ import { loadManifest, ValidationError } from "../src/manifest.mjs";
 import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { formatClosing, renderStatus } from "../src/results.mjs";
+import { dim } from "../src/ui.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
   models                     list launchable :cloud models (+ Claude aliases)
@@ -65,6 +66,19 @@ async function cmdRun(manifestPath, force) {
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
+  // Fire-and-forget completion hook (e.g. "claude-slack notify --message {status}").
+  // Mechanical plumbing only: substitute tokens, spawn detached, swallow errors.
+  if (cfg.notifyCmd) {
+    const status = bad.length ? `swarm run finished with ${bad.length} failed/blocked` : "swarm run finished clean";
+    const cmdLine = cfg.notifyCmd
+      .replaceAll("{status}", status)
+      .replaceAll("{digest}", r.digestPath || "")
+      .replaceAll("{summary}", r.summaryPath || "");
+    try {
+      const { spawn } = await import("node:child_process");
+      spawn(cmdLine, { shell: true, detached: true, stdio: "ignore" }).unref();
+    } catch { /* notification is garnish, never a failure */ }
+  }
   if (bad.length) {
     out(`FAILED tasks: ${bad.map((t) => `${t.id} [${t.state}]`).join(", ")}`);
     out("resume: re-run the same command — ok results are skipped, failed/blocked work re-executes.");
@@ -99,7 +113,7 @@ async function main() {
           for (let i = 0; i < maxTicks; i++) {
             process.stdout.write("\x1b[2J\x1b[H");
             out(renderStatus(rest[0]));
-            out(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`);
+            out(dim(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`));
             await new Promise((r) => setTimeout(r, secs * 1000));
           }
           return 0;
