@@ -38,7 +38,8 @@ The manifest preview IS the approval: the user sees every model and every leaf b
 3. **Author the manifest** (schema below) and offer it through the gate above.
 4. **Validate**: `node <engine> validate <manifest.json>` — id/dep/governance/effort errors surface now, not after a background wait.
 5. **Run**: `node <engine> run <manifest.json>` via `Bash run_in_background`. The completion notification is the "run finished" signal.
-   **Status asks**: you know the `resultsDir` (you authored the manifest — remember it). When the user asks how the swarm is doing ("/swarm status", "how far along…"), run `node <engine> status <resultsDir>` and relay its table verbatim; for one specific leaf, tail `results/<id>.log`.
+   **Immediately after dispatching**, give the user the live watch command for a separate terminal — `node <engine> status <resultsDir> --watch` — and copy it to their clipboard. NEVER poll status yourself while the run is live: dispatch in the background, continue other work, the completion notification will find you.
+   **Status asks**: you know the `resultsDir` (you authored the manifest — remember it). When the user asks how the swarm is doing ("/swarm status", "how far along…"), run `node <engine> status <resultsDir>` once and relay its table verbatim; for one specific leaf, tail `results/<id>.log`.
 6. **Read `digest.md` ONLY**, then drill into `results/<id>.json` selectively — the digest's drill-down section says which raw results merit a full read. Never read all raw output.
 7. A failed run is reported with its failures and a resume offer (re-`run` skips `ok` results; `rate-limited` leaves are retryable) — never presented as complete.
 
