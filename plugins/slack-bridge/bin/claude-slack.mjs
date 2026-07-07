@@ -105,10 +105,10 @@ if (cmd === "install-autostart") {
   const configArg = getFlag("--config", rest) ?? paths.configFile;
   const config = await loadConfig({ configPath: configArg });
   const log = createLogger({ logDir: paths.logDir, tag: "autostart" });
-  const { renderTemplate, installAutostart, verifyAutostart } = await import("../src/setup/autostart.mjs");
+  const { renderTemplate, installAutostart, verifyAutostart, installStableEntry } = await import("../src/setup/autostart.mjs");
   const platform = process.platform;
   const nodePath = process.execPath;
-  const bridgeEntry = fileURLToPath(new URL("../bin/claude-slack.mjs", import.meta.url));
+  const bridgeEntry = installStableEntry();
   const rendered = renderTemplate(platform, { nodePath, bridgeEntry, configDir: paths.configDir, logDir: paths.logDir });
   log.info("installing autostart", { platform });
   process.stdout.write(`Installing autostart for ${platform}...\n`);
