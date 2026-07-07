@@ -1,0 +1,13 @@
+{
+  "name": "swarm",
+  "version": "0.1.0",
+  "description": "Cheap open-model fan-out engine — dispatch manifest-defined task graphs across :cloud and Claude models",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.mjs\""
+  }
+}
