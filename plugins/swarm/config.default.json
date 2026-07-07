@@ -1,0 +1,16 @@
+{
+  "provider": {
+    "name": "ollama",
+    "mode": "env",
+    "discoverCmd": "ollama launch claude",
+    "launchCmd": "ollama launch claude --model {model} -- {args}",
+    "cloudSuffix": ":cloud",
+    "allowedRoots": [],
+    "url": "http://localhost:11434",
+    "authToken": "ollama"
+  },
+  "concurrency": 4,
+  "timeoutMs": 600000,
+  "resultInlineCap": 4000,
+  "worktreeBranchPrefix": "swarm/"
+}

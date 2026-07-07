@@ -41,6 +41,15 @@
         "name": "Andrew Maston",
         "email": "andrew.maston1988@gmail.com"
       }
+    },
+    {
+      "name": "swarm",
+      "description": "Alternative-model fan-out engine — manifest-driven parallel runs across capable :cloud models and Claude, with digest compression and worktree isolation",
+      "source": "./plugins/swarm",
+      "author": {
+        "name": "Andrew Maston",
+        "email": "andrew.maston1988@gmail.com"
+      }
     }
   ]
 }
