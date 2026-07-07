@@ -91,7 +91,7 @@ export function runOrchOnce(env, { intervalSec = 1, maxConcurrent = 1 } = {}) {
   // Drive orchestrator for ~6 seconds — long enough for spawn → tick →
   // fake-claude to complete its 1s simulated session → reaper to catch it.
   return new Promise((resolveRun) => {
-    const ORCH = resolvePath(PLUGIN_ROOT, "scripts", "orchestrator", "index.mjs");
+    const ORCH = resolvePath(PLUGIN_ROOT, "src", "orchestrator", "index.mjs");
     const proc = spawn(process.execPath, [
       ORCH, "--interval", String(intervalSec), "--max-concurrent", String(maxConcurrent),
     ], { env: envVars(env), stdio: ["ignore", "pipe", "pipe"] });

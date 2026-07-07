@@ -182,7 +182,7 @@ function ensureRuntimeDeps(argv) {
   }
 
   if (cmd === "orchestrator" || cmd === "orchestrate") {
-    const here = fileURLToPath(new URL("../src/orchestrator/index.mjs", import.meta.url));
+    const here = new URL("../src/orchestrator/index.mjs", import.meta.url);
     await import(here); // hands off; orchestrator daemon keeps the process alive
     return;
   }
