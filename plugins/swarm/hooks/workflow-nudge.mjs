@@ -33,8 +33,11 @@ export function nudgeReason() {
     + 'consider a swarm manifest instead of Workflow for this fan-out. Swarm runs the leaves on '
     + 'capable :cloud models (GLM/MiniMax-class) with zero Anthropic usage, in the background, '
     + 'digest-compressed. Invoke the **swarm** skill and offer it via the question box. '
-    + 'If Workflow is genuinely right here (leaves need harness tools, schemas, or session context), '
-    + 'simply call Workflow again — this reminder will not repeat this session.';
+    + 'Swarm leaves are full headless Claude Code sessions — complete tool roster, so tooling is NOT '
+    + 'a reason to prefer Workflow. Workflow is genuinely right only when leaves need session-connected '
+    + 'MCP tools (interactive auth), schema-validated returns wired into deterministic script logic, or '
+    + 'this session\'s in-context state. If so, simply call Workflow again — this reminder will not '
+    + 'repeat this session.';
 }
 
 async function main() {
