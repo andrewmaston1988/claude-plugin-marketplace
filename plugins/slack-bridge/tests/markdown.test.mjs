@@ -18,8 +18,10 @@ for (const name of fixtures) {
   const mrkdwnPath = join(fixturesDir, `${name}.expected.mrkdwn.txt`);
   const blocksPath = join(fixturesDir, `${name}.expected.blocks.json`);
 
-  const input = readFileSync(inputPath, "utf8");
-  const expectedMrkdwn = readFileSync(mrkdwnPath, "utf8");
+  // Normalise CRLF from checkout (Windows autocrlf) — the bridge itself only ever sees LF.
+  const read = p => readFileSync(p, "utf8").replace(/\r\n/g, "\n");
+  const input = read(inputPath);
+  const expectedMrkdwn = read(mrkdwnPath);
   const expectedBlocks = JSON.parse(readFileSync(blocksPath, "utf8"));
 
   test(`markdown ${name} — mdToSlack`, () => {

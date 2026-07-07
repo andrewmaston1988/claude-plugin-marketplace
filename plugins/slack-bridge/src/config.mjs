@@ -4,6 +4,11 @@ const DEFAULTS = {
   claude: {
     addDir: null,
     timeout: 180_000,
+    model: null,
+  },
+  proxy: {
+    url: "http://localhost:11434",
+    authToken: "ollama",
   },
   slack: {
     onlyChannel: null,

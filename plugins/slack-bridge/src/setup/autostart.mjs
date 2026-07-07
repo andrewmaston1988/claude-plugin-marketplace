@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync, mkdirSync, copyFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join, dirname } from "node:path";
@@ -11,6 +11,21 @@ const TEMPLATES_DIR = join(dirname(fileURLToPath(import.meta.url)), "../../autos
 const TASK_NAME  = "ClaudeSlackBridge";
 const PLIST_ID   = "com.claudeslack.bridge";
 const UNIT_NAME  = "claude-slack";
+
+/**
+ * Copy the self-resolving shim to a stable user-bin path and return it.
+ * Autostart entries point HERE, never at the plugin's sha-versioned cache dir —
+ * the shim re-resolves the active install from installed_plugins.json on every
+ * launch, so plugin updates never invalidate the autostart entry.
+ */
+export function installStableEntry() {
+  const resolverSrc = join(dirname(fileURLToPath(import.meta.url)), "../../bin/claude-slack-resolver.mjs");
+  const stableBin = join(homedir(), ".local", "bin");
+  mkdirSync(stableBin, { recursive: true });
+  const dest = join(stableBin, "claude-slack-resolver.mjs");
+  copyFileSync(resolverSrc, dest);
+  return dest;
+}
 
 /**
  * Render an OS autostart template with token substitution.
