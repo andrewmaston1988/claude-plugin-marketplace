@@ -6,6 +6,7 @@ import { loadManifest, ValidationError } from "../src/manifest.mjs";
 import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { formatClosing, renderStatus } from "../src/results.mjs";
+import { dim } from "../src/ui.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
   models                     list launchable :cloud models (+ Claude aliases)
@@ -99,7 +100,7 @@ async function main() {
           for (let i = 0; i < maxTicks; i++) {
             process.stdout.write("\x1b[2J\x1b[H");
             out(renderStatus(rest[0]));
-            out(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`);
+            out(dim(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`));
             await new Promise((r) => setTimeout(r, secs * 1000));
           }
           return 0;

@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { bold, dim, green, red, cyan, magenta, paint } from "./ui.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -65,10 +66,10 @@ const GLYPHS = {
 };
 
 export function formatStatusLine({ id, model, state, durationMs }) {
-  const glyph = GLYPHS[state] || "?";
-  const dur = durationMs != null ? ` ${Math.round(durationMs / 1000)}s` : "";
-  const suffix = state === "ok" ? "" : ` [${state}]`;
-  return `${glyph} ${id} ${model}${dur}${suffix}`;
+  const glyph = paint(state, GLYPHS[state] || "?");
+  const dur = durationMs != null ? dim(` ${Math.round(durationMs / 1000)}s`) : "";
+  const suffix = state === "ok" ? "" : paint(state, ` [${state}]`);
+  return `${glyph} ${bold(id)} ${model}${dur}${suffix}`;
 }
 
 // One-shot progress view for `swarm.mjs status <resultsDir>` — read-only,
@@ -106,36 +107,36 @@ export function renderStatus(dir, now = Date.now()) {
   }
   counts.pending = allTasks.filter((id) => !last.has(id)).length;
 
-  const lines = [`run: ${dir}`];
+  const lines = [`${bold("run:")} ${cyan(dir)}`];
   lines.push(
     ["ok", "running", "failed", "rate-limited", "blocked", "skipped", "pending"]
-      .map((k) => `${k} ${counts[k]}`)
-      .join(" | ")
+      .map((k) => (counts[k] > 0 ? paint(k, `${k} ${counts[k]}`) : dim(`${k} ${counts[k]}`)))
+      .join(dim(" | "))
   );
   const running = [...last.entries()].filter(([, v]) => v.state === "running");
   if (running.length) {
-    lines.push("running:");
+    lines.push(bold("running:"));
     for (const [id, v] of running) {
       const elapsed = Math.max(0, Math.round((now - Date.parse(v.ts)) / 1000));
-      lines.push(`  ${id} — ${elapsed}s elapsed`);
+      lines.push(`  ${cyan(id)} — ${elapsed}s elapsed`);
     }
   }
-  lines.push(`results: ${join(dir, "results")}`);
-  if (existsSync(join(dir, "digest.md"))) lines.push(`digest: ${join(dir, "digest.md")}`);
-  if (existsSync(join(dir, "summary.json"))) lines.push(`summary: ${join(dir, "summary.json")}`);
+  lines.push(`${bold("results:")} ${join(dir, "results")}`);
+  if (existsSync(join(dir, "digest.md"))) lines.push(`${bold("digest:")} ${green(join(dir, "digest.md"))}`);
+  if (existsSync(join(dir, "summary.json"))) lines.push(`${bold("summary:")} ${join(dir, "summary.json")}`);
   return lines.join("\n");
 }
 
 export function formatClosing({ digestPath, digestFailed, summaryPath, worktreesKept = [] }) {
   const lines = [];
-  if (digestPath) lines.push(`digest: ${digestPath}`);
-  else if (digestFailed) lines.push(`digest: FAILED — read summary + per-task results instead`);
-  else lines.push("digest: none (no digest block in manifest)");
-  lines.push(`summary: ${summaryPath}`);
+  if (digestPath) lines.push(`${bold("digest:")} ${green(digestPath)}`);
+  else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);
+  else lines.push(dim("digest: none (no digest block in manifest)"));
+  lines.push(`${bold("summary:")} ${summaryPath}`);
   if (worktreesKept.length) {
-    lines.push("worktrees kept:");
+    lines.push(bold("worktrees kept:"));
     for (const wt of worktreesKept) {
-      lines.push(`  ${wt.id}: ${wt.branch} at ${wt.path}`);
+      lines.push(`  ${bold(wt.id)}: ${magenta(wt.branch)} at ${wt.path}`);
     }
   }
   return lines.join("\n");
