@@ -27,3 +27,22 @@ The bridge resolves each token in two steps: env var first, then `config.json` f
 ```
 
 For production deployments, prefer env vars for token values so they don't land in a config file that might be checked into version control.
+
+## Model routing
+
+The bridge agent runs on your Claude Code default model unless `claude.model` is set. Any non-Claude model name (e.g. an ollama `:cloud` tag) routes through the Anthropic-format endpoint in `proxy` — same mechanism as the pipeline plugin; the auth token is a pass-through placeholder (ollama auth rides the app's ambient signin). Change the config, restart the bridge, job done.
+
+```json
+{
+  "claude": {
+    "cwd": "/home/user/myproject",
+    "model": "minimax-m3:cloud"
+  },
+  "proxy": {
+    "url": "http://localhost:11434",
+    "authToken": "ollama"
+  }
+}
+```
+
+Defaults: `claude.model` null (Claude default); `proxy.url` `http://localhost:11434`; `proxy.authToken` `"ollama"`. Claude models (`claude-*`, `haiku`, `sonnet`, `opus`, `fable`) never touch the proxy. The heartbeat's `slack.verbModel` is independent and stays on Claude.
