@@ -92,3 +92,12 @@ test("formatClosing covers digest present, absent, and failed", () => {
   ok(withWt.includes("impl: swarm/impl at R/wt-impl"));
   ok(formatClosing(base).includes("summary: S/summary.json"));
 });
+
+test("renderStatus: missing run.log names the ABSOLUTE path it checked", async () => {
+  const { renderStatus } = await import("../src/results.mjs");
+  const msg = renderStatus("some-relative-dir");
+  const { isAbsolute } = await import("node:path");
+  const m = msg.match(/no run\.log at (.+?) \(absolute\)/);
+  if (!m) throw new Error("message shape changed: " + msg);
+  if (!isAbsolute(m[1])) throw new Error("path not absolute: " + m[1]);
+});
