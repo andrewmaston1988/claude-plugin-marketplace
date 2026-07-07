@@ -280,14 +280,14 @@ test("status: missing run.log reports cleanly", () => {
   }
 });
 
-test("run: default resultsDir lands under .swarm/<stem>-1 with .gitignore", () => {
+test("run: default resultsDir lands under <home>/runs/<encoded-cwd>/<stem>-1 with .gitignore", () => {
   const dir = tmp();
   try {
     const manifest = join(dir, "myplan.json");
     writeFileSync(manifest, JSON.stringify({ tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
     const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
-    const rd = join(dir, ".swarm", "myplan-1");
+    const rd = join(dir, "home", "runs", dir.replace(/[\\/:]/g, "-"), "myplan-1");
     ok(existsSync(join(rd, "summary.json")), readdirSync(dir).join(","));
     equal(readFileSync(join(rd, ".gitignore"), "utf8"), "*\n");
   } finally {

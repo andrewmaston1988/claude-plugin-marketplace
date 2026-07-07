@@ -294,18 +294,22 @@ test("governance checks the ORIGINAL cwd, not the scratch redirect", () => {
 
 // ── resultsDir default ────────────────────────────────────────────────────────
 
-test("default resultsDir is .swarm/<stem>-1, reusing highest existing n for resume", () => {
+test("default resultsDir is <home>/runs/<encoded-cwd>/<stem>-1, reusing highest existing n for resume", () => {
   const dir = tmp();
+  const prevHome = process.env.SWARM_HOME;
+  process.env.SWARM_HOME = join(dir, "home");
+  const base = join(dir, "home", "runs", dir.replace(/[\\/:]/g, "-"));
   try {
     const p = writeManifest(dir, { tasks: [claudeTask()] }, "sweep.json");
     const plan1 = loadManifest(p, CFG, dir);
-    equal(plan1.resultsDir, join(dir, ".swarm", "sweep-1"));
+    equal(plan1.resultsDir, join(base, "sweep-1"));
 
-    mkdirSync(join(dir, ".swarm", "sweep-1"), { recursive: true });
-    mkdirSync(join(dir, ".swarm", "sweep-3"), { recursive: true });
+    mkdirSync(join(base, "sweep-1"), { recursive: true });
+    mkdirSync(join(base, "sweep-3"), { recursive: true });
     const plan2 = loadManifest(p, CFG, dir);
-    equal(plan2.resultsDir, join(dir, ".swarm", "sweep-3"));
+    equal(plan2.resultsDir, join(base, "sweep-3"));
   } finally {
+    if (prevHome === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prevHome;
     rmSync(dir, { recursive: true, force: true });
   }
 });

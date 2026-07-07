@@ -47,7 +47,7 @@ The manifest preview IS the approval: the user sees every model and every leaf b
 
 ```json
 {
-  "resultsDir": ".swarm/my-run",               // OMIT unless needed - default .swarm/<manifest-stem>-<n>/ keeps runs out of sight; never a bare dir in the repo
+  "resultsDir": null,                           // OMIT - default ~/.swarm/runs/<encoded-cwd>/<stem>-<n>/ keeps runs out of the repo entirely
   "concurrency": 4,
   "tasks": [{
     "id": "scan-a",                            // unique, filename-safe

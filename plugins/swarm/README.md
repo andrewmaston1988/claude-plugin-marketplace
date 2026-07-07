@@ -44,7 +44,7 @@ In a session, the **swarm** skill drives this end-to-end: it drafts the manifest
 
 ```json
 {
-  "resultsDir": ".swarm/auth-sweep",
+  "resultsDir": null,
   "tasks": [
     {
       "id": "auth",
@@ -74,7 +74,7 @@ In a session, the **swarm** skill drives this end-to-end: it drafts the manifest
 ## Results layout
 
 ```
-<resultsDir>/                # default .swarm/<manifest-stem>-<n>/ — auto-.gitignored
+<resultsDir>/                # default ~/.swarm/runs/<encoded-cwd>/<stem>-<n>/ — outside the repo
   results/<id>.json          # { id, model, ok, exit, durationMs, output, outputJson?, worktree? }
   digest.md                  # when a digest block is present — read this, not the raw results
   summary.json               # { started, finished, tasks: [...], blocked: [], worktreesKept: [] }

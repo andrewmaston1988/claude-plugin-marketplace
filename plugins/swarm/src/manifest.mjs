@@ -1,5 +1,6 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join, basename, sep } from "node:path";
+import { swarmHome } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
 
 export class ValidationError extends Error {
@@ -37,13 +38,14 @@ export function isUnderRoot(dir, root) {
   return d === r || d.startsWith(r + sep);
 }
 
-// Default resultsDir: .swarm/<manifest-stem>-<n> under cwd. Reuse the
+// Default resultsDir: ~/.swarm/runs/<encoded-cwd>/<manifest-stem>-<n> — run
+// artefacts live in the user's home, never inside a code dir. Reuse the
 // highest-numbered existing dir so a bare re-run resumes into the same run
 // (resume skips ok results); first run gets -1. An explicit resultsDir in the
-// manifest is always used verbatim.
+// manifest is always used verbatim (resolved against cwd).
 function defaultResultsDir(manifestPath, cwd) {
   const stem = basename(manifestPath).replace(/\.json$/i, "");
-  const base = join(cwd, ".swarm");
+  const base = join(swarmHome(), "runs", cwd.replace(/[\\/:]/g, "-"));
   let n = 0;
   if (existsSync(base)) {
     const re = new RegExp(`^${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-(\\d+)$`);
