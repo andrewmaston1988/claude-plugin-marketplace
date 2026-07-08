@@ -1,8 +1,6 @@
 import { EventEmitter } from "node:events";
 
 const BACKOFF_CAP_MS = 30_000;
-const PING_INTERVAL_MS = 30_000;
-const PONG_TIMEOUT_MS = 10_000;
 
 export function createSocketModeClient({ appToken, log, _WebSocket }) {
   const WS = _WebSocket ?? WebSocket; // injectable for tests
@@ -12,8 +10,6 @@ export function createSocketModeClient({ appToken, log, _WebSocket }) {
   let stopped = false;
   let noReconnect = false;
   let backoffMs = 1_000;
-  let pingTimer = null;
-  let pongTimer = null;
   let reconnectTimer = null;
 
   async function getWssUrl() {
@@ -34,8 +30,6 @@ export function createSocketModeClient({ appToken, log, _WebSocket }) {
   }
 
   function clearTimers() {
-    if (pingTimer) { clearInterval(pingTimer); pingTimer = null; }
-    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
   }
 
@@ -44,18 +38,6 @@ export function createSocketModeClient({ appToken, log, _WebSocket }) {
     log.info("scheduling reconnect", { backoffMs });
     reconnectTimer = setTimeout(() => connect(), backoffMs);
     backoffMs = Math.min(backoffMs * 2, BACKOFF_CAP_MS);
-  }
-
-  function startPing(socket) {
-    pingTimer = setInterval(() => {
-      if (socket.readyState !== socket.OPEN) return;
-      if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
-      socket.send(JSON.stringify({ type: "ping" }));
-      pongTimer = setTimeout(() => {
-        log.warn("pong timeout, reconnecting");
-        socket.close();
-      }, PONG_TIMEOUT_MS);
-    }, PING_INTERVAL_MS);
   }
 
   function connect() {
@@ -77,13 +59,13 @@ export function createSocketModeClient({ appToken, log, _WebSocket }) {
         if (msg.type === "hello") {
           log.info("connected");
           backoffMs = 1_000; // reset on successful hello
-          startPing(socket);
+          // No client→server ping: Slack Socket Mode keepalive is server-driven.
+          // The server pings us (handled below → we pong), sends `disconnect` for
+          // session rotation, and the socket `close` event fires on network death.
+          // Slack never answers a client-sent {type:"ping"}, so sending one only
+          // causes a perpetual pong-timeout reconnect churn. Reconnect purely on
+          // disconnect / close below.
           emitter.emit("connect");
-          return;
-        }
-
-        if (msg.type === "pong") {
-          if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
           return;
         }
 
