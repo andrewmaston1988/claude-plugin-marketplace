@@ -8,6 +8,7 @@ Durable cross-session **handoff** via `STATE.md`. Compaction is just one discont
 2. **SessionStart hook** — on a fresh start (`startup`/`clear`) with an existing STATE.md, offers to resume. Opt out: `checkpoint.sessionStartResume: false`.
 3. **UserPromptSubmit hook** — nudges `/checkpoint` when context utilisation (from transcript `usage`, against the model's real window: 1M opus/fable, 200k sonnet/haiku) crosses the 85% and 95% bands — once each per window cycle, re-arming after compaction. Framed as a handover, not a stop-work order. Also consumes the post-compact marker and runs the opt-in keepalive.
 4. **PreCompact hook** — skeletal STATE.md backstop before auto-compaction (the fallback when you don't checkpoint in time).
+5. **Stop hook** — the *completion* checkpoint. When a turn ends after substantial uncaptured work (a `git commit`, or ≥10 file edits accumulated since the last checkpoint), it blocks the stop once and asks the model to judge: if a significant feature or milestone just completed, invoke `/checkpoint` and write up what was completed. Loop-safe (`stop_hook_active`), 15-min cooldown, and it stands down when the session's STATE stamp has advanced (the work is already captured). Opt out: `checkpoint.stopCheckpoint: false`.
 
 ## The loop
 
@@ -42,7 +43,7 @@ node "<abs-path-to>/amag-checkpoint/statusline/cache-glyph.mjs"
 
 ```
 amag-checkpoint/
-├── hooks/                  PreCompact + UserPromptSubmit + SessionStart, lib/, templates/, tests/
+├── hooks/                  PreCompact + UserPromptSubmit + SessionStart + Stop, lib/, templates/, tests/
 ├── statusline/cache-glyph.mjs
 └── skills/
     ├── checkpoint/         the handoff skill + state-template.md
