@@ -120,12 +120,18 @@ test("socket-mode — disconnect with warning reason schedules reconnect", async
   restore(); client.stop();
 });
 
-test("socket-mode — pong clears pong timeout without warning", async () => {
+test("socket-mode — no client-sent ping; stays open without pong-timeout reconnect", async () => {
   const { client, log, stub, restore } = makeClientWithStub();
   await connectStub({ client, stub });
-  stub.receive({ type: "pong" });
-  await delay(20);
-  assert.ok(!log.entries.some(e => e.m?.includes("pong timeout")));
+  await delay(30);
+  // Slack Socket Mode keepalive is server-driven (server pings us; we pong).
+  // A client→server {type:"ping"} is never answered, so sending one only
+  // causes a perpetual pong-timeout reconnect churn. The bridge must NOT send
+  // a client ping, must not pong-timeout, and must keep the socket open.
+  assert.ok(!stub.sent.some(s => s.type === "ping"), "must not send a client ping");
+  assert.ok(!log.entries.some(e => e.m?.includes("pong timeout")), "no pong-timeout reconnect");
+  assert.ok(!log.entries.some(e => e.m?.includes("scheduling reconnect")), "no reconnect while open");
+  assert.equal(stub.readyState, 1, "socket stays open");
   restore(); client.stop();
 });
 
