@@ -40,6 +40,7 @@ Writes (or reconciles) a structured `STATE.md` so a *fresh session* can resume t
 | **PreCompact** | Writes a skeletal STATE.md backstop before auto-compaction; leaves a marker. Never blocks. |
 | **UserPromptSubmit** | Nudges you to invoke this skill when context utilisation crosses the 85%/95% bands; consumes the post-compact marker; runs the opt-in keepalive. |
 | **SessionStart** | On a fresh start with an existing STATE.md, offers to resume. |
+| **Stop** | After a turn that lands substantial uncaptured work (commit, or many file edits), blocks the stop once and asks you to judge: significant feature completed → invoke this skill and write up what was completed; otherwise just stop. |
 
 Optional cache keepalive: set `checkpoint.keepalive: true`. See the plugin README.
 
