@@ -1,0 +1,6 @@
+{
+  "name": "amag-discipline-hooks",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test" }
+}
