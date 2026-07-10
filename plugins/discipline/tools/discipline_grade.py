@@ -24,6 +24,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -86,11 +87,21 @@ def parse_verdicts(stdout_text):
     return verdicts
 
 
-def call_judge(prompt, model, effort):
+# Judge sessions inherit the user's hook/skill environment; without these
+# flags a keepalive hook or skill nudge can consume the headless turn and the
+# final text comes back empty (observed on claude-fable-5: rc=0, result "").
+JUDGE_ISOLATION_FLAGS = [
+    "--output-format", "json",
+    "--settings", '{"checkpoint":{"keepalive":false}}',
+    "--disallowedTools", "ToolSearch,ScheduleWakeup,Skill,TaskCreate,TaskUpdate,TaskList",
+]
+
+
+def call_judge(prompt, model, effort, debug_dir="judge-raw"):
     exe = shutil.which("claude")
     if not exe:
         raise RuntimeError("claude CLI not found on PATH")
-    cmd = [exe, "-p", "--model", model]
+    cmd = [exe, "-p", "--model", model, *JUDGE_ISOLATION_FLAGS]
     if effort:
         cmd += ["--effort", effort]
     result = subprocess.run(
@@ -98,7 +109,16 @@ def call_judge(prompt, model, effort):
     )
     if result.returncode != 0:
         raise RuntimeError(f"claude -p failed rc={result.returncode}: {result.stderr[:500]}")
-    return result.stdout
+    try:
+        text = json.loads(result.stdout).get("result") or ""
+    except (json.JSONDecodeError, ValueError):
+        text = result.stdout
+    if "[" not in text:
+        os.makedirs(debug_dir, exist_ok=True)
+        dump = os.path.join(debug_dir, f"judge-fail-{int(time.time())}.out")
+        with open(dump, "w", encoding="utf-8") as f:
+            f.write(result.stdout + "\n--- STDERR ---\n" + result.stderr[:3000])
+    return text
 
 
 def main():
