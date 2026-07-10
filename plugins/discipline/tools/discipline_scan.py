@@ -127,6 +127,14 @@ def flatten(path):
     pack_seen = False
     for evt in iter_events(path):
         etype = evt.get("type")
+        # WORKDIR PATCH (pilot defect #1): hook stdout is recorded as a
+        # type=attachment event (attachment.type=hook_success), not user text;
+        # arm detection must look there too.
+        if etype == "attachment":
+            att = evt.get("attachment") or {}
+            if "<discipline-pack" in str(att.get("stdout") or "") or                "<discipline-pack" in str(att.get("content") or ""):
+                pack_seen = True
+            continue
         msg = evt.get("message") or {}
         content = msg.get("content")
         if etype == "assistant":
