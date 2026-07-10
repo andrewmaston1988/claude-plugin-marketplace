@@ -50,6 +50,15 @@
         "name": "Andrew Maston",
         "email": "andrew.maston1988@gmail.com"
       }
+    },
+    {
+      "name": "discipline",
+      "description": "Per-model discipline deltas injected on every prompt (Sonnet 5 first), with baseline scanner and blind judge grader for measuring violation rates",
+      "source": "./plugins/discipline",
+      "author": {
+        "name": "Andrew Maston",
+        "email": "andrew.maston1988@gmail.com"
+      }
     }
   ]
 }

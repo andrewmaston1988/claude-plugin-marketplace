@@ -1,0 +1,17 @@
+{
+  "name": "discipline",
+  "description": "Per-model discipline deltas injected on every prompt (Sonnet 5 first: verify-before-claiming, provenance tagging, evidence-gated pushback, redundancy brake), plus a baseline scanner and blind judge grader for measuring violation rates.",
+  "author": {
+    "name": "Andrew Maston",
+    "email": "andrew.maston1988@gmail.com"
+  },
+  "homepage": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "repository": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "discipline",
+    "model-behavior",
+    "verification",
+    "benchmarking"
+  ]
+}
