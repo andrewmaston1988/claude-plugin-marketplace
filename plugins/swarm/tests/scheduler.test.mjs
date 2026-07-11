@@ -423,6 +423,42 @@ test("stream-json leaf: is_error result fails the task even on exit 0", async ()
   }
 });
 
+test("activity: tool_use events reach run.log and the mid-run roster", async () => {
+  const dir = tmp();
+  try {
+    const streamOut = [
+      JSON.stringify({ type: "assistant", message: { id: "m1", content: [{ type: "tool_use", name: "Grep", input: { path: "src/auth" } }], usage: { input_tokens: 100, output_tokens: 10 } } }),
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "found it" }),
+    ].join("\n") + "\n";
+    // output at 50ms, close at 350ms — heartbeats in between paint the activity
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut, outputAtMs: 50, delayMs: 350 }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("leaf")]);
+    await runPlan(p, { ...CFG, heartbeatSecs: 0.05 }, io);
+
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const act = logLines.find((l) => l.event === "activity" && l.id === "leaf");
+    equal(act.activity, "Grep src/auth");
+    ok(io.snapshots.some((s) => /◐ {2}leaf.*Grep src\/auth/.test(s)), "mid-run snapshot should show activity");
+    ok(!/Grep src\/auth/.test(io.snapshots.at(-1)), "terminal snapshot must not carry activity");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("activity: a leaf with no stream events goes ⚠ quiet after quietWarnSecs", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "plain text at the end", delayMs: 350 }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("mute")]);
+    await runPlan(p, { ...CFG, heartbeatSecs: 0.05, quietWarnSecs: 0.1 }, io);
+    ok(io.snapshots.some((s) => /◐ {2}mute.*⚠ quiet \d+s/.test(s)), `expected a quiet warning:\n${io.snapshots.at(-2)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("heartbeat repaints the roster with climbing elapsed while a leaf runs", async () => {
   const dir = tmp();
   try {
