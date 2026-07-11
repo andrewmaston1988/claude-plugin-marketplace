@@ -1,13 +1,17 @@
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, paint } from "./ui.mjs";
+import { tokenTotal } from "./stream.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
-//   results/<id>.json   { id, model, ok, exit, durationMs, output, outputJson?, worktree? }
+//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, output, outputJson?, worktree? }
 //   digest.md           when a digest block is present
-//   summary.json        { started, finished, tasks, blocked, worktreesKept }
-//   run.log             one JSONL line per task state-change (tailable mid-run)
+//   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens }
+//   run.log             JSONL, tailable mid-run:
+//                         { ts, event: "run-start", tasks: [{ id, model }] }
+//                         { ts, id, state, durationMs?, tokens? }   state changes
+//                         { ts, id, event: "tokens", tokens }       live usage ticks
 
 export function initResultsDir(dir) {
   mkdirSync(join(dir, "results"), { recursive: true });
@@ -53,28 +57,83 @@ export function appendRunLog(dir, obj) {
 }
 
 // ── stdout contract ───────────────────────────────────────────────────────────
-// One status line per task as it completes, then a closing block: digest path
-// (or "no digest"), summary path, kept-worktree list. NEVER raw task output.
+// The run repaints a full roster snapshot (header, one row per task, counts
+// footer) on every state change and on a heartbeat, then a closing block:
+// digest path, summary path, total tokens, kept worktrees. NEVER raw output.
 
 const GLYPHS = {
-  ok: "✓",             // ✓
-  failed: "✗",         // ✗
+  ok: "✓",
+  failed: "✗",
   "failed:timeout": "✗",
-  "rate-limited": "⧖", // ⧖
-  blocked: "⊘",        // ⊘
-  skipped: "↷",        // ↷
+  "rate-limited": "⧖",
+  blocked: "⊘",
+  skipped: "↷",
+  running: "◐",
+  pending: "·",
 };
 
-export function formatStatusLine({ id, model, state, durationMs }) {
-  const glyph = paint(state, GLYPHS[state] || "?");
-  const dur = durationMs != null ? dim(` ${Math.round(durationMs / 1000)}s`) : "";
-  const suffix = state === "ok" ? "" : paint(state, ` [${state}]`);
-  return `${glyph} ${bold(id)} ${model}${dur}${suffix}`;
+// States whose rows carry an explicit [state] tag; ok/running/pending read
+// from the glyph alone.
+const TAGGED = new Set(["failed", "failed:timeout", "rate-limited", "blocked", "skipped"]);
+
+const FOOTER_ORDER = ["ok", "failed", "rate-limited", "blocked", "skipped", "running", "pending"];
+
+export function formatTokens(n) {
+  if (!n) return "—";
+  if (n < 1000) return String(n);
+  const trim = (s) => s.replace(/\.0+$/, "");
+  if (n < 1e6) return trim((n / 1000).toFixed(1)) + "k";
+  return trim((n / 1e6).toFixed(2)) + "M";
+}
+
+const fmtSecs = (ms) => `${Math.max(0, Math.round(ms / 1000))}s`;
+
+function fmtElapsed(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+}
+
+// Full-run snapshot. tasks: [{ id, model, state, durationMs?, startedMs?, tokens? }]
+// — durationMs for terminal states, startedMs for running (elapsed ticks against
+// `now`), tokens in the src/stream.mjs shape.
+export function renderRoster({ title, tasks, now, startedMs }) {
+  const norm = tasks.map((t) => ({ ...t, model: t.model || "?" }));
+  const cells = norm.map((t) => ({
+    glyph: GLYPHS[t.state] || "?",
+    dur: t.state === "running" && t.startedMs != null ? fmtSecs(now - t.startedMs)
+      : t.durationMs != null ? fmtSecs(t.durationMs) : "—",
+    tok: formatTokens(tokenTotal(t.tokens)),
+    tag: TAGGED.has(t.state) ? ` [${t.state}]` : "",
+  }));
+  const width = (get, min) => Math.max(min, ...norm.map((t, i) => get(t, cells[i]).length));
+  const idW = width((t) => t.id, 2);
+  const modelW = width((t) => t.model, 2);
+  const durW = width((_, c) => c.dur, 1);
+  const tokW = width((_, c) => c.tok, 1);
+
+  const lines = [`swarm · ${title} · ${norm.length} tasks · ${fmtElapsed(now - startedMs)}`, ""];
+  norm.forEach((t, i) => {
+    const c = cells[i];
+    lines.push(
+      `  ${paint(t.state, c.glyph)}  ${bold(t.id.padEnd(idW))}  ${t.model.padEnd(modelW)}  ` +
+      `${dim(c.dur.padStart(durW))}  ${c.tok.padStart(tokW)}${paint(t.state, c.tag)}`
+    );
+  });
+
+  const counts = {};
+  for (const t of norm) {
+    const key = t.state === "failed:timeout" ? "failed" : t.state;
+    counts[key] = (counts[key] || 0) + 1;
+  }
+  const segments = FOOTER_ORDER.filter((k) => counts[k]).map((k) => paint(k, `${counts[k]} ${k}`));
+  const total = norm.reduce((n, t) => n + tokenTotal(t.tokens), 0);
+  if (total > 0) segments.push(bold(`${formatTokens(total)} tokens`));
+  lines.push("", `  ${segments.join(dim(" · "))}`);
+  return lines.join("\n");
 }
 
 // One-shot progress view for `swarm.mjs status <resultsDir>` — read-only,
-// derived from run.log (JSONL state changes). The latest run-start line names
-// every task, so ids never seen since it are pending.
+// rebuilt from run.log so it matches the live snapshot exactly.
 export function renderStatus(dir, now = Date.now()) {
   // Absolutise first: a relative resultsDir silently resolves against the
   // *viewer's* cwd (watch terminal), not the run's — the classic mismatch.
@@ -83,8 +142,12 @@ export function renderStatus(dir, now = Date.now()) {
   if (!existsSync(logPath)) {
     return `no run.log at ${logPath} (absolute) — either the run has not started or this is not the run's resultsDir; pass the absolute path printed at dispatch.`;
   }
-  let allTasks = [];
-  const last = new Map(); // id -> { state, ts }
+  let roster = [];
+  let startedMs = null;
+  const state = new Map();
+  const tokens = new Map();
+  const durations = new Map();
+  const runningSince = new Map();
   for (const line of readFileSync(logPath, "utf8").split("\n")) {
     if (!line.trim()) continue;
     let entry;
@@ -94,45 +157,48 @@ export function renderStatus(dir, now = Date.now()) {
       continue; // torn tail write mid-run
     }
     if (entry.event === "run-start") {
-      allTasks = entry.tasks || [];
-      last.clear();
-    } else if (entry.id) {
-      last.set(entry.id, { state: entry.state, ts: entry.ts });
+      // pre-token logs recorded plain id strings
+      roster = (entry.tasks || []).map((t) => (typeof t === "string" ? { id: t, model: "?" } : t));
+      startedMs = Date.parse(entry.ts) || now;
+      state.clear(); tokens.clear(); durations.clear(); runningSince.clear();
+    } else if (entry.event === "tokens" && entry.id) {
+      tokens.set(entry.id, entry.tokens);
+    } else if (entry.id && entry.state) {
+      state.set(entry.id, entry.state);
+      if (entry.state === "running") runningSince.set(entry.id, Date.parse(entry.ts) || now);
+      if (entry.durationMs != null) durations.set(entry.id, entry.durationMs);
+      if (entry.tokens) tokens.set(entry.id, entry.tokens);
     }
   }
-  const counts = { ok: 0, running: 0, failed: 0, "rate-limited": 0, blocked: 0, skipped: 0, pending: 0 };
-  for (const { state } of last.values()) {
-    const key = state === "failed:timeout" ? "failed" : state;
-    counts[key] = (counts[key] || 0) + 1;
-  }
-  counts.pending = allTasks.filter((id) => !last.has(id)).length;
-
-  const lines = [`${bold("run:")} ${cyan(dir)}`];
-  lines.push(
-    ["ok", "running", "failed", "rate-limited", "blocked", "skipped", "pending"]
-      .map((k) => (counts[k] > 0 ? paint(k, `${k} ${counts[k]}`) : dim(`${k} ${counts[k]}`)))
-      .join(dim(" | "))
-  );
-  const running = [...last.entries()].filter(([, v]) => v.state === "running");
-  if (running.length) {
-    lines.push(bold("running:"));
-    for (const [id, v] of running) {
-      const elapsed = Math.max(0, Math.round((now - Date.parse(v.ts)) / 1000));
-      lines.push(`  ${cyan(id)} — ${elapsed}s elapsed`);
-    }
-  }
-  lines.push(`${bold("results:")} ${join(dir, "results")}`);
+  const tasks = roster.map(({ id, model }) => ({
+    id, model,
+    state: state.get(id) || "pending",
+    durationMs: durations.get(id),
+    startedMs: runningSince.get(id),
+    tokens: tokens.get(id),
+  }));
+  const lines = [
+    `${bold("run:")} ${cyan(dir)}`,
+    "",
+    renderRoster({ title: basename(dir), tasks, now, startedMs: startedMs ?? now }),
+    "",
+    `${bold("results:")} ${join(dir, "results")}`,
+  ];
   if (existsSync(join(dir, "digest.md"))) lines.push(`${bold("digest:")} ${green(join(dir, "digest.md"))}`);
   if (existsSync(join(dir, "summary.json"))) lines.push(`${bold("summary:")} ${join(dir, "summary.json")}`);
   return lines.join("\n");
 }
 
-export function formatClosing({ digestPath, digestFailed, summaryPath, worktreesKept = [] }) {
+export function formatClosing({ digestPath, digestFailed, summaryPath, totalTokens, worktreesKept = [] }) {
   const lines = [];
   if (digestPath) lines.push(`${bold("digest:")} ${green(digestPath)}`);
   else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);
   else lines.push(dim("digest: none (no digest block in manifest)"));
   lines.push(`${bold("summary:")} ${summaryPath}`);
+  if (totalTokens && tokenTotal(totalTokens) > 0) {
+    const input = formatTokens(totalTokens.input + totalTokens.cacheCreation);
+    lines.push(`${bold("tokens:")} ${formatTokens(tokenTotal(totalTokens))} (input ${input} · output ${formatTokens(totalTokens.output)})`);
+  }
   if (worktreesKept.length) {
     lines.push(bold("worktrees kept:"));
     for (const wt of worktreesKept) {
