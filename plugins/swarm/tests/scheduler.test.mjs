@@ -1058,9 +1058,12 @@ test("JSON leaf output is parsed into outputJson alongside raw", async () => {
 // ── returns (schema-validated output) ─────────────────────────────────────────
 
 const SITES_SCHEMA = { type: "object", required: ["sites"], properties: { sites: { type: "array" } } };
-const streamOut = (text, sid, usage = { input_tokens: 100, output_tokens: 10 }) => [
-  ...(sid ? [JSON.stringify({ type: "system", subtype: "init", session_id: sid })] : []),
-  JSON.stringify({ type: "result", subtype: "success", is_error: false, result: text, usage }),
+const streamOut = (text, sid, usage = { input_tokens: 100, output_tokens: 10 }, costUsd, apiKeySource) => [
+  ...(sid ? [JSON.stringify({ type: "system", subtype: "init", session_id: sid, ...(apiKeySource && { apiKeySource }) })] : []),
+  JSON.stringify({
+    type: "result", subtype: "success", is_error: false, result: text, usage,
+    ...(costUsd != null && { total_cost_usd: costUsd }),
+  }),
 ].join("\n") + "\n";
 
 test("returns: conforming first output passes untouched — no second spawn", async () => {
@@ -1175,6 +1178,118 @@ test("returns on a forEach task: clones validate individually; the aggregate is 
     const agg = readResult(p.resultsDir, "per");
     equal(agg.ok, true);                                            // array aggregate never re-validated
     deepEqual(agg.outputJson, [{ ok: false }, { ok: true }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── cost consent (estimates + single-shot projection warn) ────────────────────
+
+test("summary task rows carry model, and costUsd only for real-key leaves; summary.estimate persists", async () => {
+  const dir = tmp();
+  try {
+    // 'a' billed via API key -> costUsd is real; 'b' subscription -> synthetic, kept out of the corpus
+    const spawn = fakeSpawnFactory((call) => promptOf(call) === "do a"
+      ? { output: streamOut("done", "s-1", { input_tokens: 100, output_tokens: 10 }, 0.25, "ANTHROPIC_API_KEY") }
+      : { output: streamOut("done", "s-2", { input_tokens: 100, output_tokens: 10 }, 0.25, "none") });
+    const io = makeIo(spawn);
+    const est = { tokens: 1234, counted: [{ model: "haiku", leaves: 1, perLeaf: 1234 }], unknown: [] };
+    const p = plan(dir, [task("a"), task("b")], { estimate: est });
+    const r = await runPlan(p, CFG, io);
+    const rowA = r.summary.tasks.find((t) => t.id === "a");
+    equal(rowA.model, "haiku");
+    equal(rowA.costUsd, 0.25);
+    const rowB = r.summary.tasks.find((t) => t.id === "b");
+    equal(rowB.costUsd, undefined);
+    deepEqual(r.summary.estimate, est);
+    ok(io.lines.some((l) => l.includes("estimated ~1.2k tokens")), io.lines.join("|"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cost warn: fires exactly once when the projection crosses costWarnTokens — stdout, run.log, notify", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call, i) => ({
+      output: streamOut(`leaf ${i}`, `s-${i}`, { input_tokens: 3000, output_tokens: 0 }),
+      delayMs: [5, 20, 300][i] ?? 1,
+    }));
+    const notified = [];
+    const io = makeIo(spawn, { notify: (msg) => notified.push(msg) });
+    const p = plan(dir, [task("a"), task("b"), task("c")]);
+    const r = await runPlan(p, { ...CFG, costWarnTokens: 5000 }, io);
+
+    const warns = io.lines.filter((l) => l.includes("projected"));
+    equal(warns.length, 1);
+    ok(warns[0].includes("⚠"), warns[0]);
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const events = logLines.filter((l) => l.event === "cost-warn");
+    equal(events.length, 1);
+    equal(events[0].unit, "tokens");
+    equal(events[0].threshold, 5000);
+    equal(events[0].projected, 9000); // 6000 spent after 2 leaves + 3000 avg × 1 remaining
+    equal(notified.length, 1);
+    equal(r.summary.costWarnFired, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cost warn: silent under threshold, and disabled entirely by costWarn:false", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut("x", "s", { input_tokens: 10, output_tokens: 0 }) }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a"), task("b")]);
+    const r = await runPlan(p, { ...CFG, costWarnTokens: 5000 }, io);
+    equal(io.lines.filter((l) => l.includes("projected")).length, 0);
+    equal(r.summary.costWarnFired, undefined);
+
+    const spawn2 = fakeSpawnFactory(() => ({ output: streamOut("x", "s", { input_tokens: 3000, output_tokens: 0 }) }));
+    const io2 = makeIo(spawn2);
+    const p2 = plan(tmp(), [task("a"), task("b")]);
+    await runPlan(p2, { ...CFG, costWarn: false, costWarnTokens: 5000 }, io2);
+    equal(io2.lines.filter((l) => l.includes("projected")).length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cost warn: projects in dollars only when every completed leaf's costUsd is real-key billed", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call, i) => ({
+      output: streamOut(`leaf ${i}`, `s-${i}`, { input_tokens: 10, output_tokens: 0 }, 6, "ANTHROPIC_API_KEY"),
+      delayMs: [5, 20][i] ?? 1,
+    }));
+    const io = makeIo(spawn, { notify: () => {} });
+    const p = plan(dir, [task("a"), task("b")]);
+    await runPlan(p, { ...CFG, costWarnUsd: 10 }, io);
+    const warns = io.lines.filter((l) => l.includes("projected"));
+    equal(warns.length, 1);
+    ok(warns[0].includes("$"), warns[0]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cost warn: subscription costUsd is synthetic — projection stays token-denominated", async () => {
+  const dir = tmp();
+  try {
+    // subscription leaves report costUsd but apiKeySource "none": the $10
+    // default must NOT swallow the warn; tokens cross their threshold instead
+    const spawn = fakeSpawnFactory((call, i) => ({
+      output: streamOut(`leaf ${i}`, `s-${i}`, { input_tokens: 3000, output_tokens: 0 }, 0.05, "none"),
+      delayMs: [5, 20][i] ?? 1,
+    }));
+    const io = makeIo(spawn, { notify: () => {} });
+    const p = plan(dir, [task("a"), task("b")]);
+    await runPlan(p, { ...CFG, costWarnTokens: 5000 }, io);
+    const warns = io.lines.filter((l) => l.includes("projected"));
+    equal(warns.length, 1);
+    ok(warns[0].includes("tokens"), warns[0]);
+    ok(!warns[0].includes("$"), warns[0]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

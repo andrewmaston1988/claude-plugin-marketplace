@@ -7,13 +7,16 @@ import { tokenTotal } from "./stream.mjs";
 //   .gitignore          '*' — runs never pollute the repo
 //   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, output, outputJson?, schemaRetried?, schemaErrors?, worktree? }
 //   digest.md           when a digest block is present
-//   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens }
+//   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens, estimate?, costWarnFired? }
+//                       task rows: { id, model, state, durationMs, tokens, costUsd?, resultPath }
+//                       (costUsd only for real-key-billed leaves — these rows ARE the estimate corpus)
 //   run.log             JSONL, tailable mid-run:
 //                         { ts, event: "run-start", tasks: [{ id, model }] }
 //                         { ts, id, state, durationMs?, tokens?, note? }   state changes
 //                         { ts, id, event: "tokens", tokens }       live usage ticks
 //                         { ts, event: "expand", id, model, clones, truncated?, total? }   forEach expansion
 //                         { ts, event: "schema-retry", id }         returns re-ask fired
+//                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn
 
 export function initResultsDir(dir) {
   mkdirSync(join(dir, "results"), { recursive: true });
@@ -223,7 +226,7 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
   return lines.join("\n");
 }
 
-export function formatClosing({ digestPath, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [] }) {
+export function formatClosing({ digestPath, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], estimate }) {
   const lines = [];
   // loud by contract: a capped forEach must never read as full coverage
   for (const tr of truncations) {
@@ -235,7 +238,15 @@ export function formatClosing({ digestPath, digestFailed, summaryPath, totalToke
   lines.push(`${bold("summary:")} ${summaryPath}`);
   if (totalTokens && tokenTotal(totalTokens) > 0) {
     const input = formatTokens(totalTokens.input + totalTokens.cacheCreation);
-    lines.push(`${bold("tokens:")} ${formatTokens(tokenTotal(totalTokens))} (input ${input} · output ${formatTokens(totalTokens.output)})`);
+    let line = `${bold("tokens:")} ${formatTokens(tokenTotal(totalTokens))} (input ${input} · output ${formatTokens(totalTokens.output)})`;
+    // actual-vs-estimate closes the consent loop and audits the corpus
+    if (estimate?.tokens) {
+      const actual = tokenTotal(totalTokens);
+      const pct = Math.round((actual / estimate.tokens - 1) * 100);
+      const verdict = pct === 0 ? "on target" : pct > 0 ? `${pct}% over` : `${-pct}% under`;
+      line += dim(` · estimate was ~${formatTokens(estimate.tokens)} (${verdict})`);
+    }
+    lines.push(line);
   }
   if (worktreesKept.length) {
     lines.push(bold("worktrees kept:"));

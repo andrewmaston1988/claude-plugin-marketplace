@@ -38,6 +38,7 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Interrogate a finished agent, context intact (`ask`) | ✅ even days later | ❌ agents end with their run |
 | Self-healing — backoff retries, declared fallbacks, quota preflight + reset times | ✅ | ❌ errored agents return null |
 | Per-agent tokens/cost + live roster (elapsed, tool call, hang warnings) | ✅ | ⚠️ aggregate budget, coarser progress |
+| Predictive cost consent — estimate at approval from run history, single-shot mid-run projection warn, actual-vs-estimate close | ✅ token-denominated; `$` only when real-key billed | ❌ budget is reactive and user-supplied |
 | Weak-model authorability | ✅ fill-in-the-blanks manifest; validation errors teach (field + fix + example) | ⚠️ correct imperative JS is a higher bar |
 
 Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, generation, mechanical implementation sweeps, and now discover-then-map pipelines — is swarm's shape, especially when alternative models are armed. Reach for Workflow when the orchestration itself needs unbounded loops, session MCP tools, or budget-driven control flow — or when you simply want zero setup.
