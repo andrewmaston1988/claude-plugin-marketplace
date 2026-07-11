@@ -405,13 +405,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     activityMap.set(task.id, note);
     appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, state: "retrying" });
     paint();
-    const timer = setTimeout(() => {
+    // Deliberately ref'd (unlike the heartbeat): a parked retry is pending
+    // work, and with nothing else running an unref'd timer lets the event
+    // loop drain — node exits 13 with the run's top-level await unsettled.
+    setTimeout(() => {
       retryWaiting--;
       state.set(task.id, "pending");
       activityMap.delete(task.id);
       wake();
     }, delayMs);
-    if (timer.unref) timer.unref();
   };
 
   // Resume: an existing ok result satisfies the task without re-running it —
@@ -676,7 +678,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       result.originalCwd = task.originalCwd;
       result.allowedTools = task.allowedTools;
 
-      const st = r.ok ? "ok" : classifyFailure({ timedOut: r.timedOut, output: r.raw }, cfg.quotaPatterns);
+      // returns-validation failures are semantic — the leaf itself ran fine.
+      // Never classify them by transcript grep: a stray "429" (line number,
+      // token count) in the raw stream would misread them as transient.
+      const st = r.ok ? "ok"
+        : (r.schemaErrors || r.citationErrors) ? "failed"
+        : classifyFailure({ timedOut: r.timedOut, output: r.raw }, cfg.quotaPatterns);
       if (st === "quota") {
         const resetsAt = parseQuotaReset(r.raw);
         if (resetsAt) result.quotaResetsAt = resetsAt;

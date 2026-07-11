@@ -189,6 +189,54 @@ test("retry: exhausted retries land as rate-limited terminal state", async () =>
   }
 });
 
+test("retry: backoff park with nothing else running keeps the process alive (exit-13 regression)", async () => {
+  const dir = tmp();
+  try {
+    const fixture = fileURLToPath(new URL("./helpers/backoff-park-child.mjs", import.meta.url));
+    const child = nodeSpawn(process.execPath, [fixture, dir], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    child.stdout.on("data", (d) => { out += d; });
+    child.stderr.on("data", (d) => { err += d; });
+    const code = await new Promise((resolve) => child.on("close", resolve));
+    equal(code, 0, `engine child exited ${code}; stderr: ${err.slice(0, 300)}`);
+    deepEqual(JSON.parse(out), { flaky: "ok" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returns-validation failure classifies failed, not rate-limited, despite 429-shaped transcript noise", async () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "src.txt"), "alpha\nbeta\n");
+    const returns = {
+      type: "object",
+      properties: {
+        findings: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { file: { type: "string" }, line: { type: "integer" }, quote: { type: "string" } },
+            required: ["file", "line", "quote"],
+          },
+        },
+      },
+      required: ["findings"],
+    };
+    // the refuted citation's line number IS the 429 — transcript grep would
+    // misread this semantic failure as transient and burn full re-runs on it
+    const spawn = fakeSpawnFactory(() => ({ output: '{"findings":[{"file":"src.txt","line":429,"quote":"does not appear"}]}' }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { cwd: dir, returns })]);
+    const r = await runPlan(p, { ...CFG, retry: { rateLimited: 2, backoffMs: 10 } }, io);
+    equal(spawn.calls.length, 1, `semantic failure must not re-run as transient (got ${spawn.calls.length} dispatches)`);
+    equal(r.summary.tasks[0].state, "failed");
+    ok(readResult(p.resultsDir, "a").citationErrors?.length, "citationErrors recorded");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("fallback: quota leaf re-dispatches immediately on its declared fallbackModel", async () => {
   const dir = tmp();
   try {
