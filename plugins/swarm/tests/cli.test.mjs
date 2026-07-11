@@ -304,6 +304,19 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
     ok(r.stdout.includes("tokens: 3k (input 2.4k · output 600)"), r.stdout);
     const summary = JSON.parse(readFileSync(join(dir, "out", "summary.json"), "utf8"));
     deepEqual(summary.totalTokens, { input: 2400, output: 600, cacheCreation: 0, cacheRead: 0 });
+
+    // ask: resume t1's captured session with a follow-up
+    const shimLog = join(dir, "ask-shim.log");
+    const a = runCli(["ask", join(dir, "out"), "t1", "why?"], {
+      cwd: dir,
+      env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "because X", SWARM_SHIM_LOG: shimLog },
+    });
+    equal(a.status, 0, a.stderr + a.stdout);
+    ok(a.stdout.includes("because X"), a.stdout);
+    ok(a.stdout.includes("tokens: 1.5k"), a.stdout);
+    const askCall = JSON.parse(readFileSync(shimLog, "utf8").trim());
+    equal(askCall.argv[askCall.argv.indexOf("--resume") + 1], "shim-session");
+    ok(readFileSync(join(dir, "out", "results", "t1.ask.log"), "utf8").includes("because X"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

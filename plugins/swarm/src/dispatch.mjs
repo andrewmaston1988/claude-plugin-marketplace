@@ -23,6 +23,8 @@ export function buildDispatch(task, prompt, cfg) {
     "--model", task.model,
     ...(task.effort ? ["--effort", task.effort] : []),
     "--allowedTools", task.allowedTools,
+    // interrogation path: continue an existing leaf session (`swarm ask`)
+    ...(task.resume ? ["--resume", task.resume] : []),
     "--output-format", "stream-json", "--verbose",
   ];
 

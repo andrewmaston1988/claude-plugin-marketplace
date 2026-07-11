@@ -36,6 +36,7 @@ Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama instal
 node plugins/swarm/scripts/swarm.mjs models              # discover launchable :cloud models + Claude aliases — run first
 node plugins/swarm/scripts/swarm.mjs validate plan.json  # lint ids, deps, template refs, governance roots, effort pairs
 node plugins/swarm/scripts/swarm.mjs run plan.json       # execute; designed for Bash run_in_background
+node plugins/swarm/scripts/swarm.mjs ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
 ```
 
 In a session, the **swarm** skill drives this end-to-end: it drafts the manifest, shows it in an AskUserQuestion box (the preview is the approval — every model and leaf visible before anything runs), runs in the background, and reads only `digest.md` when the run completes.
@@ -75,7 +76,7 @@ In a session, the **swarm** skill drives this end-to-end: it drafts the manifest
 
 ```
 <resultsDir>/                # default ~/.swarm/runs/<encoded-cwd>/<stem>-<n>/ — outside the repo
-  results/<id>.json          # { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, output, outputJson?, worktree? }
+  results/<id>.json          # { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, sessionId?, cwd, allowedTools, output, outputJson?, worktree? }
   results/<id>.log           # the leaf's raw stream-json events — tail one leaf's tool calls live
   digest.md                  # when a digest block is present — read this, not the raw results
   summary.json               # { started, finished, tasks: [...], blocked: [], worktreesKept: [], totalTokens }
@@ -87,6 +88,16 @@ Leaves are dispatched with `--output-format stream-json`, so the engine extracts
 Stdout repaints a full **roster snapshot** on every task state change and on a heartbeat (`heartbeatSecs`, default 15): one row per task — glyph, id, model, duration (elapsed ticks live for running leaves), work tokens (input + output + cache writes; live counts climb as turns complete) — plus a counts footer with the run total. Running rows also show the leaf's **latest tool call** (`◐  map-rest … 12.4k  Grep client/scripts/ui`); a leaf silent for more than `quietWarnSecs` (default 60) shows `⚠ quiet Ns` instead — hangs surface in a minute, not at the timeout. On a TTY the snapshot redraws in place; piped output appends plain-text snapshots so the tail of the buffer is always the current picture, and `NO_COLOR` is honoured. After the roster, a closing block: digest path, summary path, total tokens, kept worktrees — never raw task output. Failed tasks block their dependents; independent branches continue; re-`run` resumes (completed work is skipped, `rate-limited` tasks retry).
 
 `status <resultsDir>` renders the same roster read-only from `run.log` (add `--watch` for live repaint in a second terminal).
+
+## Interrogating a leaf
+
+Every leaf's Claude Code session id is captured in its result JSON. `ask` resumes that session with a follow-up question — the leaf already holds its file reads and reasoning in context, so a drill-down costs one turn instead of a re-run:
+
+```bash
+node plugins/swarm/scripts/swarm.mjs ask <resultsDir> census-edges "show the exact preload line you cited"
+```
+
+The resume runs with the leaf's own model, cwd, and tool allowlist (a read-only leaf stays read-only). Q/A history appends to `results/<id>.ask.log`, and each follow-up continues the same conversation thread. `--model <m>` re-asks on a different model — subject to the same `allowedRoots` governance gate as dispatch. Leaves that ran in a since-removed worktree can't be resumed; `ask` says so rather than guessing.
 
 ## Statusline segment
 

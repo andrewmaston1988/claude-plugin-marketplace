@@ -70,7 +70,8 @@ function tryParseJson(output) {
   return undefined;
 }
 
-function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity } = {}) {
+// Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
+export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity } = {}) {
   return new Promise((resolve) => {
     const { argv, env } = buildDispatch(task, prompt, cfg);
     const started = io.now();
@@ -96,9 +97,11 @@ function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity } = {}) 
     // buffer stands in as the output — same behavior as before stream-json.
     const acc = createUsageAccumulator();
     let resultEvt = null;
+    let initEvt = null;
     const parser = createStreamParser({
       onUsage: (id, usage) => { acc.record(id, usage); onTokens?.(acc.totals()); },
       onResult: (evt) => { resultEvt = evt; },
+      onInit: (evt) => { initEvt = evt; },
       onActivity,
     });
     // Progressive capture: stream to results/<id>.log as data arrives so a
@@ -128,6 +131,7 @@ function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity } = {}) 
         tokens: pickFinalTokens(resultEvt?.usage, acc.totals()),
         costUsd: resultEvt?.total_cost_usd,
         numTurns: resultEvt?.num_turns,
+        sessionId: initEvt?.session_id ?? resultEvt?.session_id ?? null,
       });
     };
     child.on("error", (e) => settle(null, `spawn error: ${e.message}`));
@@ -293,6 +297,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (tokenTotal(r.tokens) + (r.tokens?.cacheRead || 0) > 0) result.tokens = r.tokens;
       if (r.costUsd != null) result.costUsd = r.costUsd;
       if (r.numTurns != null) result.numTurns = r.numTurns;
+      // interrogation fields: `swarm ask` resumes this session in this cwd
+      if (r.sessionId) result.sessionId = r.sessionId;
+      result.cwd = taskCwd;
+      result.allowedTools = task.allowedTools;
       const parsed = tryParseJson(r.output);
       if (parsed !== undefined) result.outputJson = parsed;
 

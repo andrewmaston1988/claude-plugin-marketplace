@@ -50,6 +50,14 @@ test("parser: trailing line without newline is flushed by end()", () => {
   equal(result().result, "final answer");
 });
 
+test("parser: system init event surfaces the session id", () => {
+  let init = null;
+  const parser = createStreamParser({ onInit: (e) => { init = e; } });
+  parser.feed(JSON.stringify({ type: "system", subtype: "init", session_id: "s-123" }) + "\n");
+  parser.feed(JSON.stringify({ type: "system", subtype: "other" }) + "\n"); // non-init system events ignored
+  equal(init.session_id, "s-123");
+});
+
 test("parser: assistant event without usage is ignored", () => {
   const { parser, usages } = collect();
   parser.feed(JSON.stringify({ type: "assistant", message: { id: "m1" } }) + "\n");
