@@ -13,7 +13,8 @@ const USAGE = `usage: swarm.mjs <command>
   validate <manifest.json>   lint a manifest; exit 1 with readable errors
   run <manifest.json> [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
-  status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C`;
+  status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
+  ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -106,6 +107,7 @@ async function main() {
       }
       case "status": {
         if (!rest[0]) { err(USAGE); return 1; }
+        const quietWarnMs = (getConfig().quietWarnSecs ?? 60) * 1000;
         if (rest.includes("--watch")) {
           const ivIdx = rest.indexOf("--interval");
           const secs = ivIdx >= 0 ? Math.max(1, Number(rest[ivIdx + 1]) || 5) : 5;
@@ -113,13 +115,31 @@ async function main() {
           const maxTicks = Number(process.env.SWARM_WATCH_TICKS) || Infinity;
           for (let i = 0; i < maxTicks; i++) {
             process.stdout.write("\x1b[2J\x1b[H");
-            out(renderStatus(rest[0]));
+            out(renderStatus(rest[0], Date.now(), quietWarnMs));
             out(dim(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`));
             await new Promise((r) => setTimeout(r, secs * 1000));
           }
           return 0;
         }
-        out(renderStatus(rest[0]));
+        out(renderStatus(rest[0], Date.now(), quietWarnMs));
+        return 0;
+      }
+      case "ask": {
+        const positional = [];
+        let model;
+        for (let i = 0; i < rest.length; i++) {
+          if (rest[i] === "--model") model = rest[++i];
+          else positional.push(rest[i]);
+        }
+        const [resultsDir, taskId, question] = positional;
+        if (!resultsDir || !taskId || !question) { err(USAGE); return 1; }
+        const { askLeaf } = await import("../src/ask.mjs");
+        const { formatTokens } = await import("../src/results.mjs");
+        const { tokenTotal } = await import("../src/stream.mjs");
+        const r = await askLeaf({ resultsDir, taskId, question, model, cfg: getConfig() });
+        out(r.answer);
+        out("");
+        out(dim(`tokens: ${formatTokens(tokenTotal(r.tokens))} · session ${r.sessionId} · log: results/${taskId}.ask.log`));
         return 0;
       }
       default:
