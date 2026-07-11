@@ -1,13 +1,13 @@
 # discipline — per-model discipline deltas
 
 Injects a short behavioral addendum ("discipline pack") into every user prompt,
-**keyed on the running model**. Ships with a Sonnet 5 pack targeting its four
-measured failure modes; other models run untouched. Includes the measurement
+**keyed on the running model**. Ships with Sonnet 5 and Opus 4.8 packs, each
+targeting that model's measured failure modes; other models run untouched. Includes the measurement
 tooling: a mechanical baseline scanner over session transcripts and a blind
 judge grader, so the pack's effect is benchmarked rather than assumed.
 
-Design record: `repos/claude-plugin-marketplace/plans/sonnet5-discipline.md`
-(CLAUDE repo).
+Design records: `repos/claude-plugin-marketplace/plans/sonnet5-discipline.md`
+and `plans/opus48-discipline.md` (CLAUDE repo).
 
 ## Why a hook, not a skill
 
@@ -18,15 +18,29 @@ hook injects unconditionally, so compliance never depends on the model's own
 judgment. Plugins auto-wire their hooks: enabling the plugin is the entire
 installation.
 
-## What gets injected (Sonnet 5 pack)
+## What gets injected
 
-`disciplines/sonnet-5.md`, ~150 tokens, five rules:
+### Sonnet 5 pack — `disciplines/sonnet-5.md`, five rules
 
 1. **Verify before claiming** — "fixed/done/works/passing" only after running it this session.
 2. **Provenance tagging** — distinguish executed / read / assumed when stating behavior.
 3. **Evidence-gated pushback** — corrections answered with a fresh check, not restated reasoning.
 4. **Redundancy brake** — don't re-check what can't have changed.
 5. **Coverage-first review reporting** (review contexts only).
+
+### Opus 4.8 pack — `disciplines/opus-4-8.md`, seven rules
+
+1. **Proof means the live layer** — green lower-layer tests are evidence, not proof.
+2. **No proof by proxy** — a subagent's confident report is not verification.
+3. **The user is not your test harness** — observe it working before any handover.
+4. **Corrections get a fix, not a speech** — no contrition prose; cause + checked fix.
+5. **Hold the stated scope** — never silently substitute or merge unrelated work.
+6. **A fix isn't done until its neighbors still work** — re-check what the change touched.
+7. **Reach for skills before improvising** — invoke the matching skill before acting.
+
+No redundancy brake in the opus pack: opus-4-8's measured RSV is *below*
+sonnet's, and its core defect is under-verification — RSV is tracked as a
+guard metric instead (see the opus48 plan's Measurement Targets).
 
 ## How model keying works
 
@@ -36,7 +50,7 @@ installation.
    to the settings.json `model` alias on a session's first prompt.
 2. Ordered substring map (`FAMILY_FILES`) picks a file from `disciplines/`
    (e.g. `claude-sonnet-5*` → `sonnet-5.md`). **No matching file → no output** —
-   that is how Fable/Opus/unlisted models run clean.
+   that is how Fable / opus-4-7 / unlisted models run clean.
 3. Output is wrapped in `<discipline-pack model="..." v="1">…</discipline-pack>`.
    The wrapper is load-bearing: the grader strips it (blind adjudication) and
    the scanner reads it (arm detection in A/B comparisons).
@@ -68,6 +82,10 @@ Definitions live in `disciplines/grading-rubric.md`.
 2026-07-10 baseline (60 days, 555 sonnet sessions, candidates per 100 assistant
 messages): UDC 3.51 on Sonnet 5 vs 3.04 on Sonnet 4.6; RSV 10.52 vs 8.27.
 
+2026-07-11 baseline (60 days, 115 opus-4-8 sessions): UDC 6.41 — roughly 2× the
+sonnet family — with RSV 4.32 below it. The opposite profile, hence the
+different pack.
+
 ## Adding a model
 
 Add `disciplines/<family>.md` and a matching substring entry to `FAMILY_FILES`
@@ -81,5 +99,6 @@ packs under ~200 tokens — they are re-injected on every prompt.
 cd hooks && node --test
 ```
 
-Covers: injection on sonnet-5, clean pass-through for fable / sonnet-4-5,
-kill switch, keepalive-tick skip, missing transcript, garbage stdin.
+Covers: injection on sonnet-5 and opus-4-8, clean pass-through for fable /
+sonnet-4-5 / opus-4-7, kill switch, keepalive-tick skip, missing transcript,
+garbage stdin.
