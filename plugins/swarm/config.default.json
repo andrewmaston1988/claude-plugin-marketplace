@@ -18,6 +18,7 @@
   "quotaWarnPct": 80,
   "quotaCacheSecs": 300,
   "quotaPatterns": ["usage limit reached", "out of extra usage", "hit your limit", "limit will reset"],
+  "modelDenylist": [],
   "resultInlineCap": 4000,
   "worktreeBranchPrefix": "swarm/",
   "notifyCmd": null
