@@ -6,11 +6,32 @@ The product is **quality from group-think**: many independent perspectives, redu
 
 ## Positioning
 
-- **Workflow** — Claude-quality orchestration inside the harness. Fast, Claude-priced.
+- **Workflow** — Claude Code's built-in orchestration tool: Claude-quality agents scripted in JS, inside the harness. Fast, Claude-priced.
 - **pipeline** — durable queued throughput ending in PRs. Huge capacity, not fast.
 - **swarm** — interactive-speed group-think on capable alternative models.
 
 Compose freely — a pipeline dev session or a Workflow plan may use swarm as its alternative-model leaf executor.
+
+### Swarm vs Workflow at a glance
+
+The philosophical split: a swarm manifest is a **static, previewable plan** — every model and leaf enumerable in one approval — while a Workflow script is **imperative orchestration** reviewed as code. Each keeps real advantages:
+
+| | swarm | Workflow |
+|---|---|---|
+| Alternative-model execution (GLM, MiniMax, Kimi, …) | ✅ core purpose | ❌ Claude models only |
+| Data-governance gate (open models deny-by-default per directory root) | ✅ enforced at validation and interrogation | ❌ |
+| Live per-agent visibility (state, elapsed, tokens climbing, current tool call, hang warnings) | ✅ roster, `status --watch`, statusline | ⚠️ progress tree, coarser detail |
+| Interrogate a finished agent — one follow-up turn, context intact | ✅ `ask`, survives session restarts | ❌ agents end with their run |
+| Durable runs — on-disk results, resume skips completed work | ✅ re-`run` is idempotent | ⚠️ resume within the same session |
+| Self-healing — backoff retries, declared model fallbacks | ✅ | ❌ errored agents return null |
+| Quota awareness — predictive preflight, reset times, fail-fast | ✅ | ❌ |
+| Per-agent token/cost accounting | ✅ every result JSON + run totals | ⚠️ aggregate budget only |
+| Deterministic mid-run logic (loops, dedupe, thresholds, dynamic fan-out) | ❌ static DAG — the session is the judgment between waves | ✅ full JS scripting |
+| Session-connected MCP tools inside agents | ❌ leaves are headless | ✅ |
+| Budget-reactive control flow | ❌ | ✅ harness-integrated |
+| Schema-validated agent returns | ⚠️ best-effort JSON parse | ✅ enforced with retry |
+
+Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, generation, mechanical implementation sweeps — is swarm's shape, especially when alternative models are armed. Reach for Workflow when the orchestration itself needs mid-run logic, session-connected MCP tools, or budget-driven loops.
 
 ## Setup
 
