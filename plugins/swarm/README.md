@@ -16,29 +16,28 @@ Compose freely — a pipeline dev session or a Workflow plan may use swarm as it
 
 The structural split: a swarm manifest is a **static, previewable plan** — every model and leaf enumerable in one approval, simple enough for a weak model to author — while a Workflow script is **imperative orchestration** reviewed as code, with the full power and full cost that implies. Neither dominates; here is the real shape of the trade.
 
-**Where they're equivalent** — either tool does these well:
-
-- Parallel fan-out with a concurrency cap, dependency ordering, and per-item pipelining
-- Per-agent model and effort selection
-- Git-worktree isolation for write-capable agents
-- Agents as full headless Claude Code sessions with the complete tool roster
-
-**Where Workflow is stronger:**
-
-- **Deterministic mid-run logic** — loops, dedupe-between-stages, vote thresholds, dynamic fan-out over a discovered list, in real JS. Swarm's DAG is static; its answer is the multi-wave pattern with the session as the judgment between waves. (A bounded declarative subset — `forEach`/`when`/`compute` — is planned, but full scripting stays Workflow's.)
-- **Zero setup** — built into the harness; no provider, no config, works everywhere Claude Code runs. Swarm's alternative models need an ollama-style endpoint and explicit `allowedRoots` opt-in.
-- **In-conversation results** — `agent()` returns a value (optionally schema-validated with retry) straight into the orchestrating logic; swarm communicates through result files and a digest.
-- **Session-connected MCP tools** inside agents, and **budget-reactive control flow** (`budget.remaining()` loops) — both structurally out of reach for headless leaves.
-- **Composition** — nested `workflow()` calls and custom agent types.
-
-**Where swarm is stronger:**
-
-- **Alternative-model execution** (GLM, MiniMax, Kimi, …) with a **data-governance gate** — open models are deny-by-default outside allow-listed directory roots.
-- **Durability** — results live on disk; re-`run` resumes any time, from any session, skipping completed work. Workflow's resume is same-session.
-- **Interrogation** — `ask` resumes a finished leaf with its context intact for one-turn follow-ups, even days later; Workflow agents end with their run.
-- **Self-healing** — rate-limit backoff retries, manifest-declared model fallbacks, quota as a first-class state with predictive preflight and reset times.
-- **Accounting and visibility** — per-leaf tokens/cost in every result, live roster with elapsed, climbing token counts, current tool call, and hang warnings.
-- **Authorability** — a fill-in-the-blanks manifest that a small model can draft reliably; correct imperative orchestration code is a much higher bar.
+| | swarm | Workflow |
+|---|---|---|
+| ***Either tool does these well*** | | |
+| Parallel fan-out, concurrency caps, dependency ordering, pipelining | ✅ | ✅ |
+| Per-agent model + effort selection | ✅ | ✅ |
+| Git-worktree isolation for write-capable agents | ✅ | ✅ |
+| Agents are full headless Claude Code sessions (complete tool roster) | ✅ | ✅ |
+| ***Workflow's ground*** | | |
+| Deterministic mid-run logic — loops, dedupe, vote thresholds, dynamic fan-out | ⚠️ bounded `forEach`/`when`/`compute` planned; multi-wave otherwise | ✅ full JS scripting |
+| Zero setup — built into the harness, runs anywhere Claude Code does | ❌ alternative models need a provider endpoint + `allowedRoots` opt-in | ✅ |
+| Results return in-conversation, schema-validated with retry | ⚠️ best-effort JSON parse, via result files + digest | ✅ |
+| Session-connected MCP tools inside agents | ❌ structurally out of reach for headless leaves | ✅ |
+| Budget-reactive control flow (`budget.remaining()` loops) | ❌ | ✅ |
+| Composition — nested workflows, custom agent types | ❌ | ✅ |
+| ***Swarm's ground*** | | |
+| Alternative-model execution (GLM, MiniMax, Kimi, …) | ✅ core purpose | ❌ Claude models only |
+| Data-governance gate — open models deny-by-default per directory root | ✅ | — (moot: Claude-only) |
+| Durable runs — on-disk results, resume from any session | ✅ | ⚠️ same-session resume |
+| Interrogate a finished agent, context intact (`ask`) | ✅ even days later | ❌ agents end with their run |
+| Self-healing — backoff retries, declared fallbacks, quota preflight + reset times | ✅ | ❌ errored agents return null |
+| Per-agent tokens/cost + live roster (elapsed, tool call, hang warnings) | ✅ | ⚠️ aggregate budget, coarser progress |
+| Weak-model authorability | ✅ fill-in-the-blanks manifest | ⚠️ correct imperative JS is a higher bar |
 
 Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, generation, mechanical implementation sweeps — is swarm's shape, especially when alternative models are armed. Reach for Workflow when the orchestration itself needs mid-run logic, session MCP tools, or budget-driven loops — or when you simply want zero setup.
 
