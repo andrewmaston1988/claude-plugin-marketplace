@@ -23,6 +23,7 @@ import { fileURLToPath } from 'node:url';
 // (e.g. "sonnet-5" does not match "claude-sonnet-4-5").
 const FAMILY_FILES = [
   ['sonnet-5', 'sonnet-5.md'],
+  ['opus-4-8', 'opus-4-8.md'],
 ];
 
 // settings.json model aliases -> representative full IDs, for the first
