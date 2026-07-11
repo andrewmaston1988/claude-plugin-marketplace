@@ -1,6 +1,6 @@
-// Fixture tests for inject.mjs — same matrix as the original Python hook:
-// inject on sonnet-5, skip fable / sonnet-4-5 (family collision), kill
-// switch, keepalive prompt, missing transcript, garbage stdin.
+// Fixture tests for inject.mjs:
+// inject on sonnet-5 / opus-4-8, skip fable / sonnet-4-5 / opus-4-7 (family
+// collision), kill switch, keepalive prompt, missing transcript, garbage stdin.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -43,6 +43,19 @@ test('sonnet-5 -> pack injected', () => {
   assert.equal(code, 0);
   assert.match(out, /<discipline-pack model="claude-sonnet-5" v="1">/);
   assert.match(out, /Verify before claiming/);
+});
+
+test('opus-4-8 -> pack injected', () => {
+  const { code, out } = run({ prompt: 'fix the bug', transcript_path: transcript('claude-opus-4-8') });
+  assert.equal(code, 0);
+  assert.match(out, /<discipline-pack model="claude-opus-4-8" v="1">/);
+  assert.match(out, /Proof means the live layer/);
+});
+
+test('opus-4-7 -> empty (no family collision)', () => {
+  const { code, out } = run({ prompt: 'fix the bug', transcript_path: transcript('claude-opus-4-7') });
+  assert.equal(code, 0);
+  assert.equal(out.trim(), '');
 });
 
 test('fable -> empty', () => {
