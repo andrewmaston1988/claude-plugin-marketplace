@@ -444,3 +444,68 @@ test("validate: returns schemas join the approval preview; malformed ones exit 1
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("validate: estimate line from a seeded corpus; cold start says none", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const runDir = join(home, "runs", "some-proj", "old-1");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, "summary.json"), JSON.stringify({
+      tasks: [
+        { id: "a", state: "ok", model: "haiku", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } },
+        { id: "b", state: "ok", model: "haiku", tokens: { input: 2000, output: 0, cacheCreation: 0, cacheRead: 0 } },
+        { id: "c", state: "ok", model: "haiku", tokens: { input: 3000, output: 0, cacheCreation: 0, cacheRead: 0 } },
+      ],
+    }));
+    const p = join(dir, "plan.json");
+    writeFileSync(p, JSON.stringify({
+      tasks: [
+        { id: "x", prompt: "a", model: "haiku" },
+        { id: "y", prompt: "b", model: "haiku" },
+      ],
+    }));
+    const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(v.status, 0, v.stderr);
+    ok(v.stdout.includes("estimated ~4k tokens"), v.stdout); // median 2000 × 2 leaves
+
+    const cold = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "empty-home") } });
+    equal(cold.status, 0, cold.stderr);
+    ok(cold.stdout.includes("estimate: none (no run history yet)"), cold.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run: closing tokens line compares actual vs estimate; projection warn reaches stdout", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const runDir = join(home, "runs", "seed", "r-1");
+    mkdirSync(runDir, { recursive: true });
+    // median 1000/leaf; shim leaves actually burn 1500 each
+    writeFileSync(join(runDir, "summary.json"), JSON.stringify({
+      tasks: [{ id: "s", state: "ok", model: "haiku", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } }],
+    }));
+    const cfgPath = join(dir, "config.json");
+    writeFileSync(cfgPath, JSON.stringify({ costWarnTokens: 100 }));
+    const p = join(dir, "plan.json");
+    writeFileSync(p, JSON.stringify({
+      resultsDir: "out",
+      tasks: [
+        { id: "x", prompt: "a", model: "haiku" },
+        { id: "y", prompt: "b", model: "haiku" },
+      ],
+    }));
+    const r = runCli(["run", p], {
+      cwd: dir,
+      env: { SWARM_HOME: home, SWARM_CONFIG: cfgPath, SWARM_SHIM_STREAM: "1" },
+    });
+    equal(r.status, 0, r.stderr + r.stdout);
+    ok(r.stdout.includes("estimated ~2k tokens"), r.stdout);          // 2 leaves × median 1000
+    ok(r.stdout.includes("estimate was ~2k (50% over)"), r.stdout);   // actual 3k vs 2k
+    ok(r.stdout.includes("projected"), r.stdout);                     // warn crossed the tiny threshold
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -6,6 +6,7 @@ import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, ValidationError } from "../src/manifest.mjs";
 import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
+import { loadCorpus, estimateRun, formatEstimate } from "../src/estimate.mjs";
 import { formatClosing, renderStatus, readResult } from "../src/results.mjs";
 import { dim } from "../src/ui.mjs";
 
@@ -67,6 +68,8 @@ function cmdValidate(manifestPath) {
   if (ret.length) {
     out(`returns validated: ${ret.map((t) => t.id).join(", ")} (invalid output gets one corrective re-ask, then fails)`);
   }
+  // The consent line: worst-case leaves × historical per-model medians.
+  out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));
   out(`resultsDir: ${plan.resultsDir}`);
   return 0;
 }
@@ -74,7 +77,23 @@ function cmdValidate(manifestPath) {
 async function cmdRun(manifestPath, force) {
   const cfg = getConfig();
   const plan = loadManifest(manifestPath, cfg, process.cwd());
+  // Fire-and-forget notification hook (e.g. "claude-slack notify --message {status}").
+  // Mechanical plumbing only: substitute tokens, spawn detached, swallow errors.
+  // Shared by the end-of-run status and the scheduler's single-shot cost warn.
+  const notify = async (status, { digest = "", summary = "" } = {}) => {
+    if (!cfg.notifyCmd) return;
+    const cmdLine = cfg.notifyCmd
+      .replaceAll("{status}", status)
+      .replaceAll("{digest}", digest)
+      .replaceAll("{summary}", summary);
+    try {
+      const { spawn } = await import("node:child_process");
+      spawn(cmdLine, { shell: true, detached: true, stdio: "ignore" }).unref();
+    } catch { /* notification is garnish, never a failure */ }
+  };
+  plan.estimate = estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")));
   const io = makeDefaultIo();
+  io.notify = (status) => { notify(status); };
   const r = await runPlan(plan, cfg, io, { force });
 
   out(formatClosing({
@@ -84,22 +103,14 @@ async function cmdRun(manifestPath, force) {
     totalTokens: r.summary.totalTokens,
     worktreesKept: r.worktreesKept,
     truncations: r.summary.truncations,
+    estimate: plan.estimate,
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
-  // Fire-and-forget completion hook (e.g. "claude-slack notify --message {status}").
-  // Mechanical plumbing only: substitute tokens, spawn detached, swallow errors.
-  if (cfg.notifyCmd) {
-    const status = bad.length ? `swarm run finished with ${bad.length} failed/blocked` : "swarm run finished clean";
-    const cmdLine = cfg.notifyCmd
-      .replaceAll("{status}", status)
-      .replaceAll("{digest}", r.digestPath || "")
-      .replaceAll("{summary}", r.summaryPath || "");
-    try {
-      const { spawn } = await import("node:child_process");
-      spawn(cmdLine, { shell: true, detached: true, stdio: "ignore" }).unref();
-    } catch { /* notification is garnish, never a failure */ }
-  }
+  await notify(
+    bad.length ? `swarm run finished with ${bad.length} failed/blocked` : "swarm run finished clean",
+    { digest: r.digestPath || "", summary: r.summaryPath || "" },
+  );
   if (bad.length) {
     out(`FAILED tasks: ${bad.map((t) => `${t.id} [${t.state}]`).join(", ")}`);
     const quotaBad = bad.filter((t) => t.state === "quota");

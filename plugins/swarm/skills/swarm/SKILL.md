@@ -28,6 +28,7 @@ Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), dra
 
 1. > "Fan this out via swarm — <n> leaves on <models>?"
    > Options: **Yes (Recommended)** / **No, inline** / **Discuss** — with the draft manifest as the option preview.
+   > Run `node <engine> validate <draft>` first and quote its `estimated ~…` line in the question — the prediction (worst-case leaves × historical per-model medians) is part of the consent. `estimate: none` on a cold corpus is itself the honest answer; never invent a number.
 2. > "Model mix?" — state the split explicitly in the question (e.g. "5 leaves alternative, digest on sonnet = 1 Anthropic call").
    > Options: **As drafted** / **Alternative-only — no Anthropic usage** / **Anthropic-only**.
    > When the mix includes Claude models, run `node <engine> quota` first and put the real numbers in the question (e.g. "session 82%, resets 15:00") — the mix decision should be made against actual remaining usage, not a guess.

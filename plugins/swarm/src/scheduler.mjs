@@ -6,8 +6,9 @@ import { isClaudeModel } from "./models.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
-  writeDigestMd, appendRunLog, renderRoster,
+  writeDigestMd, appendRunLog, renderRoster, formatTokens,
 } from "./results.mjs";
+import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
   createStreamParser, createUsageAccumulator, pickFinalTokens,
   addTokens, emptyTokens, tokenTotal,
@@ -205,6 +206,9 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
         costUsd: resultEvt?.total_cost_usd,
         numTurns: resultEvt?.num_turns,
         sessionId: initEvt?.session_id ?? resultEvt?.session_id ?? null,
+        // "none" on subscription auth — costUsd is synthetic there, real only
+        // when a key source is named (unit honesty for estimates and warns)
+        apiKeySource: initEvt?.apiKeySource ?? null,
       });
     };
     child.on("error", (e) => settle(null, `spawn error: ${e.message}`));
@@ -267,6 +271,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     }
   }
 
+  // The approval-surface estimate (computed by the CLI) echoes at run start so
+  // the consent line and the closing actual sit in the same transcript.
+  if (plan.estimate !== undefined) io.stdout(formatEstimate(plan.estimate));
+
   const started = new Date().toISOString();
   // run-start line lets `status` derive pending tasks (ids never seen since
   // the latest run-start are pending) and carries models for the roster view.
@@ -275,6 +283,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   const state = new Map(tasks.map((t) => [t.id, "pending"]));
   const durations = new Map();
   const tokensMap = new Map();
+  const costMap = new Map();      // id -> costUsd, real-key leaves only (feeds the corpus)
+  // Single-shot projection warn: spend so far vs worst-case remaining leaves.
+  let completedLeaves = 0;
+  let spentTokens = 0;
+  let spentUsd = 0;
+  let costIsRealComplete = true;  // every completed leaf so far: real-key-billed costUsd
+  let costWarnFired = false;
   const startedAt = new Map();
   const activityMap = new Map();  // id -> latest tool-call description
   const lastEventAt = new Map();  // id -> ms of last stream event (liveness)
@@ -620,6 +635,32 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       }
 
       record(task, st, r.durationMs, r.tokens);
+
+      // Projection warn: this leaf is terminal (retry/fallback paths returned
+      // above). Track spend, project over the worst-case remainder, warn once.
+      const realKey = r.apiKeySource != null && r.apiKeySource !== "none";
+      if (r.costUsd != null && realKey) costMap.set(task.id, r.costUsd);
+      completedLeaves++;
+      spentTokens += tokenTotal(r.tokens || emptyTokens());
+      spentUsd += r.costUsd ?? 0;
+      costIsRealComplete &&= r.costUsd != null && realKey;
+      if (cfg.costWarn !== false && !costWarnFired) {
+        const remaining = tasks.reduce((n, t) => {
+          if (t.compute || t.aggregate || !ALIVE_STATES.has(state.get(t.id))) return n;
+          return n + (t.forEach ? t.forEach.maxItems : 1);
+        }, 0);
+        const useUsd = costIsRealComplete && spentUsd > 0;
+        const threshold = useUsd ? (cfg.costWarnUsd ?? 10) : (cfg.costWarnTokens ?? 5_000_000);
+        const projected = projectRun({ spent: useUsd ? spentUsd : spentTokens, completed: completedLeaves, remaining });
+        if (projected != null && projected >= threshold) {
+          costWarnFired = true;
+          const fmt = useUsd ? (n) => `$${n.toFixed(2)}` : (n) => `${formatTokens(n)} tokens`;
+          const text = `⚠ projected ~${fmt(projected)} for this run (threshold ${fmt(threshold)}) — ${completedLeaves}/${completedLeaves + remaining} leaves done`;
+          io.stdout(text);
+          appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), event: "cost-warn", unit: useUsd ? "usd" : "tokens", projected, threshold });
+          io.notify?.(text);
+        }
+      }
       return task.id;
     })();
     running.set(task.id, promise);
@@ -672,15 +713,20 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     finished: new Date().toISOString(),
     tasks: tasks.map((t) => ({
       id: t.id,
+      // model + costUsd feed the estimate corpus (src/estimate.mjs loadCorpus)
+      model: t.model,
       state: state.get(t.id),
       durationMs: durations.get(t.id) ?? null,
       tokens: tokensMap.get(t.id) ?? null,
+      ...(costMap.has(t.id) && { costUsd: costMap.get(t.id) }),
       resultPath: resultPath(plan.resultsDir, t.id),
     })),
     blocked: tasks.filter((t) => state.get(t.id) === "blocked").map((t) => t.id),
     worktreesKept,
     totalTokens: [...tokensMap.values()].reduce(addTokens, emptyTokens()),
     ...(truncations.length && { truncations }),
+    ...(plan.estimate !== undefined && { estimate: plan.estimate }),
+    ...(costWarnFired && { costWarnFired: true }),
   };
   const summaryPath = writeSummary(plan.resultsDir, summary);
 
