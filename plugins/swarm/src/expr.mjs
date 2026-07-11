@@ -220,7 +220,7 @@ export function parseExpr(src) {
 
 // ── evaluator ─────────────────────────────────────────────────────────────────
 
-function deepEq(a, b) {
+export function deepEq(a, b) {
   if (a === b) return true;
   if (Array.isArray(a) && Array.isArray(b)) {
     return a.length === b.length && a.every((v, i) => deepEq(v, b[i]));

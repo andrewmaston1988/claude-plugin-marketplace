@@ -417,3 +417,30 @@ test("run: default resultsDir lands under <home>/runs/<encoded-cwd>/<stem>-1 wit
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("validate: returns schemas join the approval preview; malformed ones exit 1", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "ret.json");
+    writeFileSync(p, JSON.stringify({
+      tasks: [
+        { id: "scan", prompt: "x", model: "haiku", returns: { type: "object", required: ["sites"], properties: { sites: { type: "array" } } } },
+        { id: "sum", prompt: "y {{result:scan}}", model: "haiku", after: ["scan"] },
+      ],
+    }));
+    const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(v.status, 0, v.stderr);
+    ok(v.stdout.includes("returns validated: scan"), v.stdout);
+    ok(v.stdout.includes("one corrective re-ask"), v.stdout);
+
+    const bad = join(dir, "bad-ret.json");
+    writeFileSync(bad, JSON.stringify({
+      tasks: [{ id: "a", prompt: "x", model: "haiku", returns: { type: "list" } }],
+    }));
+    const b = runCli(["validate", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(b.status, 1);
+    ok(b.stderr.includes("type 'list' is not supported"), b.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -1054,3 +1054,128 @@ test("JSON leaf output is parsed into outputJson alongside raw", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── returns (schema-validated output) ─────────────────────────────────────────
+
+const SITES_SCHEMA = { type: "object", required: ["sites"], properties: { sites: { type: "array" } } };
+const streamOut = (text, sid, usage = { input_tokens: 100, output_tokens: 10 }) => [
+  ...(sid ? [JSON.stringify({ type: "system", subtype: "init", session_id: sid })] : []),
+  JSON.stringify({ type: "result", subtype: "success", is_error: false, result: text, usage }),
+].join("\n") + "\n";
+
+test("returns: conforming first output passes untouched — no second spawn", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut(JSON.stringify({ sites: [1] }), "s-1") }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { returns: SITES_SCHEMA })]);
+    await runPlan(p, CFG, io);
+    equal(spawn.calls.length, 1);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true);
+    deepEqual(res.outputJson, { sites: [1] });
+    equal(res.schemaRetried, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returns: invalid output gets one teaching re-ask via session resume, then ok", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call, i) => i === 0
+      ? { output: streamOut(JSON.stringify(["a.mjs"]), "s-1") } // valid JSON, wrong shape
+      : { output: streamOut(JSON.stringify({ sites: ["a.mjs"] }), "s-2", { input_tokens: 50, output_tokens: 5 }) });
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { returns: SITES_SCHEMA })]);
+    await runPlan(p, CFG, io);
+
+    equal(spawn.calls.length, 2);
+    const retry = spawn.calls[1];
+    const ri = retry.args.indexOf("--resume");
+    equal(retry.args[ri + 1], "s-1");
+    const rp = promptOf(retry);
+    ok(rp.includes("expected object"), rp);        // the validator's teaching error
+    ok(rp.includes(JSON.stringify(SITES_SCHEMA, null, 2)), rp); // the schema itself — the original prompt may have underspecified the shape
+    ok(/only.*json/i.test(rp), rp);                // corrective instruction
+
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true);
+    deepEqual(res.outputJson, { sites: ["a.mjs"] });
+    equal(res.schemaRetried, true);
+    equal(res.sessionId, "s-2");                   // next ask continues the corrected thread
+    deepEqual(res.tokens, { input: 150, output: 15, cacheCreation: 0, cacheRead: 0 });
+
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    ok(logLines.some((l) => l.event === "schema-retry" && l.id === "a"), "expected schema-retry in run.log");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returns: still-invalid after the re-ask fails with the validator's message", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut("still prose", "s-1") }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { returns: SITES_SCHEMA })]);
+    await runPlan(p, CFG, io);
+    equal(spawn.calls.length, 2);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, false);
+    ok(Array.isArray(res.schemaErrors) && res.schemaErrors.length > 0, JSON.stringify(res));
+    ok(res.output.includes("returns validation failed"), res.output);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returns: no session id means no re-ask — fail immediately, one spawn", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "plain text, no stream-json" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { returns: SITES_SCHEMA })]);
+    await runPlan(p, CFG, io);
+    equal(spawn.calls.length, 1);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, false);
+    ok(res.output.includes("no session id"), res.output);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returns on a forEach task: clones validate individually; the aggregate is engine-built and exempt", async () => {
+  const dir = tmp();
+  try {
+    const CLONE_SCHEMA = { type: "object", required: ["ok"], properties: { ok: { type: "boolean" } } };
+    const spawn = fakeSpawnFactory((call) => {
+      const prompt = promptOf(call);
+      if (prompt.startsWith("do list")) return { output: streamOut(JSON.stringify({ sites: ["a", "b"] }), "s-list") };
+      if (call.args.includes("--resume")) return { output: streamOut(JSON.stringify({ ok: false }), "s-fix") };
+      if (prompt === "check a") return { output: streamOut("prose from clone 0", "s-c0") };
+      return { output: streamOut(JSON.stringify({ ok: true }), "s-c1") };
+    });
+    const io = makeIo(spawn);
+    const p = plan(dir, [
+      task("list"),
+      task("per", {
+        prompt: "check {{item}}",
+        after: ["list"],
+        forEach: { from: "list", path: "sites", maxItems: 5 },
+        returns: CLONE_SCHEMA,
+      }),
+    ]);
+    await runPlan(p, CFG, io);
+
+    equal(readResult(p.resultsDir, "per[0]").schemaRetried, true);  // corrected via resume
+    equal(readResult(p.resultsDir, "per[0]").ok, true);
+    equal(readResult(p.resultsDir, "per[1]").schemaRetried, undefined);
+    const agg = readResult(p.resultsDir, "per");
+    equal(agg.ok, true);                                            // array aggregate never re-validated
+    deepEqual(agg.outputJson, [{ ok: false }, { ok: true }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

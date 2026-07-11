@@ -5,7 +5,7 @@ import { tokenTotal } from "./stream.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
-//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, output, outputJson?, worktree? }
+//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, output, outputJson?, schemaRetried?, schemaErrors?, worktree? }
 //   digest.md           when a digest block is present
 //   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens }
 //   run.log             JSONL, tailable mid-run:
@@ -13,6 +13,7 @@ import { tokenTotal } from "./stream.mjs";
 //                         { ts, id, state, durationMs?, tokens?, note? }   state changes
 //                         { ts, id, event: "tokens", tokens }       live usage ticks
 //                         { ts, event: "expand", id, model, clones, truncated?, total? }   forEach expansion
+//                         { ts, event: "schema-retry", id }         returns re-ask fired
 
 export function initResultsDir(dir) {
   mkdirSync(join(dir, "results"), { recursive: true });
