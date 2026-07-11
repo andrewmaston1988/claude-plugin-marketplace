@@ -345,6 +345,27 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
 // directories the user has explicitly allow-listed. Checked against the
 // task's ORIGINAL effective cwd (before any scratch redirect).
 
+// Denylist — takes a model out of circulation machine-wide. Case-insensitive
+// substring so the config author controls precision ("nemotron" bans the
+// family; a full name bans exactly one). Returns the matching entry for the
+// error message, undefined when clear. Shared with the CLI's roster filter.
+export function matchDenylist(model, cfg) {
+  const lower = String(model || "").toLowerCase();
+  return (cfg?.modelDenylist || []).find(
+    (e) => typeof e === "string" && e && lower.includes(e.toLowerCase())
+  );
+}
+
+function checkDenylist(model, l, cfg, errors) {
+  const hit = matchDenylist(model, cfg);
+  if (hit) {
+    errors.push(
+      `${l}: model '${model}' is denylisted in config (matched '${hit}') — remove it from ` +
+      `modelDenylist in ~/.swarm/config.json or pick another model; see 'swarm models'`
+    );
+  }
+}
+
 function checkGovernance(model, effCwd, l, cfg, errors) {
   if (isClaudeModel(model)) return;
   const allowedRoots = cfg?.provider?.allowedRoots || [];
@@ -369,12 +390,14 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     // machine — no governance, no write-implies-isolation.
     if (!isCompute && !isManifest) {
       governanceCheck(t.model, originalCwd, l);
+      checkDenylist(t.model, l, cfg, errors);
       if (t.fallbackModel !== undefined) {
         if (typeof t.fallbackModel !== "string" || !t.fallbackModel) {
           errors.push(`${l}: fallbackModel must be a model name string`);
         } else {
           // the fallback is a real dispatch target — same governance as the primary
           governanceCheck(t.fallbackModel, originalCwd, `${l} fallback`);
+          checkDenylist(t.fallbackModel, `${l} fallback`, cfg, errors);
         }
       }
     }
@@ -544,6 +567,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
       errors.push("digest block must be an object with a 'model'");
     } else {
       checkGovernance(raw.digest.model, cwd, "digest", cfg, errors);
+      checkDenylist(raw.digest.model, "digest", cfg, errors);
       digest = { model: raw.digest.model, instructions: raw.digest.instructions || "" };
     }
   }
