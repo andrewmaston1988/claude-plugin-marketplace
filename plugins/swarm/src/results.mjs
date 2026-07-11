@@ -5,7 +5,11 @@ import { tokenTotal } from "./stream.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
-//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, output, outputJson?, schemaRetried?, schemaErrors?, worktree? }
+//   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
+//                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
+//                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
+//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, worktree? }
+//                       (prompt = the exact final string sent to the leaf; absent on compute/aggregate rows)
 //   digest.md           when a digest block is present
 //   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens, estimate?, costWarnFired? }
 //                       task rows: { id, model, state, durationMs, tokens, costUsd?, resultPath }
@@ -45,6 +49,12 @@ export function readResult(dir, id) {
   } catch {
     return null; // corrupt result — treat as absent so resume re-runs it
   }
+}
+
+export function writeManifestSnapshot(dir, doc) {
+  const p = join(dir, "manifest.json");
+  writeFileSync(p, JSON.stringify(doc, null, 2) + "\n");
+  return p;
 }
 
 export function writeSummary(dir, obj) {

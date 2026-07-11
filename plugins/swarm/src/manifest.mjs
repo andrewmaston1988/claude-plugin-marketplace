@@ -471,9 +471,11 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
 // Load + validate a manifest into a normalized plan. Throws ValidationError
 // listing every problem found. `cwd` is the invoking process's cwd — the
 // default task cwd and the base for relative paths. Options: `args` (the
-// --args object, substituted as {{args.<key>}} before validation) and
-// `fromRegistry` (child manifest paths then resolve against the parent's dir).
-export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false } = {}) {
+// --args object, substituted as {{args.<key>}} before validation),
+// `fromRegistry` (child manifest paths then resolve against the parent's dir),
+// and `ref` (the pre-resolution registry name, recorded on the plan for the
+// run dir snapshot).
+export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref } = {}) {
   const errors = [];
   if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
     throw new ValidationError([`args must be a JSON object — e.g. {"base":"master"} (got ${JSON.stringify(args)})`]);
@@ -556,5 +558,31 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     tasks,
     digest,
     goal: raw.goal || "",
+    ...(args && Object.keys(args).length && { args }),
+    ...(ref && { ref }),
+  };
+}
+
+// The effective plan as approved and dispatched: args substituted, children
+// resolved, engine defaults stripped back to authored intent. Single source
+// for the `validate --resolved` preview and the run dir's manifest.json (P1) —
+// what you approve is byte-for-byte what the run records.
+export function effectivePlanDoc(plan) {
+  const strip = (t) => {
+    const o = { id: t.id, model: t.model };
+    if (t.prompt) o.prompt = t.prompt;
+    for (const k of ["effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "isolation", "outputDir"]) {
+      if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
+    }
+    if (t.childPlan) o.child = t.childPlan.tasks.map(strip);
+    return o;
+  };
+  return {
+    ...(plan.goal && { goal: plan.goal }),
+    ...(plan.ref && { ref: plan.ref }),
+    ...(plan.args && { args: plan.args, argsFingerprint: argsFingerprint(plan.args) }),
+    resultsDir: plan.resultsDir,
+    tasks: plan.tasks.map(strip),
+    ...(plan.digest && { digest: plan.digest }),
   };
 }
