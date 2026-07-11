@@ -393,6 +393,7 @@ test("stream-json leaf: result text extracted, tokens accounted end-to-end", asy
     // interrogation fields: session to resume, where, and with which tools
     equal(res.sessionId, "s-abc");
     equal(res.cwd, tmpdir());
+    equal(res.originalCwd, tmpdir()); // pre-redirect cwd — the governance identity
     equal(res.allowedTools, "Read,Grep,Glob");
 
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));

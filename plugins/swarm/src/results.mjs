@@ -145,7 +145,7 @@ export function renderRoster({ title, tasks, now, startedMs, quietWarnMs }) {
 
 // One-shot progress view for `swarm.mjs status <resultsDir>` — read-only,
 // rebuilt from run.log so it matches the live snapshot exactly.
-export function renderStatus(dir, now = Date.now()) {
+export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
   // Absolutise first: a relative resultsDir silently resolves against the
   // *viewer's* cwd (watch terminal), not the run's — the classic mismatch.
   dir = resolve(dir);
@@ -202,7 +202,7 @@ export function renderStatus(dir, now = Date.now()) {
   const lines = [
     `${bold("run:")} ${cyan(dir)}`,
     "",
-    renderRoster({ title: basename(dir), tasks, now, startedMs: startedMs ?? now, quietWarnMs: 60000 }),
+    renderRoster({ title: basename(dir), tasks, now, startedMs: startedMs ?? now, quietWarnMs }),
     "",
     `${bold("results:")} ${join(dir, "results")}`,
   ];

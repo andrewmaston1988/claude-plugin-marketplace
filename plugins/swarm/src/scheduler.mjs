@@ -297,9 +297,11 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (tokenTotal(r.tokens) + (r.tokens?.cacheRead || 0) > 0) result.tokens = r.tokens;
       if (r.costUsd != null) result.costUsd = r.costUsd;
       if (r.numTurns != null) result.numTurns = r.numTurns;
-      // interrogation fields: `swarm ask` resumes this session in this cwd
+      // interrogation fields: `swarm ask` resumes this session in this cwd;
+      // originalCwd (pre scratch/worktree redirect) is the governance identity
       if (r.sessionId) result.sessionId = r.sessionId;
       result.cwd = taskCwd;
+      result.originalCwd = task.originalCwd;
       result.allowedTools = task.allowedTools;
       const parsed = tryParseJson(r.output);
       if (parsed !== undefined) result.outputJson = parsed;

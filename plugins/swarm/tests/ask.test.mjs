@@ -95,6 +95,22 @@ test("askLeaf: --model override to an open model re-runs the governance gate", a
   }
 });
 
+test("askLeaf: governance gates on originalCwd for scratch-redirected leaves", async () => {
+  // a write-capable open-model leaf runs in a scratch dir (never under
+  // allowedRoots) but was approved against its ORIGINAL cwd — ask must honor
+  // the same pair the manifest gate approved
+  const dir = setup({ cwd: tmpdir(), originalCwd: join(tmpdir(), "approved-root") });
+  try {
+    const cfgAllowed = { ...CFG, provider: { ...CFG.provider, allowedRoots: [join(tmpdir(), "approved-root")] } };
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", model: "glm-4.6:cloud", cfg: cfgAllowed, io: makeIo(spawn) });
+    equal(r.answer, "the follow-up answer");
+    equal(spawn.calls[0].opts.cwd, tmpdir()); // resume still runs in the leaf's actual cwd
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("askLeaf: a failed resume surfaces the raw error, does not update sessionId", async () => {
   const dir = setup();
   try {
