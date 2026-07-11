@@ -3,7 +3,7 @@
 // stdout carries status lines + paths only, never raw task output.
 import { join } from "node:path";
 import { loadConfig, swarmHome } from "../src/config.mjs";
-import { loadManifest, effectivePlanDoc, ValidationError } from "../src/manifest.mjs";
+import { loadManifest, effectivePlanDoc, matchDenylist, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
 import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
@@ -67,9 +67,10 @@ function resolveManifestRef(ref) {
 
 async function cmdModels() {
   const cfg = getConfig();
-  const models = await discoverModels(cfg);
+  // Denylisted models never appear as options — the roster is the authoring surface.
+  const models = (await discoverModels(cfg)).filter((m) => !matchDenylist(m.model, cfg));
   writeModelsCache(models);
-  for (const m of [...models, ...CLAUDE_ALIASES]) {
+  for (const m of [...models, ...CLAUDE_ALIASES].filter((m) => !matchDenylist(m.model, cfg))) {
     out(m.description ? `${m.model} — ${m.description}` : m.model);
   }
   return 0;
