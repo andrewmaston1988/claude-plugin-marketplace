@@ -1,7 +1,9 @@
 // Test doubles for scheduler io — no network, no real claude.
 import { EventEmitter } from "node:events";
 
-// handler(call, index) -> { exit=0, output="", delayMs=1 } | undefined
+// handler(call, index) -> { exit=0, output="", delayMs=1, outputAtMs? } | undefined
+// outputAtMs emits output early (before close at delayMs) so tests can observe
+// mid-run state like the activity cell.
 export function fakeSpawnFactory(handler = () => ({})) {
   const calls = [];
   const gauge = { active: 0, max: 0 };
@@ -22,9 +24,17 @@ export function fakeSpawnFactory(handler = () => ({})) {
       child.emit("close", code);
     };
     child.kill = () => close(null);
+    let emitted = false;
+    if (spec.outputAtMs != null) {
+      setTimeout(() => {
+        if (done || emitted) return;
+        emitted = true;
+        if (spec.output) child.stdout.emit("data", spec.output);
+      }, spec.outputAtMs);
+    }
     setTimeout(() => {
       if (done) return;
-      if (spec.output) child.stdout.emit("data", spec.output);
+      if (spec.output && !emitted) child.stdout.emit("data", spec.output);
       close(spec.exit ?? 0);
     }, spec.delayMs ?? 1);
     return child;

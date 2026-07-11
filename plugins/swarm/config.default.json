@@ -12,6 +12,7 @@
   "concurrency": 4,
   "timeoutMs": 600000,
   "heartbeatSecs": 15,
+  "quietWarnSecs": 60,
   "resultInlineCap": 4000,
   "worktreeBranchPrefix": "swarm/",
   "notifyCmd": null

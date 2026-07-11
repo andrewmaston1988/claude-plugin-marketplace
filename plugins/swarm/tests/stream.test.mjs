@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, deepEqual } from "node:assert/strict";
 import {
-  createStreamParser, createUsageAccumulator,
+  createStreamParser, createUsageAccumulator, describeToolUse,
   usageTokens, addTokens, tokenTotal, pickFinalTokens, emptyTokens,
 } from "../src/stream.mjs";
 
@@ -72,6 +72,33 @@ test("usageTokens tolerates missing fields; addTokens and tokenTotal math", () =
   // Headline total counts work tokens (input + output + cache writes), not cache reads.
   equal(tokenTotal(t), 6);
   equal(tokenTotal(null), 0);
+});
+
+test("parser: tool_use blocks in assistant events surface as activity", () => {
+  const acts = [];
+  const parser = createStreamParser({ onActivity: (a) => acts.push(a) });
+  const evt = (blocks) => JSON.stringify({ type: "assistant", message: { id: "m1", content: blocks } }) + "\n";
+  parser.feed(evt([{ type: "tool_use", name: "Grep", input: { pattern: "game_engine/", path: "client/scripts" } }]));
+  parser.feed(evt([{ type: "text", text: "thinking..." }])); // no tool call — no activity
+  parser.feed(evt([
+    { type: "tool_use", name: "Read", input: { file_path: "client/scripts/ai/brain.gd" } },
+    { type: "tool_use", name: "Bash", input: { command: "node --test a.mjs" } },
+  ]));
+  parser.end();
+  deepEqual(acts, [
+    "Grep client/scripts",
+    "Read client/scripts/ai/brain.gd",
+    "Bash node --test a.mjs",
+  ]);
+});
+
+test("describeToolUse: picks the most telling arg, truncates to 40 chars", () => {
+  equal(describeToolUse({ name: "Read", input: { file_path: "src/a.mjs" } }), "Read src/a.mjs");
+  equal(describeToolUse({ name: "Grep", input: { pattern: "foo", path: "src" } }), "Grep src"); // path beats pattern
+  equal(describeToolUse({ name: "WebFetch", input: { url: "https://x.dev/docs" } }), "WebFetch https://x.dev/docs");
+  equal(describeToolUse({ name: "TodoWrite", input: { todos: [1, 2] } }), "TodoWrite"); // no scalar arg worth showing
+  equal(describeToolUse({ name: "Bash", input: { command: "x".repeat(60) } }), `Bash ${"x".repeat(39)}…`);
+  equal(describeToolUse({ name: "Bash", input: {} }), "Bash");
 });
 
 test("pickFinalTokens: result-event usage is authoritative when present", () => {

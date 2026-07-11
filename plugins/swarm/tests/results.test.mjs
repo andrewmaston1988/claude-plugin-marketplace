@@ -105,6 +105,18 @@ test("renderRoster: header, aligned rows, counts footer with total tokens", () =
   equal(lines[6], "  1 ok · 1 running · 1 pending · 30.6k tokens");
 });
 
+test("renderRoster: running rows show activity; stale rows warn quiet", () => {
+  const tasks = [
+    { id: "busy", model: "haiku", state: "running", startedMs: NOW - 10000, activity: "Grep client/scripts/ui", lastEventMs: NOW - 3000 },
+    { id: "stuck", model: "haiku", state: "running", startedMs: NOW - 120000, activity: "Read a.gd", lastEventMs: NOW - 95000 },
+    { id: "done", model: "haiku", state: "ok", durationMs: 5000, activity: "Bash x" },
+  ];
+  const block = renderRoster({ title: "t", tasks, now: NOW, startedMs: NOW - 120000, quietWarnMs: 60000 });
+  match(block, /◐ {2}busy\s+haiku\s+10s\s+— {2}Grep client\/scripts\/ui$/m);
+  match(block, /◐ {2}stuck\s+haiku\s+120s\s+— {2}⚠ quiet 95s$/m);
+  match(block, /✓ {2}done\s+haiku\s+5s\s+—$/m); // terminal rows never show activity
+});
+
 test("renderRoster: non-ok terminal states carry a state tag; zero tokens omits total", () => {
   const tasks = [
     { id: "a", model: "haiku", state: "failed", durationMs: 1000 },
@@ -136,12 +148,13 @@ test("renderStatus: rebuilds the roster from run.log with live tokens and elapse
       { ts: t0, id: "a", state: "ok", durationMs: 30000, tokens: { input: 1000, output: 500, cacheCreation: 0, cacheRead: 0 } },
       { ts: t0, id: "b", state: "running" },
       { ts: t0, id: "b", event: "tokens", tokens: { input: 7000, output: 300, cacheCreation: 0, cacheRead: 100 } },
+      { ts: new Date(NOW - 5000).toISOString(), id: "b", event: "activity", activity: "Grep src/auth" },
     ];
     writeFileSync(join(rd, "run.log"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
     const out = renderStatus(rd, NOW);
     ok(out.includes(`run: ${rd}`), out);
     match(out, /✓ {2}a\s+haiku\s+30s\s+1\.5k/);
-    match(out, /◐ {2}b\s+glm-5\.2:cloud\s+42s\s+7\.3k/); // elapsed from running ts, live tokens
+    match(out, /◐ {2}b\s+glm-5\.2:cloud\s+42s\s+7\.3k {2}Grep src\/auth/); // live activity from run.log
     match(out, /· {2}c\s+haiku\s+—\s+—/);
     ok(out.includes("1 ok · 1 running · 1 pending · 8.8k tokens"), out);
     ok(out.includes(`results: ${join(rd, "results")}`), out);
