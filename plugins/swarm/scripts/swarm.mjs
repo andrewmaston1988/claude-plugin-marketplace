@@ -51,6 +51,16 @@ function cmdValidate(manifestPath) {
   const cfg = getConfig();
   const plan = loadManifest(manifestPath, cfg, process.cwd());
   out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
+  // The preview IS the approval: with forEach in play, show the worst-case
+  // leaf count the caps permit before anything runs.
+  const fans = plan.tasks.filter((t) => t.forEach);
+  const computes = plan.tasks.filter((t) => t.compute);
+  if (fans.length || computes.length) {
+    const leaves = plan.tasks.filter((t) => !t.compute && !t.forEach).length
+      + fans.reduce((n, t) => n + t.forEach.maxItems, 0);
+    const caps = fans.map((t) => `${t.id} ≤ ${t.forEach.maxItems}`).join(", ");
+    out(`worst case: up to ${leaves} leaves${fans.length ? ` after forEach expansion (${caps})` : ""}${computes.length ? ` · ${computes.length} compute step(s), zero tokens` : ""}`);
+  }
   out(`resultsDir: ${plan.resultsDir}`);
   return 0;
 }
@@ -67,6 +77,7 @@ async function cmdRun(manifestPath, force) {
     summaryPath: r.summaryPath,
     totalTokens: r.summary.totalTokens,
     worktreesKept: r.worktreesKept,
+    truncations: r.summary.truncations,
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");

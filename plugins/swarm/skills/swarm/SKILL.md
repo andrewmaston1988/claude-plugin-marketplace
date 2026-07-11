@@ -66,7 +66,10 @@ The manifest preview plus the mix answer ARE the approval: the user sees every m
     "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 600000,
-    "after": ["scan-b"]                        // dependencies
+    "after": ["scan-b"],                       // dependencies
+    "forEach": { "from": "scan-b", "path": "sites", "maxItems": 30 },  // clone this leaf per array item (see Deterministic steps)
+    "when": { "from": "scan-b", "expr": "length(value) > 20" },        // run only if true; else completes as skipped
+    "compute": "unique_by(deps['scan-b'].sites, 'file')"               // agentless expression step — replaces model+prompt
   }],
   "digest": { "model": "glm-5.2:cloud", "instructions": "…" }   // recommended ≥3 tasks
 }
@@ -139,6 +142,37 @@ Fan-out plus an explicit synthesis leaf (use when synthesis needs richer instruc
       "prompt": "Read {{resultPath:s1}}, {{resultPath:s2}}, {{resultPath:s3}}. Reconcile conflicts and produce the migration checklist." }
   ] }
 ```
+
+### Deterministic steps — find → dedupe → fan out → gate
+
+Three declarative keys cover the logic between leaves that never needed an LLM. Every leaf stays enumerable at approval time: `validate` prints the worst-case leaf count.
+
+```json
+{ "tasks": [
+    { "id": "find-sites", "model": "glm-5.2:cloud",
+      "prompt": "…return ONLY JSON: {\"sites\":[{\"file\":\"…\",\"line\":1}]}" },
+
+    { "id": "dedupe", "after": ["find-sites"],
+      "compute": "unique_by(deps['find-sites'].sites, 'file')" },
+
+    { "id": "fix", "after": ["dedupe"],
+      "forEach": { "from": "dedupe", "path": "", "maxItems": 30 },
+      "model": "glm-5.2:cloud", "isolation": "worktree",
+      "prompt": "Fix the call site at {{item.file}}:{{item.line}} (clone {{index}})" },
+
+    { "id": "escalate", "after": ["fix", "dedupe"],
+      "when": { "from": "dedupe", "expr": "length(value) > 20" },
+      "model": "sonnet", "prompt": "Many sites were touched: {{result:fix}} …" }
+  ] }
+```
+
+- **`compute`** — an agentless step: an expression over `deps['<id>']` (each dependency's JSON output; raw text binds as a string). Zero tokens; the result is a normal task result, so `{{result:}}` and `forEach.from` consume it. Replaces `model`+`prompt` — never combine them.
+- **`forEach`** — clones this leaf once per element of a dependency's JSON array. `from` names a dependency in `after`; `path` selects the array inside its output (`""` = the output itself); **`maxItems` is required — the cap is the approval**. Clones get ids `fix[0]`, `fix[1]`, … and inherit model/effort/fallbackModel/retries/isolation. `{{item}}` (whole element), `{{item.field}}`, `{{index}}` substitute at clone time. Dependents wait for ALL clones; `{{result:fix}}` inlines a JSON array of clone outputs. If the source array exceeds `maxItems` the run proceeds loudly (result field + run.log + closing warning) — never silently.
+- **`when`** — a conditional edge: `expr` runs over `value` (the `from` dependency's JSON output) and **must yield true/false** — write a comparison like `length(value) > 0`, never a bare value. False ⇒ the task completes as `skipped`; dependents still run and `{{result:}}` of a skipped task inlines empty.
+
+**Expression grammar** (same for `when`/`compute`, ≤500 chars): literals, `deps['id']`/`value`/`item` + `.field`/`[0]` access, `== != > >= < <=`, `&& || !`, and functions `length(x)`, `count(arr, pred?)`, `filter(arr, pred)`, `unique_by(arr, 'key')`, `flatten(arr)`, `min/max/sum(arr)`, `contains(a, b)`. Predicates bind `item` per element and must yield true/false. No arithmetic, no user JS. On any validation error, run `validate` and follow the message — it names the field, the fix, and an example.
+
+**`compute` is data plumbing, never judgment.** Dedupe, count, threshold, flatten — yes. "Decide which findings matter" — no: judgment stays in leaves or between waves, where a model can weigh evidence.
 
 ### Multi-wave — two runs, NEVER one manifest
 
