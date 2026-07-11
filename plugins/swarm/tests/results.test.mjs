@@ -244,3 +244,16 @@ test("formatClosing covers digest present, absent, failed, and total tokens", ()
   ok(withTok.includes("tokens: 160.2k (input 100k · output 60.2k)"), withTok);
   ok(!formatClosing(base).includes("tokens:"), "no tokens line when nothing counted");
 });
+
+test("formatClosing: tokens line carries actual-vs-estimate only when an estimate exists", () => {
+  const base = { summaryPath: "S/summary.json", totalTokens: { input: 100000, output: 60200, cacheCreation: 0, cacheRead: 0 } };
+  const over = formatClosing({ ...base, estimate: { tokens: 100000, counted: [], unknown: [] } });
+  ok(over.includes("estimate was ~100k (60% over)"), over);
+  const under = formatClosing({ ...base, estimate: { tokens: 200400, counted: [], unknown: [] } });
+  ok(under.includes("estimate was ~200.4k (20% under)"), under);
+  const exact = formatClosing({ ...base, estimate: { tokens: 160200, counted: [], unknown: [] } });
+  ok(exact.includes("estimate was ~160.2k (on target)"), exact);
+  ok(!formatClosing(base).includes("estimate was"), "no comparison without an estimate");
+  // estimate but zero actual tokens (e.g. all-compute run): no tokens line, no comparison
+  ok(!formatClosing({ summaryPath: "S", estimate: { tokens: 5, counted: [], unknown: [] } }).includes("estimate was"));
+});
