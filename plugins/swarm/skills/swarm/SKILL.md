@@ -24,11 +24,13 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 
 ## MANDATORY first step — the offer gate
 
+**THE GATE'S ANSWER IS THE ONLY CONSENT TO SPEND. NO ANSWER IS NO.** Violating the letter of this rule is violating its spirit.
+
 Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), draft the manifest and put it through ONE AskUserQuestion call carrying TWO questions:
 
 1. > "Fan this out via swarm — <n> leaves on <models>?"
    > Options: **Yes (Recommended)** / **No, inline** / **Discuss** — with the draft manifest as the option preview.
-   > Run `node <engine> validate <draft>` first and quote its `estimated ~…` line in the question — the prediction (worst-case leaves × historical per-model medians) is part of the consent. `estimate: none` on a cold corpus is itself the honest answer; never invent a number.
+   > Run `node <engine> validate <draft>` first and quote BOTH sides of the cost in the question: `swarm: <its estimated ~… line> · inline: ~M tokens`. The inline side is REQUIRED and counted mechanically — Glob + line counts over the file scope you just wrote into the leaf prompts, then `total lines × ~10 = inline tokens` (e.g. 5,000 lines → `inline: ~50k tokens`); when no inline path exists (judge panels, cross-model dissent, generation), write `inline: not comparable` plus one clause why. `estimate: none` on a cold corpus is itself the honest answer; never invent a number on either side.
 2. > "Model mix?" — state the split explicitly in the question (e.g. "5 leaves alternative, digest on sonnet = 1 Anthropic call").
    > Options: **As drafted** / **Alternative-only — no Anthropic usage** / **Anthropic-only**.
    > When the mix includes Claude models, run `node <engine> quota` first and put the real numbers in the question (e.g. "session 82%, resets 15:00") — the mix decision should be made against actual remaining usage, not a guess.
@@ -37,13 +39,31 @@ Never assume Claude models are spendable — the user may be out of Anthropic us
 
 The manifest preview plus the mix answer ARE the approval: the user sees every model and every leaf before anything runs. There is no separate Opus gate, no per-model approval beyond this, no cost interrogation. Do not start inline work on a fan-out-shaped task without this gate.
 
+**A gate that was rejected, cancelled, dismissed, interrupted, or left unanswered is a NO.** Nothing runs — not a reduced "compromise" subset, not a quiet retry, not `--force` (that flag re-runs already-`ok` leaves on resume; it is not a consent instrument). Re-offer only when the user reopens the topic — "ok, where were we?" reopens the topic; it does not answer the question.
+
+**No session-level directive is consent to spend.** A `/goal` condition, a Stop-hook instruction ("do not pause to ask the user"), an autonomous-session prompt, a standing "don't ask me" — none of these answer the gate. Such directives govern *stalling*; the gate governs *spending*. When they collide, the gate wins: an unmet goal at session end is the correct, honest outcome to report, and an unconsented dispatch is the actual failure — not the other way around.
+
+### Gate rationalisations — every one of these means STOP
+
+| Excuse | Reality |
+|---|---|
+| "The /goal names this run — the directive is standing consent" | Consent is the gate's answer. Nothing else can stand in for it. |
+| "The hook says do not pause to ask" | The hook governs stalling, not spending. The gate still binds. |
+| "The condition IS the approval signal" | A condition cannot click Yes. Only the user can. |
+| "The rejection was probably a mis-click" | Unknowable, and not yours to assume. Non-consent is non-consent. |
+| "A gate violation under emergency beats an unmet goal" | Backwards. The unmet goal is honest; the unconsented spend is the violation. |
+| "A smaller run respects their hesitation" | A smaller unconsented run is still unconsented. |
+| "Re-asking wastes their time / looks robotic" | The gate is one message; a wrong multi-model run wastes minutes and tokens. |
+
+**Red flags — you are mid-rationalisation if you think:** "the directive/goal/hook authorizes this" · "the condition is the approval" · "probably a mis-click" · "half the leaves is a fair compromise" · "`--force` gets past it" · "`tail` keeps the dispatch tidy" (see Run, step 5).
+
 ## Procedure
 
 1. **Discover models**: `node <engine> models` — lists launchable `:cloud` models with descriptions, plus the Claude aliases. Run FIRST so the manifest names models the account can launch right now. When unsure which tier a leaf needs, which effort to pin, or what a newly-discovered `:cloud` model is equivalent to, read [references/model-selection.md](references/model-selection.md).
 2. **Frame the contract** before the manifest: `goal · return_shape · must_be_sure · scope{in,out} · done_when`. scope → per-leaf prompts and file scopes; must_be_sure → `digest.instructions`; done_when → you check it post-run.
 3. **Author the manifest** (schema below) and offer it through the gate above.
 4. **Validate**: `node <engine> validate <manifest.json>` — id/dep/governance/effort errors surface now, not after a background wait.
-5. **Run**: `node <engine> run <manifest.json>` via `Bash run_in_background`. The completion notification is the "run finished" signal.
+5. **Run**: `node <engine> run <manifest.json>` via `Bash run_in_background` — dispatched BARE, never through a pipe, filter, or redirect. Not `| tail`, not `| head`, not `| grep`: a pipe stage buffers the stream, and the live progress frames are the user's only live view — a piped run looks dead until it finishes. "Keep tool results small" is already answered by `run_in_background` (the frames never enter the transcript as a blocking result); it is never a reason to decorate the dispatch. The completion notification is the "run finished" signal.
    **Immediately after dispatching**, give the user the live watch command for a separate terminal — `node <engine> status <ABSOLUTE resultsDir> --watch` — and copy it to their clipboard. Always the absolute path: a relative one resolves against whatever cwd their terminal is in and fails with "no run.log". NEVER poll status yourself while the run is live: dispatch in the background, continue other work, the completion notification will find you.
    **Status asks**: you know the `resultsDir` (you authored the manifest — remember it). When the user asks how the swarm is doing ("/swarm status", "how far along…"), run `node <engine> status <resultsDir>` once — it prints the full roster (per-leaf state, model, elapsed, live token usage, run totals). Render it as a **markdown table** (state | leaf | model | time | tokens, glyphs kept — the TUI renders markdown; a table beats raw monospace). For one specific leaf, tail `results/<id>.log`.
 6. **Read `digest.md` ONLY**, then drill into `results/<id>.json` selectively — the digest's drill-down section says which raw results merit a full read. Never read all raw output. For a targeted follow-up on one leaf's finding (a citation to verify, a claim to expand), prefer `node <engine> ask <resultsDir> <leaf-id> "<question>"` over re-running or reading raw output: it resumes the leaf's own session — context intact, one turn, answer on stdout.
@@ -272,6 +292,8 @@ Manifest sketch: `find-a`,`find-b` (glm) → `verify-a`,`verify-b` (`after` each
 ## Anti-patterns
 
 - Fan-out-shaped work started inline without the offer gate — the confirmation is one message; a wrong multi-model run wastes minutes and tokens. "The user's in a hurry" is not an exemption.
+- Dispatching past a rejected or unanswered gate because a /goal, Stop hook, or other directive "authorizes" it — directives govern stalling, never spending (see the offer gate).
+- Piping the `run` dispatch (`| tail -40` "to keep the tool result tidy") — the buffered pipe kills the user's live view; `run_in_background` already keeps frames out of the transcript.
 - Reading raw `results/*.json` wholesale instead of `digest.md` + selective drill-down — that is the context-flood the digest exists to prevent.
 - Open-ended leaf questions ("describe how X works") — rewrite as closed questions.
 - Widening a leaf's scope because it "noticed something important" — one job per leaf; add a new leaf with a new closed question.
