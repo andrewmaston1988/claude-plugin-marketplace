@@ -8,6 +8,7 @@ import { resolveRef, listManifests } from "../src/registry.mjs";
 import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
+import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, renderStatus, readResult } from "../src/results.mjs";
 import { dim } from "../src/ui.mjs";
 
@@ -105,6 +106,12 @@ function cmdValidate(rest) {
   const ret = plan.tasks.filter((t) => t.returns);
   if (ret.length) {
     out(`returns validated: ${ret.map((t) => t.id).join(", ")} (invalid output gets one corrective re-ask, then fails)`);
+  }
+  // N3: mechanical verification is approval-surface behavior — say which tasks
+  // will have their {file,line,quote} citations checked against real files.
+  const cited = ret.filter((t) => t.verifyCitations !== false && citationPaths(t.returns).length);
+  if (cited.length) {
+    out(`citations verified mechanically: ${cited.map((t) => t.id).join(", ")} (file/line/quote checked against the task cwd; refuted citations get one corrective re-ask, then fail)`);
   }
   // The consent line: worst-case leaves × historical per-model medians.
   out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));
