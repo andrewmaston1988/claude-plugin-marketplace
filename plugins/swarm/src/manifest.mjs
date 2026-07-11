@@ -175,6 +175,14 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
   const tasks = raw.tasks.map((t) => {
     const originalCwd = t.cwd ? resolve(cwd, t.cwd) : cwd;
     governanceCheck(t.model, originalCwd, `task '${t.id}'`);
+    if (t.fallbackModel !== undefined) {
+      if (typeof t.fallbackModel !== "string" || !t.fallbackModel) {
+        errors.push(`task '${t.id}': fallbackModel must be a model name string`);
+      } else {
+        // the fallback is a real dispatch target — same governance as the primary
+        governanceCheck(t.fallbackModel, originalCwd, `task '${t.id}' fallback`);
+      }
+    }
     let effCwd = originalCwd;
     let scratchRedirect = false;
     // Write-implies-isolation: a leaf granted write-capable tools without
@@ -188,6 +196,7 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
       id: t.id,
       prompt: t.prompt,
       model: t.model,
+      fallbackModel: typeof t.fallbackModel === "string" ? t.fallbackModel : undefined,
       effort: t.effort,
       allowedTools: t.allowedTools || DEFAULT_TOOLS,
       cwd: effCwd,

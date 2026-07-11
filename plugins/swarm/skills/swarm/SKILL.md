@@ -30,6 +30,7 @@ Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), dra
    > Options: **Yes (Recommended)** / **No, inline** / **Discuss** — with the draft manifest as the option preview.
 2. > "Model mix?" — state the split explicitly in the question (e.g. "5 leaves alternative, digest on sonnet = 1 Anthropic call").
    > Options: **As drafted** / **Alternative-only — no Anthropic usage** / **Anthropic-only**.
+   > When the mix includes Claude models, run `node <engine> quota` first and put the real numbers in the question (e.g. "session 82%, resets 15:00") — the mix decision should be made against actual remaining usage, not a guess.
 
 Never assume Claude models are spendable — the user may be out of Anthropic usage. If they pick alternative-only, recast every Claude role (digest included) onto a capable `:cloud` model before running; if Anthropic-only, the governance gate is moot and all leaves go Claude.
 
@@ -45,7 +46,7 @@ The manifest preview plus the mix answer ARE the approval: the user sees every m
    **Immediately after dispatching**, give the user the live watch command for a separate terminal — `node <engine> status <ABSOLUTE resultsDir> --watch` — and copy it to their clipboard. Always the absolute path: a relative one resolves against whatever cwd their terminal is in and fails with "no run.log". NEVER poll status yourself while the run is live: dispatch in the background, continue other work, the completion notification will find you.
    **Status asks**: you know the `resultsDir` (you authored the manifest — remember it). When the user asks how the swarm is doing ("/swarm status", "how far along…"), run `node <engine> status <resultsDir>` once — it prints the full roster (per-leaf state, model, elapsed, live token usage, run totals). Render it as a **markdown table** (state | leaf | model | time | tokens, glyphs kept — the TUI renders markdown; a table beats raw monospace). For one specific leaf, tail `results/<id>.log`.
 6. **Read `digest.md` ONLY**, then drill into `results/<id>.json` selectively — the digest's drill-down section says which raw results merit a full read. Never read all raw output. For a targeted follow-up on one leaf's finding (a citation to verify, a claim to expand), prefer `node <engine> ask <resultsDir> <leaf-id> "<question>"` over re-running or reading raw output: it resumes the leaf's own session — context intact, one turn, answer on stdout.
-7. A failed run is reported with its failures — never presented as complete. Offer the choice via AskUserQuestion: **Resume (Recommended)** (re-`run` skips `ok`; `rate-limited` retries) / **Inspect failures** (open the failed `results/<id>.json|.log`) / **Accept partial** — failure list as the preview.
+7. A failed run is reported with its failures — never presented as complete. Offer the choice via AskUserQuestion: **Resume (Recommended)** (re-`run` skips `ok`; `rate-limited` retries) / **Inspect failures** (open the failed `results/<id>.json|.log`) / **Accept partial** — failure list as the preview. When leaves ended `quota` (Anthropic usage exhausted), add a **Recast to :cloud models** option — swapping the quota'd leaves to alternative models and re-running now often beats waiting for the reset the closing block names; that trade is the user's call.
 8. After a substantial clean run you may offer (never auto-create) an HTML run report as an Artifact — leaf cards from `summary.json`, digest headlines, verdict colours — when the Artifact tool is available.
 
 ## Manifest quick reference
@@ -62,6 +63,7 @@ The manifest preview plus the mix answer ARE the approval: the user sees every m
     "allowedTools": "Read,Grep,Glob",          // default: read-only set
     "cwd": "C:/code/somerepo",                 // default: manifest's cwd
     "isolation": "worktree",                   // implementation leaves only
+    "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 600000,
     "after": ["scan-b"]                        // dependencies

@@ -11,7 +11,7 @@ const LOG = [
   '{"id":"b","state":"running"}',
   '{"id":"b","event":"tokens","tokens":{"input":5000,"output":1000,"cacheCreation":0,"cacheRead":0}}',
   '{"id":"c","state":"rate-limited"}',
-  '{"id":"d","state":"failed:timeout"}',
+  '{"id":"d","state":"quota"}',
 ].join("\n");
 
 test("glyphFromLog: counts per state with pending derived from run-start, plus token total", () => {
@@ -20,7 +20,7 @@ test("glyphFromLog: counts per state with pending derived from run-start, plus t
   assert.match(g, /1✓/);
   assert.match(g, /1▶/);
   assert.match(g, /1⧖/);
-  assert.match(g, /1✗/);
+  assert.match(g, /1⏳/); // d quota
   assert.match(g, /1·/); // e pending
   assert.match(g, /18k/); // 12k final (a) + 6k live (b)
 });

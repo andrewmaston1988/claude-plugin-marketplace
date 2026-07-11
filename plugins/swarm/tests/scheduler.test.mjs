@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, rejects } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -150,6 +150,122 @@ test("classifyFailure matrix", () => {
   equal(classifyFailure({ timedOut: false, output: "You hit a rate limit" }), "rate-limited");
   equal(classifyFailure({ timedOut: false, output: "too many requests" }), "rate-limited");
   equal(classifyFailure({ timedOut: false, output: "segfault" }), "failed");
+  // quota outranks rate-limit: exhaustion is temporal, not transient
+  equal(classifyFailure({ timedOut: false, output: "Claude AI usage limit reached|1751210400" }), "quota");
+  equal(classifyFailure({ timedOut: false, output: "You've hit your limit; rate limit? no — resets at 3pm" }), "quota");
+});
+
+test("retry: rate-limited leaf retries with backoff and succeeds; dependents unharmed", async () => {
+  const dir = tmp();
+  try {
+    let calls = 0;
+    const spawn = fakeSpawnFactory(() => (++calls < 3 ? { exit: 1, output: "429 rate limit" } : { output: "recovered" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("flaky"), task("child", { after: ["flaky"] })]);
+    const r = await runPlan(p, { ...CFG, retry: { rateLimited: 2, backoffMs: 20 } }, io);
+    equal(calls, 4); // flaky x3 + child x1
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.flaky, "ok");
+    equal(states.child, "ok");
+    ok(io.snapshots.some((s) => s.includes("↻ retry")), "retrying visible in roster");
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    ok(logLines.some((l) => l.id === "flaky" && l.state === "retrying"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("retry: exhausted retries land as rate-limited terminal state", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ exit: 1, output: "429 rate limit" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("doomed")]);
+    const r = await runPlan(p, { ...CFG, retry: { rateLimited: 2, backoffMs: 10 } }, io);
+    equal(spawn.calls.length, 3); // initial + 2 retries
+    equal(r.summary.tasks[0].state, "rate-limited");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fallback: quota leaf re-dispatches immediately on its declared fallbackModel", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) =>
+      call.args[call.args.indexOf("--model") + 1] === "sonnet"
+        ? { exit: 1, output: "Claude AI usage limit reached|1751210400" }
+        : { output: "fallback did it" });
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("judge", { model: "sonnet", fallbackModel: "haiku" })]);
+    const r = await runPlan(p, { ...CFG, retry: { backoffMs: 10 } }, io);
+    equal(spawn.calls.length, 2);
+    equal(spawn.calls[1].args[spawn.calls[1].args.indexOf("--model") + 1], "haiku");
+    equal(r.summary.tasks[0].state, "ok");
+    equal(readResult(p.resultsDir, "judge").output, "fallback did it");
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const fb = logLines.find((l) => l.event === "fallback");
+    deepEqual({ from: fb.from, to: fb.to }, { from: "sonnet", to: "haiku" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("quota fail-fast: first Claude quota pre-emptively marks pending Claude leaves without fallback", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ exit: 1, output: "usage limit reached — resets at 3pm" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [
+      task("first", { model: "sonnet" }),
+      task("second", { model: "haiku" }),
+      task("saved", { model: "opus", fallbackModel: "haiku" }),
+    ], { concurrency: 1 });
+    const r = await runPlan(p, CFG, io);
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.first, "quota");
+    equal(states.second, "quota"); // never dispatched
+    // 'saved' has a fallback: it dispatches on the fallback (also quota here, but it tried)
+    ok(spawn.calls.length <= 3, `second must not burn a dispatch (got ${spawn.calls.length})`);
+    const res = readResult(p.resultsDir, "first");
+    equal(res.quotaResetsAt, "3pm");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("preflight: exhausted quota aborts before dispatch when Claude leaves lack fallbacks", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "creds.json"), JSON.stringify({ claudeAiOauth: { accessToken: "t" } }));
+    const usage = { limits: [{ kind: "session", percent: 100, resets_at: "2026-07-11T15:00:00Z", severity: "exceeded" }] };
+    const spawn = fakeSpawnFactory(() => ({ output: "never" }));
+    const io = makeIo(spawn, {
+      fetch: async () => ({ ok: true, status: 200, json: async () => usage }),
+      env: { PATH: process.env.PATH, SWARM_HOME: home, SWARM_CREDENTIALS: join(home, "creds.json") },
+    });
+    const p = plan(dir, [task("c", { model: "sonnet" })]);
+    await rejects(() => runPlan(p, CFG, io), /usage exhausted|cannot dispatch/i);
+    equal(spawn.calls.length, 0);
+
+    // 80%+ warns but proceeds — fresh SWARM_HOME so the cached 100% verdict
+    // from the first half doesn't shadow the new endpoint response
+    const home2 = join(dir, "home2");
+    mkdirSync(home2, { recursive: true });
+    const usage80 = { limits: [{ kind: "session", percent: 85, resets_at: "2026-07-11T15:00:00Z", severity: "warning" }] };
+    const io2 = makeIo(fakeSpawnFactory(() => ({ output: "fine" })), {
+      fetch: async () => ({ ok: true, status: 200, json: async () => usage80 }),
+      env: { PATH: process.env.PATH, SWARM_HOME: home2, SWARM_CREDENTIALS: join(home, "creds.json") },
+    });
+    const p2 = plan(dir, [task("c2", { model: "sonnet" })], { resultsDir: join(dir, "run2") });
+    const r2 = await runPlan(p2, CFG, io2);
+    equal(r2.summary.tasks[0].state, "ok");
+    ok(io2.lines.some((l) => l.includes("85%")), io2.lines.join("|"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("timeout kills the task -> failed:timeout (real shim)", async () => {

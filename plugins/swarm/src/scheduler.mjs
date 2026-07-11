@@ -13,10 +13,14 @@ import {
   addTokens, emptyTokens, tokenTotal,
 } from "./stream.mjs";
 import { createSnapshotWriter } from "./ui.mjs";
+import { matchQuota, parseQuotaReset, checkQuota, DEFAULT_QUOTA_PATTERNS } from "./quota.mjs";
+import { swarmHome } from "./config.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const OK_STATES = new Set(["ok", "skipped"]);
+// Non-terminal, non-doomed: a leaf waiting out a backoff or model fallback.
+const ALIVE_STATES = new Set(["pending", "running", "retrying"]);
 const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 
 // Default io: real spawn (with Windows .cmd resolution), real fetch/clock,
@@ -46,11 +50,13 @@ export function substituteTemplates(prompt, resultsDir, cap) {
   });
 }
 
-// Classify a non-zero completion. Rate-limit-shaped failures are 'rate-limited'
-// — retryable via resume — instead of 'failed'. The only error-classification
+// Classify a non-zero completion. Quota exhaustion outranks rate limits (a
+// message can mention both; exhaustion is temporal — hours — while rate limits
+// clear in seconds and are worth in-run retries). The only error-classification
 // logic in the engine.
-export function classifyFailure({ timedOut, output }) {
+export function classifyFailure({ timedOut, output }, quotaPatterns = DEFAULT_QUOTA_PATTERNS) {
   if (timedOut) return "failed:timeout";
+  if (matchQuota(output, quotaPatterns)) return "quota";
   if (RATE_LIMIT_RE.test(output || "")) return "rate-limited";
   return "failed";
 }
@@ -163,6 +169,39 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     }
   }
 
+  // Quota preflight, once per run, only when any Claude-model task exists.
+  // Best-effort (endpoint failure -> proceed silently; the mid-run 'quota'
+  // classification is the backstop). Exhausted quota with undefended Claude
+  // leaves aborts BEFORE dispatch — a run that would deterministically fail
+  // should fail in one second with the reset time, not after four minutes.
+  const claudeTasks = tasks.filter((t) => isClaudeModel(t.model));
+  if (claudeTasks.length && cfg.quotaPreflight !== false) {
+    const env = io.env || process.env;
+    const q = await checkQuota({
+      cfg,
+      fetch: io.fetch,
+      now: io.now,
+      cachePath: join(swarmHome(env), "quota-cache.json"),
+      ...(env.SWARM_CREDENTIALS && { credentialsPath: env.SWARM_CREDENTIALS }),
+    });
+    if (q?.exhausted) {
+      const doomed = claudeTasks.filter((t) => !t.fallbackModel);
+      if (doomed.length) {
+        throw new Error(
+          `Anthropic usage exhausted (${q.worst.kind} at ${q.worst.percent}%` +
+          `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — ` +
+          `${doomed.length} Claude leaf(s) cannot dispatch: ${doomed.map((t) => t.id).join(", ")}. ` +
+          `Recast to :cloud models, add fallbackModel, or re-run after reset.`
+        );
+      }
+    } else if (q && q.worst.percent >= (cfg.quotaWarnPct ?? 80)) {
+      io.stdout(
+        `⚠ Anthropic usage at ${q.worst.percent}% (${q.worst.kind}` +
+        `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — Claude leaves may hit quota mid-run`
+      );
+    }
+  }
+
   const started = new Date().toISOString();
   // run-start line lets `status` derive pending tasks (ids never seen since
   // the latest run-start are pending) and carries models for the roster view.
@@ -175,6 +214,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   const activityMap = new Map();  // id -> latest tool-call description
   const lastEventAt = new Map();  // id -> ms of last stream event (liveness)
   const lastActivityLogAt = new Map();
+  const attempts = new Map();     // id -> retries consumed on the current model
+  const usedFallback = new Set(); // ids already switched to their fallbackModel
+  let retryWaiting = 0;           // leaves sleeping out a backoff
+  let wake = () => {};            // resolves the loop's idle wait when a retry re-arms
   const worktreesKept = [];
   let digestPath = null;
   let digestFailed = false;
@@ -236,6 +279,24 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     },
   });
 
+  // Park a leaf for delayMs, then hand it back to the scheduler loop as
+  // pending. The concurrency slot frees during the wait (the launch promise
+  // resolves); depsDoomed treats 'retrying' as alive so dependents hold.
+  const scheduleRetry = (task, delayMs, note) => {
+    retryWaiting++;
+    state.set(task.id, "retrying");
+    activityMap.set(task.id, note);
+    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, state: "retrying" });
+    paint();
+    const timer = setTimeout(() => {
+      retryWaiting--;
+      state.set(task.id, "pending");
+      activityMap.delete(task.id);
+      wake();
+    }, delayMs);
+    if (timer.unref) timer.unref();
+  };
+
   // Resume: an existing ok result satisfies the task without re-running it —
   // its recorded duration and tokens still count in roster and summary.
   if (!force) {
@@ -259,7 +320,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   const depsSatisfied = (t) => t.after.every((d) => OK_STATES.has(state.get(d)));
   const depsDoomed = (t) => t.after.some((d) => {
     const s = state.get(d);
-    return s !== undefined && !OK_STATES.has(s) && s !== "pending" && s !== "running";
+    return s !== undefined && !OK_STATES.has(s) && !ALIVE_STATES.has(s);
   });
 
   const launch = (task) => {
@@ -303,6 +364,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
       result.allowedTools = task.allowedTools;
+
+      const st = r.ok ? "ok" : classifyFailure({ timedOut: r.timedOut, output: r.raw }, cfg.quotaPatterns);
+      if (st === "quota") {
+        const resetsAt = parseQuotaReset(r.raw);
+        if (resetsAt) result.quotaResetsAt = resetsAt;
+      }
       const parsed = tryParseJson(r.output);
       if (parsed !== undefined) result.outputJson = parsed;
 
@@ -314,12 +381,51 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
       writeResult(plan.resultsDir, task.id, result);
 
+      if (!r.ok) {
+        const retry = cfg.retry || {};
+        const n = attempts.get(task.id) || 0;
+        // transient failures retry in-run with backoff; spawn errors (exit
+        // null, not killed) get one immediate-ish retry for environment flakes
+        if (st === "rate-limited" && n < (retry.rateLimited ?? 2)) {
+          attempts.set(task.id, n + 1);
+          const delay = (retry.backoffMs ?? 30000) * Math.pow(3, n);
+          scheduleRetry(task, delay, `↻ retry ${n + 1}/${retry.rateLimited ?? 2} in ${Math.round(delay / 1000)}s`);
+          return task.id;
+        }
+        if (st === "failed" && r.exit === null && !r.timedOut && n < (retry.spawnError ?? 1)) {
+          attempts.set(task.id, n + 1);
+          scheduleRetry(task, 2000, "↻ retry after spawn error");
+          return task.id;
+        }
+        // quota (immediately) or exhausted rate-limit retries: one switch to
+        // the manifest-declared fallback — the engine never substitutes a
+        // model the user didn't approve
+        if ((st === "quota" || st === "rate-limited") && task.fallbackModel && !usedFallback.has(task.id)) {
+          usedFallback.add(task.id);
+          appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "fallback", from: task.model, to: task.fallbackModel });
+          task.model = task.fallbackModel;
+          attempts.set(task.id, 0);
+          scheduleRetry(task, 10, `↯ fallback → ${task.model}`);
+          return task.id;
+        }
+        // terminal quota: pre-emptively fail-fast every still-pending leaf in
+        // the same model family without a fallback — one failure, one lesson
+        if (st === "quota") {
+          const family = isClaudeModel(task.model);
+          for (const t of tasks) {
+            if (state.get(t.id) === "pending" && isClaudeModel(t.model) === family && !t.fallbackModel) {
+              record(t, "quota");
+            }
+          }
+        }
+      }
+
       if (task.isDigest) {
         if (r.ok) digestPath = writeDigestMd(plan.resultsDir, r.output);
         else digestFailed = true;
       }
 
-      record(task, r.ok ? "ok" : classifyFailure({ timedOut: r.timedOut, output: r.raw }), r.durationMs, r.tokens);
+      record(task, st, r.durationMs, r.tokens);
       return task.id;
     })();
     running.set(task.id, promise);
@@ -344,9 +450,16 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (state.get(t.id) === "pending" && depsSatisfied(t)) launch(t);
     }
 
-    if (running.size === 0) break;
-    const finished = await Promise.race(running.values());
-    running.delete(finished);
+    if (running.size === 0 && retryWaiting === 0) break;
+    if (running.size > 0) {
+      const finished = await Promise.race(running.values());
+      running.delete(finished);
+    } else {
+      // nothing running, but leaves are sleeping out a backoff — idle until
+      // the next retry timer re-arms one as pending
+      await new Promise((resolve) => { wake = resolve; });
+      wake = () => {};
+    }
   }
   clearInterval(heartbeat);
 
