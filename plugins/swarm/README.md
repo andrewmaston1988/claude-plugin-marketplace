@@ -18,28 +18,29 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 
 | | swarm | Workflow |
 |---|---|---|
-| ***Either tool does these well*** | | |
-| Parallel fan-out, concurrency caps, dependency ordering, pipelining | ✅ | ✅ |
+| ***Parity — either tool does these well*** | | |
+| Parallel fan-out — concurrency caps, dependency ordering, pipelining | ✅ | ✅ |
 | Per-agent model + effort selection | ✅ | ✅ |
-| Git-worktree isolation for write-capable agents | ✅ | ✅ |
-| Agents are full headless Claude Code sessions (complete tool roster) | ✅ | ✅ |
-| Deterministic mid-run steps — dynamic fan-out over a discovered list, conditional gates, dedupe/count/threshold computes | ✅ `forEach`/`when`/`compute` — declarative, hard-capped, leaf count previewable at approval | ✅ full JS scripting |
-| Schema-validated structured output with corrective retry | ✅ `returns` JSON-Schema subset — one teaching re-ask via session resume | ✅ `agent({schema})` |
+| Worktree isolation for write-capable agents | ✅ | ✅ |
+| Full headless Claude Code agents — complete tool roster | ✅ | ✅ |
+| Deterministic mid-run steps — fan out over a discovered list, gate, dedupe/count | ✅ `forEach`/`when`/`compute` | ✅ full JS |
+| Schema-validated output — corrective retry on mismatch | ✅ `returns` | ✅ `agent({schema})` |
+| One-level composition — a reusable sub-pipeline as one node | ✅ `manifest` tasks | ✅ `workflow()` |
 | ***Workflow's ground*** | | |
-| Zero setup — built into the harness, runs anywhere Claude Code does | ❌ alternative models need a provider endpoint + `allowedRoots` opt-in | ✅ |
-| Results return in-conversation | ⚠️ via result files + digest | ✅ |
-| Session-connected MCP tools inside agents | ❌ structurally out of reach for headless leaves | ✅ |
-| Unbounded control flow — `budget.remaining()` loops, loop-until-dry, arbitrary JS between agents | ❌ deliberately: the manifest preview is the approval | ✅ |
-| Composition — nested workflows, custom agent types | ❌ | ✅ |
+| Zero setup — runs anywhere Claude Code does | ❌ needs a provider endpoint | ✅ |
+| Results return in-conversation | ⚠️ files + digest | ✅ |
+| Session-connected MCP tools inside agents | ❌ | ✅ |
+| Unbounded control flow — loops, budget-reactive spawning, arbitrary JS | ❌ by design | ✅ |
+| Custom agent types | ❌ | ✅ |
 | ***Swarm's ground*** | | |
-| Alternative-model execution (GLM, MiniMax, Kimi, …) | ✅ core purpose | ❌ Claude models only |
-| Data-governance gate — open models deny-by-default per directory root | ✅ | — (moot: Claude-only) |
-| Durable runs — on-disk results, resume from any session | ✅ | ⚠️ same-session resume |
-| Interrogate a finished agent, context intact (`ask`) | ✅ even days later | ❌ agents end with their run |
-| Self-healing — backoff retries, declared fallbacks, quota preflight + reset times | ✅ | ❌ errored agents return null |
-| Per-agent tokens/cost + live roster (elapsed, tool call, hang warnings) | ✅ | ⚠️ aggregate budget, coarser progress |
-| Predictive cost consent — estimate at approval from run history, single-shot mid-run projection warn, actual-vs-estimate close | ✅ token-denominated; `$` only when real-key billed | ❌ budget is reactive and user-supplied |
-| Weak-model authorability | ✅ fill-in-the-blanks manifest; validation errors teach (field + fix + example) | ⚠️ correct imperative JS is a higher bar |
+| Alternative models — GLM, MiniMax, Kimi, … | ✅ core purpose | ❌ Claude only |
+| Data-governance gate — open models deny-by-default outside allow-listed roots | ✅ | — |
+| Durable runs — on-disk results, resume from any session | ✅ | ⚠️ same session |
+| Interrogation — ask a finished agent a follow-up, its context intact | ✅ `ask` | ❌ |
+| Self-healing — backoff retries, declared fallbacks, quota preflight | ✅ | ❌ |
+| Live observability — per-agent roster, tokens/cost, hang warnings | ✅ | ⚠️ coarser |
+| Predictive cost consent — estimate at approval, one projection warn, actual-vs-estimate close | ✅ | ❌ reactive only |
+| Weak-model authorability — fill-in-the-blanks JSON; validation errors teach | ✅ | ⚠️ JS bar |
 
 Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, generation, mechanical implementation sweeps, and now discover-then-map pipelines — is swarm's shape, especially when alternative models are armed. Reach for Workflow when the orchestration itself needs unbounded loops, session MCP tools, or budget-driven control flow — or when you simply want zero setup.
 

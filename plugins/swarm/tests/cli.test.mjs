@@ -509,3 +509,35 @@ test("run: closing tokens line compares actual vs estimate; projection warn reac
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("validate: composed leaves multiply into the worst case; child errors exit 1 prefixed", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "child.json"), JSON.stringify({
+      tasks: [
+        { id: "scan", prompt: "scan {{item}}", model: "haiku" },
+        { id: "sum", prompt: "sum {{result:scan}}", model: "haiku", after: ["scan"] },
+      ],
+    }));
+    const p = join(dir, "parent.json");
+    writeFileSync(p, JSON.stringify({
+      tasks: [
+        { id: "seed", prompt: "list", model: "haiku" },
+        { id: "audit", manifest: "child.json", after: ["seed"], forEach: { from: "seed", path: "", maxItems: 3 } },
+      ],
+    }));
+    const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(v.status, 0, v.stderr);
+    ok(v.stdout.includes("up to 7 leaves"), v.stdout);               // 1 + 3×2
+    ok(v.stdout.includes("audit ≤ 3 × 2 child leaves"), v.stdout);   // composition detail
+
+    writeFileSync(join(dir, "bad-child.json"), JSON.stringify({ tasks: [{ id: "scan", model: "haiku" }] }));
+    const bad = join(dir, "bad-parent.json");
+    writeFileSync(bad, JSON.stringify({ tasks: [{ id: "audit", manifest: "bad-child.json" }] }));
+    const b = runCli(["validate", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(b.status, 1);
+    ok(b.stderr.includes("task 'audit' -> child 'scan'"), b.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

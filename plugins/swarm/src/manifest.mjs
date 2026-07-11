@@ -24,8 +24,14 @@ const ITEM_TEMPLATE_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/;
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
-  "returns",
+  "returns", "manifest",
 ]);
+// A manifest task is an agentless container for its child's tasks — every
+// leaf-shaped key on the node itself is an authoring mistake.
+const MANIFEST_BANNED_KEYS = [
+  "prompt", "model", "compute", "returns", "isolation", "allowedTools",
+  "outputDir", "effort", "fallbackModel",
+];
 
 export function hasWriteTools(allowedTools) {
   return String(allowedTools || "")
@@ -91,6 +97,325 @@ function detectCycle(tasks) {
   return null;
 }
 
+// Fence-tolerant JSON read — manifests may be model-authored, and models fence
+// JSON in markdown; extend the same tolerance the engine gives leaf output.
+function readManifestJson(path) {
+  const text = readFileSync(path, "utf8");
+  const fenced = text.match(/^\s*```(?:json)?\s*([\s\S]*?)```\s*$/);
+  return JSON.parse(fenced ? fenced[1] : text);
+}
+
+// ── shared per-task validation ────────────────────────────────────────────────
+// One rule set for parent and child task lists. `label(t)` renders the error
+// prefix — child errors read "task 'audit' -> child 'scan': …".
+
+function validateTaskShapes(rawTasks, errors, label) {
+  const seen = new Set();
+  for (const t of rawTasks) {
+    const l = label(t);
+    for (const k of Object.keys(t || {})) {
+      if (!KNOWN_TASK_KEYS.has(k)) {
+        errors.push(`${l}: unknown key '${k}' — known keys: ${[...KNOWN_TASK_KEYS].join(", ")}`);
+      }
+    }
+    if (typeof t.id === "string" && CLONE_ID_RE.test(t.id)) {
+      errors.push(`${l}: ids ending in [n] are reserved for forEach clones`);
+    } else if (typeof t.id === "string" && t.id.startsWith("__")) {
+      errors.push(`${l}: ids starting with '__' are reserved for engine-synthesized tasks`);
+    } else if (!t.id || typeof t.id !== "string" || !ID_RE.test(t.id)) {
+      errors.push(`${l}: id is required and must be filename-safe ([A-Za-z0-9._-], not starting with '.'/'-')`);
+    } else if (seen.has(t.id)) {
+      errors.push(`${l}: duplicate id`);
+    }
+    seen.add(t.id);
+    if (t.manifest !== undefined) {
+      if (typeof t.manifest !== "string" || !t.manifest) {
+        errors.push(`${l}: manifest must be a path string — e.g. "manifest": "audit-one-repo.json"`);
+      }
+      const banned = MANIFEST_BANNED_KEYS.filter((k) => t[k] !== undefined);
+      for (const k of banned) {
+        errors.push(`${l}: the manifest task is an agentless container — ${k} belongs on the child's own tasks`);
+      }
+    } else if (t.compute !== undefined) {
+      // Agentless: a compute step never spawns a leaf, so leaf-only keys are
+      // authoring mistakes worth naming individually.
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "isolation"]
+        .filter((k) => t[k] !== undefined);
+      if (agentKeys.length) {
+        errors.push(`${l}: compute tasks are agentless — remove ${agentKeys.join("/")}; the expression runs in the engine, no leaf is spawned`);
+      }
+      if (t.forEach !== undefined) {
+        errors.push(`${l}: a task cannot be both forEach and compute — compute the list in one step, forEach over it in the next`);
+      }
+    } else {
+      if (!t.prompt || typeof t.prompt !== "string") errors.push(`${l}: prompt is required`);
+      if (!t.model || typeof t.model !== "string") errors.push(`${l}: model is required`);
+    }
+    if (t.isolation !== undefined && t.isolation !== "worktree") {
+      errors.push(`${l}: isolation must be "worktree" when present (got ${JSON.stringify(t.isolation)})`);
+    }
+    if (t.timeoutMs !== undefined && (!Number.isInteger(t.timeoutMs) || t.timeoutMs < 1)) {
+      errors.push(`${l}: timeoutMs must be a positive integer`);
+    }
+  }
+}
+
+// `itemAllowed`: child tasks under a forEach parent node may read {{item}}
+// even without their own forEach — the parent substitutes at clone time.
+function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } = {}) {
+  const ids = new Set(rawTasks.map((t) => t.id));
+  for (const t of rawTasks) {
+    const l = label(t);
+    if (t.after !== undefined && !Array.isArray(t.after)) {
+      errors.push(`${l}: after must be an array of task ids`);
+      continue;
+    }
+    for (const dep of t.after || []) {
+      if (!ids.has(dep)) errors.push(`${l}: unknown dependency '${dep}' in after`);
+      if (dep === t.id) errors.push(`${l}: cannot depend on itself`);
+    }
+    // Template refs may only name declared dependencies — anything else can't
+    // be guaranteed complete when the prompt is materialized.
+    const deps = new Set(t.after || []);
+    for (const m of String(t.prompt || "").matchAll(TEMPLATE_RE)) {
+      if (!deps.has(m[2])) {
+        errors.push(`${l}: template {{${m[1]}:${m[2]}}} references '${m[2]}' which is not a declared dependency in after`);
+      }
+    }
+    if (t.compute === undefined && t.manifest === undefined && t.effort !== undefined && !isValidEffort(t.model, t.effort)) {
+      const tier = tierFromModel(t.model);
+      errors.push(`${l}: effort '${t.effort}' is not valid for ${tier} (allowed: ${TIER_EFFORTS[tier].join(", ")})`);
+    }
+
+    // {{item}}/{{index}} substitute at clone time — outside a forEach task they
+    // would reach the leaf as literal braces, which is always an authoring bug.
+    if (t.forEach === undefined && !itemAllowed && ITEM_TEMPLATE_RE.test(String(t.prompt || ""))) {
+      errors.push(`${l}: {{item}}/{{index}} placeholders are only substituted in forEach tasks — add a forEach block or remove them`);
+    }
+
+    if (t.when !== undefined) {
+      if (!t.when || typeof t.when !== "object" || Array.isArray(t.when)) {
+        errors.push(`${l}: when must be an object — e.g. "when": {"from": "scan", "expr": "length(value) > 0"}`);
+      } else {
+        for (const k of Object.keys(t.when)) {
+          if (k !== "from" && k !== "expr") {
+            errors.push(`${l}: unknown key '${k}' in when — the shape is {"from": "<dep id>", "expr": "<expression over value>"}`);
+          }
+        }
+        if (typeof t.when.from !== "string" || !t.when.from) {
+          errors.push(`${l}: when.from is required — the dependency whose output gates this task; e.g. "when": {"from": "scan", "expr": "length(value) > 0"}`);
+        } else if (!deps.has(t.when.from)) {
+          errors.push(`${l}: when.from '${t.when.from}' must be a declared dependency — add '${t.when.from}' to after`);
+        }
+        if (typeof t.when.expr !== "string" || !t.when.expr) {
+          errors.push(`${l}: when.expr is required — a boolean expression over value; e.g. "expr": "length(value) > 0"`);
+        } else {
+          try {
+            parseExpr(t.when.expr);
+            for (const name of collectIdents(t.when.expr)) {
+              if (name === "deps") {
+                errors.push(`${l}: a when expression reads only 'value' (the output of when.from) — deps[...] is available in compute expressions`);
+              } else if (name !== "value" && name !== "item") {
+                errors.push(`${l}: unknown identifier '${name}' in when.expr — available: value (the output of when.from), item (inside predicates)`);
+              }
+            }
+          } catch (e) {
+            errors.push(`${l}: when.expr — ${e.message}`);
+          }
+        }
+      }
+    }
+
+    if (t.forEach !== undefined && t.compute === undefined) {
+      if (!t.forEach || typeof t.forEach !== "object" || Array.isArray(t.forEach)) {
+        errors.push(`${l}: forEach must be an object — e.g. "forEach": {"from": "dedupe", "path": "sites", "maxItems": 30}`);
+      } else {
+        for (const k of Object.keys(t.forEach)) {
+          if (k !== "from" && k !== "path" && k !== "maxItems") {
+            errors.push(`${l}: unknown key '${k}' in forEach — the shape is {"from": "<dep id>", "path": "<field of its JSON, '' for the value itself>", "maxItems": <cap>}`);
+          }
+        }
+        if (typeof t.forEach.from !== "string" || !t.forEach.from) {
+          errors.push(`${l}: forEach.from is required — the dependency whose JSON array this task maps over`);
+        } else if (!deps.has(t.forEach.from)) {
+          errors.push(`${l}: forEach.from '${t.forEach.from}' must be a declared dependency — add '${t.forEach.from}' to after`);
+        }
+        if (t.forEach.maxItems === undefined) {
+          errors.push(`${l}: forEach.maxItems is required — the cap IS the run's approval (the preview must show a worst-case leaf count); e.g. "forEach": {"from": "dedupe", "maxItems": 30}`);
+        } else if (!Number.isInteger(t.forEach.maxItems) || t.forEach.maxItems < 1) {
+          errors.push(`${l}: forEach.maxItems must be a positive integer (got ${JSON.stringify(t.forEach.maxItems)})`);
+        }
+        if (t.forEach.path !== undefined && typeof t.forEach.path !== "string") {
+          errors.push(`${l}: forEach.path must be a string field path into the source JSON ('' selects the value itself)`);
+        }
+      }
+    }
+
+    if (t.compute !== undefined && t.manifest === undefined) {
+      if (typeof t.compute !== "string" || !t.compute) {
+        errors.push(`${l}: compute must be a string expression — e.g. "compute": "unique_by(deps['scan'].sites, 'file')"`);
+      } else {
+        try {
+          parseExpr(t.compute);
+          const { refs, dynamic } = collectDepRefs(t.compute);
+          if (dynamic) {
+            errors.push(`${l}: deps must be accessed with a literal task id like deps['scan'] — computed keys can't be checked at validate time`);
+          }
+          for (const ref of refs) {
+            if (!deps.has(ref)) {
+              errors.push(`${l}: compute reads deps['${ref}'] but '${ref}' is not a declared dependency — add it to after`);
+            }
+          }
+          for (const name of collectIdents(t.compute)) {
+            if (name === "value") {
+              errors.push(`${l}: 'value' is not available in compute — read dependencies via deps['id'] ('value' is the when-gate input)`);
+            } else if (name !== "deps" && name !== "item") {
+              errors.push(`${l}: unknown identifier '${name}' in compute — available: deps['id'] and item (inside predicates)`);
+            }
+          }
+        } catch (e) {
+          errors.push(`${l}: compute — ${e.message}`);
+        }
+      }
+    }
+
+    if (t.returns !== undefined && t.manifest === undefined) {
+      if (t.compute !== undefined) {
+        // compute output is a pure function of its inputs — a wrong shape
+        // there means the expression is wrong, not the data.
+        errors.push(`${l}: compute output is engine-deterministic — put 'returns' on the leaf task that produces the data`);
+      } else {
+        errors.push(...validateSchemaShape(t.returns).map((e) => `${l}: ${e}`));
+      }
+    }
+  }
+}
+
+// ── shared normalization ──────────────────────────────────────────────────────
+// Governance gate — deny-by-default for non-Claude models. The employer's
+// data agreement covers Anthropic only; open-model tasks may run only under
+// directories the user has explicitly allow-listed. Checked against the
+// task's ORIGINAL effective cwd (before any scratch redirect).
+
+function checkGovernance(model, effCwd, l, cfg, errors) {
+  if (isClaudeModel(model)) return;
+  const allowedRoots = cfg?.provider?.allowedRoots || [];
+  if (!allowedRoots.some((root) => isUnderRoot(effCwd, root))) {
+    errors.push(
+      `${l}: model '${model}' is not a Claude model and its cwd '${effCwd}' is not under any ` +
+      `provider.allowedRoots entry — blocked by data governance policy (only Anthropic is covered ` +
+      `by the data agreement). Configure provider.allowedRoots in ~/.swarm/config.json to permit open-model dispatch there.`
+    );
+  }
+}
+
+function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans }) {
+  const governanceCheck = (model, effCwd, l) => checkGovernance(model, effCwd, l, cfg, errors);
+
+  return rawTasks.map((t) => {
+    const l = label(t);
+    const isCompute = t.compute !== undefined;
+    const isManifest = t.manifest !== undefined;
+    const originalCwd = t.cwd ? resolve(cwd, t.cwd) : cwd;
+    // compute/manifest nodes spawn nothing themselves and no code leaves the
+    // machine — no governance, no write-implies-isolation.
+    if (!isCompute && !isManifest) {
+      governanceCheck(t.model, originalCwd, l);
+      if (t.fallbackModel !== undefined) {
+        if (typeof t.fallbackModel !== "string" || !t.fallbackModel) {
+          errors.push(`${l}: fallbackModel must be a model name string`);
+        } else {
+          // the fallback is a real dispatch target — same governance as the primary
+          governanceCheck(t.fallbackModel, originalCwd, `${l} fallback`);
+        }
+      }
+    }
+    let effCwd = originalCwd;
+    let scratchRedirect = false;
+    // Write-implies-isolation: a leaf granted write-capable tools without
+    // worktree isolation never runs in the user's real tree — its cwd is
+    // redirected to a per-task scratch dir under the results dir.
+    if (!isCompute && !isManifest && hasWriteTools(t.allowedTools) && t.isolation !== "worktree") {
+      effCwd = join(resultsDir, `scratch-${t.id}`);
+      scratchRedirect = true;
+    }
+    const whenBlock = t.when && typeof t.when === "object" && !Array.isArray(t.when)
+      ? { when: { from: t.when.from, expr: t.when.expr } } : {};
+    const forEachBlock = !isCompute && t.forEach && typeof t.forEach === "object" && !Array.isArray(t.forEach)
+      ? { forEach: { from: t.forEach.from, path: t.forEach.path ?? "", maxItems: t.forEach.maxItems } } : {};
+    return {
+      id: t.id,
+      prompt: isCompute || isManifest ? "" : t.prompt,
+      // "compute"/"manifest" are display sentinels, never dispatched — these
+      // nodes run inline in the engine (the scheduler excludes them from
+      // preflights; a manifest node expands into its child's tasks).
+      model: isManifest ? "manifest" : isCompute ? "compute" : t.model,
+      fallbackModel: !isCompute && !isManifest && typeof t.fallbackModel === "string" ? t.fallbackModel : undefined,
+      effort: isCompute || isManifest ? undefined : t.effort,
+      allowedTools: isCompute || isManifest ? "" : t.allowedTools || DEFAULT_TOOLS,
+      cwd: effCwd,
+      originalCwd,
+      scratchRedirect,
+      isolation: isCompute || isManifest ? undefined : t.isolation,
+      outputDir: t.outputDir ? resolve(cwd, t.outputDir) : undefined,
+      timeoutMs: t.timeoutMs ?? defaultTimeoutMs,
+      after: [...(t.after || [])],
+      ...(isCompute && { compute: t.compute }),
+      ...whenBlock,
+      ...forEachBlock,
+      ...(!isCompute && !isManifest && t.returns && typeof t.returns === "object" && !Array.isArray(t.returns) && { returns: t.returns }),
+      ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),
+    };
+  });
+}
+
+// ── child manifests (bounded one-level composition) ───────────────────────────
+// A "manifest" task runs a child manifest as one node: statically loaded and
+// validated here (errors surface in the parent's validate, prefixed), spliced
+// into the run by the scheduler. The child inherits the parent run's cwd and
+// resultsDir; it may not steer the run itself.
+
+function loadChild(node, parentPath, cwd, cfg, resultsDir, errors) {
+  const nodeLabel = `task '${node.id}'`;
+  const childPath = resolve(cwd, node.manifest);
+  let raw;
+  try {
+    raw = readManifestJson(childPath);
+  } catch (e) {
+    errors.push(`${nodeLabel}: cannot read child manifest ${childPath}: ${e.message}`);
+    return undefined;
+  }
+  if (!Array.isArray(raw.tasks) || raw.tasks.length === 0) {
+    errors.push(`${nodeLabel}: child manifest '${node.manifest}' must contain a non-empty 'tasks' array`);
+    return undefined;
+  }
+  for (const key of ["resultsDir", "concurrency", "digest"]) {
+    if (raw[key] !== undefined) {
+      errors.push(`${nodeLabel}: child manifest '${node.manifest}' may not set ${key} — the parent owns the run`);
+    }
+  }
+  for (const t of raw.tasks) {
+    if (t && typeof t === "object" && t.manifest !== undefined) {
+      errors.push(
+        `${nodeLabel}: one nesting level — '${basename(parentPath)}' -> '${node.manifest}' may not contain ` +
+        `another manifest task ('${t.id}')`
+      );
+    }
+  }
+  const label = (t) => `${nodeLabel} -> child '${t?.id ?? "with missing id"}'`;
+  validateTaskShapes(raw.tasks, errors, label);
+  // {{item}} in a child task without its own forEach is legal only when the
+  // parent node fans out — the parent substitutes into child prompts per item.
+  validateTaskRelations(raw.tasks, errors, label, { itemAllowed: node.forEach !== undefined });
+  const cycle = detectCycle(raw.tasks.filter((t) => t.id));
+  if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
+  const tasks = normalizeTasks(raw.tasks, {
+    cwd, resultsDir, cfg, errors, label,
+    defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? 600000,
+  });
+  return { tasks };
+}
+
 // Load + validate a manifest into a normalized plan. Throws ValidationError
 // listing every problem found. `cwd` is the invoking process's cwd — the
 // default task cwd and the base for relative paths.
@@ -99,11 +424,7 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
   const manifestPath = resolve(cwd, path);
   let raw;
   try {
-    const text = readFileSync(manifestPath, "utf8");
-    // Manifests may be model-authored, and models fence JSON in markdown —
-    // extend the same tolerance the engine already gives leaf output.
-    const fenced = text.match(/^\s*```(?:json)?\s*([\s\S]*?)```\s*$/);
-    raw = JSON.parse(fenced ? fenced[1] : text);
+    raw = readManifestJson(manifestPath);
   } catch (e) {
     throw new ValidationError([`cannot read manifest ${manifestPath}: ${e.message}`]);
   }
@@ -121,244 +442,24 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
     errors.push(`concurrency must be a positive integer (got ${JSON.stringify(raw.concurrency)})`);
   }
 
-  const seen = new Set();
-  for (const t of raw.tasks) {
-    const label = t?.id ? `task '${t.id}'` : "task with missing id";
-    for (const k of Object.keys(t || {})) {
-      if (!KNOWN_TASK_KEYS.has(k)) {
-        errors.push(`${label}: unknown key '${k}' — known keys: ${[...KNOWN_TASK_KEYS].join(", ")}`);
-      }
-    }
-    if (typeof t.id === "string" && CLONE_ID_RE.test(t.id)) {
-      errors.push(`${label}: ids ending in [n] are reserved for forEach clones`);
-    } else if (typeof t.id === "string" && t.id.startsWith("__")) {
-      errors.push(`${label}: ids starting with '__' are reserved for engine-synthesized tasks`);
-    } else if (!t.id || typeof t.id !== "string" || !ID_RE.test(t.id)) {
-      errors.push(`${label}: id is required and must be filename-safe ([A-Za-z0-9._-], not starting with '.'/'-')`);
-    } else if (seen.has(t.id)) {
-      errors.push(`${label}: duplicate id`);
-    }
-    seen.add(t.id);
-    if (t.compute !== undefined) {
-      // Agentless: a compute step never spawns a leaf, so leaf-only keys are
-      // authoring mistakes worth naming individually.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "isolation"]
-        .filter((k) => t[k] !== undefined);
-      if (agentKeys.length) {
-        errors.push(`${label}: compute tasks are agentless — remove ${agentKeys.join("/")}; the expression runs in the engine, no leaf is spawned`);
-      }
-      if (t.forEach !== undefined) {
-        errors.push(`${label}: a task cannot be both forEach and compute — compute the list in one step, forEach over it in the next`);
-      }
-    } else {
-      if (!t.prompt || typeof t.prompt !== "string") errors.push(`${label}: prompt is required`);
-      if (!t.model || typeof t.model !== "string") errors.push(`${label}: model is required`);
-    }
-    if (t.isolation !== undefined && t.isolation !== "worktree") {
-      errors.push(`${label}: isolation must be "worktree" when present (got ${JSON.stringify(t.isolation)})`);
-    }
-    if (t.timeoutMs !== undefined && (!Number.isInteger(t.timeoutMs) || t.timeoutMs < 1)) {
-      errors.push(`${label}: timeoutMs must be a positive integer`);
-    }
-  }
-
-  const ids = new Set(raw.tasks.map((t) => t.id));
-  for (const t of raw.tasks) {
-    if (t.after !== undefined && !Array.isArray(t.after)) {
-      errors.push(`task '${t.id}': after must be an array of task ids`);
-      continue;
-    }
-    for (const dep of t.after || []) {
-      if (!ids.has(dep)) errors.push(`task '${t.id}': unknown dependency '${dep}' in after`);
-      if (dep === t.id) errors.push(`task '${t.id}': cannot depend on itself`);
-    }
-    // Template refs may only name declared dependencies — anything else can't
-    // be guaranteed complete when the prompt is materialized.
-    const deps = new Set(t.after || []);
-    for (const m of String(t.prompt || "").matchAll(TEMPLATE_RE)) {
-      if (!deps.has(m[2])) {
-        errors.push(`task '${t.id}': template {{${m[1]}:${m[2]}}} references '${m[2]}' which is not a declared dependency in after`);
-      }
-    }
-    if (t.compute === undefined && t.effort !== undefined && !isValidEffort(t.model, t.effort)) {
-      const tier = tierFromModel(t.model);
-      errors.push(`task '${t.id}': effort '${t.effort}' is not valid for ${tier} (allowed: ${TIER_EFFORTS[tier].join(", ")})`);
-    }
-
-    const label = `task '${t.id}'`;
-
-    // {{item}}/{{index}} substitute at clone time — outside a forEach task they
-    // would reach the leaf as literal braces, which is always an authoring bug.
-    if (t.forEach === undefined && ITEM_TEMPLATE_RE.test(String(t.prompt || ""))) {
-      errors.push(`${label}: {{item}}/{{index}} placeholders are only substituted in forEach tasks — add a forEach block or remove them`);
-    }
-
-    if (t.when !== undefined) {
-      if (!t.when || typeof t.when !== "object" || Array.isArray(t.when)) {
-        errors.push(`${label}: when must be an object — e.g. "when": {"from": "scan", "expr": "length(value) > 0"}`);
-      } else {
-        for (const k of Object.keys(t.when)) {
-          if (k !== "from" && k !== "expr") {
-            errors.push(`${label}: unknown key '${k}' in when — the shape is {"from": "<dep id>", "expr": "<expression over value>"}`);
-          }
-        }
-        if (typeof t.when.from !== "string" || !t.when.from) {
-          errors.push(`${label}: when.from is required — the dependency whose output gates this task; e.g. "when": {"from": "scan", "expr": "length(value) > 0"}`);
-        } else if (!deps.has(t.when.from)) {
-          errors.push(`${label}: when.from '${t.when.from}' must be a declared dependency — add '${t.when.from}' to after`);
-        }
-        if (typeof t.when.expr !== "string" || !t.when.expr) {
-          errors.push(`${label}: when.expr is required — a boolean expression over value; e.g. "expr": "length(value) > 0"`);
-        } else {
-          try {
-            parseExpr(t.when.expr);
-            for (const name of collectIdents(t.when.expr)) {
-              if (name === "deps") {
-                errors.push(`${label}: a when expression reads only 'value' (the output of when.from) — deps[...] is available in compute expressions`);
-              } else if (name !== "value" && name !== "item") {
-                errors.push(`${label}: unknown identifier '${name}' in when.expr — available: value (the output of when.from), item (inside predicates)`);
-              }
-            }
-          } catch (e) {
-            errors.push(`${label}: when.expr — ${e.message}`);
-          }
-        }
-      }
-    }
-
-    if (t.forEach !== undefined && t.compute === undefined) {
-      if (!t.forEach || typeof t.forEach !== "object" || Array.isArray(t.forEach)) {
-        errors.push(`${label}: forEach must be an object — e.g. "forEach": {"from": "dedupe", "path": "sites", "maxItems": 30}`);
-      } else {
-        for (const k of Object.keys(t.forEach)) {
-          if (k !== "from" && k !== "path" && k !== "maxItems") {
-            errors.push(`${label}: unknown key '${k}' in forEach — the shape is {"from": "<dep id>", "path": "<field of its JSON, '' for the value itself>", "maxItems": <cap>}`);
-          }
-        }
-        if (typeof t.forEach.from !== "string" || !t.forEach.from) {
-          errors.push(`${label}: forEach.from is required — the dependency whose JSON array this task maps over`);
-        } else if (!deps.has(t.forEach.from)) {
-          errors.push(`${label}: forEach.from '${t.forEach.from}' must be a declared dependency — add '${t.forEach.from}' to after`);
-        }
-        if (t.forEach.maxItems === undefined) {
-          errors.push(`${label}: forEach.maxItems is required — the cap IS the run's approval (the preview must show a worst-case leaf count); e.g. "forEach": {"from": "dedupe", "maxItems": 30}`);
-        } else if (!Number.isInteger(t.forEach.maxItems) || t.forEach.maxItems < 1) {
-          errors.push(`${label}: forEach.maxItems must be a positive integer (got ${JSON.stringify(t.forEach.maxItems)})`);
-        }
-        if (t.forEach.path !== undefined && typeof t.forEach.path !== "string") {
-          errors.push(`${label}: forEach.path must be a string field path into the source JSON ('' selects the value itself)`);
-        }
-      }
-    }
-
-    if (t.compute !== undefined) {
-      if (typeof t.compute !== "string" || !t.compute) {
-        errors.push(`${label}: compute must be a string expression — e.g. "compute": "unique_by(deps['scan'].sites, 'file')"`);
-      } else {
-        try {
-          parseExpr(t.compute);
-          const { refs, dynamic } = collectDepRefs(t.compute);
-          if (dynamic) {
-            errors.push(`${label}: deps must be accessed with a literal task id like deps['scan'] — computed keys can't be checked at validate time`);
-          }
-          for (const ref of refs) {
-            if (!deps.has(ref)) {
-              errors.push(`${label}: compute reads deps['${ref}'] but '${ref}' is not a declared dependency — add it to after`);
-            }
-          }
-          for (const name of collectIdents(t.compute)) {
-            if (name === "value") {
-              errors.push(`${label}: 'value' is not available in compute — read dependencies via deps['id'] ('value' is the when-gate input)`);
-            } else if (name !== "deps" && name !== "item") {
-              errors.push(`${label}: unknown identifier '${name}' in compute — available: deps['id'] and item (inside predicates)`);
-            }
-          }
-        } catch (e) {
-          errors.push(`${label}: compute — ${e.message}`);
-        }
-      }
-    }
-
-    if (t.returns !== undefined) {
-      if (t.compute !== undefined) {
-        // compute output is a pure function of its inputs — a wrong shape
-        // there means the expression is wrong, not the data.
-        errors.push(`${label}: compute output is engine-deterministic — put 'returns' on the leaf task that produces the data`);
-      } else {
-        errors.push(...validateSchemaShape(t.returns).map((e) => `${label}: ${e}`));
-      }
-    }
-  }
+  const label = (t) => (t?.id ? `task '${t.id}'` : "task with missing id");
+  validateTaskShapes(raw.tasks, errors, label);
+  validateTaskRelations(raw.tasks, errors, label);
 
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`dependency cycle detected: ${cycle.join(" -> ")}`);
 
-  // Governance gate — deny-by-default for non-Claude models. The employer's
-  // data agreement covers Anthropic only; open-model tasks may run only under
-  // directories the user has explicitly allow-listed. Checked against the
-  // task's ORIGINAL effective cwd (before any scratch redirect).
-  const allowedRoots = cfg?.provider?.allowedRoots || [];
-  const governanceCheck = (model, effCwd, label) => {
-    if (isClaudeModel(model)) return;
-    if (!allowedRoots.some((root) => isUnderRoot(effCwd, root))) {
-      errors.push(
-        `${label}: model '${model}' is not a Claude model and its cwd '${effCwd}' is not under any ` +
-        `provider.allowedRoots entry — blocked by data governance policy (only Anthropic is covered ` +
-        `by the data agreement). Configure provider.allowedRoots in ~/.swarm/config.json to permit open-model dispatch there.`
-      );
+  const childPlans = new Map();
+  for (const t of raw.tasks) {
+    if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
+      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors);
+      if (child) childPlans.set(t.id, child);
     }
-  };
+  }
 
-  const tasks = raw.tasks.map((t) => {
-    const isCompute = t.compute !== undefined;
-    const originalCwd = t.cwd ? resolve(cwd, t.cwd) : cwd;
-    // compute steps spawn nothing and no code leaves the machine — no
-    // governance, no write-implies-isolation.
-    if (!isCompute) {
-      governanceCheck(t.model, originalCwd, `task '${t.id}'`);
-      if (t.fallbackModel !== undefined) {
-        if (typeof t.fallbackModel !== "string" || !t.fallbackModel) {
-          errors.push(`task '${t.id}': fallbackModel must be a model name string`);
-        } else {
-          // the fallback is a real dispatch target — same governance as the primary
-          governanceCheck(t.fallbackModel, originalCwd, `task '${t.id}' fallback`);
-        }
-      }
-    }
-    let effCwd = originalCwd;
-    let scratchRedirect = false;
-    // Write-implies-isolation: a leaf granted write-capable tools without
-    // worktree isolation never runs in the user's real tree — its cwd is
-    // redirected to a per-task scratch dir under the results dir.
-    if (!isCompute && hasWriteTools(t.allowedTools) && t.isolation !== "worktree") {
-      effCwd = join(resultsDir, `scratch-${t.id}`);
-      scratchRedirect = true;
-    }
-    const whenBlock = t.when && typeof t.when === "object" && !Array.isArray(t.when)
-      ? { when: { from: t.when.from, expr: t.when.expr } } : {};
-    const forEachBlock = !isCompute && t.forEach && typeof t.forEach === "object" && !Array.isArray(t.forEach)
-      ? { forEach: { from: t.forEach.from, path: t.forEach.path ?? "", maxItems: t.forEach.maxItems } } : {};
-    return {
-      id: t.id,
-      prompt: isCompute ? "" : t.prompt,
-      // "compute" is a display sentinel, never dispatched — compute steps run
-      // inline in the engine (the scheduler excludes them from preflights).
-      model: isCompute ? "compute" : t.model,
-      fallbackModel: !isCompute && typeof t.fallbackModel === "string" ? t.fallbackModel : undefined,
-      effort: isCompute ? undefined : t.effort,
-      allowedTools: isCompute ? "" : t.allowedTools || DEFAULT_TOOLS,
-      cwd: effCwd,
-      originalCwd,
-      scratchRedirect,
-      isolation: isCompute ? undefined : t.isolation,
-      outputDir: t.outputDir ? resolve(cwd, t.outputDir) : undefined,
-      timeoutMs: t.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? 600000,
-      after: [...(t.after || [])],
-      ...(isCompute && { compute: t.compute }),
-      ...whenBlock,
-      ...forEachBlock,
-      ...(!isCompute && t.returns && typeof t.returns === "object" && !Array.isArray(t.returns) && { returns: t.returns }),
-    };
+  const tasks = normalizeTasks(raw.tasks, {
+    cwd, resultsDir, cfg, errors, label, childPlans,
+    defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? 600000,
   });
 
   let digest;
@@ -366,7 +467,7 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
     if (!raw.digest || typeof raw.digest !== "object" || !raw.digest.model) {
       errors.push("digest block must be an object with a 'model'");
     } else {
-      governanceCheck(raw.digest.model, cwd, "digest");
+      checkGovernance(raw.digest.model, cwd, "digest", cfg, errors);
       digest = { model: raw.digest.model, instructions: raw.digest.instructions || "" };
     }
   }

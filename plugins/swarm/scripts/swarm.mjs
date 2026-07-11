@@ -6,7 +6,7 @@ import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, ValidationError } from "../src/manifest.mjs";
 import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
-import { loadCorpus, estimateRun, formatEstimate } from "../src/estimate.mjs";
+import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
 import { formatClosing, renderStatus, readResult } from "../src/results.mjs";
 import { dim } from "../src/ui.mjs";
 
@@ -52,15 +52,22 @@ function cmdValidate(manifestPath) {
   const cfg = getConfig();
   const plan = loadManifest(manifestPath, cfg, process.cwd());
   out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
-  // The preview IS the approval: with forEach in play, show the worst-case
-  // leaf count the caps permit before anything runs.
-  const fans = plan.tasks.filter((t) => t.forEach);
+  // The preview IS the approval: with forEach or composition in play, show the
+  // worst-case leaf count the caps permit before anything runs.
+  const fans = plan.tasks.filter((t) => t.forEach && !t.childPlan);
   const computes = plan.tasks.filter((t) => t.compute);
-  if (fans.length || computes.length) {
-    const leaves = plan.tasks.filter((t) => !t.compute && !t.forEach).length
-      + fans.reduce((n, t) => n + t.forEach.maxItems, 0);
-    const caps = fans.map((t) => `${t.id} ≤ ${t.forEach.maxItems}`).join(", ");
-    out(`worst case: up to ${leaves} leaves${fans.length ? ` after forEach expansion (${caps})` : ""}${computes.length ? ` · ${computes.length} compute step(s), zero tokens` : ""}`);
+  const composed = plan.tasks.filter((t) => t.childPlan);
+  if (fans.length || computes.length || composed.length) {
+    const leaves = [...leafCounts(plan.tasks, undefined).values()].reduce((a, b) => a + b, 0);
+    const caps = [
+      ...fans.map((t) => `${t.id} ≤ ${t.forEach.maxItems}`),
+      ...composed.map((t) => {
+        const n = t.childPlan.tasks.filter((c) => c.compute === undefined).length;
+        return t.forEach ? `${t.id} ≤ ${t.forEach.maxItems} × ${n} child leaves` : `${t.id} = ${n} child leaves`;
+      }),
+    ].join(", ");
+    const label = composed.length ? "expansion" : "forEach expansion";
+    out(`worst case: up to ${leaves} leaves${caps ? ` after ${label} (${caps})` : ""}${computes.length ? ` · ${computes.length} compute step(s), zero tokens` : ""}`);
   }
   // returns schemas are part of the approval surface: say which tasks are
   // guaranteed shape, and what the guarantee costs when output misses.

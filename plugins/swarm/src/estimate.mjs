@@ -46,14 +46,25 @@ export function loadCorpus(runsRoot) {
 
 // Worst-case leaf counts per model: forEach counts maxItems (the cap IS the
 // approval), compute counts zero, the digest is one more leaf of its model.
-function leafCounts(tasks, digest) {
+// A manifest node contributes its child's leaves (× maxItems under forEach) —
+// the approval invariant survives composition. Exported: the validate preview
+// counts from the same table the estimate does.
+export function leafCounts(tasks, digest) {
   const counts = new Map();
+  const add = (model, n) => counts.set(model, (counts.get(model) || 0) + n);
   for (const t of tasks) {
     if (t.compute !== undefined || t.model === "compute") continue;
-    const n = t.forEach ? t.forEach.maxItems : 1;
-    counts.set(t.model, (counts.get(t.model) || 0) + n);
+    const mult = t.forEach ? t.forEach.maxItems : 1;
+    if (t.childPlan) {
+      for (const c of t.childPlan.tasks) {
+        if (c.compute !== undefined || c.model === "compute") continue;
+        add(c.model, mult * (c.forEach ? c.forEach.maxItems : 1));
+      }
+      continue;
+    }
+    add(t.model, mult);
   }
-  if (digest?.model) counts.set(digest.model, (counts.get(digest.model) || 0) + 1);
+  if (digest?.model) add(digest.model, 1);
   return counts;
 }
 
