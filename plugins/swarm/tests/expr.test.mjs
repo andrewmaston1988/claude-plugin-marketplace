@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
-import { parseExpr, evalExpr, evalBool, collectDepRefs, ExprError, MAX_EXPR_LEN } from "../src/expr.mjs";
+import { parseExpr, evalExpr, evalBool, collectDepRefs, collectIdents, ExprError, MAX_EXPR_LEN } from "../src/expr.mjs";
 
 // The expression language's full contract lives here. Error-message asserts
 // are load-bearing: validation is the teaching surface (authorability bar),
@@ -251,6 +251,11 @@ test("collectDepRefs: literal refs collected in order, deduped; computed or bare
   deepEqual(collectDepRefs("length(value) > 3"), { refs: [], dynamic: false });
   equal(collectDepRefs("deps[value.k]").dynamic, true);
   equal(collectDepRefs("length(deps) > 0").dynamic, true);
+});
+
+test("collectIdents lists scope roots in first-appearance order, deduped", () => {
+  deepEqual(collectIdents("length(value) > 0 && count(deps.a.xs, item > 2) > 1"), ["value", "deps", "item"]);
+  deepEqual(collectIdents("1 == 1"), []);
 });
 
 // ── evalBool & raw values ─────────────────────────────────────────────────────

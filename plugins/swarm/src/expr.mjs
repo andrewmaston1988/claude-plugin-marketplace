@@ -416,6 +416,27 @@ export function evalBool(src, scope) {
   return v;
 }
 
+// Every scope identifier the expression reads, first appearance order —
+// validation checks these against what its context will actually bind
+// (compute: deps/item; when: value/item) so misspellings die at validate time.
+export function collectIdents(src) {
+  const ast = parseExpr(src);
+  const names = [];
+  const seen = new Set();
+  (function walk(n) {
+    if (!n || typeof n !== "object") return;
+    if (n.k === "id" && !seen.has(n.name)) {
+      seen.add(n.name);
+      names.push(n.name);
+    }
+    for (const key of ["obj", "key", "l", "r", "e"]) {
+      if (n[key] && typeof n[key] === "object") walk(n[key]);
+    }
+    if (Array.isArray(n.args)) n.args.forEach(walk);
+  })(ast);
+  return names;
+}
+
 // Static walk for manifest validation: which task ids does this expression
 // read via deps, and does it use any form we cannot check statically?
 export function collectDepRefs(src) {
