@@ -18,20 +18,24 @@ const task = (over = {}) => ({
   id: "t", model: "haiku", allowedTools: "Read,Grep,Glob", ...over,
 });
 
+// Every dispatch asks for stream-json so the engine can extract the final
+// result text and per-turn token usage. --verbose is required by -p.
+const STREAM_FLAGS = ["--output-format", "stream-json", "--verbose"];
+
 test("claude model: exact argv, no env overrides", () => {
   const d = buildDispatch(task({ model: "haiku", effort: "high" }), "the prompt", CFG);
-  deepEqual(d.argv, ["claude", "-p", "the prompt", "--model", "haiku", "--effort", "high", "--allowedTools", "Read,Grep,Glob"]);
+  deepEqual(d.argv, ["claude", "-p", "the prompt", "--model", "haiku", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {});
 });
 
 test("claude model without effort omits --effort", () => {
   const d = buildDispatch(task(), "p", CFG);
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "haiku", "--allowedTools", "Read,Grep,Glob"]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "haiku", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
 });
 
 test("open model env mode: same argv plus exact env trio, model verbatim", () => {
   const d = buildDispatch(task({ model: "minimax-m3:cloud" }), "p", CFG);
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "minimax-m3:cloud", "--allowedTools", "Read,Grep,Glob"]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "minimax-m3:cloud", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {
     ANTHROPIC_BASE_URL: "http://localhost:11434",
     ANTHROPIC_API_KEY: "ollama",
@@ -60,7 +64,7 @@ test("launch mode: template split with {model} substitution and {args} splice", 
   const d = buildDispatch(task({ model: "qwen3-coder:cloud", effort: "high" }), "the prompt", cfg);
   deepEqual(d.argv, [
     "ollama", "launch", "claude", "--model", "qwen3-coder:cloud", "--",
-    "-p", "the prompt", "--model", "qwen3-coder:cloud", "--effort", "high", "--allowedTools", "Read,Grep,Glob",
+    "-p", "the prompt", "--model", "qwen3-coder:cloud", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS,
   ]);
   deepEqual(d.env, {});
 });

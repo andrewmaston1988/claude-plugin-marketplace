@@ -75,17 +75,22 @@ In a session, the **swarm** skill drives this end-to-end: it drafts the manifest
 
 ```
 <resultsDir>/                # default ~/.swarm/runs/<encoded-cwd>/<stem>-<n>/ — outside the repo
-  results/<id>.json          # { id, model, ok, exit, durationMs, output, outputJson?, worktree? }
+  results/<id>.json          # { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, output, outputJson?, worktree? }
+  results/<id>.log           # the leaf's raw stream-json events — tail one leaf's tool calls live
   digest.md                  # when a digest block is present — read this, not the raw results
-  summary.json               # { started, finished, tasks: [...], blocked: [], worktreesKept: [] }
-  run.log                    # JSONL, one line per task state change — tailable mid-run
+  summary.json               # { started, finished, tasks: [...], blocked: [], worktreesKept: [], totalTokens }
+  run.log                    # JSONL — state changes, live token ticks, run-start roster — tailable mid-run
 ```
 
-Stdout shows one status line per completed task and a closing block (digest path, summary path, kept worktrees) — never raw task output. On a TTY the view is coloured (state-coloured glyphs, bold ids); piped output stays byte-identical plain text, and `NO_COLOR` is honoured. Failed tasks block their dependents; independent branches continue; re-`run` resumes (completed work is skipped, `rate-limited` tasks retry).
+Leaves are dispatched with `--output-format stream-json`, so the engine extracts each leaf's final text into `output` and its per-turn API usage into `tokens` (`{ input, output, cacheCreation, cacheRead }`). A provider that emits plain text instead degrades gracefully: raw stdout becomes `output` and the token columns stay empty.
+
+Stdout repaints a full **roster snapshot** on every task state change and on a heartbeat (`heartbeatSecs`, default 15): one row per task — glyph, id, model, duration (elapsed ticks live for running leaves), work tokens (input + output + cache writes; live counts climb as turns complete) — plus a counts footer with the run total. On a TTY the snapshot redraws in place; piped output appends plain-text snapshots so the tail of the buffer is always the current picture, and `NO_COLOR` is honoured. After the roster, a closing block: digest path, summary path, total tokens, kept worktrees — never raw task output. Failed tasks block their dependents; independent branches continue; re-`run` resumes (completed work is skipped, `rate-limited` tasks retry).
+
+`status <resultsDir>` renders the same roster read-only from `run.log` (add `--watch` for live repaint in a second terminal).
 
 ## Statusline segment
 
-Live progress of the most recent run in the Claude Code status bar — `🐝 5✓ 2▶ 1⧖` — appended to your existing statusLine command:
+Live progress of the most recent run in the Claude Code status bar — `🐝 5✓ 2▶ 1⧖ 160k` (state counts plus the run's work-token total) — appended to your existing statusLine command:
 
 ```bash
 node "<abs-path-to>/swarm/statusline/swarm-glyph.mjs"

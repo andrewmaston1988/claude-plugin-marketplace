@@ -16,11 +16,14 @@ import { isClaudeModel } from "./models.mjs";
 // dispatch is interactive-supervised, so the manifest preview is the budget gate.
 export function buildDispatch(task, prompt, cfg) {
   const claudePath = cfg.claudePath || "claude";
+  // stream-json lets the engine extract the final result text and per-turn
+  // token usage from stdout; --verbose is mandatory with -p for this format.
   const claudeArgs = [
     "-p", prompt,
     "--model", task.model,
     ...(task.effort ? ["--effort", task.effort] : []),
     "--allowedTools", task.allowedTools,
+    "--output-format", "stream-json", "--verbose",
   ];
 
   if (isClaudeModel(task.model)) {

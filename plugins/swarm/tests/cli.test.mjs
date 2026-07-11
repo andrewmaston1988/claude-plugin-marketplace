@@ -137,9 +137,10 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     // .gitignore
     equal(readFileSync(join(resultsDir, ".gitignore"), "utf8"), "*\n");
 
-    // stdout contract: status lines + closing block, never raw output beyond digest path
-    ok(r.stdout.includes("✓ scan-a haiku"), r.stdout);
-    ok(r.stdout.includes("✓ __digest haiku"), r.stdout);
+    // stdout contract: roster snapshots + closing block, never raw output beyond digest path
+    ok(/✓ {2}scan-a\s+haiku/.test(r.stdout), r.stdout);
+    ok(/✓ {2}__digest\s+haiku/.test(r.stdout), r.stdout);
+    ok(r.stdout.includes("4 ok"), r.stdout);
     ok(r.stdout.includes(`digest: ${join(resultsDir, "digest.md")}`), r.stdout);
     ok(r.stdout.includes(`summary: ${join(resultsDir, "summary.json")}`), r.stdout);
 
@@ -170,6 +171,8 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_EXIT: "1", SWARM_SHIM_OUTPUT: "boom" };
     const r1 = runCli(["run", manifest], { cwd: dir, env });
     equal(r1.status, 1);
+    ok(/✗ {2}a\s+haiku.*\[failed\]/.test(r1.stdout), r1.stdout);
+    ok(/⊘ {2}b\s+haiku.*\[blocked\]/.test(r1.stdout), r1.stdout);
     ok(r1.stdout.includes("FAILED tasks:"), r1.stdout);
     ok(r1.stdout.includes("a [failed]"), r1.stdout);
     ok(r1.stdout.includes("b [blocked]"), r1.stdout);
@@ -242,28 +245,65 @@ test("unknown command and missing args exit 1 with usage", () => {
   }
 });
 
-test("status: renders counts, running elapsed, and paths from a synthetic run.log", () => {
+test("status: renders the roster with counts, elapsed, tokens from a synthetic run.log", () => {
   const dir = tmp();
   try {
     const rd = join(dir, "run");
     mkdirSync(join(rd, "results"), { recursive: true });
     const t0 = new Date(Date.now() - 42000).toISOString();
     const lines = [
-      { ts: t0, event: "run-start", tasks: ["a", "b", "c", "d", "e", "f"] },
+      { ts: t0, event: "run-start", tasks: [{ id: "a", model: "haiku" }, { id: "b", model: "glm-5.2:cloud" }, { id: "c", model: "haiku" }, { id: "d", model: "haiku" }, { id: "e", model: "haiku" }, { id: "f", model: "haiku" }] },
       { ts: t0, id: "a", state: "running" },
-      { ts: t0, id: "a", state: "ok" },
+      { ts: t0, id: "a", state: "ok", durationMs: 30000, tokens: { input: 1000, output: 500, cacheCreation: 0, cacheRead: 0 } },
       { ts: t0, id: "b", state: "running" },
       { ts: t0, id: "b", state: "failed" },
       { ts: t0, id: "c", state: "blocked" },
       { ts: t0, id: "d", state: "running" },
+      { ts: t0, id: "d", event: "tokens", tokens: { input: 2000, output: 100, cacheCreation: 0, cacheRead: 0 } },
       { ts: t0, id: "e", state: "rate-limited" },
     ];
     writeFileSync(join(rd, "run.log"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
     const r = runCli(["status", rd], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
-    ok(r.stdout.includes("ok 1 | running 1 | failed 1 | rate-limited 1 | blocked 1 | skipped 0 | pending 1"), r.stdout);
-    ok(/d — \d+s elapsed/.test(r.stdout), r.stdout);
+    ok(r.stdout.includes("1 ok · 1 failed · 1 rate-limited · 1 blocked · 1 running · 1 pending"), r.stdout);
+    ok(/✓ {2}a\s+haiku\s+30s\s+1\.5k/.test(r.stdout), r.stdout);
+    ok(/◐ {2}d\s+haiku\s+\d+s\s+2\.1k/.test(r.stdout), r.stdout); // live elapsed + live tokens
+    ok(r.stdout.includes("3.6k tokens"), r.stdout);
     ok(r.stdout.includes(`results: ${join(rd, "results")}`), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run: stream-json shim -> tokens flow to roster, closing block, and summary", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "tok.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [
+        { id: "t1", prompt: "x", model: "haiku" },
+        { id: "t2", prompt: "y", model: "haiku" },
+      ],
+    }));
+    const r = runCli(["run", manifest], {
+      cwd: dir,
+      env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "answer text" },
+    });
+    equal(r.status, 0, r.stderr + r.stdout);
+    // result text extracted from the result event, not raw JSONL
+    for (const id of ["t1", "t2"]) {
+      const res = JSON.parse(readFileSync(join(dir, "out", "results", `${id}.json`), "utf8"));
+      equal(res.output, "answer text");
+      equal(res.tokens.input, 1200);
+      equal(res.costUsd, 0.01);
+    }
+    // roster shows per-leaf 1.5k and total 3k; closing block totals in/out
+    ok(/✓ {2}t1\s+haiku\s+\d+s\s+1\.5k/.test(r.stdout), r.stdout);
+    ok(r.stdout.includes("3k tokens"), r.stdout);
+    ok(r.stdout.includes("tokens: 3k (input 2.4k · output 600)"), r.stdout);
+    const summary = JSON.parse(readFileSync(join(dir, "out", "summary.json"), "utf8"));
+    deepEqual(summary.totalTokens, { input: 2400, output: 600, cacheCreation: 0, cacheRead: 0 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

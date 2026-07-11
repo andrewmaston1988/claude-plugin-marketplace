@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
-  writeDigestMd, appendRunLog, formatStatusLine, formatClosing,
+  writeDigestMd, appendRunLog, formatTokens, renderRoster, formatClosing,
 } from "../src/results.mjs";
 
 function tmp() {
@@ -71,15 +71,114 @@ test("writeSummary and writeDigestMd land at contract paths", () => {
   }
 });
 
-test("formatStatusLine matches the contract shape", () => {
-  equal(formatStatusLine({ id: "scan-a", model: "glm-4.6:cloud", state: "ok", durationMs: 42000 }), "✓ scan-a glm-4.6:cloud 42s");
-  match(formatStatusLine({ id: "x", model: "haiku", state: "failed", durationMs: 1000 }), /^✗ x haiku 1s \[failed\]$/);
-  match(formatStatusLine({ id: "x", model: "haiku", state: "rate-limited", durationMs: 500 }), /\[rate-limited\]$/);
-  match(formatStatusLine({ id: "x", model: "haiku", state: "blocked" }), /^⊘ x haiku \[blocked\]$/);
-  match(formatStatusLine({ id: "x", model: "haiku", state: "skipped" }), /\[skipped\]$/);
+test("formatTokens: dash for none, plain under 1k, k and M abbreviations", () => {
+  equal(formatTokens(0), "—");
+  equal(formatTokens(null), "—");
+  equal(formatTokens(982), "982");
+  equal(formatTokens(1000), "1k");
+  equal(formatTokens(18200), "18.2k");
+  equal(formatTokens(100000), "100k");
+  equal(formatTokens(1234000), "1.23M");
 });
 
-test("formatClosing covers digest present, absent, and failed", () => {
+const NOW = Date.parse("2026-07-11T12:04:12Z");
+
+function demoTasks() {
+  return [
+    { id: "alpha", model: "glm-5.2:cloud", state: "ok", durationMs: 71000, tokens: { input: 10000, output: 8200, cacheCreation: 0, cacheRead: 0 } },
+    { id: "beta-long-id", model: "haiku", state: "running", startedMs: NOW - 252000, tokens: { input: 12000, output: 400, cacheCreation: 0, cacheRead: 5000 } },
+    { id: "digest", model: "minimax-m3:cloud", state: "pending" },
+  ];
+}
+
+test("renderRoster: header, aligned rows, counts footer with total tokens", () => {
+  const block = renderRoster({ title: "demo-1", tasks: demoTasks(), now: NOW, startedMs: NOW - 252000 });
+  const lines = block.split("\n");
+  equal(lines[0], "swarm · demo-1 · 3 tasks · 4m12s");
+  equal(lines[1], "");
+  match(lines[2], /^ {2}✓ {2}alpha\s+glm-5\.2:cloud\s+71s\s+18\.2k$/);
+  match(lines[3], /^ {2}◐ {2}beta-long-id\s+haiku\s+252s\s+12\.4k$/);
+  match(lines[4], /^ {2}· {2}digest\s+minimax-m3:cloud\s+—\s+—$/);
+  // token cells right-align: rows with the same cell widths have equal length
+  equal(lines[2].length, lines[3].length);
+  equal(lines[5], "");
+  equal(lines[6], "  1 ok · 1 running · 1 pending · 30.6k tokens");
+});
+
+test("renderRoster: non-ok terminal states carry a state tag; zero tokens omits total", () => {
+  const tasks = [
+    { id: "a", model: "haiku", state: "failed", durationMs: 1000 },
+    { id: "b", model: "haiku", state: "failed:timeout", durationMs: 2000 },
+    { id: "c", model: "haiku", state: "rate-limited", durationMs: 500 },
+    { id: "d", model: "haiku", state: "blocked" },
+    { id: "e", model: "haiku", state: "skipped" },
+  ];
+  const block = renderRoster({ title: "t", tasks, now: NOW, startedMs: NOW - 5000 });
+  match(block, /✗ {2}a .*\[failed\]/);
+  match(block, /✗ {2}b .*\[failed:timeout\]/);
+  match(block, /⧖ {2}c .*\[rate-limited\]/);
+  match(block, /⊘ {2}d .*\[blocked\]/);
+  match(block, /↷ {2}e .*\[skipped\]/);
+  ok(block.includes("2 failed · 1 rate-limited · 1 blocked · 1 skipped"), block);
+  ok(!block.includes("tokens"), "footer must omit tokens when none were counted");
+});
+
+test("renderStatus: rebuilds the roster from run.log with live tokens and elapsed", async () => {
+  const { renderStatus } = await import("../src/results.mjs");
+  const dir = tmp();
+  try {
+    const rd = join(dir, "demo-2");
+    initResultsDir(rd);
+    const t0 = new Date(NOW - 42000).toISOString();
+    const entries = [
+      { ts: t0, event: "run-start", tasks: [{ id: "a", model: "haiku" }, { id: "b", model: "glm-5.2:cloud" }, { id: "c", model: "haiku" }] },
+      { ts: t0, id: "a", state: "running" },
+      { ts: t0, id: "a", state: "ok", durationMs: 30000, tokens: { input: 1000, output: 500, cacheCreation: 0, cacheRead: 0 } },
+      { ts: t0, id: "b", state: "running" },
+      { ts: t0, id: "b", event: "tokens", tokens: { input: 7000, output: 300, cacheCreation: 0, cacheRead: 100 } },
+    ];
+    writeFileSync(join(rd, "run.log"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    const out = renderStatus(rd, NOW);
+    ok(out.includes(`run: ${rd}`), out);
+    match(out, /✓ {2}a\s+haiku\s+30s\s+1\.5k/);
+    match(out, /◐ {2}b\s+glm-5\.2:cloud\s+42s\s+7\.3k/); // elapsed from running ts, live tokens
+    match(out, /· {2}c\s+haiku\s+—\s+—/);
+    ok(out.includes("1 ok · 1 running · 1 pending · 8.8k tokens"), out);
+    ok(out.includes(`results: ${join(rd, "results")}`), out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderStatus: tolerates legacy run-start with plain id strings", async () => {
+  const { renderStatus } = await import("../src/results.mjs");
+  const dir = tmp();
+  try {
+    const rd = join(dir, "legacy");
+    initResultsDir(rd);
+    const t0 = new Date(NOW - 1000).toISOString();
+    const entries = [
+      { ts: t0, event: "run-start", tasks: ["a", "b"] },
+      { ts: t0, id: "a", state: "ok" },
+    ];
+    writeFileSync(join(rd, "run.log"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    const out = renderStatus(rd, NOW);
+    ok(out.includes("1 ok · 1 pending"), out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("renderStatus: missing run.log names the ABSOLUTE path it checked", async () => {
+  const { renderStatus } = await import("../src/results.mjs");
+  const msg = renderStatus("some-relative-dir");
+  const { isAbsolute } = await import("node:path");
+  const m = msg.match(/no run\.log at (.+?) \(absolute\)/);
+  if (!m) throw new Error("message shape changed: " + msg);
+  if (!isAbsolute(m[1])) throw new Error("path not absolute: " + m[1]);
+});
+
+test("formatClosing covers digest present, absent, failed, and total tokens", () => {
   const base = { summaryPath: "S/summary.json" };
   ok(formatClosing({ ...base, digestPath: "S/digest.md" }).includes("digest: S/digest.md"));
   ok(formatClosing({ ...base }).includes("digest: none"));
@@ -91,13 +190,7 @@ test("formatClosing covers digest present, absent, and failed", () => {
   ok(withWt.includes("worktrees kept:"));
   ok(withWt.includes("impl: swarm/impl at R/wt-impl"));
   ok(formatClosing(base).includes("summary: S/summary.json"));
-});
-
-test("renderStatus: missing run.log names the ABSOLUTE path it checked", async () => {
-  const { renderStatus } = await import("../src/results.mjs");
-  const msg = renderStatus("some-relative-dir");
-  const { isAbsolute } = await import("node:path");
-  const m = msg.match(/no run\.log at (.+?) \(absolute\)/);
-  if (!m) throw new Error("message shape changed: " + msg);
-  if (!isAbsolute(m[1])) throw new Error("path not absolute: " + m[1]);
+  const withTok = formatClosing({ ...base, totalTokens: { input: 100000, output: 60200, cacheCreation: 0, cacheRead: 999 } });
+  ok(withTok.includes("tokens: 160.2k (input 100k · output 60.2k)"), withTok);
+  ok(!formatClosing(base).includes("tokens:"), "no tokens line when nothing counted");
 });

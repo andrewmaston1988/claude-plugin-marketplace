@@ -36,13 +36,16 @@ export function fakeSpawnFactory(handler = () => ({})) {
 
 export function makeIo(spawn, over = {}) {
   const lines = [];
+  const snapshots = [];
   return {
     spawn,
     fetch: async () => ({ ok: true }),
     now: () => Date.now(),
     stdout: (line) => lines.push(line),
+    snapshot: (block) => snapshots.push(block),
     env: { PATH: process.env.PATH },
     lines,
+    snapshots,
     ...over,
   };
 }
