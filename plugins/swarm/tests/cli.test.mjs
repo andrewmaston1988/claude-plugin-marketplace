@@ -541,3 +541,103 @@ test("validate: composed leaves multiply into the worst case; child errors exit 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── W1: named manifests + args ────────────────────────────────────────────────
+
+test("validate: registry name resolves and announces the lookup; --resolved prints the substituted manifest", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(join(home, "manifests"), { recursive: true });
+    const saved = join(home, "manifests", "w1-smoke.json");
+    writeFileSync(saved, JSON.stringify({
+      tasks: [{ id: "a", prompt: "say {{args.word}}", model: "haiku" }],
+    }));
+    const r = runCli(["validate", "w1-smoke", "--args", '{"word":"hello"}', "--resolved"], {
+      cwd: dir, env: { SWARM_HOME: home },
+    });
+    equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
+    ok(r.stdout.startsWith(`resolved: w1-smoke → ${saved} (global)`), r.stdout);
+    const marker = "resolved manifest:";
+    const at = r.stdout.indexOf(marker);
+    ok(at >= 0, r.stdout);
+    const doc = JSON.parse(r.stdout.slice(at + marker.length));
+    equal(doc.tasks[0].prompt, "say hello");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validate: path invocation prints no resolved line (byte-compatible with today)", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "plain.json");
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, r.stderr);
+    ok(!r.stdout.includes("resolved:"), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--args must be a JSON object — teaching error with example", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "plain.json");
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    for (const bad of ["notjson", "[1]", '"str"']) {
+      const r = runCli(["validate", p, "--args", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+      equal(r.status, 1, `--args ${bad} should fail`);
+      ok(r.stderr.includes('{"base":"master"}'), r.stderr);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("list: both scopes shown with names + scopes; collisions loud; exit 0", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(join(home, "manifests"), { recursive: true });
+    mkdirSync(join(dir, ".swarm", "manifests"), { recursive: true });
+    const body = JSON.stringify({ goal: "g", tasks: [{ id: "a", prompt: "x", model: "haiku" }] });
+    writeFileSync(join(dir, ".swarm", "manifests", "local-a.json"), body);
+    writeFileSync(join(home, "manifests", "glob-b.json"), body);
+    writeFileSync(join(dir, ".swarm", "manifests", "dup.json"), body);
+    writeFileSync(join(home, "manifests", "dup.json"), body);
+    const r = runCli(["list"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    ok(r.stdout.includes("local-a"), r.stdout);
+    ok(r.stdout.includes("glob-b"), r.stdout);
+    ok(r.stdout.includes("local"), r.stdout);
+    ok(r.stdout.includes("global"), r.stdout);
+    ok(/collision/i.test(r.stdout), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run: named manifest end-to-end — args substituted into the dispatched leaf prompt", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(join(home, "manifests"), { recursive: true });
+    writeFileSync(join(home, "manifests", "w1-run.json"), JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "say {{args.word}}", model: "haiku" }],
+    }));
+    const shimLog = join(dir, "w1-shim.log");
+    const r = runCli(["run", "w1-run", "--args", '{"word":"hello"}'], {
+      cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog },
+    });
+    equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
+    const call = JSON.parse(readFileSync(shimLog, "utf8").trim());
+    equal(call.argv[call.argv.indexOf("-p") + 1], "say hello");
+    const res = JSON.parse(readFileSync(join(dir, "out", "results", "a.json"), "utf8"));
+    equal(res.ok, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

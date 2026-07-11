@@ -1,5 +1,6 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
-import { resolve, join, basename, sep } from "node:path";
+import { resolve, join, basename, dirname, sep } from "node:path";
+import { createHash } from "node:crypto";
 import { swarmHome } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
@@ -53,13 +54,59 @@ export function isUnderRoot(dir, root) {
   return d === r || d.startsWith(r + sep);
 }
 
+// ── args parameterization ({{args.<key>}}) ────────────────────────────────────
+// Substituted on RAW text before any validation, so the validators — and the
+// gate preview — see the final prompts. Values render like substituteItems:
+// strings raw, everything else JSON. An unknown key never becomes an empty
+// string in a prompt; it stays literal and fails validation.
+
+const ARGS_TEMPLATE_RE = /\{\{args\.([A-Za-z0-9_]+)\}\}/g;
+
+function renderArg(v) {
+  return typeof v === "string" ? v : JSON.stringify(v);
+}
+
+// Substitute into every task prompt of a raw manifest (parent or child).
+// Known keys are recorded in `used`; unknown keys produce a labelled error.
+function applyArgsToRawTasks(rawTasks, args, used, errors, label) {
+  for (const t of rawTasks) {
+    if (!t || typeof t !== "object" || typeof t.prompt !== "string") continue;
+    t.prompt = t.prompt.replace(ARGS_TEMPLATE_RE, (whole, key) => {
+      if (args && Object.hasOwn(args, key)) {
+        used.add(key);
+        return renderArg(args[key]);
+      }
+      const supplied = args && Object.keys(args).length ? Object.keys(args).join(", ") : "(none)";
+      errors.push(`${label(t)}: {{args.${key}}} has no supplied value — supplied keys: ${supplied}; pass --args '{"${key}": "…"}'`);
+      return whole;
+    });
+  }
+}
+
+// Key-order-independent fingerprint so `run <name> --args …` keys its own
+// default results dir: same args resume, different args never cross-resume.
+function canonicalize(v) {
+  if (Array.isArray(v)) return v.map(canonicalize);
+  if (v !== null && typeof v === "object") {
+    return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonicalize(v[k])]));
+  }
+  return v;
+}
+
+export function argsFingerprint(args) {
+  if (!args || !Object.keys(args).length) return undefined;
+  return createHash("sha1").update(JSON.stringify(canonicalize(args))).digest("hex").slice(0, 8);
+}
+
 // Default resultsDir: ~/.swarm/runs/<encoded-cwd>/<manifest-stem>-<n> — run
 // artefacts live in the user's home, never inside a code dir. Reuse the
 // highest-numbered existing dir so a bare re-run resumes into the same run
 // (resume skips ok results); first run gets -1. An explicit resultsDir in the
-// manifest is always used verbatim (resolved against cwd).
-function defaultResultsDir(manifestPath, cwd) {
-  const stem = basename(manifestPath).replace(/\.json$/i, "");
+// manifest is always used verbatim (resolved against cwd). With --args the
+// stem carries the args fingerprint — a differently-parameterized run must
+// never resume into another parameterization's dir.
+function defaultResultsDir(manifestPath, cwd, argsFp) {
+  const stem = basename(manifestPath).replace(/\.json$/i, "") + (argsFp ? `.${argsFp}` : "");
   const base = join(swarmHome(), "runs", cwd.replace(/[\\/:]/g, "-"));
   let n = 0;
   if (existsSync(base)) {
@@ -99,7 +146,8 @@ function detectCycle(tasks) {
 
 // Fence-tolerant JSON read — manifests may be model-authored, and models fence
 // JSON in markdown; extend the same tolerance the engine gives leaf output.
-function readManifestJson(path) {
+// Exported for the registry's goal peek — one tolerance rule, not two.
+export function readManifestJson(path) {
   const text = readFileSync(path, "utf8");
   const fenced = text.match(/^\s*```(?:json)?\s*([\s\S]*?)```\s*$/);
   return JSON.parse(fenced ? fenced[1] : text);
@@ -375,9 +423,12 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
 // into the run by the scheduler. The child inherits the parent run's cwd and
 // resultsDir; it may not steer the run itself.
 
-function loadChild(node, parentPath, cwd, cfg, resultsDir, errors) {
+function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry } = {}) {
   const nodeLabel = `task '${node.id}'`;
-  const childPath = resolve(cwd, node.manifest);
+  // A registry-resolved parent references its children relative to itself — a
+  // saved manifest must work from any cwd. Plain-path parents keep cwd
+  // resolution (today's behaviour, unchanged).
+  const childPath = resolve(fromRegistry ? dirname(parentPath) : cwd, node.manifest);
   let raw;
   try {
     raw = readManifestJson(childPath);
@@ -403,6 +454,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors) {
     }
   }
   const label = (t) => `${nodeLabel} -> child '${t?.id ?? "with missing id"}'`;
+  applyArgsToRawTasks(raw.tasks, args, usedArgs, errors, label);
   validateTaskShapes(raw.tasks, errors, label);
   // {{item}} in a child task without its own forEach is legal only when the
   // parent node fans out — the parent substitutes into child prompts per item.
@@ -418,9 +470,14 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors) {
 
 // Load + validate a manifest into a normalized plan. Throws ValidationError
 // listing every problem found. `cwd` is the invoking process's cwd — the
-// default task cwd and the base for relative paths.
-export function loadManifest(path, cfg, cwd = process.cwd()) {
+// default task cwd and the base for relative paths. Options: `args` (the
+// --args object, substituted as {{args.<key>}} before validation) and
+// `fromRegistry` (child manifest paths then resolve against the parent's dir).
+export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false } = {}) {
   const errors = [];
+  if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
+    throw new ValidationError([`args must be a JSON object — e.g. {"base":"master"} (got ${JSON.stringify(args)})`]);
+  }
   const manifestPath = resolve(cwd, path);
   let raw;
   try {
@@ -433,9 +490,18 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
     throw new ValidationError(["manifest must contain a non-empty 'tasks' array"]);
   }
 
+  const usedArgs = new Set();
+  const argsLabel = (t) => (t?.id ? `task '${t.id}'` : "task with missing id");
+  applyArgsToRawTasks(raw.tasks, args, usedArgs, errors, argsLabel);
+  if (raw.digest && typeof raw.digest === "object" && typeof raw.digest.instructions === "string") {
+    const carrier = { prompt: raw.digest.instructions };
+    applyArgsToRawTasks([carrier], args, usedArgs, errors, () => "digest");
+    raw.digest.instructions = carrier.prompt;
+  }
+
   const resultsDir = raw.resultsDir
     ? resolve(cwd, raw.resultsDir)
-    : defaultResultsDir(manifestPath, cwd);
+    : defaultResultsDir(manifestPath, cwd, argsFingerprint(args));
 
   const concurrency = raw.concurrency ?? cfg.concurrency ?? 4;
   if (!Number.isInteger(concurrency) || concurrency < 1) {
@@ -452,8 +518,16 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
   const childPlans = new Map();
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
-      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors);
+      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry });
       if (child) childPlans.set(t.id, child);
+    }
+  }
+
+  // Symmetric typo protection: a supplied key nothing reads is as suspect as a
+  // placeholder nothing supplies.
+  for (const k of Object.keys(args || {})) {
+    if (!usedArgs.has(k)) {
+      errors.push(`--args key '${k}' is never referenced by the manifest — remove it or add {{args.${k}}} where intended`);
     }
   }
 
