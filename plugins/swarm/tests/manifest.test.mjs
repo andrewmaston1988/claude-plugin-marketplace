@@ -34,6 +34,27 @@ function errorsOf(fn) {
 
 const claudeTask = (over = {}) => ({ id: "a", prompt: "do it", model: "haiku", ...over });
 
+test("fallbackModel: governed like the primary; passes through to the task", () => {
+  const dir = tmp();
+  try {
+    // open-model fallback outside allowedRoots -> validation error
+    const p1 = writeManifest(dir, { tasks: [claudeTask({ fallbackModel: "glm-4.6:cloud" })] });
+    const errs = errorsOf(() => loadManifest(p1, CFG, dir));
+    ok(errs.some((e) => e.includes("fallback") && e.includes("governance")), errs.join("\n"));
+
+    // claude fallback is fine anywhere and lands on the normalized task
+    const p2 = writeManifest(dir, { tasks: [claudeTask({ model: "sonnet", fallbackModel: "haiku" })] }, "ok.json");
+    const plan = loadManifest(p2, CFG, dir);
+    equal(plan.tasks[0].fallbackModel, "haiku");
+
+    // non-string fallback rejected
+    const p3 = writeManifest(dir, { tasks: [claudeTask({ fallbackModel: 42 })] }, "bad.json");
+    ok(errorsOf(() => loadManifest(p3, CFG, dir)).some((e) => e.includes("fallbackModel")), "type error surfaced");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("fully valid manifest normalizes with defaults", () => {
   const dir = tmp();
   try {

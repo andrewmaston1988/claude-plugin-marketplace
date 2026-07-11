@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // swarm CLI — thin argv layer over src/. Subcommands: models | validate | run.
 // stdout carries status lines + paths only, never raw task output.
-import { loadConfig } from "../src/config.mjs";
+import { join } from "node:path";
+import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, ValidationError } from "../src/manifest.mjs";
 import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
-import { formatClosing, renderStatus } from "../src/results.mjs";
+import { formatClosing, renderStatus, readResult } from "../src/results.mjs";
 import { dim } from "../src/ui.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
@@ -14,7 +15,8 @@ const USAGE = `usage: swarm.mjs <command>
   run <manifest.json> [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
-  ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up`;
+  ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
+  quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -83,6 +85,11 @@ async function cmdRun(manifestPath, force) {
   }
   if (bad.length) {
     out(`FAILED tasks: ${bad.map((t) => `${t.id} [${t.state}]`).join(", ")}`);
+    const quotaBad = bad.filter((t) => t.state === "quota");
+    if (quotaBad.length) {
+      const resets = quotaBad.map((t) => readResult(plan.resultsDir, t.id)?.quotaResetsAt).find(Boolean);
+      out(`quota: ${quotaBad.length} leaf(s) blocked by Anthropic usage limits${resets ? ` — re-run after ${resets}` : ""}`);
+    }
     out("resume: re-run the same command — ok results are skipped, failed/blocked work re-executes.");
     return 1;
   }
@@ -142,6 +149,25 @@ async function main() {
         out(dim(`tokens: ${formatTokens(tokenTotal(r.tokens))} · session ${r.sessionId} · log: results/${taskId}.ask.log`));
         return 0;
       }
+      case "quota": {
+        const { checkQuota } = await import("../src/quota.mjs");
+        const q = await checkQuota({
+          cfg: getConfig(),
+          fetch: (...a) => globalThis.fetch(...a),
+          cachePath: join(swarmHome(), "quota-cache.json"),
+          ...(process.env.SWARM_CREDENTIALS && { credentialsPath: process.env.SWARM_CREDENTIALS }),
+        });
+        if (!q) {
+          out("quota: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
+          return 0;
+        }
+        for (const l of q.limits) {
+          const scope = l.scope ? ` (${l.scope})` : "";
+          const sev = l.severity && l.severity !== "normal" ? ` [${l.severity}]` : "";
+          out(`${l.kind}${scope}: ${l.percent}%${l.resetsAt ? ` — resets ${l.resetsAt}` : ""}${sev}`);
+        }
+        return q.exhausted ? 1 : 0;
+      }
       default:
         err(USAGE);
         return 1;
@@ -157,4 +183,7 @@ async function main() {
   }
 }
 
-process.exit(await main());
+// Delayed exit: undici's UV_ASYNC handle double-closes on immediate exit
+// after fetch on Windows (libuv UV_HANDLE_CLOSING assertion).
+const code = await main();
+setTimeout(() => process.exit(code), 150);

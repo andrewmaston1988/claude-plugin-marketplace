@@ -13,6 +13,11 @@
   "timeoutMs": 600000,
   "heartbeatSecs": 15,
   "quietWarnSecs": 60,
+  "retry": { "rateLimited": 2, "backoffMs": 30000, "spawnError": 1 },
+  "quotaPreflight": true,
+  "quotaWarnPct": 80,
+  "quotaCacheSecs": 300,
+  "quotaPatterns": ["usage limit reached", "out of extra usage", "hit your limit", "limit will reset"],
   "resultInlineCap": 4000,
   "worktreeBranchPrefix": "swarm/",
   "notifyCmd": null

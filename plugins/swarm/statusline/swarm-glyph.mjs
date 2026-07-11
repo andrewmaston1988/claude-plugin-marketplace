@@ -54,16 +54,18 @@ export function glyphFromLog(content) {
     }
   }
   const count = (s) => [...last.values()].filter((v) => v === s || (s === "failed" && v === "failed:timeout")).length;
-  const running = count("running");
+  const running = count("running") + count("retrying");
   const ok = count("ok") + count("skipped");
   const failed = count("failed") + count("blocked");
   const limited = count("rate-limited");
+  const quota = count("quota");
   const pending = tasks.filter((id) => !last.has(id)).length;
   const c = (code, s) => `\x1b[${code}m${s}\x1b[0m`;
   const parts = [];
   if (ok) parts.push(c("32", `${ok}✓`));
   if (running) parts.push(c("36", `${running}▶`));
   if (limited) parts.push(c("33", `${limited}⧖`));
+  if (quota) parts.push(c("33", `${quota}⏳`));
   if (failed) parts.push(c("31", `${failed}✗`));
   if (pending) parts.push(c("2", `${pending}·`));
   const total = [...tok.values()].reduce((n, t) => n + tokenTotal(t), 0);

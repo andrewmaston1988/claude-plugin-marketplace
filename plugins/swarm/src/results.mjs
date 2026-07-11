@@ -66,6 +66,8 @@ const GLYPHS = {
   failed: "✗",
   "failed:timeout": "✗",
   "rate-limited": "⧖",
+  quota: "⏳",
+  retrying: "↻",
   blocked: "⊘",
   skipped: "↷",
   running: "◐",
@@ -74,9 +76,9 @@ const GLYPHS = {
 
 // States whose rows carry an explicit [state] tag; ok/running/pending read
 // from the glyph alone.
-const TAGGED = new Set(["failed", "failed:timeout", "rate-limited", "blocked", "skipped"]);
+const TAGGED = new Set(["failed", "failed:timeout", "rate-limited", "quota", "blocked", "skipped"]);
 
-const FOOTER_ORDER = ["ok", "failed", "rate-limited", "blocked", "skipped", "running", "pending"];
+const FOOTER_ORDER = ["ok", "failed", "rate-limited", "quota", "blocked", "skipped", "running", "retrying", "pending"];
 
 export function formatTokens(n) {
   if (!n) return "—";
@@ -101,6 +103,7 @@ function fmtElapsed(ms) {
 export function renderRoster({ title, tasks, now, startedMs, quietWarnMs }) {
   const norm = tasks.map((t) => ({ ...t, model: t.model || "?" }));
   const activityCell = (t) => {
+    if (t.state === "retrying") return t.activity || ""; // the retry/fallback note
     if (t.state !== "running") return "";
     if (t.lastEventMs != null && quietWarnMs != null && now - t.lastEventMs > quietWarnMs) {
       return `⚠ quiet ${fmtSecs(now - t.lastEventMs)}`;
