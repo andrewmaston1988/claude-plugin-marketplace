@@ -351,6 +351,47 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
   }
 });
 
+test("run: forEach expands end-to-end via the shim; validate previews worst-case leaves; truncation is loud", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "fan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [
+        { id: "src", prompt: "list", model: "haiku" },
+        {
+          id: "fix", prompt: "fix {{item.f}} #{{index}}", model: "haiku", after: ["src"],
+          forEach: { from: "src", path: "sites", maxItems: 1 },
+        },
+      ],
+    }));
+
+    const v = runCli(["validate", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(v.status, 0, v.stderr);
+    ok(v.stdout.includes("worst case: up to 2 leaves"), v.stdout);
+    ok(v.stdout.includes("fix ≤ 1"), v.stdout);
+
+    const r = runCli(["run", manifest], {
+      cwd: dir,
+      env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: '{"sites":[{"f":"a"},{"f":"b"}]}' },
+    });
+    equal(r.status, 0, r.stderr + r.stdout);
+    const rd = join(dir, "out");
+    const clone = JSON.parse(readFileSync(join(rd, "results", "fix[0].json"), "utf8"));
+    equal(clone.ok, true);
+    ok(!existsSync(join(rd, "results", "fix[1].json")), "capped clone must not exist");
+    const parent = JSON.parse(readFileSync(join(rd, "results", "fix.json"), "utf8"));
+    equal(parent.clones, 1);
+    deepEqual(parent.truncated, { kept: 1, total: 2 });
+    ok(/fix\[0\]/.test(r.stdout), r.stdout); // clone row in the roster
+    ok(r.stdout.includes("first 1 of 2"), r.stdout); // closing-block truncation line
+    const summary = JSON.parse(readFileSync(join(rd, "summary.json"), "utf8"));
+    deepEqual(summary.truncations, [{ id: "fix", kept: 1, total: 2 }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("status: missing run.log reports cleanly", () => {
   const dir = tmp();
   try {

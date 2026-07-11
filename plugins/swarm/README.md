@@ -23,12 +23,12 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Per-agent model + effort selection | ✅ | ✅ |
 | Git-worktree isolation for write-capable agents | ✅ | ✅ |
 | Agents are full headless Claude Code sessions (complete tool roster) | ✅ | ✅ |
+| Deterministic mid-run steps — dynamic fan-out over a discovered list, conditional gates, dedupe/count/threshold computes | ✅ `forEach`/`when`/`compute` — declarative, hard-capped, leaf count previewable at approval | ✅ full JS scripting |
 | ***Workflow's ground*** | | |
-| Deterministic mid-run logic — loops, dedupe, vote thresholds, dynamic fan-out | ⚠️ bounded `forEach`/`when`/`compute` planned; multi-wave otherwise | ✅ full JS scripting |
 | Zero setup — built into the harness, runs anywhere Claude Code does | ❌ alternative models need a provider endpoint + `allowedRoots` opt-in | ✅ |
 | Results return in-conversation, schema-validated with retry | ⚠️ best-effort JSON parse, via result files + digest | ✅ |
 | Session-connected MCP tools inside agents | ❌ structurally out of reach for headless leaves | ✅ |
-| Budget-reactive control flow (`budget.remaining()` loops) | ❌ | ✅ |
+| Unbounded control flow — `budget.remaining()` loops, loop-until-dry, arbitrary JS between agents | ❌ deliberately: the manifest preview is the approval | ✅ |
 | Composition — nested workflows, custom agent types | ❌ | ✅ |
 | ***Swarm's ground*** | | |
 | Alternative-model execution (GLM, MiniMax, Kimi, …) | ✅ core purpose | ❌ Claude models only |
@@ -37,9 +37,9 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Interrogate a finished agent, context intact (`ask`) | ✅ even days later | ❌ agents end with their run |
 | Self-healing — backoff retries, declared fallbacks, quota preflight + reset times | ✅ | ❌ errored agents return null |
 | Per-agent tokens/cost + live roster (elapsed, tool call, hang warnings) | ✅ | ⚠️ aggregate budget, coarser progress |
-| Weak-model authorability | ✅ fill-in-the-blanks manifest | ⚠️ correct imperative JS is a higher bar |
+| Weak-model authorability | ✅ fill-in-the-blanks manifest; validation errors teach (field + fix + example) | ⚠️ correct imperative JS is a higher bar |
 
-Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, generation, mechanical implementation sweeps — is swarm's shape, especially when alternative models are armed. Reach for Workflow when the orchestration itself needs mid-run logic, session MCP tools, or budget-driven loops — or when you simply want zero setup.
+Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, generation, mechanical implementation sweeps, and now discover-then-map pipelines — is swarm's shape, especially when alternative models are armed. Reach for Workflow when the orchestration itself needs unbounded loops, session MCP tools, or budget-driven control flow — or when you simply want zero setup.
 
 ## Setup
 
@@ -63,7 +63,7 @@ Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama instal
 
 ```bash
 node plugins/swarm/scripts/swarm.mjs models              # discover launchable :cloud models + Claude aliases — run first
-node plugins/swarm/scripts/swarm.mjs validate plan.json  # lint ids, deps, template refs, governance roots, effort pairs
+node plugins/swarm/scripts/swarm.mjs validate plan.json  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
 node plugins/swarm/scripts/swarm.mjs run plan.json       # execute; designed for Bash run_in_background
 node plugins/swarm/scripts/swarm.mjs ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
 node plugins/swarm/scripts/swarm.mjs quota                # Anthropic utilization per limit window
@@ -101,6 +101,25 @@ In a session, the **swarm** skill drives this end-to-end: it drafts the manifest
   }
 }
 ```
+
+## Deterministic steps — forEach / when / compute
+
+The glue logic between agent calls that never needed an LLM, without making the manifest a programming language. Every leaf stays enumerable at approval time — `validate` prints the worst-case leaf count the caps permit.
+
+```json
+{ "tasks": [
+    { "id": "find-sites", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: {\"sites\":[…]}" },
+    { "id": "dedupe", "after": ["find-sites"], "compute": "unique_by(deps['find-sites'].sites, 'file')" },
+    { "id": "fix", "after": ["dedupe"], "forEach": { "from": "dedupe", "path": "", "maxItems": 30 },
+      "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}" },
+    { "id": "escalate", "after": ["fix", "dedupe"], "when": { "from": "dedupe", "expr": "length(value) > 20" },
+      "model": "sonnet", "prompt": "…{{result:fix}}…" }
+  ] }
+```
+
+- **`forEach`** clones a template leaf at runtime over a dependency's JSON array — the "discover a work-list, then map over it" shape that previously forced a manual second wave. `maxItems` is **required**: the cap is the approval. Clones (`fix[0]`, `fix[1]`, …) are full tasks — own result, tokens row, retry budget, `fallbackModel`, `ask` session — and dependents of the parent wait for all of them (`{{result:fix}}` = JSON array of clone outputs). Overflow is loud: a `truncated` field in the parent result, a run.log event, and a closing-block warning — a capped run never reads as full coverage.
+- **`when`** gates a leaf on a dependency's output — false means the task completes as `skipped` (dependents still run). The expression must yield true/false; a bare value is a validation-time teaching error.
+- **`compute`** is an agentless expression step (dedupe / filter / count / threshold / flatten) over dependency JSON — zero tokens, result consumable like any leaf's. No `eval`, no external `jq`: a hand-rolled, bounded evaluator (`length`, `count`, `filter`, `unique_by`, `flatten`, `min/max/sum`, `contains`; comparisons and boolean logic; 500-char cap), because manifests may themselves be model-authored and the trust boundary stays tight.
 
 ## Results layout
 
