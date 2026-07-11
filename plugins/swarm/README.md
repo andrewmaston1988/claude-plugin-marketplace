@@ -41,6 +41,7 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Live observability — per-agent roster, tokens/cost, hang warnings | ✅ | ⚠️ coarser |
 | Predictive cost consent — estimate at approval, one projection warn, actual-vs-estimate close | ✅ | ❌ reactive only |
 | Weak-model authorability — fill-in-the-blanks JSON; validation errors teach | ✅ | ⚠️ JS bar |
+| Mechanical citation verification — `{file, line, quote}` returns string-matched against real files before any verifier spawns | ✅ zero tokens | ❌ |
 
 Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, generation, mechanical implementation sweeps, and now discover-then-map pipelines — is swarm's shape, especially when alternative models are armed. Reach for Workflow when the orchestration itself needs unbounded loops, session MCP tools, or budget-driven control flow — or when you simply want zero setup.
 
@@ -58,7 +59,7 @@ Create `~/.swarm/config.json` to override any key in `config.default.json`. The 
 
 **Why `allowedRoots` exists (data governance).** Your organisation may have a data agreement with Anthropic but not with other model providers. Non-Claude dispatch is therefore **deny-by-default**: an open-model task whose effective `cwd` is not under a listed root fails validation with the governance reason. With the default `[]`, swarm still runs fine with Claude models — the alternative-model path simply never arms. List only roots whose code is cleared to leave for your provider.
 
-Other useful keys (defaults shown in `config.default.json`): `provider.url` (Anthropic-format endpoint, default `http://localhost:11434` for a direct ollama setup), `provider.mode` (`"env"` merges `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` into a plain `claude -p` call — the default; `"launch"` shells out via `launchCmd`), `concurrency`, `timeoutMs`, `worktreeBranchPrefix`. Swarm never manages credentials — auth is your provider app's ambient sign-in.
+Other useful keys (defaults shown in `config.default.json`): `provider.url` (Anthropic-format endpoint, default `http://localhost:11434` for a direct ollama setup), `provider.mode` (`"env"` merges `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` into a plain `claude -p` call — the default; `"launch"` shells out via `launchCmd`), `concurrency`, `timeoutMs`, `worktreeBranchPrefix`, `modelDenylist` (case-insensitive substrings — matching models fail validation and never appear in the `models` roster; for taking a model out of circulation on quality grounds). Swarm never manages credentials — auth is your provider app's ambient sign-in.
 
 Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama install recent enough to serve `/api/experimental/model-recommendations` (~v0.23+).
 
@@ -66,11 +67,14 @@ Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama instal
 
 ```bash
 node plugins/swarm/scripts/swarm.mjs models              # discover launchable :cloud models + Claude aliases — run first
-node plugins/swarm/scripts/swarm.mjs validate plan.json  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
-node plugins/swarm/scripts/swarm.mjs run plan.json       # execute; designed for Bash run_in_background
+node plugins/swarm/scripts/swarm.mjs list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
+node plugins/swarm/scripts/swarm.mjs validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
+node plugins/swarm/scripts/swarm.mjs run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
 node plugins/swarm/scripts/swarm.mjs ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
 node plugins/swarm/scripts/swarm.mjs quota                # Anthropic utilization per limit window
 ```
+
+A bare name resolves through the manifest registry (`<cwd>/.swarm/manifests/<name>.json`, then `~/.swarm/manifests/`; the resolution is always announced). `--args` fills `{{args.*}}` placeholders — `validate --resolved` prints the fully substituted document as the approval preview, and each distinct args value gets its own fingerprinted results dir so resume never crosses parameterizations.
 
 In a session, the **swarm** skill drives this end-to-end: it drafts the manifest, shows it in an AskUserQuestion box (the preview is the approval — every model and leaf visible before anything runs), runs in the background, and reads only `digest.md` when the run completes.
 
@@ -128,7 +132,8 @@ The glue logic between agent calls that never needed an LLM, without making the 
 
 ```
 <resultsDir>/                # default ~/.swarm/runs/<encoded-cwd>/<stem>-<n>/ — outside the repo
-  results/<id>.json          # { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, sessionId?, cwd, allowedTools, output, outputJson?, worktree? }
+  manifest.json              # the effective plan at dispatch (args substituted) — runs record their own intent
+  results/<id>.json          # { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, sessionId?, prompt?, cwd, allowedTools, output, outputJson?, citations?, worktree? }
   results/<id>.log           # the leaf's raw stream-json events — tail one leaf's tool calls live
   digest.md                  # when a digest block is present — read this, not the raw results
   summary.json               # { started, finished, tasks: [...], blocked: [], worktreesKept: [], totalTokens }

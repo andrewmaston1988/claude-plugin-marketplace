@@ -8,8 +8,9 @@ import { tokenTotal } from "./stream.mjs";
 //   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
 //                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
-//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, worktree? }
+//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationErrors?, worktree? }
 //                       (prompt = the exact final string sent to the leaf; absent on compute/aggregate rows)
+//                       (citations = { checked, drifted } when N3 verified them; citationErrors = refutation lines on failure)
 //   digest.md           when a digest block is present
 //   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens, estimate?, costWarnFired? }
 //                       task rows: { id, model, state, durationMs, tokens, costUsd?, resultPath }
@@ -22,6 +23,7 @@ import { tokenTotal } from "./stream.mjs";
 //                         { ts, event: "expand-manifest", id, children: [{id, model}] }    child-manifest splice
 //                       (child-manifest task ids are namespaced "<node>~<childId>")
 //                         { ts, event: "schema-retry", id }         returns re-ask fired
+//                         { ts, event: "citations", id, checked, refuted }   N3 mechanical verification
 //                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn
 
 export function initResultsDir(dir) {

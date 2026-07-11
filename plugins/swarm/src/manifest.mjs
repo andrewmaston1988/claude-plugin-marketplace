@@ -25,7 +25,7 @@ const ITEM_TEMPLATE_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/;
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
-  "returns", "manifest",
+  "returns", "verifyCitations", "manifest",
 ]);
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
@@ -336,6 +336,10 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
         errors.push(...validateSchemaShape(t.returns).map((e) => `${l}: ${e}`));
       }
     }
+
+    if (t.verifyCitations !== undefined && typeof t.verifyCitations !== "boolean") {
+      errors.push(`${l}: verifyCitations must be true or false (got ${JSON.stringify(t.verifyCitations)}) — citation-shaped returns are verified by default; false opts out`);
+    }
   }
 }
 
@@ -435,6 +439,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ...whenBlock,
       ...forEachBlock,
       ...(!isCompute && !isManifest && t.returns && typeof t.returns === "object" && !Array.isArray(t.returns) && { returns: t.returns }),
+      ...(typeof t.verifyCitations === "boolean" && { verifyCitations: t.verifyCitations }),
       ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),
     };
   });
@@ -595,7 +600,7 @@ export function effectivePlanDoc(plan) {
   const strip = (t) => {
     const o = { id: t.id, model: t.model };
     if (t.prompt) o.prompt = t.prompt;
-    for (const k of ["effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "isolation", "outputDir"]) {
+    for (const k of ["effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "isolation", "outputDir"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
     if (t.childPlan) o.child = t.childPlan.tasks.map(strip);

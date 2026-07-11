@@ -18,6 +18,7 @@ import { createSnapshotWriter } from "./ui.mjs";
 import { matchQuota, parseQuotaReset, checkQuota, DEFAULT_QUOTA_PATTERNS } from "./quota.mjs";
 import { evalExpr, evalBool } from "./expr.mjs";
 import { validateValue } from "./schema.mjs";
+import { extractCitations, verifyCitations, citationErrorLines } from "./citations.mjs";
 import { swarmHome } from "./config.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 
@@ -108,27 +109,53 @@ function tryParseJson(output) {
 // output fails the task with the validator's teaching errors. Runs before
 // worktree collection so the corrective turn executes in the leaf's real cwd.
 async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
-  const validationErrors = (output) => {
+  // Schema first; when the shape holds, mechanically verify any citation-shaped
+  // instances (N3) against the leaf's cwd. kind routes the fail field
+  // (schemaErrors vs citationErrors); cite carries the verification stats.
+  const assess = (output) => {
     const parsed = tryParseJson(output);
-    return parsed === undefined
-      ? ["output is not JSON — reply with a single JSON value matching the schema"]
-      : validateValue(parsed, task.returns);
+    if (parsed === undefined) {
+      return { errs: ["output is not JSON — reply with a single JSON value matching the schema"], kind: "schema" };
+    }
+    const schemaErrs = validateValue(parsed, task.returns);
+    if (schemaErrs.length) return { errs: schemaErrs, kind: "schema" };
+    if (task.verifyCitations === false) return { errs: [] };
+    const cits = extractCitations(parsed, task.returns);
+    if (!cits.length) return { errs: [] };
+    const cite = verifyCitations(cits, { cwds: [taskCwd, task.originalCwd] });
+    return { errs: cite.refuted.length ? citationErrorLines(cite.refuted) : [], kind: "citations", cite };
   };
   const failText = (errs) => `returns validation failed:\n  - ${errs.join("\n  - ")}`;
+  const logCitations = (cite) => appendRunLog(resultsDir, {
+    ts: new Date().toISOString(), event: "citations", id: task.id,
+    checked: cite.checked, refuted: cite.refuted.length,
+  });
+  const finish = (res, a) => {
+    if (!a.cite) return res;
+    logCitations(a.cite);
+    return { ...res, citations: { checked: a.cite.checked, drifted: a.cite.drifted.length } };
+  };
+  const fail = (res, a, suffix = "") => {
+    if (a.cite) logCitations(a.cite);
+    const failed = { ...res, ok: false, output: failText(a.errs) + suffix };
+    failed[a.kind === "citations" ? "citationErrors" : "schemaErrors"] = a.errs;
+    return failed;
+  };
 
-  const errs = validationErrors(r.output);
-  if (!errs.length) return r;
-  if (!r.sessionId) {
-    return { ...r, ok: false, schemaErrors: errs, output: `${failText(errs)}\n(no session id — re-ask unavailable)` };
-  }
+  const a1 = assess(r.output);
+  if (!a1.errs.length) return finish(r, a1);
+  if (!r.sessionId) return fail(r, a1, "\n(no session id — re-ask unavailable)");
 
   appendRunLog(resultsDir, { ts: new Date().toISOString(), event: "schema-retry", id: task.id });
-  // carry the schema, not just the errors — the original prompt may have
-  // underspecified the shape, and "expected object" alone doesn't name fields
-  const retryPrompt =
-    `Your output did not match the task's returns schema:\n  - ${errs.join("\n  - ")}\n` +
-    `The required schema is:\n${JSON.stringify(task.returns, null, 2)}\n` +
-    `Reply with ONLY the corrected JSON — no prose, no fences.`;
+  // Schema misses carry the schema itself, not just the errors — the original
+  // prompt may have underspecified the shape, and "expected object" alone
+  // doesn't name fields. Citation refutations already name file/line/fix.
+  const retryPrompt = a1.kind === "schema"
+    ? `Your output did not match the task's returns schema:\n  - ${a1.errs.join("\n  - ")}\n` +
+      `The required schema is:\n${JSON.stringify(task.returns, null, 2)}\n` +
+      `Reply with ONLY the corrected JSON — no prose, no fences.`
+    : `Some citations in your output could not be verified against the actual files:\n  - ${a1.errs.join("\n  - ")}\n` +
+      `Reply with ONLY the corrected JSON — no prose, no fences.`;
   const leafLog = createWriteStream(join(resultsDir, "results", `${task.id}.log`), { flags: "a" });
   const r2 = await runTask({ ...task, cwd: taskCwd, resume: r.sessionId }, retryPrompt, cfg, io, leafLog, hooks);
 
@@ -140,9 +167,11 @@ async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
     sessionId: r2.sessionId ?? r.sessionId,
     schemaRetried: true,
   };
-  const errs2 = r2.ok ? validationErrors(r2.output) : [`re-ask failed (exit ${r2.exit}): ${r2.output.slice(0, 200)}`];
-  if (!errs2.length) return { ...combined, ok: true, output: r2.output };
-  return { ...combined, ok: false, schemaErrors: errs2, output: failText(errs2) };
+  const a2 = r2.ok
+    ? assess(r2.output)
+    : { errs: [`re-ask failed (exit ${r2.exit}): ${r2.output.slice(0, 200)}`], kind: "schema" };
+  if (!a2.errs.length) return finish({ ...combined, ok: true, output: r2.output }, a2);
+  return fail(combined, a2);
 }
 
 // Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
@@ -641,6 +670,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (r.sessionId) result.sessionId = r.sessionId;
       if (r.schemaRetried) result.schemaRetried = true;
       if (r.schemaErrors) result.schemaErrors = r.schemaErrors;
+      if (r.citations) result.citations = r.citations;
+      if (r.citationErrors) result.citationErrors = r.citationErrors;
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
       result.allowedTools = task.allowedTools;
