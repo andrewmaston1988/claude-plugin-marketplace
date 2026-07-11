@@ -3,6 +3,7 @@ import { resolve, join, basename, sep } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
+import { validateSchemaShape } from "./schema.mjs";
 
 export class ValidationError extends Error {
   constructor(errors) {
@@ -23,6 +24,7 @@ const ITEM_TEMPLATE_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/;
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
+  "returns",
 ]);
 
 export function hasWriteTools(allowedTools) {
@@ -276,6 +278,16 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
         }
       }
     }
+
+    if (t.returns !== undefined) {
+      if (t.compute !== undefined) {
+        // compute output is a pure function of its inputs — a wrong shape
+        // there means the expression is wrong, not the data.
+        errors.push(`${label}: compute output is engine-deterministic — put 'returns' on the leaf task that produces the data`);
+      } else {
+        errors.push(...validateSchemaShape(t.returns).map((e) => `${label}: ${e}`));
+      }
+    }
   }
 
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
@@ -345,6 +357,7 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
       ...(isCompute && { compute: t.compute }),
       ...whenBlock,
       ...forEachBlock,
+      ...(!isCompute && t.returns && typeof t.returns === "object" && !Array.isArray(t.returns) && { returns: t.returns }),
     };
   });
 

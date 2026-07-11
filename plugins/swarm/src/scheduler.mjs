@@ -15,6 +15,7 @@ import {
 import { createSnapshotWriter } from "./ui.mjs";
 import { matchQuota, parseQuotaReset, checkQuota, DEFAULT_QUOTA_PATTERNS } from "./quota.mjs";
 import { evalExpr, evalBool } from "./expr.mjs";
+import { validateValue } from "./schema.mjs";
 import { swarmHome } from "./config.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 
@@ -96,6 +97,50 @@ function tryParseJson(output) {
     } catch { /* not JSON */ }
   }
   return undefined;
+}
+
+// Enforce a task's `returns` schema on a completed leaf. Valid output passes
+// through untouched. Invalid output gets exactly ONE corrective turn through
+// the leaf's own resumed session (the `ask` pattern — the leaf still holds its
+// reads and reasoning, so the fix costs one turn, not a re-run); still-invalid
+// output fails the task with the validator's teaching errors. Runs before
+// worktree collection so the corrective turn executes in the leaf's real cwd.
+async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
+  const validationErrors = (output) => {
+    const parsed = tryParseJson(output);
+    return parsed === undefined
+      ? ["output is not JSON — reply with a single JSON value matching the schema"]
+      : validateValue(parsed, task.returns);
+  };
+  const failText = (errs) => `returns validation failed:\n  - ${errs.join("\n  - ")}`;
+
+  const errs = validationErrors(r.output);
+  if (!errs.length) return r;
+  if (!r.sessionId) {
+    return { ...r, ok: false, schemaErrors: errs, output: `${failText(errs)}\n(no session id — re-ask unavailable)` };
+  }
+
+  appendRunLog(resultsDir, { ts: new Date().toISOString(), event: "schema-retry", id: task.id });
+  // carry the schema, not just the errors — the original prompt may have
+  // underspecified the shape, and "expected object" alone doesn't name fields
+  const retryPrompt =
+    `Your output did not match the task's returns schema:\n  - ${errs.join("\n  - ")}\n` +
+    `The required schema is:\n${JSON.stringify(task.returns, null, 2)}\n` +
+    `Reply with ONLY the corrected JSON — no prose, no fences.`;
+  const leafLog = createWriteStream(join(resultsDir, "results", `${task.id}.log`), { flags: "a" });
+  const r2 = await runTask({ ...task, cwd: taskCwd, resume: r.sessionId }, retryPrompt, cfg, io, leafLog, hooks);
+
+  const combined = {
+    ...r,
+    durationMs: r.durationMs + r2.durationMs,
+    tokens: addTokens(r.tokens || emptyTokens(), r2.tokens || emptyTokens()),
+    ...((r.costUsd != null || r2.costUsd != null) && { costUsd: (r.costUsd || 0) + (r2.costUsd || 0) }),
+    sessionId: r2.sessionId ?? r.sessionId,
+    schemaRetried: true,
+  };
+  const errs2 = r2.ok ? validationErrors(r2.output) : [`re-ask failed (exit ${r2.exit}): ${r2.output.slice(0, 200)}`];
+  if (!errs2.length) return { ...combined, ok: true, output: r2.output };
+  return { ...combined, ok: false, schemaErrors: errs2, output: failText(errs2) };
 }
 
 // Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
@@ -489,7 +534,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
       const prompt = task.promptFinal ? task.prompt : substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
       const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`));
-      const r = await runTask({ ...task, cwd: taskCwd }, prompt, cfg, io, leafLog, streamHooks(task));
+      let r = await runTask({ ...task, cwd: taskCwd }, prompt, cfg, io, leafLog, streamHooks(task));
+      if (task.returns && r.ok) {
+        r = await enforceReturns(task, r, taskCwd, plan.resultsDir, cfg, io, streamHooks(task));
+      }
 
       const result = {
         id: task.id,
@@ -505,6 +553,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       // interrogation fields: `swarm ask` resumes this session in this cwd;
       // originalCwd (pre scratch/worktree redirect) is the governance identity
       if (r.sessionId) result.sessionId = r.sessionId;
+      if (r.schemaRetried) result.schemaRetried = true;
+      if (r.schemaErrors) result.schemaErrors = r.schemaErrors;
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
       result.allowedTools = task.allowedTools;

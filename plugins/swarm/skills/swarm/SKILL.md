@@ -69,7 +69,8 @@ The manifest preview plus the mix answer ARE the approval: the user sees every m
     "after": ["scan-b"],                       // dependencies
     "forEach": { "from": "scan-b", "path": "sites", "maxItems": 30 },  // clone this leaf per array item (see Deterministic steps)
     "when": { "from": "scan-b", "expr": "length(value) > 20" },        // run only if true; else completes as skipped
-    "compute": "unique_by(deps['scan-b'].sites, 'file')"               // agentless expression step — replaces model+prompt
+    "compute": "unique_by(deps['scan-b'].sites, 'file')",              // agentless expression step — replaces model+prompt
+    "returns": { "type": "object", "required": ["sites"] }             // schema-validated output (see Schema-guaranteed leaf output)
   }],
   "digest": { "model": "glm-5.2:cloud", "instructions": "…" }   // recommended ≥3 tasks
 }
@@ -173,6 +174,29 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
 **Expression grammar** (same for `when`/`compute`, ≤500 chars): literals, `deps['id']`/`value`/`item` + `.field`/`[0]` access, `== != > >= < <=`, `&& || !`, and functions `length(x)`, `count(arr, pred?)`, `filter(arr, pred)`, `unique_by(arr, 'key')`, `flatten(arr)`, `min/max/sum(arr)`, `contains(a, b)`. Predicates bind `item` per element and must yield true/false. No arithmetic, no user JS. On any validation error, run `validate` and follow the message — it names the field, the fix, and an example.
 
 **`compute` is data plumbing, never judgment.** Dedupe, count, threshold, flatten — yes. "Decide which findings matter" — no: judgment stays in leaves or between waves, where a model can weigh evidence.
+
+### Schema-guaranteed leaf output — `returns`
+
+A task with `returns` gets its output validated against a JSON-Schema subset on completion. Invalid output triggers exactly ONE corrective re-ask through the leaf's own resumed session (the errors are field-precise teaching lines); still-invalid output fails the task with those errors. Put it on any leaf whose JSON feeds `forEach.from`, `compute`, `when`, or a chain link — guaranteed shape is what makes the deterministic-steps grammar reliable on model output.
+
+```json
+{ "id": "find-sites", "model": "glm-5.2:cloud",
+  "prompt": "…return ONLY JSON: {\"sites\":[{\"file\":\"…\",\"line\":1,\"status\":\"dirty\"}]}",
+  "returns": {
+    "type": "object",
+    "required": ["sites"],
+    "properties": {
+      "sites": { "type": "array", "items": {
+        "type": "object", "required": ["file", "line"],
+        "properties": {
+          "file": { "type": "string" },
+          "line": { "type": "integer" },
+          "status": { "enum": ["clean", "dirty"] } } } }
+    }
+  } }
+```
+
+Supported keywords: `type` (`string|number|integer|boolean|array|object|null`), `properties`, `required`, `items` (one schema for every element), `enum` — nothing else (no `$ref`, no `additionalProperties`; extra fields pass). Rules: `compute` tasks never take `returns` — their output is engine-deterministic, schema the producing leaf instead; on a `forEach` task the schema validates each clone and the parent's aggregate array is exempt. `validate` lists schema'd tasks in the approval preview.
 
 ### Multi-wave — two runs, NEVER one manifest
 

@@ -614,3 +614,81 @@ test("hasWriteTools detects each write tool, case-insensitive", () => {
   equal(hasWriteTools("NotebookEdit"), true);
   equal(hasWriteTools(undefined), false);
 });
+
+// ── returns (schema-validated output) ─────────────────────────────────────────
+
+test("returns: accepted on a leaf and a forEach task, carried through normalization", () => {
+  const dir = tmp();
+  try {
+    const schema = { type: "object", required: ["sites"], properties: { sites: { type: "array" } } };
+    const p = writeManifest(dir, {
+      tasks: [
+        claudeTask({ returns: schema }),
+        claudeTask({
+          id: "per", prompt: "check {{item}}", after: ["a"],
+          forEach: { from: "a", path: "sites", maxItems: 3 },
+          returns: { type: "string" },
+        }),
+      ],
+    });
+    const plan = loadManifest(p, CFG, dir);
+    deepEqual(plan.tasks[0].returns, schema);
+    deepEqual(plan.tasks[1].returns, { type: "string" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returns on a compute task is rejected — point it at the producing leaf", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, {
+      tasks: [
+        claudeTask(),
+        { id: "dedupe", compute: "unique_by(deps['a'], 'file')", after: ["a"], returns: { type: "array" } },
+      ],
+    });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => e.includes("task 'dedupe'") && e.includes("engine-deterministic") && e.includes("leaf")), errs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returns must be an object — teaching error carries an inline example", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ returns: "json" })] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => e.includes("task 'a'") && e.includes("returns must be an object") && e.includes('"type"')), errs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returns: schema shape errors surface per problem with the task label", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, {
+      tasks: [claudeTask({ returns: { type: "list", additionalProperties: false } })],
+    });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => e.includes("task 'a'") && e.includes("type 'list' is not supported")), errs.join("\n"));
+    ok(errs.some((e) => e.includes("task 'a'") && e.includes("unknown keyword 'additionalProperties'")), errs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("the unknown-key message now lists returns (typo teaching)", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ return: { type: "array" } })] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    const hit = errs.find((e) => e.includes("unknown key 'return'"));
+    ok(hit, errs.join("|"));
+    ok(hit.includes("returns"), hit);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
