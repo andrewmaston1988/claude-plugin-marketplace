@@ -97,7 +97,11 @@ export function loadManifest(path, cfg, cwd = process.cwd()) {
   const manifestPath = resolve(cwd, path);
   let raw;
   try {
-    raw = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const text = readFileSync(manifestPath, "utf8");
+    // Manifests may be model-authored, and models fence JSON in markdown —
+    // extend the same tolerance the engine already gives leaf output.
+    const fenced = text.match(/^\s*```(?:json)?\s*([\s\S]*?)```\s*$/);
+    raw = JSON.parse(fenced ? fenced[1] : text);
   } catch (e) {
     throw new ValidationError([`cannot read manifest ${manifestPath}: ${e.message}`]);
   }

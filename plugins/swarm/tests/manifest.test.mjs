@@ -335,6 +335,18 @@ test("default resultsDir is <home>/runs/<encoded-cwd>/<stem>-1, reusing highest 
   }
 });
 
+test("model-authored manifests: markdown fences around the JSON are tolerated", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "fenced.json");
+    writeFileSync(p, "```json\n" + JSON.stringify({ tasks: [claudeTask()] }) + "\n```\n");
+    const plan = loadManifest(p, CFG, dir);
+    equal(plan.tasks.length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("unreadable manifest throws ValidationError", () => {
   const dir = tmp();
   try {
