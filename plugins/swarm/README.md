@@ -24,9 +24,10 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Git-worktree isolation for write-capable agents | ✅ | ✅ |
 | Agents are full headless Claude Code sessions (complete tool roster) | ✅ | ✅ |
 | Deterministic mid-run steps — dynamic fan-out over a discovered list, conditional gates, dedupe/count/threshold computes | ✅ `forEach`/`when`/`compute` — declarative, hard-capped, leaf count previewable at approval | ✅ full JS scripting |
+| Schema-validated structured output with corrective retry | ✅ `returns` JSON-Schema subset — one teaching re-ask via session resume | ✅ `agent({schema})` |
 | ***Workflow's ground*** | | |
 | Zero setup — built into the harness, runs anywhere Claude Code does | ❌ alternative models need a provider endpoint + `allowedRoots` opt-in | ✅ |
-| Results return in-conversation, schema-validated with retry | ⚠️ best-effort JSON parse, via result files + digest | ✅ |
+| Results return in-conversation | ⚠️ via result files + digest | ✅ |
 | Session-connected MCP tools inside agents | ❌ structurally out of reach for headless leaves | ✅ |
 | Unbounded control flow — `budget.remaining()` loops, loop-until-dry, arbitrary JS between agents | ❌ deliberately: the manifest preview is the approval | ✅ |
 | Composition — nested workflows, custom agent types | ❌ | ✅ |

@@ -61,6 +61,12 @@ function cmdValidate(manifestPath) {
     const caps = fans.map((t) => `${t.id} ≤ ${t.forEach.maxItems}`).join(", ");
     out(`worst case: up to ${leaves} leaves${fans.length ? ` after forEach expansion (${caps})` : ""}${computes.length ? ` · ${computes.length} compute step(s), zero tokens` : ""}`);
   }
+  // returns schemas are part of the approval surface: say which tasks are
+  // guaranteed shape, and what the guarantee costs when output misses.
+  const ret = plan.tasks.filter((t) => t.returns);
+  if (ret.length) {
+    out(`returns validated: ${ret.map((t) => t.id).join(", ")} (invalid output gets one corrective re-ask, then fails)`);
+  }
   out(`resultsDir: ${plan.resultsDir}`);
   return 0;
 }
