@@ -1,5 +1,8 @@
 // Test doubles for scheduler io — no network, no real claude.
 import { EventEmitter } from "node:events";
+import { mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 
 // handler(call, index) -> { exit=0, output="", delayMs=1, outputAtMs? } | undefined
 // outputAtMs emits output early (before close at delayMs) so tests can observe
@@ -53,7 +56,8 @@ export function makeIo(spawn, over = {}) {
     now: () => Date.now(),
     stdout: (line) => lines.push(line),
     snapshot: (block) => snapshots.push(block),
-    env: { PATH: process.env.PATH },
+    // isolated SWARM_HOME so quota-cache reads/writes never touch the real one
+    env: { PATH: process.env.PATH, SWARM_HOME: mkdtempSync(join(tmpdir(), "swarm-io-")) },
     lines,
     snapshots,
     ...over,

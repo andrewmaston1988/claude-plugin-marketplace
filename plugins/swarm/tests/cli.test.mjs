@@ -232,6 +232,35 @@ test("models: stub server + SWARM_HOME config -> names with descriptions, aliase
   }
 });
 
+test("quota: prints per-window utilization from the usage endpoint", async () => {
+  const dir = tmp();
+  const server = createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      limits: [
+        { kind: "session", percent: 22, severity: "normal", resets_at: "2026-07-11T12:19:59Z" },
+        { kind: "weekly_scoped", percent: 4, severity: "normal", resets_at: "2026-07-18T07:59:59Z", scope: { model: { display_name: "Fable" } } },
+      ],
+    }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({ quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` }));
+    const creds = join(home, "creds.json");
+    writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
+    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds } });
+    equal(r.status, 0, r.stderr + r.stdout);
+    ok(r.stdout.includes("session: 22%"), r.stdout);
+    ok(r.stdout.includes("resets 2026-07-11T12:19:59Z"), r.stdout);
+    ok(r.stdout.includes("weekly_scoped (Fable): 4%"), r.stdout);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("unknown command and missing args exit 1 with usage", () => {
   const dir = tmp();
   try {
