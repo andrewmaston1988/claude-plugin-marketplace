@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
-import { bold, dim, green, red, cyan, magenta, paint } from "./ui.mjs";
+import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal } from "./stream.mjs";
 
 // Results layout under <resultsDir>:
@@ -93,17 +93,27 @@ function fmtElapsed(ms) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
 }
 
-// Full-run snapshot. tasks: [{ id, model, state, durationMs?, startedMs?, tokens? }]
-// — durationMs for terminal states, startedMs for running (elapsed ticks against
-// `now`), tokens in the src/stream.mjs shape.
-export function renderRoster({ title, tasks, now, startedMs }) {
+// Full-run snapshot. tasks: [{ id, model, state, durationMs?, startedMs?,
+// tokens?, activity?, lastEventMs? }] — durationMs for terminal states,
+// startedMs for running (elapsed ticks against `now`), tokens in the
+// src/stream.mjs shape. Running rows show their latest tool call; one that has
+// been silent longer than quietWarnMs shows a staleness warning instead.
+export function renderRoster({ title, tasks, now, startedMs, quietWarnMs }) {
   const norm = tasks.map((t) => ({ ...t, model: t.model || "?" }));
+  const activityCell = (t) => {
+    if (t.state !== "running") return "";
+    if (t.lastEventMs != null && quietWarnMs != null && now - t.lastEventMs > quietWarnMs) {
+      return `⚠ quiet ${fmtSecs(now - t.lastEventMs)}`;
+    }
+    return t.activity || "";
+  };
   const cells = norm.map((t) => ({
     glyph: GLYPHS[t.state] || "?",
     dur: t.state === "running" && t.startedMs != null ? fmtSecs(now - t.startedMs)
       : t.durationMs != null ? fmtSecs(t.durationMs) : "—",
     tok: formatTokens(tokenTotal(t.tokens)),
     tag: TAGGED.has(t.state) ? ` [${t.state}]` : "",
+    act: activityCell(t),
   }));
   const width = (get, min) => Math.max(min, ...norm.map((t, i) => get(t, cells[i]).length));
   const idW = width((t) => t.id, 2);
@@ -114,9 +124,10 @@ export function renderRoster({ title, tasks, now, startedMs }) {
   const lines = [`swarm · ${title} · ${norm.length} tasks · ${fmtElapsed(now - startedMs)}`, ""];
   norm.forEach((t, i) => {
     const c = cells[i];
+    const act = c.act ? `  ${(c.act.startsWith("⚠") ? yellow : dim)(c.act)}` : "";
     lines.push(
       `  ${paint(t.state, c.glyph)}  ${bold(t.id.padEnd(idW))}  ${t.model.padEnd(modelW)}  ` +
-      `${dim(c.dur.padStart(durW))}  ${c.tok.padStart(tokW)}${paint(t.state, c.tag)}`
+      `${dim(c.dur.padStart(durW))}  ${c.tok.padStart(tokW)}${paint(t.state, c.tag)}${act}`
     );
   });
 
@@ -148,6 +159,8 @@ export function renderStatus(dir, now = Date.now()) {
   const tokens = new Map();
   const durations = new Map();
   const runningSince = new Map();
+  const activity = new Map();
+  const lastEvent = new Map();
   for (const line of readFileSync(logPath, "utf8").split("\n")) {
     if (!line.trim()) continue;
     let entry;
@@ -161,9 +174,16 @@ export function renderStatus(dir, now = Date.now()) {
       roster = (entry.tasks || []).map((t) => (typeof t === "string" ? { id: t, model: "?" } : t));
       startedMs = Date.parse(entry.ts) || now;
       state.clear(); tokens.clear(); durations.clear(); runningSince.clear();
-    } else if (entry.event === "tokens" && entry.id) {
+      activity.clear(); lastEvent.clear();
+      continue;
+    }
+    if (!entry.id) continue;
+    lastEvent.set(entry.id, Date.parse(entry.ts) || now);
+    if (entry.event === "tokens") {
       tokens.set(entry.id, entry.tokens);
-    } else if (entry.id && entry.state) {
+    } else if (entry.event === "activity") {
+      activity.set(entry.id, entry.activity);
+    } else if (entry.state) {
       state.set(entry.id, entry.state);
       if (entry.state === "running") runningSince.set(entry.id, Date.parse(entry.ts) || now);
       if (entry.durationMs != null) durations.set(entry.id, entry.durationMs);
@@ -176,11 +196,13 @@ export function renderStatus(dir, now = Date.now()) {
     durationMs: durations.get(id),
     startedMs: runningSince.get(id),
     tokens: tokens.get(id),
+    activity: activity.get(id),
+    lastEventMs: lastEvent.get(id),
   }));
   const lines = [
     `${bold("run:")} ${cyan(dir)}`,
     "",
-    renderRoster({ title: basename(dir), tasks, now, startedMs: startedMs ?? now }),
+    renderRoster({ title: basename(dir), tasks, now, startedMs: startedMs ?? now, quietWarnMs: 60000 }),
     "",
     `${bold("results:")} ${join(dir, "results")}`,
   ];

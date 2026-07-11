@@ -70,7 +70,7 @@ function tryParseJson(output) {
   return undefined;
 }
 
-function runTask(task, prompt, cfg, io, leafLog, onTokens) {
+function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity } = {}) {
   return new Promise((resolve) => {
     const { argv, env } = buildDispatch(task, prompt, cfg);
     const started = io.now();
@@ -99,6 +99,7 @@ function runTask(task, prompt, cfg, io, leafLog, onTokens) {
     const parser = createStreamParser({
       onUsage: (id, usage) => { acc.record(id, usage); onTokens?.(acc.totals()); },
       onResult: (evt) => { resultEvt = evt; },
+      onActivity,
     });
     // Progressive capture: stream to results/<id>.log as data arrives so a
     // user can tail an individual leaf mid-run (with stream-json, the tail
@@ -167,6 +168,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   const durations = new Map();
   const tokensMap = new Map();
   const startedAt = new Map();
+  const activityMap = new Map();  // id -> latest tool-call description
+  const lastEventAt = new Map();  // id -> ms of last stream event (liveness)
+  const lastActivityLogAt = new Map();
   const worktreesKept = [];
   let digestPath = null;
   let digestFailed = false;
@@ -183,9 +187,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         durationMs: durations.get(t.id),
         startedMs: startedAt.get(t.id),
         tokens: tokensMap.get(t.id),
+        activity: activityMap.get(t.id),
+        // a leaf that never emitted an event counts as quiet since launch
+        lastEventMs: lastEventAt.get(t.id) ?? startedAt.get(t.id),
       })),
       now: io.now(),
       startedMs: runStartMs,
+      quietWarnMs: (cfg.quietWarnSecs ?? 60) * 1000,
     }));
   };
 
@@ -202,13 +210,27 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     paint();
   };
 
-  // Live token ticks from a leaf's assistant turns: run.log line (feeds the
-  // status view + statusline glyph) plus a throttled roster repaint.
-  const onTokens = (task) => (totals) => {
-    tokensMap.set(task.id, totals);
-    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "tokens", tokens: totals });
-    paint(false);
-  };
+  // Live ticks from a leaf's stream: token totals and tool-call activity both
+  // land in run.log (feeding the status view + statusline glyph) plus a
+  // throttled roster repaint. Activity log lines are rate-limited per leaf —
+  // a busy leaf calls tools far faster than a watcher needs.
+  const streamHooks = (task) => ({
+    onTokens: (totals) => {
+      tokensMap.set(task.id, totals);
+      lastEventAt.set(task.id, io.now());
+      appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "tokens", tokens: totals });
+      paint(false);
+    },
+    onActivity: (desc) => {
+      activityMap.set(task.id, desc);
+      lastEventAt.set(task.id, io.now());
+      if (io.now() - (lastActivityLogAt.get(task.id) ?? 0) >= 2000) {
+        lastActivityLogAt.set(task.id, io.now());
+        appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "activity", activity: desc });
+      }
+      paint(false);
+    },
+  });
 
   // Resume: an existing ok result satisfies the task without re-running it —
   // its recorded duration and tokens still count in roster and summary.
@@ -258,7 +280,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
       const prompt = substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
       const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`));
-      const r = await runTask({ ...task, cwd: taskCwd }, prompt, cfg, io, leafLog, onTokens(task));
+      const r = await runTask({ ...task, cwd: taskCwd }, prompt, cfg, io, leafLog, streamHooks(task));
 
       const result = {
         id: task.id,

@@ -56,9 +56,25 @@ export function pickFinalTokens(resultUsage, accumulated) {
   return tokenTotal(t) + t.cacheRead > 0 ? t : accumulated;
 }
 
+// One tool_use block -> a short human line for the roster's activity cell.
+// Argument preference: the most locating field first; nothing scalar -> bare name.
+const ARG_KEYS = ["file_path", "path", "url", "command", "pattern", "query"];
+
+export function describeToolUse(block) {
+  const input = block.input || {};
+  for (const k of ARG_KEYS) {
+    const v = input[k];
+    if (typeof v === "string" && v) {
+      const arg = v.length > 40 ? v.slice(0, 39) + "…" : v;
+      return `${block.name} ${arg}`;
+    }
+  }
+  return String(block.name);
+}
+
 // Line-oriented incremental parser. feed() buffers partial lines across chunk
 // boundaries; end() flushes a trailing unterminated line.
-export function createStreamParser({ onUsage, onResult } = {}) {
+export function createStreamParser({ onUsage, onResult, onActivity } = {}) {
   let buf = "";
   const handleLine = (line) => {
     const t = line.trim();
@@ -69,8 +85,12 @@ export function createStreamParser({ onUsage, onResult } = {}) {
     } catch {
       return; // not an event line — plain output or torn write
     }
-    if (evt.type === "assistant" && evt.message?.usage) onUsage?.(evt.message.id || "?", evt.message.usage);
-    else if (evt.type === "result") onResult?.(evt);
+    if (evt.type === "assistant") {
+      if (evt.message?.usage) onUsage?.(evt.message.id || "?", evt.message.usage);
+      for (const block of evt.message?.content || []) {
+        if (block?.type === "tool_use" && block.name) onActivity?.(describeToolUse(block));
+      }
+    } else if (evt.type === "result") onResult?.(evt);
   };
   return {
     feed(chunk) {
