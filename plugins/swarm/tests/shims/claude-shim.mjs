@@ -26,6 +26,7 @@ if (sleepMs > 0) await new Promise((r) => setTimeout(r, sleepMs));
 const text = process.env.SWARM_SHIM_OUTPUT ?? "shim-ok";
 if (process.env.SWARM_SHIM_STREAM) {
   const usage = { input_tokens: 1200, output_tokens: 300 };
+  process.stdout.write(JSON.stringify({ type: "system", subtype: "init", session_id: "shim-session" }) + "\n");
   process.stdout.write(JSON.stringify({ type: "assistant", message: { id: "m1", role: "assistant", usage } }) + "\n");
   process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: text, usage, total_cost_usd: 0.01, num_turns: 1 }) + "\n");
 } else {

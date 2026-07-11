@@ -163,6 +163,25 @@ test("renderStatus: rebuilds the roster from run.log with live tokens and elapse
   }
 });
 
+test("renderStatus: quietWarnMs is caller-tunable (config-threaded from the CLI)", async () => {
+  const { renderStatus } = await import("../src/results.mjs");
+  const dir = tmp();
+  try {
+    const rd = join(dir, "quiet");
+    initResultsDir(rd);
+    const t0 = new Date(NOW - 30000).toISOString();
+    const entries = [
+      { ts: t0, event: "run-start", tasks: [{ id: "a", model: "haiku" }] },
+      { ts: t0, id: "a", state: "running" },
+    ];
+    writeFileSync(join(rd, "run.log"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    ok(/⚠ quiet 30s/.test(renderStatus(rd, NOW, 10000)), "10s threshold: 30s silence warns");
+    ok(!/⚠ quiet/.test(renderStatus(rd, NOW, 120000)), "120s threshold: 30s silence is fine");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("renderStatus: tolerates legacy run-start with plain id strings", async () => {
   const { renderStatus } = await import("../src/results.mjs");
   const dir = tmp();

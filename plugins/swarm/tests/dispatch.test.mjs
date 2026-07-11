@@ -49,6 +49,16 @@ test("open model: effort passes through", () => {
   equal(d.argv[d.argv.indexOf("--effort") + 1], "xhigh");
 });
 
+test("task.resume adds --resume <sessionId> for any model family", () => {
+  const d = buildDispatch(task({ resume: "s-123" }), "follow-up", CFG);
+  const i = d.argv.indexOf("--resume");
+  ok(i > 0, d.argv.join(" "));
+  equal(d.argv[i + 1], "s-123");
+  const open = buildDispatch(task({ model: "glm-4.6:cloud", resume: "s-9" }), "q", CFG);
+  ok(open.argv.includes("--resume"));
+  equal(open.env.ANTHROPIC_MODEL, "glm-4.6:cloud");
+});
+
 test("no --max-budget-usd for any model family", () => {
   for (const m of ["haiku", "claude-opus-4-8", "glm-4.6:cloud"]) {
     const d = buildDispatch(task({ model: m }), "p", CFG);

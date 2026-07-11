@@ -74,7 +74,7 @@ export function describeToolUse(block) {
 
 // Line-oriented incremental parser. feed() buffers partial lines across chunk
 // boundaries; end() flushes a trailing unterminated line.
-export function createStreamParser({ onUsage, onResult, onActivity } = {}) {
+export function createStreamParser({ onUsage, onResult, onActivity, onInit } = {}) {
   let buf = "";
   const handleLine = (line) => {
     const t = line.trim();
@@ -85,7 +85,9 @@ export function createStreamParser({ onUsage, onResult, onActivity } = {}) {
     } catch {
       return; // not an event line — plain output or torn write
     }
-    if (evt.type === "assistant") {
+    if (evt.type === "system" && evt.subtype === "init") {
+      onInit?.(evt);
+    } else if (evt.type === "assistant") {
       if (evt.message?.usage) onUsage?.(evt.message.id || "?", evt.message.usage);
       for (const block of evt.message?.content || []) {
         if (block?.type === "tool_use" && block.name) onActivity?.(describeToolUse(block));
