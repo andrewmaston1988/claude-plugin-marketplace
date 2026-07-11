@@ -5,12 +5,30 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
-  writeDigestMd, appendRunLog, formatTokens, renderRoster, formatClosing,
+  writeDigestMd, appendRunLog, formatTokens, renderRoster, renderStatus, formatClosing,
 } from "../src/results.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-res-"));
 }
+
+test("renderStatus: expand events add forEach clone rows under the parent", () => {
+  const dir = tmp();
+  try {
+    initResultsDir(dir);
+    appendRunLog(dir, { ts: "2026-07-11T10:00:00Z", event: "run-start", tasks: [{ id: "src", model: "haiku" }, { id: "fix", model: "haiku" }] });
+    appendRunLog(dir, { ts: "2026-07-11T10:00:01Z", id: "src", state: "ok", durationMs: 10 });
+    appendRunLog(dir, { ts: "2026-07-11T10:00:02Z", event: "expand", id: "fix", model: "haiku", clones: 2 });
+    appendRunLog(dir, { ts: "2026-07-11T10:00:03Z", id: "fix[0]", state: "ok", durationMs: 5 });
+    appendRunLog(dir, { ts: "2026-07-11T10:00:04Z", id: "fix[1]", state: "running" });
+    const out = renderStatus(dir, Date.parse("2026-07-11T10:00:05Z"));
+    ok(out.includes("fix[0]"), out);
+    ok(out.includes("fix[1]"), out);
+    match(out, /4 tasks/); // 2 declared + 2 clones
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("initResultsDir creates results/ and a '*' .gitignore", () => {
   const dir = join(tmp(), "run-1");

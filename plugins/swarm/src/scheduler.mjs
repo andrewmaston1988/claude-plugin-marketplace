@@ -14,6 +14,7 @@ import {
 } from "./stream.mjs";
 import { createSnapshotWriter } from "./ui.mjs";
 import { matchQuota, parseQuotaReset, checkQuota, DEFAULT_QUOTA_PATTERNS } from "./quota.mjs";
+import { evalExpr, evalBool } from "./expr.mjs";
 import { swarmHome } from "./config.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 
@@ -47,6 +48,27 @@ export function substituteTemplates(prompt, resultsDir, cap) {
     const res = readResult(resultsDir, id);
     const out = String(res?.output ?? "");
     return out.length > cap ? out.slice(0, cap) : out;
+  });
+}
+
+const ITEM_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/g;
+
+// Materialize {{item}}/{{item.field}}/{{index}} for one forEach clone. Runs at
+// clone time and the result is final — launch never re-scans it, so item data
+// that happens to contain template syntax stays literal (leaf outputs are
+// untrusted data, not templates).
+export function substituteItems(prompt, item, index) {
+  return prompt.replace(ITEM_RE, (whole, expr) => {
+    if (expr === "index") return String(index);
+    let v = item;
+    if (expr !== "item") {
+      for (const seg of expr.slice(5).split(".")) {
+        v = v !== null && typeof v === "object" && !Array.isArray(v) && Object.hasOwn(v, seg) ? v[seg] : undefined;
+        if (v === undefined) break;
+      }
+    }
+    if (v === undefined || v === null) return "";
+    return typeof v === "string" ? v : JSON.stringify(v);
   });
 }
 
@@ -158,7 +180,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // Health check, once per run, only when any open-model task exists: any
   // response from the provider endpoint counts as up; fail the run fast with
   // a clear message when it is unreachable.
-  if (tasks.some((t) => !isClaudeModel(t.model))) {
+  if (tasks.some((t) => !t.compute && !isClaudeModel(t.model))) {
     try {
       await io.fetch(cfg.provider.url);
     } catch (e) {
@@ -174,7 +196,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // classification is the backstop). Exhausted quota with undefended Claude
   // leaves aborts BEFORE dispatch — a run that would deterministically fail
   // should fail in one second with the reset time, not after four minutes.
-  const claudeTasks = tasks.filter((t) => isClaudeModel(t.model));
+  const claudeTasks = tasks.filter((t) => !t.compute && isClaudeModel(t.model));
   if (claudeTasks.length && cfg.quotaPreflight !== false) {
     const env = io.env || process.env;
     const q = await checkQuota({
@@ -244,7 +266,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     }));
   };
 
-  const record = (task, st, durationMs, tokens) => {
+  const record = (task, st, durationMs, tokens, note) => {
     state.set(task.id, st);
     if (st === "running") startedAt.set(task.id, io.now());
     if (durationMs != null) durations.set(task.id, durationMs);
@@ -253,6 +275,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       ts: new Date().toISOString(), id: task.id, state: st,
       ...(durationMs != null && { durationMs }),
       ...(tokensMap.has(task.id) && st !== "running" && { tokens: tokensMap.get(task.id) }),
+      ...(note && { note }),
     });
     paint();
   };
@@ -323,6 +346,132 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     return s !== undefined && !OK_STATES.has(s) && !ALIVE_STATES.has(s);
   });
 
+  // A dependency's value for expressions and forEach: parsed JSON when the
+  // leaf produced any, else the raw output string.
+  const valueOf = (id) => {
+    const res = readResult(plan.resultsDir, id);
+    if (!res) return null;
+    return res.outputJson !== undefined ? res.outputJson : String(res.output ?? "");
+  };
+  const typeOf = (v) => (v === null ? "null" : Array.isArray(v) ? "array" : typeof v);
+  const digPath = (v, path) => {
+    if (!path) return v;
+    let cur = v;
+    for (const seg of path.split(".")) {
+      cur = cur !== null && typeof cur === "object" && !Array.isArray(cur) && Object.hasOwn(cur, seg) ? cur[seg] : undefined;
+      if (cur === undefined) return undefined;
+    }
+    return cur;
+  };
+  const truncations = [];
+
+  // Evaluate a task's when-gate once its deps are satisfied. True ⇒ proceed;
+  // false ⇒ the task settled here (skipped, or failed on an expression error).
+  // Skips write no result file — a when re-evaluates deterministically on resume.
+  const passesWhen = (task) => {
+    if (!task.when) return true;
+    let pass;
+    try {
+      pass = evalBool(task.when.expr, { value: valueOf(task.when.from) });
+    } catch (e) {
+      writeResult(plan.resultsDir, task.id, { id: task.id, model: task.model, ok: false, exit: null, durationMs: 0, output: `when failed: ${e.message}` });
+      record(task, "failed", 0);
+      return false;
+    }
+    if (pass) return true;
+    record(task, "skipped", null, undefined, `when: ${task.when.expr} → false`);
+    return false;
+  };
+
+  // compute steps run inline — no spawn, no slot, zero tokens. The result is a
+  // first-class task result so {{result:}} and forEach.from consume it as usual.
+  const runCompute = (task) => {
+    record(task, "running");
+    const t0 = io.now();
+    let result;
+    try {
+      const scope = { deps: Object.fromEntries(task.after.map((d) => [d, valueOf(d)])) };
+      const v = evalExpr(task.compute, scope);
+      result = {
+        id: task.id, model: task.model, ok: true, exit: 0, durationMs: io.now() - t0,
+        output: typeof v === "string" ? v : JSON.stringify(v),
+        outputJson: v,
+      };
+    } catch (e) {
+      result = { id: task.id, model: task.model, ok: false, exit: null, durationMs: io.now() - t0, output: `compute failed: ${e.message}` };
+    }
+    writeResult(plan.resultsDir, task.id, result);
+    record(task, result.ok ? "ok" : "failed", result.durationMs);
+  };
+
+  // When a forEach task's deps satisfy, it expands into clones and morphs into
+  // a pending aggregate over them: dependents keep depending on the parent id,
+  // which completes only when every clone does ({{result:parent}} = the JSON
+  // array of clone outputs). Both template passes happen here — deps are
+  // satisfied so {{result:}} is materializable, and {{item}}/{{index}} slots
+  // are per-clone; promptFinal stops the launch-time pass from re-scanning.
+  const expandForEach = (task) => {
+    const src = valueOf(task.forEach.from);
+    const sel = digPath(src, task.forEach.path);
+    if (!Array.isArray(sel)) {
+      const where = task.forEach.path ? `'${task.forEach.from}'.${task.forEach.path}` : `'${task.forEach.from}'`;
+      writeResult(plan.resultsDir, task.id, {
+        id: task.id, model: task.model, ok: false, exit: null, durationMs: 0,
+        output: `forEach failed: ${where} is ${typeOf(sel === undefined ? null : sel)} — expected a JSON array (check forEach.path against the dependency's output)`,
+      });
+      record(task, "failed", 0);
+      return;
+    }
+    const items = sel.slice(0, task.forEach.maxItems);
+    const truncated = sel.length > items.length;
+    const base = substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
+    const clones = items.map((item, i) => ({
+      ...task,
+      id: `${task.id}[${i}]`,
+      prompt: substituteItems(base, item, i),
+      promptFinal: true,
+      when: undefined,
+      forEach: undefined,
+      after: [...task.after],
+    }));
+    appendRunLog(plan.resultsDir, {
+      ts: new Date().toISOString(), event: "expand", id: task.id, model: task.model,
+      clones: clones.length, ...(truncated && { truncated: true, total: sel.length }),
+    });
+    if (truncated) {
+      truncations.push({ id: task.id, kept: items.length, total: sel.length });
+      io.stdout(`⚠ ${task.id}: forEach source has ${sel.length} items — running the first ${items.length} (maxItems); raise maxItems to cover the rest`);
+    }
+    tasks.splice(tasks.indexOf(task) + 1, 0, ...clones);
+    for (const c of clones) {
+      state.set(c.id, "pending");
+      if (!force) {
+        const prior = readResult(plan.resultsDir, c.id);
+        if (prior && prior.ok === true) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
+      }
+    }
+    task.when = undefined;
+    task.forEach = undefined;
+    task.after = clones.map((c) => c.id);
+    task.aggregate = { truncated, kept: items.length, total: sel.length };
+    paint();
+  };
+
+  const runAggregate = (task) => {
+    const outs = task.after.map((cid) => {
+      const r = readResult(plan.resultsDir, cid);
+      return r && r.outputJson !== undefined ? r.outputJson : String(r?.output ?? "");
+    });
+    const result = {
+      id: task.id, model: task.model, ok: true, exit: 0, durationMs: 0,
+      output: JSON.stringify(outs), outputJson: outs,
+      clones: task.after.length,
+      ...(task.aggregate.truncated && { truncated: { kept: task.aggregate.kept, total: task.aggregate.total } }),
+    };
+    writeResult(plan.resultsDir, task.id, result);
+    record(task, "ok", 0);
+  };
+
   const launch = (task) => {
     record(task, "running");
     const promise = (async () => {
@@ -343,7 +492,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         }
       }
 
-      const prompt = substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
+      const prompt = task.promptFinal ? task.prompt : substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
       const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`));
       const r = await runTask({ ...task, cwd: taskCwd }, prompt, cfg, io, leafLog, streamHooks(task));
 
@@ -413,7 +562,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         if (st === "quota") {
           const family = isClaudeModel(task.model);
           for (const t of tasks) {
-            if (state.get(t.id) === "pending" && isClaudeModel(t.model) === family && !t.fallbackModel) {
+            if (!t.compute && state.get(t.id) === "pending" && isClaudeModel(t.model) === family && !t.fallbackModel) {
               record(t, "quota");
             }
           }
@@ -445,10 +594,20 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       }
     }
 
+    // Inline settles (when-skip, compute, expansion, aggregation) change state
+    // without occupying a slot — after any of them, re-drive the whole cycle so
+    // tasks earlier in the array unlock in the same pass.
+    let progressed = false;
     for (const t of tasks) {
       if (running.size >= plan.concurrency) break;
-      if (state.get(t.id) === "pending" && depsSatisfied(t)) launch(t);
+      if (state.get(t.id) !== "pending" || !depsSatisfied(t)) continue;
+      if (!passesWhen(t)) { progressed = true; continue; }
+      if (t.forEach) { expandForEach(t); progressed = true; continue; }
+      if (t.aggregate) { runAggregate(t); progressed = true; continue; }
+      if (t.compute) { runCompute(t); progressed = true; continue; }
+      launch(t);
     }
+    if (progressed) continue;
 
     if (running.size === 0 && retryWaiting === 0) break;
     if (running.size > 0) {
@@ -476,6 +635,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     blocked: tasks.filter((t) => state.get(t.id) === "blocked").map((t) => t.id),
     worktreesKept,
     totalTokens: [...tokensMap.values()].reduce(addTokens, emptyTokens()),
+    ...(truncations.length && { truncations }),
   };
   const summaryPath = writeSummary(plan.resultsDir, summary);
 

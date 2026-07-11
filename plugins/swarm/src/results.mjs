@@ -10,8 +10,9 @@ import { tokenTotal } from "./stream.mjs";
 //   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens }
 //   run.log             JSONL, tailable mid-run:
 //                         { ts, event: "run-start", tasks: [{ id, model }] }
-//                         { ts, id, state, durationMs?, tokens? }   state changes
+//                         { ts, id, state, durationMs?, tokens?, note? }   state changes
 //                         { ts, id, event: "tokens", tokens }       live usage ticks
+//                         { ts, event: "expand", id, model, clones, truncated?, total? }   forEach expansion
 
 export function initResultsDir(dir) {
   mkdirSync(join(dir, "results"), { recursive: true });
@@ -180,6 +181,13 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
       activity.clear(); lastEvent.clear();
       continue;
     }
+    if (entry.event === "expand") {
+      // forEach clones join the roster directly under their parent
+      const rows = Array.from({ length: entry.clones || 0 }, (_, i) => ({ id: `${entry.id}[${i}]`, model: entry.model || "?" }));
+      const idx = roster.findIndex((r) => r.id === entry.id);
+      roster.splice(idx < 0 ? roster.length : idx + 1, 0, ...rows);
+      continue;
+    }
     if (!entry.id) continue;
     lastEvent.set(entry.id, Date.parse(entry.ts) || now);
     if (entry.event === "tokens") {
@@ -214,8 +222,12 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
   return lines.join("\n");
 }
 
-export function formatClosing({ digestPath, digestFailed, summaryPath, totalTokens, worktreesKept = [] }) {
+export function formatClosing({ digestPath, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [] }) {
   const lines = [];
+  // loud by contract: a capped forEach must never read as full coverage
+  for (const tr of truncations) {
+    lines.push(`${yellow("⚠")} ${bold(tr.id)}: forEach ran the first ${tr.kept} of ${tr.total} items (maxItems cap) — raise maxItems and re-run to cover the rest`);
+  }
   if (digestPath) lines.push(`${bold("digest:")} ${green(digestPath)}`);
   else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);
   else lines.push(dim("digest: none (no digest block in manifest)"));
