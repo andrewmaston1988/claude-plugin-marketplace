@@ -1,14 +1,7 @@
 // Bounded expression language for manifest `when` / `compute` steps.
-//
-// Deliberately tiny: literals, scope identifiers, member access, comparisons,
-// boolean logic, and a fixed function table. No eval/new Function — manifests
-// may be authored by a leaf model mid-composition, so the trust boundary stays
-// tight: expressions can only read the JSON they are handed. Logic is
-// boolean-strict (no truthiness) and member access resolves own properties
-// only, so prototype chains are unreachable.
-//
-// Every error is a teaching error (authorability bar): name what failed, echo
-// the source with a caret, hint the fix.
+// No eval/new Function (manifests may be model-authored — expressions can only
+// read the JSON they are handed; member access is own-properties-only), logic
+// is boolean-strict, and every error teaches: source echo, caret, fix hint.
 
 export const MAX_EXPR_LEN = 500;
 

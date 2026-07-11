@@ -173,8 +173,6 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   const worktree = io.worktree || defaultWorktree;
   const tasks = [...plan.tasks];
   if (plan.digest) tasks.push(buildDigestTask(plan));
-  const byId = new Map(tasks.map((t) => [t.id, t]));
-
   initResultsDir(plan.resultsDir);
 
   // Health check, once per run, only when any open-model task exists: any
@@ -404,12 +402,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     record(task, result.ok ? "ok" : "failed", result.durationMs);
   };
 
-  // When a forEach task's deps satisfy, it expands into clones and morphs into
-  // a pending aggregate over them: dependents keep depending on the parent id,
-  // which completes only when every clone does ({{result:parent}} = the JSON
-  // array of clone outputs). Both template passes happen here — deps are
-  // satisfied so {{result:}} is materializable, and {{item}}/{{index}} slots
-  // are per-clone; promptFinal stops the launch-time pass from re-scanning.
+  // Expansion morphs the parent into a pending aggregate over its clones, so
+  // dependents keep depending on the parent id. Both template passes run here;
+  // promptFinal stops the launch-time pass from re-scanning substituted data.
   const expandForEach = (task) => {
     const src = valueOf(task.forEach.from);
     const sel = digPath(src, task.forEach.path);
