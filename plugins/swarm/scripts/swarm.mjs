@@ -3,7 +3,7 @@
 // stdout carries status lines + paths only, never raw task output.
 import { join } from "node:path";
 import { loadConfig, swarmHome } from "../src/config.mjs";
-import { loadManifest, ValidationError } from "../src/manifest.mjs";
+import { loadManifest, effectivePlanDoc, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
 import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
@@ -79,7 +79,8 @@ function cmdValidate(rest) {
   const cfg = getConfig();
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry: ref.source !== "path" });
+  const fromRegistry = ref.source !== "path";
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, ...(fromRegistry && { ref: rest[0] }) });
   out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
   // The preview IS the approval: with forEach or composition in play, show the
   // worst-case leaf count the caps permit before anything runs.
@@ -112,22 +113,8 @@ function cmdValidate(rest) {
   // tail of stdout is the JSON being approved. Every leaf's model and prompt
   // must be visible here — that is W1's acceptance invariant.
   if (rest.includes("--resolved")) {
-    const strip = (t) => {
-      const o = { id: t.id, model: t.model };
-      if (t.prompt) o.prompt = t.prompt;
-      for (const k of ["effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "isolation", "outputDir"]) {
-        if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
-      }
-      if (t.childPlan) o.child = t.childPlan.tasks.map(strip);
-      return o;
-    };
     out("resolved manifest:");
-    out(JSON.stringify({
-      ...(plan.goal && { goal: plan.goal }),
-      resultsDir: plan.resultsDir,
-      tasks: plan.tasks.map(strip),
-      ...(plan.digest && { digest: plan.digest }),
-    }, null, 2));
+    out(JSON.stringify(effectivePlanDoc(plan), null, 2));
   }
   return 0;
 }
@@ -137,7 +124,8 @@ async function cmdRun(rest) {
   const force = rest.includes("--force");
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry: ref.source !== "path" });
+  const fromRegistry = ref.source !== "path";
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, ...(fromRegistry && { ref: rest[0] }) });
   // Fire-and-forget notification hook (e.g. "claude-slack notify --message {status}").
   // Mechanical plumbing only: substitute tokens, spawn detached, swallow errors.
   // Shared by the end-of-run status and the scheduler's single-shot cost warn.

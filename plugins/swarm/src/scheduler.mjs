@@ -4,9 +4,10 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { buildDispatch, toSpawnable } from "./dispatch.mjs";
 import { isClaudeModel } from "./models.mjs";
 import { buildDigestTask } from "./digest.mjs";
+import { effectivePlanDoc } from "./manifest.mjs";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
-  writeDigestMd, appendRunLog, renderRoster, formatTokens,
+  writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
 } from "./results.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
@@ -223,6 +224,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   const tasks = [...plan.tasks];
   if (plan.digest) tasks.push(buildDigestTask(plan));
   initResultsDir(plan.resultsDir);
+  // P1: the run records its own intent — the effective plan persists beside
+  // the outcomes it produced, so the corpus can answer "what was asked".
+  writeManifestSnapshot(plan.resultsDir, effectivePlanDoc(plan));
 
   // Health check, once per run, only when any open-model task exists: any
   // response from the provider endpoint counts as up; fail the run fast with
@@ -626,6 +630,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         ok: r.ok,
         exit: r.exit,
         durationMs: r.durationMs,
+        prompt, // the exact string sent — with the snapshot, the leaf's full intent
         output: r.output,
       };
       if (tokenTotal(r.tokens) + (r.tokens?.cacheRead || 0) > 0) result.tokens = r.tokens;
