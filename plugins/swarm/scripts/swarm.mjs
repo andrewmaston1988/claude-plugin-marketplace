@@ -62,6 +62,7 @@ async function cmdRun(manifestPath, force) {
     digestPath: r.digestPath,
     digestFailed: r.digestFailed,
     summaryPath: r.summaryPath,
+    totalTokens: r.summary.totalTokens,
     worktreesKept: r.worktreesKept,
   }));
 

@@ -4,6 +4,8 @@
 //   SWARM_SHIM_OUTPUT    stdout to emit (default "shim-ok")
 //   SWARM_SHIM_EXIT      exit code (default 0)
 //   SWARM_SHIM_SLEEP_MS  delay before exiting (for timeout/concurrency tests)
+//   SWARM_SHIM_STREAM    emit stream-json events (assistant usage + result
+//                        wrapping SWARM_SHIM_OUTPUT) like the real CLI
 import { appendFileSync } from "node:fs";
 
 const envSubset = {};
@@ -21,5 +23,12 @@ if (process.env.SWARM_SHIM_LOG) {
 const sleepMs = parseInt(process.env.SWARM_SHIM_SLEEP_MS || "0", 10);
 if (sleepMs > 0) await new Promise((r) => setTimeout(r, sleepMs));
 
-process.stdout.write(process.env.SWARM_SHIM_OUTPUT ?? "shim-ok");
+const text = process.env.SWARM_SHIM_OUTPUT ?? "shim-ok";
+if (process.env.SWARM_SHIM_STREAM) {
+  const usage = { input_tokens: 1200, output_tokens: 300 };
+  process.stdout.write(JSON.stringify({ type: "assistant", message: { id: "m1", role: "assistant", usage } }) + "\n");
+  process.stdout.write(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: text, usage, total_cost_usd: 0.01, num_turns: 1 }) + "\n");
+} else {
+  process.stdout.write(text);
+}
 process.exit(parseInt(process.env.SWARM_SHIM_EXIT || "0", 10));

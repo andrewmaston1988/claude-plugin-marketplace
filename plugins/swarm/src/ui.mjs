@@ -30,3 +30,16 @@ export const stateColor = {
 export function paint(state, s) {
   return (stateColor[state] || ((x) => x))(s);
 }
+
+// Repainting writer for roster snapshots. On a TTY each snapshot erases the
+// previous one (cursor-up + clear-to-end) so the roster updates in place; when
+// piped, snapshots append separated by a blank line — the tail of the buffer
+// is always the latest full picture.
+export function createSnapshotWriter({ write = (s) => process.stdout.write(s), isTTY = process.stdout.isTTY } = {}) {
+  let prevLines = 0;
+  return (block) => {
+    const erase = isTTY && prevLines > 0 ? `\x1b[${prevLines}A\x1b[0J` : "";
+    write(erase + block + "\n" + (isTTY ? "" : "\n"));
+    prevLines = block.split("\n").length;
+  };
+}

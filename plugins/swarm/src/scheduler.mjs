@@ -1,13 +1,18 @@
 import { mkdirSync, createWriteStream } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { buildDispatch, toSpawnable } from "./dispatch.mjs";
 import { isClaudeModel } from "./models.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
-  writeDigestMd, appendRunLog, formatStatusLine,
+  writeDigestMd, appendRunLog, renderRoster,
 } from "./results.mjs";
+import {
+  createStreamParser, createUsageAccumulator, pickFinalTokens,
+  addTokens, emptyTokens, tokenTotal,
+} from "./stream.mjs";
+import { createSnapshotWriter } from "./ui.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
@@ -15,8 +20,8 @@ const OK_STATES = new Set(["ok", "skipped"]);
 const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 
 // Default io: real spawn (with Windows .cmd resolution), real fetch/clock,
-// status lines to stdout. Every part is injectable so tests never hit the
-// network or a real claude.
+// roster snapshots + closing lines to stdout. Every part is injectable so
+// tests never hit the network or a real claude.
 export function makeDefaultIo() {
   return {
     spawn: (cmd, args, opts) => {
@@ -26,6 +31,7 @@ export function makeDefaultIo() {
     fetch: (...a) => globalThis.fetch(...a),
     now: () => Date.now(),
     stdout: (line) => process.stdout.write(line + "\n"),
+    snapshot: createSnapshotWriter(),
     env: process.env,
   };
 }
@@ -64,7 +70,7 @@ function tryParseJson(output) {
   return undefined;
 }
 
-function runTask(task, prompt, cfg, io, leafLog) {
+function runTask(task, prompt, cfg, io, leafLog, onTokens) {
   return new Promise((resolve) => {
     const { argv, env } = buildDispatch(task, prompt, cfg);
     const started = io.now();
@@ -78,17 +84,27 @@ function runTask(task, prompt, cfg, io, leafLog) {
       });
     } catch (e) {
       leafLog?.end(`spawn error: ${e.message}\n`);
-      resolve({ ok: false, exit: null, durationMs: 0, output: `spawn error: ${e.message}`, timedOut: false });
+      resolve({ ok: false, exit: null, durationMs: 0, output: `spawn error: ${e.message}`, raw: "", timedOut: false, tokens: emptyTokens() });
       return;
     }
-    let output = "";
+    let raw = "";
     let timedOut = false;
     let settled = false;
+    // stream-json events on stdout: per-turn usage feeds the live token count,
+    // the result event carries the final text + authoritative usage. Anything
+    // non-JSONL (old CLI, plain-text provider) leaves both empty and the raw
+    // buffer stands in as the output — same behavior as before stream-json.
+    const acc = createUsageAccumulator();
+    let resultEvt = null;
+    const parser = createStreamParser({
+      onUsage: (id, usage) => { acc.record(id, usage); onTokens?.(acc.totals()); },
+      onResult: (evt) => { resultEvt = evt; },
+    });
     // Progressive capture: stream to results/<id>.log as data arrives so a
-    // user can tail an individual leaf mid-run; the buffered copy still lands
-    // in the result JSON's output field.
-    child.stdout?.on("data", (d) => { output += d; leafLog?.write(d); });
-    child.stderr?.on("data", (d) => { output += d; leafLog?.write(d); });
+    // user can tail an individual leaf mid-run (with stream-json, the tail
+    // shows tool-call events live).
+    child.stdout?.on("data", (d) => { raw += d; leafLog?.write(d); parser.feed(String(d)); });
+    child.stderr?.on("data", (d) => { raw += d; leafLog?.write(d); });
     const timer = setTimeout(() => {
       timedOut = true;
       try { child.kill(); } catch { /* already gone */ }
@@ -98,14 +114,19 @@ function runTask(task, prompt, cfg, io, leafLog) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (errMsg) output += (output ? "\n" : "") + errMsg;
+      parser.end();
+      if (errMsg) raw += (raw ? "\n" : "") + errMsg;
       leafLog?.end();
       resolve({
-        ok: exit === 0 && !timedOut,
+        ok: exit === 0 && !timedOut && !(resultEvt?.is_error),
         exit,
         durationMs: io.now() - started,
-        output: String(output),
+        output: resultEvt?.result != null ? String(resultEvt.result) : String(raw),
+        raw: String(raw),
         timedOut,
+        tokens: pickFinalTokens(resultEvt?.usage, acc.totals()),
+        costUsd: resultEvt?.total_cost_usd,
+        numTurns: resultEvt?.num_turns,
       });
     };
     child.on("error", (e) => settle(null, `spawn error: ${e.message}`));
@@ -139,35 +160,75 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
   const started = new Date().toISOString();
   // run-start line lets `status` derive pending tasks (ids never seen since
-  // the latest run-start are pending).
-  appendRunLog(plan.resultsDir, { ts: started, event: "run-start", tasks: tasks.map((t) => t.id) });
+  // the latest run-start are pending) and carries models for the roster view.
+  appendRunLog(plan.resultsDir, { ts: started, event: "run-start", tasks: tasks.map((t) => ({ id: t.id, model: t.model })) });
+  const runStartMs = io.now();
   const state = new Map(tasks.map((t) => [t.id, "pending"]));
   const durations = new Map();
+  const tokensMap = new Map();
+  const startedAt = new Map();
   const worktreesKept = [];
   let digestPath = null;
   let digestFailed = false;
 
-  const record = (task, st, durationMs) => {
-    state.set(task.id, st);
-    if (durationMs != null) durations.set(task.id, durationMs);
-    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, state: st });
-    if (st !== "running") {
-      io.stdout(formatStatusLine({ id: task.id, model: task.model, state: st, durationMs }));
-    }
+  let lastPaintMs = 0;
+  const paint = (force = true) => {
+    if (!io.snapshot) return;
+    if (!force && io.now() - lastPaintMs < 1000) return; // token ticks repaint at most 1/s
+    lastPaintMs = io.now();
+    io.snapshot(renderRoster({
+      title: basename(plan.resultsDir),
+      tasks: tasks.map((t) => ({
+        id: t.id, model: t.model, state: state.get(t.id),
+        durationMs: durations.get(t.id),
+        startedMs: startedAt.get(t.id),
+        tokens: tokensMap.get(t.id),
+      })),
+      now: io.now(),
+      startedMs: runStartMs,
+    }));
   };
 
-  // Resume: an existing ok result satisfies the task without re-running it.
+  const record = (task, st, durationMs, tokens) => {
+    state.set(task.id, st);
+    if (st === "running") startedAt.set(task.id, io.now());
+    if (durationMs != null) durations.set(task.id, durationMs);
+    if (tokens && tokenTotal(tokens) + tokens.cacheRead > 0) tokensMap.set(task.id, tokens);
+    appendRunLog(plan.resultsDir, {
+      ts: new Date().toISOString(), id: task.id, state: st,
+      ...(durationMs != null && { durationMs }),
+      ...(tokensMap.has(task.id) && st !== "running" && { tokens: tokensMap.get(task.id) }),
+    });
+    paint();
+  };
+
+  // Live token ticks from a leaf's assistant turns: run.log line (feeds the
+  // status view + statusline glyph) plus a throttled roster repaint.
+  const onTokens = (task) => (totals) => {
+    tokensMap.set(task.id, totals);
+    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "tokens", tokens: totals });
+    paint(false);
+  };
+
+  // Resume: an existing ok result satisfies the task without re-running it —
+  // its recorded duration and tokens still count in roster and summary.
   if (!force) {
     for (const t of tasks) {
       const prior = readResult(plan.resultsDir, t.id);
       if (prior && prior.ok === true) {
-        record(t, "skipped");
+        record(t, "skipped", prior.durationMs ?? null, prior.tokens);
         if (t.isDigest) digestPath = writeDigestMd(plan.resultsDir, prior.output);
       }
     }
   }
 
   const running = new Map(); // id -> promise resolving to task id
+
+  // Heartbeat: repaint while anything runs so elapsed and live tokens tick
+  // even between state changes. unref'd — never holds the process open.
+  const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
+  const heartbeat = setInterval(() => { if (running.size > 0) paint(); }, heartbeatMs);
+  if (heartbeat.unref) heartbeat.unref();
 
   const depsSatisfied = (t) => t.after.every((d) => OK_STATES.has(state.get(d)));
   const depsDoomed = (t) => t.after.some((d) => {
@@ -197,7 +258,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
       const prompt = substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
       const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`));
-      const r = await runTask({ ...task, cwd: taskCwd }, prompt, cfg, io, leafLog);
+      const r = await runTask({ ...task, cwd: taskCwd }, prompt, cfg, io, leafLog, onTokens(task));
 
       const result = {
         id: task.id,
@@ -207,6 +268,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         durationMs: r.durationMs,
         output: r.output,
       };
+      if (tokenTotal(r.tokens) + (r.tokens?.cacheRead || 0) > 0) result.tokens = r.tokens;
+      if (r.costUsd != null) result.costUsd = r.costUsd;
+      if (r.numTurns != null) result.numTurns = r.numTurns;
       const parsed = tryParseJson(r.output);
       if (parsed !== undefined) result.outputJson = parsed;
 
@@ -223,7 +287,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         else digestFailed = true;
       }
 
-      record(task, r.ok ? "ok" : classifyFailure(r), r.durationMs);
+      record(task, r.ok ? "ok" : classifyFailure({ timedOut: r.timedOut, output: r.raw }), r.durationMs, r.tokens);
       return task.id;
     })();
     running.set(task.id, promise);
@@ -252,6 +316,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     const finished = await Promise.race(running.values());
     running.delete(finished);
   }
+  clearInterval(heartbeat);
 
   const summary = {
     started,
@@ -260,10 +325,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       id: t.id,
       state: state.get(t.id),
       durationMs: durations.get(t.id) ?? null,
+      tokens: tokensMap.get(t.id) ?? null,
       resultPath: resultPath(plan.resultsDir, t.id),
     })),
     blocked: tasks.filter((t) => state.get(t.id) === "blocked").map((t) => t.id),
     worktreesKept,
+    totalTokens: [...tokensMap.values()].reduce(addTokens, emptyTokens()),
   };
   const summaryPath = writeSummary(plan.resultsDir, summary);
 

@@ -6,14 +6,15 @@ import { tmpdir } from "node:os";
 import { glyphFromLog, newestRunLog } from "../statusline/swarm-glyph.mjs";
 
 const LOG = [
-  '{"event":"run-start","tasks":["a","b","c","d","e"]}',
-  '{"id":"a","state":"ok"}',
+  '{"event":"run-start","tasks":[{"id":"a","model":"haiku"},{"id":"b","model":"haiku"},{"id":"c","model":"haiku"},{"id":"d","model":"haiku"},{"id":"e","model":"haiku"}]}',
+  '{"id":"a","state":"ok","tokens":{"input":10000,"output":2000,"cacheCreation":0,"cacheRead":0}}',
   '{"id":"b","state":"running"}',
+  '{"id":"b","event":"tokens","tokens":{"input":5000,"output":1000,"cacheCreation":0,"cacheRead":0}}',
   '{"id":"c","state":"rate-limited"}',
   '{"id":"d","state":"failed:timeout"}',
 ].join("\n");
 
-test("glyphFromLog: counts per state with pending derived from run-start", () => {
+test("glyphFromLog: counts per state with pending derived from run-start, plus token total", () => {
   const g = glyphFromLog(LOG);
   assert.match(g, /^🐝 /);
   assert.match(g, /1✓/);
@@ -21,6 +22,14 @@ test("glyphFromLog: counts per state with pending derived from run-start", () =>
   assert.match(g, /1⧖/);
   assert.match(g, /1✗/);
   assert.match(g, /1·/); // e pending
+  assert.match(g, /18k/); // 12k final (a) + 6k live (b)
+});
+
+test("glyphFromLog: legacy run-start with plain id strings still counts pending", () => {
+  const g = glyphFromLog('{"event":"run-start","tasks":["a","b"]}\n{"id":"a","state":"ok"}');
+  assert.match(g, /1✓/);
+  assert.match(g, /1·/);
+  assert.ok(!/k/.test(g), "no token segment when nothing counted");
 });
 
 test("glyphFromLog: empty for no meaningful content", () => {

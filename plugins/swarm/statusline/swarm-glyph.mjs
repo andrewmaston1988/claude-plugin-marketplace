@@ -6,6 +6,8 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { tokenTotal } from "../src/stream.mjs";
+import { formatTokens } from "../src/results.mjs";
 
 const RECENT_MS = 30 * 60 * 1000; // ignore runs idle for >30 min
 
@@ -36,12 +38,20 @@ export function newestRunLog(home = swarmHome()) {
 export function glyphFromLog(content) {
   let tasks = [];
   const last = new Map();
+  const tok = new Map();
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
     let e;
     try { e = JSON.parse(line); } catch { continue; }
-    if (e.event === "run-start") { tasks = e.tasks || []; last.clear(); }
-    else if (e.id) last.set(e.id, e.state);
+    if (e.event === "run-start") {
+      // pre-token logs recorded plain id strings
+      tasks = (e.tasks || []).map((t) => (typeof t === "string" ? t : t.id));
+      last.clear();
+      tok.clear();
+    } else if (e.id) {
+      if (e.state) last.set(e.id, e.state);
+      if (e.tokens) tok.set(e.id, e.tokens);
+    }
   }
   const count = (s) => [...last.values()].filter((v) => v === s || (s === "failed" && v === "failed:timeout")).length;
   const running = count("running");
@@ -56,6 +66,8 @@ export function glyphFromLog(content) {
   if (limited) parts.push(c("33", `${limited}⧖`));
   if (failed) parts.push(c("31", `${failed}✗`));
   if (pending) parts.push(c("2", `${pending}·`));
+  const total = [...tok.values()].reduce((n, t) => n + tokenTotal(t), 0);
+  if (total > 0) parts.push(c("2", formatTokens(total)));
   return parts.length ? `🐝 ${parts.join(" ")}` : "";
 }
 

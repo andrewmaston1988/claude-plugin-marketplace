@@ -64,7 +64,9 @@ test("fan-out: all tasks run, results + summary + run.log written", async () => 
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     equal(logLines.length, 7); // run-start + (running + terminal) per task
     equal(logLines[0].event, "run-start");
-    deepEqual(logLines[0].tasks, ["a", "b", "c"]);
+    deepEqual(logLines[0].tasks, [
+      { id: "a", model: "haiku" }, { id: "b", model: "haiku" }, { id: "c", model: "haiku" },
+    ]);
     ok(existsSync(join(p.resultsDir, ".gitignore")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -136,7 +138,7 @@ test("rate-limit-shaped failure classified 'rate-limited'", async () => {
     const p = plan(dir, [task("a")]);
     const r = await runPlan(p, CFG, io);
     equal(r.summary.tasks[0].state, "rate-limited");
-    ok(io.lines.some((l) => l.includes("[rate-limited]")));
+    ok(io.snapshots.at(-1).includes("[rate-limited]"), io.snapshots.at(-1));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -205,7 +207,10 @@ test("resume skips ok results; --force reruns everything", async () => {
   try {
     const p = plan(dir, [task("a"), task("b", { prompt: "use {{result:a}}", after: ["a"] })]);
     initResultsDir(p.resultsDir);
-    writeResult(p.resultsDir, "a", { id: "a", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "prior-a" });
+    writeResult(p.resultsDir, "a", {
+      id: "a", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "prior-a",
+      tokens: { input: 500, output: 40, cacheCreation: 0, cacheRead: 0 },
+    });
 
     const spawn1 = fakeSpawnFactory(() => ({ output: "fresh" }));
     const io1 = makeIo(spawn1);
@@ -215,6 +220,8 @@ test("resume skips ok results; --force reruns everything", async () => {
     const states1 = Object.fromEntries(r1.summary.tasks.map((t) => [t.id, t.state]));
     equal(states1.a, "skipped");
     equal(states1.b, "ok");
+    // a skipped leaf's prior tokens still count in the summary
+    deepEqual(r1.summary.tasks.find((t) => t.id === "a").tokens, { input: 500, output: 40, cacheCreation: 0, cacheRead: 0 });
 
     const spawn2 = fakeSpawnFactory(() => ({ output: "fresh" }));
     const io2 = makeIo(spawn2);
@@ -340,16 +347,91 @@ test("scratch-redirected task gets its cwd created before spawn", async () => {
   }
 });
 
-test("stdout contract: one status line per task, never raw output", async () => {
+test("stdout contract: roster snapshots per state change, never raw output", async () => {
   const dir = tmp();
   try {
     const spawn = fakeSpawnFactory(() => ({ output: "SECRET-RAW-OUTPUT" }));
     const io = makeIo(spawn);
     const p = plan(dir, [task("a"), task("b")]);
     await runPlan(p, CFG, io);
-    equal(io.lines.length, 2);
-    ok(io.lines.every((l) => /^✓ (a|b) haiku \d+s$/.test(l)), io.lines.join("|"));
-    ok(!io.lines.some((l) => l.includes("SECRET-RAW-OUTPUT")));
+    equal(io.lines.length, 0); // the engine paints snapshots; the CLI owns the closing block
+    ok(io.snapshots.length >= 3, `one paint per state change, got ${io.snapshots.length}`);
+    const last = io.snapshots.at(-1);
+    ok(/✓ {2}a\s+haiku/.test(last), last);
+    ok(/✓ {2}b\s+haiku/.test(last), last);
+    ok(last.includes("2 ok"), last);
+    ok(last.startsWith("swarm · run · 2 tasks"), last);
+    ok(!io.snapshots.some((s) => s.includes("SECRET-RAW-OUTPUT")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stream-json leaf: result text extracted, tokens accounted end-to-end", async () => {
+  const dir = tmp();
+  try {
+    const streamOut = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({ type: "assistant", message: { id: "m1", usage: { input_tokens: 1000, output_tokens: 50 } } }),
+      JSON.stringify({ type: "assistant", message: { id: "m2", usage: { input_tokens: 2000, output_tokens: 150, cache_read_input_tokens: 500 } } }),
+      JSON.stringify({
+        type: "result", subtype: "success", is_error: false, result: "the extracted answer",
+        usage: { input_tokens: 3000, output_tokens: 200, cache_read_input_tokens: 500 },
+        total_cost_usd: 0.05, num_turns: 2,
+      }),
+    ].join("\n") + "\n";
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("leaf")]);
+    const r = await runPlan(p, CFG, io);
+
+    const res = readResult(p.resultsDir, "leaf");
+    equal(res.output, "the extracted answer");
+    deepEqual(res.tokens, { input: 3000, output: 200, cacheCreation: 0, cacheRead: 500 });
+    equal(res.costUsd, 0.05);
+    equal(res.numTurns, 2);
+
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    ok(logLines.some((l) => l.event === "tokens" && l.id === "leaf"), "expected a live tokens event in run.log");
+    const done = logLines.find((l) => l.id === "leaf" && l.state === "ok");
+    equal(done.tokens.input, 3000);
+    ok(done.durationMs != null, "terminal run.log line carries durationMs");
+
+    deepEqual(r.summary.tasks[0].tokens, { input: 3000, output: 200, cacheCreation: 0, cacheRead: 500 });
+    deepEqual(r.summary.totalTokens, { input: 3000, output: 200, cacheCreation: 0, cacheRead: 500 });
+
+    // final roster row shows 3000+200 work tokens = 3.2k; raw text never leaks
+    ok(io.snapshots.some((s) => /leaf.*3\.2k/.test(s)), io.snapshots.at(-1));
+    ok(!io.snapshots.some((s) => s.includes("extracted answer")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stream-json leaf: is_error result fails the task even on exit 0", async () => {
+  const dir = tmp();
+  try {
+    const streamOut = JSON.stringify({ type: "result", subtype: "error", is_error: true, result: "it broke" }) + "\n";
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut, exit: 0 }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("leaf")]);
+    const r = await runPlan(p, CFG, io);
+    equal(r.summary.tasks[0].state, "failed");
+    equal(readResult(p.resultsDir, "leaf").ok, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("heartbeat repaints the roster with climbing elapsed while a leaf runs", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ delayMs: 300, output: "x" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("slow")]);
+    await runPlan(p, { ...CFG, heartbeatSecs: 0.05 }, io);
+    const runningPaints = io.snapshots.filter((s) => s.includes("◐")).length;
+    ok(runningPaints >= 2, `expected ≥2 running snapshots, got ${runningPaints}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
