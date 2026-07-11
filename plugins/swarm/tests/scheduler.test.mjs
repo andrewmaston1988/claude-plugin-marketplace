@@ -1294,3 +1294,134 @@ test("cost warn: subscription costUsd is synthetic — projection stays token-de
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── child manifests (bounded composition) ─────────────────────────────────────
+
+const childPlanOf = (...tasks) => ({ tasks });
+
+test("manifest node: children run namespaced, sinks aggregate as the node's output, dependents inline it", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const prompt = promptOf(call);
+      if (prompt === "scan things") return { output: streamOut(JSON.stringify({ found: 2 }), "s-scan") };
+      if (prompt.startsWith("sum")) return { output: streamOut("two things", "s-sum") };
+      return { output: streamOut(`final saw: ${prompt.split("|")[1]}`, "s-final") };
+    });
+    const io = makeIo(spawn);
+    const node = task("audit", {
+      model: "manifest", prompt: "",
+      childPlan: childPlanOf(
+        task("scan", { prompt: "scan things" }),
+        task("sum", { prompt: "sum {{result:scan}}", after: ["scan"] }),
+      ),
+    });
+    const p = plan(dir, [node, task("final", { prompt: "final|{{result:audit}}", after: ["audit"] })]);
+    await runPlan(p, CFG, io);
+
+    equal(readResult(p.resultsDir, "audit~scan").ok, true);
+    equal(readResult(p.resultsDir, "audit~sum").ok, true);
+    // within-child {{result:}} resolved to the namespaced id
+    const sumCall = spawn.calls.find((c) => promptOf(c).startsWith("sum"));
+    ok(promptOf(sumCall).includes(JSON.stringify({ found: 2 })), promptOf(sumCall));
+    // the node aggregates its sinks: only 'sum' has no within-child dependents
+    const agg = readResult(p.resultsDir, "audit");
+    equal(agg.ok, true);
+    deepEqual(agg.outputJson, { sum: "two things" });
+    // and the dependent's template inlined it
+    const finalRes = readResult(p.resultsDir, "final");
+    ok(finalRes.output.includes('"sum":"two things"'), finalRes.output);
+
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const expand = logLines.find((l) => l.event === "expand-manifest");
+    deepEqual(expand.children, [{ id: "audit~scan", model: "haiku" }, { id: "audit~sum", model: "haiku" }]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("forEach × child: per-item child copies with {{item}} substituted; one item's failure dooms only the node", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const prompt = promptOf(call);
+      if (prompt === "do seed") return { output: streamOut(JSON.stringify(["alpha", "beta"]), "s-seed") };
+      if (prompt === "ask alpha") return { output: streamOut("", "s-a0"), exit: 1 }; // alpha's scan fails
+      if (prompt === "ask beta") return { output: streamOut("beta says hi", "s-b0") };
+      return { output: streamOut(`condensed: ${prompt}`, "s-x") };
+    });
+    const io = makeIo(spawn);
+    const node = task("audit", {
+      model: "manifest", prompt: "", after: ["seed"],
+      forEach: { from: "seed", path: "", maxItems: 5 },
+      childPlan: childPlanOf(
+        task("ask", { prompt: "ask {{item}}" }),
+        task("cut", { prompt: "cut {{result:ask}}", after: ["ask"] }),
+      ),
+    });
+    const p = plan(dir, [task("seed"), node]);
+    await runPlan(p, CFG, io);
+
+    // beta's chain completed
+    equal(readResult(p.resultsDir, "audit[1]~ask").ok, true);
+    equal(readResult(p.resultsDir, "audit[1]~cut").ok, true);
+    // alpha's scan failed -> alpha's cut blocked -> the audit aggregate is doomed
+    equal(readResult(p.resultsDir, "audit[0]~ask").ok, false);
+    equal(readResult(p.resultsDir, "audit[0]~cut"), null);
+    const summary = JSON.parse(readFileSync(join(p.resultsDir, "summary.json"), "utf8"));
+    equal(summary.tasks.find((t) => t.id === "audit[0]~cut").state, "blocked");
+    equal(summary.tasks.find((t) => t.id === "audit").state, "blocked");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("child compute reads deps by local id through aliases", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => promptOf(call) === "list"
+      ? { output: streamOut(JSON.stringify({ xs: [3, 1, 3] }), "s-l") }
+      : { output: streamOut("done", "s-d") });
+    const io = makeIo(spawn);
+    const node = task("crunch", {
+      model: "manifest", prompt: "",
+      childPlan: childPlanOf(
+        task("get", { prompt: "list" }),
+        { id: "dedupe", model: "compute", prompt: "", allowedTools: "", cwd: tmpdir(), originalCwd: tmpdir(), scratchRedirect: false, timeoutMs: 5000, after: ["get"], compute: "unique_by(filter(deps['get'].xs, item > 0), '')" },
+      ),
+    });
+    // unique_by needs objects; keep it simple: sum instead
+    node.childPlan.tasks[1].compute = "sum(deps['get'].xs)";
+    const p = plan(dir, [node]);
+    await runPlan(p, CFG, io);
+    const agg = readResult(p.resultsDir, "crunch");
+    equal(agg.ok, true);
+    deepEqual(agg.outputJson, { dedupe: 7 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resume: prior-ok child tasks skip on re-run", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => ({ output: streamOut(`out: ${promptOf(call)}`, "s") }));
+    const io = makeIo(spawn);
+    const node = () => task("audit", {
+      model: "manifest", prompt: "",
+      childPlan: childPlanOf(task("scan", { prompt: "scan" }), task("sum", { prompt: "sum it", after: ["scan"] })),
+    });
+    const p = plan(dir, [node()]);
+    await runPlan(p, CFG, io);
+    equal(spawn.calls.length, 2);
+
+    const spawn2 = fakeSpawnFactory(() => ({ output: streamOut("should not run", "s2") }));
+    const io2 = makeIo(spawn2);
+    const p2 = { ...plan(dir, [node()]), resultsDir: p.resultsDir };
+    await runPlan(p2, CFG, io2);
+    equal(spawn2.calls.length, 0); // both children skipped, node re-aggregated
+    equal(readResult(p.resultsDir, "audit").ok, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

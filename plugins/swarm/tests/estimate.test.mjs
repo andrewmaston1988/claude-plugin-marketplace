@@ -143,3 +143,20 @@ test("formatEstimate: tokens only, tokens+usd, partial with unknown list, and th
   );
   equal(formatEstimate(null), "estimate: none (no run history yet)");
 });
+
+test("estimateRun: manifest nodes count child leaves × maxItems per model; child computes count zero", () => {
+  const tasks = [
+    { id: "seed", model: "haiku" },
+    {
+      id: "audit", model: "manifest",
+      forEach: { from: "seed", path: "", maxItems: 3 },
+      childPlan: { tasks: [
+        { id: "scan", model: "glm-5.2:cloud" },
+        { id: "dedupe", model: "compute", compute: "length(deps['scan'])" },
+        { id: "sum", model: "haiku" },
+      ] },
+    },
+  ];
+  const est = estimateRun(tasks, undefined, corpusOf({ haiku: [100], "glm-5.2:cloud": [200] }));
+  equal(est.tokens, 100 + 3 * 200 + 3 * 100); // seed + 3×scan + 3×sum
+});
