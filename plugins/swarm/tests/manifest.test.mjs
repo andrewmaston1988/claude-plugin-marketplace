@@ -692,3 +692,133 @@ test("the unknown-key message now lists returns (typo teaching)", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── child manifests (bounded composition) ─────────────────────────────────────
+
+const CHILD = {
+  tasks: [
+    { id: "scan", prompt: "look at {{item}}", model: "haiku" },
+    { id: "sum", prompt: "compress {{result:scan}}", model: "haiku", after: ["scan"] },
+  ],
+};
+
+test("manifest task: child loads, validates, and lands normalized on childPlan", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "child.json"), JSON.stringify(CHILD));
+    const p = writeManifest(dir, {
+      tasks: [
+        claudeTask({ id: "seed" }),
+        { id: "audit", manifest: "child.json", after: ["seed"], forEach: { from: "seed", path: "", maxItems: 3 } },
+      ],
+    });
+    const plan = loadManifest(p, CFG, dir);
+    const node = plan.tasks.find((t) => t.id === "audit");
+    equal(node.model, "manifest");
+    equal(node.childPlan.tasks.length, 2);
+    equal(node.childPlan.tasks[0].id, "scan");
+    equal(node.childPlan.tasks[0].allowedTools, DEFAULT_TOOLS);
+    deepEqual(node.childPlan.tasks[1].after, ["scan"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("manifest task: agentless container — leaf keys on the node are rejected", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "child.json"), JSON.stringify(CHILD));
+    const p = writeManifest(dir, {
+      tasks: [{
+        id: "audit", manifest: "child.json", model: "haiku", prompt: "x",
+        returns: { type: "object" }, after: [],
+      }],
+    });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    for (const key of ["model", "prompt", "returns"]) {
+      ok(errs.some((e) => e.includes("task 'audit'") && e.includes(key) && e.includes("agentless container")), `${key}:\n${errs.join("\n")}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("child manifests may not set resultsDir/concurrency/digest — the parent owns the run", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "child.json"), JSON.stringify({
+      ...CHILD, resultsDir: "out", concurrency: 2, digest: { model: "haiku" },
+    }));
+    const p = writeManifest(dir, { tasks: [{ id: "audit", manifest: "child.json" }] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    for (const key of ["resultsDir", "concurrency", "digest"]) {
+      ok(errs.some((e) => e.includes(key) && e.includes("parent owns the run")), `${key}:\n${errs.join("\n")}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("one nesting level: a manifest task inside a child errors naming both files", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "grandchild.json"), JSON.stringify({ tasks: [claudeTask()] }));
+    writeFileSync(join(dir, "child.json"), JSON.stringify({
+      tasks: [{ id: "deep", manifest: "grandchild.json" }],
+    }));
+    const p = writeManifest(dir, { tasks: [{ id: "audit", manifest: "child.json" }] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => e.includes("one nesting level") && e.includes("child.json")), errs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("child task errors surface in the parent's validate output, prefixed", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "child.json"), JSON.stringify({
+      tasks: [{ id: "scan", model: "haiku" }], // missing prompt
+    }));
+    const p = writeManifest(dir, { tasks: [{ id: "audit", manifest: "child.json" }] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => e.includes("task 'audit' -> child") && e.includes("scan") && e.includes("prompt is required")), errs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("{{item}} in child prompts requires forEach on the parent node", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "child.json"), JSON.stringify(CHILD)); // scan uses {{item}}
+    const p = writeManifest(dir, { tasks: [{ id: "audit", manifest: "child.json" }] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => e.includes("{{item}}") && e.includes("forEach")), errs.join("\n"));
+
+    const p2 = writeManifest(dir, {
+      tasks: [
+        claudeTask({ id: "seed" }),
+        { id: "audit", manifest: "child.json", after: ["seed"], forEach: { from: "seed", path: "", maxItems: 2 } },
+      ],
+    }, "ok.json");
+    const plan = loadManifest(p2, CFG, dir);
+    ok(plan.tasks.find((t) => t.id === "audit").childPlan);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("governance gates child tasks exactly like inline tasks", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "child.json"), JSON.stringify({
+      tasks: [{ id: "scan", prompt: "x", model: "glm-4.6:cloud" }],
+    }));
+    const p = writeManifest(dir, { tasks: [{ id: "audit", manifest: "child.json" }] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => e.includes("governance") && e.includes("glm-4.6:cloud")), errs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

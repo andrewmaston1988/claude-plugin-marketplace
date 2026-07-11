@@ -227,7 +227,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // Health check, once per run, only when any open-model task exists: any
   // response from the provider endpoint counts as up; fail the run fast with
   // a clear message when it is unreachable.
-  if (tasks.some((t) => !t.compute && !isClaudeModel(t.model))) {
+  // Preflights must see composed leaves too — a manifest node's children are
+  // known statically even though they splice in at run time.
+  const leafView = tasks.flatMap((t) => (t.childPlan ? t.childPlan.tasks : [t]));
+  if (leafView.some((t) => !t.compute && t.model !== "manifest" && !isClaudeModel(t.model))) {
     try {
       await io.fetch(cfg.provider.url);
     } catch (e) {
@@ -243,7 +246,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // classification is the backstop). Exhausted quota with undefended Claude
   // leaves aborts BEFORE dispatch — a run that would deterministically fail
   // should fail in one second with the reset time, not after four minutes.
-  const claudeTasks = tasks.filter((t) => !t.compute && isClaudeModel(t.model));
+  const claudeTasks = leafView.filter((t) => !t.compute && isClaudeModel(t.model));
   if (claudeTasks.length && cfg.quotaPreflight !== false) {
     const env = io.env || process.env;
     const q = await checkQuota({
@@ -443,12 +446,16 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
   // compute steps run inline — no spawn, no slot, zero tokens. The result is a
   // first-class task result so {{result:}} and forEach.from consume it as usual.
+  // Spliced child computes bind deps by their LOCAL ids via depAliases — the
+  // expression text is never rewritten.
   const runCompute = (task) => {
     record(task, "running");
     const t0 = io.now();
     let result;
     try {
-      const scope = { deps: Object.fromEntries(task.after.map((d) => [d, valueOf(d)])) };
+      const scope = { deps: task.depAliases
+        ? Object.fromEntries(Object.entries(task.depAliases).map(([local, full]) => [local, valueOf(full)]))
+        : Object.fromEntries(task.after.map((d) => [d, valueOf(d)])) };
       const v = evalExpr(task.compute, scope);
       result = {
         id: task.id, model: task.model, ok: true, exit: 0, durationMs: io.now() - t0,
@@ -479,12 +486,16 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     }
     const items = sel.slice(0, task.forEach.maxItems);
     const truncated = sel.length > items.length;
-    const base = substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
+    // A childPlan parent clones manifest NODES (one child copy per item —
+    // {{item}} substitutes at each clone's own expansion); a plain parent
+    // clones prompt leaves as before.
+    const base = task.childPlan ? "" : substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
     const clones = items.map((item, i) => ({
       ...task,
       id: `${task.id}[${i}]`,
-      prompt: substituteItems(base, item, i),
-      promptFinal: true,
+      ...(task.childPlan
+        ? { manifestItem: item, manifestIndex: i }
+        : { prompt: substituteItems(base, item, i), promptFinal: true }),
       when: undefined,
       forEach: undefined,
       after: [...task.after],
@@ -507,9 +518,64 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     }
     task.when = undefined;
     task.forEach = undefined;
+    task.childPlan = undefined; // the clones carry it; the parent is now pure aggregate
     task.after = clones.map((c) => c.id);
     task.aggregate = { truncated, kept: items.length, total: sel.length };
     paint();
+  };
+
+  // Splice a manifest node's child tasks into the run under `<node>~<local>`
+  // ids, remapping within-child references; the node morphs into an aggregate
+  // over the child's sinks (tasks with no within-child dependents).
+  const expandManifest = (node) => {
+    const locals = new Set(node.childPlan.tasks.map((c) => c.id));
+    const remap = (id) => `${node.id}~${id}`;
+    const hasItem = node.manifestItem !== undefined;
+    const spliced = node.childPlan.tasks.map((c) => {
+      let prompt = c.prompt.replace(TEMPLATE_RE, (whole, kind, id) => (locals.has(id) ? `{{${kind}:${remap(id)}}}` : whole));
+      // a child task with its own forEach keeps its {{item}} for its own clones
+      if (hasItem && c.forEach === undefined) prompt = substituteItems(prompt, node.manifestItem, node.manifestIndex);
+      return {
+        ...c,
+        id: remap(c.id),
+        prompt,
+        after: c.after.map((d) => (locals.has(d) ? remap(d) : d)),
+        ...(c.when && { when: { ...c.when, from: locals.has(c.when.from) ? remap(c.when.from) : c.when.from } }),
+        ...(c.forEach && { forEach: { ...c.forEach, from: locals.has(c.forEach.from) ? remap(c.forEach.from) : c.forEach.from } }),
+        ...(c.compute !== undefined && {
+          depAliases: Object.fromEntries(c.after.map((d) => [d, locals.has(d) ? remap(d) : d])),
+        }),
+      };
+    });
+    appendRunLog(plan.resultsDir, {
+      ts: new Date().toISOString(), event: "expand-manifest", id: node.id,
+      children: spliced.map((c) => ({ id: c.id, model: c.model })),
+    });
+    tasks.splice(tasks.indexOf(node) + 1, 0, ...spliced);
+    for (const c of spliced) {
+      state.set(c.id, "pending");
+      if (!force) {
+        const prior = readResult(plan.resultsDir, c.id);
+        if (prior && prior.ok === true) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
+      }
+    }
+    const dependedOn = new Set(node.childPlan.tasks.flatMap((c) => c.after.filter((d) => locals.has(d))));
+    const sinks = node.childPlan.tasks.filter((c) => !dependedOn.has(c.id)).map((c) => ({ local: c.id, full: remap(c.id) }));
+    node.when = undefined;
+    node.childPlan = undefined;
+    node.after = spliced.map((c) => c.id);
+    node.aggregateManifest = { sinks };
+    paint();
+  };
+
+  const runManifestAggregate = (task) => {
+    const outputJson = Object.fromEntries(task.aggregateManifest.sinks.map(({ local, full }) => [local, valueOf(full)]));
+    const result = {
+      id: task.id, model: task.model, ok: true, exit: 0, durationMs: 0,
+      output: JSON.stringify(outputJson), outputJson, children: task.after.length,
+    };
+    writeResult(plan.resultsDir, task.id, result);
+    record(task, "ok", 0);
   };
 
   const runAggregate = (task) => {
@@ -646,8 +712,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       costIsRealComplete &&= r.costUsd != null && realKey;
       if (cfg.costWarn !== false && !costWarnFired) {
         const remaining = tasks.reduce((n, t) => {
-          if (t.compute || t.aggregate || !ALIVE_STATES.has(state.get(t.id))) return n;
-          return n + (t.forEach ? t.forEach.maxItems : 1);
+          if (t.compute || t.aggregate || t.aggregateManifest || !ALIVE_STATES.has(state.get(t.id))) return n;
+          const mult = t.forEach ? t.forEach.maxItems : 1;
+          if (t.childPlan) return n + mult * t.childPlan.tasks.filter((c) => c.compute === undefined).length;
+          return n + mult;
         }, 0);
         const useUsd = costIsRealComplete && spentUsd > 0;
         const threshold = useUsd ? (cfg.costWarnUsd ?? 10) : (cfg.costWarnTokens ?? 5_000_000);
@@ -689,7 +757,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (state.get(t.id) !== "pending" || !depsSatisfied(t)) continue;
       if (!passesWhen(t)) { progressed = true; continue; }
       if (t.forEach) { expandForEach(t); progressed = true; continue; }
+      if (t.childPlan) { expandManifest(t); progressed = true; continue; }
       if (t.aggregate) { runAggregate(t); progressed = true; continue; }
+      if (t.aggregateManifest) { runManifestAggregate(t); progressed = true; continue; }
       if (t.compute) { runCompute(t); progressed = true; continue; }
       launch(t);
     }

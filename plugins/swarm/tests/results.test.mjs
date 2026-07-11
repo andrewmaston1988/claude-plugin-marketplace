@@ -257,3 +257,23 @@ test("formatClosing: tokens line carries actual-vs-estimate only when an estimat
   // estimate but zero actual tokens (e.g. all-compute run): no tokens line, no comparison
   ok(!formatClosing({ summaryPath: "S", estimate: { tokens: 5, counted: [], unknown: [] } }).includes("estimate was"));
 });
+
+test("renderStatus: expand-manifest events add child rows with their own models", () => {
+  const dir = tmp();
+  try {
+    initResultsDir(dir);
+    appendRunLog(dir, { ts: "2026-07-11T10:00:00Z", event: "run-start", tasks: [{ id: "audit", model: "manifest" }] });
+    appendRunLog(dir, {
+      ts: "2026-07-11T10:00:01Z", event: "expand-manifest", id: "audit",
+      children: [{ id: "audit~scan", model: "glm-5.2:cloud" }, { id: "audit~sum", model: "haiku" }],
+    });
+    appendRunLog(dir, { ts: "2026-07-11T10:00:02Z", id: "audit~scan", state: "ok", durationMs: 10 });
+    const out = renderStatus(dir, Date.parse("2026-07-11T10:00:03Z"));
+    ok(out.includes("audit~scan"), out);
+    ok(out.includes("glm-5.2:cloud"), out);
+    ok(out.includes("audit~sum"), out);
+    ok(/✓\s+audit~scan/.test(out), out);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -15,6 +15,8 @@ import { tokenTotal } from "./stream.mjs";
 //                         { ts, id, state, durationMs?, tokens?, note? }   state changes
 //                         { ts, id, event: "tokens", tokens }       live usage ticks
 //                         { ts, event: "expand", id, model, clones, truncated?, total? }   forEach expansion
+//                         { ts, event: "expand-manifest", id, children: [{id, model}] }    child-manifest splice
+//                       (child-manifest task ids are namespaced "<node>~<childId>")
 //                         { ts, event: "schema-retry", id }         returns re-ask fired
 //                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn
 
@@ -188,6 +190,13 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
     if (entry.event === "expand") {
       // forEach clones join the roster directly under their parent
       const rows = Array.from({ length: entry.clones || 0 }, (_, i) => ({ id: `${entry.id}[${i}]`, model: entry.model || "?" }));
+      const idx = roster.findIndex((r) => r.id === entry.id);
+      roster.splice(idx < 0 ? roster.length : idx + 1, 0, ...rows);
+      continue;
+    }
+    if (entry.event === "expand-manifest") {
+      // spliced child tasks join under their node, each with its own model
+      const rows = (entry.children || []).map((c) => ({ id: c.id, model: c.model || "?" }));
       const idx = roster.findIndex((r) => r.id === entry.id);
       roster.splice(idx < 0 ? roster.length : idx + 1, 0, ...rows);
       continue;
