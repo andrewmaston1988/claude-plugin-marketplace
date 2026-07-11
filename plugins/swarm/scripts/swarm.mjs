@@ -4,6 +4,7 @@
 import { join } from "node:path";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, ValidationError } from "../src/manifest.mjs";
+import { resolveRef, listManifests } from "../src/registry.mjs";
 import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
@@ -12,8 +13,9 @@ import { dim } from "../src/ui.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
   models                     list launchable :cloud models (+ Claude aliases)
-  validate <manifest.json>   lint a manifest; exit 1 with readable errors
-  run <manifest.json> [--force]   execute the plan (use Bash run_in_background)
+  list                       saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
+  validate <manifest.json | name> [--args '<json>'] [--resolved]   lint; exit 1 with readable errors
+  run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
@@ -38,6 +40,31 @@ function getConfig() {
   return loadConfig(process.env.SWARM_CONFIG);
 }
 
+// --args '<json>' → object, or a teaching error. Anything that isn't a JSON
+// object (bad JSON, array, scalar) fails the same way.
+function parseArgsFlag(rest) {
+  const i = rest.indexOf("--args");
+  if (i < 0) return undefined;
+  let v;
+  try {
+    v = JSON.parse(rest[i + 1]);
+  } catch {
+    v = undefined;
+  }
+  if (!v || typeof v !== "object" || Array.isArray(v)) {
+    throw new ValidationError([`--args must be a JSON object — e.g. --args '{"base":"master"}' (got ${JSON.stringify(rest[i + 1])})`]);
+  }
+  return v;
+}
+
+// Resolve a manifest ref (path or registry name) and announce a registry hit —
+// the name is a lookup, never a hiding place, so the resolution is always shown.
+function resolveManifestRef(ref) {
+  const r = resolveRef(ref, process.cwd(), process.env);
+  if (r.source !== "path") out(`resolved: ${ref} → ${r.path} (${r.source})`);
+  return r;
+}
+
 async function cmdModels() {
   const cfg = getConfig();
   const models = await discoverModels(cfg);
@@ -48,9 +75,11 @@ async function cmdModels() {
   return 0;
 }
 
-function cmdValidate(manifestPath) {
+function cmdValidate(rest) {
   const cfg = getConfig();
-  const plan = loadManifest(manifestPath, cfg, process.cwd());
+  const args = parseArgsFlag(rest);
+  const ref = resolveManifestRef(rest[0]);
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry: ref.source !== "path" });
   out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
   // The preview IS the approval: with forEach or composition in play, show the
   // worst-case leaf count the caps permit before anything runs.
@@ -78,12 +107,37 @@ function cmdValidate(manifestPath) {
   // The consent line: worst-case leaves × historical per-model medians.
   out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));
   out(`resultsDir: ${plan.resultsDir}`);
+  // The gate-preview contract for named/parameterized runs: print the fully
+  // resolved document (args substituted, children expanded) LAST, so the whole
+  // tail of stdout is the JSON being approved. Every leaf's model and prompt
+  // must be visible here — that is W1's acceptance invariant.
+  if (rest.includes("--resolved")) {
+    const strip = (t) => {
+      const o = { id: t.id, model: t.model };
+      if (t.prompt) o.prompt = t.prompt;
+      for (const k of ["effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "isolation", "outputDir"]) {
+        if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
+      }
+      if (t.childPlan) o.child = t.childPlan.tasks.map(strip);
+      return o;
+    };
+    out("resolved manifest:");
+    out(JSON.stringify({
+      ...(plan.goal && { goal: plan.goal }),
+      resultsDir: plan.resultsDir,
+      tasks: plan.tasks.map(strip),
+      ...(plan.digest && { digest: plan.digest }),
+    }, null, 2));
+  }
   return 0;
 }
 
-async function cmdRun(manifestPath, force) {
+async function cmdRun(rest) {
   const cfg = getConfig();
-  const plan = loadManifest(manifestPath, cfg, process.cwd());
+  const force = rest.includes("--force");
+  const args = parseArgsFlag(rest);
+  const ref = resolveManifestRef(rest[0]);
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry: ref.source !== "path" });
   // Fire-and-forget notification hook (e.g. "claude-slack notify --message {status}").
   // Mechanical plumbing only: substitute tokens, spawn detached, swallow errors.
   // Shared by the end-of-run status and the scheduler's single-shot cost warn.
@@ -139,13 +193,24 @@ async function main() {
     switch (cmd) {
       case "models":
         return await cmdModels();
+      case "list": {
+        const entries = listManifests(process.cwd(), process.env);
+        if (!entries.length) {
+          out("no saved manifests — save one as <cwd>/.swarm/manifests/<name>.json or ~/.swarm/manifests/<name>.json");
+          return 0;
+        }
+        for (const e of entries) {
+          out(`${e.collision ? "⚠ collision: " : ""}${e.name}  (${e.scope})  ${e.goal ? `${e.goal} — ` : ""}${e.path}`);
+        }
+        return 0;
+      }
       case "validate": {
         if (!rest[0]) { err(USAGE); return 1; }
-        return cmdValidate(rest[0]);
+        return cmdValidate(rest);
       }
       case "run": {
         if (!rest[0]) { err(USAGE); return 1; }
-        return await cmdRun(rest[0], rest.includes("--force"));
+        return await cmdRun(rest);
       }
       case "status": {
         if (!rest[0]) { err(USAGE); return 1; }
