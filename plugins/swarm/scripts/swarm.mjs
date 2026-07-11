@@ -107,6 +107,7 @@ async function main() {
       }
       case "status": {
         if (!rest[0]) { err(USAGE); return 1; }
+        const quietWarnMs = (getConfig().quietWarnSecs ?? 60) * 1000;
         if (rest.includes("--watch")) {
           const ivIdx = rest.indexOf("--interval");
           const secs = ivIdx >= 0 ? Math.max(1, Number(rest[ivIdx + 1]) || 5) : 5;
@@ -114,13 +115,13 @@ async function main() {
           const maxTicks = Number(process.env.SWARM_WATCH_TICKS) || Infinity;
           for (let i = 0; i < maxTicks; i++) {
             process.stdout.write("\x1b[2J\x1b[H");
-            out(renderStatus(rest[0]));
+            out(renderStatus(rest[0], Date.now(), quietWarnMs));
             out(dim(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`));
             await new Promise((r) => setTimeout(r, secs * 1000));
           }
           return 0;
         }
-        out(renderStatus(rest[0]));
+        out(renderStatus(rest[0], Date.now(), quietWarnMs));
         return 0;
       }
       case "ask": {

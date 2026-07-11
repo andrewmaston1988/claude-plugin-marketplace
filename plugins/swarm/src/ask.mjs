@@ -23,11 +23,14 @@ export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = m
   const askModel = model || prior.model;
   // Same deny-by-default gate as the manifest: a non-Claude model may only see
   // code under an allow-listed root, whether it got here by override or not.
+  // Checked against the leaf's ORIGINAL cwd — the identity the manifest gate
+  // approved — not the scratch/worktree redirect it executed in.
   if (!isClaudeModel(askModel)) {
+    const govCwd = prior.originalCwd || cwd;
     const roots = cfg?.provider?.allowedRoots || [];
-    if (!roots.some((root) => isUnderRoot(cwd, root))) {
+    if (!roots.some((root) => isUnderRoot(govCwd, root))) {
       throw new Error(
-        `governance: model '${askModel}' is not a Claude model and '${cwd}' is not under any provider.allowedRoots entry`
+        `governance: model '${askModel}' is not a Claude model and '${govCwd}' is not under any provider.allowedRoots entry`
       );
     }
   }
