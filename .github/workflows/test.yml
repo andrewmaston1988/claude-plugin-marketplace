@@ -28,6 +28,22 @@ jobs:
       - name: Unit tests
         run: node --test plugins/slack-bridge/tests/*.test.mjs
 
+  swarm:
+    name: swarm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # worktree tests shell out to git and commit — CI has no default identity
+      - name: Configure git identity
+        run: |
+          git config --global user.email "ci@example.com"
+          git config --global user.name "CI"
+      - name: Run tests
+        run: node --test plugins/swarm/tests/*.test.mjs
+
   pipeline:
     name: pipeline
     runs-on: ubuntu-latest
