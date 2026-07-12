@@ -35,13 +35,15 @@ export function paint(state, s) {
 
 // Repainting writer for roster snapshots. On a TTY each snapshot erases the
 // previous one (cursor-up + clear-to-end) so the roster updates in place; when
-// piped, snapshots append separated by a blank line — the tail of the buffer
-// is always the latest full picture.
+// piped, snapshots append plainly — the tail of the buffer is always the latest
+// full picture, which is what the Claude Code harness renders as the live view.
+// No blank line between snapshots: the harness shows only the tail, so every
+// blank costs a row of that view.
 export function createSnapshotWriter({ write = (s) => process.stdout.write(s), isTTY = process.stdout.isTTY } = {}) {
   let prevLines = 0;
   return (block) => {
     const erase = isTTY && prevLines > 0 ? `\x1b[${prevLines}A\x1b[0J` : "";
-    write(erase + block + "\n" + (isTTY ? "" : "\n"));
+    write(erase + block + "\n");
     prevLines = block.split("\n").length;
   };
 }
