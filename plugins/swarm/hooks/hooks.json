@@ -4,7 +4,11 @@
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraswarm.mjs\"" } ] }
     ],
     "PreToolUse": [
-      { "matcher": "Workflow", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/workflow-nudge.mjs\"" } ] }
+      { "matcher": "Workflow", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/workflow-nudge.mjs\"" } ] },
+      { "matcher": "Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-gate.mjs\"" } ] }
+    ],
+    "PostToolUse": [
+      { "matcher": "Skill", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/skill-ack.mjs\"" } ] }
     ]
   }
 }

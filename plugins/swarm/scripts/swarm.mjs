@@ -2,6 +2,7 @@
 // swarm CLI — thin argv layer over src/. Subcommands: models | validate | run.
 // stdout carries status lines + paths only, never raw task output.
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
@@ -149,9 +150,30 @@ async function cmdRun(rest) {
     } catch { /* notification is garnish, never a failure */ }
   };
   plan.estimate = estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")));
+
+  // Ground truth, up front: a session that has to reconstruct the run directory
+  // gets it wrong (the default is <stem>-1, and --force reuses it rather than
+  // minting <stem>-2). Print the path and the exact watch command so the string
+  // handed to the operator is copied, never remembered.
+  out(`resultsDir: ${plan.resultsDir}`);
+  out(`watch:      node ${fileURLToPath(import.meta.url)} status ${plan.resultsDir} --watch`);
+
   const io = makeDefaultIo();
   io.notify = (status) => { notify(status); };
   const r = await runPlan(plan, cfg, io, { force });
+
+  // A cache replay IS a success: the results are valid and the resume workflow
+  // depends on it, so the exit code stays 0 and the caching is untouched. What must
+  // change is the WORDING — "finished clean" plus a bare digest path let a session
+  // skim the tail and report a no-op as a completed fresh round. The digest it
+  // points at predates this invocation; say so.
+  const live = r.summary.tasks.filter((t) => t.id !== "__digest");
+  const replayed = live.length > 0 && live.every((t) => t.state === "skipped");
+  if (replayed) {
+    out(`NOTHING RE-EXECUTED — all ${live.length} task(s) replayed from cache in ${plan.resultsDir}.`);
+    out("The digest below is from the PREVIOUS run, not this invocation — nothing about it is new.");
+    out("To re-execute this manifest: --force (same resultsDir; results are overwritten).");
+  }
 
   out(formatClosing({
     digestPath: r.digestPath,
@@ -165,7 +187,9 @@ async function cmdRun(rest) {
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
   await notify(
-    bad.length ? `swarm run finished with ${bad.length} failed/blocked` : "swarm run finished clean",
+    bad.length ? `swarm run finished with ${bad.length} failed/blocked`
+      : replayed ? "swarm run finished — cache replay, nothing re-executed"
+        : "swarm run finished clean",
     { digest: r.digestPath || "", summary: r.summaryPath || "" },
   );
   if (bad.length) {

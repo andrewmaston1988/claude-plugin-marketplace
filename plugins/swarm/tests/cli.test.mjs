@@ -151,6 +151,69 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
   }
 });
 
+// A session had to GUESS the resultsDir and published an invented path
+// (".../p5-review-2", which has never existed) as the operator's watch target.
+// The engine knows the answer — it must print it, up front, absolutely.
+test("run: prints the absolute resultsDir and the watch command at dispatch", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "banner.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+    }));
+    const r = runCli(["run", manifest], {
+      cwd: dir,
+      env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "done" },
+    });
+    equal(r.status, 0, r.stderr);
+    const resultsDir = join(dir, "out");
+    ok(r.stdout.includes(`resultsDir: ${resultsDir}`), r.stdout);
+    ok(/watch:.*status .*out.* --watch/.test(r.stdout), `must print a copyable watch command: ${r.stdout}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A cache replay IS a success — resume-skips-ok is the design and the verification
+// loop depends on it. But it printed "finished clean" and a bare digest path, so a
+// session skimming the tail read a no-op as a completed fresh round and announced
+// "Round 3 is running" when nothing was. Keep exit 0; make the no-op impossible to miss.
+test("run: an all-skipped replay still exits 0 but says NOTHING RE-EXECUTED", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "replay.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+      digest: { model: "haiku" },
+    }));
+    const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "first-pass" };
+    const r1 = runCli(["run", manifest], { cwd: dir, env });
+    equal(r1.status, 0, r1.stderr);
+    ok(!r1.stdout.includes("NOTHING RE-EXECUTED"), "a real run must not claim to be a replay");
+
+    // second run: everything is ok on disk already
+    const r2 = runCli(["run", manifest], { cwd: dir, env });
+    equal(r2.status, 0, "a cache replay is a SUCCESS — results are valid and resume depends on it");
+    ok(r2.stdout.includes("NOTHING RE-EXECUTED"), r2.stdout);
+    ok(/previous run|PREVIOUS/i.test(r2.stdout), `the digest must be marked as the previous run's: ${r2.stdout}`);
+    ok(r2.stdout.includes("--force"), `must name the remedy: ${r2.stdout}`);
+    // the replay notice must come BEFORE the digest path, or a tail-skimmer reads
+    // the path first and stops there — which is exactly how it was misread.
+    ok(r2.stdout.indexOf("NOTHING RE-EXECUTED") < r2.stdout.indexOf("digest:"),
+      `the staleness notice must precede the digest path: ${r2.stdout}`);
+    ok(r2.stdout.includes("[skipped]"), r2.stdout);
+
+    // --force re-executes and says nothing of the kind
+    const r3 = runCli(["run", manifest, "--force"], { cwd: dir, env });
+    equal(r3.status, 0);
+    ok(!r3.stdout.includes("NOTHING RE-EXECUTED"), r3.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("models: stub server + SWARM_HOME config -> names with descriptions, aliases, cache", async () => {
   const dir = tmp();
   const server = createServer((req, res) => {
