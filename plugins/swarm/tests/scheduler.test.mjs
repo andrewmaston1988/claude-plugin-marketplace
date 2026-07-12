@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, rejects } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, createWriteStream } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
-import { runPlan, substituteTemplates, substituteItems, classifyFailure } from "../src/scheduler.mjs";
+import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
@@ -628,6 +628,28 @@ test("resume: an independent cached leaf is still skipped when an unrelated leaf
     equal(states.a, "ok");
     equal(states.b, "ok");
     equal(spawn.calls.length, 2, "only a and b dispatched");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// runTask resolved while its leaf log was still flushing: `leafLog.end()` is
+// fire-and-forget, so runPlan could resolve with writes still in flight. The run
+// then "finishes" before results/<id>.log is durable — which surfaced in CI as
+// ENOENT when a test's cleanup deleted the results dir out from under the flush,
+// and in production as a leaf log that can be truncated at exit.
+test("runTask does not resolve until its leaf log has finished flushing", async () => {
+  const dir = tmp();
+  try {
+    mkdirSync(join(dir, "results"), { recursive: true });
+    const leafLog = createWriteStream(join(dir, "results", "a.log"));
+    const spawn = fakeSpawnFactory(() => ({ output: "some leaf output" }));
+    const io = makeIo(spawn);
+
+    await runTask(task("a"), "do a", CFG, io, leafLog, {});
+
+    equal(leafLog.writableFinished, true,
+      "the stream must be fully flushed and closed before runTask resolves");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
