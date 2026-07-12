@@ -282,6 +282,65 @@ test("quota fail-fast: first Claude quota pre-emptively marks pending Claude lea
   }
 });
 
+// A model-SCOPED bucket at 100% must ground ONLY that model. The account verdict
+// comes from the unscoped buckets. Regression: a full Fable-scoped weekly bucket
+// grounded every Claude leaf — Opus, Sonnet and Haiku — while the account had 46%
+// headroom, and the session issuing the dispatch was itself running on Opus.
+test("preflight: a scoped-bucket exhaustion grounds only that model's leaves", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "creds.json"), JSON.stringify({ claudeAiOauth: { accessToken: "t" } }));
+    // Fable's weekly bucket is full; session/weekly_all have headroom.
+    const usage = { limits: [
+      { kind: "session", percent: 24, resets_at: "R1", scope: null },
+      { kind: "weekly_all", percent: 54, resets_at: "R2", scope: null },
+      { kind: "weekly_scoped", percent: 100, resets_at: "R3", scope: { model: { display_name: "Fable" } } },
+    ] };
+    const mkIo = (h) => makeIo(fakeSpawnFactory(() => ({ output: "ok" })), {
+      fetch: async () => ({ ok: true, status: 200, json: async () => usage }),
+      env: { PATH: process.env.PATH, SWARM_HOME: h, SWARM_CREDENTIALS: join(home, "creds.json") },
+    });
+
+    // Sonnet/Opus/Haiku draw from the unscoped buckets → they must dispatch.
+    const io1 = mkIo(home);
+    const p1 = plan(dir, [task("s", { model: "sonnet" }), task("o", { model: "opus" }), task("h", { model: "haiku" })]);
+    await runPlan(p1, CFG, io1);
+    equal(io1.spawn.calls.length, 3, "non-scoped Claude models must still dispatch");
+
+    // A Fable leaf IS constrained by the exhausted Fable bucket → still aborts.
+    const home2 = join(dir, "home2");
+    mkdirSync(home2, { recursive: true });
+    const io2 = mkIo(home2);
+    const p2 = plan(dir, [task("f", { model: "claude-fable-5" })]);
+    await rejects(() => runPlan(p2, CFG, io2), /Fable-scoped limit is at 100%/i);
+    equal(io2.spawn.calls.length, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The endpoint may name a scope "Claude Sonnet 4.5", not "Sonnet". Matching the
+// leaf model against it by substring in one direction misses that entirely, so an
+// exhausted Sonnet bucket would happily dispatch Sonnet leaves.
+test("preflight: a multi-word scope name still matches its model family", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "creds.json"), JSON.stringify({ claudeAiOauth: { accessToken: "t" } }));
+    const usage = { limits: [
+      { kind: "session", percent: 10, resets_at: "R1", scope: null },
+      { kind: "weekly_scoped", percent: 100, resets_at: "R3", scope: { model: { display_name: "Claude Sonnet 4.5" } } },
+    ] };
+    const io = makeIo(fakeSpawnFactory(() => ({ output: "ok" })), {
+      fetch: async () => ({ ok: true, status: 200, json: async () => usage }),
+      env: { PATH: process.env.PATH, SWARM_HOME: home, SWARM_CREDENTIALS: join(home, "creds.json") },
+    });
+    await rejects(() => runPlan(plan(dir, [task("s", { model: "sonnet" })]), CFG, io), /Sonnet.*scoped limit/i);
+    equal(io.spawn.calls.length, 0, "an exhausted Sonnet bucket must ground Sonnet leaves");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("preflight: exhausted quota aborts before dispatch when Claude leaves lack fallbacks", async () => {
   const dir = tmp();
   try {
