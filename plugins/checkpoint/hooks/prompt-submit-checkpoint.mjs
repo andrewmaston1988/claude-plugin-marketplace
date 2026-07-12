@@ -10,7 +10,7 @@ import {
   readJSON, writeJSON, getSessionState, appendJSONL,
 } from './lib/paths.mjs';
 import {
-  nextDelay, keepaliveAction,
+  nextDelay, keepaliveAction, cadenceFor, resolveTtl,
 } from './lib/cadence.mjs';
 import {
   contextWindowFor, contextUtilization, decideCheckpointNudge, readRecentAssistantTurns,
@@ -90,15 +90,30 @@ async function main() {
 
   let ctx = '';
 
+  // Read a few turns: the last one may be a pure cache-hit with no bucket signal.
+  const recent = transcriptPath ? readRecentAssistantTurns(transcriptPath, 3) : [];
+
   // --- 3. Keepalive (opt-in) ---
   if (keepaliveEnabled && sState) {
-    const action = keepaliveAction(prevUserIdleSecs, prevSinceAnySecs, isTick);
+    const ttl = resolveTtl(
+      Number(settings?.checkpoint?.keepaliveTtlSecs),
+      recent.map(t => t.usage),
+      sState.lastTtlSecs,
+    );
+    sState.lastTtlSecs = ttl;
+    const cad = cadenceFor(ttl, {
+      idleStopSecs: Number(settings?.checkpoint?.keepaliveIdleStopSecs) || undefined,
+    });
+    const action = keepaliveAction(prevUserIdleSecs, prevSinceAnySecs, isTick, cad);
     if (action === 'inject') {
-      const delay = nextDelay(prevTickGap, sState.lastInjectedDelay);
+      const delay = nextDelay(prevTickGap, sState.lastInjectedDelay, cad);
       const initTmpl = readTemplate('keepalive-init.md');
       const tickTmpl = readTemplate('keepalive-tick.md').trim();
       if (initTmpl && tickTmpl) {
-        ctx += initTmpl.replace(/\{delay\}/g, String(delay)).replace(/\{tick\}/g, tickTmpl);
+        ctx += initTmpl
+          .replace(/\{delay\}/g, String(delay))
+          .replace(/\{ttl\}/g, String(cad.ttlSecs))
+          .replace(/\{tick\}/g, tickTmpl);
       }
       if (isTick) {
         appendJSONL(KEEPALIVE_LOG, {
@@ -107,6 +122,7 @@ async function main() {
           lastInjectedDelay: sState.lastInjectedDelay || 0,
           overshoot: Math.max(0, Math.round(prevTickGap) - (sState.lastInjectedDelay || 0)),
           nextDelay: delay,
+          ttlSecs: cad.ttlSecs,
         });
       }
       sState.lastTickTs = now;
@@ -121,7 +137,6 @@ async function main() {
   // --- 1. Context-pressure nudge ---
   let transcriptBytes = 0;
   try { if (transcriptPath) transcriptBytes = fs.statSync(transcriptPath).size; } catch {}
-  const recent = transcriptPath ? readRecentAssistantTurns(transcriptPath, 1) : [];
   const { pct } = resolveUtilisation(recent, transcriptBytes);
   if (sState && decideCheckpointNudge(pct, sState.lastFiredPct)) {
     sState.lastFiredPct = pct;

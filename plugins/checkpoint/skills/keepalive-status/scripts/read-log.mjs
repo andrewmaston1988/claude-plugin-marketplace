@@ -28,9 +28,10 @@ if (ticks.length) {
   const min = gaps.length ? Math.min(...gaps) : 0;
   const max = gaps.length ? Math.max(...gaps) : 0;
   const avg = gaps.length ? Math.round(gaps.reduce((a, b) => a + b, 0) / gaps.length) : 0;
-  console.log(`  ticks: ${ticks.length} | cadence min/avg/max = ${min}/${avg}/${max}s`);
-  const overTTL = gaps.filter(g => g > 300).length;
-  console.log(overTTL ? `  ⚠️ ${overTTL} tick gap(s) exceeded the 300s TTL` : `  ✅ all tick gaps under TTL`);
+  const lastTtl = ticks[ticks.length - 1].ttlSecs || 300;
+  console.log(`  ticks: ${ticks.length} | cadence min/avg/max = ${min}/${avg}/${max}s | ttl (latest tick) = ${lastTtl}s`);
+  const overTTL = ticks.filter(t => (t.observedGap || 0) > (t.ttlSecs || 300)).length;
+  console.log(overTTL ? `  ⚠️ ${overTTL} tick gap(s) exceeded the cache TTL` : `  ✅ all tick gaps under TTL`);
 } else {
   console.log(enabled ? '  no ticks logged yet (chain not fired this session)' : '  no ticks logged (keepalive is off)');
 }
