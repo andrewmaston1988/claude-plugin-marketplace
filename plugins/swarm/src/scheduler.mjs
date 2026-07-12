@@ -289,17 +289,40 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       cachePath: join(swarmHome(env), "quota-cache.json"),
       ...(env.SWARM_CREDENTIALS && { credentialsPath: env.SWARM_CREDENTIALS }),
     });
-    if (q?.exhausted) {
-      const doomed = claudeTasks.filter((t) => !t.fallbackModel);
+    // A scoped limit grounds only the model it names — never the whole roster.
+    // Match on the family token, because the two sides are written differently:
+    // a leaf says "sonnet" or "claude-sonnet-5"; the endpoint may say "Sonnet"
+    // OR "Claude Sonnet 4.5". A bare substring test in one direction misses the
+    // multi-word form and would let an exhausted Sonnet bucket dispatch Sonnet.
+    const FAMILY_RE = /(fable|opus|sonnet|haiku)/i;
+    const familyOf = (s) => (String(s || "").match(FAMILY_RE)?.[1] || "").toLowerCase();
+    const blockedScope = (model) =>
+      (q?.exhaustedScopes || []).find((s) => {
+        const mf = familyOf(model), sf = familyOf(s.scope);
+        if (mf && sf) return mf === sf;
+        // Scope names a model we don't recognise: fall back to a two-way substring
+        // test so an unclassifiable exhausted bucket still grounds a leaf naming it.
+        const m = String(model).toLowerCase(), sc = String(s.scope || "").toLowerCase();
+        return Boolean(sc) && (m.includes(sc) || sc.includes(m));
+      });
+    if (q?.exhausted || q?.exhaustedScopes?.length) {
+      const doomed = claudeTasks.filter(
+        (t) => !t.fallbackModel && (q.exhausted || blockedScope(t.model))
+      );
       if (doomed.length) {
+        const hit = q.exhausted ? q.worst : blockedScope(doomed[0].model);
+        const what = q.exhausted
+          ? `${hit.kind} at ${hit.percent}%`
+          : `the ${hit.scope}-scoped limit is at ${hit.percent}%`;
         throw new Error(
-          `Anthropic usage exhausted (${q.worst.kind} at ${q.worst.percent}%` +
-          `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — ` +
+          `Anthropic usage exhausted (${what}` +
+          `${hit.resetsAt ? `, resets ${hit.resetsAt}` : ""}) — ` +
           `${doomed.length} Claude leaf(s) cannot dispatch: ${doomed.map((t) => t.id).join(", ")}. ` +
           `Recast to :cloud models, add fallbackModel, or re-run after reset.`
         );
       }
-    } else if (q && q.worst.percent >= (cfg.quotaWarnPct ?? 80)) {
+    }
+    if (q && !q.exhausted && q.worst.percent >= (cfg.quotaWarnPct ?? 80)) {
       io.stdout(
         `⚠ Anthropic usage at ${q.worst.percent}% (${q.worst.kind}` +
         `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — Claude leaves may hit quota mid-run`

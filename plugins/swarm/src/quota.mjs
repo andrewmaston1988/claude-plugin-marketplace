@@ -32,9 +32,16 @@ export function parseQuotaReset(text) {
   return null;
 }
 
-// Endpoint response -> { limits, worst, exhausted }. `limits[]` is the
-// authoritative array (session/weekly/per-model-scoped, each with percent,
+// Endpoint response -> { limits, worst, exhausted, exhaustedScopes }. `limits[]`
+// is the authoritative array (session/weekly/per-model-scoped, each with percent,
 // severity, resets_at).
+//
+// A limit carrying a `scope.model` constrains THAT MODEL ONLY; an unscoped limit
+// (session, weekly_all) is the account-wide truth. Conflating the two grounded
+// every Claude leaf whenever one premium model's weekly bucket filled — while the
+// account still had headroom and the dispatching session was itself running on a
+// Claude model. So the account verdict reads unscoped limits, and each exhausted
+// scope is reported separately for the caller to block just that model.
 export function parseUsageLimits(json) {
   const limits = (json?.limits || []).map((l) => ({
     kind: l.kind,
@@ -44,8 +51,14 @@ export function parseUsageLimits(json) {
     scope: l.scope?.model?.display_name ?? null,
   }));
   if (!limits.length) return null;
-  const worst = limits.reduce((a, b) => (b.percent > a.percent ? b : a));
-  return { limits, worst, exhausted: worst.percent >= 100 };
+  const unscoped = limits.filter((l) => !l.scope);
+  // No unscoped limit reported → fall back to the whole set rather than claim
+  // infinite headroom.
+  const worst = (unscoped.length ? unscoped : limits).reduce((a, b) => (b.percent > a.percent ? b : a));
+  const exhaustedScopes = limits
+    .filter((l) => l.scope && l.percent >= 100)
+    .map((l) => ({ scope: l.scope, percent: l.percent, resetsAt: l.resetsAt }));
+  return { limits, worst, exhausted: worst.percent >= 100, exhaustedScopes };
 }
 
 function readOAuthToken(credentialsPath) {

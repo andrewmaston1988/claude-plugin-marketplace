@@ -42,6 +42,36 @@ test("parseUsageLimits: extracts limits with worst-by-percent", () => {
   equal(maxed.exhausted, true);
 });
 
+// A model-SCOPED limit constrains exactly one model — not the account. Treating it
+// as account-wide exhaustion grounded every Claude leaf (Opus, Sonnet, Haiku) while
+// the Fable-scoped weekly bucket sat at 100% and the unscoped buckets had headroom;
+// the session doing the dispatch was itself running on Opus at the time.
+test("parseUsageLimits: a model-scoped limit at 100% does NOT exhaust the account", () => {
+  const p = parseUsageLimits({
+    limits: [
+      { kind: "session", percent: 24, resets_at: "R1", scope: null },
+      { kind: "weekly_all", percent: 54, resets_at: "R2", scope: null },
+      { kind: "weekly_scoped", percent: 100, resets_at: "R3", scope: { model: { display_name: "Fable" } } },
+    ],
+  });
+  equal(p.exhausted, false);
+  equal(p.worst.kind, "weekly_all", "worst-unscoped drives the account verdict");
+  deepEqual(p.exhaustedScopes, [{ scope: "Fable", percent: 100, resetsAt: "R3" }]);
+});
+
+test("parseUsageLimits: an UNSCOPED limit at 100% DOES exhaust the account", () => {
+  const p = parseUsageLimits({
+    limits: [
+      { kind: "session", percent: 12, resets_at: "R1", scope: null },
+      { kind: "weekly_all", percent: 100, resets_at: "R2", scope: null },
+      { kind: "weekly_scoped", percent: 3, resets_at: "R3", scope: { model: { display_name: "Fable" } } },
+    ],
+  });
+  equal(p.exhausted, true);
+  equal(p.worst.kind, "weekly_all");
+  deepEqual(p.exhaustedScopes, []);
+});
+
 test("checkQuota: endpoint success is cached; second call within TTL skips fetch", async () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-quota-"));
   try {
