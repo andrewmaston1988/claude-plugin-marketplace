@@ -26,7 +26,13 @@ Set in `~/.claude/settings.json`:
 { "checkpoint": { "keepalive": true } }
 ```
 
-The UserPromptSubmit hook owns a **self-correcting** cadence (target ~255s, jitter-aware) and logs each tick to `~/.claude/.checkpoint-keepalive.jsonl`. Verify with `/keepalive-status`.
+The UserPromptSubmit hook owns a **self-correcting** cadence (jitter-aware, target ~85% of the cache TTL) and logs each tick to `~/.claude/.checkpoint-keepalive.jsonl`. Verify with `/keepalive-status`.
+
+**TTL detection:** the hook reads the live cache bucket from the transcript's `usage.cache_creation` breakdown (`ephemeral_5m` vs `ephemeral_1h`) on every tick, so a 1h-bucket session paces at ~51min and a 5m session at ~4min — including mid-session transitions (e.g. an overage drop back to 5m). All derived values scale with the detected TTL, notably the idle-stop (12× TTL: 1h at 5m, 12h at 1h — a 1h-bucket chain survives an overnight sleep). Overrides, both optional:
+
+```json
+{ "checkpoint": { "keepalive": true, "keepaliveTtlSecs": 3600, "keepaliveIdleStopSecs": 28800 } }
+```
 
 **Honest limit:** hooks fire only on prompts. During pure idle (machine sleep, a dropped tick) the chain can't self-re-arm until you return — `/keepalive-status` will show the gap.
 

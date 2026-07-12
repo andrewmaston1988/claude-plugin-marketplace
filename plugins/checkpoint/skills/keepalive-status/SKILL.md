@@ -17,4 +17,4 @@ Audit the cache keepalive: realized tick cadence and recent cache hits/busts (fr
    ```
 2. Relay the summary.
 3. **If it reports `keepalive: DISABLED`**, offer to enable it — with the user's OK, set `"checkpoint": { "keepalive": true }` in `~/.claude/settings.json`.
-4. If gaps exceeded the 300s TTL or busts appear, the cadence constants in `hooks/lib/cadence.mjs` may need tuning.
+4. If gaps exceeded the cache TTL or busts appear, the cadence ratios in `hooks/lib/cadence.mjs` may need tuning — each logged tick records the TTL it was paced against (`ttlSecs`, detected per-tick from the transcript's cache-bucket usage).
