@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { runPlan, substituteTemplates, substituteItems, classifyFailure } from "../src/scheduler.mjs";
-import { writeResult, readResult, initResultsDir, resultPath } from "../src/results.mjs";
+import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
 
@@ -531,6 +531,103 @@ test("substituteTemplates never truncates a {{resultPath:}} reference", () => {
     writeResult(join(dir, "run"), "dep", { id: "dep", ok: true, output: "abcdef" });
     const { truncations } = substituteTemplates("x {{resultPath:dep}}", join(dir, "run"), 3);
     equal(truncations.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The p5-review failure: find-deletions re-ran, but verify-deletions (which exists
+// ONLY to check it) was skipped on its previous-pass `ok`, and __digest was skipped
+// AND digest.md rewritten from the previous run's body. The run then reported success
+// and handed the session a verdict that predated everything the resume produced.
+// A cached result is only valid if every input that produced it is unchanged.
+test("resume: a dependent whose upstream re-runs is invalidated, and the digest is not stale", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [
+      task("find"),
+      task("verify", { prompt: "check {{result:find}}", after: ["find"] }),
+    ], { digest: { model: "haiku" } });
+    initResultsDir(p.resultsDir);
+    // prior pass: find FAILED, but verify and the digest succeeded against the
+    // findings of a still-earlier pass.
+    writeResult(p.resultsDir, "find", { id: "find", model: "haiku", ok: false, exit: 1, durationMs: 5, output: "boom" });
+    writeResult(p.resultsDir, "verify", { id: "verify", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "STALE-verdict" });
+    writeResult(p.resultsDir, DIGEST_ID, { id: DIGEST_ID, model: "haiku", ok: true, exit: 0, durationMs: 5, output: "STALE-digest" });
+    writeDigestMd(p.resultsDir, "STALE-digest");
+
+    const spawn = fakeSpawnFactory((call) => {
+      const pr = promptOf(call);
+      if (pr === "do find") return { output: "NEW-findings" };
+      if (pr.startsWith("check ")) return { output: "FRESH-verdict" };
+      return { output: "FRESH-digest" };
+    });
+    const io = makeIo(spawn);
+    const r = await runPlan(p, CFG, io);
+
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.find, "ok", "find had no valid cache — must re-run");
+    equal(states.verify, "ok", "verify's upstream re-ran — its cached verdict is stale");
+    equal(states[DIGEST_ID], "ok", "the digest depends on everything — anything re-running invalidates it");
+
+    // the verifier must have been fed the NEW findings, not the old ones
+    ok(spawn.calls.map(promptOf).includes("check NEW-findings"), spawn.calls.map(promptOf).join(" | "));
+
+    // and the artifact on disk must be this pass's digest, not the previous one
+    equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "FRESH-digest");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Invalidation is transitive: A → B → C. If A re-runs, C is stale even though C
+// never names A. One-hop invalidation would leave exactly the digest-shaped hole.
+test("resume: invalidation is transitive across the dependency chain", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [
+      task("a"),
+      task("b", { prompt: "b uses {{result:a}}", after: ["a"] }),
+      task("c", { prompt: "c uses {{result:b}}", after: ["b"] }),
+    ]);
+    initResultsDir(p.resultsDir);
+    writeResult(p.resultsDir, "b", { id: "b", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "old-b" });
+    writeResult(p.resultsDir, "c", { id: "c", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "old-c" });
+    // a has no result at all → re-runs → b stale → c stale (c never mentions a)
+
+    const spawn = fakeSpawnFactory(() => ({ output: "fresh" }));
+    const io = makeIo(spawn);
+    const r = await runPlan(p, CFG, io);
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.a, "ok");
+    equal(states.b, "ok", "b's upstream re-ran");
+    equal(states.c, "ok", "c is two hops from a and must still be invalidated");
+    equal(spawn.calls.length, 3);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Resume must stay cheap: invalidation follows the graph, it does not nuke the run.
+test("resume: an independent cached leaf is still skipped when an unrelated leaf re-runs", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [
+      task("a"),
+      task("b", { after: ["a"] }),
+      task("d"), // independent of a and b
+    ]);
+    initResultsDir(p.resultsDir);
+    writeResult(p.resultsDir, "d", { id: "d", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "cached-d" });
+
+    const spawn = fakeSpawnFactory(() => ({ output: "fresh" }));
+    const io = makeIo(spawn);
+    const r = await runPlan(p, CFG, io);
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.d, "skipped", "d shares no dependency with the re-running leaves");
+    equal(states.a, "ok");
+    equal(states.b, "ok");
+    equal(spawn.calls.length, 2, "only a and b dispatched");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

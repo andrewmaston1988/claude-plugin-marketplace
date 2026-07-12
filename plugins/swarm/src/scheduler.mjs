@@ -448,13 +448,37 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
   // Resume: an existing ok result satisfies the task without re-running it —
   // its recorded duration and tokens still count in roster and summary.
+  //
+  // A cached result is only valid if every input that produced it is unchanged.
+  // For a dependent, the inputs ARE its dependencies' outputs — so a task whose
+  // upstream is re-executing must re-execute too, however good its own last run
+  // looked. Skipping on `prior.ok` alone let a verifier keep a verdict about
+  // findings that no longer existed, and re-stamped digest.md with the previous
+  // pass's body while reporting success. Invalidation is transitive: in A → B → C,
+  // a re-running A invalidates C, which never names A.
+  let cachedIds = new Set();
   if (!force) {
     for (const t of tasks) {
       const prior = readResult(plan.resultsDir, t.id);
-      if (prior && prior.ok === true) {
-        record(t, "skipped", prior.durationMs ?? null, prior.tokens);
-        if (t.isDigest) digestPath = writeDigestMd(plan.resultsDir, prior.output);
+      if (prior && prior.ok === true) cachedIds.add(t.id);
+    }
+    // `after` is the complete dependency graph: validation rejects a {{result:}}
+    // or forEach.from/when.from reference to a non-dependency, so nothing can
+    // consume an output it does not declare. Fixed-point over it.
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const t of tasks) {
+        if (cachedIds.has(t.id) && t.after.some((d) => !cachedIds.has(d))) {
+          cachedIds.delete(t.id);
+          changed = true;
+        }
       }
+    }
+    for (const t of tasks) {
+      if (!cachedIds.has(t.id)) continue;
+      const prior = readResult(plan.resultsDir, t.id);
+      record(t, "skipped", prior.durationMs ?? null, prior.tokens);
+      if (t.isDigest) digestPath = writeDigestMd(plan.resultsDir, prior.output);
     }
   }
 
