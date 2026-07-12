@@ -12,12 +12,15 @@ test("snapshot writer on a TTY: erases the previous block before repainting", ()
   ok(chunks[1].endsWith("line3\n"));
 });
 
-test("snapshot writer piped: plain blocks separated by a blank line, no ANSI", () => {
+// The harness renders only the TAIL of a captured run, so every blank line the
+// writer emits costs a row of the operator's live view. Snapshots abut directly.
+test("snapshot writer piped: plain blocks with no blank-line padding, no ANSI", () => {
   const chunks = [];
   const snap = createSnapshotWriter({ write: (s) => chunks.push(s), isTTY: false });
   snap("a\nb");
   snap("c");
-  equal(chunks[0], "a\nb\n\n");
-  equal(chunks[1], "c\n\n");
+  equal(chunks[0], "a\nb\n");
+  equal(chunks[1], "c\n");
   ok(!chunks.join("").includes("\x1b["));
+  ok(!chunks.join("").includes("\n\n"), "no blank line may separate piped snapshots");
 });
