@@ -228,6 +228,37 @@ test("renderStatus: missing run.log names the ABSOLUTE path it checked", async (
   if (!isAbsolute(m[1])) throw new Error("path not absolute: " + m[1]);
 });
 
+// The two truncation paths must read differently: a capped forEach ran fewer
+// ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency.
+test("formatClosing renders forEach and prompt truncations distinctly", () => {
+  const base = { summaryPath: "S/summary.json", digestPath: "d" };
+  const forEach = formatClosing({
+    ...base,
+    truncations: [{ kind: "forEach", id: "fix", kept: 30, total: 51 }],
+  });
+  ok(forEach.includes("forEach ran the first 30 of 51 items"), forEach);
+
+  const prompt = formatClosing({
+    ...base,
+    truncations: [{ kind: "prompt", id: "verify-specpin", depId: "find-specpin", kept: 4000, total: 6200 }],
+  });
+  ok(prompt.includes("verify-specpin"), prompt);
+  ok(prompt.includes("find-specpin"), prompt);
+  ok(prompt.includes("4000"), prompt);
+  ok(prompt.includes("6200"), prompt);
+  ok(prompt.includes("resultPath"), "must name the remedy: " + prompt);
+  ok(!prompt.includes("forEach"), "a prompt truncation is not a forEach truncation: " + prompt);
+});
+
+// A record with no kind is a legacy forEach record — must not vanish silently.
+test("formatClosing treats an untagged truncation as a forEach one", () => {
+  const out = formatClosing({
+    summaryPath: "S/summary.json", digestPath: "d",
+    truncations: [{ id: "fix", kept: 2, total: 9 }],
+  });
+  ok(out.includes("forEach ran the first 2 of 9 items"), out);
+});
+
 test("formatClosing covers digest present, absent, failed, and total tokens", () => {
   const base = { summaryPath: "S/summary.json" };
   ok(formatClosing({ ...base, digestPath: "S/digest.md" }).includes("digest: S/digest.md"));

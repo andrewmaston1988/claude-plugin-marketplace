@@ -25,6 +25,10 @@ Compression rules:
 - Structure: headlines first — one line per leaf — then body detail beneath.
 - Leaf accounting: account for every leaf listed above, including failed or empty ones; say so explicitly rather than omitting them.
 
+Truncated inputs — check this for every leaf:
+- If a result JSON carries a "promptTruncations" field, that leaf was fed only a PREFIX of the named dependency's output: it never saw the rest. A verifier in this state checked only the findings that fit, and the remainder is UNVERIFIED — not refuted, simply unchecked.
+- Say so explicitly: name the affected leaf and dependency, and put the unchecked findings in the ledger as OPEN. They are never PROVEN on that verifier's say-so, and they must not appear as confirmed headlines.
+
 Required sections:
 - "## PROVEN / OPEN ledger" — PROVEN rows carry evidence (file:line or reproduced output); OPEN rows are unresolved questions or unverified claims.
 - "## Drill-down" — which raw result files merit a full read by the orchestrating session, and why.

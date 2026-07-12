@@ -22,6 +22,7 @@ import { tokenTotal } from "./stream.mjs";
 //                         { ts, event: "expand", id, model, clones, truncated?, total? }   forEach expansion
 //                         { ts, event: "expand-manifest", id, children: [{id, model}] }    child-manifest splice
 //                       (child-manifest task ids are namespaced "<node>~<childId>")
+//                         { ts, event: "truncate-prompt", id, depId, kept, total }   {{result:}} cut to the inline cap
 //                         { ts, event: "schema-retry", id }         returns re-ask fired
 //                         { ts, event: "citations", id, checked, refuted }   N3 mechanical verification
 //                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn
@@ -249,9 +250,15 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
 
 export function formatClosing({ digestPath, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], estimate }) {
   const lines = [];
-  // loud by contract: a capped forEach must never read as full coverage
+  // loud by contract: neither cap may read as full coverage. A capped forEach ran
+  // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
+  // the latter is how a verifier silently checks a prefix of its finder's findings.
   for (const tr of truncations) {
-    lines.push(`${yellow("⚠")} ${bold(tr.id)}: forEach ran the first ${tr.kept} of ${tr.total} items (maxItems cap) — raise maxItems and re-run to cover the rest`);
+    if (tr.kind === "prompt") {
+      lines.push(`${yellow("⚠")} ${bold(tr.id)}: {{result:${tr.depId}}} inlined ${tr.kept} of ${tr.total} chars — the rest was NOT seen by this leaf; use {{resultPath:${tr.depId}}} to pass the whole result`);
+    } else {
+      lines.push(`${yellow("⚠")} ${bold(tr.id)}: forEach ran the first ${tr.kept} of ${tr.total} items (maxItems cap) — raise maxItems and re-run to cover the rest`);
+    }
   }
   if (digestPath) lines.push(`${bold("digest:")} ${green(digestPath)}`);
   else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);
