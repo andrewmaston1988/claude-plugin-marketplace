@@ -27,6 +27,17 @@ test("digest task depends on ALL leaves and uses the plan's digest model", () =>
   equal(t.timeoutMs, 900000); // widest leaf timeout
 });
 
+// A verifier fed a truncated finding-set checked only a PREFIX. Without this the
+// digest promotes the unchecked remainder as if a verifier had confirmed it —
+// which is how a fabricated finding reached the operator on p5-review round 5.
+test("digest is told to treat a truncated leaf input as unverified", () => {
+  const t = buildDigestTask(plan());
+  ok(t.prompt.includes("promptTruncations"), "digest must know the field name to look for");
+  ok(/prefix/i.test(t.prompt), "digest must be told the leaf saw only a prefix");
+  ok(/OPEN/.test(t.prompt) && /never PROVEN|not PROVEN/i.test(t.prompt),
+    "digest must be told such findings are OPEN, never PROVEN");
+});
+
 test("digest leaf is read-only — the ENGINE writes digest.md", () => {
   const t = buildDigestTask(plan());
   equal(t.allowedTools, "Read");

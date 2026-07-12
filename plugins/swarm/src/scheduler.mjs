@@ -46,13 +46,20 @@ export function makeDefaultIo() {
 }
 
 // Materialize {{result:id}} / {{resultPath:id}} against completed dep results.
+// Returns the substituted prompt plus a record of every dep whose output was cut
+// to fit the cap. Truncation is never silent: a verifier fed a PREFIX of its
+// finder's findings would report the rest as checked when nothing checked them.
 export function substituteTemplates(prompt, resultsDir, cap) {
-  return prompt.replace(TEMPLATE_RE, (whole, kind, id) => {
+  const truncations = [];
+  const substituted = prompt.replace(TEMPLATE_RE, (whole, kind, id) => {
     if (kind === "resultPath") return resultPath(resultsDir, id);
     const res = readResult(resultsDir, id);
     const out = String(res?.output ?? "");
-    return out.length > cap ? out.slice(0, cap) : out;
+    if (out.length <= cap) return out;
+    truncations.push({ depId: id, kept: cap, total: out.length });
+    return out.slice(0, cap);
   });
+  return { prompt: substituted, truncations };
 }
 
 const ITEM_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/g;
@@ -484,6 +491,20 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   };
   const truncations = [];
 
+  // Both truncation paths share one loud channel: run.log event, stdout warning,
+  // run-summary field, closing block. A cut only the engine knows about is how an
+  // unverified finding ends up reported as verified.
+  const notePromptTruncations = (task, list) => {
+    for (const t of list) {
+      truncations.push({ kind: "prompt", id: task.id, depId: t.depId, kept: t.kept, total: t.total });
+      appendRunLog(plan.resultsDir, {
+        ts: new Date().toISOString(), event: "truncate-prompt", id: task.id,
+        depId: t.depId, kept: t.kept, total: t.total,
+      });
+      io.stdout(`⚠ ${task.id}: {{result:${t.depId}}} inlined ${t.kept} of ${t.total} chars — the rest was NOT seen; use {{resultPath:${t.depId}}} to pass the whole result`);
+    }
+  };
+
   // Evaluate a task's when-gate once its deps are satisfied. True ⇒ proceed;
   // false ⇒ the task settled here (skipped, or failed on an expression error).
   // Skips write no result file — a when re-evaluates deterministically on resume.
@@ -547,7 +568,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     // A childPlan parent clones manifest NODES (one child copy per item —
     // {{item}} substitutes at each clone's own expansion); a plain parent
     // clones prompt leaves as before.
-    const base = task.childPlan ? "" : substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
+    let base = "";
+    if (!task.childPlan) {
+      const sub = substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
+      base = sub.prompt;
+      notePromptTruncations(task, sub.truncations); // every clone inherits the cut base
+    }
     const clones = items.map((item, i) => ({
       ...task,
       id: `${task.id}[${i}]`,
@@ -563,7 +589,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       clones: clones.length, ...(truncated && { truncated: true, total: sel.length }),
     });
     if (truncated) {
-      truncations.push({ id: task.id, kept: items.length, total: sel.length });
+      truncations.push({ kind: "forEach", id: task.id, kept: items.length, total: sel.length });
       io.stdout(`⚠ ${task.id}: forEach source has ${sel.length} items — running the first ${items.length} (maxItems); raise maxItems to cover the rest`);
     }
     tasks.splice(tasks.indexOf(task) + 1, 0, ...clones);
@@ -671,7 +697,14 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         }
       }
 
-      const prompt = task.promptFinal ? task.prompt : substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
+      let prompt = task.prompt;
+      let promptTruncations = [];
+      if (!task.promptFinal) {
+        const sub = substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
+        prompt = sub.prompt;
+        promptTruncations = sub.truncations;
+        notePromptTruncations(task, promptTruncations);
+      }
       const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`));
       let r = await runTask({ ...task, cwd: taskCwd }, prompt, cfg, io, leafLog, streamHooks(task));
       if (task.returns && r.ok) {
@@ -686,6 +719,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         durationMs: r.durationMs,
         prompt, // the exact string sent — with the snapshot, the leaf's full intent
         output: r.output,
+        // A drill-down straight to results/<id>.json must see that this leaf's
+        // input was cut — the run-level warning is easy to skip past.
+        ...(promptTruncations.length && { promptTruncations }),
       };
       if (tokenTotal(r.tokens) + (r.tokens?.cacheRead || 0) > 0) result.tokens = r.tokens;
       if (r.costUsd != null) result.costUsd = r.costUsd;

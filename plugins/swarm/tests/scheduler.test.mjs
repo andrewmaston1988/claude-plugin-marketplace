@@ -413,13 +413,124 @@ test("template substitution feeds dependency results, inline capped", async () =
   }
 });
 
+// The p5-review failure, reproduced: find-specpin returned 7 findings, the cap cut
+// the inlined copy, and verify-specpin checked only the first 5 — while the digest
+// reported all 7 as verified. The cut must surface on the leaf, the summary, and run.log.
+test("integration: a {{result:}} cut to the cap is loud on the leaf, the summary, and run.log", async () => {
+  const dir = tmp();
+  try {
+    const long = "F".repeat(50); // finder output, far over the tiny cap below
+    const spawn = fakeSpawnFactory((call) => {
+      const pr = promptOf(call);
+      if (pr === "do find") return { output: long };
+      return { output: "verdicts" };
+    });
+    const io = makeIo(spawn);
+    const p = plan(dir, [
+      task("find"),
+      task("verify", { prompt: "check: {{result:find}}", after: ["find"] }),
+    ]);
+    const r = await runPlan(p, { ...CFG, resultInlineCap: 10 }, io);
+
+    // the verifier really did see only a prefix
+    equal(promptOf(spawn.calls[1]), `check: ${"F".repeat(10)}`);
+
+    // 1. stamped on the consuming leaf's own result — what a drill-down reads
+    const verify = readResult(p.resultsDir, "verify");
+    equal(verify.promptTruncations.length, 1);
+    equal(verify.promptTruncations[0].depId, "find");
+    equal(verify.promptTruncations[0].kept, 10);
+    equal(verify.promptTruncations[0].total, 50);
+
+    // 2. in the run summary, on the same channel forEach's maxItems cap uses
+    const tr = r.summary.truncations;
+    equal(tr.length, 1);
+    equal(tr[0].kind, "prompt");
+    equal(tr[0].id, "verify");
+    equal(tr[0].depId, "find");
+
+    // 3. in run.log
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const evt = logLines.find((l) => l.event === "truncate-prompt");
+    ok(evt, "run.log must carry a truncate-prompt event");
+    equal(evt.id, "verify");
+    equal(evt.depId, "find");
+    equal(evt.total, 50);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Control: the same shape under the cap must stay silent, or the warning says nothing.
+test("integration: a {{result:}} that fits under the cap records no truncation", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => (promptOf(call) === "do find" ? { output: "short" } : { output: "v" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [
+      task("find"),
+      task("verify", { prompt: "check: {{result:find}}", after: ["find"] }),
+    ]);
+    const r = await runPlan(p, { ...CFG, resultInlineCap: 4000 }, io);
+    equal(readResult(p.resultsDir, "verify").promptTruncations, undefined);
+    equal(r.summary.truncations, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("substituteTemplates unit: path + cap", () => {
   const dir = tmp();
   try {
     initResultsDir(join(dir, "run"));
     writeResult(join(dir, "run"), "dep", { id: "dep", ok: true, output: "abcdef" });
-    const out = substituteTemplates("x {{result:dep}} y {{resultPath:dep}}", join(dir, "run"), 3);
-    equal(out, `x abc y ${resultPath(join(dir, "run"), "dep")}`);
+    const { prompt } = substituteTemplates("x {{result:dep}} y {{resultPath:dep}}", join(dir, "run"), 3);
+    equal(prompt, `x abc y ${resultPath(join(dir, "run"), "dep")}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A {{result:}} that exceeds the cap silently fed verifiers a PREFIX of their
+// finder's findings — unverified findings then read as verified. It must be loud.
+test("substituteTemplates reports a truncation when a dep's output exceeds the cap", () => {
+  const dir = tmp();
+  try {
+    initResultsDir(join(dir, "run"));
+    writeResult(join(dir, "run"), "dep", { id: "dep", ok: true, output: "abcdef" });
+    const { prompt, truncations } = substituteTemplates("x {{result:dep}}", join(dir, "run"), 3);
+    equal(prompt, "x abc");
+    equal(truncations.length, 1);
+    equal(truncations[0].depId, "dep");
+    equal(truncations[0].kept, 3);
+    equal(truncations[0].total, 6);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Control: a check that fires always says nothing.
+test("substituteTemplates reports no truncation when the dep fits under the cap", () => {
+  const dir = tmp();
+  try {
+    initResultsDir(join(dir, "run"));
+    writeResult(join(dir, "run"), "dep", { id: "dep", ok: true, output: "abc" });
+    const { prompt, truncations } = substituteTemplates("x {{result:dep}}", join(dir, "run"), 100);
+    equal(prompt, "x abc");
+    equal(truncations.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// {{resultPath:}} hands the leaf a path to Read — nothing is inlined, so nothing truncates.
+test("substituteTemplates never truncates a {{resultPath:}} reference", () => {
+  const dir = tmp();
+  try {
+    initResultsDir(join(dir, "run"));
+    writeResult(join(dir, "run"), "dep", { id: "dep", ok: true, output: "abcdef" });
+    const { truncations } = substituteTemplates("x {{resultPath:dep}}", join(dir, "run"), 3);
+    equal(truncations.length, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -919,7 +1030,7 @@ test("forEach: truncation is loud — result field, run.log, stdout warning, sum
     equal(expand.truncated, true);
     equal(expand.total, 3);
     ok(io.lines.some((l) => l.includes("first 2") && l.includes("3")), io.lines.join("|"));
-    deepEqual(r.summary.truncations, [{ id: "fix", kept: 2, total: 3 }]);
+    deepEqual(r.summary.truncations, [{ kind: "forEach", id: "fix", kept: 2, total: 3 }]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

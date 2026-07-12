@@ -342,7 +342,7 @@ test("run: forEach expands end-to-end via the shim; validate previews worst-case
     ok(/fix\[0\]/.test(r.stdout), r.stdout); // clone row in the roster
     ok(r.stdout.includes("first 1 of 2"), r.stdout); // closing-block truncation line
     const summary = JSON.parse(readFileSync(join(rd, "summary.json"), "utf8"));
-    deepEqual(summary.truncations, [{ id: "fix", kept: 1, total: 2 }]);
+    deepEqual(summary.truncations, [{ kind: "forEach", id: "fix", kept: 1, total: 2 }]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
