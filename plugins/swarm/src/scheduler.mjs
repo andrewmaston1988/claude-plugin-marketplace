@@ -195,8 +195,10 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (e) {
-      leafLog?.end(`spawn error: ${e.message}\n`);
-      resolve({ ok: false, exit: null, durationMs: 0, output: `spawn error: ${e.message}`, raw: "", timedOut: false, tokens: emptyTokens() });
+      // same contract as settle(): the log is durable before the task resolves
+      const done = () => resolve({ ok: false, exit: null, durationMs: 0, output: `spawn error: ${e.message}`, raw: "", timedOut: false, tokens: emptyTokens() });
+      if (leafLog) leafLog.end(`spawn error: ${e.message}\n`, done);
+      else done();
       return;
     }
     let raw = "";
@@ -225,14 +227,23 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
       try { child.kill(); } catch { /* already gone */ }
     }, task.timeoutMs);
     if (timer.unref) timer.unref();
+    // The leaf log must be FLUSHED before the task resolves. end() is
+    // fire-and-forget, so resolving straight after it let runPlan finish with
+    // writes still in flight: the run reported done while results/<id>.log was
+    // still being written, and anything that touched the results dir on that
+    // signal (a cleanup, an archive, a reader) raced the flush.
+    const flushLog = () => new Promise((res) => {
+      if (!leafLog || leafLog.writableFinished) return res();
+      leafLog.end(res);
+    });
+
     const settle = (exit, errMsg) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       parser.end();
       if (errMsg) raw += (raw ? "\n" : "") + errMsg;
-      leafLog?.end();
-      resolve({
+      flushLog().then(() => resolve({
         ok: exit === 0 && !timedOut && !(resultEvt?.is_error),
         exit,
         durationMs: io.now() - started,
@@ -246,7 +257,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
         // "none" on subscription auth — costUsd is synthetic there, real only
         // when a key source is named (unit honesty for estimates and warns)
         apiKeySource: initEvt?.apiKeySource ?? null,
-      });
+      }));
     };
     child.on("error", (e) => settle(null, `spawn error: ${e.message}`));
     child.on("close", (code) => settle(code));
