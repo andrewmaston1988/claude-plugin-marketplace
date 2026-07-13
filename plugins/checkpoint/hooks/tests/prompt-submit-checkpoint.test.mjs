@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import { resolveUtilisation, buildCheckpointNudge } from '../prompt-submit-checkpoint.mjs';
 
 test('resolveUtilisation: usage path wins when present', () => {
@@ -28,4 +29,10 @@ test('buildCheckpointNudge frames a handover, not a stop-work order', () => {
   assert.match(note, /handover/i);
   assert.match(note, /no need to stop/i);
   assert.doesNotMatch(note, /## 1\. OBJECTIVE/); // must NOT inline the template
+});
+
+test('keepalive-init template does not hand the model an excuse to skip', () => {
+  const tmpl = fs.readFileSync(new URL('../templates/keepalive-init.md', import.meta.url), 'utf8');
+  assert.doesNotMatch(tmpl, /\*\*Skip this\*\*/i);
+  assert.match(tmpl, /even if you are mid-task/i);
 });
