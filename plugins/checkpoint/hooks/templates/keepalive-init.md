@@ -12,4 +12,4 @@ Call the `ScheduleWakeup` tool with these exact arguments:
 
 **On wakeup**, you'll be re-invoked with `{tick}` as the prompt and this instruction will re-appear. Schedule the next tick exactly the same way and return briefly — nothing else needed on tick turns; don't tool-call beyond the scheduling, don't write anything to disk. The hook auto-stops the chain once the user has been idle past its idle-stop threshold (12× the cache TTL by default) — no re-injection on that turn, so you won't schedule another wakeup.
 
-**Skip this** if the user has already given you something pressing to do that you haven't finished — finish the user's work first, the wakeup can be set on the next quiet turn.
+**Do this even if you are mid-task.** It is one tool call, it does not disturb the user's work, and the chain can only start on a *working* turn because that is when this injection lands. Schedule the wakeup first, then carry straight on with what the user asked. Declining because you are busy is precisely how the cache silently lapses — and if you skip it, the hook will keep re-offering until you comply.

@@ -156,8 +156,8 @@ export function writeJSON(p, obj) {
 export function getSessionState(state, sid) {
   const cur = state[sid];
   if (cur && typeof cur === 'object') return cur;
-  if (typeof cur === 'number') return { lastSize: cur, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastFiredPct: null };
-  return { lastSize: 0, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastFiredPct: null };
+  if (typeof cur === 'number') return { lastSize: cur, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastFiredPct: null, lastInjectTs: 0, injectPending: false };
+  return { lastSize: 0, userTs: 0, lastActivityTs: 0, lastTickTs: 0, lastInjectedDelay: 0, lastFiredPct: null, lastInjectTs: 0, injectPending: false };
 }
 
 export function appendJSONL(p, obj) {
