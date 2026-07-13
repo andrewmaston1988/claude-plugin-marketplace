@@ -1,10 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  nextDelay, keepaliveAction, cadenceFor, ttlFromUsage, resolveTtl,
+  nextDelay, keepaliveAction, cadenceFor, ttlFromUsage, resolveTtl, offerOverdue,
   FIRST_DELAY_SECS, MIN_DELAY_SECS, MAX_DELAY_SECS,
   TARGET_CADENCE_SECS, KEEPALIVE_CHAIN_DEAD_SECS, KEEPALIVE_IDLE_STOP_SECS,
 } from '../lib/cadence.mjs';
+
+const REF = cadenceFor(300);
 
 test('cadenceFor(300) reproduces the reference constants', () => {
   const c = cadenceFor(300);
@@ -88,10 +90,10 @@ test('nextDelay and keepaliveAction accept a cadence override', () => {
   assert.equal(nextDelay(3300, 3060, c), 2820); // overshoot 240 -> 3060 - 240
   assert.equal(nextDelay(9999, 3060, c), 2160); // clamps at scaled min
   // 4000s user idle stops the default chain but not a 1h-bucket chain
-  assert.equal(keepaliveAction(4000, 10, false), 'stop');
-  assert.equal(keepaliveAction(4000, 10, false, c), 'none');
-  assert.equal(keepaliveAction(50000, 10, false, c), 'stop');
-  assert.equal(keepaliveAction(4000, 3000, false, c), 'inject'); // chain dead at 2880
+  assert.equal(keepaliveAction(4000, 10, false, REF, false), 'stop');
+  assert.equal(keepaliveAction(4000, 10, false, c, false), 'none');
+  assert.equal(keepaliveAction(50000, 10, false, c, false), 'stop');
+  assert.equal(keepaliveAction(4000, 3000, false, c, false), 'inject'); // chain dead at 2880
 });
 
 test('first tick (no history) uses FIRST_DELAY_SECS', () => {
@@ -115,22 +117,54 @@ test('never exceeds MAX', () => {
 });
 
 test('keepaliveAction: stop after long real user idle', () => {
-  assert.equal(keepaliveAction(4000, 10, false), 'stop');
+  assert.equal(keepaliveAction(4000, 10, false, REF, false), 'stop');
 });
 
 test('keepaliveAction: no stop when no prior user data', () => {
   // Infinity idle == "never seen a user prompt", treat as fresh, not gone
-  assert.notEqual(keepaliveAction(Infinity, Infinity, false), 'stop');
+  assert.notEqual(keepaliveAction(Infinity, Infinity, false, REF, false), 'stop');
 });
 
 test('keepaliveAction: inject on a tick', () => {
-  assert.equal(keepaliveAction(10, 10, true), 'inject');
+  assert.equal(keepaliveAction(10, 10, true, REF, false), 'inject');
 });
 
 test('keepaliveAction: inject when chain is dead', () => {
-  assert.equal(keepaliveAction(10, 300, false), 'inject');
+  assert.equal(keepaliveAction(10, 300, false, REF, false), 'inject');
 });
 
 test('keepaliveAction: no-op when warm and recent', () => {
-  assert.equal(keepaliveAction(10, 10, false), 'none');
+  assert.equal(keepaliveAction(10, 10, false, REF, false), 'none');
+});
+
+test('cadenceFor exposes an overdue slack proportional to TTL', () => {
+  assert.equal(cadenceFor(300).overdueSlackSecs, 30);
+  assert.equal(cadenceFor(3600).overdueSlackSecs, 300);
+  assert.equal(cadenceFor(60).overdueSlackSecs, 30); // clamped at MIN
+});
+
+test('offerOverdue: a pending offer inside its wakeup window is not overdue', () => {
+  assert.equal(offerOverdue(true, 200, 240, REF), false);
+  assert.equal(offerOverdue(true, 270, 240, REF), false); // 240 + 30 slack, exactly
+});
+
+test('offerOverdue: an unanswered offer past delay+slack is overdue', () => {
+  assert.equal(offerOverdue(true, 271, 240, REF), true);
+});
+
+test('offerOverdue: nothing pending, nothing overdue', () => {
+  assert.equal(offerOverdue(false, 99999, 240, REF), false);
+  assert.equal(offerOverdue(true, 99999, 0, REF), false); // no delay ever injected
+});
+
+// The 2026-07-12 miss: on a 1h bucket chain-dead is 48 min, so an ignored offer
+// was never re-offered across 557 turns of live interactive work.
+test('keepaliveAction: re-injects an ignored offer while the session is warm and busy', () => {
+  const c = cadenceFor(3600);
+  assert.equal(keepaliveAction(120, 120, false, c, false), 'none');
+  assert.equal(keepaliveAction(120, 120, false, c, true), 'inject');
+});
+
+test('keepaliveAction: idle-stop still beats an overdue offer', () => {
+  assert.equal(keepaliveAction(99999, 10, false, REF, true), 'stop');
 });
