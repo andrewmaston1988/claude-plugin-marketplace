@@ -14,6 +14,11 @@ const MAX_RATIO        = 0.90;
 const CHAIN_DEAD_RATIO = 0.80;
 const IDLE_STOP_MULT   = 12;   // 1h at 5m TTL, 12h at 1h TTL
 
+// Grace on top of the injected delay before an unanswered offer counts as declined.
+const OVERDUE_SLACK_RATIO = 0.10;
+const OVERDUE_SLACK_MIN   = 30;
+const OVERDUE_SLACK_MAX   = 300;
+
 export function clamp(n, lo, hi) {
   return Math.max(lo, Math.min(hi, n));
 }
@@ -32,6 +37,7 @@ export function cadenceFor(ttlSecs, { idleStopSecs } = {}) {
     maxDelaySecs: delay(MAX_RATIO),
     chainDeadSecs: Math.round(ttl * CHAIN_DEAD_RATIO),
     idleStopSecs: (Number.isFinite(idleStopSecs) && idleStopSecs > 0) ? idleStopSecs : ttl * IDLE_STOP_MULT,
+    overdueSlackSecs: clamp(Math.round(ttl * OVERDUE_SLACK_RATIO), OVERDUE_SLACK_MIN, OVERDUE_SLACK_MAX),
   };
 }
 
@@ -76,13 +82,24 @@ export function nextDelay(observedGap, lastInjectedDelay, cad = REFERENCE) {
   return clamp(cad.targetSecs - overshoot, cad.minDelaySecs, cad.maxDelaySecs);
 }
 
+// An offer is overdue when it was injected, no tick has answered it, and the
+// wakeup it asked for should already have fired (delay + slack). That means the
+// model declined to schedule — not that the wakeup is merely still pending.
+export function offerOverdue(injectPending, sinceInjectSecs, injectedDelaySecs, cad) {
+  if (!injectPending) return false;
+  if (!Number.isFinite(sinceInjectSecs)) return false;
+  if (!Number.isFinite(injectedDelaySecs) || injectedDelaySecs <= 0) return false;
+  return sinceInjectSecs > injectedDelaySecs + cad.overdueSlackSecs;
+}
+
 // prevUserIdleSecs: seconds since last *user* prompt (Infinity if never).
 // prevSinceAnySecs: seconds since last activity incl. ticks (Infinity if never).
+// overdue: a previous offer went unanswered past its wakeup window (see offerOverdue).
 // Returns 'stop' | 'inject' | 'none'.
-export function keepaliveAction(prevUserIdleSecs, prevSinceAnySecs, isTick, cad = REFERENCE) {
+export function keepaliveAction(prevUserIdleSecs, prevSinceAnySecs, isTick, cad, overdue) {
   const userIdleStop = Number.isFinite(prevUserIdleSecs) && prevUserIdleSecs >= cad.idleStopSecs;
   if (userIdleStop) return 'stop';
   const chainDead = prevSinceAnySecs >= cad.chainDeadSecs;
-  if (isTick || chainDead) return 'inject';
+  if (isTick || chainDead || overdue) return 'inject';
   return 'none';
 }

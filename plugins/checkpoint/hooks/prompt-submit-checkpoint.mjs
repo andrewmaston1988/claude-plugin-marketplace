@@ -10,7 +10,7 @@ import {
   readJSON, writeJSON, getSessionState, appendJSONL,
 } from './lib/paths.mjs';
 import {
-  nextDelay, keepaliveAction, cadenceFor, resolveTtl,
+  nextDelay, keepaliveAction, cadenceFor, resolveTtl, offerOverdue,
 } from './lib/cadence.mjs';
 import {
   contextWindowFor, contextUtilization, decideCheckpointNudge, readRecentAssistantTurns,
@@ -78,11 +78,11 @@ async function main() {
   const state = readJSON(STATE_DB, {});
   const sState = sessionId ? getSessionState(state, sessionId) : null;
 
-  let prevUserIdleSecs = Infinity, prevSinceAnySecs = Infinity, prevTickGap = 0;
+  let prevUserIdleSecs = Infinity, prevSinceAnySecs = Infinity, prevInjectGap = 0;
   if (sState) {
     prevUserIdleSecs = sState.userTs ? (now - sState.userTs) / 1000 : Infinity;
     prevSinceAnySecs = sState.lastActivityTs ? (now - sState.lastActivityTs) / 1000 : Infinity;
-    prevTickGap = sState.lastTickTs ? (now - sState.lastTickTs) / 1000 : 0;
+    prevInjectGap = sState.lastInjectTs ? (now - sState.lastInjectTs) / 1000 : 0;
     sState.lastActivityTs = now;
     if (!isTick) sState.userTs = now;
     state[sessionId] = sState;
@@ -104,9 +104,12 @@ async function main() {
     const cad = cadenceFor(ttl, {
       idleStopSecs: Number(settings?.checkpoint?.keepaliveIdleStopSecs) || undefined,
     });
-    const action = keepaliveAction(prevUserIdleSecs, prevSinceAnySecs, isTick, cad);
+    // Decide before mutating: a tick is the answer to the offer that preceded it.
+    const overdue = offerOverdue(Boolean(sState.injectPending), prevInjectGap, sState.lastInjectedDelay, cad);
+    if (isTick) sState.injectPending = false;
+    const action = keepaliveAction(prevUserIdleSecs, prevSinceAnySecs, isTick, cad, overdue);
     if (action === 'inject') {
-      const delay = nextDelay(prevTickGap, sState.lastInjectedDelay, cad);
+      const delay = nextDelay(prevInjectGap, sState.lastInjectedDelay, cad);
       const initTmpl = readTemplate('keepalive-init.md');
       const tickTmpl = readTemplate('keepalive-tick.md').trim();
       if (initTmpl && tickTmpl) {
@@ -115,20 +118,22 @@ async function main() {
           .replace(/\{ttl\}/g, String(cad.ttlSecs))
           .replace(/\{tick\}/g, tickTmpl);
       }
-      if (isTick) {
-        appendJSONL(KEEPALIVE_LOG, {
-          ts: now, session: sessionId,
-          observedGap: Math.round(prevTickGap),
-          lastInjectedDelay: sState.lastInjectedDelay || 0,
-          overshoot: Math.max(0, Math.round(prevTickGap) - (sState.lastInjectedDelay || 0)),
-          nextDelay: delay,
-          ttlSecs: cad.ttlSecs,
-        });
-      }
-      sState.lastTickTs = now;
+      // Log every offer, not just answered ones — an ignored offer must be visible.
+      appendJSONL(KEEPALIVE_LOG, {
+        ts: now, session: sessionId,
+        event: isTick ? 'tick' : (overdue ? 'retry' : 'offer'),
+        observedGap: Math.round(prevInjectGap),
+        lastInjectedDelay: sState.lastInjectedDelay || 0,
+        overshoot: Math.max(0, Math.round(prevInjectGap) - (sState.lastInjectedDelay || 0)),
+        nextDelay: delay,
+        ttlSecs: cad.ttlSecs,
+      });
+      sState.lastInjectTs = now;
+      sState.injectPending = true;
       sState.lastInjectedDelay = delay;
       state[sessionId] = sState;
     }
+    if (isTick) { sState.lastTickTs = now; state[sessionId] = sState; }
   }
 
   // Ticks are for cache warmth only — skip the real-work jobs.
