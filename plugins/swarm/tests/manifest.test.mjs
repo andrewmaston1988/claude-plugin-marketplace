@@ -257,6 +257,55 @@ test("governance: Claude task anywhere passes with empty allowedRoots", () => {
   }
 });
 
+test("digest.report: true and a steering string both survive to the plan", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, {
+      tasks: [claudeTask()],
+      digest: { model: "haiku", report: true },
+    });
+    equal(loadManifest(p, CFG, dir).digest.report, true);
+
+    const p2 = writeManifest(dir, {
+      tasks: [claudeTask()],
+      digest: { model: "haiku", report: "Lead with the security findings." },
+    }, "plan2.json");
+    equal(loadManifest(p2, CFG, dir).digest.report, "Lead with the security findings.");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("digest.report rejects a non-boolean, non-string value", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, {
+      tasks: [claudeTask()],
+      digest: { model: "haiku", report: 3 },
+    });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => e.includes("digest.report")), errs.join("|"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// digest.instructions already gets args substitution; without the same treatment
+// a {{args.x}} in the report steer survives verbatim into the leaf's prompt.
+test("args substitute into the digest.report steering string", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, {
+      tasks: [claudeTask({ prompt: "look at {{args.area}}" })],
+      digest: { model: "haiku", report: "Lead with {{args.area}}." },
+    });
+    const plan = loadManifest(p, CFG, dir, { args: { area: "auth" } });
+    equal(plan.digest.report, "Lead with auth.");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("governance: non-Claude digest model outside roots rejected", () => {
   const dir = tmp();
   try {
