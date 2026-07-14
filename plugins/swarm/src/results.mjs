@@ -299,7 +299,7 @@ export function renderProvenance({ goal, tasks = [], truncations = [] }) {
   return lines.join("\n") + "\n";
 }
 
-export function formatClosing({ digestPath, reportPath, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], estimate }) {
+export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], estimate }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -315,6 +315,9 @@ export function formatClosing({ digestPath, reportPath, digestFailed, summaryPat
   else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);
   else lines.push(dim("digest: none (no digest block in manifest)"));
   if (reportPath) lines.push(`${bold("report:")} ${green(reportPath)}`);
+  // A requested report that never materialised must SAY so. Printing nothing is
+  // how you ask for a report and are left wondering where it went.
+  else if (reportMissing) lines.push(`${bold("report:")} ${red("NOT WRITTEN")} — report was requested but the digest leaf produced no report.md`);
   lines.push(`${bold("summary:")} ${summaryPath}`);
   if (totalTokens && tokenTotal(totalTokens) > 0) {
     const input = formatTokens(totalTokens.input + totalTokens.cacheCreation);

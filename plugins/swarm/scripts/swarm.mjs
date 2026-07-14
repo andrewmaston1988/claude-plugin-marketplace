@@ -178,6 +178,7 @@ async function cmdRun(rest) {
   out(formatClosing({
     digestPath: r.digestPath,
     reportPath: r.reportPath,
+    reportMissing: r.reportMissing,
     digestFailed: r.digestFailed,
     summaryPath: r.summaryPath,
     totalTokens: r.summary.totalTokens,

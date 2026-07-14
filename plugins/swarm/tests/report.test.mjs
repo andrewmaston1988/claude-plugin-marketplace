@@ -95,6 +95,8 @@ test("integration: a digest that writes no report still produces digest.md", asy
     equal(existsSync(join(p.resultsDir, "report.md")), false);
     equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "DIGEST TEXT");
     equal(r.digestFailed, false, "a missing report must not fail the digest");
+    // ...but it must not be SILENT either — you asked for a report and got none
+    equal(r.reportMissing, true, "a requested-but-absent report must be surfaced");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -107,5 +109,7 @@ test("integration: without a report block nothing is written and the digest is u
     equal(r.reportPath ?? null, null);
     equal(existsSync(join(p.resultsDir, "report.md")), false);
     equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "DIGEST TEXT");
+    // nothing was asked for, so nothing is missing — no false alarm
+    equal(r.reportMissing, false, "a run that never wanted a report must not warn about one");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -384,3 +384,24 @@ test("renderProvenance: a :cloud leaf earns the token-accounting footnote", () =
   const claudeOnly = renderProvenance({ goal: "g", tasks: [row({ model: "claude-opus-4-8" })], truncations: [] });
   ok(!/cache/i.test(claudeOnly), "an all-Anthropic run needs no such footnote");
 });
+
+// You ask for a report, the leaf doesn't write one, and the closing block says
+// NOTHING. That is how you go looking for a report and find silence.
+test("formatClosing: a requested report that never landed is LOUD, not absent", () => {
+  const out = formatClosing({
+    digestPath: "d.md", reportMissing: true, summaryPath: "s.json", totalTokens: null,
+  });
+  ok(/NOT WRITTEN/.test(out), out);
+  ok(/requested/i.test(out), "must say it was asked for");
+
+  // and when it did land, the path — never both
+  const ok2 = formatClosing({
+    digestPath: "d.md", reportPath: "r.md", summaryPath: "s.json", totalTokens: null,
+  });
+  ok(ok2.includes("r.md"), ok2);
+  ok(!/NOT WRITTEN/.test(ok2), ok2);
+
+  // no report asked for → no report line at all
+  const none = formatClosing({ digestPath: "d.md", summaryPath: "s.json", totalTokens: null });
+  ok(!/report:/.test(none), none);
+});
