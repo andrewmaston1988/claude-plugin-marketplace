@@ -308,3 +308,79 @@ test("renderStatus: expand-manifest events add child rows with their own models"
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── renderProvenance ──────────────────────────────────────────────────────────
+// The header is engine-written precisely so its numbers can be trusted. Every
+// test here defends a number the model would otherwise have had to transcribe.
+
+import { renderProvenance } from "../src/results.mjs";
+
+const row = (over = {}) => ({
+  id: "scan-a", model: "glm-5.2:cloud", state: "ok",
+  durationMs: 42000, tokens: { input: 18000, output: 200, cacheCreation: 0, cacheRead: 0 },
+  ...over,
+});
+
+test("renderProvenance: goal heading and a row per leaf", () => {
+  const out = renderProvenance({
+    goal: "find every caller of frobnicate",
+    tasks: [row(), row({ id: "verify", model: "claude-opus-4-8", durationMs: 71000 })],
+    truncations: [],
+  });
+  ok(out.startsWith("# find every caller of frobnicate"), out);
+  ok(out.includes("scan-a"), out);
+  ok(out.includes("verify"), out);
+  ok(/42s/.test(out), "durations render in seconds");
+});
+
+// costUsd on a :cloud row is the CLI's own price table applied to token counts —
+// these providers bill on subscription and GPU time, with no token mapping. It is
+// not a wrong number, it is not a number. It must never reach the table.
+test("renderProvenance: a :cloud leaf's costUsd is suppressed, an Anthropic leaf's is not", () => {
+  const out = renderProvenance({
+    goal: "g",
+    tasks: [
+      row({ id: "cloudy", model: "glm-5.2:cloud", costUsd: 108.89 }),
+      row({ id: "claudey", model: "claude-opus-4-8", costUsd: 0.31 }),
+    ],
+    truncations: [],
+  });
+  ok(!out.includes("108"), "a fabricated :cloud cost must never render");
+  ok(out.includes("$0.31"), "a real Anthropic cost must render");
+});
+
+test("renderProvenance: a leaf with no cost renders a dash, never $undefined", () => {
+  const out = renderProvenance({ goal: "g", tasks: [row()], truncations: [] });
+  ok(!/undefined|NaN/.test(out), out);
+});
+
+// A {{result:}} truncation means a verifier checked only a PREFIX of its finder's
+// findings. It must read as loudly here as it does in the closing block.
+test("renderProvenance: truncations render loudly, not as a footnote", () => {
+  const out = renderProvenance({
+    goal: "g",
+    tasks: [row()],
+    truncations: [{ kind: "prompt", id: "verify", depId: "scan-a", kept: 4000, total: 9120 }],
+  });
+  ok(/NOT seen/.test(out), "must say the rest was NOT seen by that leaf");
+  ok(out.includes("verify") && out.includes("scan-a"), "must name the leaf and its dependency");
+  ok(out.includes("4000") && out.includes("9120"), out);
+});
+
+test("renderProvenance: a forEach cap renders as a coverage warning", () => {
+  const out = renderProvenance({
+    goal: "g", tasks: [row()],
+    truncations: [{ kind: "forEach", id: "fan", kept: 10, total: 57 }],
+  });
+  ok(out.includes("10") && out.includes("57"), out);
+  ok(/maxItems/i.test(out), out);
+});
+
+// The cloud token magnitude is an accounting artefact, not a runaway. A reader of
+// the report gets the same footnote the skill gives an orchestrating session.
+test("renderProvenance: a :cloud leaf earns the token-accounting footnote", () => {
+  const cloud = renderProvenance({ goal: "g", tasks: [row({ model: "glm-5.2:cloud" })], truncations: [] });
+  ok(/cache/i.test(cloud), "must explain the missing cache buckets");
+  const claudeOnly = renderProvenance({ goal: "g", tasks: [row({ model: "claude-opus-4-8" })], truncations: [] });
+  ok(!/cache/i.test(claudeOnly), "an all-Anthropic run needs no such footnote");
+});

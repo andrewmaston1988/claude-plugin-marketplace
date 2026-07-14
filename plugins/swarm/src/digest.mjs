@@ -1,16 +1,64 @@
+import { join } from "node:path";
 import { resultPath } from "./results.mjs";
 
 export const DIGEST_ID = "__digest";
 
 // The digest leaf RETURNS text; the ENGINE writes digest.md from its output.
-// The leaf therefore needs only Read — never Write.
+// The leaf therefore needs only Read — never Write. Report mode is the one
+// exception: it also WRITES report.md, so it earns Write.
 const DIGEST_TOOLS = "Read";
+const DIGEST_TOOLS_REPORT = "Read,Write";
+
+export function reportPath(resultsDir) {
+  return join(resultsDir, "report.md");
+}
+
+// Phase 1 of report mode. The leaf expands into report.md; only then does it
+// compress for the return. Compressing a document it just reasoned through beats
+// compressing raw results cold.
+//
+// The spine (leaf accounting, the ledger) is mandated because it is true of every
+// run. The BODY is deliberately free: a code audit and a research sweep want
+// different documents, and a fixed template is a straitjacket on one of them.
+//
+// The leaf must NOT write the header — the engine prepends a deterministic one
+// (renderProvenance) so the run's numbers cannot be fumbled in transcription.
+function reportPhase(plan) {
+  const steer = typeof plan.digest.report === "string" ? plan.digest.report.trim() : "";
+  return `
+
+## PHASE 1 — write the report (do this FIRST)
+
+Write a full, human-facing report to this exact path:
+  ${reportPath(plan.resultsDir)}
+
+This is the document a human reads to understand what this run found and why. It is NOT the digest — do not compress it. Expand: quote the evidence, draw the inferences across leaves that no single leaf could draw, say what you actually think.
+
+Required, in every report:
+- "## Leaf accounting" — account for every leaf, including the failed and the empty ones. State plainly what happened: which leaf failed and how, which returned nothing and what that means for coverage. Do not hedge, do not apologise, and never quietly omit a leaf. An empty result is a fact about the run, not an embarrassment — and it usually implies a next action; say what it is.
+- "## PROVEN / OPEN ledger" — PROVEN rows carry evidence (file:line or reproduced output); OPEN rows are unresolved questions or unverified claims. A finding a truncated verifier never saw is OPEN, never PROVEN.
+
+The body between them is YOURS. Shape it to this run: a code audit wants findings and file:line evidence; a research sweep wants a narrative that draws inferences across leaves; a generation run wants the work itself.
+
+**Do not reach for the default report.** Left alone, a model writes the same document every time — "Executive Summary", then "Key Findings" in a list of three, then "Recommendations", then "Next Steps", then a Conclusion restating the Summary — and it writes it regardless of what the run actually was. That shape is a reflex, not a choice: it fits an audit and a research sweep and a poem equally badly. If a section of your outline would appear no matter what this run had found, cut it and write the section this run actually earned.
+
+Two rules that follow from that:
+- **Structure encodes information.** Headings, numbering and ordering must carry something true — number findings only if the order means something, and never create a section you have nothing to say in.
+- **Each part does one job.** The header is provenance, the ledger is epistemics, the body is the argument. The body does not restate the ledger and does not re-list the run's mechanics; say a thing in the one place it belongs. Emphasis works the same way — if every finding is critical, none reads as critical.
+
+**Do not write a title or a run/provenance header.** The engine prepends one (goal, per-leaf models, durations, tokens, truncation warnings) after you finish. Start the file at your first content section — anything you write about run mechanics will be duplicated.${steer ? `\n\nSteering for the body (from the manifest):\n${steer}` : ""}
+
+## PHASE 2 — return the digest
+
+Having written the report, compress IT for the orchestrating session, under the rules below. The report is the long form; the digest is the handoff. Mention ${reportPath(plan.resultsDir)} once so the session knows the long form exists.`;
+}
 
 function digestPrompt(plan) {
   const goal = plan.goal || "(no goal line provided in the manifest)";
   const pathLines = plan.tasks
     .map((t) => `- ${t.id}: ${resultPath(plan.resultsDir, t.id)}`)
     .join("\n");
+  const report = plan.digest?.report ? reportPhase(plan) : "";
 
   let prompt = `You are the digest stage of a swarm run. The leaf tasks have completed and their raw outputs are on disk. Your single job: compress them for the orchestrating session without losing what matters.
 
@@ -18,9 +66,10 @@ Goal of this run: ${goal}
 
 Result files — Read each one yourself; the JSON "output" field holds the leaf's raw output:
 ${pathLines}
+${report}
 
 Compression rules:
-- At most 5 bullets per leaf (≤5). Never inline long raw output.
+- One bullet per real finding — no padding to fill, and no arbitrary cap. A leaf with eight findings gets eight bullets; a leaf with one gets one. If a leaf's findings genuinely do not compress, say so rather than truncating them silently. Never inline long raw output.
 - Three-band compression: (1) full fidelity with file:line references for anything the instructions below name as must_be_sure; (2) one line per relevant finding; (3) drop noise entirely.
 - Structure: headlines first — one line per leaf — then body detail beneath.
 - Leaf accounting: account for every leaf listed above, including failed or empty ones; say so explicitly rather than omitting them.
@@ -33,7 +82,9 @@ Required sections:
 - "## PROVEN / OPEN ledger" — PROVEN rows carry evidence (file:line or reproduced output); OPEN rows are unresolved questions or unverified claims.
 - "## Drill-down" — which raw result files merit a full read by the orchestrating session, and why.
 
-Return the digest as your final response text. Do not write any files — the engine writes digest.md from your output.`;
+Return the digest as your final response text. ${plan.digest?.report
+    ? `The ONLY file you write is the report named above — the engine writes digest.md from your returned text.`
+    : `Do not write any files — the engine writes digest.md from your output.`}`;
 
   if (plan.digest?.instructions) {
     prompt += `\n\nAdditional instructions from the manifest:\n${plan.digest.instructions}`;
@@ -49,7 +100,7 @@ export function buildDigestTask(plan) {
     id: DIGEST_ID,
     prompt: digestPrompt(plan),
     model: plan.digest.model,
-    allowedTools: DIGEST_TOOLS,
+    allowedTools: plan.digest.report ? DIGEST_TOOLS_REPORT : DIGEST_TOOLS,
     cwd: plan.cwd,
     originalCwd: plan.cwd,
     scratchRedirect: false,

@@ -523,10 +523,15 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const usedArgs = new Set();
   const argsLabel = (t) => (t?.id ? `task '${t.id}'` : "task with missing id");
   applyArgsToRawTasks(raw.tasks, args, usedArgs, errors, argsLabel);
-  if (raw.digest && typeof raw.digest === "object" && typeof raw.digest.instructions === "string") {
-    const carrier = { prompt: raw.digest.instructions };
-    applyArgsToRawTasks([carrier], args, usedArgs, errors, () => "digest");
-    raw.digest.instructions = carrier.prompt;
+  // instructions AND the report steer are both prompt text — an un-substituted
+  // {{args.x}} in either reaches the leaf verbatim.
+  if (raw.digest && typeof raw.digest === "object") {
+    for (const key of ["instructions", "report"]) {
+      if (typeof raw.digest[key] !== "string") continue;
+      const carrier = { prompt: raw.digest[key] };
+      applyArgsToRawTasks([carrier], args, usedArgs, errors, () => "digest");
+      raw.digest[key] = carrier.prompt;
+    }
   }
 
   const resultsDir = raw.resultsDir
@@ -573,7 +578,15 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     } else {
       checkGovernance(raw.digest.model, cwd, "digest", cfg, errors);
       checkDenylist(raw.digest.model, "digest", cfg, errors);
-      digest = { model: raw.digest.model, instructions: raw.digest.instructions || "" };
+      const report = raw.digest.report;
+      if (report !== undefined && report !== true && report !== false && typeof report !== "string") {
+        errors.push("digest.report must be true, false, or a steering string for the report body");
+      }
+      digest = {
+        model: raw.digest.model,
+        instructions: raw.digest.instructions || "",
+        ...(report && { report }),
+      };
     }
   }
 
