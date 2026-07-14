@@ -244,11 +244,62 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
     `${bold("results:")} ${join(dir, "results")}`,
   ];
   if (existsSync(join(dir, "digest.md"))) lines.push(`${bold("digest:")} ${green(join(dir, "digest.md"))}`);
+  if (existsSync(join(dir, "report.md"))) lines.push(`${bold("report:")} ${green(join(dir, "report.md"))}`);
   if (existsSync(join(dir, "summary.json"))) lines.push(`${bold("summary:")} ${join(dir, "summary.json")}`);
   return lines.join("\n");
 }
 
-export function formatClosing({ digestPath, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], estimate }) {
+// ── report provenance header ──────────────────────────────────────────────────
+// Engine-written, prepended to the leaf's report.md. The header is a table of
+// NUMBERS; a model transcribing durations and dollars out of JSONL fumbles them,
+// and a wrong figure in an official-looking table is worse than no table.
+
+const isCloud = (model) => String(model || "").includes(":");
+
+// costUsd on a :cloud row is the CLI's own price table applied to token counts.
+// These providers bill on subscription and GPU time with no token mapping, so the
+// figure is not a wrong number — it is not a number. Never render it.
+function costCell(row) {
+  if (row.costUsd == null || isCloud(row.model)) return "—";
+  return `$${row.costUsd.toFixed(2)}`;
+}
+
+// Both truncation kinds, worded exactly as the closing block words them — a cut
+// only the engine knows about is how an unverified finding reads as verified.
+// List items, not bare lines: consecutive markdown lines collapse into one
+// run-on paragraph, which is how two separate coverage gaps read as one.
+export function truncationLines(truncations) {
+  return truncations.map((tr) => tr.kind === "prompt"
+    ? `- ⚠ **${tr.id}**: \`{{result:${tr.depId}}}\` inlined ${tr.kept} of ${tr.total} chars — the rest was NOT seen by this leaf.`
+    : `- ⚠ **${tr.id}**: forEach ran the first ${tr.kept} of ${tr.total} items (maxItems cap) — the remainder was NOT covered.`);
+}
+
+export function renderProvenance({ goal, tasks = [], truncations = [] }) {
+  const lines = [`# ${goal || "(no goal line provided in the manifest)"}`, "", "## Run", ""];
+  lines.push("| leaf | model | duration | tokens | cost | state |");
+  lines.push("|---|---|---|---|---|---|");
+  for (const t of tasks) {
+    const dur = t.durationMs != null ? fmtSecs(t.durationMs) : "—";
+    lines.push(`| ${t.id} | ${t.model || "?"} | ${dur} | ${formatTokens(tokenTotal(t.tokens))} | ${costCell(t)} | ${t.state || "?"} |`);
+  }
+
+  const warn = truncationLines(truncations);
+  if (warn.length) lines.push("", "### Coverage gaps", "", ...warn);
+
+  // The magnitude is an accounting artefact, not a runaway: these providers report
+  // no cache buckets, so the re-sent transcript lands in `input` (which tokenTotal
+  // counts) rather than `cacheRead` (which it excludes). Say so, or a reader draws
+  // exactly the wrong conclusion from the biggest number on the page.
+  if (tasks.some((t) => isCloud(t.model))) {
+    lines.push(
+      "",
+      "> Token counts on `:cloud` rows look enormous because those providers report no prompt-cache buckets: every turn re-sends the agent's whole transcript as fresh *input*, which is counted, rather than as a cache read, which is not. Output is the work; input is the transcript, re-sent once per turn. Cost is not shown for these rows — it cannot be derived from tokens.",
+    );
+  }
+  return lines.join("\n") + "\n";
+}
+
+export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], estimate }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -263,6 +314,10 @@ export function formatClosing({ digestPath, digestFailed, summaryPath, totalToke
   if (digestPath) lines.push(`${bold("digest:")} ${green(digestPath)}`);
   else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);
   else lines.push(dim("digest: none (no digest block in manifest)"));
+  if (reportPath) lines.push(`${bold("report:")} ${green(reportPath)}`);
+  // A requested report that never materialised must SAY so. Printing nothing is
+  // how you ask for a report and are left wondering where it went.
+  else if (reportMissing) lines.push(`${bold("report:")} ${red("NOT WRITTEN")} — report was requested but the digest leaf produced no report.md`);
   lines.push(`${bold("summary:")} ${summaryPath}`);
   if (totalTokens && tokenTotal(totalTokens) > 0) {
     const input = formatTokens(totalTokens.input + totalTokens.cacheCreation);
