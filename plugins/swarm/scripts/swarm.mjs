@@ -177,6 +177,8 @@ async function cmdRun(rest) {
 
   out(formatClosing({
     digestPath: r.digestPath,
+    reportPath: r.reportPath,
+    reportMissing: r.reportMissing,
     digestFailed: r.digestFailed,
     summaryPath: r.summaryPath,
     totalTokens: r.summary.totalTokens,
@@ -190,7 +192,7 @@ async function cmdRun(rest) {
     bad.length ? `swarm run finished with ${bad.length} failed/blocked`
       : replayed ? "swarm run finished — cache replay, nothing re-executed"
         : "swarm run finished clean",
-    { digest: r.digestPath || "", summary: r.summaryPath || "" },
+    { digest: r.digestPath || "", ...(r.reportPath && { report: r.reportPath }), summary: r.summaryPath || "" },
   );
   if (bad.length) {
     out(`FAILED tasks: ${bad.map((t) => `${t.id} [${t.state}]`).join(", ")}`);
