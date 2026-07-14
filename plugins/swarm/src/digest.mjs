@@ -13,6 +13,14 @@ export function reportPath(resultsDir) {
   return join(resultsDir, "report.md");
 }
 
+// A named drafting directory. Report mode asks for a document long enough that
+// one-pass composition shows — the model needs somewhere to draft, re-read, and
+// cut before it commits. Naming the directory is the whole mechanism: the leaf
+// writes where it is told.
+export function scratchPath(resultsDir) {
+  return join(resultsDir, "scratch-__digest");
+}
+
 // Phase 1 of report mode. The leaf expands into report.md; only then does it
 // compress for the return. Compressing a document it just reasoned through beats
 // compressing raw results cold.
@@ -29,8 +37,11 @@ function reportPhase(plan) {
 
 ## PHASE 1 — write the report (do this FIRST)
 
-Write a full, human-facing report to this exact path:
-  ${reportPath(plan.resultsDir)}
+Draft, then revise, then commit. You have two paths and you write to nowhere else:
+- Drafting space (use it freely): ${scratchPath(plan.resultsDir)}
+- The finished report, and nothing else:  ${reportPath(plan.resultsDir)}
+
+**Write a draft first, re-read it, and cut.** A report worth reading is not composed in one pass. Draft into the scratch directory, read your own draft back, and interrogate it against the checklist below before you write the final file. The last thing you do is cut — if a section survives only because you wrote it, delete it.
 
 This is the document a human reads to understand what this run found and why. It is NOT the digest — do not compress it. Expand: quote the evidence, draw the inferences across leaves that no single leaf could draw, say what you actually think.
 
@@ -42,9 +53,12 @@ The body between them is YOURS. Shape it to this run: a code audit wants finding
 
 **Do not reach for the default report.** Left alone, a model writes the same document every time — "Executive Summary", then "Key Findings" in a list of three, then "Recommendations", then "Next Steps", then a Conclusion restating the Summary — and it writes it regardless of what the run actually was. That shape is a reflex, not a choice: it fits an audit and a research sweep and a poem equally badly. If a section of your outline would appear no matter what this run had found, cut it and write the section this run actually earned.
 
-Two rules that follow from that:
-- **Structure encodes information.** Headings, numbering and ordering must carry something true — number findings only if the order means something, and never create a section you have nothing to say in.
-- **Each part does one job.** The header is provenance, the ledger is epistemics, the body is the argument. The body does not restate the ledger and does not re-list the run's mechanics; say a thing in the one place it belongs. Emphasis works the same way — if every finding is critical, none reads as critical.
+**The revision checklist — run your draft against this before writing the final file:**
+- Would this section appear no matter what the run had found? Cut it.
+- Does a heading or a number encode something true — does the order actually mean something? If not, it is decoration. Cut it.
+- Does the body restate the ledger, or re-list the run's mechanics the header already carries? Each part does one job: the header is provenance, the ledger is epistemics, the body is the argument. Say a thing in the one place it belongs.
+- Is every finding "critical"? Then none of them reads as critical. Spend emphasis once.
+- Is there a section you had nothing to say in, and padded? Delete it — a short report that earns every line beats a long one that doesn't.
 
 **Do not write a title or a run/provenance header.** The engine prepends one (goal, per-leaf models, durations, tokens, truncation warnings) after you finish. Start the file at your first content section — anything you write about run mechanics will be duplicated.${steer ? `\n\nSteering for the body (from the manifest):\n${steer}` : ""}
 

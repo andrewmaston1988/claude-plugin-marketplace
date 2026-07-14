@@ -3,7 +3,10 @@ import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { buildDispatch, toSpawnable } from "./dispatch.mjs";
 import { isClaudeModel } from "./models.mjs";
-import { buildDigestTask, DIGEST_ID, reportPath as digestReportPath } from "./digest.mjs";
+import {
+  buildDigestTask, DIGEST_ID,
+  reportPath as digestReportPath, scratchPath as digestScratchPath,
+} from "./digest.mjs";
 import { effectivePlanDoc } from "./manifest.mjs";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
@@ -718,6 +721,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     const promise = (async () => {
       if (task.scratchRedirect) mkdirSync(task.cwd, { recursive: true });
       if (task.outputDir) mkdirSync(task.outputDir, { recursive: true });
+      // report mode drafts here; the prompt names it, so it must exist
+      if (task.isDigest && plan.digest?.report) mkdirSync(digestScratchPath(plan.resultsDir), { recursive: true });
 
       let wt = null;
       let taskCwd = task.cwd;
@@ -965,5 +970,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     }
   }
 
-  return { summary, summaryPath, digestPath, digestFailed, reportPath, worktreesKept };
+  // requested-but-absent is a distinct, LOUD state — never silence
+  const reportMissing = !!plan.digest?.report && !reportPath;
+
+  return { summary, summaryPath, digestPath, digestFailed, reportPath, reportMissing, worktreesKept };
 }

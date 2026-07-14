@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { join } from "node:path";
-import { buildDigestTask, DIGEST_ID } from "../src/digest.mjs";
+import { buildDigestTask, scratchPath, DIGEST_ID } from "../src/digest.mjs";
 import { resultPath } from "../src/results.mjs";
 
 const plan = (over = {}) => ({
@@ -86,11 +86,29 @@ test("report mode names the generic report shape so the model can avoid it", () 
 
 test("report mode: structure must encode something true, and each part does one job", () => {
   const p = buildDigestTask(reportPlan()).prompt;
-  ok(/nothing to say|no section/i.test(p), "no empty sections");
-  ok(/one job|does not restate|must not restate/i.test(p),
+  ok(/nothing to say|padded/i.test(p), "no empty sections");
+  ok(/one job|restate the ledger/i.test(p),
     "each part does one job — the body must not re-state the ledger");
-  ok(/encode|carries? (real )?information|order carries/i.test(p),
+  ok(/encode|order actually mean/i.test(p),
     "structure must encode something true, not decorate");
+});
+
+// A report worth reading is not composed in one pass. The leaf gets a NAMED
+// drafting directory (naming it is the whole mechanism — the leaf writes where it
+// is told) and an explicit draft → re-read → cut cycle before it commits.
+test("report mode: names a scratch dir and demands a revise pass", () => {
+  const p = buildDigestTask(reportPlan()).prompt;
+  ok(p.includes(scratchPath("C:/work/.swarm/run-1")), "the drafting directory must be named");
+  ok(/draft/i.test(p) && /re-read|read your own draft/i.test(p),
+    "must demand a draft and a re-read, not one-pass composition");
+  ok(/cut/i.test(p), "the last move is to cut");
+  ok(/checklist/i.test(p), "the revise pass needs something to interrogate the draft against");
+});
+
+// The scratch dir is a drafting affordance, not part of the contract — a
+// non-report digest is read-only and has nothing to draft.
+test("no report block — no scratch dir is offered", () => {
+  ok(!buildDigestTask(plan()).prompt.includes("scratch-__digest"));
 });
 
 // "Errors don't apologize, and they are never vague about what happened."
