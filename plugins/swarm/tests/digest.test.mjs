@@ -63,14 +63,55 @@ test("report mode orders the two phases: expand into report.md, THEN compress", 
   ok(/compress/i.test(p), "phase 2 must still be a compression");
 });
 
-test("report mode mandates the spine but leaves the body free", () => {
+test("report mode mandates the ledger but leaves the body free", () => {
   const p = buildDigestTask(reportPlan()).prompt;
   ok(/PROVEN \/ OPEN ledger/.test(p), "ledger is spine");
-  ok(/account for every leaf/i.test(p), "leaf accounting is spine");
-  ok(/do not write.*header|engine prepends|the engine writes the header/i.test(p),
-    "the leaf must be told NOT to write the provenance header — the engine prepends it");
   ok(/body/i.test(p) && /shape it to|the document a human/i.test(p),
     "the body's shape must be left to the model");
+});
+
+// The report is about its SUBJECT, not the run. Operator, 2026-07-14, after the
+// first live reports read like autopsies of the swarm run.
+test("report mode: no leaf-accounting SECTION, no process narration", () => {
+  const p = buildDigestTask(reportPlan()).prompt;
+  // NB: the DIGEST compression rules still say "- Leaf accounting: account for
+  // every leaf" — correct, digest.md accounts for leaves. The REPORT must not
+  // mandate a "## Leaf accounting" SECTION heading.
+  ok(!/## Leaf accounting/.test(p), "the report must NOT mandate a ## Leaf accounting section");
+  ok(/never name a leaf, a model, a token count, or a verifier verdict/i.test(p),
+    "the report must be told not to narrate the run");
+  ok(/about its subject|not about this run/i.test(p), "the subject-not-run rule is stated");
+});
+
+// The engine no longer prepends a title — the leaf writes its own, and the engine
+// appends only a one-line run footnote. This reverses PR #186.
+test("report mode: the leaf writes its OWN title; engine appends a footnote", () => {
+  const p = buildDigestTask(reportPlan()).prompt;
+  ok(/write your own title/i.test(p), "the leaf must be told to write its own title");
+  ok(/appends a (one-line )?run footnote|footnote at the (very )?bottom/i.test(p),
+    "the leaf must be told the engine only APPENDS a footnote");
+  ok(!/engine prepends|do not write a title/i.test(p),
+    "the old 'do not write a title, engine prepends' instruction must be gone");
+});
+
+// Two claims-you-cannot-cash the live reports made: calling scaffolding 'rot', and
+// widening a plan's scope. Both are the report over-reaching its evidence.
+test("report mode: scaffolding-vs-rot and scope-preservation", () => {
+  const p = buildDigestTask(reportPlan()).prompt;
+  ok(/scaffolding is not rot|scaffolding/i.test(p) && /named,? (and )?live plan sub-phase|plan sub-phase/i.test(p),
+    "must teach scaffolding-vs-rot (a field awaiting a named sub-phase is not dead)");
+  ok(/the comment, not the field|flag the comment/i.test(p), "the defect is usually the comment");
+  ok(/preserve scope|carry its scope|widen/i.test(p), "must teach scope-preservation");
+});
+
+// The HTML renderer's marker vocabulary — optional, semantic, things the model
+// already writes. Gives the model flex without imposing a layout.
+test("report mode: documents the optional HTML marker vocabulary", () => {
+  const p = buildDigestTask(reportPlan()).prompt;
+  ok(/badge/i.test(p) && /PROVEN.*OPEN.*REFUTED/s.test(p), "verdict-badge markers named");
+  ok(/operator-feel, unresolved/i.test(p) && /chip/i.test(p), "the playtest-call chip named");
+  ok(/path:line/i.test(p) && /citation span/i.test(p), "the citation-span marker named");
+  ok(/optional|instead of inventing/i.test(p), "the markers are OPTIONAL, not a template");
 });
 
 // Telling a model "be original" does nothing; it reaches for the default anyway.
@@ -111,11 +152,15 @@ test("no report block — no scratch dir is offered", () => {
   ok(!buildDigestTask(plan()).prompt.includes("scratch-__digest"));
 });
 
-// "Errors don't apologize, and they are never vague about what happened."
-test("report mode: a failed or empty leaf gets a plain statement, not a hedge", () => {
+// Coverage caveats moved from a leaf-accounting section into the BODY, as a
+// subject-level statement: say what is not covered, never which component failed.
+test("report mode: incomplete coverage is stated plainly in the body", () => {
   const p = buildDigestTask(reportPlan()).prompt;
-  ok(/failed|empty/i.test(p), p.slice(0, 120));
-  ok(/hedge|vague|apolog/i.test(p), "must forbid hedging about what happened");
+  ok(/coverage is incomplete|what is NOT covered|not covered/i.test(p),
+    "must tell the leaf to state coverage gaps");
+  ok(/say plainly/i.test(p), "plainly — not hedged");
+  ok(/never which component failed/i.test(p),
+    "coverage gaps are subject-level, not 'the verify leaf died'");
 });
 
 // summary.json is written AFTER the graph drains; the digest is a node IN the

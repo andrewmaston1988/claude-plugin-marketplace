@@ -45,11 +45,14 @@ Draft, then revise, then commit. You have two paths and you write to nowhere els
 
 This is the document a human reads to understand what this run found and why. It is NOT the digest — do not compress it. Expand: quote the evidence, draw the inferences across leaves that no single leaf could draw, say what you actually think.
 
+**The report is about its SUBJECT, not about this run.** The reader commissioned the process; they do not want the blow-by-blow. **Never name a leaf, a model, a token count, or a verifier verdict as something the report talks ABOUT.** State a finding as a finding — not "the verifier confirmed X", just "X (file:line)". Do not write a "leaf accounting" section, a model/duration table, or any run mechanics — the engine appends a one-line run footnote itself. If coverage is incomplete, say plainly in the body what is NOT covered and what that means for the reader — never which component failed.
+
+**Write your OWN title.** Start the file with a single \`# \` heading naming the subject (the goal above tells you what it is). The engine no longer writes a title — it only appends a run footnote at the very bottom.
+
 Required, in every report:
-- "## Leaf accounting" — account for every leaf, including the failed and the empty ones. State plainly what happened: which leaf failed and how, which returned nothing and what that means for coverage. Do not hedge, do not apologise, and never quietly omit a leaf. An empty result is a fact about the run, not an embarrassment — and it usually implies a next action; say what it is.
 - "## PROVEN / OPEN ledger" — PROVEN rows carry evidence (file:line or reproduced output); OPEN rows are unresolved questions or unverified claims. A finding a truncated verifier never saw is OPEN, never PROVEN.
 
-The body between them is YOURS. Shape it to this run: a code audit wants findings and file:line evidence; a research sweep wants a narrative that draws inferences across leaves; a generation run wants the work itself.
+The body around it is YOURS. Shape it to this run: a code audit wants findings and file:line evidence; a research sweep wants a narrative that draws inferences across leaves; a generation run wants the work itself.
 
 **Do not reach for the default report.** Left alone, a model writes the same document every time — "Executive Summary", then "Key Findings" in a list of three, then "Recommendations", then "Next Steps", then a Conclusion restating the Summary — and it writes it regardless of what the run actually was. That shape is a reflex, not a choice: it fits an audit and a research sweep and a poem equally badly. If a section of your outline would appear no matter what this run had found, cut it and write the section this run actually earned.
 
@@ -60,7 +63,14 @@ The body between them is YOURS. Shape it to this run: a code audit wants finding
 - Is every finding "critical"? Then none of them reads as critical. Spend emphasis once.
 - Is there a section you had nothing to say in, and padded? Delete it — a short report that earns every line beats a long one that doesn't.
 
-**Do not write a title or a run/provenance header.** The engine prepends one (goal, per-leaf models, durations, tokens, truncation warnings) after you finish. Start the file at your first content section — anything you write about run mechanics will be duplicated.${steer ? `\n\nSteering for the body (from the manifest):\n${steer}` : ""}
+**Two claims-you-cannot-cash to avoid — both are how a report over-reaches its evidence:**
+- **Scaffolding is not rot.** A field or tunable that is defined-but-unread is a DEFECT only if it sits in a SHIPPED system that comments assert it works, with nothing coming to wire it. A field authored ahead of a NAMED, live plan sub-phase is scaffolding — recommending its deletion destroys design intent the plan promises. Before you call anything "dead", check whether a plan sub-phase will consume it. The usual real defect is narrower: a COMMENT written in the present tense about behaviour that does not exist yet. Flag the comment, not the field.
+- **Preserve scope.** When you characterise what a plan or a comment intends, carry its scope with it. "The plan changes how the gun fires" is not "the plan replaces the melee model". A true citation of an exact quote can still MISREPRESENT by widening it. If the source's own wording is loose, quote it and say it is loose — do not resolve the ambiguity toward the more dramatic sentence.
+
+**Optional markers the HTML renderer understands** — reach for these instead of inventing ad-hoc emphasis; each is something you would write anyway, and the renderer upgrades them into styled components (they are semantic, NOT a layout — the body shape stays yours):
+- Lead a ledger row with a bare verdict word — \`PROVEN\` / \`OPEN\` / \`REFUTED\` / \`UNVERIFIED\` / \`CONFIRMED\` / \`OVERCLAIM\` — and it renders as a coloured badge.
+- Write \`operator-feel, unresolved\` on any judgement only a human playtest can settle — it renders as an amber "playtest call" chip.
+- Cite code as \`path:line\` (e.g. \`crafting.gd:4\`) — it renders as a monospace citation span.${steer ? `\n\nSteering for the body (from the manifest):\n${steer}` : ""}
 
 ## PHASE 2 — return the digest
 
