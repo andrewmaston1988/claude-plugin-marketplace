@@ -10,6 +10,19 @@ Swarm turns one session into a group: many independent perspectives, redundant a
 
 Engine: `scripts/swarm.mjs` at the plugin root — resolve it as `<this skill's base directory>/../../scripts/swarm.mjs`. Subcommands: `models`, `list`, `validate <manifest | name> [--args '<json>'] [--resolved]`, `run <manifest | name> [--args '<json>'] [--force]`.
 
+## The Iron Law — never interfere with a live dispatch
+
+**Violating the letter of this rule is violating its spirit.** After you dispatch a run you get exactly ONE `status` check; from then until the completion notification fires, you are **hands-off**:
+
+- **Do NOT read a leaf's raw output** — not `tail`/`cat`/`Read`/`grep` on `results/*.log`. Use `status` (it reads `run.log`).
+- **Do NOT kill anything** — no `Stop-Process`/`taskkill`, no killing the shell. There is no per-leaf kill and no engine kill.
+- **Do NOT `git`-touch a run's worktree or branch** — no `worktree remove`, `branch -D`, `reset --hard`, `clean`, `rm -rf` of a run dir.
+- **Do NOT judge a leaf failed from a mid-flight view** — a tool-call count (`0 writes so far`) is never a health signal; a leaf reads for many turns before it writes. Only the final result (or a `failed` state the engine sets) is a verdict.
+
+A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the above — those govern *stalling*, never *interfering with a live dispatch*. When a leaf genuinely ended badly, the engine marks it `failed`; recover per "A leaf ended and produced no commit" (below) — never by killing or deleting, which is only ever the operator's call. **This exists because a session that had this skill loaded broke every clause under directive pressure — killed a healthy leaf, orphaned its worktree, deleted branches, and misdiagnosed the cause three times (2026-07-15).** The pre-dispatch twin of this gate is the offer gate (below): consent before spend, hands-off after.
+
+**Instantiate this as tasks — do not just read it.** The moment you dispatch, create these as `TaskCreate` items: `offer-gate answered` · `one status check, then hands-off` · `recover a bad leaf by re-dispatch, never kill/delete`. A skimmed rule gets rationalised past; a task you created and left undone is *visible*. If you did not make the tasks, you did not engage the discipline.
+
 ## Data governance — read this first
 
 Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm/config.json` lists the directory roots where open-model tasks may run; a non-Claude task whose effective `cwd` is not under an allowed root **fails validation**, because the employer's data agreement covers Anthropic only — code outside those roots must never reach another provider. Claude-model tasks run anywhere. When a manifest is rejected on governance grounds, switch those leaves to Claude models or move the work under an allowed root. Never work around the gate.
@@ -111,6 +124,24 @@ Every phrase below came from a session that read a *working* roster and moved to
 - "I'd **kill `scan-api` now**" · "I'll give it 2–3 more minutes, then kill it"
 
 **All of these mean: you are reading token magnitude as health. It isn't. Check the activity cell for `⚠ quiet`, check the state tags, and otherwise let it run.** A leaf that is grepping is a leaf that is working. Report progress to the user; do not intervene.
+
+### A leaf ended and produced no commit — recover, never kill
+
+The red flags above are about a *healthy* run. The other failure class (2026-07-15) is a leaf that genuinely ended with nothing — and the damage was the *response*, not the empty result. When a **completed** leaf (its notification fired) left no work:
+
+1. Read `results/<id>.json` and, for an isolation leaf, `git log <target>..<branch>` — confirm it is genuinely empty. (The engine now marks a leaf that died mid-stream `failed`, not `ok`, so this is usually already flagged for you.)
+2. If empty, **re-dispatch a FRESH manifest name** (new run dir). If it rat-holed (a leaf sitting in a long silent thinking turn), fix the PROMPT first — add "write files as you go, commit early" and pre-resolve the one genuinely ambiguous step, so the leaf emits frequent tool calls instead of one long output-less turn.
+3. **Never** kill a process, `rm -rf` a run dir, or `branch -D` a worktree branch to "clean up" — that is the operator's call alone. And never relay a leaf's self-report, or your own guess, as the cause: verify the OUTPUT (the diff, the result file), not the running process.
+
+**Rationalisations that preceded the real incident — each is a STOP:**
+
+| The thought | The reality |
+|---|---|
+| "0 writes at 49s — it's stuck / repeating the last failure" | A leaf reads for many turns before it writes. Mid-run tool counts are not health. |
+| "I'll just kill it and restart clean" | There is no kill. Killing orphans the worktree and makes the resend 0s-fail. |
+| "I'll `git clean` / remove the orphaned worktree / delete the branch" | Destroys salvage; it is the operator's call, never yours. |
+| "It ran out of turns" / "the keepalive hook hijacked it" | A confident root cause you have not proven from the result file — proof by proxy. |
+| "The `/goal` says don't pause, so I must act now" | The directive governs stalling, not interfering with a live dispatch. |
 
 ## Manifest quick reference
 
