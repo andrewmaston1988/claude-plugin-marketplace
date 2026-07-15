@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { resultPath } from "./results.mjs";
 
 export const DIGEST_ID = "__digest";
@@ -123,7 +124,7 @@ Return the digest as your final response text. ${plan.digest?.report
 // Synthesize the digest task: depends on every leaf, runs on the plan-named
 // model, read-only toolset, in the manifest's cwd.
 export function buildDigestTask(plan) {
-  const timeoutMs = Math.max(...plan.tasks.map((t) => t.timeoutMs || 0)) || 600000;
+  const timeoutMs = Math.max(...plan.tasks.map((t) => t.timeoutMs || 0)) || DEFAULT_TIMEOUT_MS;
   return {
     id: DIGEST_ID,
     prompt: digestPrompt(plan),
