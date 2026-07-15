@@ -8,9 +8,11 @@ import { tokenTotal } from "./stream.mjs";
 //   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
 //                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
-//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationErrors?, worktree? }
+//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, worktree? }
 //                       (prompt = the exact final string sent to the leaf; absent on compute/aggregate rows)
-//                       (citations = { checked, drifted } when N3 verified them; citationErrors = refutation lines on failure)
+//                       (citations = { checked, drifted, refuted } when N3 verified them; each cited finding is
+//                        annotated citation:"verified"|"drift"|"refuted" in output. citationRefuted = [{path,reason}]
+//                        for the kept-but-unverified findings — Stage 1 never fails a leaf over a citation)
 //   digest.md           when a digest block is present
 //   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens, estimate?, costWarnFired? }
 //                       task rows: { id, model, state, durationMs, tokens, costUsd?, resultPath }
@@ -24,7 +26,7 @@ import { tokenTotal } from "./stream.mjs";
 //                       (child-manifest task ids are namespaced "<node>~<childId>")
 //                         { ts, event: "truncate-prompt", id, depId, kept, total }   {{result:}} cut to the inline cap
 //                         { ts, event: "schema-retry", id }         returns re-ask fired
-//                         { ts, event: "citations", id, checked, refuted }   N3 mechanical verification
+//                         { ts, event: "citations", id, checked, drifted, refuted }   N3 mechanical verification
 //                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn
 
 export function initResultsDir(dir) {
@@ -292,7 +294,7 @@ export function renderProvenance({ tasks = [], truncations = [] }) {
   return lines.join("\n") + "\n";
 }
 
-export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], estimate }) {
+export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -303,6 +305,11 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
     } else {
       lines.push(`${yellow("⚠")} ${bold(tr.id)}: forEach ran the first ${tr.kept} of ${tr.total} items (maxItems cap) — raise maxItems and re-run to cover the rest`);
     }
+  }
+  // Same register: a refuted citation is coverage the checker could not confirm.
+  // The finding is KEPT and annotated — the verifier wave, not this gate, rules on it.
+  for (const rf of refutations) {
+    lines.push(`${yellow("⚠")} ${bold(rf.id)}: ${rf.refuted} of ${rf.total} citations could not be verified against the source — the findings are KEPT and annotated; the verifier wave rules on them, not this gate`);
   }
   if (digestPath) lines.push(`${bold("digest:")} ${green(digestPath)}`);
   else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);

@@ -250,6 +250,20 @@ test("formatClosing renders forEach and prompt truncations distinctly", () => {
   ok(!prompt.includes("forEach"), "a prompt truncation is not a forEach truncation: " + prompt);
 });
 
+// A refuted citation is a coverage event of the same shape as a truncation: the
+// engine kept the finding but could not verify it, and the reader must be told —
+// loud, in the same register, never silent.
+test("formatClosing renders a loud refutation line, kept-not-deleted", () => {
+  const out = formatClosing({
+    summaryPath: "S/summary.json", digestPath: "d",
+    refutations: [{ id: "pz-find", refuted: 1, total: 39 }],
+  });
+  ok(out.includes("pz-find"), out);
+  ok(out.includes("1 of 39"), out);
+  ok(/verif/i.test(out), "must say the findings are for the verifier to rule on: " + out);
+  ok(!/deleted|removed|dropped/i.test(out), "must not imply the findings were destroyed: " + out);
+});
+
 // A record with no kind is a legacy forEach record — must not vanish silently.
 test("formatClosing treats an untagged truncation as a forEach one", () => {
   const out = formatClosing({
