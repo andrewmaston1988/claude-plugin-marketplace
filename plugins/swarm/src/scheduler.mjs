@@ -215,10 +215,17 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
     const acc = createUsageAccumulator();
     let resultEvt = null;
     let initEvt = null;
+    // False-green guard: a claude -p session that dies mid-thinking still exits 0
+    // with an empty result. A cleanly-finished leaf emits a terminal assistant
+    // stop_reason "end_turn"; one cut mid-stream never does. We only judge leaves
+    // that actually produced assistant events — a non-stream-json provider is exempt.
+    let sawAssistant = false;
+    let sawEndTurn = false;
     const parser = createStreamParser({
       onUsage: (id, usage) => { acc.record(id, usage); onTokens?.(acc.totals()); },
       onResult: (evt) => { resultEvt = evt; },
       onInit: (evt) => { initEvt = evt; },
+      onStop: (sr) => { sawAssistant = true; if (sr === "end_turn") sawEndTurn = true; },
       onActivity,
     });
     // Progressive capture: stream to results/<id>.log as data arrives so a
@@ -247,12 +254,16 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
       clearTimeout(timer);
       parser.end();
       if (errMsg) raw += (raw ? "\n" : "") + errMsg;
+      const cleanFinish = !sawAssistant || sawEndTurn; // exempt non-stream-json leaves
       flushLog().then(() => resolve({
-        ok: exit === 0 && !timedOut && !(resultEvt?.is_error),
+        ok: exit === 0 && !timedOut && !(resultEvt?.is_error) && cleanFinish,
         exit,
         durationMs: io.now() - started,
-        output: resultEvt?.result != null ? String(resultEvt.result) : String(raw),
+        output: cleanFinish
+          ? (resultEvt?.result != null ? String(resultEvt.result) : String(raw))
+          : `leaf terminated mid-stream (no end_turn) — its session died before completing; re-dispatch a fresh manifest, do not kill or diff-hunt.\n${resultEvt?.result != null ? String(resultEvt.result) : String(raw)}`,
         raw: String(raw),
+        stopReason: sawEndTurn ? "end_turn" : (sawAssistant ? "incomplete" : null),
         timedOut,
         tokens: pickFinalTokens(resultEvt?.usage, acc.totals()),
         costUsd: resultEvt?.total_cost_usd,

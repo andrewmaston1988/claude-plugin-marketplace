@@ -237,6 +237,37 @@ test("returns-validation failure classifies failed, not rate-limited, despite 42
   }
 });
 
+// A claude -p session that dies mid-thinking still exits 0 with an empty result —
+// the false-green that let a dead leaf read as "ok" and drove the orchestrator to
+// forensically (and destructively) discover the failure. The truthful signal: a
+// leaf that emitted assistant events but never a terminal stop_reason "end_turn"
+// did not cleanly finish.
+const streamStop = (stopReason, { result = "" } = {}) => [
+  JSON.stringify({ type: "system", subtype: "init", session_id: "s-1" }),
+  JSON.stringify({ type: "assistant", message: { id: "m1", stop_reason: stopReason } }),
+  JSON.stringify({ type: "result", subtype: "success", is_error: false, result }),
+].join("\n") + "\n";
+
+test("false-green: an exit-0 leaf that never emitted end_turn (cut mid-stream) is marked failed", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: streamStop(null) })); // exit 0, died mid-thinking
+    const io = makeIo(spawn);
+    const r = await runPlan(plan(dir, [task("a", { cwd: dir })]), CFG, io);
+    equal(r.summary.tasks.find((t) => t.id === "a").state, "failed");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("clean finish: an exit-0 leaf that emitted stop_reason end_turn stays ok", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: streamStop("end_turn", { result: "done" }) }));
+    const io = makeIo(spawn);
+    const r = await runPlan(plan(dir, [task("a", { cwd: dir })]), CFG, io);
+    equal(r.summary.tasks.find((t) => t.id === "a").state, "ok");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("fallback: quota leaf re-dispatches immediately on its declared fallbackModel", async () => {
   const dir = tmp();
   try {
@@ -826,7 +857,7 @@ test("stream-json leaf: result text extracted, tokens accounted end-to-end", asy
     const streamOut = [
       JSON.stringify({ type: "system", subtype: "init", session_id: "s-abc" }),
       JSON.stringify({ type: "assistant", message: { id: "m1", usage: { input_tokens: 1000, output_tokens: 50 } } }),
-      JSON.stringify({ type: "assistant", message: { id: "m2", usage: { input_tokens: 2000, output_tokens: 150, cache_read_input_tokens: 500 } } }),
+      JSON.stringify({ type: "assistant", message: { id: "m2", stop_reason: "end_turn", usage: { input_tokens: 2000, output_tokens: 150, cache_read_input_tokens: 500 } } }),
       JSON.stringify({
         type: "result", subtype: "success", is_error: false, result: "the extracted answer",
         usage: { input_tokens: 3000, output_tokens: 200, cache_read_input_tokens: 500 },
