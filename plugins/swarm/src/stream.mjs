@@ -74,7 +74,7 @@ export function describeToolUse(block) {
 
 // Line-oriented incremental parser. feed() buffers partial lines across chunk
 // boundaries; end() flushes a trailing unterminated line.
-export function createStreamParser({ onUsage, onResult, onActivity, onInit } = {}) {
+export function createStreamParser({ onUsage, onResult, onActivity, onInit, onStop } = {}) {
   let buf = "";
   const handleLine = (line) => {
     const t = line.trim();
@@ -89,6 +89,10 @@ export function createStreamParser({ onUsage, onResult, onActivity, onInit } = {
       onInit?.(evt);
     } else if (evt.type === "assistant") {
       if (evt.message?.usage) onUsage?.(evt.message.id || "?", evt.message.usage);
+      // stop_reason lives on the assistant message; a clean completion ends on
+      // "end_turn". A leaf cut mid-stream ends on null/tool_use/absent — the
+      // signal the engine needs to catch a false-green (exit 0 but never finished).
+      onStop?.(evt.message?.stop_reason);
       for (const block of evt.message?.content || []) {
         if (block?.type === "tool_use" && block.name) onActivity?.(describeToolUse(block));
       }
