@@ -48,6 +48,32 @@ test("loadCorpus walks runsRoot/*/*/summary.json and collects per-model samples"
   }
 });
 
+test("loadCorpus drops costUsd from non-Claude (:cloud) rows — subscription dollars are fabricated, tokens are still real", () => {
+  const root = mkdtempSync(join(tmpdir(), "swarm-est-"));
+  try {
+    seedRun(root, "proj", "run-1", [
+      // a :cloud leaf's costUsd is the CLI's own price table applied to tokens —
+      // there is no token->$ mapping for a subscription/GPU provider, so it is fiction
+      { id: "cloud", state: "ok", model: "glm-5.2:cloud", tokens: tok(500), costUsd: 108.89 },
+      { id: "anthropic", state: "ok", model: "haiku", tokens: tok(300), costUsd: 0.5 },
+    ]);
+    const corpus = loadCorpus(root);
+    deepEqual(corpus.tokens.get("glm-5.2:cloud"), [500]);   // tokens are real for every model
+    equal(corpus.costUsd.get("glm-5.2:cloud"), undefined);  // fabricated dollars never enter the corpus
+    deepEqual(corpus.costUsd.get("haiku"), [0.5]);          // a real Anthropic-billed row's cost is kept
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("estimateRun omits usd for an all-:cloud manifest — no fabricated dollars on the consent surface", () => {
+  // post-filter, a :cloud corpus has token samples but no costUsd samples
+  const corpus = { tokens: new Map([["glm-5.2:cloud", [1000, 1200]]]), costUsd: new Map() };
+  const est = estimateRun([{ id: "a", model: "glm-5.2:cloud" }], null, corpus);
+  ok(est, "tokens are still estimated");
+  equal(est.usd, undefined, "no $ line when the only models are subscription :cloud");
+});
+
 test("loadCorpus skips non-ok rows, compute rows, rows without model or tokens, corrupt files, and a missing root", () => {
   const root = mkdtempSync(join(tmpdir(), "swarm-est-"));
   try {
