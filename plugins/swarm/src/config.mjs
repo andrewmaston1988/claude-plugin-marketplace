@@ -10,6 +10,11 @@ export function swarmHome(env = process.env) {
   return env.SWARM_HOME || join(homedir(), ".swarm");
 }
 
+// Shipped leaf timeout: one hour of headroom. The single code-facing source;
+// config.default.json mirrors it and config.test.mjs pins them together so the
+// fallback sites (which import this) can never drift from the user-facing value.
+export const DEFAULT_TIMEOUT_MS = 3_600_000;
+
 function isPlainObject(v) {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }

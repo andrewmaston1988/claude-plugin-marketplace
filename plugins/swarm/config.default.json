@@ -10,7 +10,7 @@
     "authToken": "ollama"
   },
   "concurrency": 4,
-  "timeoutMs": 600000,
+  "timeoutMs": 3600000,
   "heartbeatSecs": 15,
   "quietWarnSecs": 60,
   "retry": { "rateLimited": 2, "backoffMs": 30000, "spawnError": 1 },

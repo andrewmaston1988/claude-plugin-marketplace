@@ -5,6 +5,7 @@
 // under questioning.
 import { existsSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
+import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { readResult, writeResult } from "./results.mjs";
 import { isClaudeModel } from "./models.mjs";
 import { isUnderRoot } from "./manifest.mjs";
@@ -41,7 +42,7 @@ export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = m
     allowedTools: prior.allowedTools || "Read,Grep,Glob",
     cwd,
     resume: prior.sessionId,
-    timeoutMs: cfg.timeoutMs ?? 600000,
+    timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   };
   const r = await runTask(task, question, cfg, io, null, {});
   if (!r.ok) throw new Error(`ask failed (exit ${r.exit}): ${r.raw.slice(0, 500)}`);
