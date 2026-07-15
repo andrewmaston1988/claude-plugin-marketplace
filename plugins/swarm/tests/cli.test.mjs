@@ -660,3 +660,37 @@ test("run: named manifest end-to-end — args substituted into the dispatched le
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("report: writes report.html beside report.md and prints the path", () => {
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "run");
+    mkdirSync(resultsDir, { recursive: true });
+    writeFileSync(join(resultsDir, "report.md"),
+      "# Findings — the subject\n\n## PROVEN / OPEN ledger\n\n**PROVEN**\n\n- **PROVEN** fact one — foo.gd:1\n\n**OPEN**\n\n- **OPEN** claim two\n");
+    const r = runCli(["report", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
+    const htmlPath = join(resultsDir, "report.html");
+    ok(existsSync(htmlPath), "report.html written");
+    ok(r.stdout.includes(htmlPath), "path printed to stdout");
+    const html = readFileSync(htmlPath, "utf8");
+    ok(html.includes("<!doctype html>"), "self-contained document");
+    ok(html.includes('class="badge b-proven"'), "verdict badge upgraded");
+    ok(html.includes('class="cite">foo.gd:1'), "citation upgraded");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("report: missing report.md exits 1 with a readable error", () => {
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "run");
+    mkdirSync(resultsDir, { recursive: true });
+    const r = runCli(["report", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 1);
+    ok(r.stderr.toLowerCase().includes("report.md"), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
