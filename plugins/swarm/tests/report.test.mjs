@@ -50,13 +50,13 @@ function planWith(dir, report) {
 function spawnFor(dir, { writesReport }) {
   return fakeSpawnFactory((call, i) => {
     if (i === 2 && writesReport) {
-      writeFileSync(join(dir, "run", "report.md"), "## Leaf accounting\n\nBoth leaves ran.\n");
+      writeFileSync(join(dir, "run", "report.md"), "# Callers of frobnicate\n\nBoth leaves ran.\n");
     }
     return { output: streamOut(i === 2 ? "DIGEST TEXT" : `finding from leaf ${i}`, `s-${i}`) };
   });
 }
 
-test("integration: engine prepends the provenance header to the leaf's report.md", async () => {
+test("integration: the leaf's title leads; engine APPENDS a one-line run footnote", async () => {
   const dir = tmp();
   try {
     const p = planWith(dir, true);
@@ -65,22 +65,21 @@ test("integration: engine prepends the provenance header to the leaf's report.md
     ok(r.reportPath, "runPlan must return the report path");
     const md = readFileSync(r.reportPath, "utf8");
 
-    // header — engine's, and FIRST
-    ok(md.startsWith("# find every caller of frobnicate"), md.slice(0, 120));
-    ok(md.includes("## Run"), "provenance table missing");
-    ok(md.includes("scan-a") && md.includes("scan-b"), "every leaf must appear in the table");
-    ok(md.includes("glm-5.2:cloud"), "models must appear");
-    ok(/cache/i.test(md), ":cloud leaves earn the token footnote");
-
-    // body — the leaf's, and AFTER the header
-    ok(md.indexOf("## Leaf accounting") > md.indexOf("## Run"), "the leaf's body must follow the header");
+    // the LEAF's own title leads — the engine no longer prepends anything
+    ok(md.startsWith("# Callers of frobnicate"), md.slice(0, 120));
     ok(md.includes("Both leaves ran."), "the leaf's body must survive intact");
 
-    // the digest is untouched by any of this
-    equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "DIGEST TEXT");
+    // provenance is a single Run footnote at the BOTTOM — no table, no token/cost
+    const footAt = md.indexOf("*Run:");
+    ok(footAt > md.indexOf("Both leaves ran."), "the Run footnote is at the bottom, after the body");
+    ok(md.includes("scan-a") && md.includes("scan-b") && md.includes("glm-5.2:cloud"),
+      "the footnote names each leaf and its model");
+    ok(!md.includes("## Run") && !md.includes("| leaf |"), "no provenance table");
+    ok(!/cache/i.test(md), "no token-accounting footnote in the report");
+    ok(!md.includes("__digest"), "the digest node is not in the footnote");
 
-    // the digest node itself is not a row in its own provenance table
-    ok(!md.includes("__digest"), "the digest node must not appear in the table");
+    // the digest is untouched
+    equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "DIGEST TEXT");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

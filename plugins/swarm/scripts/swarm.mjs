@@ -20,6 +20,7 @@ const USAGE = `usage: swarm.mjs <command>
   run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
+  report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)`;
 
@@ -251,6 +252,23 @@ async function main() {
           return 0;
         }
         out(renderStatus(rest[0], Date.now(), quietWarnMs));
+        return 0;
+      }
+      case "report": {
+        if (!rest[0]) { err(USAGE); return 1; }
+        const { readFileSync, writeFileSync, existsSync, renameSync } = await import("node:fs");
+        const mdPath = join(rest[0], "report.md");
+        if (!existsSync(mdPath)) {
+          err(`swarm: no report.md in ${rest[0]} — report mode was not enabled for this run, or it has not finished.`);
+          return 1;
+        }
+        const { mdToHtml } = await import("../src/md_to_html.mjs");
+        const html = mdToHtml(readFileSync(mdPath, "utf8"));
+        const htmlPath = join(rest[0], "report.html");
+        const tmp = htmlPath + ".tmp";
+        writeFileSync(tmp, html);
+        renameSync(tmp, htmlPath);
+        out(htmlPath);
         return 0;
       }
       case "ask": {

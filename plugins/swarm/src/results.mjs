@@ -249,20 +249,16 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
   return lines.join("\n");
 }
 
-// ── report provenance header ──────────────────────────────────────────────────
-// Engine-written, prepended to the leaf's report.md. The header is a table of
-// NUMBERS; a model transcribing durations and dollars out of JSONL fumbles them,
-// and a wrong figure in an official-looking table is worse than no table.
-
-const isCloud = (model) => String(model || "").includes(":");
-
-// costUsd on a :cloud row is the CLI's own price table applied to token counts.
-// These providers bill on subscription and GPU time with no token mapping, so the
-// figure is not a wrong number — it is not a number. Never render it.
-function costCell(row) {
-  if (row.costUsd == null || isCloud(row.model)) return "—";
-  return `$${row.costUsd.toFixed(2)}`;
-}
+// ── report provenance — a one-line footnote, APPENDED ───────────────────────────
+// A report is about its SUBJECT. Run mechanics are process the reader
+// commissioned and does not want narrated, so provenance is a single italic Run
+// line at the bottom — no goal heading (the leaf titles the report itself), no
+// table, no token column, no cost column, no token-accounting footnote (that is
+// MODEL-facing guidance and has no place in a human's report).
+//
+// The ONE exception: a coverage failure (a truncated verifier input, a capped
+// fan-out) changes what the reader should believe, so it stays LOUD — reusing the
+// exact truncationLines wording. The model may not know to say it; the engine does.
 
 // Both truncation kinds, worded exactly as the closing block words them — a cut
 // only the engine knows about is how an unverified finding reads as verified.
@@ -274,28 +270,25 @@ export function truncationLines(truncations) {
     : `- ⚠ **${tr.id}**: forEach ran the first ${tr.kept} of ${tr.total} items (maxItems cap) — the remainder was NOT covered.`);
 }
 
-export function renderProvenance({ goal, tasks = [], truncations = [] }) {
-  const lines = [`# ${goal || "(no goal line provided in the manifest)"}`, "", "## Run", ""];
-  lines.push("| leaf | model | duration | tokens | cost | state |");
-  lines.push("|---|---|---|---|---|---|");
-  for (const t of tasks) {
-    const dur = t.durationMs != null ? fmtSecs(t.durationMs) : "—";
-    lines.push(`| ${t.id} | ${t.model || "?"} | ${dur} | ${formatTokens(tokenTotal(t.tokens))} | ${costCell(t)} | ${t.state || "?"} |`);
-  }
+export function renderProvenance({ tasks = [], truncations = [] }) {
+  const lines = [];
 
+  // coverage failures FIRST and loud — they change what the reader believes
   const warn = truncationLines(truncations);
-  if (warn.length) lines.push("", "### Coverage gaps", "", ...warn);
+  if (warn.length) lines.push(...warn, "");
 
-  // The magnitude is an accounting artefact, not a runaway: these providers report
-  // no cache buckets, so the re-sent transcript lands in `input` (which tokenTotal
-  // counts) rather than `cacheRead` (which it excludes). Say so, or a reader draws
-  // exactly the wrong conclusion from the biggest number on the page.
-  if (tasks.some((t) => isCloud(t.model))) {
-    lines.push(
-      "",
-      "> Token counts on `:cloud` rows look enormous because those providers report no prompt-cache buckets: every turn re-sends the agent's whole transcript as fresh *input*, which is counted, rather than as a cache read, which is not. Output is the work; input is the transcript, re-sent once per turn. Cost is not shown for these rows — it cannot be derived from tokens.",
-    );
-  }
+  // the one-line run footnote: id · model · duration, nothing else. Human-scaled
+  // duration — "45s", "12m", "1h40m" — never "6000s".
+  const compactDur = (ms) => {
+    if (ms < 90000) return `${Math.round(ms / 1000)}s`;
+    const m = Math.round(ms / 60000);
+    return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h${m % 60}m`;
+  };
+  const bits = tasks.map((t) => {
+    const dur = t.durationMs != null ? ` (${compactDur(t.durationMs)})` : "";
+    return `${t.id} ${t.model || "?"}${dur}`;
+  });
+  lines.push(`*Run: ${bits.join(" · ")}*`);
   return lines.join("\n") + "\n";
 }
 
