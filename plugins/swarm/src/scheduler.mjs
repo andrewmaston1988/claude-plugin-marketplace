@@ -724,12 +724,23 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       // report mode drafts here; the prompt names it, so it must exist
       if (task.isDigest && plan.digest?.report) mkdirSync(digestScratchPath(plan.resultsDir), { recursive: true });
 
+      // Resume a previously-failed leaf in place: re-enter its kept worktree
+      // (partial diff intact) and resume its session, rather than starting cold.
+      // --force is a deliberate fresh redo, so it resets the tree and drops the
+      // session. A first-ever run has no prior and does neither.
+      const prior = force ? null : readResult(plan.resultsDir, task.id);
+      const resumeId = prior && prior.ok === false ? prior.sessionId : null;
+
       let wt = null;
       let taskCwd = task.cwd;
       if (task.isolation === "worktree") {
         try {
-          wt = worktree.prepareIsolation(task, cfg, plan.resultsDir);
+          wt = worktree.prepareIsolation(task, cfg, plan.resultsDir, { reset: force });
           taskCwd = wt.path;
+          if (wt.reused) appendRunLog(plan.resultsDir, {
+            ts: new Date().toISOString(), event: "worktree-resume", id: task.id,
+            reset: force, session: resumeId ? "resumed" : "fresh",
+          });
         } catch (e) {
           const result = { id: task.id, model: task.model, ok: false, exit: null, durationMs: 0, output: `worktree setup failed: ${e.message}` };
           writeResult(plan.resultsDir, task.id, result);
@@ -747,7 +758,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         notePromptTruncations(task, promptTruncations);
       }
       const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`));
-      let r = await runTask({ ...task, cwd: taskCwd }, prompt, cfg, io, leafLog, streamHooks(task));
+      let r = await runTask({ ...task, cwd: taskCwd, ...(resumeId && { resume: resumeId }) }, prompt, cfg, io, leafLog, streamHooks(task));
       if (task.returns && r.ok) {
         r = await enforceReturns(task, r, taskCwd, plan.resultsDir, cfg, io, streamHooks(task));
       }
