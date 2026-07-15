@@ -84,9 +84,11 @@ test("extractCitations: instances with array indices in path; empty arrays give 
     ],
   };
   deepEqual(extractCitations(value, SITES_SCHEMA), [
-    { path: "output.sites[0]", file: "a.mjs", line: 3, quote: "const x = 1;" },
-    { path: "output.sites[1]", file: "b.mjs", line: 9, quote: "return y;" },
+    { path: "output.sites[0]", node: value.sites[0], file: "a.mjs", line: 3, quote: "const x = 1;" },
+    { path: "output.sites[1]", node: value.sites[1], file: "b.mjs", line: 9, quote: "return y;" },
   ]);
+  // the node is the live element object — annotation mutates it in place
+  equal(extractCitations(value, SITES_SCHEMA)[0].node, value.sites[0]);
   deepEqual(extractCitations({ sites: [] }, SITES_SCHEMA), []);
 });
 
@@ -211,6 +213,47 @@ test("citationErrorLines: caps at 10 with an …and-N-more tail", () => {
   ok(lines[10].includes("4 more"), lines[10]);
 });
 
+// Stage 1 annotates each finding in place — verifyCitations must classify EVERY
+// citation (verified/drift/refuted) and hand back a node reference to annotate.
+test("verifyCitations: verdicts classify every citation and carry the node to annotate", () => {
+  const lines = ["pad", "const exact = 1;", "pad", "const drift = 2;", "pad", "pad"];
+  const dir = citeDir(lines);
+  try {
+    const nodes = [
+      { file: "target.mjs", line: 2, quote: "const exact = 1;" }, // exact
+      { file: "target.mjs", line: 5, quote: "const drift = 2;" },  // +/-1 → drift
+      { file: "target.mjs", line: 1, quote: "const ghost = 9;" },  // refuted
+    ];
+    const cits = nodes.map((n, i) => ({ path: `output.sites[${i}]`, node: n, ...n }));
+    const r = verifyCitations(cits, { cwds: [dir] });
+    deepEqual(r.verdicts.map((v) => v.status), ["verified", "drift", "refuted"]);
+    // node refs point back at the exact citation objects, so annotation is in place
+    equal(r.verdicts[0].node, nodes[0]);
+    equal(r.verdicts[2].node, nodes[2]);
+    ok(/quote not found/.test(r.verdicts[2].reason), r.verdicts[2].reason);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The checker's actual worst input: a 200+ char decompiled-Java line. A model
+// quoting a short distinctive FRAGMENT of it must verify — this is the false
+// positive that killed a run (findings[38], FixingManager.java:167).
+test("verifyCitations: a fragment of a 200-char decompiled line verifies (false-positive guard)", () => {
+  const pathological =
+    "var4 += (double)((((Fixing.FixerSkill)var3.getFixerSkills().get(var6)).getSkillLevel() " +
+    "- var1.getPerkLevel(PerkFactory.Perks.FromString(((Fixing.FixerSkill)var3.getFixerSkills()" +
+    ".get(var6)).getSkillName()))) * 30);";
+  const dir = citeDir(["package p;", pathological, "// end"]);
+  try {
+    const r = verifyCitations(
+      [{ path: "output", file: "target.mjs", line: 2, quote: "getSkillLevel() - var1.getPerkLevel" }],
+      { cwds: [dir] },
+    );
+    deepEqual(r.refuted, []);
+    equal(r.checked, 1);
+    equal(r.verdicts[0].status, "verified");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // ── enforceReturns integration (runPlan + fake io) ────────────────────────────
 
 const CFG = {
@@ -253,8 +296,9 @@ test("integration: verified citations — leaf ok, citations field, run.log even
     equal(spawn.calls.length, 1);
     const res = readResult(p.resultsDir, "a");
     equal(res.ok, true);
-    deepEqual(res.citations, { checked: 1, drifted: 0 });
+    deepEqual(res.citations, { checked: 1, drifted: 0, refuted: 0 });
     equal(res.citationErrors, undefined);
+    equal(res.outputJson.sites[0].citation, "verified");
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     ok(logLines.some((l) => l.event === "citations" && l.id === "a" && l.checked === 1 && l.refuted === 0),
       "expected citations event in run.log");
@@ -281,11 +325,13 @@ test("integration: fabricated citation — teaching re-ask, corrected output pas
     const res = readResult(p.resultsDir, "a");
     equal(res.ok, true);
     equal(res.schemaRetried, true);
-    deepEqual(res.citations, { checked: 1, drifted: 0 });
+    deepEqual(res.citations, { checked: 1, drifted: 0, refuted: 0 });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("integration: still-fabricated after re-ask — failed with citationErrors", async () => {
+// Stage 1: a refuted citation NEVER fails the leaf and NEVER deletes a finding.
+// The one corrective re-ask still fires; a survivor is annotated, the leaf is ok.
+test("integration: still-refuted after re-ask — leaf STILL ok, finding annotated, never failed", async () => {
   const dir = tmp();
   try {
     writeFileSync(join(dir, "src.mjs"), "one\n");
@@ -295,15 +341,18 @@ test("integration: still-fabricated after re-ask — failed with citationErrors"
     const p = plan(dir, [task("a", dir, { returns: SITES_SCHEMA })]);
     const r = await runPlan(p, CFG, io);
 
-    equal(spawn.calls.length, 2);
+    equal(spawn.calls.length, 2); // the corrective re-ask still fires
     const res = readResult(p.resultsDir, "a");
-    equal(res.ok, false);
-    ok(Array.isArray(res.citationErrors) && res.citationErrors.length === 1, JSON.stringify(res.citationErrors));
-    equal(r.summary.tasks.find((t) => t.id === "a").state, "failed");
+    equal(res.ok, true);
+    equal(res.citationErrors, undefined);
+    deepEqual(res.citations, { checked: 0, drifted: 0, refuted: 1 });
+    equal(res.outputJson.sites.length, 1);            // finding NOT deleted
+    equal(res.outputJson.sites[0].citation, "refuted"); // annotated in place
+    equal(r.summary.tasks.find((t) => t.id === "a").state, "ok");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("integration: schema errors and citation errors share ONE corrective turn", async () => {
+test("integration: schema re-ask consumes the one turn; a still-refuted citation after it annotates, never fails", async () => {
   const dir = tmp();
   try {
     writeFileSync(join(dir, "src.mjs"), "const k = 7;\n");
@@ -318,8 +367,60 @@ test("integration: schema errors and citation errors share ONE corrective turn",
 
     equal(spawn.calls.length, 2);
     const res = readResult(p.resultsDir, "a");
-    equal(res.ok, false);
-    ok(res.citationErrors, JSON.stringify(res));
+    equal(res.ok, true); // citation refutation never fails the leaf, even after a schema re-ask
+    equal(res.citationErrors, undefined);
+    deepEqual(res.citations, { checked: 0, drifted: 0, refuted: 1 });
+    equal(res.outputJson.sites[0].citation, "refuted");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The regression this plan exists to prevent: a finder returns many findings,
+// ONE citation is unfixable after the re-ask. Under all-or-nothing (or deletion)
+// the whole leaf — all N findings — would be lost. Stage 1 keeps every one.
+test("integration: N findings, one refuted — leaf ok, ALL findings survive, only the suspect annotated refuted", async () => {
+  const dir = tmp();
+  try {
+    const good = Array.from({ length: 10 }, (_, i) => `const v${i} = ${i};`);
+    writeFileSync(join(dir, "src.mjs"), good.join("\n") + "\n");
+    // 9 real citations + 1 fabricated (index 4). Same output on the re-ask.
+    const sites = good.map((line, i) => site("src.mjs", i + 1, i === 4 ? "const fabricated = 999;" : line));
+    const out = JSON.stringify({ sites });
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut(out, "s-1") }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", dir, { returns: SITES_SCHEMA })]);
+    await runPlan(p, CFG, io);
+
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true);
+    equal(res.citationErrors, undefined);
+    equal(res.outputJson.sites.length, 10, "all findings survive");
+    deepEqual(res.citations, { checked: 9, drifted: 0, refuted: 1 });
+    equal(res.outputJson.sites[4].citation, "refuted");
+    equal(res.outputJson.sites[0].citation, "verified");
+    equal(res.outputJson.sites[9].citation, "verified");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The nemotron shape: every citation refuted. Loud, but never fatal — under
+// Stage 1 the verifier (an LLM reading the file), not this gate, rules on them.
+test("integration: ALL citations refuted — leaf STILL ok, all findings intact and annotated refuted", async () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "src.mjs"), "real line one\nreal line two\n");
+    const out = JSON.stringify({ sites: [
+      site("src.mjs", 1, "fabricated one"),
+      site("src.mjs", 2, "fabricated two"),
+    ] });
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut(out, "s-1") }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", dir, { returns: SITES_SCHEMA })]);
+    await runPlan(p, CFG, io);
+
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true);
+    deepEqual(res.citations, { checked: 0, drifted: 0, refuted: 2 });
+    equal(res.outputJson.sites.length, 2);
+    ok(res.outputJson.sites.every((s) => s.citation === "refuted"), JSON.stringify(res.outputJson.sites));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
