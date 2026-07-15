@@ -309,9 +309,12 @@ test("renderStatus: expand-manifest events add child rows with their own models"
   }
 });
 
-// ── renderProvenance ──────────────────────────────────────────────────────────
-// The header is engine-written precisely so its numbers can be trusted. Every
-// test here defends a number the model would otherwise have had to transcribe.
+// ── renderProvenance — a one-line footnote, not a header ────────────────────────
+// A report is about its SUBJECT. The run mechanics are process the reader
+// commissioned and does not want narrated. So provenance collapses to a single
+// italic footnote at the BOTTOM — no goal heading, no table, no token column, no
+// cost column, no cache footnote. The ONLY thing that gets more than one line is a
+// coverage failure, because it changes what the reader should believe.
 
 import { renderProvenance } from "../src/results.mjs";
 
@@ -321,68 +324,55 @@ const row = (over = {}) => ({
   ...over,
 });
 
-test("renderProvenance: goal heading and a row per leaf", () => {
+test("renderProvenance: one italic Run footnote, id + model + duration per leaf", () => {
   const out = renderProvenance({
-    goal: "find every caller of frobnicate",
     tasks: [row(), row({ id: "verify", model: "claude-opus-4-8", durationMs: 71000 })],
     truncations: [],
   });
-  ok(out.startsWith("# find every caller of frobnicate"), out);
-  ok(out.includes("scan-a"), out);
-  ok(out.includes("verify"), out);
-  ok(/42s/.test(out), "durations render in seconds");
+  // one line naming each leaf and its model — not a table
+  ok(/\*Run:.*scan-a.*glm-5\.2:cloud.*verify.*claude-opus-4-8.*\*/s.test(out),
+    "a single italic Run line naming leaf+model: " + out);
+  ok(out.includes("42s") || out.includes("42"), "carries per-leaf duration");
 });
 
-// costUsd on a :cloud row is the CLI's own price table applied to token counts —
-// these providers bill on subscription and GPU time, with no token mapping. It is
-// not a wrong number, it is not a number. It must never reach the table.
-test("renderProvenance: a :cloud leaf's costUsd is suppressed, an Anthropic leaf's is not", () => {
+test("renderProvenance: NO table, NO goal heading, NO token/cost column", () => {
+  const out = renderProvenance({ tasks: [row()], truncations: [] });
+  ok(!out.includes("## Run"), "no Run table heading");
+  ok(!out.includes("| leaf |") && !out.includes("|---|"), "no markdown table");
+  ok(!/^# /m.test(out), "no goal H1 — the leaf writes its own title now");
+  ok(!/token/i.test(out), "no token column");
+  ok(!/cost|\$/.test(out), "no cost column");
+});
+
+// The whole point: the token-accounting footnote is MODEL-facing guidance (it
+// exists so an agent doesn't misread a 21M-token row as a runaway). It has no
+// place in a human's report. Operator: "I know what I pay for. Models don't."
+test("renderProvenance: the :cloud token-accounting footnote is GONE from the report", () => {
+  const out = renderProvenance({ tasks: [row({ model: "glm-5.2:cloud" })], truncations: [] });
+  ok(!/cache/i.test(out), "no cache-bucket explanation in a human report");
+  ok(!/prompt-cache|re-sent|transcript/i.test(out), "no token-accounting prose at all");
+});
+
+// A coverage failure DOES change what the reader believes, so it stays loud —
+// reusing the exact truncationLines wording. This is the one exception to
+// "process stays out of the report".
+test("renderProvenance: a truncation still renders loud, naming leaf + dependency", () => {
   const out = renderProvenance({
-    goal: "g",
-    tasks: [
-      row({ id: "cloudy", model: "glm-5.2:cloud", costUsd: 108.89 }),
-      row({ id: "claudey", model: "claude-opus-4-8", costUsd: 0.31 }),
-    ],
-    truncations: [],
-  });
-  ok(!out.includes("108"), "a fabricated :cloud cost must never render");
-  ok(out.includes("$0.31"), "a real Anthropic cost must render");
-});
-
-test("renderProvenance: a leaf with no cost renders a dash, never $undefined", () => {
-  const out = renderProvenance({ goal: "g", tasks: [row()], truncations: [] });
-  ok(!/undefined|NaN/.test(out), out);
-});
-
-// A {{result:}} truncation means a verifier checked only a PREFIX of its finder's
-// findings. It must read as loudly here as it does in the closing block.
-test("renderProvenance: truncations render loudly, not as a footnote", () => {
-  const out = renderProvenance({
-    goal: "g",
     tasks: [row()],
     truncations: [{ kind: "prompt", id: "verify", depId: "scan-a", kept: 4000, total: 9120 }],
   });
   ok(/NOT seen/.test(out), "must say the rest was NOT seen by that leaf");
-  ok(out.includes("verify") && out.includes("scan-a"), "must name the leaf and its dependency");
+  ok(out.includes("verify") && out.includes("scan-a"), "names the leaf and its dependency");
   ok(out.includes("4000") && out.includes("9120"), out);
 });
 
-test("renderProvenance: a forEach cap renders as a coverage warning", () => {
+test("renderProvenance: a forEach cap still renders as a loud coverage warning", () => {
   const out = renderProvenance({
-    goal: "g", tasks: [row()],
+    tasks: [row()],
     truncations: [{ kind: "forEach", id: "fan", kept: 10, total: 57 }],
   });
   ok(out.includes("10") && out.includes("57"), out);
-  ok(/maxItems/i.test(out), out);
-});
-
-// The cloud token magnitude is an accounting artefact, not a runaway. A reader of
-// the report gets the same footnote the skill gives an orchestrating session.
-test("renderProvenance: a :cloud leaf earns the token-accounting footnote", () => {
-  const cloud = renderProvenance({ goal: "g", tasks: [row({ model: "glm-5.2:cloud" })], truncations: [] });
-  ok(/cache/i.test(cloud), "must explain the missing cache buckets");
-  const claudeOnly = renderProvenance({ goal: "g", tasks: [row({ model: "claude-opus-4-8" })], truncations: [] });
-  ok(!/cache/i.test(claudeOnly), "an all-Anthropic run needs no such footnote");
+  ok(/NOT covered/i.test(out), out);
 });
 
 // You ask for a report, the leaf doesn't write one, and the closing block says

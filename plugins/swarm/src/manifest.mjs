@@ -533,6 +533,14 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
       raw.digest[key] = carrier.prompt;
     }
   }
+  // `goal` flows into the digest prompt AND is what the report titles itself from,
+  // so an un-substituted {{args.x}} there disfigures every report's title. It was
+  // the one prompt-bound field the substitution pass skipped.
+  if (typeof raw.goal === "string" && raw.goal.includes("{{")) {
+    const carrier = { prompt: raw.goal };
+    applyArgsToRawTasks([carrier], args, usedArgs, errors, () => "goal");
+    raw.goal = carrier.prompt;
+  }
 
   const resultsDir = raw.resultsDir
     ? resolve(cwd, raw.resultsDir)

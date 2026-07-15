@@ -292,6 +292,22 @@ test("digest.report rejects a non-boolean, non-string value", () => {
 
 // digest.instructions already gets args substitution; without the same treatment
 // a {{args.x}} in the report steer survives verbatim into the leaf's prompt.
+// The goal flows into the digest prompt and titles the report — an un-substituted
+// {{args.x}} there disfigured every report's H1 (the live-run bug).
+test("args substitute into the goal", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, {
+      goal: "audit the {{args.area}} surface",
+      tasks: [claudeTask({ prompt: "look at {{args.area}}" })],
+    });
+    const plan = loadManifest(p, CFG, dir, { args: { area: "auth" } });
+    equal(plan.goal, "audit the auth surface");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("args substitute into the digest.report steering string", () => {
   const dir = tmp();
   try {

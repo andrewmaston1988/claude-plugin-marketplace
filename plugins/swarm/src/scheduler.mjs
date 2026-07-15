@@ -943,26 +943,26 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   };
   const summaryPath = writeSummary(plan.resultsDir, summary);
 
-  // Report mode: the leaf wrote the body; the engine owns the header. Prepending
-  // happens here because this is the first point where every leaf's final row and
-  // the full truncation list are in hand — and the digest, being the terminal
-  // node, has already finished.
+  // Report mode: the leaf wrote the body AND its own title; the engine APPENDS a
+  // one-line Run footnote (+ loud coverage lines). This is the first point where
+  // every leaf's final row and the full truncation list are in hand, and the
+  // digest, being the terminal node, has already finished.
   //
-  // The whole block is best-effort BY CONTRACT: the agent path (digest.md) is
-  // load-bearing, the human path is not. A report that fails to materialise must
-  // never take the digest down with it.
+  // A report is about its subject — the footnote is the only run-mechanics the
+  // reader sees, and it lives at the bottom. Best-effort BY CONTRACT: the agent
+  // path (digest.md) is load-bearing, the human path is not; a report that fails
+  // to materialise never takes the digest down with it.
   let reportPath = null;
   if (plan.digest?.report) {
     try {
       const p = digestReportPath(plan.resultsDir);
       if (existsSync(p)) {
-        const body = readFileSync(p, "utf8");
-        const header = renderProvenance({
-          goal: plan.goal,
+        const body = readFileSync(p, "utf8").trimEnd();
+        const footnote = renderProvenance({
           tasks: summary.tasks.filter((t) => t.id !== DIGEST_ID),
           truncations,
         });
-        writeFileSync(p, `${header}\n${body.trimStart()}`);
+        writeFileSync(p, `${body}\n\n---\n\n${footnote}`);
         reportPath = p;
       }
     } catch {
