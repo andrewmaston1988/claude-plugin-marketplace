@@ -211,27 +211,19 @@ test("returns-validation failure classifies failed, not rate-limited, despite 42
     writeFileSync(join(dir, "src.txt"), "alpha\nbeta\n");
     const returns = {
       type: "object",
-      properties: {
-        findings: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: { file: { type: "string" }, line: { type: "integer" }, quote: { type: "string" } },
-            required: ["file", "line", "quote"],
-          },
-        },
-      },
+      properties: { findings: { type: "array" } },
       required: ["findings"],
     };
-    // the refuted citation's line number IS the 429 — transcript grep would
-    // misread this semantic failure as transient and burn full re-runs on it
-    const spawn = fakeSpawnFactory(() => ({ output: '{"findings":[{"file":"src.txt","line":429,"quote":"does not appear"}]}' }));
+    // findings must be an array; the model returned a string whose text IS the
+    // 429 — transcript grep would misread this schema failure as transient and
+    // burn full re-runs on it. No session id, so the one re-ask is unavailable.
+    const spawn = fakeSpawnFactory(() => ({ output: '{"findings":"429 — expected an array, got a string"}' }));
     const io = makeIo(spawn);
     const p = plan(dir, [task("a", { cwd: dir, returns })]);
     const r = await runPlan(p, { ...CFG, retry: { rateLimited: 2, backoffMs: 10 } }, io);
     equal(spawn.calls.length, 1, `semantic failure must not re-run as transient (got ${spawn.calls.length} dispatches)`);
     equal(r.summary.tasks[0].state, "failed");
-    ok(readResult(p.resultsDir, "a").citationErrors?.length, "citationErrors recorded");
+    ok(readResult(p.resultsDir, "a").schemaErrors?.length, "schemaErrors recorded");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

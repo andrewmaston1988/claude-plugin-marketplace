@@ -102,6 +102,10 @@ Truncated inputs — check this for every leaf:
 - If a result JSON carries a "promptTruncations" field, that leaf was fed only a PREFIX of the named dependency's output: it never saw the rest. A verifier in this state checked only the findings that fit, and the remainder is UNVERIFIED — not refuted, simply unchecked.
 - Say so explicitly: name the affected leaf and dependency, and put the unchecked findings in the ledger as OPEN. They are never PROVEN on that verifier's say-so, and they must not appear as confirmed headlines.
 
+Mechanically-doubted citations — check this for every leaf:
+- A finding annotated "citation": "refuted" in a leaf's output had its quote fail a mechanical check against the actual file. This is a SUSPICION, not a verdict: the check cannot tell a fabrication from a whitespace-mangled quote of a real line, so a good finding can be flagged. Do NOT delete these findings, and do NOT treat the flag as proof of fabrication.
+- Unless a verifier leaf independently CONFIRMED that finding, put it in the ledger as OPEN/REFUTED — never a PROVEN row and never a headline. If a verifier did confirm it, trust the verifier over the mechanical flag.
+
 Required sections:
 - "## PROVEN / OPEN ledger" — PROVEN rows carry evidence (file:line or reproduced output); OPEN rows are unresolved questions or unverified claims.
 - "## Drill-down" — which raw result files merit a full read by the orchestrating session, and why.

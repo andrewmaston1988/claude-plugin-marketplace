@@ -185,6 +185,7 @@ async function cmdRun(rest) {
     totalTokens: r.summary.totalTokens,
     worktreesKept: r.worktreesKept,
     truncations: r.summary.truncations,
+    refutations: r.summary.refutations,
     estimate: plan.estimate,
   }));
 

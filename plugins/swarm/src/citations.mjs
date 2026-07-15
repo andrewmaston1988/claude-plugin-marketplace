@@ -44,11 +44,12 @@ export function citationPaths(schema, path = "output") {
 }
 
 // Walk value+schema together, collecting citation instances with their JSON
-// path (schema validation has already passed, so the three fields exist).
+// path (schema validation has already passed, so the three fields exist). `node`
+// is the live citation object — the engine annotates it in place with a verdict.
 export function extractCitations(value, schema, path = "output") {
   if (!isPlainObject(schema)) return [];
   if (isCitationSchema(schema) && isPlainObject(value)) {
-    return [{ path, file: value.file, line: value.line, quote: value.quote }];
+    return [{ path, node: value, file: value.file, line: value.line, quote: value.quote }];
   }
   const out = [];
   if (isPlainObject(value) && isPlainObject(schema.properties)) {
@@ -69,16 +70,38 @@ export function verifyCitations(citations, { cwds, readFile = (p) => readFileSyn
   const roots = [...new Set(cwds.filter(Boolean).map((c) => resolve(c)))];
   const drifted = [];
   const refuted = [];
+  const verdicts = [];
   let checked = 0;
   for (const c of citations) {
-    const reason = verifyOne(c, roots, readFile, drifted);
-    if (reason) refuted.push({ ...c, reason });
-    else checked++;
+    const v = verifyOne(c, roots, readFile);
+    const verdict = { path: c.path, node: c.node, status: v.status };
+    if (v.status === "refuted") {
+      verdict.reason = v.reason;
+      refuted.push({ ...c, reason: v.reason });
+    } else {
+      checked++;
+      if (v.status === "drift") {
+        verdict.matchedLine = v.matchedLine;
+        drifted.push({ path: c.path, line: c.line, matchedLine: v.matchedLine });
+      }
+    }
+    verdicts.push(verdict);
   }
-  return { checked, drifted, refuted };
+  return { checked, drifted, refuted, verdicts };
 }
 
-function verifyOne(c, roots, readFile, drifted) {
+// Stamp each citation's live node with its verdict — the annotation Stage 1
+// leaves in place of deletion, so the verifier and digest see what the checker
+// doubted without any finding being lost.
+export function annotateCitations(cite) {
+  for (const v of cite.verdicts) {
+    if (v.node !== null && typeof v.node === "object") v.node.citation = v.status;
+  }
+}
+
+// { status: "verified" | "drift" | "refuted", reason?, matchedLine? }
+function verifyOne(c, roots, readFile) {
+  const refute = (reason) => ({ status: "refuted", reason });
   let inside = false;
   let content = null;
   for (const root of roots) {
@@ -89,30 +112,27 @@ function verifyOne(c, roots, readFile, drifted) {
       content = readFile(abs);
       break;
     } catch (e) {
-      if (e.code !== "ENOENT") return `cannot read ${c.file} (${e.code || e.message})`;
+      if (e.code !== "ENOENT") return refute(`cannot read ${c.file} (${e.code || e.message})`);
     }
   }
-  if (!inside) return `cites a file outside the task's cwd: ${c.file}`;
-  if (content === null) return `${c.file} does not exist under the task's cwd`;
+  if (!inside) return refute(`cites a file outside the task's cwd: ${c.file}`);
+  if (content === null) return refute(`${c.file} does not exist under the task's cwd`);
 
   const lines = String(content).split(/\r?\n/);
   if (lines.length && lines[lines.length - 1] === "") lines.pop();
   const n = lines.length;
   if (!Number.isInteger(c.line) || c.line < 1 || c.line > n) {
-    return `${c.file}: file has ${n} ${n === 1 ? "line" : "lines"} — cited line ${c.line}`;
+    return refute(`${c.file}: file has ${n} ${n === 1 ? "line" : "lines"} — cited line ${c.line}`);
   }
 
   const q = norm(String(c.quote).split("\n")[0]);
-  if (!q) return `quote is empty — cite the actual source line`;
+  if (!q) return refute(`quote is empty — cite the actual source line`);
   const matchAt = (ln) => ln >= 1 && ln <= n && norm(lines[ln - 1]).includes(q);
-  if (matchAt(c.line)) return null;
+  if (matchAt(c.line)) return { status: "verified" };
   for (const off of WINDOW) {
-    if (matchAt(c.line + off)) {
-      drifted.push({ path: c.path, line: c.line, matchedLine: c.line + off });
-      return null;
-    }
+    if (matchAt(c.line + off)) return { status: "drift", matchedLine: c.line + off };
   }
-  return `quote not found in ${c.file} at line ${c.line} (searched ±2)`;
+  return refute(`quote not found in ${c.file} at line ${c.line} (searched ±2)`);
 }
 
 // Refutations as teaching lines for the corrective re-ask, capped.

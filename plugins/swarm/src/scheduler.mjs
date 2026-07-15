@@ -22,7 +22,7 @@ import { createSnapshotWriter } from "./ui.mjs";
 import { matchQuota, parseQuotaReset, checkQuota, DEFAULT_QUOTA_PATTERNS } from "./quota.mjs";
 import { evalExpr, evalBool } from "./expr.mjs";
 import { validateValue } from "./schema.mjs";
-import { extractCitations, verifyCitations, citationErrorLines } from "./citations.mjs";
+import { extractCitations, verifyCitations, citationErrorLines, annotateCitations } from "./citations.mjs";
 import { swarmHome } from "./config.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 
@@ -121,51 +121,67 @@ function tryParseJson(output) {
 // worktree collection so the corrective turn executes in the leaf's real cwd.
 async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
   // Schema first; when the shape holds, mechanically verify any citation-shaped
-  // instances (N3) against the leaf's cwd. kind routes the fail field
-  // (schemaErrors vs citationErrors); cite carries the verification stats.
+  // instances (N3) against the leaf's cwd. A schema miss is unusable output and
+  // still fails the leaf; a refuted citation NEVER does — the finding may be
+  // sound and the CHECKER may be the thing that is wrong (decompiled/minified
+  // lines defeat whitespace-normalised matching), so Stage 1 annotates in place
+  // and lets the verifier wave, an LLM that reads the file, rule on it.
   const assess = (output) => {
     const parsed = tryParseJson(output);
     if (parsed === undefined) {
-      return { errs: ["output is not JSON — reply with a single JSON value matching the schema"], kind: "schema" };
+      return { parsed: undefined, schemaErrs: ["output is not JSON — reply with a single JSON value matching the schema"] };
     }
     const schemaErrs = validateValue(parsed, task.returns);
-    if (schemaErrs.length) return { errs: schemaErrs, kind: "schema" };
-    if (task.verifyCitations === false) return { errs: [] };
+    if (schemaErrs.length) return { parsed, schemaErrs };
+    if (task.verifyCitations === false) return { parsed };
     const cits = extractCitations(parsed, task.returns);
-    if (!cits.length) return { errs: [] };
-    const cite = verifyCitations(cits, { cwds: [taskCwd, task.originalCwd] });
-    return { errs: cite.refuted.length ? citationErrorLines(cite.refuted) : [], kind: "citations", cite };
+    if (!cits.length) return { parsed };
+    return { parsed, cite: verifyCitations(cits, { cwds: [taskCwd, task.originalCwd] }) };
   };
   const failText = (errs) => `returns validation failed:\n  - ${errs.join("\n  - ")}`;
   const logCitations = (cite) => appendRunLog(resultsDir, {
     ts: new Date().toISOString(), event: "citations", id: task.id,
-    checked: cite.checked, refuted: cite.refuted.length,
+    checked: cite.checked, drifted: cite.drifted.length, refuted: cite.refuted.length,
   });
+  // A schema-clean result: annotate every citation in place, re-serialize the
+  // annotated output, and attach loud stats. Refutations never fail the leaf.
   const finish = (res, a) => {
     if (!a.cite) return res;
-    logCitations(a.cite);
-    return { ...res, citations: { checked: a.cite.checked, drifted: a.cite.drifted.length } };
+    const cite = a.cite;
+    annotateCitations(cite);
+    logCitations(cite);
+    const out = {
+      ...res,
+      output: JSON.stringify(a.parsed),
+      citations: { checked: cite.checked, drifted: cite.drifted.length, refuted: cite.refuted.length },
+    };
+    if (cite.refuted.length) out.citationRefuted = cite.refuted.map((c) => ({ path: c.path, reason: c.reason }));
+    return out;
   };
-  const fail = (res, a, suffix = "") => {
-    if (a.cite) logCitations(a.cite);
-    const failed = { ...res, ok: false, output: failText(a.errs) + suffix };
-    failed[a.kind === "citations" ? "citationErrors" : "schemaErrors"] = a.errs;
-    return failed;
-  };
+  const failSchema = (res, errs, suffix = "") => ({
+    ...res, ok: false, output: failText(errs) + suffix, schemaErrors: errs,
+  });
 
   const a1 = assess(r.output);
-  if (!a1.errs.length) return finish(r, a1);
-  if (!r.sessionId) return fail(r, a1, "\n(no session id — re-ask unavailable)");
+  const schema1 = a1.schemaErrs?.length ? a1.schemaErrs : null;
+  const refuted1 = a1.cite?.refuted.length || 0;
+
+  // Clean, or only-refuted-with-no-session: annotate and finish (never fail).
+  if (!schema1 && !refuted1) return finish(r, a1);
+  if (!r.sessionId) {
+    if (schema1) return failSchema(r, schema1, "\n(no session id — re-ask unavailable)");
+    return finish(r, a1);
+  }
 
   appendRunLog(resultsDir, { ts: new Date().toISOString(), event: "schema-retry", id: task.id });
   // Schema misses carry the schema itself, not just the errors — the original
   // prompt may have underspecified the shape, and "expected object" alone
   // doesn't name fields. Citation refutations already name file/line/fix.
-  const retryPrompt = a1.kind === "schema"
-    ? `Your output did not match the task's returns schema:\n  - ${a1.errs.join("\n  - ")}\n` +
+  const retryPrompt = schema1
+    ? `Your output did not match the task's returns schema:\n  - ${schema1.join("\n  - ")}\n` +
       `The required schema is:\n${JSON.stringify(task.returns, null, 2)}\n` +
       `Reply with ONLY the corrected JSON — no prose, no fences.`
-    : `Some citations in your output could not be verified against the actual files:\n  - ${a1.errs.join("\n  - ")}\n` +
+    : `Some citations in your output could not be verified against the actual files:\n  - ${citationErrorLines(a1.cite.refuted).join("\n  - ")}\n` +
       `Reply with ONLY the corrected JSON — no prose, no fences.`;
   const leafLog = createWriteStream(join(resultsDir, "results", `${task.id}.log`), { flags: "a" });
   const r2 = await runTask({ ...task, cwd: taskCwd, resume: r.sessionId }, retryPrompt, cfg, io, leafLog, hooks);
@@ -178,11 +194,16 @@ async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
     sessionId: r2.sessionId ?? r.sessionId,
     schemaRetried: true,
   };
-  const a2 = r2.ok
-    ? assess(r2.output)
-    : { errs: [`re-ask failed (exit ${r2.exit}): ${r2.output.slice(0, 200)}`], kind: "schema" };
-  if (!a2.errs.length) return finish({ ...combined, ok: true, output: r2.output }, a2);
-  return fail(combined, a2);
+  // Re-ask process itself failed: a schema miss is still fatal; a citation
+  // correction that never ran falls back to annotating the ORIGINAL output —
+  // a failed correction must not destroy findings the first pass produced.
+  if (!r2.ok) {
+    if (schema1) return failSchema(combined, [`re-ask failed (exit ${r2.exit}): ${r2.output.slice(0, 200)}`]);
+    return finish({ ...combined, output: r.output }, a1);
+  }
+  const a2 = assess(r2.output);
+  if (a2.schemaErrs?.length) return failSchema(combined, a2.schemaErrs);
+  return finish({ ...combined, ok: true, output: r2.output }, a2);
 }
 
 // Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
@@ -529,6 +550,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     return cur;
   };
   const truncations = [];
+  // Citation refutations that Stage 1 kept — surfaced loud in the closing block,
+  // the same register as a truncation: coverage the reader must not mistake for full.
+  const refutations = [];
 
   // Both truncation paths share one loud channel: run.log event, stdout warning,
   // run-summary field, closing block. A cut only the engine knows about is how an
@@ -773,7 +797,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (r.schemaRetried) result.schemaRetried = true;
       if (r.schemaErrors) result.schemaErrors = r.schemaErrors;
       if (r.citations) result.citations = r.citations;
-      if (r.citationErrors) result.citationErrors = r.citationErrors;
+      // Stage 1: refuted citations are KEPT and annotated, never a failure. Loud
+      // per-leaf (in the result) and run-level (the closing block) — a kept-but-
+      // unverified finding must read as exactly that, never as verified.
+      if (r.citationRefuted?.length) {
+        result.citationRefuted = r.citationRefuted;
+        refutations.push({ id: task.id, refuted: r.citationRefuted.length, total: r.citations.checked + r.citations.refuted });
+      }
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
       result.allowedTools = task.allowedTools;
@@ -782,7 +812,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       // Never classify them by transcript grep: a stray "429" (line number,
       // token count) in the raw stream would misread them as transient.
       const st = r.ok ? "ok"
-        : (r.schemaErrors || r.citationErrors) ? "failed"
+        : r.schemaErrors ? "failed"
         : classifyFailure({ timedOut: r.timedOut, output: r.raw }, cfg.quotaPatterns);
       if (st === "quota") {
         const resetsAt = parseQuotaReset(r.raw);
@@ -938,6 +968,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     worktreesKept,
     totalTokens: [...tokensMap.values()].reduce(addTokens, emptyTokens()),
     ...(truncations.length && { truncations }),
+    ...(refutations.length && { refutations }),
     ...(plan.estimate !== undefined && { estimate: plan.estimate }),
     ...(costWarnFired && { costWarnFired: true }),
   };
