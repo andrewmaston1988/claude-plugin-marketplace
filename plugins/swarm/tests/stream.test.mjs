@@ -58,6 +58,15 @@ test("parser: system init event surfaces the session id", () => {
   equal(init.session_id, "s-123");
 });
 
+test("parser: onStop reports each assistant message's stop_reason — end_turn marks a clean finish", () => {
+  const stops = [];
+  const parser = createStreamParser({ onStop: (sr) => stops.push(sr) });
+  parser.feed(JSON.stringify({ type: "assistant", message: { id: "m1" } }) + "\n");                        // mid-turn, no stop_reason
+  parser.feed(JSON.stringify({ type: "assistant", message: { id: "m2", stop_reason: null } }) + "\n");     // cut mid-thinking
+  parser.feed(JSON.stringify({ type: "assistant", message: { id: "m3", stop_reason: "end_turn" } }) + "\n"); // clean finish
+  deepEqual(stops, [undefined, null, "end_turn"]);
+});
+
 test("parser: assistant event without usage is ignored", () => {
   const { parser, usages } = collect();
   parser.feed(JSON.stringify({ type: "assistant", message: { id: "m1" } }) + "\n");
