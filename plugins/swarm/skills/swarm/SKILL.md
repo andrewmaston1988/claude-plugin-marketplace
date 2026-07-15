@@ -128,7 +128,7 @@ Every phrase below came from a session that read a *working* roster and moved to
     "isolation": "worktree",                   // implementation leaves only
     "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
-    "timeoutMs": 600000,
+    "timeoutMs": 3600000,
     "after": ["scan-b"],                       // dependencies
     "forEach": { "from": "scan-b", "path": "sites", "maxItems": 30 },  // clone this leaf per array item (see Deterministic steps)
     "when": { "from": "scan-b", "expr": "length(value) > 20" },        // run only if true; else completes as skipped

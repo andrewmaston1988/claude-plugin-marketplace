@@ -1,7 +1,7 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join, basename, dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
-import { swarmHome } from "./config.mjs";
+import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
 import { validateSchemaShape } from "./schema.mjs";
@@ -491,7 +491,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
   const tasks = normalizeTasks(raw.tasks, {
     cwd, resultsDir, cfg, errors, label,
-    defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? 600000,
+    defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   return { tasks };
 }
@@ -576,7 +576,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
 
   const tasks = normalizeTasks(raw.tasks, {
     cwd, resultsDir, cfg, errors, label, childPlans,
-    defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? 600000,
+    defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
 
   let digest;
