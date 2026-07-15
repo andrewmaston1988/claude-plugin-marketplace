@@ -7,6 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tokenTotal } from "./stream.mjs";
 import { formatTokens } from "./results.mjs";
+import { isClaudeModel } from "./models.mjs";
 
 export function median(nums) {
   const s = [...nums].sort((a, b) => a - b);
@@ -37,7 +38,12 @@ export function loadCorpus(runsRoot) {
       for (const row of summary?.tasks || []) {
         if (row?.state !== "ok" || typeof row.model !== "string" || row.model === "compute" || !row.tokens) continue;
         push(tokens, row.model, tokenTotal(row.tokens));
-        if (Number.isFinite(row.costUsd)) push(costUsd, row.model, row.costUsd);
+        // costUsd is real only for Anthropic-billed leaves. On a :cloud row the CLI
+        // applies its own price table to token counts, but the provider bills on
+        // subscription/GPU cycles with no token->$ mapping — that dollar figure is
+        // fiction, and feeding it to the estimator would fabricate the cost the
+        // operator consents against. Tokens (above) are real for every model.
+        if (Number.isFinite(row.costUsd) && isClaudeModel(row.model)) push(costUsd, row.model, row.costUsd);
       }
     }
   }
