@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  nextDelay, keepaliveAction, cadenceFor, ttlFromUsage, resolveTtl, offerOverdue,
+  nextDelay, keepaliveAction, cadenceFor, ttlFromUsage, resolveTtl, resolveTtlSource, offerOverdue,
   FIRST_DELAY_SECS, MIN_DELAY_SECS, MAX_DELAY_SECS,
   TARGET_CADENCE_SECS, KEEPALIVE_CHAIN_DEAD_SECS, KEEPALIVE_IDLE_STOP_SECS,
 } from '../lib/cadence.mjs';
@@ -82,6 +82,16 @@ test('resolveTtl: newest usage row with a bucket signal wins', () => {
 test('resolveTtl: falls back to last known, then 300', () => {
   assert.equal(resolveTtl(null, [], 3600), 3600);
   assert.equal(resolveTtl(null, [{}], null), 300);
+});
+
+// The 2026-07-16 refusal: the injection claimed a defaulted TTL was "detected",
+// so the model distrusted it. The source must ride along with the value.
+test('resolveTtlSource reports where the TTL came from', () => {
+  const h1 = [{ cache_creation: { ephemeral_1h_input_tokens: 412, ephemeral_5m_input_tokens: 0 } }];
+  assert.deepEqual(resolveTtlSource(1800, h1, null), { ttlSecs: 1800, source: 'settings' });
+  assert.deepEqual(resolveTtlSource(null, h1, null), { ttlSecs: 3600, source: 'detected' });
+  assert.deepEqual(resolveTtlSource(null, [], 3600), { ttlSecs: 3600, source: 'last-known' });
+  assert.deepEqual(resolveTtlSource(null, [{}], null), { ttlSecs: 300, source: 'default' });
 });
 
 test('nextDelay and keepaliveAction accept a cadence override', () => {

@@ -10,7 +10,7 @@ import {
   readJSON, writeJSON, getSessionState, appendJSONL,
 } from './lib/paths.mjs';
 import {
-  nextDelay, keepaliveAction, cadenceFor, resolveTtl, offerOverdue,
+  nextDelay, keepaliveAction, cadenceFor, resolveTtlSource, offerOverdue,
 } from './lib/cadence.mjs';
 import {
   contextWindowFor, contextUtilization, decideCheckpointNudge, readRecentAssistantTurns,
@@ -22,6 +22,14 @@ const SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 
 // Byte-fallback threshold (used only when no usage row is available yet).
 const BYTES_THRESHOLD = 2_000_000;
+
+// Honest provenance for the {ttlNote} template slot, keyed by resolveTtlSource().source.
+export const TTL_NOTES = {
+  settings: 'pinned by the checkpoint.keepaliveTtlSecs setting',
+  detected: 'detected from the cache-bucket usage in the transcript',
+  'last-known': 'carried over from the last cache-bucket signal seen this session',
+  default: 'no cache-bucket usage rows yet, so this is a conservative default — the first tick reads the real bucket and stretches the cadence',
+};
 
 function readTemplate(name) {
   try { return fs.readFileSync(path.join(TEMPLATES_DIR, name), 'utf8'); } catch { return ''; }
@@ -95,7 +103,7 @@ async function main() {
 
   // --- 3. Keepalive (opt-in) ---
   if (keepaliveEnabled && sState) {
-    const ttl = resolveTtl(
+    const { ttlSecs: ttl, source: ttlSource } = resolveTtlSource(
       Number(settings?.checkpoint?.keepaliveTtlSecs),
       recent.map(t => t.usage),
       sState.lastTtlSecs,
@@ -116,6 +124,7 @@ async function main() {
         ctx += initTmpl
           .replace(/\{delay\}/g, String(delay))
           .replace(/\{ttl\}/g, String(cad.ttlSecs))
+          .replace(/\{ttlNote\}/g, TTL_NOTES[ttlSource] || ttlSource)
           .replace(/\{tick\}/g, tickTmpl);
       }
       // Log every offer, not just answered ones — an ignored offer must be visible.
@@ -127,6 +136,7 @@ async function main() {
         overshoot: Math.max(0, Math.round(prevInjectGap) - (sState.lastInjectedDelay || 0)),
         nextDelay: delay,
         ttlSecs: cad.ttlSecs,
+        ttlSource,
       });
       sState.lastInjectTs = now;
       sState.injectPending = true;

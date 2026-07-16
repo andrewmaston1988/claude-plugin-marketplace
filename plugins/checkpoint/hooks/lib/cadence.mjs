@@ -65,14 +65,19 @@ export function ttlFromUsage(usage) {
 // Precedence: forced settings override > newest usage row with a bucket signal
 // > last known (persisted in session state) > conservative 300s default.
 // Under-estimating the TTL just ticks more often; over-estimating kills the cache.
-export function resolveTtl(forcedTtlSecs, usages, lastKnownTtlSecs) {
-  if (Number.isFinite(forcedTtlSecs) && forcedTtlSecs > 0) return forcedTtlSecs;
+// The source rides along so the injection can say honestly where the TTL came from.
+export function resolveTtlSource(forcedTtlSecs, usages, lastKnownTtlSecs) {
+  if (Number.isFinite(forcedTtlSecs) && forcedTtlSecs > 0) return { ttlSecs: forcedTtlSecs, source: 'settings' };
   for (let i = usages.length - 1; i >= 0; i--) {
     const t = ttlFromUsage(usages[i]);
-    if (t) return t;
+    if (t) return { ttlSecs: t, source: 'detected' };
   }
-  if (Number.isFinite(lastKnownTtlSecs) && lastKnownTtlSecs > 0) return lastKnownTtlSecs;
-  return REFERENCE_TTL_SECS;
+  if (Number.isFinite(lastKnownTtlSecs) && lastKnownTtlSecs > 0) return { ttlSecs: lastKnownTtlSecs, source: 'last-known' };
+  return { ttlSecs: REFERENCE_TTL_SECS, source: 'default' };
+}
+
+export function resolveTtl(forcedTtlSecs, usages, lastKnownTtlSecs) {
+  return resolveTtlSource(forcedTtlSecs, usages, lastKnownTtlSecs).ttlSecs;
 }
 
 // observedGap / lastInjectedDelay in seconds. Falsy -> no history -> first delay.
