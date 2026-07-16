@@ -7,9 +7,12 @@ const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 const ADHOC_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const ADHOC_REAP_MS = 60 * 60 * 1000;
 
+const MAX_BODY_BYTES = 1_000_000;
+
 export function createBroker({
   stateFile = null,
   log = () => {},
+  onShutdown = null,
   _kill = (pid) => process.kill(pid, 0),
   _now = () => new Date(),
 } = {}) {
@@ -23,7 +26,7 @@ export function createBroker({
     log(`state file corrupt (${e.message}) — quarantined to ${quarantine}, starting empty`);
     state = emptyState();
   }
-  let nextMsgId = state.messages.reduce((m, x) => Math.max(m, x.id), 0) + 1;
+  let nextMsgId = state.messages.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1;
 
   const persist = () => { if (stateFile) saveState(stateFile, state); };
 
@@ -59,7 +62,8 @@ export function createBroker({
   const handlers = {
     "/register"(body) {
       for (const peer of Object.values(state.peers)) {
-        if (peer.pid > 0 && peer.pid === body.pid) delete state.peers[peer.id];
+        // reap, not delete: the replaced id's undelivered queue must go with it
+        if (peer.pid > 0 && peer.pid === body.pid) reap(peer.id);
       }
       const id = generateId();
       const now = _now().toISOString();
@@ -167,9 +171,25 @@ export function createBroker({
       res.writeHead(200);
       return res.end("claude-peers broker");
     }
+    if (req.url === "/shutdown") {
+      json(200, { ok: true });
+      // let the response flush, then close; pid-kill-free stop path
+      setTimeout(() => server.close(() => onShutdown?.()), 50);
+      return;
+    }
     let buf = "";
-    req.on("data", (c) => { buf += c; });
+    let overflow = false;
+    req.on("data", (c) => {
+      if (overflow) return;
+      buf += c;
+      if (buf.length > MAX_BODY_BYTES) {
+        overflow = true;
+        json(413, { error: "body too large" });
+        req.destroy();
+      }
+    });
     req.on("end", () => {
+      if (overflow) return;
       try {
         const handler = handlers[req.url];
         if (!handler) return json(404, { error: "not found" });

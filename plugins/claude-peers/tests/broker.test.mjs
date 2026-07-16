@@ -13,7 +13,7 @@ function tmpState() {
 // t.after closes it even when an assertion throws — a failing test must not
 // leave a live server holding the runner open.
 async function startBroker(t, opts = {}) {
-  const broker = createBroker({ stateFile: tmpState(), ...opts });
+  const broker = createBroker({ stateFile: opts.stateFile ?? tmpState(), ...opts });
   t.after(() => broker.close());
   const port = await broker.listen(0);
   const call = async (p, body) => {
@@ -134,6 +134,62 @@ test('poll-messages delivers once, in order', async (t) => {
   assert.deepEqual(first.body.messages.map(m => m.text), ['one', 'two']);
   const second = await call('/poll-messages', { id: b.id });
   assert.equal(second.body.messages.length, 0);
+});
+
+// Review finding #2: re-registration must purge the old id's queue like a
+// death does — otherwise undelivered messages to the old id leak forever.
+test('re-register purges the old id and its undelivered messages from state', async (t) => {
+  const stateFile = tmpState();
+  const broker = createBroker({ stateFile });
+  t.after(() => broker.close());
+  const port = await broker.listen(0);
+  const call = async (p, body) => (await fetch(`http://127.0.0.1:${port}${p}`, { method: 'POST', body: JSON.stringify(body) })).json();
+  const a = await call('/register', { ...REG, pid: process.pid });
+  const b = await call('/register', { ...REG, pid: process.ppid });
+  await call('/send-message', { from_id: b.id, to_id: a.id, text: 'queued for old id' });
+  await call('/register', { ...REG, pid: process.pid }); // a re-registers
+  const state = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+  assert.equal(state.messages.length, 0, 'undelivered messages to the replaced id must be purged');
+  assert.equal(Object.keys(state.peers).length, 2);
+});
+
+// Review finding #3: a corrupted message id in loaded state must not poison
+// the id counter into NaN for every subsequent message.
+test('non-numeric message ids in loaded state do not poison the id counter', async (t) => {
+  const stateFile = tmpState();
+  fs.writeFileSync(stateFile, JSON.stringify({
+    peers: {},
+    messages: [{ id: 'garbage', from_id: 'x', to_id: 'y', text: 'old', sent_at: 't', delivered: false }],
+  }));
+  const { broker, call } = await startBroker(t, { stateFile });
+  const { body: reg } = await call('/register', REG);
+  await call('/send-message', { from_id: reg.id, to_id: reg.id, text: 'new' });
+  const { body: polled } = await call('/poll-messages', { id: reg.id });
+  const fresh = polled.messages.find((m) => m.text === 'new');
+  assert.ok(Number.isInteger(fresh.id), `new message id must be an integer, got ${fresh.id}`);
+});
+
+// Review finding #9: the shared broker must cap request bodies — any local
+// process could otherwise OOM it with one unbounded POST.
+test('oversized POST bodies are rejected with 413, not buffered', async (t) => {
+  const { broker, port } = await startBroker(t);
+  const res = await fetch(`http://127.0.0.1:${port}/send-message`, {
+    method: 'POST',
+    body: JSON.stringify({ from_id: 'a', to_id: 'b', text: 'x'.repeat(2_000_000) }),
+  }).catch((e) => ({ status: 'aborted', aborted: true }));
+  assert.ok(res.aborted || res.status === 413, `expected 413 or aborted socket, got ${res.status}`);
+});
+
+// Review finding #7 (fix side): /shutdown lets `broker stop` end the broker
+// without a pid-based kill that could hit a reused pid.
+test('POST /shutdown closes the broker gracefully', async (t) => {
+  let shutdownCalled = false;
+  const { broker, port, call } = await startBroker(t, { onShutdown: () => { shutdownCalled = true; } });
+  const { body } = await call('/shutdown', {});
+  assert.equal(body.ok, true);
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(shutdownCalled, true, 'onShutdown hook must fire');
+  await assert.rejects(fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(500) }));
 });
 
 test('state survives a broker restart via the state file', async () => {

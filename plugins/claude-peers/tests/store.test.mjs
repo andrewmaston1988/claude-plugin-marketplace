@@ -26,6 +26,14 @@ test('loadState: valid JSON with the wrong shape throws', () => {
   assert.throws(() => loadState(f), /shape/);
 });
 
+// Review finding #1: typeof null === "object" must not slip past the guard —
+// a null peers map would permanently 500 every handler with no self-repair.
+test('loadState: peers: null is a shape error, not a pass', () => {
+  const f = tmpFile();
+  fs.writeFileSync(f, JSON.stringify({ peers: null, messages: [] }));
+  assert.throws(() => loadState(f), /shape/);
+});
+
 test('save then load round-trips', () => {
   const f = tmpFile();
   const state = emptyState();

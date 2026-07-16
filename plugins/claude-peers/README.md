@@ -39,7 +39,7 @@ node bin/claude-peers.mjs doctor          # node version, config, broker health,
 | `pollIntervalMs` | `1000` | Inbound message poll cadence |
 | `heartbeatIntervalMs` | `15000` | Peer liveness heartbeat |
 
-State lives in `<stateDir>/claude-peers/peers-state.json`; a corrupt state file is quarantined (renamed `.corrupt-<ts>`), never silently overwritten.
+State lives in `<stateDir>/claude-peers/peers-state-<port>.json` (port-scoped so a test broker never shares state with the real one); a corrupt state file is quarantined (renamed `.corrupt-<ts>`), never silently overwritten. `broker stop` shuts the broker down via its own `POST /shutdown` — no pid-based kills.
 
 ## Troubleshooting
 

@@ -11,12 +11,14 @@ const args = process.argv.slice(2);
 const cmd = args[0];
 const sub = args[1];
 
-function getDefaultPaths(paths) {
+// state + pid are port-scoped: two brokers (e.g. a test broker on 7999 beside
+// the real one) must never share state or clobber each other's pid file.
+function getDefaultPaths(paths, port) {
   return {
     ...paths,
     configFile: path.join(paths.configDir, "config.json"),
-    stateFile: path.join(paths.stateDir, "peers-state.json"),
-    pidFile: path.join(paths.stateDir, "claude-peers-broker.pid"),
+    stateFile: path.join(paths.stateDir, `peers-state-${port}.json`),
+    pidFile: path.join(paths.stateDir, `claude-peers-broker-${port}.pid`),
   };
 }
 
@@ -60,8 +62,9 @@ async function health(port, timeoutMs = 2000) {
 (async () => {
   const { getPaths } = await import("../src/paths.mjs");
   const { loadConfig } = await import("../src/config.mjs");
-  const paths = getDefaultPaths(getPaths());
-  const config = loadConfig({ paths });
+  const basePaths = getPaths();
+  const config = loadConfig({ paths: basePaths });
+  const paths = getDefaultPaths(basePaths, config.port);
 
   if (cmd === "mcp") {
     const { createPeersServer } = await import("../src/mcp/server.mjs");
@@ -75,7 +78,8 @@ async function health(port, timeoutMs = 2000) {
     const { createBroker } = await import("../src/broker/index.mjs");
     const { createLogger } = await import("../src/log.mjs");
     const log = createLogger("claude-peers broker");
-    const broker = createBroker({ stateFile: paths.stateFile, log });
+    let shutdown; // assigned below; /shutdown reaches it via onShutdown
+    const broker = createBroker({ stateFile: paths.stateFile, log, onShutdown: () => shutdown() });
     try {
       await broker.listen(config.port);
     } catch (e) {
@@ -88,7 +92,7 @@ async function health(port, timeoutMs = 2000) {
     }
     _writePid(paths.pidFile, process.pid);
     const reapTimer = setInterval(() => broker.reapDead(), 30_000);
-    const shutdown = () => {
+    shutdown = () => {
       clearInterval(reapTimer);
       _clearPid(paths.pidFile);
       broker.close().then(() => process.exit(0));
@@ -125,17 +129,27 @@ async function health(port, timeoutMs = 2000) {
   }
 
   if (cmd === "broker" && sub === "stop") {
-    const pid = _readPid(paths.pidFile);
-    if (!pid || !_isAlive(pid)) {
+    // stop via the broker's own /shutdown — never a pid-based kill, which can
+    // hit an unrelated process that reused a stale pid.
+    if (!(await health(config.port))) {
       _clearPid(paths.pidFile);
-      process.stdout.write("broker not running (no live pid)\n");
+      process.stdout.write(`broker not running on port ${config.port} (stale pid cleared)\n`);
       setTimeout(() => process.exit(0), 150);
       return;
     }
-    process.kill(pid);
-    _clearPid(paths.pidFile);
-    process.stdout.write(`broker (pid ${pid}) stopped\n`);
-    setTimeout(() => process.exit(0), 150);
+    try {
+      await fetch(`http://127.0.0.1:${config.port}/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) });
+    } catch {}
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 150));
+      if (!(await health(config.port, 500))) {
+        process.stdout.write(`broker on port ${config.port} stopped\n`);
+        setTimeout(() => process.exit(0), 150);
+        return;
+      }
+    }
+    process.stderr.write(`broker on port ${config.port} did not stop within 3s\n`);
+    setTimeout(() => process.exit(1), 150);
     return;
   }
 

@@ -14,7 +14,7 @@ export function loadState(file, { _fs = fs } = {}) {
     throw e;
   }
   const state = JSON.parse(raw);
-  if (!state || typeof state.peers !== "object" || Array.isArray(state.peers) || !Array.isArray(state.messages)) {
+  if (!state || !state.peers || typeof state.peers !== "object" || Array.isArray(state.peers) || !Array.isArray(state.messages)) {
     throw new Error(`unexpected state shape in ${file}`);
   }
   return state;

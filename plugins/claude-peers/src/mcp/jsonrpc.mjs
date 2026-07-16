@@ -13,7 +13,8 @@ export function createRpcEndpoint({ input, output, onRequest, onNotification = a
       write({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } });
       return;
     }
-    if (typeof msg.method !== "string") return; // a response to us — we never send requests
+    // non-object lines ("null", "42") and responses-to-us are silently ignored
+    if (!msg || typeof msg !== "object" || typeof msg.method !== "string") return;
     if (msg.id === undefined || msg.id === null) {
       try {
         await onNotification(msg.method, msg.params ?? {});
@@ -37,7 +38,7 @@ export function createRpcEndpoint({ input, output, onRequest, onNotification = a
     while ((idx = buf.indexOf("\n")) !== -1) {
       const line = buf.slice(0, idx).trim();
       buf = buf.slice(idx + 1);
-      if (line) handleLine(line);
+      if (line) handleLine(line).catch((e) => log(`rpc line handler failed: ${e.message}`));
     }
   });
 

@@ -130,7 +130,14 @@ export function createPeersServer({
     child.unref();
   }
 
-  async function ensureBroker() {
+  // single-flight: concurrent failures (poll + heartbeat racing) share one respawn
+  let ensuring = null;
+  function ensureBroker() {
+    ensuring ??= doEnsureBroker().finally(() => { ensuring = null; });
+    return ensuring;
+  }
+
+  async function doEnsureBroker() {
     if (await isBrokerAlive()) return;
     log("broker not reachable — starting daemon");
     spawnBroker();
@@ -237,7 +244,8 @@ export function createPeersServer({
   async function onRequest(method, params) {
     if (method === "initialize") {
       return {
-        protocolVersion: params.protocolVersion ?? PROTOCOL_VERSION,
+        // we implement 2024-11-05 semantics — never echo an arbitrary requested version
+        protocolVersion: PROTOCOL_VERSION,
         capabilities: { experimental: { "claude/channel": {} }, tools: {} },
         serverInfo: { name: "claude-peers", version: SERVER_VERSION },
         instructions: INSTRUCTIONS,

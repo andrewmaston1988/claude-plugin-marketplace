@@ -13,12 +13,13 @@ function okJson(value) {
   return { ok: true, status: 200, json: async () => value, text: async () => JSON.stringify(value) };
 }
 
-function makeServer({ fetchImpl, spawnCalls = [] } = {}) {
+function makeServer({ fetchImpl, spawnCalls = [], onSpawn } = {}) {
   const output = new PassThrough();
   const written = [];
   output.on('data', (c) => written.push(c.toString()));
   const _spawn = (cmd, args, opts) => {
     spawnCalls.push({ cmd, args, opts });
+    onSpawn?.();
     return { unref: () => {}, pid: 99999 };
   };
   const server = createPeersServer({
@@ -44,6 +45,37 @@ test('initialize response matches the fixture captured from the live upstream se
   assert.deepEqual(result.capabilities, expected.capabilities);
   assert.equal(result.serverInfo.name, expected.serverInfo.name);
   assert.equal(result.instructions, expected.instructions);
+});
+
+// Review finding #5: never echo an arbitrary client protocolVersion — we
+// implement 2024-11-05 semantics and must say so when asked for anything else.
+test('initialize with an unsupported protocolVersion responds with the version we implement', async () => {
+  const { server } = makeServer();
+  const result = await server._onRequest('initialize', { protocolVersion: '2099-12-31', capabilities: {}, clientInfo: { name: 'probe', version: '0' } });
+  assert.equal(result.protocolVersion, '2024-11-05');
+});
+
+// Review finding #8: concurrent broker-call failures must share ONE respawn —
+// no thundering herd of spawns when several calls fail at once.
+test('concurrent connection failures share a single ensureBroker respawn', async () => {
+  // health stays dead until a spawn "starts the broker" ~300ms later — every
+  // caller that checks health before then sees it down, exposing spawn storms.
+  let broken = true;
+  const fetchImpl = async (url) => {
+    if (broken) throw new TypeError('fetch failed');
+    return okJson(String(url).endsWith('/health') ? { status: 'ok' } : { fine: true });
+  };
+  const { server, spawnCalls } = makeServer({
+    fetchImpl,
+    onSpawn: () => setTimeout(() => { broken = false; }, 300),
+  });
+  const results = await Promise.all([
+    server._brokerFetch('/heartbeat', { id: 'x' }),
+    server._brokerFetch('/poll-messages', { id: 'x' }),
+    server._brokerFetch('/set-summary', { id: 'x' }),
+  ]);
+  assert.equal(results.length, 3);
+  assert.equal(spawnCalls.length, 1, `expected exactly one spawn, got ${spawnCalls.length}`);
 });
 
 test('tools/list returns the four upstream tools with identical names and required fields', async () => {

@@ -71,6 +71,19 @@ test('a handler throw becomes a JSON-RPC error, with the method-not-found code h
   assert.equal(lines()[0].error.code, -32601);
 });
 
+// Review finding #4: a line that parses to a non-object (`null`, `42`, `"x"`)
+// must not throw inside async handleLine — that unhandled rejection kills the
+// whole MCP server process.
+test('non-object JSON lines are ignored and the loop survives', async () => {
+  const seen = [];
+  const { input, lines } = harness(async (m) => { seen.push(m); return { alive: true }; });
+  input.write('null\n42\n"just a string"\n');
+  input.write(JSON.stringify({ jsonrpc: '2.0', id: 11, method: 'still/works' }) + '\n');
+  await tick(); await tick();
+  assert.deepEqual(seen, ['still/works']);
+  assert.deepEqual(lines(), [{ jsonrpc: '2.0', id: 11, result: { alive: true } }]);
+});
+
 test('notifications (no id) invoke the handler but never produce a response', async () => {
   const seen = [];
   const input = new PassThrough();
