@@ -34,6 +34,15 @@
       }
     },
     {
+      "name": "claude-peers",
+      "description": "Peer discovery and real-time messaging between local Claude Code sessions — stdio MCP server + self-healing localhost broker",
+      "source": "./plugins/claude-peers",
+      "author": {
+        "name": "Andrew Maston",
+        "email": "andrew.maston1988@gmail.com"
+      }
+    },
+    {
       "name": "checkpoint",
       "description": "Durable cross-session handoff via STATE.md, /checkpoint skill, SessionStart resume offer, PreCompact backstop, and an observable self-correcting cache-keepalive.",
       "source": "./plugins/checkpoint",
