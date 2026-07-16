@@ -275,7 +275,13 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
       clearTimeout(timer);
       parser.end();
       if (errMsg) raw += (raw ? "\n" : "") + errMsg;
-      const cleanFinish = !sawAssistant || sawEndTurn; // exempt non-stream-json leaves
+      // Clean finish: an assistant end_turn, OR a terminal result event with
+      // subtype "success". The :cloud proxies (glm/kimi) never put stop_reason
+      // on assistant stream events — only on the final result event — so
+      // judging by assistant events alone failed every successful :cloud leaf
+      // as "terminated mid-stream" (2026-07-16). A genuinely cut leaf emits no
+      // success result event at all, so #192's false-green detection is kept.
+      const cleanFinish = !sawAssistant || sawEndTurn || resultEvt?.subtype === "success";
       flushLog().then(() => resolve({
         ok: exit === 0 && !timedOut && !(resultEvt?.is_error) && cleanFinish,
         exit,
