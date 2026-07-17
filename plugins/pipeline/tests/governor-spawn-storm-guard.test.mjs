@@ -24,44 +24,43 @@ import { test, before, after } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
 import {
   mkdtempSync, mkdirSync, writeFileSync, rmSync,
-  existsSync, renameSync,
 } from "node:fs";
 import { join } from "node:path";
-import { tmpdir, homedir } from "node:os";
-import { connectPath, close, projectAdd } from "../scripts/pipeline-db/index.mjs";
+import { tmpdir } from "node:os";
+import { connectPath, close, projectAdd } from "../src/db/index.mjs";
 import {
   spawnGovernor, spawnMonthlyGovernor,
   resolveGovernorContext,
-} from "../scripts/orchestrator/governor.mjs";
+} from "../src/orchestrator/governor.mjs";
 
 const PROJECT = "testproject-storm-guard";
-const CONFIG_PATH = join(homedir(), ".pipeline", "config.json");
 
-let configBackupPath = null;
+// The real ~/.pipeline/config.json is never touched: HOME/USERPROFILE are
+// redirected to a throwaway temp dir for the suite, so loadPipelineConfig()
+// (which resolves its path from os.homedir()) reads an isolated config. This
+// keeps the test safe to run while the orchestrator is live against the real
+// config — the original values are restored in `after`.
+let savedHome, savedUserProfile, homeDir;
 
 before(() => {
-  // Back up the real config so the test can mutate it freely. The backup is
-  // a rename (atomic), restored in `after`.
-  if (existsSync(CONFIG_PATH)) {
-    configBackupPath = CONFIG_PATH + ".bak-storm-guard-test";
-    renameSync(CONFIG_PATH, configBackupPath);
-  }
+  savedHome = process.env.HOME;
+  savedUserProfile = process.env.USERPROFILE;
+  homeDir = mkdtempSync(join(tmpdir(), "storm-guard-home-"));
+  process.env.HOME = homeDir;
+  process.env.USERPROFILE = homeDir;
   // Write a config that enables the governor pointed at the test project.
   // PIPELINE_DEFAULTS will be deep-merged on top, so we only set the keys
   // that matter.
-  mkdirSync(join(homedir(), ".pipeline"), { recursive: true });
-  writeFileSync(CONFIG_PATH, JSON.stringify({
+  mkdirSync(join(homeDir, ".pipeline"), { recursive: true });
+  writeFileSync(join(homeDir, ".pipeline", "config.json"), JSON.stringify({
     governor: { enabled: true, project: PROJECT },
   }, null, 2));
 });
 
 after(() => {
-  // Restore the on-disk config (or remove the test one if no real one existed).
-  if (configBackupPath) {
-    if (existsSync(configBackupPath)) renameSync(configBackupPath, CONFIG_PATH);
-  } else if (existsSync(CONFIG_PATH)) {
-    rmSync(CONFIG_PATH);
-  }
+  if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+  if (savedUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = savedUserProfile;
+  rmSync(homeDir, { recursive: true, force: true });
 });
 
 function setup() {
