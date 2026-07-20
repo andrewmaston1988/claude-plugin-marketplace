@@ -19,6 +19,16 @@ const DEFAULTS = {
     verbModel: "claude-haiku-4-5",
   },
   extensions: [],
+  remote: {
+    brokerPort: 7898,
+    controlPort: 7897,
+    controlToken: null,
+    createChannels: false,
+    replyTimeoutMs: 120_000,
+    replyPollIntervalMs: 1_000,
+    pollIntervalMs: 1_000,
+    heartbeatIntervalMs: 15_000,
+  },
 };
 
 const REQUIRED = ["tokens.bot", "tokens.app", "claude.cwd"];

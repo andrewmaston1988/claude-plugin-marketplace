@@ -84,7 +84,7 @@ export async function safeUpdate({ web, channel, ts, params, threadTs }) {
   }
 }
 
-export async function handleMessage({ web, store, queue, config, log, payload, botUserId, isFirstInSession, extensions }) {
+export async function handleMessage({ web, store, queue, config, log, payload, botUserId, isFirstInSession, extensions, remote, _runClaude }) {
   const skipReason = shouldSkip(payload);
   if (skipReason) {
     log.info("message skipped", { channel: payload.channel, ts: payload.ts, reason: skipReason });
@@ -107,6 +107,23 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
   const threadTs = payload.thread_ts ?? null;
 
   queue.enqueue(channel, async () => {
+    // --- remote-control routing branch ---
+    // If this channel has been claimed by a live interactive session, route the
+    // message to it via the internal broker instead of spawning `claude -p`. A
+    // dead/missing claiming peer falls through to the spawn path (after reaping
+    // the stale claim) so Slack is never silent.
+    const claim = remote?.claims?.get(channel) ?? null;
+    if (claim && remote?.broker) {
+      let alive = false;
+      try { alive = await remote.broker.isAlive(claim.peer_id); } catch { alive = false; }
+      if (alive) {
+        await routeToLiveSession({ web, channel, threadTs, text, claim, broker: remote.broker, config, log, cmdEcho: deriveTitle(text) });
+        return;
+      }
+      try { await remote.claims.release(claim.peer_id); } catch { /* reaped below */ }
+      log.info("remote-control claim reaped (peer dead), falling back to spawn", { channel, peer_id: claim.peer_id });
+    }
+
     const existingSession = store.get(key);
     const cmdEcho = deriveTitle(text);
     let placeholderTs = null;
@@ -158,7 +175,8 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
     }
 
     try {
-      const { result: claudeResult, sessionId } = await runClaude({
+      const runClaudeFn = _runClaude ?? runClaude;
+      const { result: claudeResult, sessionId } = await runClaudeFn({
         cwd: config.claude.cwd,
         addDir: config.claude.addDir,
         prompt: (inject ? inject + "\n" : "") + prelude + text,
@@ -304,6 +322,74 @@ export async function postError({ web, channel, placeholderTs, threadTs, message
   try {
     await safeUpdate({ web, channel, ts: placeholderTs, threadTs, params: { text: `_Error: ${message}_` } });
   } catch { /* placeholder already gone; error was already logged by the caller */ }
+}
+
+/**
+ * Route a Slack message to a live interactive session via the internal broker.
+ * Posts a "📱 routed to live session…" placeholder, sends the text to the claiming
+ * peer, then polls the broker for that peer's reply (updating the placeholder with
+ * it). On a ~120s timeout, posts "live session didn't reply in time" and retains
+ * the claim (the peer may be slow, not dead). Reuses postResponse for the reply so
+ * markdown/tables/splitting match the spawn path.
+ */
+export async function routeToLiveSession({ web, channel, threadTs, text, claim, broker, config, log, cmdEcho }) {
+  const timeoutMs = config.remote?.replyTimeoutMs ?? 120_000;
+  const pollIntervalMs = config.remote?.replyPollIntervalMs ?? 1_000;
+
+  let placeholderTs = null;
+  try {
+    const postParams = {
+      channel,
+      text: "",
+      attachments: [{ color: "#808080", text: `📱 _routed to live session…_`, mrkdwn_in: ["text"] }],
+    };
+    if (threadTs) postParams.thread_ts = threadTs;
+    const posted = await web.chatPostMessage(postParams);
+    placeholderTs = posted.ts;
+  } catch (e) {
+    log.error("failed to post routed placeholder", { channel, error: e.message });
+    return;
+  }
+
+  try {
+    const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
+    if (r && r.ok === false) throw new Error(r.error ?? "send failed");
+  } catch (e) {
+    log.error("failed to route to live session", { channel, error: e.message });
+    await postError({ web, channel, placeholderTs, threadTs, message: `failed to route to live session: ${e.message}` });
+    return;
+  }
+
+  const reply = await pollReply({ broker, peerId: claim.peer_id, timeoutMs, pollIntervalMs, log });
+  if (reply) {
+    try {
+      await postResponse({
+        web, channel, placeholderTs, threadTs,
+        responseText: reply.text, existingSession: claim.peer_id, isFirstInSession: false,
+        cmdEcho, extensions: null, sessionId: null, config,
+      });
+    } catch (e) {
+      log.error("failed to post live-session reply", { channel, error: e.message });
+      await postError({ web, channel, placeholderTs, threadTs, message: `live session reply post failed: ${e.message}` });
+    }
+  } else {
+    await postError({ web, channel, placeholderTs, threadTs, message: "live session didn't reply in time" });
+  }
+}
+
+// Drain the broker's slack-bridge queue looking for a reply from `peerId`. Drained
+// messages from other peers are dropped in v1 (single-live-session common case);
+// a daemon-wide poll loop for unsolicited outbound is a future enhancement.
+async function pollReply({ broker, peerId, timeoutMs, pollIntervalMs, log }) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    let msgs = [];
+    try { msgs = await broker.pollMessages("slack-bridge") ?? []; } catch (e) { log?.warn?.("poll error", { error: e.message }); }
+    const reply = msgs.find((m) => m && m.from_id === peerId);
+    if (reply) return reply;
+    await new Promise((r) => setTimeout(r, pollIntervalMs));
+  }
+  return null;
 }
 
 export function startBridge({ config, log, web, socket, store, queue, extensions }) {
