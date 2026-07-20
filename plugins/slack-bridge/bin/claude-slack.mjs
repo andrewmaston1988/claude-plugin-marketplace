@@ -32,6 +32,16 @@ function _readPid(paths) {
 function _clearPid(paths) { try { unlinkSync(_pidFile(paths)); } catch {} }
 function _isAlive(pid) { try { process.kill(pid, 0); return true; } catch { return false; } }
 
+// Port-scoped broker pid files (a test broker must not clobber the real one).
+function _brokerPidFile(paths, port) { return _join(paths.stateDir, `remote-broker-${port}.pid`); }
+function _brokerStateFile(paths, port) { return _join(paths.stateDir, `remote-broker-state-${port}.json`); }
+async function _brokerHealth(port, timeoutMs = 2000) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(timeoutMs) });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
 const [,, cmd = "start", ...rest] = process.argv;
 
 (async () => {
@@ -214,6 +224,95 @@ if (cmd === "import-sessions") {
   return;
 }
 
+if (cmd === "remote-mcp") {
+  // stdio MCP server the live interactive session loads (user-scoped). Registers
+  // with the internal broker, polls for inbound Slack messages, surfaces the
+  // slack_seize / slack_release / slack_post tools.
+  const paths = getDefaultPaths();
+  const configArg = getFlag("--config", rest) ?? paths.configFile;
+  const config = await loadConfig({ configPath: configArg });
+  const { createRemoteMcpServer } = await import("../src/remote-mcp/server.mjs");
+  const { createLogger: _cl } = await import("../src/log.mjs");
+  const log = _cl({ logDir: paths.logDir, tag: "remote-mcp" });
+  const server = createRemoteMcpServer({ config, log });
+  await server.start();
+  return; // stays alive on stdin + timers
+}
+
+if (cmd === "broker") {
+  const paths = getDefaultPaths();
+  const configArg = getFlag("--config", rest) ?? paths.configFile;
+  let brokerPort;
+  try {
+    const c = await loadConfig({ configPath: configArg });
+    brokerPort = c.remote?.brokerPort ?? 7898;
+  } catch { brokerPort = 7898; }
+  const portOverride = getFlag("--port", rest);
+  if (portOverride) brokerPort = parseInt(portOverride, 10);
+  const pidFile = _brokerPidFile(paths, brokerPort);
+  const stateFile = _brokerStateFile(paths, brokerPort);
+  const sub = rest[0];
+
+  if (sub === "run") {
+    const { createBroker } = await import("../src/remote/broker.mjs");
+    const { createLogger: _cl } = await import("../src/log.mjs");
+    const log = _cl({ logDir: paths.logDir, tag: "remote-broker" });
+    let shutdown;
+    const broker = createBroker({ stateFile, log, onShutdown: () => shutdown() });
+    try { await broker.listen(brokerPort); }
+    catch (e) {
+      if (e.code === "EADDRINUSE") { log(`port ${brokerPort} already in use — another broker is running`); setTimeout(() => process.exit(0), 150); return; }
+      throw e;
+    }
+    _writePid(pidFile, process.pid);
+    const reapTimer = setInterval(() => broker.reapDead(), 30_000);
+    shutdown = () => { clearInterval(reapTimer); _clearPid(pidFile); broker.close().then(() => process.exit(0)); };
+    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", shutdown);
+    log(`remote-control broker listening on 127.0.0.1:${brokerPort} (state: ${stateFile})`);
+    return;
+  }
+
+  if (sub === "start") {
+    if (await _brokerHealth(brokerPort)) { process.stdout.write(`broker already running on port ${brokerPort}\n`); setTimeout(() => process.exit(0), 150); return; }
+    const entry = (await import("node:url")).fileURLToPath(import.meta.url);
+    const child = (await import("node:child_process")).spawn(process.execPath, [entry, "broker", "run", "--port", String(brokerPort)], { detached: true, stdio: "ignore", windowsHide: true });
+    child.unref();
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      if (await _brokerHealth(brokerPort)) { process.stdout.write(`broker started on port ${brokerPort} (pid ${child.pid})\n`); setTimeout(() => process.exit(0), 150); return; }
+    }
+    process.stderr.write("broker failed to come up within 6s\n");
+    setTimeout(() => process.exit(1), 150);
+    return;
+  }
+
+  if (sub === "stop") {
+    if (!(await _brokerHealth(brokerPort))) { _clearPid(pidFile); process.stdout.write(`broker not running on port ${brokerPort} (stale pid cleared)\n`); setTimeout(() => process.exit(0), 150); return; }
+    try { await fetch(`http://127.0.0.1:${brokerPort}/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) }); } catch {}
+    for (let i = 0; i < 20; i++) {
+      await new Promise((r) => setTimeout(r, 150));
+      if (!(await _brokerHealth(brokerPort, 500))) { process.stdout.write(`broker on port ${brokerPort} stopped\n`); setTimeout(() => process.exit(0), 150); return; }
+    }
+    process.stderr.write(`broker on port ${brokerPort} did not stop within 3s\n`);
+    setTimeout(() => process.exit(1), 150);
+    return;
+  }
+
+  if (sub === "status") {
+    const h = await _brokerHealth(brokerPort);
+    const pid = _readPid(pidFile);
+    if (h) process.stdout.write(`running on port ${brokerPort} — ${h.peers} peer(s)${pid ? ` (pid ${pid})` : ""}\n`);
+    else process.stdout.write(`not running on port ${brokerPort}\n`);
+    setTimeout(() => process.exit(h ? 0 : 1), 150);
+    return;
+  }
+
+  process.stderr.write("usage: claude-slack broker <start|stop|status|run> [--port P]\n");
+  setTimeout(() => process.exit(2), 150);
+  return;
+}
+
 // Default: start
 const configFlag = getFlag("--config", [cmd, ...rest]);
 const paths = getDefaultPaths();
@@ -281,10 +380,43 @@ const socket = createSocketModeClient({ appToken: config.tokens.app, log });
 const store = createSessionStore({ path: paths.sessionsFile, log });
 const queue = createQueue({ log });
 
+// Remote-control subsystem: internal broker + claims store + control endpoint.
+// Only wired when a control token is configured (the doctor flags an unconfigured
+// endpoint). Without it the routing branch is skipped — the bridge behaves exactly
+// as before (every message spawns `claude -p`).
+let remote = null;
+if (config.remote?.controlToken) {
+  const { createClaimsStore } = await import("../src/remote/claims.mjs");
+  const { createBrokerClient } = await import("../src/remote/broker-client.mjs");
+  const { createControlServer } = await import("../src/remote/control.mjs");
+  const claims = createClaimsStore({ path: _join(paths.stateDir, "remote-claims.json"), log });
+  const broker = createBrokerClient({ port: config.remote.brokerPort, log });
+  const control = createControlServer({
+    web, claims, token: config.remote.controlToken,
+    canCreateChannels: !!config.remote.createChannels, log,
+  });
+  await broker.ensureBroker();
+  await control.listen(config.remote.controlPort);
+  log.info("remote-control ready", { brokerPort: config.remote.brokerPort, controlPort: config.remote.controlPort });
+  // Periodically drop claims whose live session has died, so a dead session's
+  // channel falls back to the spawn path within ~30s rather than waiting on the
+  // per-message liveness check.
+  const reapTimer = setInterval(() => {
+    broker.listPeers()
+      .then((peers) => { const alive = new Set(peers.map((p) => p.id)); return claims.reapDead({ isAlive: async (id) => alive.has(id) }); })
+      .then((reaped) => { if (reaped.length) log.info("reaped stale remote claims", { reaped }); })
+      .catch(() => {});
+  }, 30_000);
+  reapTimer.unref?.();
+  remote = { claims, broker, control };
+} else {
+  log.warn("remote-control disabled — set remote.controlToken in config to enable");
+}
+
 _writePid(paths);
 log.info("starting claude-slack bridge", { configPath, logDir: paths.logDir });
 
-startBridge({ config, log, web, socket, store, queue });
+startBridge({ config, log, web, socket, store, queue, remote });
 
 process.on("SIGTERM", () => { log.info("SIGTERM — shutting down"); _clearPid(paths); process.exit(0); });
 process.on("SIGINT",  () => { log.info("SIGINT — shutting down");  _clearPid(paths); process.exit(0); });

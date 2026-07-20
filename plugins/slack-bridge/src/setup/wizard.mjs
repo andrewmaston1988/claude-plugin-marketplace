@@ -1,6 +1,7 @@
 import { createInterface } from "node:readline/promises";
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
 import { execFile, execSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
 import { renderManifest } from "./manifest.mjs";
@@ -204,9 +205,40 @@ export async function runWizard({ paths, log }) {
       writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
     }
 
-    // Step 7: Smoke test via doctor
+    // Step 7: Remote control (optional)
     hr();
-    say("Step 7/8 — Smoke test\n");
+    say("Step 7/9 — Remote control (optional)\n");
+    say("Remote control lets a live interactive session seize a Slack channel so you can");
+    say("talk to it from mobile (provider-agnostic — works on GLM/Kimi, not just /rc).");
+    say("Needs a one-time user-scoped MCP registration. See README → Remote control.\n");
+    const wantRemote = await ask("Enable remote control? [y/N] ");
+    if (wantRemote.trim().toLowerCase().startsWith("y")) {
+      config.remote = config.remote ?? {};
+      const tokRaw = await ask("Control shared-secret token (blank = generate one): ");
+      config.remote.controlToken = tokRaw.trim() || randomBytes(24).toString("hex");
+      const scopesChoice = await ask("Did you add channels:write + channels:manage scopes (lets /slack-remote create a #ln- channel)? [y/N] ");
+      config.remote.createChannels = scopesChoice.trim().toLowerCase().startsWith("y");
+      writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+      say(`✓ remote.controlToken written (${config.remote.createChannels ? "channel create enabled" : "DM-seize default — no new scopes needed"})`);
+      say(`  control: 127.0.0.1:${config.remote.controlPort ?? 7897}, broker: ${config.remote.brokerPort ?? 7898}`);
+      const { fileURLToPath: _ftu2 } = await import("node:url");
+      const entryAbs = _ftu2(new URL("../../bin/claude-slack.mjs", import.meta.url));
+      const regCmd = `claude mcp add --scope user slack-bridge-remote -- node "${entryAbs}" remote-mcp`;
+      say("\nOne-time user-scoped MCP registration (plugin-declared MCP does NOT render");
+      say("channel notifications as of 2026-07-16, so this manual step is required):");
+      say("  " + regCmd);
+      const runReg = await ask("Run it now? [Y/n] ");
+      if (!runReg.trim().toLowerCase().startsWith("n")) {
+        try { execSync(regCmd, { stdio: "inherit" }); say("✓ registered"); }
+        catch (e) { say(`✗ registration failed: ${e.message}`); say("  run it manually after the wizard."); }
+      }
+    } else {
+      say("Skipped — the bridge runs without remote control (every Slack message spawns claude -p).");
+    }
+
+    // Step 8: Smoke test via doctor
+    hr();
+    say("Step 8/9 — Smoke test\n");
     const noop = { info() {}, warn() {}, child() { return noop; } };
     const web = createWebClient({ token: config.tokens.bot, log: noop });
     const results = await runDoctor({ config, paths, web, log: noop });
@@ -214,9 +246,9 @@ export async function runWizard({ paths, log }) {
 
     const failed = results.filter(r => !r.ok);
 
-    // Step 7: Offer to start
+    // Step 9: Offer to start
     hr();
-    say("Step 8/8 — Launch\n");
+    say("Step 9/9 — Launch\n");
     if (failed.length === 0) {
       const start = await ask("Start the bridge daemon now? [Y/n] ");
       if (!start.trim().toLowerCase().startsWith("n")) {

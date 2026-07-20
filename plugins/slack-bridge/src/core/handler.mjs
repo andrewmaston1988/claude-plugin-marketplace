@@ -392,7 +392,7 @@ async function pollReply({ broker, peerId, timeoutMs, pollIntervalMs, log }) {
   return null;
 }
 
-export function startBridge({ config, log, web, socket, store, queue, extensions }) {
+export function startBridge({ config, log, web, socket, store, queue, extensions, remote }) {
   loadDedup(store);
 
   // Fire-and-forget: tell the operator the bridge is back. Errors are swallowed
@@ -413,7 +413,7 @@ export function startBridge({ config, log, web, socket, store, queue, extensions
     if (event?.type === "message") {
       const isFirst = !sessionFirstMessage.has(event.channel);
       if (isFirst) sessionFirstMessage.add(event.channel);
-      handleMessage({ web, store, queue, config, log, payload: event, botUserId, isFirstInSession: isFirst, extensions })
+      handleMessage({ web, store, queue, config, log, payload: event, botUserId, isFirstInSession: isFirst, extensions, remote })
         .catch(e => log.error("handleMessage unhandled", { error: e.message }));
     }
   });

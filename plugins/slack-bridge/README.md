@@ -194,6 +194,57 @@ Edit `config.json` (path shown in Step 3 above) to adjust any of these:
 
 ---
 
+## Remote control (optional)
+
+Remote control lets a **live interactive** Claude Code session seize a Slack channel, so the operator can step away from the terminal and keep talking to that same session from a phone. It is provider-agnostic — it works on any cloud model (GLM, Kimi, …), not just the Anthropic API that the built-in `/rc` requires.
+
+When a channel is claimed, inbound Slack messages are routed to the live session through an internal localhost broker instead of spawning a fresh `claude -p`. The live session replies, and its reply replaces the "📱 routed to live session…" placeholder in Slack. If the live session doesn't reply within ~120 s, the bridge posts a timeout notice and **keeps the claim** (the peer may be slow, not dead). When the claiming session dies, the claim is reaped and Slack falls back to the spawn path.
+
+### Enabling
+
+Run `claude-slack setup` and answer **yes** at the *Remote control* step. The wizard writes `remote.controlToken` (generates one if you leave it blank) and can run the one-time MCP registration for you. To enable it later by hand, add to `config.json`:
+
+```json
+{
+  "remote": {
+    "controlToken": "<any shared secret>",
+    "createChannels": false
+  }
+}
+```
+
+Then run the one-time, **user-scoped** MCP registration (this must be user-scoped — plugin-declared MCP servers do not render channel notifications as of 2026-07-16, so the live session would never see inbound messages):
+
+```bash
+claude mcp add --scope user slack-bridge-remote -- node /path/to/bin/claude-slack.mjs remote-mcp
+```
+
+Restart any interactive session you want to control this way so it picks up the new MCP server.
+
+### Slack scopes
+
+- **Default (`createChannels: false`):** `/slack-remote` seizes an **existing DM** with the bot. No new Slack scopes are required.
+- **Channel-create (`createChannels: true`):** add `channels:write` and `channels:manage` to the bot token, and `/slack-remote` creates a dedicated `#ln-<peer-id-short>` channel instead.
+
+### Using it from a live session
+
+In an interactive Claude Code session, invoke the `/slack-remote` skill (or call the `slack_seize` MCP tool directly). It reports the channel to DM. Reply via `slack_post`; release with `slack_release` (or `/slack-remote release`). See `skills/slack-remote.md`.
+
+### Config keys
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `remote.controlToken` | `null` | Shared-secret bearer token for the control endpoint. `null` = remote control disabled. |
+| `remote.brokerPort` | `7898` | Internal localhost broker port (distinct from claude-peers' 7899). |
+| `remote.controlPort` | `7897` | Internal localhost control endpoint port. |
+| `remote.createChannels` | `false` | `true` → `/slack-remote` creates `#ln-<short>` (needs `channels:write`/`channels:manage`). `false` → DM-seize. |
+| `remote.replyTimeoutMs` | `120000` | How long the bridge waits for the live session to reply before posting a timeout. |
+| `remote.replyPollIntervalMs` | `1000` | Poll cadence for the live session's reply. |
+
+The broker self-starts (and self-heals) when the first live session's MCP server registers; `claude-slack doctor` reports its health and the control endpoint's reachability.
+
+---
+
 ## Troubleshooting
 
 **Bot doesn't respond:** Run `claude-slack status` and check the log file path shown in `claude-slack doctor`.

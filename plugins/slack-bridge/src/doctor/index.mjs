@@ -88,6 +88,46 @@ export async function runDoctor({ config, paths, web, log }) {
     return await checkDaemonStatus();
   });
 
+  // Remote-control subsystem checks (only when a control token is configured).
+  if (config.remote?.controlToken) {
+    await check("Remote-control broker", async () => {
+      const port = config.remote.brokerPort ?? 7898;
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) });
+        if (!res.ok) throw new Error(`broker on ${port} not healthy`);
+        const body = await res.json();
+        return `healthy on ${port} (${body.peers} peer(s))`;
+      } catch {
+        return `not reachable on ${port} — a live session's MCP server will self-start it`;
+      }
+    });
+
+    await check("Remote-control endpoint", async () => {
+      const port = config.remote.controlPort ?? 7897;
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/health`, {
+          headers: { Authorization: `Bearer ${config.remote.controlToken}` },
+          signal: AbortSignal.timeout(2000),
+        });
+        if (res.status === 401) throw new Error("token mismatch — controlToken differs from the running daemon");
+        if (!res.ok) throw new Error(`endpoint on ${port} returned ${res.status}`);
+        return `healthy on ${port}`;
+      } catch (e) {
+        throw new Error(`not reachable on ${port} (is the bridge running?) — ${e.message}`);
+      }
+    });
+
+    checks.push({
+      name: "Remote-control scopes",
+      ok: !!config.remote.createChannels,
+      detail: config.remote.createChannels
+        ? "channels:write/manage configured — /slack-remote creates #ln-<short>"
+        : "DM-seize default (no channels:write/manage) — /slack-remote seizes an existing DM",
+    });
+  } else {
+    checks.push({ name: "Remote control", ok: true, detail: "disabled (no remote.controlToken)" });
+  }
+
   return checks;
 }
 
