@@ -2,8 +2,11 @@
 // calls to seize/release a Slack channel and post outbound messages. Token-guarded
 // (shared secret in bridge config, passed to the MCP server). Default localhost-only.
 //
-// /claim    {peer_id, channel?}  — create #ln-<short> (if scopes allow) or join the
-//                                 given channel; records the claim. Returns {channel, ...}.
+// /claim    {peer_id, channel?, name?} — create #rc-<name-slug> (if scopes allow) or
+//                                       join the given channel; records the claim.
+//                                       `name` defaults the channel to the session's
+//                                       context (cwd basename / operator label).
+//                                       Returns {channel, ...}.
 // /release  {peer_id}            — frees the peer's claim.
 // /post     {peer_id, message}   — posts to the peer's claimed channel.
 // /heartbeat{peer_id}           — refreshes last_seen.
@@ -16,6 +19,18 @@ function shortName(peerId) {
   return String(peerId).slice(0, 4).toLowerCase();
 }
 
+// Slack channel names: lowercase, [a-z0-9_-], max 80 chars. Slugify a context
+// label (the session's cwd basename or an operator-supplied label) into a channel
+// suffix. Returns null for an empty/all-invalid input so the caller can fall back
+// to the peer-id fragment.
+function slugify(s) {
+  if (!s) return null;
+  return String(s).toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40) || null;
+}
+
 export function createControlServer({
   web,
   claims,
@@ -23,30 +38,37 @@ export function createControlServer({
   canCreateChannels = false,
   log = () => {},
 } = {}) {
-  async function claimChannel(peerId, channel) {
+  // `name` is an optional descriptive label for the created channel (the session's
+  // cwd basename or an operator-supplied label). When present + slugifiable, the
+  // channel is `#rc-<slug>` (e.g. `#rc-long-night`) — the /rc-style "a channel with a
+  // name describing the chat context just appears" experience. The `rc-` prefix
+  // namespaces remote-control channels so they group together and don't collide with
+  // real project channels, and generalizes across every project. Falls back to the
+  // peer-id fragment when no usable name is provided.
+  async function claimChannel(peerId, channel, name) {
     if (channel) {
       const joined = await web.conversationsJoin({ channel });
       const ch = joined?.channel ?? { id: channel };
       return { id: ch.id ?? channel, name: ch.name ?? null, topic: null };
     }
     if (canCreateChannels) {
-      const base = `ln-${shortName(peerId)}`;
-      let name = base;
+      const base = `rc-${slugify(name) || shortName(peerId)}`;
+      let chanName = base;
       let created;
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
-          created = await web.conversationsCreate({ name });
+          created = await web.conversationsCreate({ name: chanName });
           break;
         } catch (e) {
           if (e?.slackError === "name_taken" || /name_taken/i.test(e?.message ?? "")) {
-            name = `${base}-${attempt + 2}`;
+            chanName = `${base}-${attempt + 2}`;
             continue;
           }
           throw e;
         }
       }
       const channelId = created?.channel?.id;
-      const channelName = created?.channel?.name ?? name;
+      const channelName = created?.channel?.name ?? chanName;
       let topic = null;
       if (channelId) {
         try {
@@ -69,7 +91,7 @@ export function createControlServer({
   const handlers = {
     "/claim": async (body) => {
       if (!body.peer_id) return { ok: false, error: "peer_id required" };
-      const { id, name, topic } = await claimChannel(body.peer_id, body.channel);
+      const { id, name, topic } = await claimChannel(body.peer_id, body.channel, body.name);
       const r = claims.claim(body.peer_id, id, { channelName: name });
       if (!r.ok) return r;
       return { ok: true, channel: id, channel_name: name, topic };

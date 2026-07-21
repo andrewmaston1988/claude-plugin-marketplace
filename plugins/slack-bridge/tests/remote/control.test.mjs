@@ -49,22 +49,43 @@ async function startControl(t, opts = {}) {
   return { server, port, claims, call, get };
 }
 
-test("/claim with no channel creates a #ln-<short> channel, sets topic, records claim", async (t) => {
+test("/claim with no channel + no name creates a #rc-<peer-id-short> channel, sets topic, records claim", async (t) => {
   const web = makeWeb();
   const { call, claims } = await startControl(t, { web });
   const r = await call("/claim", { peer_id: "peerA" });
   assert.equal(r.status, 200);
   assert.equal(r.body.ok, true);
   assert.equal(r.body.channel, "C-new");
-  assert.equal(r.body.channel_name, "ln-peer");
+  assert.equal(r.body.channel_name, "rc-peer");
   const createCall = web.calls.find(([c]) => c === "conversationsCreate");
   assert.ok(createCall, "must call conversations.create");
-  assert.equal(createCall[1].name, "ln-peer");
+  assert.equal(createCall[1].name, "rc-peer");
   const topicCall = web.calls.find(([c]) => c === "conversationsSetTopic");
   assert.ok(topicCall, "must set the topic");
   assert.equal(topicCall[1].channel, "C-new");
   // claim recorded against the created channel id
   assert.equal(claims.get("C-new").peer_id, "peerA");
+});
+
+test("/claim with a name creates a #rc-<name-slug> channel describing the context", async (t) => {
+  const web = makeWeb();
+  const { call, claims } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "Slack Remote Setup!" });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.channel_name, "rc-slack-remote-setup");
+  const createCall = web.calls.find(([c]) => c === "conversationsCreate");
+  assert.ok(createCall, "must call conversations.create");
+  assert.equal(createCall[1].name, "rc-slack-remote-setup");
+  assert.equal(claims.get("C-new").peer_id, "peerA");
+});
+
+test("/claim with an empty/whitespace name falls back to the peer-id fragment", async (t) => {
+  const web = makeWeb();
+  const { call } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerA", name: "   " });
+  assert.equal(r.body.ok, true);
+  assert.equal(r.body.channel_name, "rc-peer");
 });
 
 test("/claim with a channel joins the existing channel instead of creating", async (t) => {

@@ -216,7 +216,7 @@ export async function runWizard({ paths, log }) {
       config.remote = config.remote ?? {};
       const tokRaw = await ask("Control shared-secret token (blank = generate one): ");
       config.remote.controlToken = tokRaw.trim() || randomBytes(24).toString("hex");
-      const scopesChoice = await ask("Did you add channels:write + channels:manage scopes (lets /slack-remote create a #ln- channel)? [y/N] ");
+      const scopesChoice = await ask("Did you add channels:write + channels:manage scopes (lets /slack-remote create a #rc-<context> channel)? [y/N] ");
       config.remote.createChannels = scopesChoice.trim().toLowerCase().startsWith("y");
       writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
       say(`✓ remote.controlToken written (${config.remote.createChannels ? "channel create enabled" : "DM-seize default — no new scopes needed"})`);
