@@ -8,6 +8,7 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 import { resolveOwnStatePath, isMeaningfulState } from './lib/paths.mjs';
+import { SKILL_ID, SKILL_DISAMBIGUATION } from './lib/skill-ref.mjs';
 
 const MARKER = path.join(os.homedir(), '.claude', '.compact_just_ran');
 // Read this much from the end of the JSONL — enough to find the last user/assistant
@@ -87,7 +88,7 @@ export function buildSkeleton(entries, trigger, sid, cwd, size) {
   const lines = [
     `# STATE.md (auto-snapshot before ${trigger} compaction at ${ts})`,
     '',
-    '_Skeletal backstop written by `pre-compact-snapshot.mjs`. Invoke the `checkpoint` skill after compaction to reconcile it into a rich version._',
+    `_Skeletal backstop written by \`pre-compact-snapshot.mjs\`. After compaction, call the Skill tool with skill="${SKILL_ID}" to reconcile it into a rich version. ${SKILL_DISAMBIGUATION}_`,
     '',
     '## Session',
     `- session_id: \`${sidShort}\``,

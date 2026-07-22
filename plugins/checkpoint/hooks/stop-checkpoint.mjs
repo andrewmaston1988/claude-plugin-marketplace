@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 import {
   STATE_DB, readJSON, writeJSON, getSessionState, resolveOwnStatePath,
 } from './lib/paths.mjs';
+import { SKILL_ID, SKILL_DISAMBIGUATION } from './lib/skill-ref.mjs';
 
 const SETTINGS = path.join(os.homedir(), '.claude', 'settings.json');
 
@@ -53,10 +54,10 @@ export function buildStopNudge({ edits, commits }) {
     ? `${commits} commit${commits === 1 ? '' : 's'} and ${edits} file edit${edits === 1 ? '' : 's'}`
     : `${edits} file edits`;
   return `A batch of substantial work just finished (${signals} since the last checkpoint) and no `
-    + `STATE.md captures it. If this completed a significant feature or milestone, invoke the `
-    + `**checkpoint** skill now and write up what was completed — the completion write-up is the `
-    + `most valuable handover a fresh session can inherit. If the work is still mid-flight or `
-    + `nothing significant landed, just stop.`;
+    + `STATE.md captures it. If this completed a significant feature or milestone, call the Skill `
+    + `tool with skill="${SKILL_ID}" now and write up what was completed — the completion write-up `
+    + `is the most valuable handover a fresh session can inherit. If the work is still mid-flight `
+    + `or nothing significant landed, just stop. ${SKILL_DISAMBIGUATION}`;
 }
 
 // Epoch ms of the UTC stamp embedded in a STATE filename; 0 if not a STATE name.

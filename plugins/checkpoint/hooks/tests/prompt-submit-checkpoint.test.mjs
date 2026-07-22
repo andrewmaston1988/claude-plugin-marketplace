@@ -25,7 +25,10 @@ test('resolveUtilisation: falls back to bytes when no usage', () => {
 
 test('buildCheckpointNudge frames a handover, not a stop-work order', () => {
   const note = buildCheckpointNudge(87);
-  assert.match(note, /\*\*checkpoint\*\* skill/i);
+  // Must name the qualified skill id, not bare "checkpoint" — bare collides with
+  // the CLI's built-in checkpoint/rewind and agents reach for that instead.
+  assert.match(note, /skill="checkpoint:checkpoint"/);
+  assert.match(note, /not the built-in checkpoint\/rewind/i);
   assert.match(note, /87%/);
   assert.match(note, /handover/i);
   assert.match(note, /no need to stop/i);
