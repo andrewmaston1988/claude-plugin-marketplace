@@ -41,7 +41,7 @@ export const TOOLS = [
   {
     name: "send_message",
     description:
-      "Send a message to another Claude Code instance by peer ID. The message will be pushed into their session immediately via channel notification.",
+      "Send a message to another Claude Code instance by peer ID. Delivery is not instant: it surfaces as a channel notification at the peer's next turn boundary, so a peer sitting idle at its prompt will not see it until it next runs.",
     inputSchema: {
       type: "object",
       properties: {
@@ -75,7 +75,7 @@ export const TOOLS = [
   {
     name: "check_messages",
     description:
-      "Manually check for new messages from other Claude Code instances. Messages are normally pushed automatically via channel notifications, but you can use this as a fallback.",
+      "Retrieve messages held for you by the broker. Use this when you expect a reply that has not appeared: a channel notification pushed while your session was idle can be missed, and this is the only way to recover it. May re-show a message you already saw.",
     inputSchema: {
       type: "object",
       properties: {},
@@ -229,10 +229,11 @@ export function createPeersServer({
     async check_messages() {
       if (!myId) return text("Not registered with broker yet", true);
       try {
-        const result = await brokerFetch("/poll-messages", { id: myId });
+        const result = await brokerFetch("/take-messages", { id: myId });
         if (result.messages.length === 0) return text("No new messages.");
         const lines = result.messages.map((m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`);
-        return text(`${result.messages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`);
+        return text(`${result.messages.length} message(s):\n\n${lines.join("\n\n---\n\n")}`
+          + `\n\n(Any of these may already have appeared as a channel notification — reply once.)`);
       } catch (e) {
         return errText("Error checking messages", e);
       }

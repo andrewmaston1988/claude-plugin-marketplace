@@ -6,6 +6,10 @@ const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 // Ad-hoc sender ids arrive from outside the register flow — constrain them.
 const ADHOC_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const ADHOC_REAP_MS = 60 * 60 * 1000;
+// A pushed message is kept so check_messages can still find it: the push is a
+// notification with no ack, so "the model saw it" is unknowable. Backstop only —
+// reaping the peer drops its messages first in the normal case.
+const RETAIN_DELIVERED_MS = 24 * 60 * 60 * 1000;
 
 const MAX_BODY_BYTES = 1_000_000;
 
@@ -50,13 +54,19 @@ export function createBroker({
 
   function reap(id) {
     delete state.peers[id];
-    state.messages = state.messages.filter((m) => !(m.to_id === id && !m.delivered));
+    state.messages = state.messages.filter((m) => m.to_id !== id);
+  }
+
+  function purgeExpired() {
+    const cutoff = _now().getTime() - RETAIN_DELIVERED_MS;
+    state.messages = state.messages.filter((m) => !m.delivered || new Date(m.sent_at).getTime() >= cutoff);
   }
 
   function reapDead() {
     for (const peer of Object.values(state.peers)) {
       if (!isAlive(peer)) reap(peer.id);
     }
+    purgeExpired();
   }
 
   const handlers = {
@@ -140,10 +150,26 @@ export function createBroker({
       return { ok: true };
     },
 
+    // Push path. Returns what has not been pushed yet and marks it pushed, but
+    // keeps it: a channel notification fires into a session that may be idle and
+    // never render it, and nothing acks back, so deleting here loses the message
+    // outright. /take-messages is what actually removes.
     "/poll-messages"(body) {
       const mine = state.messages.filter((m) => m.to_id === body.id && !m.delivered);
       for (const msg of mine) msg.delivered = true;
-      state.messages = state.messages.filter((m) => !m.delivered);
+      const peer = state.peers[body.id];
+      if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
+      purgeExpired();
+      persist();
+      return { messages: mine };
+    },
+
+    // Consume path, driven by the check_messages tool. Returns everything held
+    // for the peer — pushed or not — and removes it. A message already rendered
+    // comes back one extra time; that beats the alternative of never seeing it.
+    "/take-messages"(body) {
+      const mine = state.messages.filter((m) => m.to_id === body.id);
+      state.messages = state.messages.filter((m) => m.to_id !== body.id);
       const peer = state.peers[body.id];
       if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
       persist();
