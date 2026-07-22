@@ -16,7 +16,7 @@ Peer discovery and real-time messaging between Claude Code sessions on one machi
 | `list_peers` | Discover other sessions (`scope`: `machine` / `directory` / `repo`) |
 | `send_message` | Message a peer by id — lands in their console immediately |
 | `set_summary` | Publish a 1–2 sentence "what I'm working on" |
-| `check_messages` | Manual poll fallback |
+| `check_messages` | Recover messages the broker is holding — including ones already pushed as a notification, so a push missed while idle is not lost |
 
 ## CLI
 
