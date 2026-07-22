@@ -1,7 +1,7 @@
 ---
 name: checkpoint
 description: >-
-  Use when capturing a durable session handoff to STATE.md so work resumes cleanly in a fresh session. Triggers — "/checkpoint", "snapshot state", "save a handoff", "checkpoint before I stop", or the UserPromptSubmit hook's context-pressure nudge. SKIP for: trivial/short sessions where STATE.md adds nothing; routine `/compact`.
+  Use when capturing a durable session handoff to STATE.md so work resumes cleanly in a fresh session. Triggers — "/checkpoint", "/checkpoint:checkpoint", "snapshot state", "save a handoff", "checkpoint before I stop", or any checkpoint-plugin hook nudge (context pressure, post-compact pickup, Stop-hook write-up). SKIP for: trivial/short sessions where STATE.md adds nothing; routine `/compact`; the CLI's built-in checkpoint/rewind feature, which is unrelated to this skill.
 ---
 
 # checkpoint — durable session handoff

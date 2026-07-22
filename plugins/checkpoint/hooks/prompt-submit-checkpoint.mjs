@@ -15,6 +15,7 @@ import {
 import {
   contextWindowFor, contextUtilization, decideCheckpointNudge, readRecentAssistantTurns,
 } from './lib/context.mjs';
+import { SKILL_ID, SKILL_DISAMBIGUATION } from './lib/skill-ref.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.resolve(HERE, 'templates');
@@ -51,8 +52,9 @@ export function resolveUtilisation(recentTurns, transcriptBytes) {
 }
 
 export function buildCheckpointNudge(pct) {
-  return `Context is ~${pct}% full. No need to stop — at your next natural pause, invoke the `
-    + `**checkpoint** skill to write a STATE.md handover so a fresh session can pick up cleanly.`;
+  return `Context is ~${pct}% full. No need to stop — at your next natural pause, call the Skill `
+    + `tool with skill="checkpoint:checkpoint" to write a STATE.md handover so a fresh session can `
+    + `pick up cleanly. ${SKILL_DISAMBIGUATION}`;
 }
 
 function emitContext(ctx) {
@@ -164,8 +166,8 @@ async function main() {
   if (fs.existsSync(MARKER)) {
     try { fs.unlinkSync(MARKER); } catch {}
     const note = '**Compaction just happened.** A skeletal STATE.md was written by the PreCompact '
-      + 'backstop. While your post-compact summary is still in context, invoke the **checkpoint** '
-      + 'skill to reconcile it into a richer STATE.md.';
+      + 'backstop. While your post-compact summary is still in context, call the Skill tool with '
+      + `skill="${SKILL_ID}" to reconcile it into a richer STATE.md. ${SKILL_DISAMBIGUATION}`;
     ctx = ctx ? `${ctx}\n\n${note}` : note;
   }
 

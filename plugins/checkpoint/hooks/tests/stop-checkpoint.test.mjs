@@ -60,7 +60,8 @@ test('decideStopNudge: cooldown suppresses a second nudge', () => {
 
 test('buildStopNudge: asks for judgment and a completion write-up, does not order a checkpoint unconditionally', () => {
   const note = buildStopNudge({ edits: 12, commits: 1 });
-  assert.match(note, /\*\*checkpoint\*\* skill/i);
+  assert.match(note, /skill="checkpoint:checkpoint"/);
+  assert.match(note, /not the built-in checkpoint\/rewind/i);
   assert.match(note, /significant/i);
   assert.match(note, /completed/i);
   assert.match(note, /just stop|simply stop/i); // the not-significant branch must be explicit
