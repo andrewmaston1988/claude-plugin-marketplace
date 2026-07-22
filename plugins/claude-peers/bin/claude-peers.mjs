@@ -74,6 +74,14 @@ async function health(port, timeoutMs = 2000) {
     return; // stays alive on stdin + timers
   }
 
+  if (cmd === "stop-hook") {
+    const { runStopHook } = await import("../src/hooks/stop.mjs");
+    const decision = await runStopHook({ config });
+    if (decision) process.stdout.write(JSON.stringify(decision));
+    setTimeout(() => process.exit(0), 150);
+    return;
+  }
+
   if (cmd === "broker" && sub === "run") {
     const { createBroker } = await import("../src/broker/index.mjs");
     const { createLogger } = await import("../src/log.mjs");
