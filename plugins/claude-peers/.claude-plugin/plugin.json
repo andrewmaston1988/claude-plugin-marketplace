@@ -13,5 +13,11 @@
     "mcp",
     "messaging",
     "multi-session"
-  ]
+  ],
+  "mcpServers": {
+    "claude-peers": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/claude-peers.mjs", "mcp"]
+    }
+  }
 }

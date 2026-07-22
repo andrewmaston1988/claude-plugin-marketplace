@@ -6,7 +6,7 @@ Peer discovery and real-time messaging between Claude Code sessions on one machi
 
 | Piece | What it does |
 |---|---|
-| `bin/claude-peers.mjs mcp` | Per-session stdio MCP server — registers with the broker, polls for inbound messages, pushes them as channel notifications. Wire it as a **user-scoped MCP server**: `claude mcp add --scope user claude-peers -- node <install-path>/bin/claude-peers.mjs mcp`. (Manifest `mcpServers` wiring is deliberately absent: as of 2026-07-16 Claude Code does not render `notifications/claude/channel` from plugin-declared MCP servers — verified byte-identical output rendered from a user-scoped server but not a plugin-declared one. Restore the manifest key once the harness renders plugin-server channel notifications, and drop the manual entry.) |
+| `bin/claude-peers.mjs mcp` | Per-session stdio MCP server — registers with the broker, polls for inbound messages, pushes them as channel notifications. Wired automatically by the plugin manifest. Rendering `<channel>` blocks additionally requires the plugin in the session's `--dangerously-load-development-channels` allowlist. |
 | Broker (`broker run`) | Singleton HTTP server on `127.0.0.1:7899` — peer registry + message queue, state in an atomic-write JSON file. Auto-started by the first session that needs it; **self-heals**: if it dies mid-session, the next broker call respawns it and retries. |
 
 ## MCP tools
