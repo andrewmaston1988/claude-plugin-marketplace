@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 const FAMILY_FILES = [
   ['sonnet-5', 'sonnet-5.md'],
   ['opus-4-8', 'opus-4-8.md'],
+  ['opus-5', 'opus-5.md'],
 ];
 
 // settings.json model aliases -> representative full IDs, for the first

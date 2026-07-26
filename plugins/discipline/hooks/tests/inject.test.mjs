@@ -1,6 +1,7 @@
 // Fixture tests for inject.mjs:
-// inject on sonnet-5 / opus-4-8, skip fable / sonnet-4-5 / opus-4-7 (family
-// collision), kill switch, keepalive prompt, missing transcript, garbage stdin.
+// inject on sonnet-5 / opus-4-8 / opus-5, skip fable / sonnet-4-5 / opus-4-7
+// (family collision), kill switch, keepalive prompt, missing transcript,
+// garbage stdin.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -50,6 +51,14 @@ test('opus-4-8 -> pack injected', () => {
   assert.equal(code, 0);
   assert.match(out, /<discipline-pack model="claude-opus-4-8" v="1">/);
   assert.match(out, /Proof means the live layer/);
+});
+
+test('opus-5 -> pack injected (terseness only)', () => {
+  const { code, out } = run({ prompt: 'fix the bug', transcript_path: transcript('claude-opus-5') });
+  assert.equal(code, 0);
+  assert.match(out, /<discipline-pack model="claude-opus-5" v="1">/);
+  assert.match(out, /Lead with the result/);
+  assert.doesNotMatch(out, /Proof means the live layer/); // opus-4-8 pack must not leak in
 });
 
 test('opus-4-7 -> empty (no family collision)', () => {
