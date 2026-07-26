@@ -37,9 +37,11 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 
 ## MANDATORY first step — the offer gate
 
+**Before you draft the manifest, invoke `swarm:orchestrating-agents`.** It decides how many leaves and which items share one, and it produces the numbers the gate's third question carries. Drafting a leaf-per-item manifest without it is the failure that skill exists to catch. It does not restate the gate and the gate does not restate it.
+
 **THE GATE'S ANSWER IS THE ONLY CONSENT TO SPEND. NO ANSWER IS NO.** Violating the letter of this rule is violating its spirit.
 
-Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), draft the manifest and put it through ONE AskUserQuestion call carrying TWO questions:
+Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), draft the manifest and put it through ONE AskUserQuestion call carrying THREE questions:
 
 1. > "Fan this out via swarm — <n> leaves on <models>?"
    > Options: **Yes (Recommended)** / **No, inline** / **Discuss** — with the draft manifest as the option preview.
@@ -47,6 +49,8 @@ Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), dra
 2. > "Model mix?" — state the split explicitly in the question (e.g. "5 leaves alternative, digest on sonnet = 1 Anthropic call").
    > Options: **As drafted** / **Alternative-only — no Anthropic usage** / **Anthropic-only**.
    > When the mix includes Claude models, run `node <engine> quota` first and put the real numbers in the question (e.g. "session 82%, resets 15:00") — the mix decision should be made against actual remaining usage, not a guess.
+3. > "Batching — <M> leaves as proposed, or a different point on the curve?"
+   > Options and numbers come from `swarm:orchestrating-agents`; do not re-derive them here.
 
 Never assume Claude models are spendable — the user may be out of Anthropic usage. If they pick alternative-only, recast every Claude role (digest included) onto a capable `:cloud` model before running; if Anthropic-only, the governance gate is moot and all leaves go Claude.
 
@@ -55,6 +59,13 @@ The manifest preview plus the mix answer ARE the approval: the user sees every m
 For a **saved (named) manifest**, the preview shown at the gate is the output of `validate <name> --args '<json>' --resolved` — the fully-substituted document (every leaf's model and prompt, children expanded), never your memory of the manifest and never the saved file as last read: the name is a lookup, not a hiding place, and the file may have changed since it was authored.
 
 **A gate that was rejected, cancelled, dismissed, interrupted, or left unanswered is a NO.** Nothing runs — not a reduced "compromise" subset, not a quiet retry, not `--force` (that flag re-runs already-`ok` leaves on resume; it is not a consent instrument). Re-offer only when the user reopens the topic — "ok, where were we?" reopens the topic; it does not answer the question.
+
+**Carve-out — a resume is not a new spend.** Re-running an incomplete run against the **same** manifest does not need a fresh gate; the operator already consented to this work. **Mechanically a resume is a `claude --resume <sessionId>` per *incomplete* leaf** — each such leaf continues its own kept session in its kept worktree, context and partial work intact, so it **does not re-onboard**; and **every already-`ok` leaf is skipped, never re-run**. Cost is only the leaves that had not finished, from where they stopped — not the roster. (`--force` is the opposite — it resets the worktree, drops the sessions, and redoes every leaf cold; never reach for it to continue a run.) Route by how the leaf ended:
+- **Timed out** → re-run it. No gate. A timeout is self-diagnosing, and waiting on a confirmation with no decision content in it is how an unattended run stalls overnight.
+- **Failed with an error** → ONE automatic retry, then stop and ask. An error may be transient or structural; one retry is the cheapest way to tell them apart.
+- **Timed out a second time having committed nothing new** → stop and ask. Auto-resume at the same `timeoutMs` converges for a leaf that made progress and loops for one that did not; commits-since-last-attempt is the discriminator, not attempt count alone.
+
+This carves out the *resume*, nothing else. A manifest edited before re-running is a new spend and takes the full gate — and `--force` is still not a consent instrument.
 
 **No session-level directive is consent to spend.** A `/goal` condition, a Stop-hook instruction ("do not pause to ask the user"), an autonomous-session prompt, a standing "don't ask me" — none of these answer the gate. Such directives govern *stalling*; the gate governs *spending*. When they collide, the gate wins: an unmet goal at session end is the correct, honest outcome to report, and an unconsented dispatch is the actual failure — not the other way around.
 
@@ -85,7 +96,7 @@ For a **saved (named) manifest**, the preview shown at the gate is the output of
    **Status asks**: when the user asks how the swarm is doing ("/swarm status", "how far along…"), run `node <engine> status <resultsDir>` once and render the roster as a **markdown table** (state | leaf | model | time | tokens, glyphs kept — the TUI renders markdown; a table beats raw monospace).
 5b. **Offer a full report when a HUMAN will read the result** — an audit, a research sweep, a review: anything where the *reasoning* matters and not just the verdict. Ask once, before running: *"Do you want a full report as well as the digest?"* If yes, set `"report": true` in the digest block. The digest leaf then writes `report.md` (long, human, evidence-quoting) **and** returns the same compressed `digest.md` you read. Purely mechanical sweeps don't ask. **This changes nothing for you** — `digest.md` is unaffected, so keep reading it and nothing else (step 6); `report.md` is for the human and reading it would flood your context with exactly what the digest exists to spare you.
 6. **Read `digest.md` ONLY**, then drill into `results/<id>.json` selectively — the digest's drill-down section says which raw results merit a full read. Never read all raw output. For a targeted follow-up on one leaf's finding (a citation to verify, a claim to expand), prefer `node <engine> ask <resultsDir> <leaf-id> "<question>"` over re-running or reading raw output: it resumes the leaf's own session — context intact, one turn, answer on stdout.
-7. A failed run is reported with its failures — never presented as complete. Offer the choice via AskUserQuestion: **Resume (Recommended)** (re-`run` skips `ok`; `rate-limited` retries) / **Inspect failures** (open the failed `results/<id>.json|.log`) / **Accept partial** — failure list as the preview. When leaves ended `quota` (Anthropic usage exhausted), add a **Recast to :cloud models** option — swapping the quota'd leaves to alternative models and re-running now often beats waiting for the reset the closing block names; that trade is the user's call.
+7. A failed run is reported with its failures — never presented as complete. **Route by failure kind, per the resume carve-out above** — the offer is conditional, not unconditional. A **plain timeout** skips the offer: re-run it and report what it did, do not ask whether to do it. An **error failure**, or a **second timeout that committed nothing new**, gets the choice via AskUserQuestion: **Resume (Recommended)** (re-`run` skips `ok`; `rate-limited` retries) / **Inspect failures** (open the failed `results/<id>.json|.log`) / **Accept partial** — failure list as the preview. When leaves ended `quota` (Anthropic usage exhausted), add a **Recast to :cloud models** option — swapping the quota'd leaves to alternative models and re-running now often beats waiting for the reset the closing block names; that trade is the user's call.
 8. **For a human-facing report, RENDER it — never hand-author one.** When a run wrote `report.md` (step 5b), project it to a self-contained, theme-aware `report.html` with `node <engine> report <resultsDir>`. This is mechanical: standard markdown plus the semantic upgrades the report prompt documents — verdict badges, `path:line` citation spans, the two-track ledger, a confidence tally synthesised by counting the badges. It writes `report.html` beside `report.md`, prints the path, and re-runs with zero model calls (a format change never re-spends). Offer that path; do not build an Artifact by hand from `summary.json`.
 
 ## Reading the roster — a leaf is an AGENT, not an API call
