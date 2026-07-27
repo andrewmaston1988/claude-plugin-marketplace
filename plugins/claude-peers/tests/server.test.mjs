@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { createPeersServer, TOOLS } from '../src/mcp/server.mjs';
+import { createPeersServer, TOOLS, INSTRUCTIONS, POLLING_INSTRUCTIONS } from '../src/mcp/server.mjs';
 
 const FIXTURE = JSON.parse(fs.readFileSync(new URL('./fixtures/initialize.json', import.meta.url), 'utf8'));
 const CONFIG = { port: 65001, pollIntervalMs: 1000, heartbeatIntervalMs: 15000 };
@@ -13,7 +13,7 @@ function okJson(value) {
   return { ok: true, status: 200, json: async () => value, text: async () => JSON.stringify(value) };
 }
 
-function makeServer({ fetchImpl, spawnCalls = [], onSpawn } = {}) {
+function makeServer({ fetchImpl, spawnCalls = [], onSpawn, channels = true } = {}) {
   const output = new PassThrough();
   const written = [];
   output.on('data', (c) => written.push(c.toString()));
@@ -30,6 +30,7 @@ function makeServer({ fetchImpl, spawnCalls = [], onSpawn } = {}) {
     _spawn,
     _pid: 4242,
     _cwd: 'C:/work/repo',
+    _detectChannels: () => channels,
   });
   const notifications = () => written.join('').split('\n').filter(Boolean).map(JSON.parse);
   return { server, notifications, spawnCalls };
@@ -49,6 +50,36 @@ test('initialize response matches the fixture captured from the live upstream se
 
 // Review finding #5: never echo an arbitrary client protocolVersion — we
 // implement 2024-11-05 semantics and must say so when asked for anything else.
+// A session that cannot render <channel> blocks gets nothing pushed to it, so the
+// handshake is the only chance to tell it to poll instead.
+test('initialize appends the polling instructions when channels are unavailable', async () => {
+  const { server } = makeServer({ channels: false });
+  const result = await server._onRequest('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+  assert.equal(result.instructions, `${INSTRUCTIONS}\n\n${POLLING_INSTRUCTIONS}`);
+  assert.match(result.instructions, /CronCreate\(cron="\*\/3 \* \* \* \*"/);
+  assert.match(result.instructions, /check_messages/);
+});
+
+test('initialize omits the polling instructions when channels are available', async () => {
+  const { server } = makeServer({ channels: true });
+  const result = await server._onRequest('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+  assert.equal(result.instructions.includes('CronCreate'), false);
+});
+
+test('channel detection runs once per session, not once per handshake', async () => {
+  let calls = 0;
+  const server = createPeersServer({
+    config: CONFIG,
+    input: new PassThrough(),
+    output: new PassThrough(),
+    _fetch: async () => okJson({}),
+    _detectChannels: () => { calls++; return false; },
+  });
+  await server._onRequest('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+  await server._onRequest('initialize', { protocolVersion: '2024-11-05', capabilities: {} });
+  assert.equal(calls, 1);
+});
+
 test('initialize with an unsupported protocolVersion responds with the version we implement', async () => {
   const { server } = makeServer();
   const result = await server._onRequest('initialize', { protocolVersion: '2099-12-31', capabilities: {}, clientInfo: { name: 'probe', version: '0' } });

@@ -6,8 +6,16 @@ Peer discovery and real-time messaging between Claude Code sessions on one machi
 
 | Piece | What it does |
 |---|---|
-| `bin/claude-peers.mjs mcp` | Per-session stdio MCP server — registers with the broker, polls for inbound messages, pushes them as channel notifications. Wired automatically by the plugin manifest. Rendering `<channel>` blocks additionally requires the plugin in the session's `--dangerously-load-development-channels` allowlist. |
+| `bin/claude-peers.mjs mcp` | Per-session stdio MCP server — registers with the broker, polls for inbound messages, pushes them as channel notifications. Wired automatically by the plugin manifest. |
 | Broker (`broker run`) | Singleton HTTP server on `127.0.0.1:7899` — peer registry + message queue, state in an atomic-write JSON file. Auto-started by the first session that needs it; **self-heals**: if it dies mid-session, the next broker call respawns it and retries. |
+
+## Delivery: push or poll
+
+Rendering a `<channel>` block requires this plugin in the session's `--dangerously-load-development-channels` allowlist. A session launched without it — commonly one routed through a third-party provider — silently drops every push aimed at it.
+
+At handshake the server walks its process ancestry to the owning `claude` command and reads that flag off its argv. Allowlisted → the push instructions ship unchanged. Not allowlisted → the handshake additionally instructs the session to `CronCreate` a `*/3 * * * *` job calling `check_messages`, which drains the broker's held queue. Detection that fails for any reason resolves to *not allowlisted*: a needless poll costs a turn every three minutes, a missed push costs the message.
+
+The flag is the only signal read. If a session that cannot render channels is nonetheless launched with the flag, it is indistinguishable from one that can, and it gets the push instructions.
 
 ## MCP tools
 
