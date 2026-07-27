@@ -1,6 +1,7 @@
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { createRpcEndpoint } from "./jsonrpc.mjs";
+import { detectChannelsEnabled } from "../session-flags.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 export const SERVER_VERSION = "0.2.0";
@@ -19,6 +20,21 @@ Available tools:
 - check_messages: Manually check for new messages
 
 When you start, proactively call set_summary to describe what you're working on. This helps other instances understand your context.`;
+
+// Appended only when the push path cannot reach this session. Concrete tool calls,
+// not prose: the weakest model that reads this must get a working cron in one pass.
+export const POLLING_INSTRUCTIONS = `MESSAGE DELIVERY IN THIS SESSION: push is UNAVAILABLE. This session was not launched with \`--dangerously-load-development-channels plugin:claude-peers\`, so a <channel source="claude-peers"> block will never render for you. Ignore the paragraph above about responding to channel messages — you must poll instead, or you will never see a peer message.
+
+Set up the poll now, before your other startup work:
+
+1. If the CronCreate tool's schema is not loaded, load it first: ToolSearch(query="select:CronCreate")
+2. CronCreate(cron="*/3 * * * *", prompt="Call check_messages. If it returns messages, respond to them now with send_message, then resume what you were doing.", recurring=true)
+
+That checks every 3 minutes. The job lives only in this session and expires after 7 days — create it again in your next session. Between ticks, call check_messages directly whenever you are waiting on a peer's reply.`;
+
+export function buildInstructions(channelsAvailable) {
+  return channelsAvailable ? INSTRUCTIONS : `${INSTRUCTIONS}\n\n${POLLING_INSTRUCTIONS}`;
+}
 
 export const TOOLS = [
   {
@@ -103,12 +119,14 @@ export function createPeersServer({
   _pid = process.pid,
   _cwd = process.cwd(),
   _setInterval = setInterval,
+  _detectChannels = detectChannelsEnabled,
 } = {}) {
   const brokerUrl = `http://127.0.0.1:${config.port}`;
   const binPath = fileURLToPath(new URL("../../bin/claude-peers.mjs", import.meta.url));
 
   let myId = null;
   let myGitRoot = null;
+  let channelsAvailable; // memoised: reading the process table is not free
 
   async function isBrokerAlive() {
     try {
@@ -244,12 +262,14 @@ export function createPeersServer({
 
   async function onRequest(method, params) {
     if (method === "initialize") {
+      channelsAvailable ??= _detectChannels();
+      if (!channelsAvailable) log("channels unavailable — instructing this session to poll");
       return {
         // we implement 2024-11-05 semantics — never echo an arbitrary requested version
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { experimental: { "claude/channel": {} }, tools: {} },
         serverInfo: { name: "claude-peers", version: SERVER_VERSION },
-        instructions: INSTRUCTIONS,
+        instructions: buildInstructions(channelsAvailable),
       };
     }
     if (method === "tools/list") return { tools: TOOLS };
