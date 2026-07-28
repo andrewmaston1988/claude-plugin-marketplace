@@ -18,7 +18,7 @@ import {
   createStreamParser, createUsageAccumulator, pickFinalTokens,
   addTokens, emptyTokens, tokenTotal,
 } from "./stream.mjs";
-import { createSnapshotWriter } from "./ui.mjs";
+import { createSnapshotWriter, liveViewLines } from "./ui.mjs";
 import { matchQuota, parseQuotaReset, checkQuota, DEFAULT_QUOTA_PATTERNS } from "./quota.mjs";
 import { evalExpr, evalBool } from "./expr.mjs";
 import { validateValue } from "./schema.mjs";
@@ -45,6 +45,7 @@ export function makeDefaultIo() {
     now: () => Date.now(),
     stdout: (line) => process.stdout.write(line + "\n"),
     snapshot: createSnapshotWriter(),
+    maxLines: liveViewLines(),
     env: process.env,
   };
 }
@@ -440,6 +441,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       now: io.now(),
       startedMs: runStartMs,
       quietWarnMs: (cfg.quietWarnSecs ?? 60) * 1000,
+      maxLines: io.maxLines ?? null,
     }));
   };
 

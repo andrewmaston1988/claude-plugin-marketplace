@@ -135,6 +135,77 @@ test("renderRoster: running rows show activity; stale rows warn quiet", () => {
   match(block, /✓ {2}done\s+haiku\s+5s\s+—$/m); // terminal rows never show activity
 });
 
+// The harness live view is a 9-line window: a taller roster loses its header
+// and top rows off the top, which is how a 15-leaf run came to show nothing but
+// its last few pending leaves.
+const leaves = (n, state = "pending") =>
+  Array.from({ length: n }, (_, i) => ({ id: `leaf-${i + 1}`, model: "haiku", state }));
+
+test("renderRoster: 7 leaves fill a 9-line budget exactly, none collapsed", () => {
+  const block = renderRoster({ title: "t", tasks: leaves(7), now: NOW, startedMs: NOW, maxLines: 9 });
+  const lines = block.split("\n");
+  equal(lines.length, 9); // header + 7 rows + footer
+  ok(!lines.includes(""));
+  for (let i = 1; i <= 7; i++) ok(block.includes(`leaf-${i}`), `leaf-${i} must keep its row`);
+  ok(!block.includes("…"), "nothing collapsed at exactly the budget");
+});
+
+// Height must be predictable for the budget we render to, so spacers go under
+// ANY budget — the windowed view renders blank lines inconsistently.
+test("renderRoster: a budget always costs the spacers, even with rows to spare", () => {
+  const block = renderRoster({ title: "t", tasks: leaves(4), now: NOW, startedMs: NOW, maxLines: 9 });
+  const lines = block.split("\n");
+  equal(lines.length, 6, block); // header + 4 rows + footer
+  ok(!lines.includes(""), "no spacer may survive a budget");
+  for (let i = 1; i <= 4; i++) ok(block.includes(`leaf-${i}`));
+});
+
+test("renderRoster: over maxLines, watched leaves keep rows and the rest collapse", () => {
+  const tasks = [
+    ...leaves(6),
+    { id: "hot", model: "haiku", state: "running", startedMs: NOW - 3000 },
+    { id: "bad", model: "haiku", state: "failed", durationMs: 1000 },
+  ];
+  const block = renderRoster({ title: "t", tasks, now: NOW, startedMs: NOW, maxLines: 9 });
+  const lines = block.split("\n");
+  equal(lines.length, 9, block);
+  ok(block.includes("hot"), "a running leaf always earns a row");
+  ok(block.includes("bad"), "a failed leaf always earns a row");
+  match(lines.at(-2), /… .*\+\d+ pending/, `expected a collapsed remainder: ${block}`);
+  // the footer counts every leaf, shown or collapsed
+  ok(lines.at(-1).includes("1 failed"), lines.at(-1));
+  ok(lines.at(-1).includes("1 running"), lines.at(-1));
+  ok(lines.at(-1).includes("6 pending"), lines.at(-1));
+});
+
+test("renderRoster: the header still names the FULL task count when leaves collapse", () => {
+  const block = renderRoster({ title: "t", tasks: leaves(15), now: NOW, startedMs: NOW, maxLines: 9 });
+  equal(block.split("\n").length, 9);
+  ok(block.startsWith("swarm · t · 15 tasks · "), block.split("\n")[0]);
+});
+
+// Observed: the first leaf to finish held a row for the whole run while later
+// finishers never got one. Clean finishers must age out by finish time.
+test("renderRoster: a stale clean finisher yields its row to a newer one", () => {
+  const done = (id, finishedAt) => ({ id, model: "haiku", state: "ok", startedMs: finishedAt - 1000, durationMs: 1000 });
+  const tasks = [
+    done("first", NOW - 120000),   // finished long ago
+    done("second", NOW - 90000),
+    done("third", NOW - 60000),
+    done("newest", NOW - 1000),    // just landed
+    ...leaves(8),
+  ];
+  const block = renderRoster({ title: "t", tasks, now: NOW, startedMs: NOW - 120000, maxLines: 6 });
+  ok(block.includes("newest"), `the newest finisher must hold a row:\n${block}`);
+  ok(!block.includes("first"), `the stalest finisher must have aged out:\n${block}`);
+});
+
+test("renderRoster: no maxLines means no clipping, however many leaves", () => {
+  const block = renderRoster({ title: "t", tasks: leaves(15), now: NOW, startedMs: NOW });
+  equal(block.split("\n").length, 19);
+  ok(!block.includes("…"), "an unclipped roster has no overflow line");
+});
+
 test("renderRoster: non-ok terminal states carry a state tag; zero tokens omits total", () => {
   const tasks = [
     { id: "a", model: "haiku", state: "failed", durationMs: 1000 },
