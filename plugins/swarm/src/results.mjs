@@ -117,13 +117,57 @@ function fmtElapsed(ms) {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
 }
 
+// Which leaves earn a row when the roster cannot show them all: the ones being
+// watched, then the ones that went wrong, and only then the settled majority.
+const ROW_PRIORITY = [
+  "running", "retrying", "rate-limited", "quota",
+  "failed", "failed:timeout", "blocked",
+  "ok", "skipped", "pending",
+];
+const rank = (state) => {
+  const i = ROW_PRIORITY.indexOf(state);
+  return i === -1 ? ROW_PRIORITY.length : i;
+};
+
+// A leaf that finished cleanly is news for a moment and clutter thereafter, so
+// clean finishers age out: each new one displaces the stalest. Without this the
+// first leaf to complete holds a row for the entire run.
+const AGES_OUT = new Set(["ok", "skipped"]);
+const finishedMs = (t) =>
+  t.startedMs != null && t.durationMs != null ? t.startedMs + t.durationMs : -Infinity;
+
 // Full-run snapshot. tasks: [{ id, model, state, durationMs?, startedMs?,
 // tokens?, activity?, lastEventMs? }] — durationMs for terminal states,
 // startedMs for running (elapsed ticks against `now`), tokens in the
 // src/stream.mjs shape. Running rows show their latest tool call; one that has
 // been silent longer than quietWarnMs shows a staleness warning instead.
-export function renderRoster({ title, tasks, now, startedMs, quietWarnMs }) {
-  const norm = tasks.map((t) => ({ ...t, model: t.model || "?" }));
+//
+// maxLines caps the rendered height. The Claude Code harness renders the live
+// view through a fixed-height window, so a taller roster loses its header and
+// top rows off the top — a 15-leaf run showed nothing but its last few pending
+// leaves. Any budget costs the blank spacers; past that the leaves worth
+// watching keep their rows and the rest collapse into one count line. Header
+// and footer are never dropped, and the footer counts EVERY leaf, shown or not.
+export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLines }) {
+  const all = tasks.map((t) => ({ ...t, model: t.model || "?" }));
+  // Under a budget the blank spacers always go: the windowed view renders them
+  // inconsistently, so keeping them makes the rendered height unpredictable for
+  // the very budget we are rendering to. Layout is then exactly
+  // header + rows + [overflow] + footer. Leaves collapse only past that.
+  const compact = maxLines != null;
+  const overflows = maxLines != null && all.length + 2 > maxLines;
+  let hidden = [];
+  let norm = all;
+  if (overflows) {
+    // header + footer + the overflow line leave this many rows for leaves
+    const budget = Math.max(1, maxLines - 3);
+    const order = new Map(all.map((t, i) => [t, i]));
+    const ranked = [...all].sort((a, b) =>
+      rank(a.state) - rank(b.state) ||
+      (AGES_OUT.has(a.state) ? finishedMs(b) - finishedMs(a) : 0));
+    norm = ranked.slice(0, budget).sort((a, b) => order.get(a) - order.get(b));
+    hidden = ranked.slice(budget);
+  }
   const activityCell = (t) => {
     if (t.state === "retrying") return t.activity || ""; // the retry/fallback note
     if (t.state !== "running") return "";
@@ -146,7 +190,8 @@ export function renderRoster({ title, tasks, now, startedMs, quietWarnMs }) {
   const durW = width((_, c) => c.dur, 1);
   const tokW = width((_, c) => c.tok, 1);
 
-  const lines = [`swarm · ${title} · ${norm.length} tasks · ${fmtElapsed(now - startedMs)}`, ""];
+  const spacer = compact ? [] : [""];
+  const lines = [`swarm · ${title} · ${all.length} tasks · ${fmtElapsed(now - startedMs)}`, ...spacer];
   norm.forEach((t, i) => {
     const c = cells[i];
     const act = c.act ? `  ${(c.act.startsWith("⚠") ? yellow : dim)(c.act)}` : "";
@@ -156,15 +201,27 @@ export function renderRoster({ title, tasks, now, startedMs, quietWarnMs }) {
     );
   });
 
-  const counts = {};
-  for (const t of norm) {
-    const key = t.state === "failed:timeout" ? "failed" : t.state;
-    counts[key] = (counts[key] || 0) + 1;
+  const tally = (rows) => {
+    const c = {};
+    for (const t of rows) {
+      const key = t.state === "failed:timeout" ? "failed" : t.state;
+      c[key] = (c[key] || 0) + 1;
+    }
+    return c;
+  };
+
+  if (hidden.length) {
+    const h = tally(hidden);
+    const more = FOOTER_ORDER.filter((k) => h[k]).map((k) => `+${h[k]} ${k}`).join(" · ");
+    lines.push(dim(`  … ${more}`));
   }
+
+  // counts and total span EVERY leaf — a collapsed row must not vanish from the tally
+  const counts = tally(all);
   const segments = FOOTER_ORDER.filter((k) => counts[k]).map((k) => paint(k, `${counts[k]} ${k}`));
-  const total = norm.reduce((n, t) => n + tokenTotal(t.tokens), 0);
+  const total = all.reduce((n, t) => n + tokenTotal(t.tokens), 0);
   if (total > 0) segments.push(bold(`${formatTokens(total)} tokens`));
-  lines.push("", `  ${segments.join(dim(" · "))}`);
+  lines.push(...spacer, `  ${segments.join(dim(" · "))}`);
   return lines.join("\n");
 }
 

@@ -19,6 +19,9 @@ export function runCli(args, { cwd, env = {} } = {}) {
       ...process.env,
       PATH: SHIMS + delimiter + process.env.PATH,
       Path: SHIMS + delimiter + (process.env.Path || process.env.PATH),
+      // Pin the append-only stdout contract: the suite may itself be running
+      // inside a repainting harness, whose CLAUDECODE would otherwise leak in.
+      SWARM_REPAINT: "0",
       ...env,
     },
   });
@@ -35,6 +38,7 @@ export function runCliAsync(args, { cwd, env = {} } = {}) {
         ...process.env,
         PATH: SHIMS + delimiter + process.env.PATH,
         Path: SHIMS + delimiter + (process.env.Path || process.env.PATH),
+        SWARM_REPAINT: "0",
         ...env,
       },
     });
