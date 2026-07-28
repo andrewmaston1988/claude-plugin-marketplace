@@ -1,7 +1,10 @@
 // Terminal styling for swarm's stdout. Colour is a TTY-only garnish: when
 // stdout is piped (a session's Bash capture, tests, CI) every helper returns
 // its input verbatim, so the stdout CONTRACT stays byte-identical and parsers
-// never see ANSI. NO_COLOR (https://no-color.org) is honoured on TTYs too.
+// never see colour. NO_COLOR (https://no-color.org) is honoured on TTYs too.
+// Cursor control is decided separately and CAN reach a pipe — see
+// repaintsInPlace below; SWARM_REPAINT=0 is the switch for a parser that must
+// see no ANSI at all.
 
 const on = () => process.stdout.isTTY && !process.env.NO_COLOR;
 
@@ -47,11 +50,11 @@ export function repaintsInPlace({ isTTY, env = process.env } = {}) {
 
 // The harness live view is a fixed-height window onto the buffer — 9 rows,
 // measured 2026-07-28. Erasing exactly what we wrote keeps net growth at zero,
-// so the block repaints in place; a block TALLER than the window would lose its
-// header and top rows off the top, so renderRoster compacts to this budget
-// (see maxLines there). Short blocks are left short — rows above the roster
-// belong to whatever printed before it, and are the operator's context, not ours
-// to blank out.
+// so the block repaints in place, but the window height cuts both ways:
+//   - a TALLER block loses its header and top rows off the top
+//     → renderRoster compacts to this budget (see maxLines there)
+//   - a SHORTER block leaves rows above it that the erase never rewrites, so
+//     they freeze → the writer fills the block out to this height
 export const HARNESS_WINDOW_LINES = 9;
 
 function windowLines(env) {

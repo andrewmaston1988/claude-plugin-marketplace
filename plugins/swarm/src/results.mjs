@@ -145,9 +145,9 @@ const finishedMs = (t) =>
 // maxLines caps the rendered height. The Claude Code harness renders the live
 // view through a fixed-height window, so a taller roster loses its header and
 // top rows off the top — a 15-leaf run showed nothing but its last few pending
-// leaves. Over budget, the blank spacers go, the leaves worth watching keep
-// their rows, and the rest collapse into one count line. Header and footer are
-// never dropped, and the footer still counts EVERY leaf, shown or not.
+// leaves. Any budget costs the blank spacers; past that the leaves worth
+// watching keep their rows and the rest collapse into one count line. Header
+// and footer are never dropped, and the footer counts EVERY leaf, shown or not.
 export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLines }) {
   const all = tasks.map((t) => ({ ...t, model: t.model || "?" }));
   // Under a budget the blank spacers always go: the windowed view renders them
