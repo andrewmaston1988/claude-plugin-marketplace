@@ -72,3 +72,106 @@ cldr-data
 
 # Scout itself
 .scout
+# --- scout managed defaults: edit above or below, not inside ---
+# Scout ignore patterns. Similar to .gitignore, but NOT identical — read the
+# two rules below before adding a line, because a wrong pattern matches nothing
+# and says nothing.
+#
+# How lines are interpreted:
+#   - Bare directory names (no slash, no wildcard, no leading "!")
+#     feed the fast directory-prune optimisation in os.walk — these
+#     subtrees are never descended into. Use them for caches, build
+#     output, vendored dependencies. ALWAYS the first choice.
+#   - Anything else (contains "/", "*", "?", or starts with "!") falls
+#     through to per-file fnmatch and is matched against the path
+#     relative to the repo root, plus the bare filename.
+#
+# THREE FORMS THAT SILENTLY MATCH NOTHING — all three look right:
+#   package-lock.json   a bare FILE name goes to the directory-prune set,
+#                       and matches no directory.      Use *package-lock.json
+#   perf/history/       a trailing slash is a .gitignore habit; this is
+#                       tested against `perf/history/run.json`, and a
+#                       pattern ending in "/" never matches a file.
+#   */perf/history/*    paths are matched RELATIVE TO THE REPO ROOT, so a
+#                       root-level `perf/` has no leading component for the
+#                       `*/` to consume. Works nested, fails at the root.
+#
+# To exclude a directory that is not a bare name, glue the leading star:
+#   *perf/history/*     matches at the root AND at any depth.
+#
+# Verify with `scout-index prune-ignored . --dry-run` and READ THE COUNT.
+# Zero matches on a directory you know is indexed means the pattern is wrong.
+#
+# scout install drops this template into <repo>/.scoutignore on first
+# `scout index` if no .scoutignore exists. Edit per-repo to add project-
+# specific exclusions (e.g. `*Third Party/*`, `*vendor/*`, `*.generated.cs`).
+#
+#   - Large vendored artefacts are read and discarded on every run. Files
+#     over 2 MB are skipped by symbol extraction and over ~2 MB by the embed
+#     cap, but they are still READ first. If your repo carries vendored API-doc
+#     XML beside a third-party DLL, a WiX-generated script, or similar, add
+#     the pattern here — e.g. `**/Third Party/**` or `*.xml` scoped to that
+#     directory. Check `.scout/extraction-warnings.log` after a run: every
+#     oversize skip is named there.
+
+# Claude Code worktrees — `.claude/worktrees/` duplicates every tracked
+# file. Without this prune, GDScript (and every language) indexes each
+# script N times and pollutes the `res://` project-root resolver.
+# `.claude-worktrees/` is a SIBLING, not a child: bare names prune by exact
+# directory name, so `.claude` does not cover it. Listed separately rather
+# than globbed as `.claude*` so both keep the zero-cost directory prune —
+# a glob would fall through to per-file fnmatch on every file in the repo.
+.claude
+.claude-worktrees
+
+# Godot build cache — `.godot/imported/` holds generated `.res` import
+# artefacts, not source. A single imported `.glb` chunks past the embed
+# cap (1,252 chunks observed on a real project), so it gets scanned,
+# chunked, then skipped — burning scan time and leaving a dead row.
+.godot
+
+# Line-delimited JSON — an append-only log format, not source. One
+# orchestrator log produced 29,291 chunks against a 1,000 cap, so every
+# index read the whole file, chunked it, then threw the work away and
+# left the Embedding bar a unit short of its total. `.ndjson` is the same
+# format under its other common extension.
+*.jsonl
+*.ndjson
+
+# Vendored example code — a vendored library's `examples/` tree dominates
+# messaging graphs. Anchored under a vendoring root (leading `*` spans `/`)
+# so first-party `examples/` and `src/examples/` stay indexed; a bare
+# `**/examples/**` would over-exclude them.
+*vendor/**/examples/**
+*third_party/**/examples/**
+
+# MSVC / VC++ build output — `Debug`/`Release` are the standard configuration
+# directories and `*.res`/`*.recipe` are compiler intermediates. A local build
+# churns these, so without the prune every incremental run re-embeds build
+# output (a 1,160-chunk `.res` binary was observed tripping the oversize skip).
+# NOT `Win32`: it is also a common .NET convention for P/Invoke wrapper source
+# directories, and a bare name here feeds the os.walk prune — the exclusion
+# would be total and silent. Same reasoning keeps `x64` out.
+Debug
+Release
+*.res
+*.recipe
+
+# MSVC project files — file listings and GUIDs, not source. Measured on a
+# 35,650-file C++ corpus: 207 .vcxproj + 162 .vcxproj.filters carrying 6,887
+# chunks, 3.2% of the whole index, and one .vcxproj chunks to 1,667 against
+# the 1,000-chunk cap — read, chunked and discarded on every run. Same
+# argument that seeded *.res and *.recipe.
+*.vcxproj
+*.vcxproj.filters
+
+# Static-site / doc-generator output dirs. docfx `_site/` and Sphinx
+# `_build/` are generated trees: one client `_site/` directory accounted
+# for every unindexable file, the three slowest extractions, and both
+# annotation poison files in a report. Bare names so the os.walk prune
+# never descends into them (the fast path). A user who wants one indexed
+# can negate it (e.g. `!_site`) OUTSIDE this block — the line survives
+# every refresh. Existing rows from a prior index need `scout prune-ignored`.
+_site
+_build
+# --- end scout managed defaults ---
