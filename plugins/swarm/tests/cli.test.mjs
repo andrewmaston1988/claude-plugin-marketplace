@@ -225,6 +225,9 @@ test("models: stub server + SWARM_HOME config -> names with descriptions, aliase
           { model: "not-cloud:480b", description: "local", context_length: 1, max_output_tokens: 1, required_plan: null },
         ],
       }));
+    } else if (req.url === "/api/show") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end("{}");
     } else {
       res.writeHead(404).end();
     }
@@ -233,18 +236,82 @@ test("models: stub server + SWARM_HOME config -> names with descriptions, aliase
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
+    // catalogUrl also points at the stub — the CLI child must never hit the live WAN.
     writeFileSync(join(home, "config.json"), JSON.stringify({
-      provider: { url: `http://127.0.0.1:${server.address().port}` },
+      provider: { url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
     }));
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
-    ok(r.stdout.includes("glm-5.2:cloud — Frontier open model"), r.stdout);
+    // ctx from the recommendation, no parameter count from the empty /api/show;
+    // the stub 404s /api/generate, so this also pins probe fail-open end to end.
+    ok(r.stdout.includes("glm-5.2:cloud — Frontier open model (size unreported, 1.0M ctx)"), r.stdout);
     ok(!r.stdout.includes("not-cloud:480b"), r.stdout);
     for (const alias of ["haiku", "sonnet", "opus"]) {
       ok(r.stdout.includes(alias), `missing alias ${alias}`);
     }
     const cache = JSON.parse(readFileSync(join(home, "models-cache.json"), "utf8"));
     deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud"]);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("models: size-ordered collapsed roster, hidden-count footer, --all resurfaces marked", async () => {
+  const dir = tmp();
+  const counts = { "glm-5.2:cloud": 756000000000, "glm-5.1:cloud": 355000000000 };
+  const generateHits = [];
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      if (req.url === "/api/experimental/model-recommendations") {
+        // 5.1 listed first so the size-order assertion tests the sort, not the input order
+        res.end(JSON.stringify({
+          recommendations: [
+            { model: "glm-5.1:cloud", description: "Prior gen", context_length: 202752 },
+            { model: "glm-5.2:cloud", description: "Frontier open model", context_length: 1000000 },
+          ],
+        }));
+      } else if (req.url === "/api/show") {
+        res.end(JSON.stringify({ model_info: { "general.parameter_count": counts[JSON.parse(body).model] } }));
+      } else if (req.url === "/api/generate") {
+        generateHits.push(JSON.parse(body).model);
+        res.end("{}");
+      } else {
+        res.end("{}");
+      }
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({
+      provider: { url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
+    }));
+    const env = { SWARM_HOME: home };
+
+    const r = await runCliAsync(["models"], { cwd: dir, env });
+    equal(r.status, 0, r.stderr);
+    ok(r.stdout.includes("glm-5.2:cloud — Frontier open model (756B, 1.0M ctx)"), r.stdout);
+    ok(!r.stdout.includes("glm-5.1"), `superseded entry must be hidden by default: ${r.stdout}`);
+    ok(r.stdout.includes("1 superseded hidden"), r.stdout);
+    ok(r.stdout.includes("--all"), r.stdout);
+    // aliases keep the legacy no-parens format
+    ok(/^sonnet — Claude Sonnet — always available$/m.test(r.stdout), r.stdout);
+    // probe fired on the refresh path, top-3-visible only — the hidden elder is not probed
+    deepEqual(generateHits, ["glm-5.2:cloud"]);
+    // cache keeps the full size-ordered roster and carries supersededBy
+    const cache = JSON.parse(readFileSync(join(home, "models-cache.json"), "utf8"));
+    deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud", "glm-5.1:cloud"]);
+    equal(cache.models[1].supersededBy, "glm-5.2:cloud");
+
+    const r2 = await runCliAsync(["models", "--all"], { cwd: dir, env });
+    equal(r2.status, 0, r2.stderr);
+    ok(r2.stdout.includes("glm-5.1:cloud — Prior gen (355B, 203k ctx) [superseded by glm-5.2:cloud]"), r2.stdout);
+    ok(!r2.stdout.includes("hidden"), `--all shows everything, no footer: ${r2.stdout}`);
   } finally {
     server.close();
     rmSync(dir, { recursive: true, force: true });

@@ -24,6 +24,7 @@ import { evalExpr, evalBool } from "./expr.mjs";
 import { validateValue } from "./schema.mjs";
 import { extractCitations, verifyCitations, citationErrorLines, annotateCitations } from "./citations.mjs";
 import { swarmHome } from "./config.mjs";
+import { removeCachedModel, ENTITLEMENT_RE } from "./discovery.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
@@ -848,6 +849,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         const resetsAt = parseQuotaReset(r.raw);
         if (resetsAt) result.quotaResetsAt = resetsAt;
       }
+      // A 402 extra-usage failure means the account can't run this model:
+      // drop it from the models cache so the roster stops offering it. The
+      // classification stays "failed" — entitlement is roster metadata, not a
+      // retry class — and the next `models` refresh restores the row if the
+      // probe stops 402ing.
+      if (!r.ok && ENTITLEMENT_RE.test(r.raw || "")) removeCachedModel(task.model, io.env);
       const parsed = tryParseJson(r.output);
       if (parsed !== undefined) result.outputJson = parsed;
 

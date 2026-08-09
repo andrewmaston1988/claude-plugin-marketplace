@@ -7,6 +7,7 @@
     "cloudSuffix": ":cloud",
     "allowedRoots": [],
     "url": "http://localhost:11434",
+    "catalogUrl": "https://ollama.com",
     "authToken": "ollama"
   },
   "concurrency": 4,

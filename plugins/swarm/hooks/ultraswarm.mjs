@@ -16,19 +16,32 @@ function readJSON(p) {
 }
 
 // Cache shape is owned by `swarm.mjs models`; accept the plausible shapes defensively.
-export function formatModelList(cache) {
+// Same visibility rule as cmdModels — superseded and denylisted entries are dropped
+// so the standing offer names only live, usable models.
+export async function formatModelList(cache, cfg) {
   try {
+    // Lazy: keeps src/ out of the hook's per-prompt startup parse (only the
+    // active branch pays it). The other hooks import node builtins only.
+    const [{ visibleModels }, { matchDenylist }] = await Promise.all([
+      import('../src/discovery.mjs'),
+      import('../src/manifest.mjs'),
+    ]);
     const list = Array.isArray(cache) ? cache
       : Array.isArray(cache?.models) ? cache.models
         : Array.isArray(cache?.recommendations) ? cache.recommendations
           : null;
     if (!list || list.length === 0) return '';
-    return list.slice(0, MAX_MODELS).map((m) => {
-      if (typeof m === 'string') return `- ${m}`;
+    const objs = list.filter((m) => m && typeof m === 'object' && m.model);
+    const visible = new Set(
+      visibleModels(objs, { isDenylisted: (n) => !!matchDenylist(n, cfg) }).map((m) => m.model),
+    );
+    return list.map((m) => {
+      if (typeof m === 'string') return matchDenylist(m, cfg) ? null : `- ${m}`;
       const name = m?.model || m?.name;
-      if (!name) return null;
+      if (!name || matchDenylist(name, cfg)) return null;
+      if (m.model && !visible.has(m.model)) return null;
       return m.description ? `- ${name} — ${m.description}` : `- ${name}`;
-    }).filter(Boolean).join('\n');
+    }).filter(Boolean).slice(0, MAX_MODELS).join('\n');
   } catch { return ''; }
 }
 
@@ -59,7 +72,7 @@ async function main() {
   const active = prompt.toLowerCase().includes('ultraswarm') || config?.swarm?.always === true;
   if (!active) process.exit(0);
 
-  const ctx = buildStandingInstructions(formatModelList(readJSON(MODELS_CACHE)));
+  const ctx = buildStandingInstructions(await formatModelList(readJSON(MODELS_CACHE), config));
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: ctx },
   }) + '\n');

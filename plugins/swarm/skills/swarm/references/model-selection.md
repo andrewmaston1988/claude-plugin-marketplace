@@ -21,8 +21,10 @@ Seeded from the user's own calibration; refine as models change:
 
 | Alternative model | ≈ Claude tier | Notes |
 |---|---|---|
+| `glm-5.2:cloud` | opus-lite | heavier synthesis and judging on the alternative subscription; strongest on monorepo/terminal work |
+| `deepseek-v4-pro:cloud` | opus-lite | a notch below glm-5.2; leads raw coding (SWE-bench Verified) and is multimodal |
+| `kimi-k2.7-code:cloud` | opus-lite | below v4-pro on raw coding; strongest MCP tool-use depth; proven verification leaf |
 | `minimax-m3:cloud` | sonnet-class | reasoning-leaf default; honours `--effort` |
-| `glm-5.2:cloud` | opus-lite | heavier synthesis and judging on the alternative subscription |
 
 When a new model appears in discovery, judge its tier from the `models` output's per-model description (positioning, context length) and a trial leaf — then add a row here once calibrated.
 

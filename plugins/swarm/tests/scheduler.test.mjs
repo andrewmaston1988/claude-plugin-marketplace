@@ -1800,3 +1800,56 @@ test("resume: prior-ok child tasks skip on re-run", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Live 402 body from ollama for an unfunded extra-usage model.
+const ENTITLEMENT_BODY = `{"error":"this model uses extra usage only (not included plan usage) and your extra usage balance is empty, add extra usage or turn on auto reload at https://ollama.com/settings (ref: ...)"}`;
+
+function seedModelsCache(io, models) {
+  const p = join(io.env.SWARM_HOME, "models-cache.json");
+  writeFileSync(p, JSON.stringify({ updated: "2026-08-09T00:00:00.000Z", models }, null, 2) + "\n");
+  return p;
+}
+
+test("entitlement failure removes the model from the cache; classification stays failed", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ exit: 1, output: ENTITLEMENT_BODY }));
+    const io = makeIo(spawn);
+    const cachePath = seedModelsCache(io, [{ model: "kimi-k3:cloud" }, { model: "glm-5.2:cloud" }]);
+    const r = await runPlan(plan(dir, [task("a", { model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
+    equal(r.summary.tasks[0].state, "failed"); // not quota, not rate-limited
+    deepEqual(JSON.parse(readFileSync(cachePath, "utf8")).models.map((m) => m.model), ["glm-5.2:cloud"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("ordinary failure leaves the models cache untouched", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ exit: 1, output: "boom" }));
+    const io = makeIo(spawn);
+    const cachePath = seedModelsCache(io, [{ model: "kimi-k3:cloud" }]);
+    const before = readFileSync(cachePath, "utf8");
+    const r = await runPlan(plan(dir, [task("a", { model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
+    equal(r.summary.tasks[0].state, "failed");
+    equal(readFileSync(cachePath, "utf8"), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("success leaves the models cache untouched", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "fine" }));
+    const io = makeIo(spawn);
+    const cachePath = seedModelsCache(io, [{ model: "kimi-k3:cloud" }]);
+    const before = readFileSync(cachePath, "utf8");
+    const r = await runPlan(plan(dir, [task("a", { model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
+    equal(r.summary.tasks[0].state, "ok");
+    equal(readFileSync(cachePath, "utf8"), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
