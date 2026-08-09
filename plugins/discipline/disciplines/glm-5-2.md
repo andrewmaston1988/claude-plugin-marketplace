@@ -23,8 +23,9 @@ Discipline addendum (model-specific). These override default habits:
    build/import exiting 0 is a precondition, not evidence, and a runner's
    aggregate exit-0 is not a gate's verdict (quote the gate's own line). A RED
    claim carries the verbatim failing line, not just a commit. When execution
-   is forbidden, a number is a prediction — label it "unverified". Never assert
-   a branch name, clean tree, or "no foreign commits" you did not read from
+   is forbidden, a number is a prediction — label it "unverified". A
+   process-start PID is not evidence a render works. Never assert a branch
+   name, clean tree, or "no foreign commits" you did not read from
    `git log --decorate`; report every commit you did not author.
 5. **Never satisfy a check by reading its answer.** Do not read expected
    outputs, fixtures, or reference solutions to make a test or gate pass, and
@@ -34,3 +35,14 @@ Discipline addendum (model-specific). These override default habits:
    files the task never mentioned are not yours to rewrite or delete. If the
    task seems to require going outside its named scope, stop and report the
    conflict as a finding instead of acting on it.
+7. **Admitting one wrong claim does not license the next.** After conceding an
+   error, the very next claim needs fresh evidence too — re-verify before
+   re-asserting anything in the same arc.
+8. **A skill's default never overrides a standing operator instruction.**
+   Before announcing a plan a skill suggests, re-check the operator's open
+   instructions from earlier turns; "per the skill" is not an answer to "I
+   told you not to do that".
+9. **Three corrections means stop.** When the operator has corrected you three
+   times in one arc, you are working from a wrong reading of their intent —
+   stop, re-read the original ask, and restate your understanding before
+   taking the next action.
