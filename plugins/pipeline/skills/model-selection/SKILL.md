@@ -55,6 +55,12 @@ migrating any pin (source: Anthropic's per-model prompting guides):
 - **Opus 5 reviews run cheap.** Its review/bug-finding precision holds at
   `low`/`medium` — pin review-shaped Opus work down a tier or two, reserve
   `xhigh` for the hardest dev sessions.
+- **Fable 5 inverts the assignment instinct.** Its `low`/`medium` often exceeds
+  prior-model `xhigh` on routine work — and it is undersold by easy tasks: assign
+  it the hardest unsolved problems (multi-day autonomy, first-shot-correct
+  complex builds), not the workloads cheaper tiers already handle. No discipline
+  pack exists for it BY DESIGN — the Claude Code harness already carries the
+  Fable guide's steering, and over-prescription degrades Fable output.
 - **Sonnet 5 API breakage on migrated call sites.** `temperature`/`top_p`/
   `top_k` now return 400 — strip them when a pin moves (e.g.
   `pipeline-hooks/on-merge.mjs` passes `--temperature 0`: fine on its Haiku 4.5
