@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { resolveUtilisation, buildCheckpointNudge, TTL_NOTES } from '../prompt-submit-checkpoint.mjs';
+import { resolveUtilisation, buildCheckpointNudge, isThirdPartyModel, TTL_NOTES } from '../prompt-submit-checkpoint.mjs';
 import { resolveTtlSource } from '../lib/cadence.mjs';
 
 test('resolveUtilisation: usage path wins when present', () => {
@@ -56,6 +56,30 @@ test('keepalive-init template answers the ScheduleWakeup no-cache-warming contra
   assert.match(tmpl, /operator-configured, opt-in/i);
   assert.match(tmpl, /past/i); // the chain extends the cache PAST its TTL — the case the contract ignores
   assert.match(tmpl, /operator-opted-in cache keepalive/); // reason string says what it really is
+});
+
+// Third-party providers expose no prompt-cache TTL — nothing to keep warm, so
+// the keepalive is Claude-model-only.
+test('isThirdPartyModel: non-Claude model on the newest turn skips keepalive', () => {
+  assert.equal(isThirdPartyModel([{ model: 'glm-5.2:cloud' }]), true);
+  assert.equal(isThirdPartyModel([{ model: 'kimi-k2.7-code:cloud' }]), true);
+  // Newest turn wins, oldest-first input order.
+  assert.equal(isThirdPartyModel([{ model: 'claude-opus-5' }, { model: 'glm-5.2:cloud' }]), true);
+  assert.equal(isThirdPartyModel([{ model: 'glm-5.2:cloud' }, { model: 'claude-opus-5' }]), false);
+});
+
+test('isThirdPartyModel: claude family ids are never third-party', () => {
+  // Bedrock/Vertex ids wrap the family name rather than starting with it.
+  for (const m of ['claude-fable-5', 'claude-opus-5', 'claude-sonnet-5', 'claude-haiku-4-5-20251001',
+                   'us.anthropic.claude-opus-4-5-v1:0']) {
+    assert.equal(isThirdPartyModel([{ model: m }]), false, m);
+  }
+});
+
+test('isThirdPartyModel: unknown model fails open as Claude', () => {
+  assert.equal(isThirdPartyModel([]), false);
+  assert.equal(isThirdPartyModel([{ model: '<synthetic>' }]), false);
+  assert.equal(isThirdPartyModel([{ usage: {} }]), false);
 });
 
 test('every resolveTtlSource source has a TTL_NOTES entry', () => {

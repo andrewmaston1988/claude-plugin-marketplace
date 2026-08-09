@@ -34,6 +34,8 @@ The UserPromptSubmit hook owns a **self-correcting** cadence (jitter-aware, targ
 { "checkpoint": { "keepalive": true, "keepaliveTtlSecs": 3600, "keepaliveIdleStopSecs": 28800 } }
 ```
 
+**Claude-model sessions only:** third-party providers expose no prompt-cache TTL, so there is no cache window to keep warm — sessions on a non-Claude model (per the transcript's newest assistant `model`) skip the keepalive entirely, even when opted in.
+
 **Honest limit:** hooks fire only on prompts. During pure idle (machine sleep, a dropped tick) the chain can't self-re-arm until you return — `/keepalive-status` will show the gap.
 
 ## Cache state (ambient, not an alert)
