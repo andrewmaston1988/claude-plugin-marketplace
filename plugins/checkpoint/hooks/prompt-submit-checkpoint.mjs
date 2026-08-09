@@ -51,6 +51,18 @@ export function resolveUtilisation(recentTurns, transcriptBytes) {
   return { pct, source: 'bytes' };
 }
 
+// Third-party providers expose no prompt-cache TTL — there is no cache window
+// to keep warm, so the keepalive is Claude-model-only. Substring, not prefix:
+// Bedrock/Vertex ids wrap the family name (us.anthropic.claude-*). Unknown
+// model (no assistant turn yet, or a `<synthetic>` error entry) fails open as Claude.
+export function isThirdPartyModel(recentTurns) {
+  for (let i = recentTurns.length - 1; i >= 0; i--) {
+    const m = recentTurns[i] && recentTurns[i].model;
+    if (typeof m === 'string' && m && m !== '<synthetic>') return !m.includes('claude');
+  }
+  return false;
+}
+
 export function buildCheckpointNudge(pct) {
   return `Context is ~${pct}% full. No need to stop — at your next natural pause, call the Skill `
     + `tool with skill="checkpoint:checkpoint" to write a STATE.md handover so a fresh session can `
@@ -103,8 +115,8 @@ async function main() {
   // Read a few turns: the last one may be a pure cache-hit with no bucket signal.
   const recent = transcriptPath ? readRecentAssistantTurns(transcriptPath, 3) : [];
 
-  // --- 3. Keepalive (opt-in) ---
-  if (keepaliveEnabled && sState) {
+  // --- 3. Keepalive (opt-in, Claude-model sessions only) ---
+  if (keepaliveEnabled && sState && !isThirdPartyModel(recent)) {
     const { ttlSecs: ttl, source: ttlSource } = resolveTtlSource(
       Number(settings?.checkpoint?.keepaliveTtlSecs),
       recent.map(t => t.usage),
