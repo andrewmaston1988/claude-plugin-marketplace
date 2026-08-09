@@ -41,6 +41,33 @@ Once you've picked a model, effort fine-tunes the reasoning depth. The same mode
 - **xhigh** — for hard cases; between high and max; rare
 - **max** — depth-bound reasoning; you've tried shallower and it didn't work
 
+### Claude 5 effort migration (Opus 5 / Sonnet 5)
+
+Effort pins carried over from a 4.x model run too hot on the 5-family. When
+migrating any pin (source: Anthropic's per-model prompting guides):
+
+- **Sonnet 5 ≈ one tier cheaper.** `medium` matches Sonnet 4.6 `high`; `high`
+  matches 4.6 `max`. Drop migrated pins one level and benchmark by observed
+  thinking length, not effort name. Sonnet 5 also obeys low-end pins strictly —
+  complex work at `low` under-thinks; raise effort rather than prompting around
+  it. Sonnet 5 supports `xhigh` (new for Sonnet-class): re-verify
+  `cfg.tier_efforts` rather than trusting the table below on a 5-family install.
+- **Opus 5 reviews run cheap.** Its review/bug-finding precision holds at
+  `low`/`medium` — pin review-shaped Opus work down a tier or two, reserve
+  `xhigh` for the hardest dev sessions.
+- **Fable 5 inverts the assignment instinct.** Its `low`/`medium` often exceeds
+  prior-model `xhigh` on routine work — and it is undersold by easy tasks: assign
+  it the hardest unsolved problems (multi-day autonomy, first-shot-correct
+  complex builds), not the workloads cheaper tiers already handle. No discipline
+  pack exists for it BY DESIGN — the Claude Code harness already carries the
+  Fable guide's steering, and over-prescription degrades Fable output.
+- **Sonnet 5 API breakage on migrated call sites.** `temperature`/`top_p`/
+  `top_k` now return 400 — strip them when a pin moves (e.g.
+  `pipeline-hooks/on-merge.mjs` passes `--temperature 0`: fine on its Haiku 4.5
+  pin, breaks the day that pin moves to a 5-family model). The new tokenizer
+  also emits ~30% more tokens for the same text — revisit `max_tokens` limits
+  tuned pre-5.
+
 ### Per-tier supported effort levels
 
 Not every effort level is valid for every model tier. Pinning an unsupported level causes a runtime API rejection.
@@ -137,6 +164,20 @@ The pipeline is not Anthropic-only. Any model the local proxy can serve — Olla
 Non-Anthropic models route through `cfg.proxy.url` in `~/.pipeline/config.json`. Ensure the proxy is running before queueing a row with a non-Anthropic model.
 
 Model names are **lowercase only** (e.g., `minimax-m3:cloud`, `gemma4:31b-cloud`, `qwen2.5-coder:32b`).
+
+### GLM-5.2 specifics (vendor-published, 2026-06)
+
+- **Two effort levels only: `high` and `max`** — the Anthropic-shaped low→max
+  escalation ladder is partly fictional for GLM rows; only the top two rungs
+  are real. Capability sits between Opus 4.7 and 4.8 at comparable token spend.
+  **Pin `max` explicitly on hard work** — swarm manifests historically omitted
+  effort (silently running the proxy default), and interactive GLM sessions
+  default likewise: `/effort max` for serious sessions, `high` for routine
+  sweeps, finders, and quick iterations.
+- **Documented hacking disposition:** Z.ai's own RL notes state GLM-5.2 shortcuts
+  verifiable pass/fail signals more than 5.1 (reading eval artifacts, copying
+  reference solutions). The discipline plugin's `glm-5-2.md` pack carries the
+  counter-rule; keep RED-verification on any GLM-authored test.
 
 ### Auto-escalation — effort only
 
