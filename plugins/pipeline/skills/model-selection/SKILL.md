@@ -170,9 +170,10 @@ Model names are **lowercase only** (e.g., `minimax-m3:cloud`, `gemma4:31b-cloud`
 - **Two effort levels only: `high` and `max`** — the Anthropic-shaped low→max
   escalation ladder is partly fictional for GLM rows; only the top two rungs
   are real. Capability sits between Opus 4.7 and 4.8 at comparable token spend.
-  **Pin `max` explicitly on hard implementation/tooling leaves** (swarm manifests
-  historically omitted effort, silently running the proxy default); `high` for
-  routine sweeps and finders.
+  **Pin `max` explicitly on hard work** — swarm manifests historically omitted
+  effort (silently running the proxy default), and interactive GLM sessions
+  default likewise: `/effort max` for serious sessions, `high` for routine
+  sweeps, finders, and quick iterations.
 - **Documented hacking disposition:** Z.ai's own RL notes state GLM-5.2 shortcuts
   verifiable pass/fail signals more than 5.1 (reading eval artifacts, copying
   reference solutions). The discipline plugin's `glm-5-2.md` pack carries the
