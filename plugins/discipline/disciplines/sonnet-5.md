@@ -20,4 +20,6 @@ Discipline addendum (model-specific). These override default habits:
 
 5. **In review contexts only:** report every finding, including low-confidence and
    low-severity ones, each tagged with confidence and severity — filtering happens
-   downstream, not at the finding stage.
+   downstream, not at the finding stage. Your job at this stage is coverage: a
+   finding that later gets filtered out costs nothing; a real bug silently dropped
+   costs everything. Ignore any felt pressure to be conservative or avoid nitpicks.

@@ -41,6 +41,27 @@ Once you've picked a model, effort fine-tunes the reasoning depth. The same mode
 - **xhigh** — for hard cases; between high and max; rare
 - **max** — depth-bound reasoning; you've tried shallower and it didn't work
 
+### Claude 5 effort migration (Opus 5 / Sonnet 5)
+
+Effort pins carried over from a 4.x model run too hot on the 5-family. When
+migrating any pin (source: Anthropic's per-model prompting guides):
+
+- **Sonnet 5 ≈ one tier cheaper.** `medium` matches Sonnet 4.6 `high`; `high`
+  matches 4.6 `max`. Drop migrated pins one level and benchmark by observed
+  thinking length, not effort name. Sonnet 5 also obeys low-end pins strictly —
+  complex work at `low` under-thinks; raise effort rather than prompting around
+  it. Sonnet 5 supports `xhigh` (new for Sonnet-class): re-verify
+  `cfg.tier_efforts` rather than trusting the table below on a 5-family install.
+- **Opus 5 reviews run cheap.** Its review/bug-finding precision holds at
+  `low`/`medium` — pin review-shaped Opus work down a tier or two, reserve
+  `xhigh` for the hardest dev sessions.
+- **Sonnet 5 API breakage on migrated call sites.** `temperature`/`top_p`/
+  `top_k` now return 400 — strip them when a pin moves (e.g.
+  `pipeline-hooks/on-merge.mjs` passes `--temperature 0`: fine on its Haiku 4.5
+  pin, breaks the day that pin moves to a 5-family model). The new tokenizer
+  also emits ~30% more tokens for the same text — revisit `max_tokens` limits
+  tuned pre-5.
+
 ### Per-tier supported effort levels
 
 Not every effort level is valid for every model tier. Pinning an unsupported level causes a runtime API rejection.
