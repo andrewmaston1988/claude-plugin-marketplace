@@ -165,6 +165,20 @@ Non-Anthropic models route through `cfg.proxy.url` in `~/.pipeline/config.json`.
 
 Model names are **lowercase only** (e.g., `minimax-m3:cloud`, `gemma4:31b-cloud`, `qwen2.5-coder:32b`).
 
+### GLM-5.2 specifics (vendor-published, 2026-06)
+
+- **Two effort levels only: `high` and `max`** — the Anthropic-shaped low→max
+  escalation ladder is partly fictional for GLM rows; only the top two rungs
+  are real. Capability sits between Opus 4.7 and 4.8 at comparable token spend.
+- **Quota multiplier by clock:** Coding-Plan quota burns **3× during Beijing
+  peak (14:00–18:00 UTC+8 = 07:00–11:00 UK)**, 2× off-peak (1× promo through
+  Sep 2026). Schedule large GLM swarms outside the UK-morning window; overnight
+  dispatches are the cheap slot.
+- **Documented hacking disposition:** Z.ai's own RL notes state GLM-5.2 shortcuts
+  verifiable pass/fail signals more than 5.1 (reading eval artifacts, copying
+  reference solutions). The discipline plugin's `glm-5-2.md` pack carries the
+  counter-rule; keep RED-verification on any GLM-authored test.
+
 ### Auto-escalation — effort only
 
 Non-Anthropic models escalate **effort only** on dev retry (no tier jump). `tierFromModel` returns `null` for anything that doesn't match `/haiku|sonnet|opus/i`, so auto-escalation uses Opus-shaped effort defaults: `low` → `medium` → `high` → `xhigh` → `max` (+2 per retry, clamped to max). Many non-Anthropic models (e.g., minimax-m3) respond meaningfully to effort changes; escalation can improve results even though the scale is Anthropic-tuned. If a non-Anthropic row bounces through review, pin a new model in the row's `notes_extra` (`model=…`) or in `*Dev-Model:*` and re-queue.

@@ -15,3 +15,7 @@ Discipline addendum (model-specific). These override default habits:
 4. **Claims need a run.** Say "done", "works", or "passes" only for what a tool
    result in this session shows; otherwise say "unverified" and what would
    verify it.
+5. **Never satisfy a check by reading its answer.** Do not read expected
+   outputs, fixtures, or reference solutions to make a test or gate pass, and
+   never weaken an assertion to green it — make the underlying behavior real.
+   If a shortcut to the signal exists, name it in your return; don't take it.
