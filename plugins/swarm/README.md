@@ -78,6 +78,14 @@ A bare name resolves through the manifest registry (`<cwd>/.swarm/manifests/<nam
 
 In a session, the **swarm** skill drives this end-to-end: it drafts the manifest, shows it in an AskUserQuestion box (the preview is the approval — every model and leaf visible before anything runs), runs in the background, and reads only `digest.md` when the run completes.
 
+## Model discovery
+
+Discovery covers the **ollama cloud catalog only**. `models` unions the curated recommendations endpoint with the full `/api/tags` catalog (either source failing is non-fatal), derives `:cloud` names from bare tags, validates and enriches each candidate free via the daemon's `/api/show` (capabilities, context length, parameter count), and prints the roster largest-first — `glm-5.2:cloud — Frontier open model (756B, 1.0M ctx)`. The Claude tiers (`haiku`/`sonnet`/`opus`) are a static always-available alias list appended after the discovered set — they are not discovered, and no non-ollama provider ever is.
+
+Model families collapse: an entry superseded by a strictly-newer same-lineage sibling (`glm-5.1` next to `glm-5.2`) is hidden behind it, with a dim footer counting the hidden rows; `swarm models --all` shows them marked `[superseded by …]`. When a superseder drops out of the roster — denylisted, or removed by the entitlement probe — its elder resurfaces automatically.
+
+Entitlement is handled by removal, not annotation: each `models` refresh fires a one-token probe at the top 3 visible cloud entries (a removal cascades to whichever entry resurfaces into the slice, capped at six probes total), and a 402 "extra usage" rejection removes that row from `~/.swarm/models-cache.json` (the same removal happens lazily when a live dispatch fails with that body). The roster then simply doesn't offer the model, and the next refresh restores it once the account can run it again. The cache keeps the full roster — the denylist and supersession hiding are display filters, applied identically by the CLI and by the ultraswarm hook's model list.
+
 ## Example manifest
 
 ```json

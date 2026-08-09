@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
-import { discoverModels, writeModelsCache } from "../src/discovery.mjs";
+import { discoverModels, writeModelsCache, visibleModels, probeTopModels } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
@@ -14,7 +14,7 @@ import { formatClosing, renderStatus, readResult } from "../src/results.mjs";
 import { dim } from "../src/ui.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
-  models                     list launchable :cloud models (+ Claude aliases)
+  models [--all]             list launchable :cloud models (+ Claude aliases)
   list                       saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
   validate <manifest.json | name> [--args '<json>'] [--resolved]   lint; exit 1 with readable errors
   run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
@@ -68,14 +68,42 @@ function resolveManifestRef(ref) {
   return r;
 }
 
-async function cmdModels() {
+function fmtParams(n) {
+  return n >= 1e12 ? `${(n / 1e12).toFixed(1)}T` : `${Math.round(n / 1e9)}B`;
+}
+
+function fmtCtx(n) {
+  return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M ctx` : `${Math.round(n / 1e3)}k ctx`;
+}
+
+function modelLine(m) {
+  const line = m.description ? `${m.model} — ${m.description}` : m.model;
+  if (!(m.parameterCount > 0) && !(m.contextLength > 0)) return line;
+  const size = m.parameterCount > 0 ? fmtParams(m.parameterCount) : "size unreported";
+  return `${line} (${[size, ...(m.contextLength > 0 ? [fmtCtx(m.contextLength)] : [])].join(", ")})`;
+}
+
+async function cmdModels(rest = []) {
   const cfg = getConfig();
-  // Denylisted models never appear as options — the roster is the authoring surface.
-  const models = (await discoverModels(cfg)).filter((m) => !matchDenylist(m.model, cfg));
-  writeModelsCache(models);
-  for (const m of [...models, ...CLAUDE_ALIASES].filter((m) => !matchDenylist(m.model, cfg))) {
-    out(m.description ? `${m.model} — ${m.description}` : m.model);
+  const showAll = rest.includes("--all");
+  const isDenylisted = (name) => !!matchDenylist(name, cfg);
+  const discovered = await discoverModels(cfg);
+  // Cache keeps the FULL roster — denylist and supersession filter at print,
+  // and the entitlement probe/scheduler removal need rows present to remove.
+  writeModelsCache(discovered);
+  const base = String(cfg.provider.url).replace(/\/+$/, "");
+  // Every models run re-discovers, so this is the one place the top-3
+  // entitlement probe fires. 402 removals rewrite the cache just written.
+  const live = await probeTopModels(discovered, base, globalThis.fetch, { isDenylisted });
+  const visible = new Set(visibleModels(live, { isDenylisted }).map((m) => m.model));
+  const offered = live.filter((m) => !isDenylisted(m.model));
+  const shown = showAll ? offered : offered.filter((m) => visible.has(m.model));
+  for (const m of [...shown, ...CLAUDE_ALIASES.filter((a) => !isDenylisted(a.model))]) {
+    const mark = showAll && m.supersededBy && !visible.has(m.model) ? ` [superseded by ${m.supersededBy}]` : "";
+    out(modelLine(m) + mark);
   }
+  const hidden = offered.length - shown.length;
+  if (hidden) out(dim(`${hidden} superseded hidden — swarm models --all shows them`));
   return 0;
 }
 
@@ -216,7 +244,7 @@ async function main() {
   try {
     switch (cmd) {
       case "models":
-        return await cmdModels();
+        return await cmdModels(rest);
       case "list": {
         const entries = listManifests(process.cwd(), process.env);
         if (!entries.length) {

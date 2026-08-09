@@ -114,23 +114,35 @@ test("empty denylist: the same manifest loads clean", () => {
 
 // ── roster listing ────────────────────────────────────────────────────────────
 
-test("swarm models omits denylisted models from output and cache", async () => {
+test("swarm models: denylist filters at print only — absent from output, present in cache, never probed", async () => {
   const dir = tmp();
+  const generateHits = [];
   const server = createServer((req, res) => {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({
-      recommendations: [
-        { model: "glm-5.2:cloud", description: "Frontier open model" },
-        { model: "nemotron-3-super:cloud", description: "Slow burn" },
-      ],
-    }));
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      if (req.url === "/api/generate") {
+        generateHits.push(JSON.parse(body).model);
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end("{}");
+        return;
+      }
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({
+        recommendations: [
+          { model: "glm-5.2:cloud", description: "Frontier open model" },
+          { model: "nemotron-3-super:cloud", description: "Slow burn" },
+        ],
+      }));
+    });
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
+    // catalogUrl also points at the stub — the CLI child must never hit the live WAN.
     writeFileSync(join(home, "config.json"), JSON.stringify({
-      provider: { url: `http://127.0.0.1:${server.address().port}` },
+      provider: { url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
       modelDenylist: ["nemotron"],
     }));
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
@@ -138,8 +150,11 @@ test("swarm models omits denylisted models from output and cache", async () => {
     ok(r.stdout.includes("glm-5.2:cloud"), r.stdout);
     ok(!r.stdout.includes("nemotron"), r.stdout);
     ok(r.stdout.includes("haiku"), r.stdout);
+    // the cache keeps the full roster — the denylist is a display filter, not a discovery one
     const cache = JSON.parse(readFileSync(join(home, "models-cache.json"), "utf8"));
-    deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud"]);
+    deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud", "nemotron-3-super:cloud"]);
+    // and a denylisted model is never offered, so the refresh probe skips it
+    deepEqual(generateHits, ["glm-5.2:cloud"]);
   } finally {
     server.close();
     rmSync(dir, { recursive: true, force: true });
