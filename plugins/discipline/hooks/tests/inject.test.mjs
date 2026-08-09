@@ -61,6 +61,14 @@ test('opus-5 -> pack injected (terseness only)', () => {
   assert.doesNotMatch(out, /Proof means the live layer/); // opus-4-8 pack must not leak in
 });
 
+test('glm-5.2:cloud -> pack injected (leaf discipline)', () => {
+  const { code, out } = run({ prompt: 'fix the bug', transcript_path: transcript('glm-5.2:cloud') });
+  assert.equal(code, 0);
+  assert.match(out, /<discipline-pack model="glm-5.2:cloud" v="1">/);
+  assert.match(out, /Never claim a visual outcome/);
+  assert.doesNotMatch(out, /Lead with the result/); // opus-5 pack must not leak in
+});
+
 test('opus-4-7 -> empty (no family collision)', () => {
   const { code, out } = run({ prompt: 'fix the bug', transcript_path: transcript('claude-opus-4-7') });
   assert.equal(code, 0);
