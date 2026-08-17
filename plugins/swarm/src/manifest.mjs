@@ -221,6 +221,65 @@ function validateTaskShapes(rawTasks, errors, label) {
   }
 }
 
+// Tasks sharing a worktree run in ONE directory, so they must form a single
+// ordered chain — two unordered members would race and corrupt each other.
+function validateWorktreeGroups(rawTasks, errors, label) {
+  const nameOf = (t) => t.isolation === undefined ? undefined
+    : (typeof t.isolation === "object" && t.isolation !== null ? t.isolation.worktree : t.id);
+
+  const groups = new Map();
+  for (const t of rawTasks) {
+    const n = nameOf(t);
+    if (typeof n !== "string" || !n) continue;
+    if (!groups.has(n)) groups.set(n, []);
+    groups.get(n).push(t);
+  }
+
+  // Reachability over `after`, the same edges detectCycle walks.
+  const byId = new Map(rawTasks.map((t) => [t.id, t]));
+  const reaches = (fromId, toId, seen = new Set()) => {
+    if (fromId === toId) return true;
+    if (seen.has(fromId)) return false;
+    seen.add(fromId);
+    const after = byId.get(fromId)?.after;
+    return Array.isArray(after) && after.some((a) => reaches(a, toId, seen));
+  };
+
+  for (const [name, members] of groups) {
+    const shared = members.filter((t) => typeof t.isolation === "object" && t.isolation !== null);
+
+    for (const t of shared) {
+      if (t.forEach !== undefined) {
+        errors.push(
+          `${label(t)}: a forEach task cannot use the shared worktree "${name}" — clones run ` +
+          `concurrently and would collide in one directory.\n` +
+          `    Give each clone its own tree instead: "isolation": "worktree"`);
+      }
+    }
+
+    for (let i = 0; i < members.length; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        const [a, b] = [members[i], members[j]];
+        if (reaches(a.id, b.id) || reaches(b.id, a.id)) continue;
+        errors.push(
+          `tasks '${a.id}' and '${b.id}' share worktree "${name}" but neither runs before the other.\n` +
+          `    Tasks sharing a worktree must form a single ordered chain — add the missing\n` +
+          `    \`after\` so one waits for the other:\n` +
+          `        { "id": "${b.id}", "after": ["${a.id}"], "isolation": { "worktree": "${name}" }, … }`);
+      }
+    }
+
+    // A shared name equal to another task's id resolves to the same wt-<name> path.
+    if (!shared.length) continue;
+    const clash = members.find((t) => t.id === name && typeof t.isolation === "string");
+    if (clash) {
+      errors.push(
+        `shared worktree "${name}" collides with task '${clash.id}', which has its own private ` +
+        `worktree of the same name — both resolve to wt-${name}. Rename one.`);
+    }
+  }
+}
+
 // `itemAllowed`: child tasks under a forEach parent node may read {{item}}
 // even without their own forEach — the parent substitutes at clone time.
 function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } = {}) {
@@ -506,6 +565,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   // {{item}} in a child task without its own forEach is legal only when the
   // parent node fans out — the parent substitutes into child prompts per item.
   validateTaskRelations(raw.tasks, errors, label, { itemAllowed: node.forEach !== undefined });
+  validateWorktreeGroups(raw.tasks, errors, label);
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
   const tasks = normalizeTasks(raw.tasks, {
@@ -573,6 +633,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const label = (t) => (t?.id ? `task '${t.id}'` : "task with missing id");
   validateTaskShapes(raw.tasks, errors, label);
   validateTaskRelations(raw.tasks, errors, label);
+  validateWorktreeGroups(raw.tasks, errors, label);
 
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`dependency cycle detected: ${cycle.join(" -> ")}`);
