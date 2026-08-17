@@ -18,6 +18,33 @@ The existing skill documents the workaround as the intended practice: *"Judgemen
 chains split across runs — run a link, compress in-session, run the next"*
 (`skills/swarm/SKILL.md:220`). That is the gap, written down.
 
+### What it costs — an unbudgeted reconciliation stage
+
+The cost is not the merge commits. It is that a phased run silently grows a final stage
+nobody planned: the orchestrator stitches N worktrees into one branch and settles the
+differences by hand. That stage does the integration work the phases should have done
+incrementally, and it lands on the session least equipped to do it — the orchestrator
+implemented none of the phases and has only each leaf's self-report to explain why it
+made the choices it made.
+
+Textual conflicts are the easy half. The expensive half merges cleanly and does not
+build: a later leaf, unable to read an earlier leaf's code, writes against the interface
+it inferred from `{{result:}}` prose. Two files touching nothing in common, one calling a
+function the other never defined. Git reports success; the build reports the truth.
+
+Observed live while this spec was being written (`gene-pool-eco-p1`, 2026-08-17): four
+leaves, `after`-chained, every one `isolation: "worktree"`. All four branches forked from
+the same commit `d7e8cc5` with no shared history above it. One commit reads *"Scale/cull
+flora instances from sim biomass (plan §4)"* — authored on a base containing no flora
+module, because the flora leaf's work lived on a sibling branch it could not see. The
+orchestrating session's operator ruled the run be completed and hand-merged in dependency
+order, treating each leaf's self-report as a guide and never as ground truth for what
+actually landed.
+
+A shared worktree removes the stage rather than easing it. Each link reads its
+predecessor's real source instead of a description of it, so the interface mismatch cannot
+be authored in the first place, and the run ends with one branch already integrated.
+
 ## What already works
 
 Only two things are missing; the rest of the chain is built.
@@ -35,6 +62,14 @@ Only two things are missing; the rest of the chain is built.
 Transitive invalidation deserves emphasis: it is already the correct semantics for a
 chain. Fix p2 and re-run, and p3/p4 redo their work on the corrected base. No new
 machinery needed.
+
+One near-miss worth naming, because it looks like a workaround and is not. `prepareIsolation`
+reads `rev-parse HEAD` from the parent repo at the moment each leaf starts (`worktree.mjs:31`),
+not once per run. So a leaf *can* inherit a predecessor's commits — but only if something
+lands them on the parent branch between links. With `isolation` set on every task nothing
+writes to the parent, so every leaf gets the identical base. Merging each branch into the
+parent before dispatching the next does work, and is the honest interim workaround; it
+costs one merge per link, which is the reconciliation stage above, paid in instalments.
 
 ## Design
 
