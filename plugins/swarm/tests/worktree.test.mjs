@@ -357,7 +357,7 @@ test("scheduler integration: isolation task runs IN the worktree; summary lists 
     equal(r.summary.tasks[0].state, "ok");
     equal(r.worktreesKept.length, 1);
     equal(r.worktreesKept[0].branch, "swarm/impl");
-    equal(r.summary.worktreesKept[0].id, "impl");
+    equal(r.summary.worktreesKept[0].name, "impl");
     ok(!existsSync(join(repo, "made-by-leaf.txt")), "user's real tree untouched");
     const res = JSON.parse(spawnSync("node", ["-e",
       `process.stdout.write(require("fs").readFileSync(${JSON.stringify(join(p.resultsDir, "results", "impl.json"))},"utf8"))`],

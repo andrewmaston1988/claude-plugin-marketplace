@@ -7,7 +7,7 @@ import {
   buildDigestTask, DIGEST_ID,
   reportPath as digestReportPath, scratchPath as digestScratchPath,
 } from "./digest.mjs";
-import { effectivePlanDoc } from "./manifest.mjs";
+import { effectivePlanDoc, resolveWorktreeName } from "./manifest.mjs";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
@@ -429,10 +429,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // --force reset, or re-running a later link would scrub its predecessors'
   // commits. A task with a private tree is simply a group of one.
   // normalizeTasks derives worktreeName, but runPlan also accepts hand-built
-  // plans — fall back to the same rule rather than silently skipping isolation.
-  const nameOf = (t) => t.worktreeName !== undefined ? t.worktreeName
-    : t.isolation === undefined ? undefined
-    : (typeof t.isolation === "object" && t.isolation !== null ? t.isolation.worktree : t.id);
+  // plans — resolveWorktreeName covers both rather than silently skipping isolation.
+  const nameOf = resolveWorktreeName;
 
   const groupMembers = new Map();   // name -> [task ids, in manifest order]
   const groupFinal = new Map();
@@ -909,7 +907,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         const collected = worktree.collect(task, cfg, wt);
         result.worktree = collected;
         if (collected.kept) worktreesKept.push({
-          id: wt.name ?? wtName, name: wt.name ?? wtName, branch: collected.branch,
+          name: wt.name ?? wtName, branch: collected.branch,
           path: collected.path, diffstat: collected.diffstat,
           taskIds: groupMembers.get(wtName),
         });

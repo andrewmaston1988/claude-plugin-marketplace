@@ -167,8 +167,8 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "effort": "medium",                        // optional; validated for Claude tiers
     "allowedTools": "Read,Grep,Glob",          // default: read-only set
     "cwd": "C:/code/somerepo",                 // default: manifest's cwd
-    "isolation": "worktree",                   // private tree, implementation leaves only
-    "isolation": { "worktree": "feat" },       // SHARED tree — phased chains, see Plan patterns
+    "isolation": "worktree",                   // private tree (implementation leaves); OR
+                                               //   { "worktree": "feat" } — SHARED tree, phased chains, see Plan patterns
     "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 3600000,

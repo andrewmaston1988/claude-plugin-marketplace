@@ -394,7 +394,7 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
       // A shared chain's branch carries several leaves' commits — name them, so
       // the session merging it knows whose work is on there.
       const chain = wt.taskIds?.length > 1 ? ` ${dim(`(${wt.taskIds.join(" → ")})`)}` : "";
-      lines.push(`  ${bold(wt.id)}: ${magenta(wt.branch)} at ${wt.path}${chain}`);
+      lines.push(`  ${bold(wt.name)}: ${magenta(wt.branch)} at ${wt.path}${chain}`);
     }
   }
   return lines.join("\n");

@@ -221,15 +221,22 @@ function validateTaskShapes(rawTasks, errors, label) {
   }
 }
 
+// The one rule for which worktree a task lives in: the object form names a
+// tree shared with ordered siblings, the string form is shorthand for the
+// task's own id. Normalized tasks carry the answer already; raw ones (hand-built
+// plans, pre-normalization validation) derive it here.
+export function resolveWorktreeName(t) {
+  if (t.worktreeName !== undefined) return t.worktreeName;
+  if (t.isolation === undefined || t.isolation === null) return undefined;
+  return typeof t.isolation === "object" ? t.isolation.worktree : t.id;
+}
+
 // Tasks sharing a worktree run in ONE directory, so they must form a single
 // ordered chain — two unordered members would race and corrupt each other.
 function validateWorktreeGroups(rawTasks, errors, label) {
-  const nameOf = (t) => t.isolation === undefined ? undefined
-    : (typeof t.isolation === "object" && t.isolation !== null ? t.isolation.worktree : t.id);
-
   const groups = new Map();
   for (const t of rawTasks) {
-    const n = nameOf(t);
+    const n = resolveWorktreeName(t);
     if (typeof n !== "string" || !n) continue;
     if (!groups.has(n)) groups.set(n, []);
     groups.get(n).push(t);
@@ -479,11 +486,8 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     }
     let effCwd = originalCwd;
     let scratchRedirect = false;
-    // Both isolation forms name a worktree: "worktree" is shorthand for the
-    // task's own id, the object form names one shared with ordered siblings.
-    const worktreeName = (isCompute || isManifest || t.isolation === undefined)
-      ? undefined
-      : (typeof t.isolation === "object" ? t.isolation.worktree : t.id);
+    // Compute and manifest nodes spawn no leaf, so there is nothing to isolate.
+    const worktreeName = (isCompute || isManifest) ? undefined : resolveWorktreeName(t);
     // Write-implies-isolation: a leaf granted write-capable tools without
     // worktree isolation never runs in the user's real tree — its cwd is
     // redirected to a per-task scratch dir under the results dir.

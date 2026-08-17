@@ -1110,3 +1110,14 @@ test("an ordered chain of three passes validation", () => {
     deepEqual(plan.tasks.map((t) => t.worktreeName), ["feat", "feat", "feat"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+import { resolveWorktreeName } from "../src/manifest.mjs";
+
+test("resolveWorktreeName is the single rule every derivation site shares", () => {
+  equal(resolveWorktreeName({ id: "a" }), undefined);
+  equal(resolveWorktreeName({ id: "a", isolation: "worktree" }), "a");
+  equal(resolveWorktreeName({ id: "a", isolation: { worktree: "feat" } }), "feat");
+  equal(resolveWorktreeName({ id: "a", isolation: null }), undefined);
+  // Already-normalized tasks carry the derived field; it wins over re-derivation.
+  equal(resolveWorktreeName({ id: "a", worktreeName: "feat" }), "feat");
+});
