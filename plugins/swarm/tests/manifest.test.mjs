@@ -1015,3 +1015,44 @@ test("args fingerprint keys the default results dir; key order irrelevant; no ar
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("isolation object form normalizes to a shared worktree name", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "p1", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "p2", after: ["p1"], isolation: { worktree: "feat" } }),
+      claudeTask({ id: "solo", isolation: "worktree" }),
+    ] });
+    const plan = loadManifest(p, CFG, dir);
+    const byId = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
+    equal(byId.p1.worktreeName, "feat");
+    equal(byId.p2.worktreeName, "feat");
+    equal(byId.solo.worktreeName, "solo", "string form is shorthand for its own id");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("isolation object form rejects an empty or non-filename-safe worktree name", () => {
+  const dir = tmp();
+  try {
+    const bad = writeManifest(dir, { tasks: [claudeTask({ isolation: { worktree: "" } })] }, "b1.json");
+    ok(errorsOf(() => loadManifest(bad, CFG, dir)).some((e) => /non-empty string/i.test(e)));
+
+    const unsafe = writeManifest(dir, { tasks: [claudeTask({ isolation: { worktree: "a/b" } })] }, "b2.json");
+    ok(errorsOf(() => loadManifest(unsafe, CFG, dir)).some((e) => /filename-safe/i.test(e)));
+
+    const junk = writeManifest(dir, { tasks: [claudeTask({ isolation: "nope" })] }, "b3.json");
+    ok(errorsOf(() => loadManifest(junk, CFG, dir)).some((e) => /isolation must be/i.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a shared worktree suppresses the scratch redirect for write-capable leaves", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "p1", isolation: { worktree: "feat" }, allowedTools: "Read,Write" }),
+    ] });
+    const t = loadManifest(p, CFG, dir).tasks[0];
+    equal(t.scratchRedirect, false, "a named worktree is real isolation, not a scratch case");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
