@@ -17,7 +17,7 @@ function isRegisteredWorktree(path, repo) {
 }
 
 // Create — or re-enter — an isolated worktree for an implementation leaf:
-//   git worktree add <resultsDir>/wt-<id> -b <prefix><id> --no-track <HEAD of task cwd repo>
+//   git worktree add <resultsDir>/wt-<name> -b <prefix><name> --no-track <HEAD of task cwd repo>
 // The branch prefix comes from config — never hardcoded. On resend the leaf's
 // worktree may already exist (kept on timeout for salvage): re-enter it so the
 // partial diff survives and the leaf resumes in place, rather than 0s-failing on
@@ -25,8 +25,11 @@ function isRegisteredWorktree(path, repo) {
 export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) {
   const repo = task.originalCwd || task.cwd;
   const prefix = cfg.worktreeBranchPrefix || "swarm/";
-  const branch = `${prefix}${task.id}`;
-  const path = resolve(join(resultsDir, `wt-${task.id}`));
+  // Ordered siblings sharing a name meet in one tree; without one, the task's
+  // own id names a private tree.
+  const name = task.worktreeName || task.id;
+  const branch = `${prefix}${name}`;
+  const path = resolve(join(resultsDir, `wt-${name}`));
 
   const head = git(["rev-parse", "HEAD"], repo);
   if (head.status !== 0) {
@@ -39,7 +42,13 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
       git(["reset", "--hard", head.stdout], path);
       git(["clean", "-fd"], path);
     }
-    return { path, branch, head: head.stdout, repo, reused: true };
+    // A follower starts from what its predecessor left, so its own collect()
+    // diffstat covers its work alone rather than the whole chain's.
+    const treeHead = git(["rev-parse", "HEAD"], path);
+    return {
+      path, branch, name, repo, reused: true,
+      head: (!reset && treeHead.status === 0) ? treeHead.stdout : head.stdout,
+    };
   }
 
   let add = git(["worktree", "add", path, "-b", branch, "--no-track", head.stdout], repo);
@@ -51,7 +60,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     throw new Error(`git worktree add failed for '${task.id}': ${add.stderr}`);
   }
 
-  return { path, branch, head: head.stdout, repo, reused: false };
+  return { path, branch, name, head: head.stdout, repo, reused: false };
 }
 
 // Collect after the leaf ran: unchanged worktrees are removed (and their

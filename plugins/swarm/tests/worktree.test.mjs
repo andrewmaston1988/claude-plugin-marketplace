@@ -32,6 +32,17 @@ function cleanup(...dirs) {
   for (const d of dirs) rmSync(d, { recursive: true, force: true });
 }
 
+function commitAll(cwd, msg) {
+  spawnSync("git", ["add", "."], { cwd, windowsHide: true });
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+    "commit", "-q", "-m", msg], { cwd, windowsHide: true });
+}
+
+// git holds the worktree dir open; remove it before rmSync'ing the repo.
+function dropWorktree(repo, path) {
+  spawnSync("git", ["worktree", "remove", "--force", path], { cwd: repo, windowsHide: true });
+}
+
 test("prepareIsolation creates a worktree on the prefixed branch at repo HEAD", () => {
   const repo = initRepo();
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
@@ -108,6 +119,89 @@ test("prepareIsolation on a fresh path still creates and reports reused:false", 
     ok(existsSync(join(wt.path, "a.txt")));
   } finally {
     spawnSync("git", ["worktree", "remove", "--force", join(resultsDir, "wt-fresh")], { cwd: repo, windowsHide: true });
+    cleanup(resultsDir, repo);
+  }
+});
+
+test("two tasks sharing a worktree name land in one tree on one branch", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
+    const p2 = { id: "p2", worktreeName: "feat", originalCwd: repo, cwd: repo };
+
+    const wt1 = prepareIsolation(p1, CFG, resultsDir);
+    equal(wt1.branch, "swarm/feat", "branch comes from the name, not the task id");
+    equal(wt1.name, "feat");
+    ok(wt1.path.endsWith("wt-feat"), `expected wt-feat, got ${wt1.path}`);
+
+    writeFileSync(join(wt1.path, "phase1.txt"), "phase 1 work\n");
+    commitAll(wt1.path, "phase 1");
+
+    const wt2 = prepareIsolation(p2, CFG, resultsDir);
+    equal(wt2.path, wt1.path, "second task re-enters the same tree");
+    equal(wt2.branch, wt1.branch);
+    ok(wt2.reused, "second task reuses rather than creates");
+    ok(existsSync(join(wt2.path, "phase1.txt")), "p2 must see p1's committed work");
+  } finally {
+    dropWorktree(repo, join(resultsDir, "wt-feat"));
+    cleanup(resultsDir, repo);
+  }
+});
+
+test("a follower's head is the tree's HEAD, so its diffstat spans only its own work", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
+    const wt1 = prepareIsolation(p1, CFG, resultsDir);
+    writeFileSync(join(wt1.path, "phase1.txt"), "work\n");
+    commitAll(wt1.path, "phase 1");
+    const phase1Head = git(["rev-parse", "HEAD"], wt1.path);
+
+    const rev = { id: "rev", worktreeName: "feat", originalCwd: repo, cwd: repo };
+    const wtR = prepareIsolation(rev, CFG, resultsDir);
+    equal(wtR.path, wt1.path);
+    equal(wtR.head, phase1Head, "a follower starts from what its predecessor left, not repo HEAD");
+
+    // The reviewer touched nothing, so relative to ITS start the tree is unchanged.
+    const c = collect(rev, CFG, wtR);
+    equal(c.kept, false, "an unchanged follower reports no work of its own");
+  } finally {
+    dropWorktree(repo, join(resultsDir, "wt-feat"));
+    cleanup(resultsDir, repo);
+  }
+});
+
+test("--force on a follower resets to repo HEAD, not the tree's", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
+    const wt1 = prepareIsolation(p1, CFG, resultsDir);
+    writeFileSync(join(wt1.path, "phase1.txt"), "work\n");
+    commitAll(wt1.path, "phase 1");
+
+    const p2 = { id: "p2", worktreeName: "feat", originalCwd: repo, cwd: repo };
+    const forced = prepareIsolation(p2, CFG, resultsDir, { reset: true });
+    equal(forced.head, git(["rev-parse", "HEAD"], repo), "a reset restarts the group from repo HEAD");
+    ok(!existsSync(join(forced.path, "phase1.txt")), "reset scrubs the whole group's work");
+  } finally {
+    dropWorktree(repo, join(resultsDir, "wt-feat"));
+    cleanup(resultsDir, repo);
+  }
+});
+
+test("a task with no worktreeName keeps its per-task tree (regression)", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, CFG, resultsDir);
+    equal(wt.branch, "swarm/impl");
+    equal(wt.name, "impl");
+    ok(wt.path.endsWith("wt-impl"));
+  } finally {
+    dropWorktree(repo, join(resultsDir, "wt-impl"));
     cleanup(resultsDir, repo);
   }
 });
