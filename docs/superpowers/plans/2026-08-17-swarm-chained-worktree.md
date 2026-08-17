@@ -45,6 +45,17 @@ p2 branch log            : d4ff9cd init
 | `plugins/swarm/tests/scheduler.test.mjs` | integration | deferred-collect test |
 | `plugins/swarm/skills/swarm/SKILL.md` | agent-facing docs | rewrite Chain pattern, add digraph, worked example, verifier mechanics, routing rewrite |
 | `plugins/swarm/README.md` | user-facing docs | `isolation` object form, per-group `worktreesKept` |
+| `plugins/swarm/skills/swarm/manifest-fields.md` | agent-facing docs (new) | `returns`/citations, child manifests, named manifests — extracted from SKILL.md |
+
+**Undrafted, required by the 500-line skill cap:** Tasks 5+6 pushed `SKILL.md` to 515 lines
+against `writing-skills+`'s hard 500-line body cap, whose Iron Law forbids shipping a skill
+with the linter red. The three deepest `## Plan patterns` subsections (`returns` + citation
+verification, child manifests, named manifests + `args`) moved verbatim into
+`manifest-fields.md`, wired back with a conditional pointer naming what each covers and when
+to read it. Decision-routing content — Iron Law, offer gate, the shape digraph, Single
+delegated leaf, Phased chain, the two-wave `[SHARED_CONTEXT]` invariant — all stayed in
+`SKILL.md` (478 lines, linter green). The split is by *load semantics*, not topic: reference
+files are never auto-loaded, so anything needed to make a routing decision cannot move.
 
 **Docs-task gate:** `SKILL.md` edits are hook-blocked until `writing-skills+` is invoked (observed this session: the Edit tool returns `You MUST invoke /writing-skills+ before editing any SKILL.md`). Tasks 5 and 6 must invoke it as their first step. This is not optional and cannot be worked around.
 

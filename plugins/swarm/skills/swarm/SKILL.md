@@ -1,12 +1,12 @@
 ---
 name: swarm
 description: >-
-  Use when a request fans out into 3+ independent bounded leaves, or alternative models are wanted for breadth or second opinions. Triggers — "swarm this", "fan out", "sweep", "judge panel", "run these in parallel", "use glm/minimax". SKIP for: a single bounded question — answer it inline.
+  Use when a request fans out into 3+ independent bounded leaves, when alternative models are wanted for breadth or second opinions, or when one bounded task should run outside this session. Triggers — "swarm this", "fan out", "sweep", "judge panel", "run these in parallel", "use glm/minimax", "run a <model> session on swarm", "delegate this to a leaf".
 ---
 
 # swarm — alternative-model fan-out engine
 
-Swarm turns one session into a group: many independent perspectives, redundant attempts, diverse-lens judging — powered by capable `:cloud` models (GLM, MiniMax — not an opus swarm, but almost) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context. The smarts live in the plan and the leaves; the plumbing has none.
+Swarm runs work in headless Claude Code sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Powered by capable `:cloud` models (GLM, MiniMax — not an opus swarm, but almost) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context. The smarts live in the plan and the leaves; the plumbing has none.
 
 Engine: `scripts/swarm.mjs` at the plugin root — resolve it as `<this skill's base directory>/../../scripts/swarm.mjs`. Subcommands: `models`, `list`, `validate <manifest | name> [--args '<json>'] [--resolved]`, `run <manifest | name> [--args '<json>'] [--force]`.
 
@@ -29,7 +29,7 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 
 ## Routing — when to swarm
 
-- **Triage first**: when the whole job is under ~one leaf's cost (~30k tokens), read it yourself — don't swarm.
+- **Triage first**: the question is whose budget and context pay, not how big the job is. A `:cloud` leaf spends no Anthropic budget, so "too small to swarm" is not a reason on its own. Read it yourself when this session has context to spare and the answer is one read. Delegate a **single leaf** when it doesn't — see *Single delegated leaf* below. A request phrased as dispatch ("run a glm-5.2 session on swarm") has already made this call; honour it rather than re-triaging it.
 - **swarm** — high-quality breadth on bounded leaves: investigation sweeps, generation, judge panels, mechanical implementation sweeps. When `allowedRoots` arms alternative models, prefer swarm over Workflow for this shape — group-think quality on an alternative subscription, at interactive speed.
 - **Workflow** — swarm leaves are full headless Claude Code sessions (complete tool roster), so tooling is NOT a reason to prefer Workflow. Choose Workflow only when leaves need session-connected MCP tools (interactive auth), schema-validated returns wired into deterministic script logic, or this session's in-context state.
 - **pipeline** — durable queued throughput ending in PRs. Huge capacity, not fast.
@@ -218,6 +218,37 @@ The discriminating question is whether step N builds on step N-1's **edits** —
 the leaves touch the same repo. Several leaves editing disjoint files in one codebase is
 still fan-out with private trees; only accumulation needs a shared tree.
 
+### Single delegated leaf
+
+One leaf, no `after`, no digest needed. The shape for work that is perfectly doable inline
+but shouldn't be — because the cost is context, not tokens.
+
+When it applies:
+
+- **This session's context is scarce.** A busy session buys headroom by sending a bounded
+  job out and reading back a short result instead of the whole investigation.
+- **A finished swarm missed something.** A follow-up leaf answers the gap without
+  re-running the sweep or re-reading its raw output.
+- **The result should be auditable.** A leaf leaves `results/<id>.json` and a run dir on
+  disk; an inline read leaves only transcript.
+
+```json
+{ "tasks": [
+    { "id": "check", "model": "glm-5.2:cloud",
+      "prompt": "Your single job: <closed question>.\nFile scope: <paths>.\nReturn ≤10 bullets: claim, file:line. No prose. If you cannot answer, say so in one line." }
+  ] }
+```
+
+**The offer gate is a judgement call here, not a mandate.** The gate proper covers
+fan-out-shaped work (3+ leaves). For one leaf, still say what you are about to dispatch and
+on which model — briefly, so the operator can redirect the model or the scope before it
+runs — but a request already phrased as dispatch ("run a glm-5.2 session on swarm") has
+made the call, and re-asking it is friction. The Iron Law's hands-off rule applies in full
+once the leaf is running.
+
+Everything else still applies: one closed question, an explicit return contract. Skip the
+digest — with one leaf, reading `results/check.json` directly *is* the digest.
+
 ### Fan-out (the native shape)
 
 N tasks, no `after`; digest synthesizes. Every investigation leaf prompt uses this fixed shape — one closed question per leaf, each answerable from a bounded file set:
@@ -364,56 +395,19 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
 
 **`compute` is data plumbing, never judgment.** Dedupe, count, threshold, flatten — yes. "Decide which findings matter" — no: judgment stays in leaves or between waves, where a model can weigh evidence.
 
-### Schema-guaranteed leaf output — `returns`
+### Deeper manifest fields — read on demand
 
-A task with `returns` gets its output validated against a JSON-Schema subset on completion. Invalid output triggers exactly ONE corrective re-ask through the leaf's own resumed session (the errors are field-precise teaching lines); still-invalid output fails the task with those errors. Put it on any leaf whose JSON feeds `forEach.from`, `compute`, `when`, or a chain link — guaranteed shape is what makes the deterministic-steps grammar reliable on model output.
+Three features have field-by-field semantics too long to carry here. Read
+[manifest-fields.md](manifest-fields.md) when you are writing one of them:
 
-```json
-{ "id": "find-sites", "model": "glm-5.2:cloud",
-  "prompt": "…return ONLY JSON: {\"sites\":[{\"file\":\"…\",\"line\":1,\"status\":\"dirty\"}]}",
-  "returns": {
-    "type": "object",
-    "required": ["sites"],
-    "properties": {
-      "sites": { "type": "array", "items": {
-        "type": "object", "required": ["file", "line"],
-        "properties": {
-          "file": { "type": "string" },
-          "line": { "type": "integer" },
-          "status": { "enum": ["clean", "dirty"] } } } }
-    }
-  } }
-```
+- **`returns`** — JSON-Schema validation of a leaf's output, the one corrective re-ask, and
+  the mechanical citation check. Read it before schema'ing any finder that cites code.
+- **`manifest`** — running a saved child manifest as one node, `forEach` over it, and what
+  the node may and may not carry.
+- **Named manifests + `{{args.<key>}}`** — saving a recurring shape and re-running it by
+  name with fresh parameters.
 
-Supported keywords: `type` (`string|number|integer|boolean|array|object|null`), `properties`, `required`, `items` (one schema for every element), `enum` — nothing else (no `$ref`, no `additionalProperties`; extra fields pass). Rules: `compute` tasks never take `returns` — their output is engine-deterministic, schema the producing leaf instead; on a `forEach` task the schema validates each clone and the parent's aggregate array is exempt. `validate` lists schema'd tasks in the approval preview.
-
-**Citations are verified mechanically — warn, never destroy.** When a `returns` schema declares citation-shaped objects — `properties` with `file` (string), `line` (integer), `quote` (string), all three `required` — the engine string-matches every citation against the actual file after schema validation: the quote (whitespace-normalised; first line of a multi-line quote) must appear on the cited line or within ±2 (near-misses pass, recording drift). A refuted citation shares the ONE corrective re-ask; a still-refuted one **never fails the leaf and never deletes the finding** — it is annotated in place (`citation: "verified" | "drift" | "refuted"`), the leaf stays `ok` with its output intact, and the closing block plus `citations: {checked, drifted, refuted}` say so loudly. The mechanical check cannot tell a fabrication from a whitespace-mangled quote of a real line (decompiled/minified code defeats it), so it flags; the **verifier wave** — an LLM that reads the file — is what rules. Put this shape on every finder that cites code, and route its output through a verifier. Paths resolve against the leaf's cwd (out-of-cwd citations are refuted); `"verifyCitations": false` on the task opts out. `validate` announces covered tasks.
-
-**Finder-prompt guidance: quote a SHORT distinctive fragment (10–40 chars), not the whole line.** The check matches a substring of the cited line, so a fragment of a 200-char decompiled line verifies where a reformatted full-line quote would refute. Tell finders to cite the smallest span that identifies the code, and to omit any finding whose quote they cannot vouch for — the gate is the backstop, the finder prompt is the front line.
-
-### Child manifests — a reusable sub-pipeline as one node
-
-A task with `"manifest": "<path>"` runs that child manifest as one node — the child's tasks join the run under `<node>~<childId>` ids, and the node's output is a JSON object of the child's terminal tasks (`{"<taskId>": <output>, …}`). Combine with `forEach` for the core case: a tuned multi-stage pipeline executed once per item. One nesting level; the child's worst-case leaves multiply into `validate`'s preview and estimate.
-
-```json
-{ "tasks": [
-    { "id": "repos", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: [\"repoA\", \"repoB\"]" },
-    { "id": "audit", "manifest": "audit-one-repo.json", "after": ["repos"],
-      "forEach": { "from": "repos", "path": "", "maxItems": 6 } }
-  ] }
-```
-
-`audit-one-repo.json` is a normal manifest (its prompts may use `{{item}}`/`{{index}}` when the node has `forEach`), except: no `resultsDir`/`concurrency`/`digest` (the parent owns the run), and no `manifest` tasks of its own (one level). The node itself is an agentless container — `model`/`prompt`/`returns`/etc. belong on the child's tasks; only `after`, `when`, `forEach`, `timeoutMs` go on the node.
-
-### Named manifests + args — recurring runs, saved once
-
-A recurring shape (standing audit, per-repo sweep, judge panel) is saved once and re-run by name with fresh parameters — never re-authored:
-
-- **Save by Write** — no save subcommand. Repo-shaped runs: `<cwd>/.swarm/manifests/<name>.json`; cross-repo shapes: `~/.swarm/manifests/<name>.json`. `node <engine> list` shows what is saved where.
-- **Invoke by name**: `run <name> --args '{"base":"master"}'` / `validate <name> …` — a ref without a path separator or `.json` suffix is a name. A name in both scopes fails loudly (disambiguate with a path); the engine always prints which file a name resolved to.
-- **`{{args.<key>}}`** in any prompt (parent, child, digest instructions) substitutes from `--args` at load, before validation — same vocabulary as `{{item}}`/`{{result:}}`. An unreferenced supplied key and an unsupplied placeholder both fail validation; nothing ever substitutes to empty. A child manifest referenced by a saved parent resolves relative to the parent's own directory.
-- Each distinct `--args` value gets its own default results dir (fingerprinted stem), so resume never crosses parameterizations.
-- Gate a named run on the `--resolved` preview — see the offer gate above.
+### Two waves — the between-wave synthesis is yours
 
 **Invariant: wave 2 never starts until wave 1 results are compressed into `[SHARED_CONTEXT]` (≤400 words).** Wave 1 explores (fan-out manifest + digest); then **you** (the session) synthesize `[SHARED_CONTEXT]` covering: **data model** (exact names, key schema facts), **API contract** (exact interfaces, response structures), **existing conventions** (patterns, helpers, file locations wave-2 leaves must follow). Wave 2 is a second manifest embedding it verbatim in each leaf prompt — `isolation: "worktree"` for implementation leaves, `outputDir` for plan/generation leaves — plus per-leaf: "Do not claim files outside your scope boundary" and "List dependencies under `## Prerequisites` (use `- none`)". Encoding both waves in one manifest is FORBIDDEN: the between-wave synthesis is the judgement step and must not be delegated to the plan.
 
@@ -478,7 +472,7 @@ Manifest sketch: `find-a`,`find-b` (glm) → `verify-a`,`verify-b` (`after` each
 - Reading raw `results/*.json` wholesale instead of `digest.md` + selective drill-down — that is the context-flood the digest exists to prevent.
 - Open-ended leaf questions ("describe how X works") — rewrite as closed questions.
 - Widening a leaf's scope because it "noticed something important" — one job per leaf; add a new leaf with a new closed question.
-- Both waves in one manifest, or judgement-heavy chain links joined by `{{result:…}}`.
+- Both waves in one manifest — a discovery wave and the work it scopes cannot be authored before the discovery has run. (A *phased chain* is different: its phases are known upfront and share a worktree.)
+- Chaining leaves that build on each other's **edits** with `{{result:…}}` alone — that passes text, not changes; use a phased chain on a shared worktree.
 - Per-leaf price deliberation — pick from the discovered list and move on.
 - Working around a governance rejection instead of switching the leaf to a Claude model.
-- Swarming a single bounded question — under ~one leaf's cost, read it yourself.
