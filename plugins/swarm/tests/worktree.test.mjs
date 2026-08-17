@@ -164,9 +164,12 @@ test("a follower's head is the tree's HEAD, so its diffstat spans only its own w
     equal(wtR.path, wt1.path);
     equal(wtR.head, phase1Head, "a follower starts from what its predecessor left, not repo HEAD");
 
-    // The reviewer touched nothing, so relative to ITS start the tree is unchanged.
+    // The reviewer touched nothing, so relative to ITS start the diff is empty —
+    // but it is a follower, so the tree survives with its predecessor's commit.
     const c = collect(rev, CFG, wtR);
-    equal(c.kept, false, "an unchanged follower reports no work of its own");
+    equal(c.diffstat, "", "an unchanged follower reports no work of its own");
+    equal(c.kept, true, "a follower's branch carries its predecessors' commits — never destroy it");
+    ok(existsSync(join(wt1.path, "phase1.txt")), "p1's committed work must survive the collect");
   } finally {
     dropWorktree(repo, join(resultsDir, "wt-feat"));
     cleanup(resultsDir, repo);
@@ -202,6 +205,30 @@ test("a task with no worktreeName keeps its per-task tree (regression)", () => {
     ok(wt.path.endsWith("wt-impl"));
   } finally {
     dropWorktree(repo, join(resultsDir, "wt-impl"));
+    cleanup(resultsDir, repo);
+  }
+});
+
+test("collect never destroys a reused tree — a failed follower would take the chain's commits", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
+    const wt1 = prepareIsolation(p1, CFG, resultsDir);
+    writeFileSync(join(wt1.path, "phase1.txt"), "phase 1 work\n");
+    commitAll(wt1.path, "phase 1");
+
+    // p2 is the final link and fails without touching the tree: relative to its
+    // own start HEAD nothing changed, which is the destroy condition.
+    const p2 = { id: "p2", worktreeName: "feat", originalCwd: repo, cwd: repo };
+    const wt2 = prepareIsolation(p2, CFG, resultsDir);
+    const c = collect(p2, CFG, wt2);
+
+    equal(c.kept, true, "the shared branch must survive");
+    ok(existsSync(join(wt2.path, "phase1.txt")), "p1's committed work must still be there");
+    ok(git(["branch", "--list", "swarm/feat"], repo) !== "", "the branch must not be deleted");
+  } finally {
+    dropWorktree(repo, join(resultsDir, "wt-feat"));
     cleanup(resultsDir, repo);
   }
 });

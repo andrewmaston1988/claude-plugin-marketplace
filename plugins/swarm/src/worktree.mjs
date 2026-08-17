@@ -71,7 +71,11 @@ export function collect(task, cfg, wt) {
   const headNow = git(["rev-parse", "HEAD"], wt.path);
   const changed = status.stdout !== "" || (headNow.status === 0 && headNow.stdout !== wt.head);
 
-  if (!changed) {
+  // Destroy only a tree this leaf started fresh. A reused tree's branch carries
+  // its predecessors' commits, and `wt.head` is the tree's own HEAD — so a final
+  // link that changed nothing of its OWN still reads as unchanged here, and
+  // deleting the branch would take the whole chain's work with it.
+  if (!changed && !wt.reused) {
     git(["worktree", "remove", "--force", wt.path], wt.repo);
     git(["branch", "-D", wt.branch], wt.repo);
     return { kept: false, branch: wt.branch, path: wt.path };

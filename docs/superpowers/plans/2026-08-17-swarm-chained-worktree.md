@@ -37,9 +37,10 @@ p2 branch log            : d4ff9cd init
 
 | File | Responsibility | Change |
 |---|---|---|
-| `plugins/swarm/src/worktree.mjs` | worktree create/re-enter/collect | `prepareIsolation` takes a name; `collect` unchanged in body |
+| `plugins/swarm/src/worktree.mjs` | worktree create/re-enter/collect | `prepareIsolation` takes a name; `collect` never destroys a reused tree |
 | `plugins/swarm/src/manifest.mjs` | manifest validation + normalization | accept object `isolation`, normalize to a `worktreeName`, add ordering/forEach/collision validation |
 | `plugins/swarm/src/scheduler.mjs` | dispatch loop | resolve group membership, defer `collect` to the group's last task, per-group `worktreesKept` |
+| `plugins/swarm/src/results.mjs` | closing block | name a shared chain's leaves beside its branch |
 | `plugins/swarm/tests/worktree.test.mjs` | worktree unit tests | new shared-name tests |
 | `plugins/swarm/tests/manifest.test.mjs` | validation tests | new teaching-error tests |
 | `plugins/swarm/tests/scheduler.test.mjs` | integration | deferred-collect test |
@@ -305,6 +306,8 @@ Without this, the reviewer's `collect()` destroys the tree mid-chain. This is a 
 - Produces: `worktreesKept` entries shaped `{ id, name, branch, path, diffstat, taskIds: string[] }` — one per group, replacing the current one-per-task `{ id, branch, path, diffstat }`.
 
   **Deviation from the drafted shape:** `id` is kept alongside the new `name`/`taskIds` rather than replaced. `results.mjs:394` renders `wt.id`; keeping the field is additive, so every Step-1 assertion holds unchanged and no consumer edit is needed. Dropping `id` would have forced a rename in a file this plan does not otherwise touch, for no behavioural gain.
+
+  **Superseded by review:** `results.mjs` IS edited after all. Keeping `id` spared a rename, but it left `taskIds` written and never read — the closing block named a chain's branch without naming whose commits were on it. `formatClosing` now renders the chain when `taskIds.length > 1`, which is why `results.mjs` appears in the File Structure table.
 
   **Also required, undrafted:** the scheduler derives the worktree name itself via a local `nameOf(t)` helper rather than reading `task.worktreeName` alone. `normalizeTasks` sets that field for manifest-loaded plans, but `runPlan` also accepts hand-built plan objects (two existing tests build them with a bare `isolation: "worktree"`); without the fallback those tasks silently lose isolation entirely. `nameOf` applies the same rule `normalizeTasks` does.
 
@@ -881,5 +884,43 @@ Every spec section maps to a task. The spec's "out of scope" items (merging back
 **Task ordering note.** Tasks 5 and 6 both edit `SKILL.md` and will conflict if run in parallel. Run 6 after 5, or fold them into one editing pass — the digraph (5) and the routing rewrite (6) are the two halves of one coherent docs change.
 
 **Type consistency:** `worktreeName` is the normalized field throughout (Tasks 1→2→3). `prepareIsolation` returns `name` (Task 2), consumed as `wt.name` (Task 3). `worktreesKept` entries are `{ name, branch, path, diffstat, taskIds }` in both Task 3's implementation and its test.
+
+**Post-implementation review (all 9 findings fixed).** A `/code-review` pass over the implemented
+branch found a class of defect the task decomposition could not have caught, because it lives
+where the feature meets machinery no task touches: **the two expansion paths**. Tasks 1–4 reason
+about `plan.tasks` as authored, but `expandForEach` and `expandManifest` splice new tasks in
+mid-run, and neither carried a worktree name through the splice.
+
+| Finding | Defect | Fix |
+|---|---|---|
+| BLOCKER 1 | `forEach` clones inherited the parent's `worktreeName`, so every concurrent clone landed in one tree | clones get a private name from their own id (`fix[0]`, `fix[1]`) |
+| BLOCKER 2 | manifest children kept an un-remapped name — two nodes splicing the same child resolved to one path, and the name was absent from the group maps (never collected, never reset) | `worktreeName` is remapped with the id (`node~feat`) |
+| MAJOR 1–2 | child-vs-parent and cross-node name collisions | **no new validation** — BLOCKER 2's remap makes both structurally impossible; proved by test rather than asserted |
+| MAJOR 3 | `collect` destroyed a *reused* tree whose own diff was empty, deleting the branch and taking the whole chain's commits with it | `collect` destroys only a tree the leaf started fresh (`!wt.reused`) |
+| MINOR 1–4 | test asserted the old destructive behaviour; `nameOf` fallback and `kept:false` paths untested; `taskIds` written but never read | assertions rewritten; two paths covered; `results.mjs` renders the chain |
+
+**RED evidence.** Every new assertion was verified red before being kept. The two that passed on
+first write (`nameOf` fallback, `kept:false` collect path) were re-checked by applying the review's
+own named mutations — `const nameOf = (t) => t.worktreeName;` and `if (true)` for `if (collected.kept)`
+— confirming each goes red, then restoring. The MAJOR 3 scheduler test passes trivially against the
+always-`kept:true` fake, so the load-bearing version lives in `worktree.test.mjs` against real git:
+p1 commits, p2 re-enters and collects untouched, and the assertion is that `swarm/feat` still exists
+with p1's file on it. **GREEN: `node --test plugins/swarm/tests/*.test.mjs` → 522 pass, 0 fail**
+(514 before this work — 8 net new tests).
+
+**Regression caught during the fix.** The first MAJOR 3 attempt guarded the scheduler's collect call
+with `r.ok`, which broke the pre-existing "a failed isolated leaf re-enters its kept worktree" test:
+a failed *private* leaf must still collect, so its changed tree is reported for salvage. Reverted —
+the `!wt.reused` guard inside `collect()` addresses the real defect without touching that path.
+
+MAJOR 3 is worth reading twice: the report framed it as a *failed* final link, but `wt.head` for a
+reused tree is that tree's own HEAD, so a **successful** final link that committed nothing of its
+own would have destroyed the branch too. The group maps are also rebuilt after every splice — a map
+built from the pre-expansion snapshot leaves spliced-in trees uncollected and un-resettable.
+
+**Rejected alternative.** The review offered "reject string-isolation under `forEach`" for BLOCKER 1.
+Rejected: it removes a working, useful feature (per-clone private trees) to fix a bug that remapping
+fixes outright. Validation at `manifest.mjs:252` correctly still rejects only the *object* (shared)
+form under `forEach`, where concurrent clones genuinely cannot share one tree.
 
 **Known adaptation point:** Task 3's test uses `planWith`/`makeIo` as placeholders for `tests/scheduler.test.mjs`'s actual helpers; Step 1 instructs the implementer to read that file's existing shape first. This is flagged rather than guessed because inventing a helper name that does not exist would be a worse failure than naming the adaptation.
