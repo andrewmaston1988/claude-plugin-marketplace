@@ -904,7 +904,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (parsed !== undefined) result.outputJson = parsed;
 
       if (wt && groupFinal.get(wtName) === task.id) {
-        const collected = worktree.collect(task, cfg, wt);
+        const isChainFollower = (groupMembers.get(wtName)?.length ?? 1) > 1;
+        const collected = worktree.collect(task, cfg, wt, { isChainFollower });
         result.worktree = collected;
         if (collected.kept) worktreesKept.push({
           name: wt.name ?? wtName, branch: collected.branch,

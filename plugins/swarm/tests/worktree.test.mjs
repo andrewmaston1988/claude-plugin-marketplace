@@ -166,7 +166,7 @@ test("a follower's head is the tree's HEAD, so its diffstat spans only its own w
 
     // The reviewer touched nothing, so relative to ITS start the diff is empty —
     // but it is a follower, so the tree survives with its predecessor's commit.
-    const c = collect(rev, CFG, wtR);
+    const c = collect(rev, CFG, wtR, { isChainFollower: true });
     equal(c.diffstat, "", "an unchanged follower reports no work of its own");
     equal(c.kept, true, "a follower's branch carries its predecessors' commits — never destroy it");
     ok(existsSync(join(wt1.path, "phase1.txt")), "p1's committed work must survive the collect");
@@ -222,13 +222,38 @@ test("collect never destroys a reused tree — a failed follower would take the 
     // own start HEAD nothing changed, which is the destroy condition.
     const p2 = { id: "p2", worktreeName: "feat", originalCwd: repo, cwd: repo };
     const wt2 = prepareIsolation(p2, CFG, resultsDir);
-    const c = collect(p2, CFG, wt2);
+    const c = collect(p2, CFG, wt2, { isChainFollower: true });
 
     equal(c.kept, true, "the shared branch must survive");
     ok(existsSync(join(wt2.path, "phase1.txt")), "p1's committed work must still be there");
     ok(git(["branch", "--list", "swarm/feat"], repo) !== "", "the branch must not be deleted");
   } finally {
     dropWorktree(repo, join(resultsDir, "wt-feat"));
+    cleanup(resultsDir, repo);
+  }
+});
+
+// A resumed SOLO task (not a chain member) also gets wt.reused: true on
+// re-entry, but has no predecessor commits to protect — an unchanged resend
+// must still be swept, same as before chains existed.
+test("collect sweeps an unchanged worktree on solo resend, even though it was reused", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const task = { id: "solo", originalCwd: repo };
+    const wt1 = prepareIsolation(task, CFG, resultsDir);
+    // First attempt "fails" without touching the tree — nothing to collect yet.
+    // Re-enter (simulating a resend): reused: true, but isChainFollower defaults
+    // to false because collect() is called without it (solo task, group size 1).
+    const wt2 = prepareIsolation(task, CFG, resultsDir);
+    ok(wt2.reused, "the resend must re-enter the same tree");
+    const c = collect(task, CFG, wt2);
+
+    equal(c.kept, false, "an unchanged solo resend must still be swept");
+    ok(!existsSync(wt2.path), "worktree dir should be removed");
+    const branches = git(["branch", "--list", "swarm/solo"], repo);
+    equal(branches, "", "branch should be deleted");
+  } finally {
     cleanup(resultsDir, repo);
   }
 });

@@ -66,16 +66,23 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
 // Collect after the leaf ran: unchanged worktrees are removed (and their
 // branches deleted — they point at the start HEAD and carry nothing); changed
 // ones are kept and reported for the session to inspect/merge.
-export function collect(task, cfg, wt) {
+// `isChainFollower`: true only when this task shares its worktree with other
+// chain members (group size > 1) AND the tree was reused. A resumed SOLO task
+// also gets `wt.reused: true` on re-entry, but it has no predecessor commits to
+// protect — an unchanged solo resend must still be swept, same as before chains
+// existed.
+export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
   const status = git(["status", "--porcelain"], wt.path);
   const headNow = git(["rev-parse", "HEAD"], wt.path);
   const changed = status.stdout !== "" || (headNow.status === 0 && headNow.stdout !== wt.head);
 
-  // Destroy only a tree this leaf started fresh. A reused tree's branch carries
-  // its predecessors' commits, and `wt.head` is the tree's own HEAD — so a final
-  // link that changed nothing of its OWN still reads as unchanged here, and
-  // deleting the branch would take the whole chain's work with it.
-  if (!changed && !wt.reused) {
+  // Destroy only a tree this leaf started fresh, OR an unchanged solo resend.
+  // A reused CHAIN tree's branch carries its predecessors' commits, and
+  // `wt.head` is the tree's own HEAD — so a final link that changed nothing of
+  // its OWN still reads as unchanged here, and deleting the branch would take
+  // the whole chain's work with it. A reused SOLO tree has no such history to
+  // protect.
+  if (!changed && !(wt.reused && isChainFollower)) {
     git(["worktree", "remove", "--force", wt.path], wt.repo);
     git(["branch", "-D", wt.branch], wt.repo);
     return { kept: false, branch: wt.branch, path: wt.path };
