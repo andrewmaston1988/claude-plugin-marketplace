@@ -17,7 +17,7 @@ function isRegisteredWorktree(path, repo) {
 }
 
 // Create — or re-enter — an isolated worktree for an implementation leaf:
-//   git worktree add <resultsDir>/wt-<id> -b <prefix><id> --no-track <HEAD of task cwd repo>
+//   git worktree add <resultsDir>/wt-<name> -b <prefix><name> --no-track <HEAD of task cwd repo>
 // The branch prefix comes from config — never hardcoded. On resend the leaf's
 // worktree may already exist (kept on timeout for salvage): re-enter it so the
 // partial diff survives and the leaf resumes in place, rather than 0s-failing on
@@ -25,8 +25,11 @@ function isRegisteredWorktree(path, repo) {
 export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) {
   const repo = task.originalCwd || task.cwd;
   const prefix = cfg.worktreeBranchPrefix || "swarm/";
-  const branch = `${prefix}${task.id}`;
-  const path = resolve(join(resultsDir, `wt-${task.id}`));
+  // Ordered siblings sharing a name meet in one tree; without one, the task's
+  // own id names a private tree.
+  const name = task.worktreeName || task.id;
+  const branch = `${prefix}${name}`;
+  const path = resolve(join(resultsDir, `wt-${name}`));
 
   const head = git(["rev-parse", "HEAD"], repo);
   if (head.status !== 0) {
@@ -39,7 +42,13 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
       git(["reset", "--hard", head.stdout], path);
       git(["clean", "-fd"], path);
     }
-    return { path, branch, head: head.stdout, repo, reused: true };
+    // A follower starts from what its predecessor left, so its own collect()
+    // diffstat covers its work alone rather than the whole chain's.
+    const treeHead = git(["rev-parse", "HEAD"], path);
+    return {
+      path, branch, name, repo, reused: true,
+      head: (!reset && treeHead.status === 0) ? treeHead.stdout : head.stdout,
+    };
   }
 
   let add = git(["worktree", "add", path, "-b", branch, "--no-track", head.stdout], repo);
@@ -51,18 +60,29 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     throw new Error(`git worktree add failed for '${task.id}': ${add.stderr}`);
   }
 
-  return { path, branch, head: head.stdout, repo, reused: false };
+  return { path, branch, name, head: head.stdout, repo, reused: false };
 }
 
 // Collect after the leaf ran: unchanged worktrees are removed (and their
 // branches deleted — they point at the start HEAD and carry nothing); changed
 // ones are kept and reported for the session to inspect/merge.
-export function collect(task, cfg, wt) {
+// `isChainFollower`: true only when this task shares its worktree with other
+// chain members (group size > 1) AND the tree was reused. A resumed SOLO task
+// also gets `wt.reused: true` on re-entry, but it has no predecessor commits to
+// protect — an unchanged solo resend must still be swept, same as before chains
+// existed.
+export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
   const status = git(["status", "--porcelain"], wt.path);
   const headNow = git(["rev-parse", "HEAD"], wt.path);
   const changed = status.stdout !== "" || (headNow.status === 0 && headNow.stdout !== wt.head);
 
-  if (!changed) {
+  // Destroy only a tree this leaf started fresh, OR an unchanged solo resend.
+  // A reused CHAIN tree's branch carries its predecessors' commits, and
+  // `wt.head` is the tree's own HEAD — so a final link that changed nothing of
+  // its OWN still reads as unchanged here, and deleting the branch would take
+  // the whole chain's work with it. A reused SOLO tree has no such history to
+  // protect.
+  if (!changed && !(wt.reused && isChainFollower)) {
     git(["worktree", "remove", "--force", wt.path], wt.repo);
     git(["branch", "-D", wt.branch], wt.repo);
     return { kept: false, branch: wt.branch, path: wt.path };

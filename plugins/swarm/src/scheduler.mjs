@@ -7,7 +7,7 @@ import {
   buildDigestTask, DIGEST_ID,
   reportPath as digestReportPath, scratchPath as digestScratchPath,
 } from "./digest.mjs";
-import { effectivePlanDoc } from "./manifest.mjs";
+import { effectivePlanDoc, resolveWorktreeName } from "./manifest.mjs";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
@@ -423,6 +423,38 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   let digestPath = null;
   let digestFailed = false;
 
+  // Tasks sharing a worktree name form one ordered chain in one tree. Only its
+  // final link collects — collect() destroys a tree whose diff is empty, and a
+  // read-only reviewer mid-chain changes nothing. Only its first link may be
+  // --force reset, or re-running a later link would scrub its predecessors'
+  // commits. A task with a private tree is simply a group of one.
+  // normalizeTasks derives worktreeName, but runPlan also accepts hand-built
+  // plans — resolveWorktreeName covers both rather than silently skipping isolation.
+  const nameOf = resolveWorktreeName;
+
+  const groupMembers = new Map();   // name -> [task ids, in manifest order]
+  const groupFinal = new Map();
+  const groupFirst = new Map();
+  // Rebuilt after every splice: forEach clones and manifest children join the
+  // run mid-flight, and a group map that predates them would leave their trees
+  // uncollected and un-resettable.
+  const rebuildGroups = () => {
+    groupMembers.clear(); groupFinal.clear(); groupFirst.clear();
+    for (const t of tasks) {
+      const n = nameOf(t);
+      if (!n) continue;
+      if (!groupMembers.has(n)) groupMembers.set(n, []);
+      groupMembers.get(n).push(t.id);
+    }
+    for (const [name, ids] of groupMembers) {
+      const set = new Set(ids);
+      const deps = (id) => (tasks.find((t) => t.id === id)?.after || []).filter((a) => set.has(a));
+      groupFinal.set(name, ids.find((id) => !ids.some((o) => o !== id && deps(o).includes(id))) ?? ids[ids.length - 1]);
+      groupFirst.set(name, ids.find((id) => deps(id).length === 0) ?? ids[0]);
+    }
+  };
+  rebuildGroups();
+
   let lastPaintMs = 0;
   const paint = (force = true) => {
     if (!io.snapshot) return;
@@ -660,6 +692,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     const clones = items.map((item, i) => ({
       ...task,
       id: `${task.id}[${i}]`,
+      // Clones run concurrently, so each needs its OWN tree — inheriting the
+      // parent's name would put every clone in one directory. A shared name is
+      // rejected at validation; the private shorthand lands here.
+      ...(task.worktreeName !== undefined && { worktreeName: `${task.id}[${i}]` }),
       ...(task.childPlan
         ? { manifestItem: item, manifestIndex: i }
         : { prompt: substituteItems(base, item, i), promptFinal: true }),
@@ -688,6 +724,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     task.childPlan = undefined; // the clones carry it; the parent is now pure aggregate
     task.after = clones.map((c) => c.id);
     task.aggregate = { truncated, kept: items.length, total: sel.length };
+    rebuildGroups();
     paint();
   };
 
@@ -706,6 +743,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         ...c,
         id: remap(c.id),
         prompt,
+        // Worktree names are remapped with the ids: two nodes splicing the same
+        // child would otherwise resolve to one path, and an un-remapped name is
+        // absent from the group maps entirely (never collected, never reset).
+        ...(c.worktreeName !== undefined && { worktreeName: remap(c.worktreeName) }),
         after: c.after.map((d) => (locals.has(d) ? remap(d) : d)),
         ...(c.when && { when: { ...c.when, from: locals.has(c.when.from) ? remap(c.when.from) : c.when.from } }),
         ...(c.forEach && { forEach: { ...c.forEach, from: locals.has(c.forEach.from) ? remap(c.forEach.from) : c.forEach.from } }),
@@ -732,6 +773,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     node.childPlan = undefined;
     node.after = spliced.map((c) => c.id);
     node.aggregateManifest = { sinks };
+    rebuildGroups();
     paint();
   };
 
@@ -777,9 +819,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
       let wt = null;
       let taskCwd = task.cwd;
-      if (task.isolation === "worktree") {
+      const wtName = nameOf(task);
+      if (wtName !== undefined) {
         try {
-          wt = worktree.prepareIsolation(task, cfg, plan.resultsDir, { reset: force });
+          wt = worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
+            reset: force && groupFirst.get(wtName) === task.id,
+          });
           taskCwd = wt.path;
           if (wt.reused) appendRunLog(plan.resultsDir, {
             ts: new Date().toISOString(), event: "worktree-resume", id: task.id,
@@ -858,10 +903,18 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       const parsed = tryParseJson(r.output);
       if (parsed !== undefined) result.outputJson = parsed;
 
-      if (wt) {
-        const collected = worktree.collect(task, cfg, wt);
+      if (wt && groupFinal.get(wtName) === task.id) {
+        const isChainFollower = (groupMembers.get(wtName)?.length ?? 1) > 1;
+        const collected = worktree.collect(task, cfg, wt, { isChainFollower });
         result.worktree = collected;
-        if (collected.kept) worktreesKept.push({ id: task.id, branch: collected.branch, path: collected.path, diffstat: collected.diffstat });
+        if (collected.kept) worktreesKept.push({
+          name: wt.name ?? wtName, branch: collected.branch,
+          path: collected.path, diffstat: collected.diffstat,
+          taskIds: groupMembers.get(wtName),
+        });
+      } else if (wt) {
+        // Mid-chain link: record where it worked, leave the tree for its successor.
+        result.worktree = { kept: true, branch: wt.branch, path: wt.path, name: wt.name, pending: true };
       }
 
       writeResult(plan.resultsDir, task.id, result);

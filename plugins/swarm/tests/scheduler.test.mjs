@@ -1853,3 +1853,282 @@ test("success leaves the models cache untouched", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A fake worktree module: records every collect() so a test can assert the
+// shared tree is collected once, by the group's last link.
+function fakeWorktree(collectCalls) {
+  return {
+    prepareIsolation: (t, cfg, resultsDir) => {
+      const name = t.worktreeName || t.id;
+      return {
+        path: join(resultsDir, `wt-${name}`), branch: `swarm/${name}`, name,
+        head: "abc123", repo: resultsDir, reused: collectCalls.length > 0,
+      };
+    },
+    collect: (t, cfg, wt) => {
+      collectCalls.push({ taskId: t.id, name: wt.name });
+      return { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed" };
+    },
+  };
+}
+
+test("collect runs once, after the last task in a shared worktree group", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const p = plan(dir, [
+      task("p1", { worktreeName: "feat", isolation: { worktree: "feat" } }),
+      task("rev", { after: ["p1"], worktreeName: "feat", isolation: { worktree: "feat" } }),
+      task("p2", { after: ["rev"], worktreeName: "feat", isolation: { worktree: "feat" } }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
+      { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+
+    equal(collectCalls.length, 1, `collect must run once per group, got ${JSON.stringify(collectCalls)}`);
+    equal(collectCalls[0].taskId, "p2", "collect runs after the LAST group member");
+    equal(r.worktreesKept.length, 1, "one entry per group, not per task");
+    equal(r.worktreesKept[0].name, "feat");
+    deepEqual(r.worktreesKept[0].taskIds, ["p1", "rev", "p2"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a mid-chain link reports its tree as pending rather than collected", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const p = plan(dir, [
+      task("p1", { worktreeName: "feat", isolation: { worktree: "feat" } }),
+      task("p2", { after: ["p1"], worktreeName: "feat", isolation: { worktree: "feat" } }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
+      { worktree: fakeWorktree(collectCalls) });
+    await runPlan(p, CFG, io);
+
+    const first = readResult(p.resultsDir, "p1");
+    equal(first.worktree.pending, true, "a mid-chain link must not claim its tree was collected");
+    equal(first.worktree.branch, "swarm/feat");
+    const last = readResult(p.resultsDir, "p2");
+    equal(last.worktree.pending, undefined);
+    equal(last.worktree.kept, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a private worktree still collects per task", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const p = plan(dir, [
+      task("a", { isolation: "worktree", worktreeName: "a" }),
+      task("b", { isolation: "worktree", worktreeName: "b" }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
+      { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+    equal(collectCalls.length, 2, "each private tree is its own group of one");
+    equal(r.worktreesKept.length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("forEach clones each get their own private worktree, never the parent's", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const pr = promptOf(call);
+      if (pr === "do src") return { output: '{"sites":[{"f":"a"},{"f":"b"}]}' };
+      return { output: "done" };
+    });
+    const p = plan(dir, [
+      task("src"),
+      task("fix", {
+        after: ["src"], isolation: "worktree", worktreeName: "fix",
+        forEach: { from: "src", path: "sites", maxItems: 5 }, prompt: "fix {{item.f}}",
+      }),
+    ]);
+    const io = makeIo(spawn, { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+
+    const names = collectCalls.map((c) => c.name).sort();
+    deepEqual(names, ["fix[0]", "fix[1]"],
+      "each clone needs its own tree — sharing the parent's name races them in one directory");
+    equal(r.worktreesKept.length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("manifest children with worktree isolation are collected under remapped names", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const childPlan = {
+      tasks: [
+        task("impl", { isolation: "worktree", worktreeName: "impl", after: [] }),
+        task("check", { after: ["impl"], isolation: "worktree", worktreeName: "impl2" }),
+      ],
+    };
+    const p = plan(dir, [task("node", { model: "manifest", prompt: "", childPlan })]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
+      { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+
+    const names = collectCalls.map((c) => c.name).sort();
+    deepEqual(names, ["node~impl", "node~impl2"],
+      "a spliced child's worktree name must be remapped, or two nodes' children collide on one path");
+    equal(r.worktreesKept.length, 2, "spliced children must still be collected, not orphaned");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a child's worktree name cannot collide with the parent's or a sibling node's", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const mkChild = () => ({
+      tasks: [task("impl", { isolation: { worktree: "feat" }, worktreeName: "feat", after: [] })],
+    });
+    const p = plan(dir, [
+      task("feat", { isolation: "worktree", worktreeName: "feat" }),
+      task("nodeA", { model: "manifest", prompt: "", childPlan: mkChild() }),
+      task("nodeB", { model: "manifest", prompt: "", childPlan: mkChild() }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
+      { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+
+    const names = r.worktreesKept.map((w) => w.name).sort();
+    deepEqual(names, ["feat", "nodeA~feat", "nodeB~feat"],
+      "three distinct trees — an un-remapped child name would put all three on one path");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a forEach'd manifest node gives each clone's children their own worktrees", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const pr = promptOf(call);
+      if (pr === "do src") return { output: '{"sites":["a","b"]}' };
+      return { ok: true, output: "done" };
+    });
+    const childPlan = {
+      tasks: [task("impl", { isolation: { worktree: "feat" }, worktreeName: "feat", after: [] })],
+    };
+    const p = plan(dir, [
+      task("src"),
+      task("audit", {
+        model: "manifest", prompt: "", childPlan, after: ["src"],
+        forEach: { from: "src", path: "sites", maxItems: 5 },
+      }),
+    ]);
+    const io = makeIo(spawn, { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+
+    const names = r.worktreesKept.map((w) => w.name).sort();
+    deepEqual(names, ["audit[0]~feat", "audit[1]~feat"],
+      "clones splice identical children — without per-clone remapping they'd share one tree concurrently");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a failed final link must not destroy its predecessors' committed work", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const spawn = fakeSpawnFactory((call) =>
+      promptOf(call) === "do p2" ? { ok: false, exit: 1, output: "boom" } : { ok: true, output: "done" });
+    const p = plan(dir, [
+      task("p1", { worktreeName: "feat", isolation: { worktree: "feat" } }),
+      task("p2", { after: ["p1"], worktreeName: "feat", isolation: { worktree: "feat" } }),
+    ]);
+    const io = makeIo(spawn, { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+
+    equal(r.summary.tasks.find((t) => t.id === "p2").state, "failed");
+    // The tree is still collected — a failed leaf's partial work is salvageable —
+    // but it must be KEPT, never destroyed: the branch carries p1's commits.
+    deepEqual(r.worktreesKept.map((w) => w.name), ["feat"],
+      "the shared branch must survive a failed final link, with p1's work on it");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("string-form isolation with no worktreeName still isolates (hand-built plan)", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const p = plan(dir, [task("a", { isolation: "worktree" })]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
+      { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+    deepEqual(collectCalls.map((c) => c.name), ["a"],
+      "runPlan accepts hand-built plans — the isolation shorthand must resolve without normalizeTasks");
+    equal(r.worktreesKept.length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a destroyed (unchanged) tree is absent from worktreesKept", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [
+      task("a", { isolation: "worktree", worktreeName: "a" }),
+      task("b", { isolation: "worktree", worktreeName: "b" }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })), {
+      worktree: {
+        prepareIsolation: (t, cfg, resultsDir) => ({
+          path: join(resultsDir, `wt-${t.worktreeName}`), branch: `swarm/${t.worktreeName}`,
+          name: t.worktreeName, head: "h", repo: resultsDir, reused: false,
+        }),
+        // 'b' changed nothing, so its tree and branch were deleted
+        collect: (t, cfg, wt) => t.id === "b"
+          ? { kept: false, branch: wt.branch, path: wt.path }
+          : { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed" },
+      },
+    });
+    const r = await runPlan(p, CFG, io);
+    deepEqual(r.worktreesKept.map((w) => w.name), ["a"],
+      "a deleted tree reported as kept sends the session to a path that no longer exists");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--force resets only the first link of a shared worktree group", async () => {
+  const dir = tmp();
+  const resets = [];
+  try {
+    const p = plan(dir, [
+      task("p1", { worktreeName: "feat", isolation: { worktree: "feat" } }),
+      task("p2", { after: ["p1"], worktreeName: "feat", isolation: { worktree: "feat" } }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })), {
+      worktree: {
+        prepareIsolation: (t, cfg, resultsDir, opts) => {
+          resets.push({ id: t.id, reset: opts.reset });
+          return { path: join(resultsDir, "wt-feat"), branch: "swarm/feat", name: "feat", head: "h", repo: resultsDir, reused: false };
+        },
+        collect: (t, cfg, wt) => ({ kept: true, branch: wt.branch, path: wt.path, diffstat: "d" }),
+      },
+    });
+    await runPlan(p, CFG, io, { force: true });
+    deepEqual(resets, [{ id: "p1", reset: true }, { id: "p2", reset: false }],
+      "a later link must never scrub its predecessor's commits");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

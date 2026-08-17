@@ -351,7 +351,7 @@ test("formatClosing covers digest present, absent, failed, and total tokens", ()
   ok(formatClosing({ ...base, digestFailed: true }).includes("FAILED"));
   const withWt = formatClosing({
     ...base, digestPath: "d",
-    worktreesKept: [{ id: "impl", branch: "swarm/impl", path: "R/wt-impl" }],
+    worktreesKept: [{ name: "impl", branch: "swarm/impl", path: "R/wt-impl" }],
   });
   ok(withWt.includes("worktrees kept:"));
   ok(withWt.includes("impl: swarm/impl at R/wt-impl"));
@@ -479,4 +479,18 @@ test("formatClosing: a requested report that never landed is LOUD, not absent", 
   // no report asked for → no report line at all
   const none = formatClosing({ digestPath: "d.md", summaryPath: "s.json", totalTokens: null });
   ok(!/report:/.test(none), none);
+});
+
+test("formatClosing names every link of a shared chain, and only a chain", () => {
+  const chained = formatClosing({ worktreesKept: [
+    { name: "feat", branch: "swarm/feat", path: "/w/wt-feat", taskIds: ["p1", "rev", "p2"] },
+  ] });
+  ok(chained.includes("p1 → rev → p2"), chained);
+  ok(chained.includes("feat"), chained);
+
+  // A private tree is a group of one — no arrows, nothing to disambiguate.
+  const solo = formatClosing({ worktreesKept: [
+    { name: "scan-a", branch: "swarm/scan-a", path: "/w/wt-scan-a", taskIds: ["scan-a"] },
+  ] });
+  ok(!solo.includes("→"), solo);
 });

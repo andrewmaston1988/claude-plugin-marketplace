@@ -199,11 +199,90 @@ function validateTaskShapes(rawTasks, errors, label) {
       if (!t.prompt || typeof t.prompt !== "string") errors.push(`${l}: prompt is required`);
       if (!t.model || typeof t.model !== "string") errors.push(`${l}: model is required`);
     }
-    if (t.isolation !== undefined && t.isolation !== "worktree") {
-      errors.push(`${l}: isolation must be "worktree" when present (got ${JSON.stringify(t.isolation)})`);
+    if (t.isolation !== undefined) {
+      const iso = t.isolation;
+      const named = iso && typeof iso === "object" && !Array.isArray(iso);
+      if (iso !== "worktree" && !named) {
+        errors.push(
+          `${l}: isolation must be "worktree" or { "worktree": "<name>" } (got ${JSON.stringify(iso)})\n` +
+          `    private tree: "isolation": "worktree"\n` +
+          `    shared tree:  "isolation": { "worktree": "feat" }`);
+      } else if (named && (typeof iso.worktree !== "string" || !iso.worktree)) {
+        errors.push(`${l}: isolation.worktree must be a non-empty string naming the shared worktree — e.g. { "worktree": "feat" }`);
+      } else if (named && !/^[A-Za-z0-9._-]+$/.test(iso.worktree)) {
+        errors.push(
+          `${l}: isolation.worktree '${iso.worktree}' must be filename-safe ` +
+          `(letters, digits, dot, dash, underscore) — it becomes a directory and a branch name`);
+      }
     }
     if (t.timeoutMs !== undefined && (!Number.isInteger(t.timeoutMs) || t.timeoutMs < 1)) {
       errors.push(`${l}: timeoutMs must be a positive integer`);
+    }
+  }
+}
+
+// The one rule for which worktree a task lives in: the object form names a
+// tree shared with ordered siblings, the string form is shorthand for the
+// task's own id. Normalized tasks carry the answer already; raw ones (hand-built
+// plans, pre-normalization validation) derive it here.
+export function resolveWorktreeName(t) {
+  if (t.worktreeName !== undefined) return t.worktreeName;
+  if (t.isolation === undefined || t.isolation === null) return undefined;
+  return typeof t.isolation === "object" ? t.isolation.worktree : t.id;
+}
+
+// Tasks sharing a worktree run in ONE directory, so they must form a single
+// ordered chain — two unordered members would race and corrupt each other.
+function validateWorktreeGroups(rawTasks, errors, label) {
+  const groups = new Map();
+  for (const t of rawTasks) {
+    const n = resolveWorktreeName(t);
+    if (typeof n !== "string" || !n) continue;
+    if (!groups.has(n)) groups.set(n, []);
+    groups.get(n).push(t);
+  }
+
+  // Reachability over `after`, the same edges detectCycle walks.
+  const byId = new Map(rawTasks.map((t) => [t.id, t]));
+  const reaches = (fromId, toId, seen = new Set()) => {
+    if (fromId === toId) return true;
+    if (seen.has(fromId)) return false;
+    seen.add(fromId);
+    const after = byId.get(fromId)?.after;
+    return Array.isArray(after) && after.some((a) => reaches(a, toId, seen));
+  };
+
+  for (const [name, members] of groups) {
+    const shared = members.filter((t) => typeof t.isolation === "object" && t.isolation !== null);
+
+    for (const t of shared) {
+      if (t.forEach !== undefined) {
+        errors.push(
+          `${label(t)}: a forEach task cannot use the shared worktree "${name}" — clones run ` +
+          `concurrently and would collide in one directory.\n` +
+          `    Give each clone its own tree instead: "isolation": "worktree"`);
+      }
+    }
+
+    for (let i = 0; i < members.length; i++) {
+      for (let j = i + 1; j < members.length; j++) {
+        const [a, b] = [members[i], members[j]];
+        if (reaches(a.id, b.id) || reaches(b.id, a.id)) continue;
+        errors.push(
+          `tasks '${a.id}' and '${b.id}' share worktree "${name}" but neither runs before the other.\n` +
+          `    Tasks sharing a worktree must form a single ordered chain — add the missing\n` +
+          `    \`after\` so one waits for the other:\n` +
+          `        { "id": "${b.id}", "after": ["${a.id}"], "isolation": { "worktree": "${name}" }, … }`);
+      }
+    }
+
+    // A shared name equal to another task's id resolves to the same wt-<name> path.
+    if (!shared.length) continue;
+    const clash = members.find((t) => t.id === name && typeof t.isolation === "string");
+    if (clash) {
+      errors.push(
+        `shared worktree "${name}" collides with task '${clash.id}', which has its own private ` +
+        `worktree of the same name — both resolve to wt-${name}. Rename one.`);
     }
   }
 }
@@ -407,10 +486,12 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     }
     let effCwd = originalCwd;
     let scratchRedirect = false;
+    // Compute and manifest nodes spawn no leaf, so there is nothing to isolate.
+    const worktreeName = (isCompute || isManifest) ? undefined : resolveWorktreeName(t);
     // Write-implies-isolation: a leaf granted write-capable tools without
     // worktree isolation never runs in the user's real tree — its cwd is
     // redirected to a per-task scratch dir under the results dir.
-    if (!isCompute && !isManifest && hasWriteTools(t.allowedTools) && t.isolation !== "worktree") {
+    if (!isCompute && !isManifest && hasWriteTools(t.allowedTools) && worktreeName === undefined) {
       effCwd = join(resultsDir, `scratch-${t.id}`);
       scratchRedirect = true;
     }
@@ -432,6 +513,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       originalCwd,
       scratchRedirect,
       isolation: isCompute || isManifest ? undefined : t.isolation,
+      ...(worktreeName !== undefined && { worktreeName }),
       outputDir: t.outputDir ? resolve(cwd, t.outputDir) : undefined,
       timeoutMs: t.timeoutMs ?? defaultTimeoutMs,
       after: [...(t.after || [])],
@@ -487,6 +569,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   // {{item}} in a child task without its own forEach is legal only when the
   // parent node fans out — the parent substitutes into child prompts per item.
   validateTaskRelations(raw.tasks, errors, label, { itemAllowed: node.forEach !== undefined });
+  validateWorktreeGroups(raw.tasks, errors, label);
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
   const tasks = normalizeTasks(raw.tasks, {
@@ -554,6 +637,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const label = (t) => (t?.id ? `task '${t.id}'` : "task with missing id");
   validateTaskShapes(raw.tasks, errors, label);
   validateTaskRelations(raw.tasks, errors, label);
+  validateWorktreeGroups(raw.tasks, errors, label);
 
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`dependency cycle detected: ${cycle.join(" -> ")}`);

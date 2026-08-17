@@ -1015,3 +1015,109 @@ test("args fingerprint keys the default results dir; key order irrelevant; no ar
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("isolation object form normalizes to a shared worktree name", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "p1", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "p2", after: ["p1"], isolation: { worktree: "feat" } }),
+      claudeTask({ id: "solo", isolation: "worktree" }),
+    ] });
+    const plan = loadManifest(p, CFG, dir);
+    const byId = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
+    equal(byId.p1.worktreeName, "feat");
+    equal(byId.p2.worktreeName, "feat");
+    equal(byId.solo.worktreeName, "solo", "string form is shorthand for its own id");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("isolation object form rejects an empty or non-filename-safe worktree name", () => {
+  const dir = tmp();
+  try {
+    const bad = writeManifest(dir, { tasks: [claudeTask({ isolation: { worktree: "" } })] }, "b1.json");
+    ok(errorsOf(() => loadManifest(bad, CFG, dir)).some((e) => /non-empty string/i.test(e)));
+
+    const unsafe = writeManifest(dir, { tasks: [claudeTask({ isolation: { worktree: "a/b" } })] }, "b2.json");
+    ok(errorsOf(() => loadManifest(unsafe, CFG, dir)).some((e) => /filename-safe/i.test(e)));
+
+    const junk = writeManifest(dir, { tasks: [claudeTask({ isolation: "nope" })] }, "b3.json");
+    ok(errorsOf(() => loadManifest(junk, CFG, dir)).some((e) => /isolation must be/i.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a shared worktree suppresses the scratch redirect for write-capable leaves", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "p1", isolation: { worktree: "feat" }, allowedTools: "Read,Write" }),
+    ] });
+    const t = loadManifest(p, CFG, dir).tasks[0];
+    equal(t.scratchRedirect, false, "a named worktree is real isolation, not a scratch case");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("tasks sharing a worktree must be totally ordered", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "p1", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "p2", after: ["p1"], isolation: { worktree: "feat" } }),
+      claudeTask({ id: "p3", after: ["p1"], isolation: { worktree: "feat" } }),
+    ] });
+    const msg = errorsOf(() => loadManifest(p, CFG, dir)).join("\n");
+    ok(/'p2'.*'p3'|'p3'.*'p2'/.test(msg), `expected the unordered pair named: ${msg}`);
+    ok(/after/.test(msg), "error must name the fix");
+    ok(/"worktree"/.test(msg), "error must show a correct example");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("forEach cannot use a shared worktree", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "find" }),
+      claudeTask({ id: "fix", after: ["find"], isolation: { worktree: "feat" },
+        forEach: { from: "find", path: "", maxItems: 5 } }),
+    ] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => /forEach.*shared worktree|shared worktree.*forEach/i.test(e)), JSON.stringify(errs));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a shared worktree name cannot collide with a private worktree task id", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "feat", isolation: "worktree" }),
+      claudeTask({ id: "p1", isolation: { worktree: "feat" } }),
+    ] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => /collide|same path|already/i.test(e)), JSON.stringify(errs));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("an ordered chain of three passes validation", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "p1", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "rev", after: ["p1"], isolation: { worktree: "feat" } }),
+      claudeTask({ id: "p2", after: ["rev"], isolation: { worktree: "feat" } }),
+    ] });
+    const plan = loadManifest(p, CFG, dir);
+    equal(plan.tasks.length, 3);
+    deepEqual(plan.tasks.map((t) => t.worktreeName), ["feat", "feat", "feat"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+import { resolveWorktreeName } from "../src/manifest.mjs";
+
+test("resolveWorktreeName is the single rule every derivation site shares", () => {
+  equal(resolveWorktreeName({ id: "a" }), undefined);
+  equal(resolveWorktreeName({ id: "a", isolation: "worktree" }), "a");
+  equal(resolveWorktreeName({ id: "a", isolation: { worktree: "feat" } }), "feat");
+  equal(resolveWorktreeName({ id: "a", isolation: null }), undefined);
+  // Already-normalized tasks carry the derived field; it wins over re-derivation.
+  equal(resolveWorktreeName({ id: "a", worktreeName: "feat" }), "feat");
+});

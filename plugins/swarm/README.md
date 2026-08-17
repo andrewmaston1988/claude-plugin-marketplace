@@ -2,7 +2,7 @@
 
 A Claude Code session authors a JSON manifest (the same authoring act as writing a Workflow script); the swarm engine dispatches each task via CLI — capable `:cloud` models (GLM, MiniMax, qwen, …) through your provider, Claude models via plain `claude -p` — runs the dependency graph in the background, and compresses results through a digest stage so the session never swallows raw output.
 
-The product is **quality from group-think**: many independent perspectives, redundant attempts, diverse-lens judging — near-opus-swarm quality from capable alternative models on an alternative subscription, delivered at interactive speed. The smarts live in the plan and the leaves; the plumbing has none.
+The widest shape is **quality from group-think**: many independent perspectives, redundant attempts, diverse-lens judging — near-opus-swarm quality from capable alternative models on an alternative subscription, delivered at interactive speed. But the manifest is a dispatch surface, not a fan-out surface: one delegated leaf is a first-class use, and phased chains run several leaves in sequence on one shared branch. The smarts live in the plan and the leaves; the plumbing has none.
 
 ## Positioning
 
@@ -147,6 +147,8 @@ The glue logic between agent calls that never needed an LLM, without making the 
   summary.json               # { started, finished, tasks: [...], blocked: [], worktreesKept: [], totalTokens }
   run.log                    # JSONL — state changes, live token ticks, run-start roster — tailable mid-run
 ```
+
+`isolation` takes two forms. `"worktree"` gives the leaf a private tree keyed by its own id — the fan-out shape, where clones must not collide. `{ "worktree": "<name>" }` puts every leaf naming that name in **one** tree on one branch, so an ordered chain accumulates: phase 1 commits, a read-only reviewer sees those commits, phase 2 builds on them. Links sharing a name must be totally ordered by `after`, and `forEach` cannot share a tree. `worktreesKept` in `summary.json` carries one entry per shared group — `{ id, name, branch, path, diffstat, taskIds }`, its diffstat spanning every phase — not one per task.
 
 Leaves are dispatched with `--output-format stream-json`, so the engine extracts each leaf's final text into `output` and its per-turn API usage into `tokens` (`{ input, output, cacheCreation, cacheRead }`). A provider that emits plain text instead degrades gracefully: raw stdout becomes `output` and the token columns stay empty.
 
