@@ -291,7 +291,11 @@ Without this, the reviewer's `collect()` destroys the tree mid-chain. This is a 
 
 **Interfaces:**
 - Consumes: `task.worktreeName` (Task 1), `prepareIsolation` returning `name` (Task 2).
-- Produces: `worktreesKept` entries shaped `{ name, branch, path, diffstat, taskIds: string[] }` — one per group, replacing the current one-per-task `{ id, branch, path, diffstat }`.
+- Produces: `worktreesKept` entries shaped `{ id, name, branch, path, diffstat, taskIds: string[] }` — one per group, replacing the current one-per-task `{ id, branch, path, diffstat }`.
+
+  **Deviation from the drafted shape:** `id` is kept alongside the new `name`/`taskIds` rather than replaced. `results.mjs:394` renders `wt.id`; keeping the field is additive, so every Step-1 assertion holds unchanged and no consumer edit is needed. Dropping `id` would have forced a rename in a file this plan does not otherwise touch, for no behavioural gain.
+
+  **Also required, undrafted:** the scheduler derives the worktree name itself via a local `nameOf(t)` helper rather than reading `task.worktreeName` alone. `normalizeTasks` sets that field for manifest-loaded plans, but `runPlan` also accepts hand-built plan objects (two existing tests build them with a bare `isolation: "worktree"`); without the fallback those tasks silently lose isolation entirely. `nameOf` applies the same rule `normalizeTasks` does.
 
 - [ ] **Step 1: Write the failing test**
 

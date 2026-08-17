@@ -423,6 +423,33 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   let digestPath = null;
   let digestFailed = false;
 
+  // Tasks sharing a worktree name form one ordered chain in one tree. Only its
+  // final link collects — collect() destroys a tree whose diff is empty, and a
+  // read-only reviewer mid-chain changes nothing. Only its first link may be
+  // --force reset, or re-running a later link would scrub its predecessors'
+  // commits. A task with a private tree is simply a group of one.
+  // normalizeTasks derives worktreeName, but runPlan also accepts hand-built
+  // plans — fall back to the same rule rather than silently skipping isolation.
+  const nameOf = (t) => t.worktreeName !== undefined ? t.worktreeName
+    : t.isolation === undefined ? undefined
+    : (typeof t.isolation === "object" && t.isolation !== null ? t.isolation.worktree : t.id);
+
+  const groupMembers = new Map();   // name -> [task ids, in manifest order]
+  for (const t of plan.tasks) {
+    const n = nameOf(t);
+    if (!n) continue;
+    if (!groupMembers.has(n)) groupMembers.set(n, []);
+    groupMembers.get(n).push(t.id);
+  }
+  const groupFinal = new Map();
+  const groupFirst = new Map();
+  for (const [name, ids] of groupMembers) {
+    const set = new Set(ids);
+    const deps = (id) => (plan.tasks.find((t) => t.id === id)?.after || []).filter((a) => set.has(a));
+    groupFinal.set(name, ids.find((id) => !ids.some((o) => o !== id && deps(o).includes(id))) ?? ids[ids.length - 1]);
+    groupFirst.set(name, ids.find((id) => deps(id).length === 0) ?? ids[0]);
+  }
+
   let lastPaintMs = 0;
   const paint = (force = true) => {
     if (!io.snapshot) return;
@@ -777,9 +804,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
       let wt = null;
       let taskCwd = task.cwd;
-      if (task.isolation === "worktree") {
+      const wtName = nameOf(task);
+      if (wtName !== undefined) {
         try {
-          wt = worktree.prepareIsolation(task, cfg, plan.resultsDir, { reset: force });
+          wt = worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
+            reset: force && groupFirst.get(wtName) === task.id,
+          });
           taskCwd = wt.path;
           if (wt.reused) appendRunLog(plan.resultsDir, {
             ts: new Date().toISOString(), event: "worktree-resume", id: task.id,
@@ -858,10 +888,17 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       const parsed = tryParseJson(r.output);
       if (parsed !== undefined) result.outputJson = parsed;
 
-      if (wt) {
+      if (wt && groupFinal.get(wtName) === task.id) {
         const collected = worktree.collect(task, cfg, wt);
         result.worktree = collected;
-        if (collected.kept) worktreesKept.push({ id: task.id, branch: collected.branch, path: collected.path, diffstat: collected.diffstat });
+        if (collected.kept) worktreesKept.push({
+          id: wt.name ?? wtName, name: wt.name ?? wtName, branch: collected.branch,
+          path: collected.path, diffstat: collected.diffstat,
+          taskIds: groupMembers.get(wtName),
+        });
+      } else if (wt) {
+        // Mid-chain link: record where it worked, leave the tree for its successor.
+        result.worktree = { kept: true, branch: wt.branch, path: wt.path, name: wt.name, pending: true };
       }
 
       writeResult(plan.resultsDir, task.id, result);

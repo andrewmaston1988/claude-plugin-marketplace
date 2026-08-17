@@ -1853,3 +1853,110 @@ test("success leaves the models cache untouched", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A fake worktree module: records every collect() so a test can assert the
+// shared tree is collected once, by the group's last link.
+function fakeWorktree(collectCalls) {
+  return {
+    prepareIsolation: (t, cfg, resultsDir) => {
+      const name = t.worktreeName || t.id;
+      return {
+        path: join(resultsDir, `wt-${name}`), branch: `swarm/${name}`, name,
+        head: "abc123", repo: resultsDir, reused: collectCalls.length > 0,
+      };
+    },
+    collect: (t, cfg, wt) => {
+      collectCalls.push({ taskId: t.id, name: wt.name });
+      return { kept: true, branch: wt.branch, path: wt.path, diffstat: "1 file changed" };
+    },
+  };
+}
+
+test("collect runs once, after the last task in a shared worktree group", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const p = plan(dir, [
+      task("p1", { worktreeName: "feat", isolation: { worktree: "feat" } }),
+      task("rev", { after: ["p1"], worktreeName: "feat", isolation: { worktree: "feat" } }),
+      task("p2", { after: ["rev"], worktreeName: "feat", isolation: { worktree: "feat" } }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
+      { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+
+    equal(collectCalls.length, 1, `collect must run once per group, got ${JSON.stringify(collectCalls)}`);
+    equal(collectCalls[0].taskId, "p2", "collect runs after the LAST group member");
+    equal(r.worktreesKept.length, 1, "one entry per group, not per task");
+    equal(r.worktreesKept[0].name, "feat");
+    deepEqual(r.worktreesKept[0].taskIds, ["p1", "rev", "p2"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a mid-chain link reports its tree as pending rather than collected", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const p = plan(dir, [
+      task("p1", { worktreeName: "feat", isolation: { worktree: "feat" } }),
+      task("p2", { after: ["p1"], worktreeName: "feat", isolation: { worktree: "feat" } }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
+      { worktree: fakeWorktree(collectCalls) });
+    await runPlan(p, CFG, io);
+
+    const first = readResult(p.resultsDir, "p1");
+    equal(first.worktree.pending, true, "a mid-chain link must not claim its tree was collected");
+    equal(first.worktree.branch, "swarm/feat");
+    const last = readResult(p.resultsDir, "p2");
+    equal(last.worktree.pending, undefined);
+    equal(last.worktree.kept, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a private worktree still collects per task", async () => {
+  const dir = tmp();
+  const collectCalls = [];
+  try {
+    const p = plan(dir, [
+      task("a", { isolation: "worktree", worktreeName: "a" }),
+      task("b", { isolation: "worktree", worktreeName: "b" }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
+      { worktree: fakeWorktree(collectCalls) });
+    const r = await runPlan(p, CFG, io);
+    equal(collectCalls.length, 2, "each private tree is its own group of one");
+    equal(r.worktreesKept.length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("--force resets only the first link of a shared worktree group", async () => {
+  const dir = tmp();
+  const resets = [];
+  try {
+    const p = plan(dir, [
+      task("p1", { worktreeName: "feat", isolation: { worktree: "feat" } }),
+      task("p2", { after: ["p1"], worktreeName: "feat", isolation: { worktree: "feat" } }),
+    ]);
+    const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })), {
+      worktree: {
+        prepareIsolation: (t, cfg, resultsDir, opts) => {
+          resets.push({ id: t.id, reset: opts.reset });
+          return { path: join(resultsDir, "wt-feat"), branch: "swarm/feat", name: "feat", head: "h", repo: resultsDir, reused: false };
+        },
+        collect: (t, cfg, wt) => ({ kept: true, branch: wt.branch, path: wt.path, diffstat: "d" }),
+      },
+    });
+    await runPlan(p, CFG, io, { force: true });
+    deepEqual(resets, [{ id: "p1", reset: true }, { id: "p2", reset: false }],
+      "a later link must never scrub its predecessor's commits");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
