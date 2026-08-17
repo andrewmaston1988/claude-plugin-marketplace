@@ -167,7 +167,8 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "effort": "medium",                        // optional; validated for Claude tiers
     "allowedTools": "Read,Grep,Glob",          // default: read-only set
     "cwd": "C:/code/somerepo",                 // default: manifest's cwd
-    "isolation": "worktree",                   // implementation leaves only
+    "isolation": "worktree",                   // private tree, implementation leaves only
+    "isolation": { "worktree": "feat" },       // SHARED tree — phased chains, see Plan patterns
     "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 3600000,
@@ -188,6 +189,34 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
 Prompt templating: `{{result:<id>}}` inlines a dependency's output, **capped at `resultInlineCap` chars (default 4,000) — anything past the cap is cut**; `{{resultPath:<id>}}` injects the result file's absolute path so the leaf Reads it itself, uncapped. Referencing a non-dependency id fails validation. **Use `{{resultPath:}}` whenever the consumer must see ALL of its dependency's output** — any verifier, any leaf that counts or enumerates. `{{result:}}` is for short, bounded hand-offs. A cut is never silent (leaf result field, `run.log`, closing warning), but a warning after the fact does not un-check the findings the leaf never saw.
 
 ## Plan patterns
+
+Pick the shape before writing the manifest:
+
+```dot
+digraph swarm_shape {
+    "Asked as dispatch?\n(\"run a glm-5.2 session on swarm\")" [shape=diamond];
+    "Does step N build on step N-1's edits?" [shape=diamond];
+    "Does step N need step N-1's output?" [shape=diamond];
+    "Judgement or mechanical handoff?" [shape=diamond];
+    "Single delegated leaf" [shape=box];
+    "Fan-out + digest" [shape=box];
+    "Mechanical chain ({{result:}})" [shape=box];
+    "Phased chain (shared worktree)" [shape=box];
+
+    "Asked as dispatch?\n(\"run a glm-5.2 session on swarm\")" -> "Single delegated leaf" [label="yes — one job, no fan-out"];
+    "Asked as dispatch?\n(\"run a glm-5.2 session on swarm\")" -> "Does step N build on step N-1's edits?" [label="no"];
+    "Does step N build on step N-1's edits?" -> "Phased chain (shared worktree)" [label="yes"];
+    "Does step N build on step N-1's edits?" -> "Does step N need step N-1's output?" [label="no"];
+    "Does step N need step N-1's output?" -> "Fan-out + digest" [label="no"];
+    "Does step N need step N-1's output?" -> "Judgement or mechanical handoff?" [label="yes"];
+    "Judgement or mechanical handoff?" -> "Mechanical chain ({{result:}})" [label="mechanical — a fact, a list"];
+    "Judgement or mechanical handoff?" -> "Phased chain (shared worktree)" [label="judgement — review, risk warnings"];
+}
+```
+
+The discriminating question is whether step N builds on step N-1's **edits** — not whether
+the leaves touch the same repo. Several leaves editing disjoint files in one codebase is
+still fan-out with private trees; only accumulation needs a shared tree.
 
 ### Fan-out (the native shape)
 
@@ -217,7 +246,7 @@ If you cannot find the answer, say so in one line — do not expand scope.
 
 ### Chain — mechanical links only
 
-`{{result:<id>}}` passes raw (capped) output between links, so each link's *output* contract must be hard: **"return ONLY the N facts the next step needs."** Judgement-heavy chains split across runs — run a link, compress in-session, run the next.
+`{{result:<id>}}` passes raw (capped) output between links, so each link's *output* contract must be hard: **"return ONLY the N facts the next step needs."** It passes text, never edits — a link that must build on the previous link's *changes* needs a phased chain instead.
 
 ```json
 { "tasks": [
@@ -225,6 +254,57 @@ If you cannot find the answer, say so in one line — do not expand scope.
     { "id": "matrix",  "model": "glm-5.2:cloud", "after": ["extract"], "prompt": "Routes: {{result:extract}}\nProduce a markdown table: route × auth requirement." }
   ] }
 ```
+
+### Phased chain — one branch, implement → review → implement
+
+Phases of one feature that must accumulate on a single branch. Every link names the
+same worktree; `after` orders them; the reviewer holds no write tools and warns the
+next implementer through `{{result:}}`.
+
+```json
+{ "tasks": [
+    { "id": "p1", "model": "glm-5.2:cloud", "isolation": { "worktree": "feat" },
+      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+      "prompt": "Phase 1: <scope>.\nCommit your work before you finish — the next link builds on your commits." },
+
+    { "id": "p1-review", "model": "kimi-k2.7-code:cloud", "after": ["p1"],
+      "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob",
+      "prompt": "Review phase 1 in this worktree (git log/diff to see it).\nReturn ONLY: (a) defects with file:line, (b) risks phase 2 must avoid. No prose." },
+
+    { "id": "p2", "model": "glm-5.2:cloud", "after": ["p1-review"],
+      "isolation": { "worktree": "feat" },
+      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+      "prompt": "Phase 2: <scope>.\nThe phase-1 reviewer warned:\n{{result:p1-review}}\nFix what it flagged, then do phase 2. Commit before you finish." }
+  ] }
+```
+
+**Rules that make it work:**
+
+- **Every link names the same worktree.** All links sharing a name must be totally ordered by `after` — validation rejects an unordered pair, because they would race in one directory.
+- **Reviewers get no write tools.** `allowedTools: "Read,Grep,Glob"`. A reviewer that edits is not reviewing, and a leaf holding `Write` can write anywhere — withholding the tool is the only real confinement.
+- **Every implementing prompt must say "commit before you finish."** The engine never commits for a leaf. Uncommitted work still reaches the next link (same tree), but the history is what makes a failed link recoverable.
+- **The tree is collected once**, after the last link — so one entry in `worktreesKept`, with a diffstat spanning every phase.
+- **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix p2, re-run, and p3/p4 redo their work on the corrected base.
+- **`forEach` cannot share a worktree** — clones are concurrent by construction.
+
+**How a verifier link works.** A reviewer with no write tools still does its whole job,
+because its findings do not travel through files:
+
+- **Its output is its return value.** The engine writes every leaf's result to
+  `results/<id>.json`; the next link reads it via `{{result:<reviewer-id>}}`. A reviewer
+  never needs `Write` to report — it needs `Write` only to *change* things, which is the
+  one thing it must not do.
+- **It sees more than a fresh checkout.** Same working directory as the link before it, so
+  it reads that link's commits *and* anything left uncommitted. `git log`, `git diff`, and
+  the files themselves all work.
+- **It never ends the chain's tree.** Collection is deferred to the group's last link, so a
+  reviewer changing nothing cannot trigger the empty-tree cleanup that would delete the
+  work its successor needs.
+- **Giving a reviewer write tools breaks the contract silently.** It will fix things
+  instead of reporting them, and `{{result:}}` then describes work the next link cannot
+  see the reasoning for. Nothing in the engine prevents this — `--allowedTools` is
+  tool-name-only and a leaf holding `Write` can write anywhere — so the tool list is the
+  whole mechanism.
 
 ### Judge panel
 
