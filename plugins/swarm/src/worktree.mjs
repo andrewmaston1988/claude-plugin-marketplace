@@ -58,6 +58,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     return {
       path, branch, name, repo, reused: true,
       head: (!reset && treeHead.status === 0) ? treeHead.stdout : head.stdout,
+      ...(task.baseRef && { baseRef: task.baseRef }),
     };
   }
 
@@ -68,13 +69,19 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     // doesn't already have — a previous run's phases live exactly there. Count,
     // not ancestry: HEAD may have moved sideways since, which says nothing about
     // whether this branch holds work.
-    const carried = git(["rev-list", "--count", branch, `^${head.stdout}`], repo);
-    if (carried.status === 0 && carried.stdout !== "" && carried.stdout !== "0") {
+    // `git cherry` compares by PATCH, not commit identity, so work that landed
+    // via squash-merge — the documented landing path — reads as already applied
+    // ('-' prefix) and does not block. Only genuinely unlanded commits ('+') do.
+    const cherry = git(["cherry", head.stdout, branch], repo);
+    const unlanded = cherry.status === 0
+      ? cherry.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length
+      : 0;
+    if (unlanded > 0 && !reset) {
       throw new Error(
-        `worktree branch '${branch}' carries ${carried.stdout} commit(s) not in HEAD — refusing to reset it ` +
+        `worktree branch '${branch}' carries ${unlanded} unlanded commit(s) — refusing to reset it ` +
         `for task '${task.id}'. That work came from an earlier run and would be lost.\n` +
         `    inspect:  git log ${branch}\n` +
-        `    reuse it: name a different worktree, or merge/delete '${branch}' yourself first`);
+        `    reuse it: name a different worktree, merge/delete '${branch}' yourself, or re-run with --force`);
     }
     add = git(["worktree", "add", path, "-B", branch, "--no-track", head.stdout], repo);
   }
@@ -82,7 +89,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     throw new Error(`git worktree add failed for '${task.id}': ${add.stderr}`);
   }
 
-  return { path, branch, name, head: head.stdout, repo, reused: false };
+  return { path, branch, name, head: head.stdout, repo, reused: false, ...(task.baseRef && { baseRef: task.baseRef }) };
 }
 
 // Collect after the leaf ran: unchanged worktrees are removed (and their
@@ -110,11 +117,21 @@ export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
   // phase's commits with it. Ask git instead of the plan: does this branch carry
   // anything not already in the repo's HEAD? Direction-agnostic, so it stays
   // correct when HEAD has moved sideways since the tree was made.
+  // Does this branch hold work nobody has landed? Measured by PATCH (`git
+  // cherry`), so squash-merged work reads as landed and does not pin the tree
+  // forever. Measured against the tree's BASE (`wt.head`) as well as the repo:
+  // a `from`-based tree inherits its dependency's commits at birth, and counting
+  // those as this leaf's work would keep every empty leaf's tree alive.
   const repoHead = git(["rev-parse", "HEAD"], wt.repo);
-  const unmerged = repoHead.status === 0
-    ? git(["rev-list", "--count", wt.branch, `^${repoHead.stdout}`], wt.repo)
-    : { status: 1, stdout: "" };
-  const carriesWork = unmerged.status === 0 && unmerged.stdout !== "" && unmerged.stdout !== "0";
+  const countUnlanded = (base) => {
+    const c = git(["cherry", base, wt.branch], wt.repo);
+    return c.status === 0 ? c.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length : 0;
+  };
+  // A `from`-based tree inherits its dependency's commits, so measure it against
+  // that base — otherwise an empty leaf looks productive. Every other tree is
+  // measured against the repo, which is what protects a chain's earlier phases.
+  const base = wt.baseRef ? wt.head : (repoHead.status === 0 ? repoHead.stdout : null);
+  const carriesWork = base !== null && countUnlanded(base) > 0;
 
   if (!changed && !(wt.reused && isChainFollower) && !carriesWork) {
     git(["worktree", "remove", "--force", wt.path], wt.repo);

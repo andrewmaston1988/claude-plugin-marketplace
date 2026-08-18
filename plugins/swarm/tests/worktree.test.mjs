@@ -441,7 +441,7 @@ test("prepareIsolation refuses to force-reset a branch carrying commits", () => 
         prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other);
       } catch (e) { threw = e; }
       ok(threw, "must refuse rather than silently reset a branch with commits");
-      ok(/carries \d+ commit/i.test(threw.message), `message should name the loss: ${threw?.message}`);
+      ok(/carries \d+ unlanded commit/i.test(threw.message), `message should name the loss: ${threw?.message}`);
       equal(git(["rev-parse", "swarm/feat"], repo), tip, "branch still points at phase 1");
     } finally { cleanup(other); }
   } finally { cleanup(repo, results); }
@@ -510,6 +510,10 @@ test("scheduler integration: a from-based leaf starts from its dependency's comm
       if (call.opts.cwd.endsWith("wt-feat")) {
         writeFileSync(join(call.opts.cwd, "helper.txt"), "the helper\n");
         commitAll(call.opts.cwd, "add helper");
+      } else if (call.opts.cwd.endsWith("wt-migrate")) {
+        // Do real work, so the tree survives collect() and can be inspected.
+        writeFileSync(join(call.opts.cwd, "migrated.txt"), "uses the helper\n");
+        commitAll(call.opts.cwd, "migrate");
       }
       return { output: "done" };
     });
@@ -531,4 +535,58 @@ test("scheduler integration: a from-based leaf starts from its dependency's comm
     ok(existsSync(join(migrateCall.opts.cwd, "helper.txt")),
       "a from-based tree contains its dependency's committed work");
   } finally { cleanup(repo, dir); }
+});
+
+test("a from-based leaf that does nothing is still swept", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-sweep-"));
+  try {
+    const up = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "helper" }, CFG, results);
+    writeFileSync(join(up.path, "helper.txt"), "helper\n");
+    commitAll(up.path, "helper");
+
+    // Downstream bases on helper's branch and adds NOTHING of its own. Its branch
+    // inherits helper's commit from birth — measuring against repo HEAD would
+    // read that as this leaf's work and keep an empty tree forever.
+    const down = prepareIsolation(
+      { id: "noop", originalCwd: repo, worktreeName: "noop", baseRef: "swarm/helper" }, CFG, results);
+    const out = collect({ id: "noop" }, CFG, down, { isChainFollower: false });
+    equal(out.kept, false, "an empty from-based tree is swept, not kept");
+    ok(!git(["branch", "--list", "swarm/noop"], repo).includes("swarm/noop"));
+  } finally { cleanup(repo, results); }
+});
+
+test("a squash-merged branch no longer blocks reuse; --force overrides an unlanded one", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-sq-"));
+  try {
+    const wt = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    writeFileSync(join(wt.path, "work.txt"), "real work\n");
+    commitAll(wt.path, "phase 1");
+    spawnSync("git", ["worktree", "remove", "--force", wt.path], { cwd: repo, windowsHide: true });
+
+    // Unlanded work still blocks...
+    const other = mkdtempSync(join(tmpdir(), "swarm-wt-sq2-"));
+    let threw = null;
+    try { prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other); }
+    catch (e) { threw = e; }
+    ok(threw && /unlanded/.test(threw.message), "unlanded commits still refuse");
+
+    // ...but --force is the documented escape hatch.
+    const forced = mkdtempSync(join(tmpdir(), "swarm-wt-sq3-"));
+    const okWt = prepareIsolation(
+      { id: "p3", originalCwd: repo, worktreeName: "feat" }, CFG, forced, { reset: true });
+    ok(existsSync(okWt.path), "--force overrides the guard");
+    spawnSync("git", ["worktree", "remove", "--force", okWt.path], { cwd: repo, windowsHide: true });
+    cleanup(other, forced);
+
+    // Squash-merged content reads as landed and must not block.
+    spawnSync("git", ["merge", "--squash", "swarm/feat"], { cwd: repo, windowsHide: true });
+    commitAll(repo, "squashed phase 1");
+    const after = mkdtempSync(join(tmpdir(), "swarm-wt-sq4-"));
+    try {
+      const reused = prepareIsolation({ id: "p4", originalCwd: repo, worktreeName: "feat" }, CFG, after);
+      ok(existsSync(reused.path), "a squash-merged branch is reusable");
+    } finally { cleanup(after); }
+  } finally { cleanup(repo, results); }
 });

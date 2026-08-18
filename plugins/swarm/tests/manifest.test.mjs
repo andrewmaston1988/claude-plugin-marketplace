@@ -1167,3 +1167,42 @@ test("isolation.from must name a declared, worktree-isolated dependency", () => 
     equal(plan.tasks.find((t) => t.id === "x").from, "helper");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("integrate node: agentless, validated, normalized onto its target worktree", () => {
+  const dir = tmp();
+  try {
+    const agentic = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "worktree" }),
+      { id: "join", after: ["x"], model: "haiku", prompt: "merge it",
+        integrate: { into: "feat", from: ["x"] } },
+    ] }, "agentic.json");
+    ok(errorsOf(() => loadManifest(agentic, CFG, dir))
+      .some((e) => /integrate tasks are agentless/.test(e)));
+
+    const notDep = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "worktree" }),
+      { id: "join", integrate: { into: "feat", from: ["x"] } },
+    ] }, "notdep.json");
+    ok(errorsOf(() => loadManifest(notDep, CFG, dir))
+      .some((e) => /must be a declared dependency/.test(e)));
+
+    const noTree = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x" }),
+      { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] } },
+    ] }, "notree.json");
+    ok(errorsOf(() => loadManifest(noTree, CFG, dir))
+      .some((e) => /no worktree, so it has no branch to merge/.test(e)));
+
+    const good = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "worktree" }),
+      claudeTask({ id: "y", isolation: "worktree" }),
+      { id: "join", after: ["x", "y"], integrate: { into: "feat", from: ["x", "y"] } },
+      claudeTask({ id: "next", after: ["join"], isolation: { worktree: "feat" } }),
+    ] }, "good.json");
+    const plan = loadManifest(good, CFG, dir);
+    const join = plan.tasks.find((t) => t.id === "join");
+    equal(join.model, "integrate", "display sentinel — never dispatched");
+    equal(join.worktreeName, "feat", "the node owns the target tree");
+    deepEqual(join.integrate.from, ["x", "y"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

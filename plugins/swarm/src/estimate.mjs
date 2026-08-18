@@ -36,7 +36,7 @@ export function loadCorpus(runsRoot) {
       let summary;
       try { summary = JSON.parse(readFileSync(join(runsRoot, a, b, "summary.json"), "utf8")); } catch { continue; }
       for (const row of summary?.tasks || []) {
-        if (row?.state !== "ok" || typeof row.model !== "string" || row.model === "compute" || !row.tokens) continue;
+        if (row?.state !== "ok" || typeof row.model !== "string" || row.model === "compute" || row.model === "integrate" || !row.tokens) continue;
         push(tokens, row.model, tokenTotal(row.tokens));
         // costUsd is real only for Anthropic-billed leaves. On a :cloud row the CLI
         // applies its own price table to token counts, but the provider bills on
@@ -60,6 +60,7 @@ export function leafCounts(tasks, digest) {
   const add = (model, n) => counts.set(model, (counts.get(model) || 0) + n);
   for (const t of tasks) {
     if (t.compute !== undefined || t.model === "compute") continue;
+    if (t.integrate !== undefined || t.model === "integrate") continue;
     const mult = t.forEach ? t.forEach.maxItems : 1;
     if (t.childPlan) {
       for (const c of t.childPlan.tasks) {

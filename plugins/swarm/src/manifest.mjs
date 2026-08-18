@@ -27,7 +27,7 @@ const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch", "from"]);
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
-  "returns", "verifyCitations", "manifest",
+  "returns", "verifyCitations", "manifest", "integrate",
 ]);
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
@@ -196,6 +196,29 @@ function validateTaskShapes(rawTasks, errors, label) {
       }
       if (t.forEach !== undefined) {
         errors.push(`${l}: a task cannot be both forEach and compute — compute the list in one step, forEach over it in the next`);
+      }
+    } else if (t.integrate !== undefined) {
+      // Agentless like compute: the engine merges, no leaf is spawned.
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns"]
+        .filter((k) => t[k] !== undefined);
+      if (agentKeys.length) {
+        errors.push(`${l}: integrate tasks are agentless — remove ${agentKeys.join("/")}; the merge runs in the engine, no leaf is spawned`);
+      }
+      const spec = t.integrate;
+      if (!spec || typeof spec !== "object" || Array.isArray(spec)) {
+        errors.push(`${l}: integrate must be an object — e.g. "integrate": {"into": "feat", "from": ["migrate-x", "migrate-y"]}`);
+      } else {
+        for (const k of Object.keys(spec)) {
+          if (k !== "into" && k !== "from") {
+            errors.push(`${l}: unknown key '${k}' in integrate — the shape is {"into": "<worktree name>", "from": ["<task id>", …]}`);
+          }
+        }
+        if (typeof spec.into !== "string" || !spec.into) {
+          errors.push(`${l}: integrate.into is required — the worktree name the merged work lands in; e.g. {"into": "feat", "from": ["migrate-x"]}`);
+        }
+        if (!Array.isArray(spec.from) || !spec.from.length) {
+          errors.push(`${l}: integrate.from must be a non-empty array of task ids to merge — e.g. {"into": "feat", "from": ["migrate-x", "migrate-y"]}`);
+        }
       }
     } else {
       if (!t.prompt || typeof t.prompt !== "string") errors.push(`${l}: prompt is required`);
@@ -456,6 +479,23 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
       }
     }
 
+    // Every branch an integrate node merges must exist by the time it runs, and
+    // must actually be a branch — same two failure modes as isolation.from.
+    if (t.integrate && typeof t.integrate === "object" && Array.isArray(t.integrate.from)) {
+      for (const srcId of t.integrate.from) {
+        if (typeof srcId !== "string" || !srcId) {
+          errors.push(`${l}: integrate.from entries must be task ids`);
+        } else if (!deps.has(srcId)) {
+          errors.push(`${l}: integrate.from '${srcId}' must be a declared dependency — add '${srcId}' to after, or its branch may not exist when the merge runs`);
+        } else {
+          const src = rawTasks.find((o) => o.id === srcId);
+          if (src && src.isolation === undefined) {
+            errors.push(`${l}: integrate.from '${srcId}' has no worktree, so it has no branch to merge — give '${srcId}' an isolation block`);
+          }
+        }
+      }
+    }
+
     if (t.verifyCitations !== undefined && typeof t.verifyCitations !== "boolean") {
       errors.push(`${l}: verifyCitations must be true or false (got ${JSON.stringify(t.verifyCitations)}) — citation-shaped returns are verified by default; false opts out`);
     }
@@ -507,11 +547,12 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
   return rawTasks.map((t) => {
     const l = label(t);
     const isCompute = t.compute !== undefined;
+    const isIntegrate = t.integrate !== undefined;
     const isManifest = t.manifest !== undefined;
     const originalCwd = t.cwd ? resolve(cwd, t.cwd) : cwd;
     // compute/manifest nodes spawn nothing themselves and no code leaves the
     // machine — no governance, no write-implies-isolation.
-    if (!isCompute && !isManifest) {
+    if (!isCompute && !isManifest && !isIntegrate) {
       governanceCheck(t.model, originalCwd, l);
       checkDenylist(t.model, l, cfg, errors);
       if (t.fallbackModel !== undefined) {
@@ -527,7 +568,8 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     let effCwd = originalCwd;
     let scratchRedirect = false;
     // Compute and manifest nodes spawn no leaf, so there is nothing to isolate.
-    const worktreeName = (isCompute || isManifest) ? undefined : resolveWorktreeName(t);
+    const worktreeName = isIntegrate ? t.integrate.into
+      : (isCompute || isManifest) ? undefined : resolveWorktreeName(t);
     const branchName = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
       ? undefined : t.isolation.branch;
     // `from` names a task; the tree bases on that task's BRANCH, resolved the
@@ -537,7 +579,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     // Write-implies-isolation: a leaf granted write-capable tools without
     // worktree isolation never runs in the user's real tree — its cwd is
     // redirected to a per-task scratch dir under the results dir.
-    if (!isCompute && !isManifest && hasWriteTools(t.allowedTools) && worktreeName === undefined) {
+    if (!isCompute && !isManifest && !isIntegrate && hasWriteTools(t.allowedTools) && worktreeName === undefined) {
       effCwd = join(resultsDir, `scratch-${t.id}`);
       scratchRedirect = true;
     }
@@ -547,19 +589,20 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ? { forEach: { from: t.forEach.from, path: t.forEach.path ?? "", maxItems: t.forEach.maxItems } } : {};
     return {
       id: t.id,
-      prompt: isCompute || isManifest ? "" : t.prompt,
+      prompt: isCompute || isManifest || isIntegrate ? "" : t.prompt,
       // "compute"/"manifest" are display sentinels, never dispatched — these
       // nodes run inline in the engine (the scheduler excludes them from
       // preflights; a manifest node expands into its child's tasks).
-      model: isManifest ? "manifest" : isCompute ? "compute" : t.model,
+      model: isManifest ? "manifest" : isCompute ? "compute" : isIntegrate ? "integrate" : t.model,
       fallbackModel: !isCompute && !isManifest && typeof t.fallbackModel === "string" ? t.fallbackModel : undefined,
       effort: isCompute || isManifest ? undefined : t.effort,
-      allowedTools: isCompute || isManifest ? "" : t.allowedTools || DEFAULT_TOOLS,
+      allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || DEFAULT_TOOLS,
       cwd: effCwd,
       originalCwd,
       scratchRedirect,
       isolation: isCompute || isManifest ? undefined : t.isolation,
       ...(worktreeName !== undefined && { worktreeName }),
+      ...(isIntegrate && { integrate: { into: t.integrate.into, from: [...t.integrate.from] } }),
       ...(branchName !== undefined && { branchName }),
       ...(fromId !== undefined && { from: fromId }),
       outputDir: t.outputDir ? resolve(cwd, t.outputDir) : undefined,

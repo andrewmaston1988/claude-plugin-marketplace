@@ -236,12 +236,6 @@ If you cannot find the answer, say so in one line — do not expand scope.
 
 `{{result:<id>}}` passes raw (capped) output between links, so each link's *output* contract must be hard: **"return ONLY the N facts the next step needs."** It passes text, never edits — a link that must build on the previous link's *changes* needs a phased chain instead.
 
-```json
-{ "tasks": [
-    { "id": "extract", "model": "minimax-m3:cloud", "prompt": "List every route in src/routes/. Return ONLY a JSON array of {method, path, handler} — nothing else." },
-    { "id": "matrix",  "model": "glm-5.2:cloud", "after": ["extract"], "prompt": "Routes: {{result:extract}}\nProduce a markdown table: route × auth requirement." }
-  ] }
-```
 
 ### Phased chain — one branch, implement → review → implement
 
@@ -337,7 +331,10 @@ width falls out of the answers. A run may narrow to one task and widen again:
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish." },
 
-    { "id": "cleanup", "model": "glm-5.2:cloud", "after": ["migrate-x", "migrate-y"],
+    { "id": "join", "after": ["migrate-x", "migrate-y"],
+      "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
+
+    { "id": "cleanup", "model": "glm-5.2:cloud", "after": ["join"],
       "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…delete the dead code, run the suite. Commit before you finish." }
   ] }
@@ -368,23 +365,24 @@ them.
   must be a declared dependency and must itself be worktree-isolated (it needs a
   branch to base on) — `validate` says so if not.
 - **Sibling trees still do not see each other.** `migrate-x` and `migrate-y` each
-  carry `helper`'s work but not each other's, so `cleanup` merges
-  `swarm/migrate-x` and `swarm/migrate-y` itself — they are listed in
-  `worktreesKept`. Only a *shared* worktree accumulates automatically.
+  carry `helper`'s work but not each other's. Fold them back with an **`integrate`
+  node** — agentless, like `compute`, so it spends nothing:
+
+  ```json
+  { "id": "join", "after": ["migrate-x", "migrate-y"],
+    "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } }
+  ```
+
+  It merges each named task's branch into the `into` worktree and the next leaf
+  on that worktree carries on from the combined state. **A conflict is not a
+  failure**: the merge stops with markers in the tree, the node stays `ok`, and
+  the conflicting paths land in its result — pass `{{result:join}}` to the next
+  leaf and tell it to resolve them. Without an integrate node the merge is the
+  next leaf's job, done by hand in its prompt.
 
 ### Sweep-then-synthesize
 
-Fan-out plus an explicit synthesis leaf (use when synthesis needs richer instructions than the digest, or a Claude tier): sweep leaves with no `after`, then one task `after: [all sweeps]` reading `{{resultPath:…}}` for each.
-
-```json
-{ "tasks": [
-    { "id": "s1", "model": "minimax-m3:cloud", "prompt": "…closed question, cluster 1…" },
-    { "id": "s2", "model": "minimax-m3:cloud", "prompt": "…cluster 2…" },
-    { "id": "s3", "model": "minimax-m3:cloud", "prompt": "…cluster 3…" },
-    { "id": "synth", "model": "sonnet", "effort": "high", "after": ["s1", "s2", "s3"],
-      "prompt": "Read {{resultPath:s1}}, {{resultPath:s2}}, {{resultPath:s3}}. Reconcile conflicts and produce the migration checklist." }
-  ] }
-```
+Fan-out plus an explicit synthesis leaf — sweeps with no `after`, then one task `after: [all sweeps]` reading `{{resultPath:…}}` for each. Use when synthesis needs richer instructions than the digest, or a Claude tier. (The *Mixed topology* example above shows the shape.)
 
 ### Deterministic steps — find → dedupe → fan out → gate
 
