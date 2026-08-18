@@ -327,10 +327,12 @@ width falls out of the answers. A run may narrow to one task and widen again:
       "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Read {{resultPath:survey-a}} and {{resultPath:survey-b}}. Write the helper. Commit before you finish." },
 
-    { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper"], "isolation": "worktree",
-      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…migrate X. Commit before you finish." },
-    { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper"], "isolation": "worktree",
-      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…migrate Y. Commit before you finish." },
+    { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper", "survey-a"], "isolation": "worktree",
+      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+      "prompt": "…migrate every site in {{resultPath:survey-a}}. Commit before you finish." },
+    { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper", "survey-b"], "isolation": "worktree",
+      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+      "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish." },
 
     { "id": "cleanup", "model": "glm-5.2:cloud", "after": ["migrate-x", "migrate-y"],
       "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
@@ -349,6 +351,13 @@ them.
   behind the other because they are adjacent is the common mistake.
 - **Chain them only for a real collision** — same file, same region — and name
   that file in the prompt. "They're adjacent in the plan" is not a collision.
+- **`{{result:}}` / `{{resultPath:}}` reach only a DIRECT dependency.** In a wide
+  graph the task you want is often a grandparent — `migrate-x` needs the survey,
+  but its `after` names only `helper`. Referencing it anyway fails validation
+  (*"references 'survey' which is not a declared dependency in after"*). Add the
+  upstream id to `after` as well: `"after": ["helper", "survey-a"]`. The extra
+  edge changes no ordering — `helper` already waits on the survey — it just
+  declares what the prompt reads.
 - **Private trees do not see each other's commits.** Each branches from the repo's
   HEAD, so `migrate-x`/`migrate-y` will not contain `helper`'s commit, and
   `cleanup` must merge `swarm/migrate-x` and `swarm/migrate-y` itself (they are
