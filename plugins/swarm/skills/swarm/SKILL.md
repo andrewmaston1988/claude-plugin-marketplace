@@ -125,6 +125,7 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
     "isolation": "worktree",                   // private tree (implementation leaves); OR
                                                //   { "worktree": "feat" } — SHARED tree, phased chains, see Plan patterns
                                                //   optional "branch": names the branch explicitly (default swarm/<worktree>)
+                                               //   optional "from": base this tree on that task's branch, not repo HEAD
     "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 3600000,
@@ -327,10 +328,12 @@ width falls out of the answers. A run may narrow to one task and widen again:
       "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Read {{resultPath:survey-a}} and {{resultPath:survey-b}}. Write the helper. Commit before you finish." },
 
-    { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper", "survey-a"], "isolation": "worktree",
+    { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper", "survey-a"],
+      "isolation": { "worktree": "migrate-x", "from": "helper" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…migrate every site in {{resultPath:survey-a}}. Commit before you finish." },
-    { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper", "survey-b"], "isolation": "worktree",
+    { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper", "survey-b"],
+      "isolation": { "worktree": "migrate-y", "from": "helper" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish." },
 
@@ -358,10 +361,16 @@ them.
   upstream id to `after` as well: `"after": ["helper", "survey-a"]`. The extra
   edge changes no ordering — `helper` already waits on the survey — it just
   declares what the prompt reads.
-- **Private trees do not see each other's commits.** Each branches from the repo's
-  HEAD, so `migrate-x`/`migrate-y` will not contain `helper`'s commit, and
-  `cleanup` must merge `swarm/migrate-x` and `swarm/migrate-y` itself (they are
-  listed in `worktreesKept`). Only a *shared* worktree accumulates automatically.
+- **A private tree branches from the repo's HEAD unless you say otherwise.** Add
+  `"from": "<task id>"` to base it on that task's branch instead, so the leaf
+  starts with the code it depends on:
+  `"isolation": { "worktree": "migrate-x", "from": "helper" }`. The named task
+  must be a declared dependency and must itself be worktree-isolated (it needs a
+  branch to base on) — `validate` says so if not.
+- **Sibling trees still do not see each other.** `migrate-x` and `migrate-y` each
+  carry `helper`'s work but not each other's, so `cleanup` merges
+  `swarm/migrate-x` and `swarm/migrate-y` itself — they are listed in
+  `worktreesKept`. Only a *shared* worktree accumulates automatically.
 
 ### Sweep-then-synthesize
 

@@ -23,7 +23,7 @@ const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 const CLONE_ID_RE = /\[\d+\]$/;
 const ITEM_TEMPLATE_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/;
 // The isolation object's own allowlist — KNOWN_TASK_KEYS only gates top-level keys.
-const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch"]);
+const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch", "from"]);
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
@@ -436,6 +436,26 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
       }
     }
 
+    // isolation.from bases this tree on another task's branch — that task must be
+    // a declared dependency (so its branch exists by then) AND worktree-isolated
+    // (so it HAS a branch). Both are silent wrong-base bugs otherwise.
+    const isoFrom = t.isolation && typeof t.isolation === "object" && !Array.isArray(t.isolation)
+      ? t.isolation.from : undefined;
+    if (isoFrom !== undefined) {
+      if (typeof isoFrom !== "string" || !isoFrom) {
+        errors.push(`${l}: isolation.from must be the id of a worktree-isolated dependency — e.g. { "worktree": "migrate-x", "from": "helper" }`);
+      } else if (!deps.has(isoFrom)) {
+        errors.push(`${l}: isolation.from '${isoFrom}' must be a declared dependency — add '${isoFrom}' to after, or its branch may not exist when this leaf starts`);
+      } else {
+        const src = rawTasks.find((o) => o.id === isoFrom);
+        if (src && src.isolation === undefined) {
+          errors.push(
+            `${l}: isolation.from '${isoFrom}' has no worktree, so it has no branch to base on — ` +
+            `give '${isoFrom}' an isolation block, or drop from and branch from the repo instead`);
+        }
+      }
+    }
+
     if (t.verifyCitations !== undefined && typeof t.verifyCitations !== "boolean") {
       errors.push(`${l}: verifyCitations must be true or false (got ${JSON.stringify(t.verifyCitations)}) — citation-shaped returns are verified by default; false opts out`);
     }
@@ -510,6 +530,10 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     const worktreeName = (isCompute || isManifest) ? undefined : resolveWorktreeName(t);
     const branchName = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
       ? undefined : t.isolation.branch;
+    // `from` names a task; the tree bases on that task's BRANCH, resolved the
+    // same way its own prepareIsolation derives it.
+    const fromId = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
+      ? undefined : t.isolation.from;
     // Write-implies-isolation: a leaf granted write-capable tools without
     // worktree isolation never runs in the user's real tree — its cwd is
     // redirected to a per-task scratch dir under the results dir.
@@ -537,6 +561,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       isolation: isCompute || isManifest ? undefined : t.isolation,
       ...(worktreeName !== undefined && { worktreeName }),
       ...(branchName !== undefined && { branchName }),
+      ...(fromId !== undefined && { from: fromId }),
       outputDir: t.outputDir ? resolve(cwd, t.outputDir) : undefined,
       timeoutMs: t.timeoutMs ?? defaultTimeoutMs,
       after: [...(t.after || [])],

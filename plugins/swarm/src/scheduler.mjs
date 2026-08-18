@@ -822,7 +822,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       const wtName = nameOf(task);
       if (wtName !== undefined) {
         try {
-          wt = worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
+          // `from` names a task; base this tree on THAT task's branch, derived
+          // the same way its own isolation did (explicit branch, else prefix+name).
+          let baseRef;
+          if (task.from) {
+            const src = tasks.find((o) => o.id === task.from);
+            const srcName = src ? (nameOf(src) ?? src.id) : task.from;
+            baseRef = src?.branchName || `${cfg.worktreeBranchPrefix || "swarm/"}${srcName}`;
+          }
+          wt = worktree.prepareIsolation({ ...task, worktreeName: wtName, baseRef }, cfg, plan.resultsDir, {
             reset: force && groupFirst.get(wtName) === task.id,
           });
           taskCwd = wt.path;

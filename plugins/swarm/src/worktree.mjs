@@ -33,9 +33,17 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
   const branch = task.branchName || `${prefix}${name}`;
   const path = resolve(join(resultsDir, `wt-${name}`));
 
-  const head = git(["rev-parse", "HEAD"], repo);
+  // A leaf that builds on another's committed work bases its tree on that
+  // branch instead of repo HEAD — otherwise it starts without the code it
+  // depends on. `wt.head` follows the base, so "did this leaf change anything"
+  // stays a question about THIS leaf's work.
+  const baseRef = task.baseRef || "HEAD";
+  const head = git(["rev-parse", baseRef], repo);
   if (head.status !== 0) {
-    throw new Error(`cannot resolve HEAD in ${repo}: ${head.stderr || "not a git repo?"}`);
+    throw new Error(task.baseRef
+      ? `cannot resolve base '${baseRef}' in ${repo} for task '${task.id}': ${head.stderr || "no such ref"} — ` +
+        `isolation.from names a task whose branch must exist by the time this leaf runs`
+      : `cannot resolve HEAD in ${repo}: ${head.stderr || "not a git repo?"}`);
   }
 
   if (isRegisteredWorktree(path, repo)) {

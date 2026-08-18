@@ -1125,20 +1125,45 @@ test("resolveWorktreeName is the single rule every derivation site shares", () =
 test("isolation object rejects unknown keys — a typo must never be silently ignored", () => {
   const dir = tmp();
   try {
-    // `from` is not (yet) a supported key. Silently accepting it hands the leaf a
-    // tree based on repo HEAD while the author believes it starts from a
-    // dependency's commit — a wrong answer with no error.
+    // A misspelt or invented key silently hands the leaf a tree the author did
+    // not ask for — a wrong answer with no error.
     const bad = writeManifest(dir, { tasks: [
       claudeTask({ id: "c", isolation: { worktree: "feat" } }),
-      claudeTask({ id: "d", after: ["c"], isolation: { worktree: "d", from: "c" } }),
+      claudeTask({ id: "d", after: ["c"], isolation: { worktree: "d", basedOn: "c" } }),
     ] }, "unknown-key.json");
     const errs = errorsOf(() => loadManifest(bad, CFG, dir));
-    ok(errs.some((e) => /unknown key 'from' in isolation/.test(e)), errs.join("\n"));
+    ok(errs.some((e) => /unknown key 'basedOn' in isolation/.test(e)), errs.join("\n"));
 
     const typo = writeManifest(dir, { tasks: [
       claudeTask({ isolation: { worktree: "feat", worktreeName: "oops" } }),
     ] }, "typo.json");
     ok(errorsOf(() => loadManifest(typo, CFG, dir))
       .some((e) => /unknown key 'worktreeName' in isolation/.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("isolation.from must name a declared, worktree-isolated dependency", () => {
+  const dir = tmp();
+  try {
+    const notDep = writeManifest(dir, { tasks: [
+      claudeTask({ id: "helper", isolation: "worktree" }),
+      claudeTask({ id: "x", isolation: { worktree: "x", from: "helper" } }),
+    ] }, "notdep.json");
+    ok(errorsOf(() => loadManifest(notDep, CFG, dir))
+      .some((e) => /must be a declared dependency/.test(e)));
+
+    const noTree = writeManifest(dir, { tasks: [
+      claudeTask({ id: "survey" }),
+      claudeTask({ id: "x", after: ["survey"], isolation: { worktree: "x", from: "survey" } }),
+    ] }, "notree.json");
+    ok(errorsOf(() => loadManifest(noTree, CFG, dir))
+      .some((e) => /no worktree, so it has no branch/.test(e)));
+
+    const good = writeManifest(dir, { tasks: [
+      claudeTask({ id: "helper", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "x", after: ["helper"], isolation: { worktree: "x", from: "helper" } }),
+    ] }, "good.json");
+    const plan = loadManifest(good, CFG, dir);
+    equal(plan.tasks.find((t) => t.id === "x").from, "helper");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

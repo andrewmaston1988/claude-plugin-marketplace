@@ -481,3 +481,54 @@ test("isolation.branch names the branch independently of the tree", () => {
     ok(git(["branch", "--list", "swarm/eco-p3branch"], repo).includes("swarm/eco-p3branch"));
   } finally { cleanup(repo, results); }
 });
+
+test("isolation.from bases a private tree on a dependency's branch tip", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    // The upstream leaf commits a helper on its own branch.
+    const up = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "helper" }, CFG, results);
+    writeFileSync(join(up.path, "helper.txt"), "the helper\n");
+    commitAll(up.path, "add helper");
+    const helperTip = git(["rev-parse", "HEAD"], up.path);
+
+    // A downstream leaf bases on that branch instead of repo HEAD.
+    const down = prepareIsolation(
+      { id: "migrate-x", originalCwd: repo, worktreeName: "migrate-x", baseRef: "swarm/helper" },
+      CFG, results);
+    ok(existsSync(join(down.path, "helper.txt")), "the dependency's committed work is present");
+    equal(down.head, helperTip, "wt.head is the base ref, so an empty leaf still reads as unchanged");
+  } finally { cleanup(repo, results); }
+});
+
+test("scheduler integration: a from-based leaf starts from its dependency's commit", async () => {
+  const repo = initRepo();
+  const dir = mkdtempSync(join(tmpdir(), "swarm-wt-from-"));
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      // The upstream leaf commits; the downstream leaf must SEE that commit.
+      if (call.opts.cwd.endsWith("wt-feat")) {
+        writeFileSync(join(call.opts.cwd, "helper.txt"), "the helper\n");
+        commitAll(call.opts.cwd, "add helper");
+      }
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        { id: "helper", prompt: "h", model: "haiku", allowedTools: "Read,Edit,Bash",
+          cwd: repo, originalCwd: repo, isolation: { worktree: "feat" }, worktreeName: "feat",
+          timeoutMs: 5000, after: [] },
+        { id: "migrate", prompt: "m", model: "haiku", allowedTools: "Read,Edit,Bash",
+          cwd: repo, originalCwd: repo, isolation: { worktree: "migrate", from: "helper" },
+          worktreeName: "migrate", from: "helper", timeoutMs: 5000, after: ["helper"] },
+      ],
+    };
+    await runPlan(p, CFG, io);
+    const migrateCall = spawn.calls.find((c) => String(c.opts.cwd).endsWith("wt-migrate"));
+    ok(migrateCall, "the migrate leaf ran in its own tree");
+    ok(existsSync(join(migrateCall.opts.cwd, "helper.txt")),
+      "a from-based tree contains its dependency's committed work");
+  } finally { cleanup(repo, dir); }
+});
