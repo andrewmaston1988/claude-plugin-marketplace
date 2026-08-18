@@ -28,7 +28,9 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
   // Ordered siblings sharing a name meet in one tree; without one, the task's
   // own id names a private tree.
   const name = task.worktreeName || task.id;
-  const branch = `${prefix}${name}`;
+  // The branch is normally derived from the tree name, but a run continuing work
+  // onto an existing branch needs to name it — the two are separate identities.
+  const branch = task.branchName || `${prefix}${name}`;
   const path = resolve(join(resultsDir, `wt-${name}`));
 
   const head = git(["rev-parse", "HEAD"], repo);
@@ -54,6 +56,18 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
   let add = git(["worktree", "add", path, "-b", branch, "--no-track", head.stdout], repo);
   if (add.status !== 0 && /already exists/i.test(add.stderr)) {
     // Stale branch (path was cleaned but the branch lingered): force it to HEAD.
+    // But -B RESETS the branch, so first ask whether it carries anything HEAD
+    // doesn't already have — a previous run's phases live exactly there. Count,
+    // not ancestry: HEAD may have moved sideways since, which says nothing about
+    // whether this branch holds work.
+    const carried = git(["rev-list", "--count", branch, `^${head.stdout}`], repo);
+    if (carried.status === 0 && carried.stdout !== "" && carried.stdout !== "0") {
+      throw new Error(
+        `worktree branch '${branch}' carries ${carried.stdout} commit(s) not in HEAD — refusing to reset it ` +
+        `for task '${task.id}'. That work came from an earlier run and would be lost.\n` +
+        `    inspect:  git log ${branch}\n` +
+        `    reuse it: name a different worktree, or merge/delete '${branch}' yourself first`);
+    }
     add = git(["worktree", "add", path, "-B", branch, "--no-track", head.stdout], repo);
   }
   if (add.status !== 0) {
