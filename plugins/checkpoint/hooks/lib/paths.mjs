@@ -103,6 +103,22 @@ export function resolveStatePath(cwd, sid) {
   return path.join(projectDir(cwd), 'STATE.md');
 }
 
+// Sibling docs directory for a resolved STATE path: appends `-docs` to the
+// whole `slug_sid` blob (STATE_FILE_RE group 1) verbatim and unsplit — never
+// attempts slug/sid decomposition, which is ambiguous once an unslugged sid
+// contains underscores (sanitizeSid keeps them, sanitizeSlug strips them).
+// Returns the sibling dir *name* (not a full path): the caller joins it with
+// the STATE file's own directory, so it stays mechanically locked to whatever
+// STATE file is being written this turn (no caller-supplied slug → no drift).
+// Returns '' when the basename does not match STATE_FILE_RE, covering the
+// CLAUDE_STATE_PATH override whose path need not follow the STATE shape.
+export function docsDirForStatePath(statePath) {
+  if (!statePath) return '';
+  const m = path.basename(statePath).match(STATE_FILE_RE);
+  if (!m) return '';
+  return m[1] + '-docs';
+}
+
 // True if `body` has user-meaningful content (not empty, not just whitespace).
 // Used by the snapshot hook to refuse self-clobber of a non-empty STATE.
 // Rename a STATE file to embed the *current* UTC stamp. The sessionId portion
