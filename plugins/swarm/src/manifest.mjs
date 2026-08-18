@@ -22,6 +22,8 @@ const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 const CLONE_ID_RE = /\[\d+\]$/;
 const ITEM_TEMPLATE_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/;
+// The isolation object's own allowlist — KNOWN_TASK_KEYS only gates top-level keys.
+const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch"]);
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
@@ -213,6 +215,24 @@ function validateTaskShapes(rawTasks, errors, label) {
         errors.push(
           `${l}: isolation.worktree '${iso.worktree}' must be filename-safe ` +
           `(letters, digits, dot, dash, underscore) — it becomes a directory and a branch name`);
+      }
+      if (named && iso.branch !== undefined
+          && (typeof iso.branch !== "string" || !/^[A-Za-z0-9._\/-]+$/.test(iso.branch))) {
+        errors.push(
+          `${l}: isolation.branch must be a git branch name (letters, digits, dot, dash, ` +
+          `underscore, slash) — e.g. { "worktree": "p3", "branch": "swarm/eco-p3" }`);
+      }
+      // An unknown key here is silent otherwise: the leaf runs with a tree the
+      // author did not ask for and nothing reports it.
+      if (named) {
+        for (const k of Object.keys(iso)) {
+          if (!KNOWN_ISOLATION_KEYS.has(k)) {
+            errors.push(
+              `${l}: unknown key '${k}' in isolation — known keys: ${[...KNOWN_ISOLATION_KEYS].join(", ")}\n` +
+              `    shared tree:  "isolation": { "worktree": "feat" }\n` +
+              `    private tree: "isolation": "worktree"`);
+          }
+        }
       }
     }
     if (t.timeoutMs !== undefined && (!Number.isInteger(t.timeoutMs) || t.timeoutMs < 1)) {
@@ -488,6 +508,8 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     let scratchRedirect = false;
     // Compute and manifest nodes spawn no leaf, so there is nothing to isolate.
     const worktreeName = (isCompute || isManifest) ? undefined : resolveWorktreeName(t);
+    const branchName = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
+      ? undefined : t.isolation.branch;
     // Write-implies-isolation: a leaf granted write-capable tools without
     // worktree isolation never runs in the user's real tree — its cwd is
     // redirected to a per-task scratch dir under the results dir.
@@ -514,6 +536,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       scratchRedirect,
       isolation: isCompute || isManifest ? undefined : t.isolation,
       ...(worktreeName !== undefined && { worktreeName }),
+      ...(branchName !== undefined && { branchName }),
       outputDir: t.outputDir ? resolve(cwd, t.outputDir) : undefined,
       timeoutMs: t.timeoutMs ?? defaultTimeoutMs,
       after: [...(t.after || [])],

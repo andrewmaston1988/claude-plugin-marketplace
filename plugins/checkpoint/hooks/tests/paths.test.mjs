@@ -6,7 +6,7 @@ import path from 'node:path';
 import {
   sanitizeSid, sanitizeSlug, nowStamp, sessionStateFilename,
   resolveOwnStatePath, resolveLatestStatePath,
-  isMeaningfulState, resolveStatePath, projectDir,
+  isMeaningfulState, resolveStatePath, projectDir, docsDirForStatePath,
 } from '../lib/paths.mjs';
 
 // ---- pure helpers ----
@@ -116,6 +116,51 @@ test('resolveLatestStatePath: picks the lexicographically greatest STATE_* (late
 test('resolveLatestStatePath: returns empty string when no STATE_* exists', () => {
   const cwd = tmpCwd();
   assert.equal(resolveLatestStatePath(cwd), '');
+});
+
+// ---- docsDirForStatePath (sibling docs dir, derived from a STATE path) ----
+
+test('docsDirForStatePath: slugged name → <slug>_<sid>-docs', () => {
+  assert.equal(
+    docsDirForStatePath('STATE_my-task_sid-cccc_20260624T064645Z.md'),
+    'my-task_sid-cccc-docs');
+});
+
+test('docsDirForStatePath: unslugged name → <sid>-docs', () => {
+  assert.equal(
+    docsDirForStatePath('STATE_sid123_20260624T064645Z.md'),
+    'sid123-docs');
+});
+
+test('docsDirForStatePath: unslugged sid with underscores stays unsplit (regression)', () => {
+  // sanitizeSid keeps underscores while sanitizeSlug strips them, so any
+  // slug/sid split is ambiguous. The whole of group 1 must come back
+  // verbatim + '-docs' — proving no decomposition is attempted.
+  assert.equal(
+    docsDirForStatePath('STATE_sid-with_underscores_20260624T064645Z.md'),
+    'sid-with_underscores-docs');
+});
+
+test('docsDirForStatePath: non-matching basename → "" (CLAUDE_STATE_PATH override)', () => {
+  assert.equal(docsDirForStatePath('custom.md'), '');
+  assert.equal(docsDirForStatePath('/abs/path/to/notes.md'), '');
+  assert.equal(docsDirForStatePath(''), '');
+});
+
+test('docsDirForStatePath: stable across repeated calls (reconcile-stability)', () => {
+  // The same STATE path in must yield the same docs dir out on every call,
+  // regardless of what slug the caller would compute fresh this turn.
+  const statePath = 'STATE_checkpoint-limits_sid-bbbb_20260620T010000Z.md';
+  const a = docsDirForStatePath(statePath);
+  const b = docsDirForStatePath(statePath);
+  assert.equal(a, b);
+  assert.equal(a, 'checkpoint-limits_sid-bbbb-docs');
+});
+
+test('docsDirForStatePath: takes the basename of an absolute STATE path', () => {
+  const abs = path.join(os.homedir(), '.claude', 'projects', 'C--code-foo',
+    'STATE_my-task_sid-cccc_20260624T064645Z.md');
+  assert.equal(docsDirForStatePath(abs), 'my-task_sid-cccc-docs');
 });
 
 // ---- content guard ----

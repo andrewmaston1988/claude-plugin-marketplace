@@ -394,3 +394,90 @@ test("scheduler integration: isolation task runs IN the worktree; summary lists 
     cleanup(dir, repo);
   }
 });
+
+test("collect never deletes a branch carrying commits it did not create", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    // Phase 1 lands real work on the shared branch.
+    const p1 = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    writeFileSync(join(p1.path, "phase1.txt"), "phase 1 work\n");
+    commitAll(p1.path, "phase 1");
+    const phase1Tip = git(["rev-parse", "HEAD"], p1.path);
+
+    // A later leaf re-enters the same tree and changes NOTHING of its own — a
+    // review leaf, a no-op, a leaf that found nothing to do. It is the sole
+    // member of its group in this plan, so isChainFollower is false.
+    const p2 = prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    ok(p2.reused, "re-entered the existing tree");
+    const out = collect({ id: "p2" }, CFG, p2, { isChainFollower: false });
+
+    const branches = git(["branch", "--list", "swarm/feat"], repo);
+    ok(branches.includes("swarm/feat"),
+      "branch carrying phase 1's commits must survive a no-op successor");
+    equal(git(["rev-parse", "swarm/feat"], repo), phase1Tip, "and still point at phase 1's work");
+    ok(out.kept, "a tree whose branch carries uncollected work is kept");
+  } finally { cleanup(repo, results); }
+});
+
+test("prepareIsolation refuses to force-reset a branch carrying commits", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    // A prior run left commits on swarm/feat, then its worktree was removed by
+    // hand (or pruned) while the branch survived.
+    const first = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    writeFileSync(join(first.path, "work.txt"), "real work\n");
+    commitAll(first.path, "phase 1");
+    const tip = git(["rev-parse", "swarm/feat"], repo);
+    spawnSync("git", ["worktree", "remove", "--force", first.path], { cwd: repo, windowsHide: true });
+
+    // A fresh run in a DIFFERENT resultsDir resolves a new path, so the -B
+    // fallback would otherwise reset swarm/feat to repo HEAD, discarding it.
+    const other = mkdtempSync(join(tmpdir(), "swarm-wt-res2-"));
+    try {
+      let threw = null;
+      try {
+        prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other);
+      } catch (e) { threw = e; }
+      ok(threw, "must refuse rather than silently reset a branch with commits");
+      ok(/carries \d+ commit/i.test(threw.message), `message should name the loss: ${threw?.message}`);
+      equal(git(["rev-parse", "swarm/feat"], repo), tip, "branch still points at phase 1");
+    } finally { cleanup(other); }
+  } finally { cleanup(repo, results); }
+});
+
+test("prepareIsolation still force-resets an EMPTY stale branch after HEAD moves sideways", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    // Stale branch carrying nothing, tree removed — the legitimate -B case.
+    const first = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    spawnSync("git", ["worktree", "remove", "--force", first.path], { cwd: repo, windowsHide: true });
+
+    // Repo HEAD moves SIDEWAYS (a different branch), so the stale branch is not
+    // an ancestor of HEAD — an ancestry-based guard would wrongly refuse here.
+    spawnSync("git", ["checkout", "-q", "-b", "other"], { cwd: repo, windowsHide: true });
+    writeFileSync(join(repo, "b.txt"), "elsewhere\n");
+    commitAll(repo, "sideways");
+
+    const other = mkdtempSync(join(tmpdir(), "swarm-wt-res2-"));
+    try {
+      const wt = prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other);
+      ok(existsSync(wt.path), "an empty stale branch is still safe to reuse");
+    } finally { cleanup(other); }
+  } finally { cleanup(repo, results); }
+});
+
+test("isolation.branch names the branch independently of the tree", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const wt = prepareIsolation(
+      { id: "p3", originalCwd: repo, worktreeName: "p3", branchName: "swarm/eco-p3branch" },
+      CFG, results);
+    equal(wt.branch, "swarm/eco-p3branch", "explicit branch wins over the derived name");
+    ok(wt.path.endsWith("wt-p3"), "the tree is still keyed by the worktree name");
+    ok(git(["branch", "--list", "swarm/eco-p3branch"], repo).includes("swarm/eco-p3branch"));
+  } finally { cleanup(repo, results); }
+});
