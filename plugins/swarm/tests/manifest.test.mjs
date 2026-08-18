@@ -1121,3 +1121,24 @@ test("resolveWorktreeName is the single rule every derivation site shares", () =
   // Already-normalized tasks carry the derived field; it wins over re-derivation.
   equal(resolveWorktreeName({ id: "a", worktreeName: "feat" }), "feat");
 });
+
+test("isolation object rejects unknown keys — a typo must never be silently ignored", () => {
+  const dir = tmp();
+  try {
+    // `from` is not (yet) a supported key. Silently accepting it hands the leaf a
+    // tree based on repo HEAD while the author believes it starts from a
+    // dependency's commit — a wrong answer with no error.
+    const bad = writeManifest(dir, { tasks: [
+      claudeTask({ id: "c", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "d", after: ["c"], isolation: { worktree: "d", from: "c" } }),
+    ] }, "unknown-key.json");
+    const errs = errorsOf(() => loadManifest(bad, CFG, dir));
+    ok(errs.some((e) => /unknown key 'from' in isolation/.test(e)), errs.join("\n"));
+
+    const typo = writeManifest(dir, { tasks: [
+      claudeTask({ isolation: { worktree: "feat", worktreeName: "oops" } }),
+    ] }, "typo.json");
+    ok(errorsOf(() => loadManifest(typo, CFG, dir))
+      .some((e) => /unknown key 'worktreeName' in isolation/.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

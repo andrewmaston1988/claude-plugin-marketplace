@@ -82,7 +82,19 @@ export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
   // its OWN still reads as unchanged here, and deleting the branch would take
   // the whole chain's work with it. A reused SOLO tree has no such history to
   // protect.
-  if (!changed && !(wt.reused && isChainFollower)) {
+  // `isChainFollower` only knows about THIS plan's group. A tree reused across
+  // manifests, or a chain whose successor is the sole member of its own group,
+  // reads as a solo resend — and deleting the branch would take every earlier
+  // phase's commits with it. Ask git instead of the plan: does this branch carry
+  // anything not already in the repo's HEAD? Direction-agnostic, so it stays
+  // correct when HEAD has moved sideways since the tree was made.
+  const repoHead = git(["rev-parse", "HEAD"], wt.repo);
+  const unmerged = repoHead.status === 0
+    ? git(["rev-list", "--count", wt.branch, `^${repoHead.stdout}`], wt.repo)
+    : { status: 1, stdout: "" };
+  const carriesWork = unmerged.status === 0 && unmerged.stdout !== "" && unmerged.stdout !== "0";
+
+  if (!changed && !(wt.reused && isChainFollower) && !carriesWork) {
     git(["worktree", "remove", "--force", wt.path], wt.repo);
     git(["branch", "-D", wt.branch], wt.repo);
     return { kept: false, branch: wt.branch, path: wt.path };

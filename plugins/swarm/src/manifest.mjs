@@ -22,6 +22,8 @@ const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 const CLONE_ID_RE = /\[\d+\]$/;
 const ITEM_TEMPLATE_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/;
+// The isolation object's own allowlist — KNOWN_TASK_KEYS only gates top-level keys.
+const KNOWN_ISOLATION_KEYS = new Set(["worktree"]);
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
@@ -213,6 +215,18 @@ function validateTaskShapes(rawTasks, errors, label) {
         errors.push(
           `${l}: isolation.worktree '${iso.worktree}' must be filename-safe ` +
           `(letters, digits, dot, dash, underscore) — it becomes a directory and a branch name`);
+      }
+      // An unknown key here is silent otherwise: the leaf runs with a tree the
+      // author did not ask for and nothing reports it.
+      if (named) {
+        for (const k of Object.keys(iso)) {
+          if (!KNOWN_ISOLATION_KEYS.has(k)) {
+            errors.push(
+              `${l}: unknown key '${k}' in isolation — known keys: ${[...KNOWN_ISOLATION_KEYS].join(", ")}\n` +
+              `    shared tree:  "isolation": { "worktree": "feat" }\n` +
+              `    private tree: "isolation": "worktree"`);
+          }
+        }
       }
     }
     if (t.timeoutMs !== undefined && (!Number.isInteger(t.timeoutMs) || t.timeoutMs < 1)) {

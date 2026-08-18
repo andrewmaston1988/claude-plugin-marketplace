@@ -394,3 +394,28 @@ test("scheduler integration: isolation task runs IN the worktree; summary lists 
     cleanup(dir, repo);
   }
 });
+
+test("collect never deletes a branch carrying commits it did not create", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    // Phase 1 lands real work on the shared branch.
+    const p1 = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    writeFileSync(join(p1.path, "phase1.txt"), "phase 1 work\n");
+    commitAll(p1.path, "phase 1");
+    const phase1Tip = git(["rev-parse", "HEAD"], p1.path);
+
+    // A later leaf re-enters the same tree and changes NOTHING of its own — a
+    // review leaf, a no-op, a leaf that found nothing to do. It is the sole
+    // member of its group in this plan, so isChainFollower is false.
+    const p2 = prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    ok(p2.reused, "re-entered the existing tree");
+    const out = collect({ id: "p2" }, CFG, p2, { isChainFollower: false });
+
+    const branches = git(["branch", "--list", "swarm/feat"], repo);
+    ok(branches.includes("swarm/feat"),
+      "branch carrying phase 1's commits must survive a no-op successor");
+    equal(git(["rev-parse", "swarm/feat"], repo), phase1Tip, "and still point at phase 1's work");
+    ok(out.kept, "a tree whose branch carries uncollected work is kept");
+  } finally { cleanup(repo, results); }
+});
