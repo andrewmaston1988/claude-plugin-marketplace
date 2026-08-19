@@ -446,11 +446,23 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (!groupMembers.has(n)) groupMembers.set(n, []);
       groupMembers.get(n).push(t.id);
     }
+    // Reachability must be GLOBAL, not group-local: two members of one tree can
+    // be ordered entirely through tasks in other groups (helper -> migrate-x ->
+    // cleanup, where migrate-x has its own tree). A group-local scan sees no
+    // edge, picks the FIRST task as the collector, and sweeps the tree before
+    // the last member has run — silently dropping its work. This mirrors
+    // validateWorktreeGroups, which already permits such a topology.
+    const byId = new Map(tasks.map((t) => [t.id, t]));
+    const reaches = (fromId, toId, seen = new Set()) => {
+      if (fromId === toId) return true;
+      if (seen.has(fromId)) return false;
+      seen.add(fromId);
+      const after = byId.get(fromId)?.after;
+      return Array.isArray(after) && after.some((a) => reaches(a, toId, seen));
+    };
     for (const [name, ids] of groupMembers) {
-      const set = new Set(ids);
-      const deps = (id) => (tasks.find((t) => t.id === id)?.after || []).filter((a) => set.has(a));
-      groupFinal.set(name, ids.find((id) => !ids.some((o) => o !== id && deps(o).includes(id))) ?? ids[ids.length - 1]);
-      groupFirst.set(name, ids.find((id) => deps(id).length === 0) ?? ids[0]);
+      groupFinal.set(name, ids.find((id) => !ids.some((o) => o !== id && reaches(o, id))) ?? ids[ids.length - 1]);
+      groupFirst.set(name, ids.find((id) => !ids.some((o) => o !== id && reaches(id, o))) ?? ids[0]);
     }
   };
   rebuildGroups();
@@ -674,8 +686,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       const byId = new Map(tasks.map((o) => [o.id, o]));
       const sources = task.integrate.from.map((srcId) => {
         const src = byId.get(srcId);
-        const srcName = src ? (nameOf(src) ?? src.id) : srcId;
-        return src?.branchName || `${cfg.worktreeBranchPrefix || "swarm/"}${srcName}`;
+        return worktree.branchNameFor(
+          src ? { ...src, worktreeName: nameOf(src) ?? src.id } : { id: srcId }, cfg);
       });
       const out = worktree.integrate(
         { ...task, worktreeName: task.integrate.into, sources }, cfg, plan.resultsDir,
@@ -863,8 +875,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
           let baseRef;
           if (task.from) {
             const src = tasks.find((o) => o.id === task.from);
-            const srcName = src ? (nameOf(src) ?? src.id) : task.from;
-            baseRef = src?.branchName || `${cfg.worktreeBranchPrefix || "swarm/"}${srcName}`;
+            baseRef = worktree.branchNameFor(
+              src ? { ...src, worktreeName: nameOf(src) ?? src.id } : { id: task.from }, cfg);
           }
           wt = worktree.prepareIsolation({ ...task, worktreeName: wtName, baseRef }, cfg, plan.resultsDir, {
             reset: force && groupFirst.get(wtName) === task.id,
@@ -1021,7 +1033,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         const remaining = tasks.reduce((n, t) => {
           if (t.compute || t.integrate || t.aggregate || t.aggregateManifest || !ALIVE_STATES.has(state.get(t.id))) return n;
           const mult = t.forEach ? t.forEach.maxItems : 1;
-          if (t.childPlan) return n + mult * t.childPlan.tasks.filter((c) => c.compute === undefined).length;
+          if (t.childPlan) return n + mult * t.childPlan.tasks.filter((c) => c.compute === undefined && c.integrate === undefined).length;
           return n + mult;
         }, 0);
         const useUsd = costIsRealComplete && spentUsd > 0;

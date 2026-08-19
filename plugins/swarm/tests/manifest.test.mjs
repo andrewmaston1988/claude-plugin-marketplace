@@ -1206,3 +1206,40 @@ test("integrate node: agentless, validated, normalized onto its target worktree"
     deepEqual(join.integrate.from, ["x", "y"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("agentless nodes reject outputDir; from/integrate reject a forEach source", () => {
+  const dir = tmp();
+  try {
+    const od = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "worktree" }),
+      { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] }, outputDir: "out" },
+    ] }, "od.json");
+    ok(errorsOf(() => loadManifest(od, CFG, dir)).some((e) => /agentless.*outputDir/.test(e)),
+      "integrate rejects outputDir");
+
+    const odc = writeManifest(dir, { tasks: [
+      claudeTask({ id: "a", prompt: "…return JSON" }),
+      { id: "c", after: ["a"], compute: "deps['a']", outputDir: "out" },
+    ] }, "odc.json");
+    ok(errorsOf(() => loadManifest(odc, CFG, dir)).some((e) => /agentless.*outputDir/.test(e)),
+      "compute rejects outputDir");
+
+    const fe = writeManifest(dir, { tasks: [
+      claudeTask({ id: "src", prompt: "…return JSON list" }),
+      claudeTask({ id: "fan", after: ["src"], isolation: "worktree",
+        forEach: { from: "src", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
+      claudeTask({ id: "next", after: ["fan"], isolation: { worktree: "n", from: "fan" } }),
+    ] }, "fe.json");
+    ok(errorsOf(() => loadManifest(fe, CFG, dir)).some((e) => /is a forEach task/.test(e)),
+      "isolation.from rejects a forEach parent");
+
+    const fei = writeManifest(dir, { tasks: [
+      claudeTask({ id: "src2", prompt: "…return JSON list" }),
+      claudeTask({ id: "fan2", after: ["src2"], isolation: "worktree",
+        forEach: { from: "src2", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
+      { id: "join2", after: ["fan2"], integrate: { into: "feat", from: ["fan2"] } },
+    ] }, "fei.json");
+    ok(errorsOf(() => loadManifest(fei, CFG, dir)).some((e) => /is a forEach task/.test(e)),
+      "integrate.from rejects a forEach parent");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

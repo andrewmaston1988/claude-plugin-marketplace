@@ -580,14 +580,28 @@ test("a squash-merged branch no longer blocks reuse; --force overrides an unland
     spawnSync("git", ["worktree", "remove", "--force", okWt.path], { cwd: repo, windowsHide: true });
     cleanup(other, forced);
 
-    // Squash-merged content reads as landed and must not block.
-    spawnSync("git", ["merge", "--squash", "swarm/feat"], { cwd: repo, windowsHide: true });
-    commitAll(repo, "squashed phase 1");
-    const after = mkdtempSync(join(tmpdir(), "swarm-wt-sq4-"));
+    // Squash-merge on a FRESH branch — the --force above already reset swarm/feat
+    // to HEAD, so reusing it here would assert nothing.
+    const sqDir = mkdtempSync(join(tmpdir(), "swarm-wt-sq4-"));
+    const sq = prepareIsolation({ id: "sq", originalCwd: repo, worktreeName: "sq" }, CFG, sqDir);
+    writeFileSync(join(sq.path, "sq.txt"), "squashed work\n");
+    commitAll(sq.path, "sq work");
+    spawnSync("git", ["worktree", "remove", "--force", sq.path], { cwd: repo, windowsHide: true });
+    // Before the squash lands, that branch genuinely blocks.
+    let blocked = null;
+    const preDir = mkdtempSync(join(tmpdir(), "swarm-wt-sq5-"));
+    try { prepareIsolation({ id: "sq2", originalCwd: repo, worktreeName: "sq" }, CFG, preDir); }
+    catch (e) { blocked = e; }
+    ok(blocked && /unlanded/.test(blocked.message), "unlanded work blocks before the squash");
+    cleanup(preDir);
+    // After squash-merging its CONTENT, git cherry reads it as landed.
+    spawnSync("git", ["merge", "--squash", "swarm/sq"], { cwd: repo, windowsHide: true });
+    commitAll(repo, "squashed sq");
+    const after = mkdtempSync(join(tmpdir(), "swarm-wt-sq6-"));
     try {
-      const reused = prepareIsolation({ id: "p4", originalCwd: repo, worktreeName: "feat" }, CFG, after);
+      const reused = prepareIsolation({ id: "sq3", originalCwd: repo, worktreeName: "sq" }, CFG, after);
       ok(existsSync(reused.path), "a squash-merged branch is reusable");
-    } finally { cleanup(after); }
+    } finally { cleanup(after, sqDir); }
   } finally { cleanup(repo, results); }
 });
 
@@ -684,5 +698,42 @@ test("scheduler integration: an integrate node merges sibling branches into the 
     const tree = join(p.resultsDir, "wt-feat");
     ok(existsSync(join(tree, "mx.txt")) && existsSync(join(tree, "my.txt")),
       "both siblings' work landed in the target tree");
+  } finally { cleanup(repo, dir); }
+});
+
+test("groupFinal is the task nothing else in the group depends on, even across other groups", async () => {
+  const repo = initRepo();
+  const dir = mkdtempSync(join(tmpdir(), "swarm-wt-gf-"));
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      // The feat tree is entered twice: first by helper, later by cleanup.
+      const tag = !cwd.endsWith("wt-feat") ? "mx"
+        : existsSync(join(cwd, "helper.txt")) ? "cleanup" : "helper";
+      writeFileSync(join(cwd, `${tag}.txt`), "work\n");
+      commitAll(cwd, tag);
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const leaf = (id, over) => ({
+      id, prompt: "p", model: "haiku", allowedTools: "Read,Edit,Bash",
+      cwd: repo, originalCwd: repo, timeoutMs: 5000, after: [], ...over,
+    });
+    // feat = [helper, cleanup]; cleanup reaches helper ONLY through mx, which is
+    // in a different group. A same-group-only dep scan makes helper the
+    // collector and sweeps the tree before cleanup has run.
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        leaf("helper", { isolation: { worktree: "feat" }, worktreeName: "feat" }),
+        leaf("mx", { after: ["helper"], isolation: { worktree: "mx", from: "helper" }, worktreeName: "mx", from: "helper" }),
+        leaf("cleanup", { after: ["mx"], isolation: { worktree: "feat" }, worktreeName: "feat" }),
+      ],
+    };
+    const r = await runPlan(p, CFG, io);
+    const feat = (r.worktreesKept || []).find((w) => w.name === "feat");
+    ok(feat, "the feat tree is kept");
+    ok(/cleanup/.test(feat.diffstat || ""),
+      `collection must happen after cleanup, not after helper — diffstat: ${feat.diffstat}`);
   } finally { cleanup(repo, dir); }
 });

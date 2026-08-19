@@ -65,6 +65,7 @@ export function leafCounts(tasks, digest) {
     if (t.childPlan) {
       for (const c of t.childPlan.tasks) {
         if (c.compute !== undefined || c.model === "compute") continue;
+        if (c.integrate !== undefined || c.model === "integrate") continue;
         add(c.model, mult * (c.forEach ? c.forEach.maxItems : 1));
       }
       continue;

@@ -189,7 +189,7 @@ function validateTaskShapes(rawTasks, errors, label) {
     } else if (t.compute !== undefined) {
       // Agentless: a compute step never spawns a leaf, so leaf-only keys are
       // authoring mistakes worth naming individually.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "isolation"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "isolation", "outputDir"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: compute tasks are agentless — remove ${agentKeys.join("/")}; the expression runs in the engine, no leaf is spawned`);
@@ -199,7 +199,7 @@ function validateTaskShapes(rawTasks, errors, label) {
       }
     } else if (t.integrate !== undefined) {
       // Agentless like compute: the engine merges, no leaf is spawned.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "outputDir"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: integrate tasks are agentless — remove ${agentKeys.join("/")}; the merge runs in the engine, no leaf is spawned`);
@@ -475,6 +475,11 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
           errors.push(
             `${l}: isolation.from '${isoFrom}' has no worktree, so it has no branch to base on — ` +
             `give '${isoFrom}' an isolation block, or drop from and branch from the repo instead`);
+        } else if (src && src.forEach !== undefined) {
+          errors.push(
+            `${l}: isolation.from '${isoFrom}' is a forEach task — its clones own the branches ` +
+            `('${isoFrom}[0]', '${isoFrom}[1]', …) and '${isoFrom}' itself never gets one. ` +
+            `Base on a single-tree task instead.`);
         }
       }
     }
@@ -491,6 +496,11 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
           const src = rawTasks.find((o) => o.id === srcId);
           if (src && src.isolation === undefined) {
             errors.push(`${l}: integrate.from '${srcId}' has no worktree, so it has no branch to merge — give '${srcId}' an isolation block`);
+          } else if (src && src.forEach !== undefined) {
+            errors.push(
+              `${l}: integrate.from '${srcId}' is a forEach task — its clones own the branches ` +
+              `('${srcId}[0]', '${srcId}[1]', …) and '${srcId}' itself never gets one. ` +
+              `Merge a single-tree task instead.`);
           }
         }
       }

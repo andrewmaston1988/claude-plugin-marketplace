@@ -6,6 +6,27 @@ function git(args, cwd) {
   return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
 }
 
+// Commits on `branch` not already landed on `base`, compared by PATCH (`git
+// cherry`) rather than commit identity or ancestry: squash-merge — the
+// documented landing path — rewrites commits, and ancestry says nothing once
+// HEAD has moved sideways. Returns Infinity when git cannot answer, so callers
+// FAIL CLOSED: an unresolvable question must block a destructive path, not
+// waive it.
+function unlandedCount(base, branch, repo) {
+  const c = git(["cherry", base, branch], repo);
+  if (c.status !== 0) return Infinity;
+  return c.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length;
+}
+
+// The one rule for a task's branch name: an explicit `isolation.branch` wins,
+// else the worktree name under the configured prefix. Exported so the scheduler
+// resolves `from` / `integrate` sources the same way prepareIsolation creates
+// them — three copies of this formula is how they drift apart.
+export function branchNameFor(task, cfg) {
+  const name = task.worktreeName || task.id;
+  return task.branchName || `${cfg.worktreeBranchPrefix || "swarm/"}${name}`;
+}
+
 // True when `path` is already a registered worktree of `repo` — the kept tree
 // a prior failed/timed-out leaf left behind.
 function isRegisteredWorktree(path, repo) {
@@ -24,13 +45,10 @@ function isRegisteredWorktree(path, repo) {
 // a re-create. `reset` (the --force redo) scrubs it back to HEAD first.
 export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) {
   const repo = task.originalCwd || task.cwd;
-  const prefix = cfg.worktreeBranchPrefix || "swarm/";
   // Ordered siblings sharing a name meet in one tree; without one, the task's
   // own id names a private tree.
   const name = task.worktreeName || task.id;
-  // The branch is normally derived from the tree name, but a run continuing work
-  // onto an existing branch needs to name it — the two are separate identities.
-  const branch = task.branchName || `${prefix}${name}`;
+  const branch = branchNameFor(task, cfg);
   const path = resolve(join(resultsDir, `wt-${name}`));
 
   // A leaf that builds on another's committed work bases its tree on that
@@ -65,17 +83,8 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
   let add = git(["worktree", "add", path, "-b", branch, "--no-track", head.stdout], repo);
   if (add.status !== 0 && /already exists/i.test(add.stderr)) {
     // Stale branch (path was cleaned but the branch lingered): force it to HEAD.
-    // But -B RESETS the branch, so first ask whether it carries anything HEAD
-    // doesn't already have — a previous run's phases live exactly there. Count,
-    // not ancestry: HEAD may have moved sideways since, which says nothing about
-    // whether this branch holds work.
-    // `git cherry` compares by PATCH, not commit identity, so work that landed
-    // via squash-merge — the documented landing path — reads as already applied
-    // ('-' prefix) and does not block. Only genuinely unlanded commits ('+') do.
-    const cherry = git(["cherry", head.stdout, branch], repo);
-    const unlanded = cherry.status === 0
-      ? cherry.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length
-      : 0;
+    // But -B RESETS the branch, so refuse when it still carries unlanded work.
+    const unlanded = unlandedCount(head.stdout, branch, repo);
     if (unlanded > 0 && !reset) {
       throw new Error(
         `worktree branch '${branch}' carries ${unlanded} unlanded commit(s) — refusing to reset it ` +
@@ -105,33 +114,14 @@ export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
   const headNow = git(["rev-parse", "HEAD"], wt.path);
   const changed = status.stdout !== "" || (headNow.status === 0 && headNow.stdout !== wt.head);
 
-  // Destroy only a tree this leaf started fresh, OR an unchanged solo resend.
-  // A reused CHAIN tree's branch carries its predecessors' commits, and
-  // `wt.head` is the tree's own HEAD — so a final link that changed nothing of
-  // its OWN still reads as unchanged here, and deleting the branch would take
-  // the whole chain's work with it. A reused SOLO tree has no such history to
-  // protect.
-  // `isChainFollower` only knows about THIS plan's group. A tree reused across
-  // manifests, or a chain whose successor is the sole member of its own group,
-  // reads as a solo resend — and deleting the branch would take every earlier
-  // phase's commits with it. Ask git instead of the plan: does this branch carry
-  // anything not already in the repo's HEAD? Direction-agnostic, so it stays
-  // correct when HEAD has moved sideways since the tree was made.
-  // Does this branch hold work nobody has landed? Measured by PATCH (`git
-  // cherry`), so squash-merged work reads as landed and does not pin the tree
-  // forever. Measured against the tree's BASE (`wt.head`) as well as the repo:
-  // a `from`-based tree inherits its dependency's commits at birth, and counting
-  // those as this leaf's work would keep every empty leaf's tree alive.
+  // Destroy only a tree that carries nothing: a leaf changing nothing of its OWN
+  // may still sit on a branch holding earlier phases' commits, and `branch -D`
+  // would take them with it. `isChainFollower` only sees THIS plan's group, so
+  // ask git as well — measured against the tree's own base, since a `from`-based
+  // tree inherits its dependency's commits at birth.
   const repoHead = git(["rev-parse", "HEAD"], wt.repo);
-  const countUnlanded = (base) => {
-    const c = git(["cherry", base, wt.branch], wt.repo);
-    return c.status === 0 ? c.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length : 0;
-  };
-  // A `from`-based tree inherits its dependency's commits, so measure it against
-  // that base — otherwise an empty leaf looks productive. Every other tree is
-  // measured against the repo, which is what protects a chain's earlier phases.
-  const base = wt.baseRef ? wt.head : (repoHead.status === 0 ? repoHead.stdout : null);
-  const carriesWork = base !== null && countUnlanded(base) > 0;
+  const base = wt.baseRef ? wt.head : repoHead.stdout;
+  const carriesWork = repoHead.status !== 0 || unlandedCount(base, wt.branch, wt.repo) > 0;
 
   if (!changed && !(wt.reused && isChainFollower) && !carriesWork) {
     git(["worktree", "remove", "--force", wt.path], wt.repo);
