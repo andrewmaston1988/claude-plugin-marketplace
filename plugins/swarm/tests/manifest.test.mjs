@@ -1125,20 +1125,121 @@ test("resolveWorktreeName is the single rule every derivation site shares", () =
 test("isolation object rejects unknown keys — a typo must never be silently ignored", () => {
   const dir = tmp();
   try {
-    // `from` is not (yet) a supported key. Silently accepting it hands the leaf a
-    // tree based on repo HEAD while the author believes it starts from a
-    // dependency's commit — a wrong answer with no error.
+    // A misspelt or invented key silently hands the leaf a tree the author did
+    // not ask for — a wrong answer with no error.
     const bad = writeManifest(dir, { tasks: [
       claudeTask({ id: "c", isolation: { worktree: "feat" } }),
-      claudeTask({ id: "d", after: ["c"], isolation: { worktree: "d", from: "c" } }),
+      claudeTask({ id: "d", after: ["c"], isolation: { worktree: "d", basedOn: "c" } }),
     ] }, "unknown-key.json");
     const errs = errorsOf(() => loadManifest(bad, CFG, dir));
-    ok(errs.some((e) => /unknown key 'from' in isolation/.test(e)), errs.join("\n"));
+    ok(errs.some((e) => /unknown key 'basedOn' in isolation/.test(e)), errs.join("\n"));
 
     const typo = writeManifest(dir, { tasks: [
       claudeTask({ isolation: { worktree: "feat", worktreeName: "oops" } }),
     ] }, "typo.json");
     ok(errorsOf(() => loadManifest(typo, CFG, dir))
       .some((e) => /unknown key 'worktreeName' in isolation/.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("isolation.from must name a declared, worktree-isolated dependency", () => {
+  const dir = tmp();
+  try {
+    const notDep = writeManifest(dir, { tasks: [
+      claudeTask({ id: "helper", isolation: "worktree" }),
+      claudeTask({ id: "x", isolation: { worktree: "x", from: "helper" } }),
+    ] }, "notdep.json");
+    ok(errorsOf(() => loadManifest(notDep, CFG, dir))
+      .some((e) => /must be a declared dependency/.test(e)));
+
+    const noTree = writeManifest(dir, { tasks: [
+      claudeTask({ id: "survey" }),
+      claudeTask({ id: "x", after: ["survey"], isolation: { worktree: "x", from: "survey" } }),
+    ] }, "notree.json");
+    ok(errorsOf(() => loadManifest(noTree, CFG, dir))
+      .some((e) => /no worktree, so it has no branch/.test(e)));
+
+    const good = writeManifest(dir, { tasks: [
+      claudeTask({ id: "helper", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "x", after: ["helper"], isolation: { worktree: "x", from: "helper" } }),
+    ] }, "good.json");
+    const plan = loadManifest(good, CFG, dir);
+    equal(plan.tasks.find((t) => t.id === "x").from, "helper");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integrate node: agentless, validated, normalized onto its target worktree", () => {
+  const dir = tmp();
+  try {
+    const agentic = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "worktree" }),
+      { id: "join", after: ["x"], model: "haiku", prompt: "merge it",
+        integrate: { into: "feat", from: ["x"] } },
+    ] }, "agentic.json");
+    ok(errorsOf(() => loadManifest(agentic, CFG, dir))
+      .some((e) => /integrate tasks are agentless/.test(e)));
+
+    const notDep = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "worktree" }),
+      { id: "join", integrate: { into: "feat", from: ["x"] } },
+    ] }, "notdep.json");
+    ok(errorsOf(() => loadManifest(notDep, CFG, dir))
+      .some((e) => /must be a declared dependency/.test(e)));
+
+    const noTree = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x" }),
+      { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] } },
+    ] }, "notree.json");
+    ok(errorsOf(() => loadManifest(noTree, CFG, dir))
+      .some((e) => /no worktree, so it has no branch to merge/.test(e)));
+
+    const good = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "worktree" }),
+      claudeTask({ id: "y", isolation: "worktree" }),
+      { id: "join", after: ["x", "y"], integrate: { into: "feat", from: ["x", "y"] } },
+      claudeTask({ id: "next", after: ["join"], isolation: { worktree: "feat" } }),
+    ] }, "good.json");
+    const plan = loadManifest(good, CFG, dir);
+    const join = plan.tasks.find((t) => t.id === "join");
+    equal(join.model, "integrate", "display sentinel — never dispatched");
+    equal(join.worktreeName, "feat", "the node owns the target tree");
+    deepEqual(join.integrate.from, ["x", "y"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("agentless nodes reject outputDir; from/integrate reject a forEach source", () => {
+  const dir = tmp();
+  try {
+    const od = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "worktree" }),
+      { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] }, outputDir: "out" },
+    ] }, "od.json");
+    ok(errorsOf(() => loadManifest(od, CFG, dir)).some((e) => /agentless.*outputDir/.test(e)),
+      "integrate rejects outputDir");
+
+    const odc = writeManifest(dir, { tasks: [
+      claudeTask({ id: "a", prompt: "…return JSON" }),
+      { id: "c", after: ["a"], compute: "deps['a']", outputDir: "out" },
+    ] }, "odc.json");
+    ok(errorsOf(() => loadManifest(odc, CFG, dir)).some((e) => /agentless.*outputDir/.test(e)),
+      "compute rejects outputDir");
+
+    const fe = writeManifest(dir, { tasks: [
+      claudeTask({ id: "src", prompt: "…return JSON list" }),
+      claudeTask({ id: "fan", after: ["src"], isolation: "worktree",
+        forEach: { from: "src", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
+      claudeTask({ id: "next", after: ["fan"], isolation: { worktree: "n", from: "fan" } }),
+    ] }, "fe.json");
+    ok(errorsOf(() => loadManifest(fe, CFG, dir)).some((e) => /is a forEach task/.test(e)),
+      "isolation.from rejects a forEach parent");
+
+    const fei = writeManifest(dir, { tasks: [
+      claudeTask({ id: "src2", prompt: "…return JSON list" }),
+      claudeTask({ id: "fan2", after: ["src2"], isolation: "worktree",
+        forEach: { from: "src2", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
+      { id: "join2", after: ["fan2"], integrate: { into: "feat", from: ["fan2"] } },
+    ] }, "fei.json");
+    ok(errorsOf(() => loadManifest(fei, CFG, dir)).some((e) => /is a forEach task/.test(e)),
+      "integrate.from rejects a forEach parent");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

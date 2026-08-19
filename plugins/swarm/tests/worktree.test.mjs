@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, readFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { prepareIsolation, collect } from "../src/worktree.mjs";
+import { prepareIsolation, collect, integrate } from "../src/worktree.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 
@@ -441,7 +441,7 @@ test("prepareIsolation refuses to force-reset a branch carrying commits", () => 
         prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other);
       } catch (e) { threw = e; }
       ok(threw, "must refuse rather than silently reset a branch with commits");
-      ok(/carries \d+ commit/i.test(threw.message), `message should name the loss: ${threw?.message}`);
+      ok(/carries \d+ unlanded commit/i.test(threw.message), `message should name the loss: ${threw?.message}`);
       equal(git(["rev-parse", "swarm/feat"], repo), tip, "branch still points at phase 1");
     } finally { cleanup(other); }
   } finally { cleanup(repo, results); }
@@ -480,4 +480,260 @@ test("isolation.branch names the branch independently of the tree", () => {
     ok(wt.path.endsWith("wt-p3"), "the tree is still keyed by the worktree name");
     ok(git(["branch", "--list", "swarm/eco-p3branch"], repo).includes("swarm/eco-p3branch"));
   } finally { cleanup(repo, results); }
+});
+
+test("isolation.from bases a private tree on a dependency's branch tip", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    // The upstream leaf commits a helper on its own branch.
+    const up = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "helper" }, CFG, results);
+    writeFileSync(join(up.path, "helper.txt"), "the helper\n");
+    commitAll(up.path, "add helper");
+    const helperTip = git(["rev-parse", "HEAD"], up.path);
+
+    // A downstream leaf bases on that branch instead of repo HEAD.
+    const down = prepareIsolation(
+      { id: "migrate-x", originalCwd: repo, worktreeName: "migrate-x", baseRef: "swarm/helper" },
+      CFG, results);
+    ok(existsSync(join(down.path, "helper.txt")), "the dependency's committed work is present");
+    equal(down.head, helperTip, "wt.head is the base ref, so an empty leaf still reads as unchanged");
+  } finally { cleanup(repo, results); }
+});
+
+test("scheduler integration: a from-based leaf starts from its dependency's commit", async () => {
+  const repo = initRepo();
+  const dir = mkdtempSync(join(tmpdir(), "swarm-wt-from-"));
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      // The upstream leaf commits; the downstream leaf must SEE that commit.
+      if (call.opts.cwd.endsWith("wt-feat")) {
+        writeFileSync(join(call.opts.cwd, "helper.txt"), "the helper\n");
+        commitAll(call.opts.cwd, "add helper");
+      } else if (call.opts.cwd.endsWith("wt-migrate")) {
+        // Do real work, so the tree survives collect() and can be inspected.
+        writeFileSync(join(call.opts.cwd, "migrated.txt"), "uses the helper\n");
+        commitAll(call.opts.cwd, "migrate");
+      }
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        { id: "helper", prompt: "h", model: "haiku", allowedTools: "Read,Edit,Bash",
+          cwd: repo, originalCwd: repo, isolation: { worktree: "feat" }, worktreeName: "feat",
+          timeoutMs: 5000, after: [] },
+        { id: "migrate", prompt: "m", model: "haiku", allowedTools: "Read,Edit,Bash",
+          cwd: repo, originalCwd: repo, isolation: { worktree: "migrate", from: "helper" },
+          worktreeName: "migrate", from: "helper", timeoutMs: 5000, after: ["helper"] },
+      ],
+    };
+    await runPlan(p, CFG, io);
+    const migrateCall = spawn.calls.find((c) => String(c.opts.cwd).endsWith("wt-migrate"));
+    ok(migrateCall, "the migrate leaf ran in its own tree");
+    ok(existsSync(join(migrateCall.opts.cwd, "helper.txt")),
+      "a from-based tree contains its dependency's committed work");
+  } finally { cleanup(repo, dir); }
+});
+
+test("a from-based leaf that does nothing is still swept", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-sweep-"));
+  try {
+    const up = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "helper" }, CFG, results);
+    writeFileSync(join(up.path, "helper.txt"), "helper\n");
+    commitAll(up.path, "helper");
+
+    // Downstream bases on helper's branch and adds NOTHING of its own. Its branch
+    // inherits helper's commit from birth — measuring against repo HEAD would
+    // read that as this leaf's work and keep an empty tree forever.
+    const down = prepareIsolation(
+      { id: "noop", originalCwd: repo, worktreeName: "noop", baseRef: "swarm/helper" }, CFG, results);
+    const out = collect({ id: "noop" }, CFG, down, { isChainFollower: false });
+    equal(out.kept, false, "an empty from-based tree is swept, not kept");
+    ok(!git(["branch", "--list", "swarm/noop"], repo).includes("swarm/noop"));
+  } finally { cleanup(repo, results); }
+});
+
+test("a squash-merged branch no longer blocks reuse; --force overrides an unlanded one", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-sq-"));
+  try {
+    const wt = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    writeFileSync(join(wt.path, "work.txt"), "real work\n");
+    commitAll(wt.path, "phase 1");
+    spawnSync("git", ["worktree", "remove", "--force", wt.path], { cwd: repo, windowsHide: true });
+
+    // Unlanded work still blocks...
+    const other = mkdtempSync(join(tmpdir(), "swarm-wt-sq2-"));
+    let threw = null;
+    try { prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other); }
+    catch (e) { threw = e; }
+    ok(threw && /unlanded/.test(threw.message), "unlanded commits still refuse");
+
+    // ...but --force is the documented escape hatch.
+    const forced = mkdtempSync(join(tmpdir(), "swarm-wt-sq3-"));
+    const okWt = prepareIsolation(
+      { id: "p3", originalCwd: repo, worktreeName: "feat" }, CFG, forced, { reset: true });
+    ok(existsSync(okWt.path), "--force overrides the guard");
+    spawnSync("git", ["worktree", "remove", "--force", okWt.path], { cwd: repo, windowsHide: true });
+    cleanup(other, forced);
+
+    // Squash-merge on a FRESH branch — the --force above already reset swarm/feat
+    // to HEAD, so reusing it here would assert nothing.
+    const sqDir = mkdtempSync(join(tmpdir(), "swarm-wt-sq4-"));
+    const sq = prepareIsolation({ id: "sq", originalCwd: repo, worktreeName: "sq" }, CFG, sqDir);
+    writeFileSync(join(sq.path, "sq.txt"), "squashed work\n");
+    commitAll(sq.path, "sq work");
+    spawnSync("git", ["worktree", "remove", "--force", sq.path], { cwd: repo, windowsHide: true });
+    // Before the squash lands, that branch genuinely blocks.
+    let blocked = null;
+    const preDir = mkdtempSync(join(tmpdir(), "swarm-wt-sq5-"));
+    try { prepareIsolation({ id: "sq2", originalCwd: repo, worktreeName: "sq" }, CFG, preDir); }
+    catch (e) { blocked = e; }
+    ok(blocked && /unlanded/.test(blocked.message), "unlanded work blocks before the squash");
+    cleanup(preDir);
+    // After squash-merging its CONTENT, git cherry reads it as landed.
+    spawnSync("git", ["merge", "--squash", "swarm/sq"], { cwd: repo, windowsHide: true });
+    commitAll(repo, "squashed sq");
+    const after = mkdtempSync(join(tmpdir(), "swarm-wt-sq6-"));
+    try {
+      const reused = prepareIsolation({ id: "sq3", originalCwd: repo, worktreeName: "sq" }, CFG, after);
+      ok(existsSync(reused.path), "a squash-merged branch is reusable");
+    } finally { cleanup(after, sqDir); }
+  } finally { cleanup(repo, results); }
+});
+
+test("integrate merges sibling branches into the target tree", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-int-"));
+  try {
+    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    writeFileSync(join(base.path, "helper.txt"), "helper\n");
+    commitAll(base.path, "helper");
+
+    for (const id of ["x", "y"]) {
+      const wt = prepareIsolation(
+        { id, originalCwd: repo, worktreeName: id, baseRef: "swarm/feat" }, CFG, results);
+      writeFileSync(join(wt.path, `${id}.txt`), `${id} work\n`);
+      commitAll(wt.path, `${id} work`);
+    }
+
+    const out = integrate(
+      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo });
+
+    equal(out.conflicts.length, 0, "disjoint files merge cleanly");
+    ok(existsSync(join(out.path, "x.txt")) && existsSync(join(out.path, "y.txt")),
+      "both siblings' work is present in the target tree");
+  } finally { cleanup(repo, results); }
+});
+
+test("integrate leaves conflict markers in place and reports the paths", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-int2-"));
+  try {
+    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    writeFileSync(join(base.path, "shared.txt"), "original\n");
+    commitAll(base.path, "base");
+
+    for (const [id, text] of [["x", "x version\n"], ["y", "y version\n"]]) {
+      const wt = prepareIsolation(
+        { id, originalCwd: repo, worktreeName: id, baseRef: "swarm/feat" }, CFG, results);
+      writeFileSync(join(wt.path, "shared.txt"), text);
+      commitAll(wt.path, `${id} edits shared`);
+    }
+
+    const out = integrate(
+      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo });
+
+    deepEqual(out.conflicts, ["shared.txt"], "the conflicting path is reported");
+    const body = readFileSync(join(out.path, "shared.txt"), "utf8");
+    ok(body.includes("<<<<<<<") && body.includes(">>>>>>>"),
+      "conflict markers are left for the next leaf to resolve");
+    ok(out.merged.includes("swarm/x"), "the clean merge before the conflict still landed");
+  } finally { cleanup(repo, results); }
+});
+
+test("scheduler integration: an integrate node merges sibling branches into the target tree", async () => {
+  const repo = initRepo();
+  const dir = mkdtempSync(join(tmpdir(), "swarm-wt-intsched-"));
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      if (cwd.endsWith("wt-feat")) {
+        writeFileSync(join(cwd, "helper.txt"), "helper\n");
+        commitAll(cwd, "helper");
+      } else if (cwd.endsWith("wt-mx")) {
+        writeFileSync(join(cwd, "mx.txt"), "x work\n");
+        commitAll(cwd, "mx");
+      } else if (cwd.endsWith("wt-my")) {
+        writeFileSync(join(cwd, "my.txt"), "y work\n");
+        commitAll(cwd, "my");
+      }
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const leaf = (id, over) => ({
+      id, prompt: "p", model: "haiku", allowedTools: "Read,Edit,Bash",
+      cwd: repo, originalCwd: repo, timeoutMs: 5000, after: [], ...over,
+    });
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        leaf("helper", { isolation: { worktree: "feat" }, worktreeName: "feat" }),
+        leaf("mx", { after: ["helper"], isolation: { worktree: "mx", from: "helper" }, worktreeName: "mx", from: "helper" }),
+        leaf("my", { after: ["helper"], isolation: { worktree: "my", from: "helper" }, worktreeName: "my", from: "helper" }),
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["mx", "my"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["mx", "my"] } },
+      ],
+    };
+    await runPlan(p, CFG, io);
+
+    const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
+    equal(res.ok, true, "the node completes ok");
+    deepEqual(res.outputJson.merged, ["swarm/mx", "swarm/my"], "task ids resolved to branch names");
+    deepEqual(res.outputJson.conflicts, [], "disjoint files merged cleanly");
+    const tree = join(p.resultsDir, "wt-feat");
+    ok(existsSync(join(tree, "mx.txt")) && existsSync(join(tree, "my.txt")),
+      "both siblings' work landed in the target tree");
+  } finally { cleanup(repo, dir); }
+});
+
+test("groupFinal is the task nothing else in the group depends on, even across other groups", async () => {
+  const repo = initRepo();
+  const dir = mkdtempSync(join(tmpdir(), "swarm-wt-gf-"));
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      // The feat tree is entered twice: first by helper, later by cleanup.
+      const tag = !cwd.endsWith("wt-feat") ? "mx"
+        : existsSync(join(cwd, "helper.txt")) ? "cleanup" : "helper";
+      writeFileSync(join(cwd, `${tag}.txt`), "work\n");
+      commitAll(cwd, tag);
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const leaf = (id, over) => ({
+      id, prompt: "p", model: "haiku", allowedTools: "Read,Edit,Bash",
+      cwd: repo, originalCwd: repo, timeoutMs: 5000, after: [], ...over,
+    });
+    // feat = [helper, cleanup]; cleanup reaches helper ONLY through mx, which is
+    // in a different group. A same-group-only dep scan makes helper the
+    // collector and sweeps the tree before cleanup has run.
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        leaf("helper", { isolation: { worktree: "feat" }, worktreeName: "feat" }),
+        leaf("mx", { after: ["helper"], isolation: { worktree: "mx", from: "helper" }, worktreeName: "mx", from: "helper" }),
+        leaf("cleanup", { after: ["mx"], isolation: { worktree: "feat" }, worktreeName: "feat" }),
+      ],
+    };
+    const r = await runPlan(p, CFG, io);
+    const feat = (r.worktreesKept || []).find((w) => w.name === "feat");
+    ok(feat, "the feat tree is kept");
+    ok(/cleanup/.test(feat.diffstat || ""),
+      `collection must happen after cleanup, not after helper — diffstat: ${feat.diffstat}`);
+  } finally { cleanup(repo, dir); }
 });

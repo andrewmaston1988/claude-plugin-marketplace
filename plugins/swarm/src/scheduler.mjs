@@ -7,7 +7,7 @@ import {
   buildDigestTask, DIGEST_ID,
   reportPath as digestReportPath, scratchPath as digestScratchPath,
 } from "./digest.mjs";
-import { effectivePlanDoc, resolveWorktreeName } from "./manifest.mjs";
+import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from "./manifest.mjs";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
@@ -325,7 +325,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // Preflights must see composed leaves too — a manifest node's children are
   // known statically even though they splice in at run time.
   const leafView = tasks.flatMap((t) => (t.childPlan ? t.childPlan.tasks : [t]));
-  if (leafView.some((t) => !t.compute && t.model !== "manifest" && !isClaudeModel(t.model))) {
+  if (leafView.some((t) => !isAgentless(t) && t.model !== "manifest" && !isClaudeModel(t.model))) {
     try {
       await io.fetch(cfg.provider.url);
     } catch (e) {
@@ -341,7 +341,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // classification is the backstop). Exhausted quota with undefended Claude
   // leaves aborts BEFORE dispatch — a run that would deterministically fail
   // should fail in one second with the reset time, not after four minutes.
-  const claudeTasks = leafView.filter((t) => !t.compute && isClaudeModel(t.model));
+  const claudeTasks = leafView.filter((t) => !isAgentless(t) && isClaudeModel(t.model));
   if (claudeTasks.length && cfg.quotaPreflight !== false) {
     const env = io.env || process.env;
     const q = await checkQuota({
@@ -432,6 +432,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // plans — resolveWorktreeName covers both rather than silently skipping isolation.
   const nameOf = resolveWorktreeName;
 
+  // The branch a task id resolves to, for `isolation.from` and `integrate.from`.
+  // Both ask the same question, so both ask it here — the id may name a task
+  // whose worktree name differs from it, or (defensively) no task at all.
+  const branchOf = (srcId) => {
+    const src = tasks.find((o) => o.id === srcId);
+    return worktree.branchNameFor(
+      src ? { ...src, worktreeName: nameOf(src) ?? src.id } : { id: srcId }, cfg);
+  };
+
   const groupMembers = new Map();   // name -> [task ids, in manifest order]
   const groupFinal = new Map();
   const groupFirst = new Map();
@@ -446,11 +455,16 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (!groupMembers.has(n)) groupMembers.set(n, []);
       groupMembers.get(n).push(t.id);
     }
+    // Reachability must be GLOBAL, not group-local: two members of one tree can
+    // be ordered entirely through tasks in other groups (helper -> migrate-x ->
+    // cleanup, where migrate-x has its own tree). A group-local scan sees no
+    // edge, picks the FIRST task as the collector, and sweeps the tree before
+    // the last member has run — silently dropping its work. This mirrors
+    // validateWorktreeGroups, which already permits such a topology.
+    const reaches = makeReaches(tasks);
     for (const [name, ids] of groupMembers) {
-      const set = new Set(ids);
-      const deps = (id) => (tasks.find((t) => t.id === id)?.after || []).filter((a) => set.has(a));
-      groupFinal.set(name, ids.find((id) => !ids.some((o) => o !== id && deps(o).includes(id))) ?? ids[ids.length - 1]);
-      groupFirst.set(name, ids.find((id) => deps(id).length === 0) ?? ids[0]);
+      groupFinal.set(name, ids.find((id) => !ids.some((o) => o !== id && reaches(o, id))) ?? ids[ids.length - 1]);
+      groupFirst.set(name, ids.find((id) => !ids.some((o) => o !== id && reaches(id, o))) ?? ids[0]);
     }
   };
   rebuildGroups();
@@ -663,6 +677,37 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     record(task, result.ok ? "ok" : "failed", result.durationMs);
   };
 
+  // Agentless merge: fold the named tasks' branches into the target worktree.
+  // A conflict is NOT a failure — the markers stay in the tree and the paths are
+  // reported, because the next link is a model that can read and resolve them.
+  const runIntegrate = (task) => {
+    record(task, "running");
+    const t0 = io.now();
+    let result;
+    try {
+      const sources = task.integrate.from.map(branchOf);
+      const out = worktree.integrate(
+        { ...task, worktreeName: task.integrate.into, sources }, cfg, plan.resultsDir,
+        { repo: task.originalCwd || plan.cwd });
+      const payload = { into: task.integrate.into, branch: out.branch, merged: out.merged, conflicts: out.conflicts };
+      result = {
+        id: task.id, model: task.model, ok: true, exit: 0, durationMs: io.now() - t0,
+        output: out.conflicts.length
+          ? `merged ${out.merged.join(", ")} into ${out.branch}; conflicts left in the tree for the next leaf to resolve: ${out.conflicts.join(", ")}`
+          : `merged ${out.merged.join(", ")} into ${out.branch} cleanly`,
+        outputJson: payload,
+      };
+      appendRunLog(plan.resultsDir, {
+        ts: new Date().toISOString(), event: "integrate", id: task.id,
+        into: task.integrate.into, merged: out.merged.length, conflicts: out.conflicts.length,
+      });
+    } catch (e) {
+      result = { id: task.id, model: task.model, ok: false, exit: null, durationMs: io.now() - t0, output: `integrate failed: ${e.message}` };
+    }
+    writeResult(plan.resultsDir, task.id, result);
+    record(task, result.ok ? "ok" : "failed", result.durationMs);
+  };
+
   // Expansion morphs the parent into a pending aggregate over its clones, so
   // dependents keep depending on the parent id. Both template passes run here;
   // promptFinal stops the launch-time pass from re-scanning substituted data.
@@ -822,7 +867,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       const wtName = nameOf(task);
       if (wtName !== undefined) {
         try {
-          wt = worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
+          // `from` names a task; base this tree on THAT task's branch, derived
+          // the same way its own isolation did (explicit branch, else prefix+name).
+          const baseRef = task.from ? branchOf(task.from) : undefined;
+          wt = worktree.prepareIsolation({ ...task, worktreeName: wtName, baseRef }, cfg, plan.resultsDir, {
             reset: force && groupFirst.get(wtName) === task.id,
           });
           taskCwd = wt.path;
@@ -951,7 +999,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         if (st === "quota") {
           const family = isClaudeModel(task.model);
           for (const t of tasks) {
-            if (!t.compute && state.get(t.id) === "pending" && isClaudeModel(t.model) === family && !t.fallbackModel) {
+            if (!isAgentless(t) && state.get(t.id) === "pending" && isClaudeModel(t.model) === family && !t.fallbackModel) {
               record(t, "quota");
             }
           }
@@ -975,9 +1023,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       costIsRealComplete &&= r.costUsd != null && realKey;
       if (cfg.costWarn !== false && !costWarnFired) {
         const remaining = tasks.reduce((n, t) => {
-          if (t.compute || t.aggregate || t.aggregateManifest || !ALIVE_STATES.has(state.get(t.id))) return n;
+          if (isAgentless(t) || t.aggregate || t.aggregateManifest || !ALIVE_STATES.has(state.get(t.id))) return n;
           const mult = t.forEach ? t.forEach.maxItems : 1;
-          if (t.childPlan) return n + mult * t.childPlan.tasks.filter((c) => c.compute === undefined).length;
+          if (t.childPlan) return n + mult * t.childPlan.tasks.filter((c) => !isAgentless(c)).length;
           return n + mult;
         }, 0);
         const useUsd = costIsRealComplete && spentUsd > 0;
@@ -1024,6 +1072,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       if (t.aggregate) { runAggregate(t); progressed = true; continue; }
       if (t.aggregateManifest) { runManifestAggregate(t); progressed = true; continue; }
       if (t.compute) { runCompute(t); progressed = true; continue; }
+      if (t.integrate) { runIntegrate(t); progressed = true; continue; }
       launch(t);
     }
     if (progressed) continue;

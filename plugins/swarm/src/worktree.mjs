@@ -6,6 +6,27 @@ function git(args, cwd) {
   return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
 }
 
+// Commits on `branch` not already landed on `base`, compared by PATCH (`git
+// cherry`) rather than commit identity or ancestry: squash-merge — the
+// documented landing path — rewrites commits, and ancestry says nothing once
+// HEAD has moved sideways. Returns Infinity when git cannot answer, so callers
+// FAIL CLOSED: an unresolvable question must block a destructive path, not
+// waive it.
+function unlandedCount(base, branch, repo) {
+  const c = git(["cherry", base, branch], repo);
+  if (c.status !== 0) return Infinity;
+  return c.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length;
+}
+
+// The one rule for a task's branch name: an explicit `isolation.branch` wins,
+// else the worktree name under the configured prefix. Exported so the scheduler
+// resolves `from` / `integrate` sources the same way prepareIsolation creates
+// them — three copies of this formula is how they drift apart.
+export function branchNameFor(task, cfg) {
+  const name = task.worktreeName || task.id;
+  return task.branchName || `${cfg.worktreeBranchPrefix || "swarm/"}${name}`;
+}
+
 // True when `path` is already a registered worktree of `repo` — the kept tree
 // a prior failed/timed-out leaf left behind.
 function isRegisteredWorktree(path, repo) {
@@ -24,18 +45,23 @@ function isRegisteredWorktree(path, repo) {
 // a re-create. `reset` (the --force redo) scrubs it back to HEAD first.
 export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) {
   const repo = task.originalCwd || task.cwd;
-  const prefix = cfg.worktreeBranchPrefix || "swarm/";
   // Ordered siblings sharing a name meet in one tree; without one, the task's
   // own id names a private tree.
   const name = task.worktreeName || task.id;
-  // The branch is normally derived from the tree name, but a run continuing work
-  // onto an existing branch needs to name it — the two are separate identities.
-  const branch = task.branchName || `${prefix}${name}`;
+  const branch = branchNameFor(task, cfg);
   const path = resolve(join(resultsDir, `wt-${name}`));
 
-  const head = git(["rev-parse", "HEAD"], repo);
+  // A leaf that builds on another's committed work bases its tree on that
+  // branch instead of repo HEAD — otherwise it starts without the code it
+  // depends on. `wt.head` follows the base, so "did this leaf change anything"
+  // stays a question about THIS leaf's work.
+  const baseRef = task.baseRef || "HEAD";
+  const head = git(["rev-parse", baseRef], repo);
   if (head.status !== 0) {
-    throw new Error(`cannot resolve HEAD in ${repo}: ${head.stderr || "not a git repo?"}`);
+    throw new Error(task.baseRef
+      ? `cannot resolve base '${baseRef}' in ${repo} for task '${task.id}': ${head.stderr || "no such ref"} — ` +
+        `isolation.from names a task whose branch must exist by the time this leaf runs`
+      : `cannot resolve HEAD in ${repo}: ${head.stderr || "not a git repo?"}`);
   }
 
   if (isRegisteredWorktree(path, repo)) {
@@ -50,23 +76,21 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     return {
       path, branch, name, repo, reused: true,
       head: (!reset && treeHead.status === 0) ? treeHead.stdout : head.stdout,
+      ...(task.baseRef && { baseRef: task.baseRef }),
     };
   }
 
   let add = git(["worktree", "add", path, "-b", branch, "--no-track", head.stdout], repo);
   if (add.status !== 0 && /already exists/i.test(add.stderr)) {
     // Stale branch (path was cleaned but the branch lingered): force it to HEAD.
-    // But -B RESETS the branch, so first ask whether it carries anything HEAD
-    // doesn't already have — a previous run's phases live exactly there. Count,
-    // not ancestry: HEAD may have moved sideways since, which says nothing about
-    // whether this branch holds work.
-    const carried = git(["rev-list", "--count", branch, `^${head.stdout}`], repo);
-    if (carried.status === 0 && carried.stdout !== "" && carried.stdout !== "0") {
+    // But -B RESETS the branch, so refuse when it still carries unlanded work.
+    const unlanded = unlandedCount(head.stdout, branch, repo);
+    if (unlanded > 0 && !reset) {
       throw new Error(
-        `worktree branch '${branch}' carries ${carried.stdout} commit(s) not in HEAD — refusing to reset it ` +
+        `worktree branch '${branch}' carries ${unlanded === Infinity ? "an unknown number of" : unlanded} unlanded commit(s) — refusing to reset it ` +
         `for task '${task.id}'. That work came from an earlier run and would be lost.\n` +
         `    inspect:  git log ${branch}\n` +
-        `    reuse it: name a different worktree, or merge/delete '${branch}' yourself first`);
+        `    reuse it: name a different worktree, merge/delete '${branch}' yourself, or re-run with --force`);
     }
     add = git(["worktree", "add", path, "-B", branch, "--no-track", head.stdout], repo);
   }
@@ -74,7 +98,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     throw new Error(`git worktree add failed for '${task.id}': ${add.stderr}`);
   }
 
-  return { path, branch, name, head: head.stdout, repo, reused: false };
+  return { path, branch, name, head: head.stdout, repo, reused: false, ...(task.baseRef && { baseRef: task.baseRef }) };
 }
 
 // Collect after the leaf ran: unchanged worktrees are removed (and their
@@ -90,23 +114,14 @@ export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
   const headNow = git(["rev-parse", "HEAD"], wt.path);
   const changed = status.stdout !== "" || (headNow.status === 0 && headNow.stdout !== wt.head);
 
-  // Destroy only a tree this leaf started fresh, OR an unchanged solo resend.
-  // A reused CHAIN tree's branch carries its predecessors' commits, and
-  // `wt.head` is the tree's own HEAD — so a final link that changed nothing of
-  // its OWN still reads as unchanged here, and deleting the branch would take
-  // the whole chain's work with it. A reused SOLO tree has no such history to
-  // protect.
-  // `isChainFollower` only knows about THIS plan's group. A tree reused across
-  // manifests, or a chain whose successor is the sole member of its own group,
-  // reads as a solo resend — and deleting the branch would take every earlier
-  // phase's commits with it. Ask git instead of the plan: does this branch carry
-  // anything not already in the repo's HEAD? Direction-agnostic, so it stays
-  // correct when HEAD has moved sideways since the tree was made.
+  // Destroy only a tree that carries nothing: a leaf changing nothing of its OWN
+  // may still sit on a branch holding earlier phases' commits, and `branch -D`
+  // would take them with it. `isChainFollower` only sees THIS plan's group, so
+  // ask git as well — measured against the tree's own base, since a `from`-based
+  // tree inherits its dependency's commits at birth.
   const repoHead = git(["rev-parse", "HEAD"], wt.repo);
-  const unmerged = repoHead.status === 0
-    ? git(["rev-list", "--count", wt.branch, `^${repoHead.stdout}`], wt.repo)
-    : { status: 1, stdout: "" };
-  const carriesWork = unmerged.status === 0 && unmerged.stdout !== "" && unmerged.stdout !== "0";
+  const base = wt.baseRef ? wt.head : repoHead.stdout;
+  const carriesWork = repoHead.status !== 0 || unlandedCount(base, wt.branch, wt.repo) > 0;
 
   if (!changed && !(wt.reused && isChainFollower) && !carriesWork) {
     git(["worktree", "remove", "--force", wt.path], wt.repo);
@@ -123,4 +138,39 @@ export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
     porcelain: status.stdout,
     diffstat: diffstat.stdout,
   };
+}
+
+// Fold sibling branches into one tree so a later leaf can carry on from the
+// combined state. Deliberately NOT atomic: a conflicted merge is left in the
+// tree with its markers, because the next link is a model that can read them
+// and resolve. Failing the node instead would turn an ordinary conflict — the
+// thing merges do — into a dead run needing operator rescue.
+//
+// The node owns the target tree: it creates it (or re-enters a kept one) rather
+// than borrowing a tree a leaf is using, so nothing races.
+export function integrate(task, cfg, resultsDir, { repo: repoOverride } = {}) {
+  const repo = repoOverride || task.originalCwd || task.cwd;
+  const wt = prepareIsolation({ ...task, originalCwd: repo }, cfg, resultsDir);
+
+  const merged = [];
+  const conflicts = [];
+  for (const src of task.sources || []) {
+    const m = git(["merge", "--no-edit", src], wt.path);
+    if (m.status === 0) { merged.push(src); continue; }
+    // Conflicted: keep the markers, record the paths, move on. `git merge` has
+    // already staged what it could and left the rest marked.
+    const conflicted = git(["diff", "--name-only", "--diff-filter=U"], wt.path);
+    const paths = conflicted.stdout
+      ? conflicted.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : [];
+    if (!paths.length) {
+      // Failed for a reason other than content conflict (missing ref, unrelated
+      // histories) — surface it rather than pretending it merged.
+      git(["merge", "--abort"], wt.path);
+      throw new Error(`integrate '${task.id}': cannot merge ${src}: ${m.stderr || m.stdout}`);
+    }
+    for (const p of paths) if (!conflicts.includes(p)) conflicts.push(p);
+    merged.push(src);
+  }
+
+  return { path: wt.path, branch: wt.branch, name: wt.name, repo, merged, conflicts };
 }

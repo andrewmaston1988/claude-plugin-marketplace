@@ -136,6 +136,33 @@ The glue logic between agent calls that never needed an LLM, without making the 
 - **`when`** gates a leaf on a dependency's output — false means the task completes as `skipped` (dependents still run). The expression must yield true/false; a bare value is a validation-time teaching error.
 - **`compute`** is an agentless expression step (dedupe / filter / count / threshold / flatten) over dependency JSON — zero tokens, result consumable like any leaf's. No `eval`, no external `jq`: a hand-rolled, bounded evaluator (`length`, `count`, `filter`, `unique_by`, `flatten`, `min/max/sum`, `contains`; comparisons and boolean logic; 500-char cap), because manifests may themselves be model-authored and the trust boundary stays tight.
 
+## Widening after a narrow step — `isolation.from` and `integrate`
+
+Private trees branch from repo HEAD and never see each other's commits, so a fan-out that follows a shared step needs two things the engine now supplies: a way to start from that step's work, and a way to fold the results back.
+
+```json
+{ "tasks": [
+    { "id": "helper", "model": "glm-5.2:cloud", "isolation": { "worktree": "feat" },
+      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…write the helper. Commit before you finish." },
+
+    { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper"],
+      "isolation": { "worktree": "migrate-x", "from": "helper" }, "prompt": "…" },
+    { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper"],
+      "isolation": { "worktree": "migrate-y", "from": "helper" }, "prompt": "…" },
+
+    { "id": "join", "after": ["migrate-x", "migrate-y"],
+      "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
+
+    { "id": "cleanup", "model": "glm-5.2:cloud", "after": ["join"],
+      "isolation": { "worktree": "feat" }, "prompt": "…resolve {{result:join}}, run the suite. Commit." }
+  ] }
+```
+
+Width goes `1 → 2 → 1`: `migrate-x` and `migrate-y` run concurrently in private trees that already contain `helper`'s commit, then `join` merges both branches into the `feat` tree and `cleanup` carries on from the combined state.
+
+- **`integrate`** is an agentless node like `compute` — it spends nothing. It merges each named task's branch into the `into` worktree, creating that tree if the chain has not reached it yet.
+- **A conflict is not a failure.** The merge stops with markers left in the tree, the node stays `ok`, and the conflicting paths land in its result — pass `{{result:join}}` to the next leaf and tell it to resolve them. Failing the node instead would turn an ordinary merge conflict into a dead run needing rescue; the next link is a model that can read markers.
+
 ## Results layout
 
 ```
@@ -148,7 +175,15 @@ The glue logic between agent calls that never needed an LLM, without making the 
   run.log                    # JSONL — state changes, live token ticks, run-start roster — tailable mid-run
 ```
 
-`isolation` takes two forms. `"worktree"` gives the leaf a private tree keyed by its own id — the fan-out shape, where clones must not collide. `{ "worktree": "<name>" }` puts every leaf naming that name in **one** tree on one branch, so an ordered chain accumulates: phase 1 commits, a read-only reviewer sees those commits, phase 2 builds on them. Links sharing a name must be totally ordered by `after`, and `forEach` cannot share a tree. `worktreesKept` in `summary.json` carries one entry per shared group — `{ id, name, branch, path, diffstat, taskIds }`, its diffstat spanning every phase — not one per task.
+`isolation` is either the string `"worktree"` — a private tree keyed by the leaf's own id, the fan-out shape where clones must not collide — or an object carrying up to three keys:
+
+| Key | Effect |
+|---|---|
+| `worktree` | Every leaf naming this name meets in **one** tree on one branch, so an ordered chain accumulates: phase 1 commits, a read-only reviewer sees those commits, phase 2 builds on them. Links sharing a name must be totally ordered by `after`, and `forEach` cannot share a tree. |
+| `branch` | Names the branch explicitly instead of deriving it from the worktree name (default `swarm/<worktree>`) — for continuing work onto a branch that already exists. |
+| `from` | Bases this tree on **that task's branch tip** instead of repo HEAD, so the leaf starts holding the code it builds on. The named task must be a declared dependency and worktree-isolated; a `forEach` parent is rejected, since its clones own the branches. |
+
+`worktreesKept` in `summary.json` carries one entry per shared group — `{ id, name, branch, path, diffstat, taskIds }`, its diffstat spanning every phase — not one per task. A branch carrying commits not yet landed (compared by patch, so squash-merges count as landed) is never deleted or force-reset; the engine refuses rather than lose it.
 
 Leaves are dispatched with `--output-format stream-json`, so the engine extracts each leaf's final text into `output` and its per-turn API usage into `tokens` (`{ input, output, cacheCreation, cacheRead }`). A provider that emits plain text instead degrades gracefully: raw stdout becomes `output` and the token columns stay empty.
 

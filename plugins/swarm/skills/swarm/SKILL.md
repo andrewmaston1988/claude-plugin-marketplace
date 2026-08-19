@@ -6,9 +6,26 @@ description: >-
 
 # swarm — alternative-model fan-out engine
 
-Swarm runs work in headless Claude Code sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Powered by capable `:cloud` models (GLM, MiniMax — not an opus swarm, but almost) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context. The smarts live in the plan and the leaves; the plumbing has none.
+Swarm runs work in headless Claude Code sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Powered by capable `:cloud` models (GLM, MiniMax — not an opus swarm, but almost) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context.
+
+**Core principle:** the smarts live in the plan and the leaves; the plumbing has none. A manifest you could not defend line by line is a manifest you should not dispatch.
 
 Engine: `scripts/swarm.mjs` at the plugin root — resolve it as `<this skill's base directory>/../../scripts/swarm.mjs`. Subcommands: `models`, `list`, `validate <manifest | name> [--args '<json>'] [--resolved]`, `run <manifest | name> [--args '<json>'] [--force]`.
+
+## When to use
+
+**Reach for swarm:**
+- 3+ independent bounded leaves — sweeps, generation, judge panels, mechanical implementation
+- One bounded job that should not spend THIS session's context
+- A second opinion from a model family this session is not using
+
+**Do not:**
+- Work that needs this session's in-context state — it does not travel
+- A question one `Read` answers, when context is not scarce
+- Anything you cannot state as a closed question with a return contract
+
+Thinking "I know the command, I can skip the skill"? Stop. That is the bypass this
+skill exists to catch — the command arrives without the rules that govern it.
 
 ## The Iron Law — never interfere with a live dispatch
 
@@ -19,7 +36,7 @@ Engine: `scripts/swarm.mjs` at the plugin root — resolve it as `<this skill's 
 - **Do NOT `git`-touch a run's worktree or branch** — no `worktree remove`, `branch -D`, `reset --hard`, `clean`, `rm -rf` of a run dir.
 - **Do NOT judge a leaf failed from a mid-flight view** — a tool-call count (`0 writes so far`) is never a health signal; a leaf reads for many turns before it writes. Only the final result (or a `failed` state the engine sets) is a verdict.
 
-A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the above — those govern *stalling*, never *interfering with a live dispatch*. When a leaf genuinely ended badly, the engine marks it `failed`; recover per [references/reading-the-roster.md](references/reading-the-roster.md) — never by killing or deleting, which is only ever the operator's call. **This exists because a session that had this skill loaded broke every clause under directive pressure — killed a healthy leaf, orphaned its worktree, deleted branches, and misdiagnosed the cause three times (2026-07-15).** The pre-dispatch twin of this gate is the offer gate (below): consent before spend, hands-off after.
+A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the above — those govern *stalling*, never *interfering with a live dispatch*. When a leaf genuinely ended badly, the engine marks it `failed`; recover per "A leaf ended and produced no commit" (below) — never by killing or deleting, which is only ever the operator's call. **This exists because a session that had this skill loaded broke every clause under directive pressure — killed a healthy leaf, orphaned its worktree, deleted branches, and misdiagnosed the cause three times (2026-07-15).** The pre-dispatch twin of this gate is the offer gate (below): consent before spend, hands-off after.
 
 **Instantiate this as tasks — do not just read it.** The moment you dispatch, create these as `TaskCreate` items: `offer-gate answered` · `one status check, then hands-off` · `recover a bad leaf by re-dispatch, never kill/delete`. A skimmed rule gets rationalised past; a task you created and left undone is *visible*. If you did not make the tasks, you did not engage the discipline.
 
@@ -57,6 +74,8 @@ Never assume Claude models are spendable — the user may be out of Anthropic us
 The manifest preview plus the mix answer ARE the approval: the user sees every model and every leaf before anything runs. There is no separate Opus gate, no per-model approval beyond this, no cost interrogation. Do not start inline work on a fan-out-shaped task without this gate.
 
 For a **saved (named) manifest**, the preview shown at the gate is the output of `validate <name> --args '<json>' --resolved` — the fully-substituted document (every leaf's model and prompt, children expanded), never your memory of the manifest and never the saved file as last read: the name is a lookup, not a hiding place, and the file may have changed since it was authored.
+
+**When asked only to AUTHOR a manifest — not to run it — there is nothing to consent to.** Write the JSON and hand it over; the gate governs *spending*, and drafting spends nothing. Fire the gate when you are about to dispatch, not when the deliverable is the manifest itself.
 
 **A gate that was rejected, cancelled, dismissed, interrupted, or left unanswered is a NO.** Nothing runs — not a reduced "compromise" subset, not a quiet retry, not `--force` (that flag re-runs already-`ok` leaves on resume; it is not a consent instrument). Re-offer only when the user reopens the topic — "ok, where were we?" reopens the topic; it does not answer the question.
 
@@ -99,15 +118,61 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 7. A failed run is reported with its failures — never presented as complete. **Route by failure kind, per the resume carve-out above** — the offer is conditional, not unconditional. A **plain timeout** skips the offer: re-run it and report what it did, do not ask whether to do it. An **error failure**, or a **second timeout that committed nothing new**, gets the choice via AskUserQuestion: **Resume (Recommended)** (re-`run` skips `ok`; `rate-limited` retries) / **Inspect failures** (open the failed `results/<id>.json|.log`) / **Accept partial** — failure list as the preview. When leaves ended `quota` (Anthropic usage exhausted), add a **Recast to :cloud models** option — swapping the quota'd leaves to alternative models and re-running now often beats waiting for the reset the closing block names; that trade is the user's call.
 8. **For a human-facing report, RENDER it — never hand-author one.** When a run wrote `report.md` (step 5b), project it to a self-contained, theme-aware `report.html` with `node <engine> report <resultsDir>`. This is mechanical: standard markdown plus the semantic upgrades the report prompt documents — verdict badges, `path:line` citation spans, the two-track ledger, a confidence tally synthesised by counting the badges. It writes `report.html` beside `report.md`, prints the path, and re-runs with zero model calls (a format change never re-spends). Offer that path; do not build an Artifact by hand from `summary.json`.
 
+
 ## Reading the roster — a leaf is an AGENT, not an API call
 
-**A `:cloud` leaf is a full autonomous agent** running its own multi-turn loop — not one request/response. Judge it as a colleague working a problem for fifteen minutes.
+**A `:cloud` leaf is a full autonomous agent**, running its own multi-turn loop: it greps, reads, reasons, greps again, dozens or hundreds of turns, until it has an answer. It is not one request/response. Judge it as you would a colleague working a problem for fifteen minutes — not as a query that should have returned by now.
 
-**Token counts in the millions are arithmetic, not pathology.** These providers report no prompt-cache buckets, so every turn re-sends the whole transcript as fresh input. `output` is the work; `input` is the transcript re-sent.
+**Their token counts are enormous, and that is arithmetic, not pathology.** These providers report no prompt-cache buckets (`cache_creation_input_tokens` / `cache_read_input_tokens` come back absent). So every turn re-sends the agent's entire growing transcript as *fresh input*, and `tokenTotal` counts it (`input + output + cacheCreation` — `cacheRead` is deliberately excluded). A Claude leaf doing identical work parks that same re-sent prefix in `cacheRead`, which the roster does **not** count. The number is real; the magnitude is an accounting artefact of where the bucket lands.
 
-**The only real distress signals**: `⚠ quiet <N>s` in the activity cell, and the states `failed` / `rate-limited` / `quota` / `retrying` / `blocked`. A leaf showing a tool call is working. There is no per-leaf kill.
+Read the two columns for what they are: **`output` is the work. `input` is the transcript re-sent, once per turn.**
 
-**When a run is live, or a completed leaf produced no commit, read [references/reading-the-roster.md](references/reading-the-roster.md)** — it carries the token-magnitude table, the red-flag phrases that preceded a session killing a healthy leaf, and the recover-never-kill procedure.
+| What you see | What it means |
+|---|---|
+| A `:cloud` leaf at 1M–20M+ tokens | **Normal.** Input/output ratios of 100–180× are the ordinary signature of a working agent. Observed in real runs: a 21.3M-token leaf produced 116k output — it re-read its own context ~180 times. |
+| Its `costUsd` (`$108`, `$53`) | **Not a number.** The CLI applies its own price table to token counts; these providers bill on subscription and GPU time with no token mapping. Never quote it, never act on it. |
+| The activity cell (`Grep("handler")`) | The **most recent** tool call — a heartbeat, proof of life. NOT a call the leaf has been stuck on. A leaf showing a tool call is a leaf that is working. |
+| One leaf far slower than its siblings | **Normal.** Leaves have different amounts to do. 840s next to 184s is scope, not sickness. |
+
+**What IS a real signal** — watch these instead, because they are the ones the engine actually raises:
+
+- **`⚠ quiet <N>s`** in the activity cell — the leaf has emitted no event for longer than the quiet threshold. *This* is the stall indicator. A leaf with a live activity cell is not stalled, no matter its token count.
+- States: **`failed`**, **`rate-limited`**, **`quota`**, **`retrying`**, **`blocked`** — all tagged explicitly on the row.
+- The closing block's truncation warnings.
+
+**There is no per-leaf kill.** Do not propose one. The run is the unit; killing it kills every leaf's work, and resume re-runs the incomplete ones anyway.
+
+**Pathological leaves are real — you just don't detect them with the token column.** A `nemotron-3-super` verifier once burned 27.3M tokens across three leaves, timed out on two, and fabricated all 18 refutations on the one that finished. That is a genuine runaway. But note *how it surfaced*: two leaves hit `timeoutMs`, and the engine's mechanical citation check caught the fabrications for zero tokens. The bound did its job. The token count was a *symptom* that arrived too late to act on and would have been indistinguishable, mid-run, from a healthy leaf doing a lot of work. The defences against a runaway are **pre-dispatch** — the right model tier, a closed scope over a named file set, a `returns` citation schema, a sane `timeoutMs` — not a mid-run judgement call about a big number. If a leaf is genuinely sick, the timeout or the citation check will say so. Your panic will not.
+
+### Red flags — you are about to interfere with a healthy run
+
+Every phrase below came from a session that read a *working* roster and moved to kill it:
+
+- "21.3M tokens is **runaway**" · "that's not still working, that's a **runaway**"
+- "**pure burn** with no sign it's converging" · "a 7x token blowup relative to its sibling leaves"
+- "it's been **stuck on a single `Grep`** for 14 minutes" (it hasn't — that's the latest call)
+- "the leaf is **drowning in matched context** / re-consuming its own output"
+- "I'd **kill `scan-api` now**" · "I'll give it 2–3 more minutes, then kill it"
+
+**All of these mean: you are reading token magnitude as health. It isn't. Check the activity cell for `⚠ quiet`, check the state tags, and otherwise let it run.** A leaf that is grepping is a leaf that is working. Report progress to the user; do not intervene.
+
+### A leaf ended and produced no commit — recover, never kill
+
+The red flags above are about a *healthy* run. The other failure class (2026-07-15) is a leaf that genuinely ended with nothing — and the damage was the *response*, not the empty result. When a **completed** leaf (its notification fired) left no work:
+
+1. Read `results/<id>.json` and, for an isolation leaf, `git log <target>..<branch>` — confirm it is genuinely empty. (The engine now marks a leaf that died mid-stream `failed`, not `ok`, so this is usually already flagged for you.)
+2. If empty, **re-dispatch a FRESH manifest name** (new run dir). If it rat-holed (a leaf sitting in a long silent thinking turn), fix the PROMPT first — add "write files as you go, commit early" and pre-resolve the one genuinely ambiguous step, so the leaf emits frequent tool calls instead of one long output-less turn.
+3. **Never** kill a process, `rm -rf` a run dir, or `branch -D` a worktree branch to "clean up" — that is the operator's call alone. And never relay a leaf's self-report, or your own guess, as the cause: verify the OUTPUT (the diff, the result file), not the running process.
+
+**Rationalisations that preceded the real incident — each is a STOP:**
+
+| The thought | The reality |
+|---|---|
+| "0 writes at 49s — it's stuck / repeating the last failure" | A leaf reads for many turns before it writes. Mid-run tool counts are not health. |
+| "I'll just kill it and restart clean" | There is no kill. Killing orphans the worktree and makes the resend 0s-fail. |
+| "I'll `git clean` / remove the orphaned worktree / delete the branch" | Destroys salvage; it is the operator's call, never yours. |
+| "It ran out of turns" / "the keepalive hook hijacked it" | A confident root cause you have not proven from the result file — proof by proxy. |
+| "The `/goal` says don't pause, so I must act now" | The directive governs stalling, not interfering with a live dispatch. |
 
 ## Manifest quick reference
 
@@ -125,6 +190,7 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
     "isolation": "worktree",                   // private tree (implementation leaves); OR
                                                //   { "worktree": "feat" } — SHARED tree, phased chains, see Plan patterns
                                                //   optional "branch": names the branch explicitly (default swarm/<worktree>)
+                                               //   optional "from": base this tree on that task's branch, not repo HEAD
     "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 3600000,
@@ -146,64 +212,63 @@ Prompt templating: `{{result:<id>}}` inlines a dependency's output, **capped at 
 
 ## Plan patterns
 
-Pick the shape before writing the manifest:
+**Asked as dispatch** ("run a glm-5.2 session on swarm")? One delegated leaf — see below.
+Otherwise **a manifest is a dependency graph, not one pattern stamped across every task**:
+take one task at a time and ask what must FINISH before it can start. Width falls out of the
+answers; you never pick a shape.
 
 ```dot
-digraph swarm_shape {
-    "Asked as dispatch?\n(\"run a glm-5.2 session on swarm\")" [shape=diamond];
-    "Does step N build on step N-1's edits?" [shape=diamond];
-    "Does step N need step N-1's output?" [shape=diamond];
-    "Judgement or mechanical handoff?" [shape=diamond];
-    "Single delegated leaf" [shape=box];
-    "Fan-out + digest" [shape=box];
-    "Mechanical chain ({{result:}})" [shape=box];
-    "Phased chain (shared worktree)" [shape=box];
+digraph swarm_place {
+    left [label="Any task left to place?", shape=diamond];
+    need [label="What must FINISH before this starts?", shape=diamond];
+    nothing [label="Nothing — no after", shape=box];
+    output [label="Another task OUTPUT — after + resultPath", shape=box];
+    edits [label="Another task EDITS — after + shared worktree, or isolation.from", shape=box];
+    done [label="Done — one manifest", shape=ellipse];
 
-    "Asked as dispatch?\n(\"run a glm-5.2 session on swarm\")" -> "Single delegated leaf" [label="yes — one job, no fan-out"];
-    "Asked as dispatch?\n(\"run a glm-5.2 session on swarm\")" -> "Does step N build on step N-1's edits?" [label="no"];
-    "Does step N build on step N-1's edits?" -> "Phased chain (shared worktree)" [label="yes"];
-    "Does step N build on step N-1's edits?" -> "Does step N need step N-1's output?" [label="no"];
-    "Does step N need step N-1's output?" -> "Fan-out + digest" [label="no"];
-    "Does step N need step N-1's output?" -> "Judgement or mechanical handoff?" [label="yes"];
-    "Judgement or mechanical handoff?" -> "Mechanical chain ({{result:}})" [label="mechanical — a fact, a list"];
-    "Judgement or mechanical handoff?" -> "Phased chain (shared worktree)" [label="judgement — review, risk warnings"];
+    left -> need [label="yes — take one"];
+    need -> nothing;
+    need -> output;
+    need -> edits;
+    nothing -> left;
+    output -> left;
+    edits -> left;
+    left -> done [label="no"];
 }
 ```
 
-The discriminating question is whether step N builds on step N-1's **edits** — not whether
-the leaves touch the same repo. Several leaves editing disjoint files in one codebase is
-still fan-out with private trees; only accumulation needs a shared tree.
+Loop until every task is placed — one manifest holds as many segments as the work needs.
+The named shapes below are what these answers *produce*, not a menu: fan-out is every task
+answering **nothing**; a phased chain is each answering **edits of the previous**; mixed
+topology is a run where the answers differ and the width changes more than once.
+
+**Two tasks that share a prerequisite but not each other run in parallel** — answer against
+the work, not against the task above it in your list. Chain them only for a real collision
+(same file, same region), and name that file in the prompt.
+
+**Output vs edits is the discriminating question**, not whether leaves touch the same repo.
+`{{result:}}` passes text, never changes. Leaves editing disjoint files stay parallel with
+private trees; only accumulation needs a shared tree or `isolation.from`.
 
 ### Single delegated leaf
 
-One leaf, no `after`, no digest needed. The shape for work that is perfectly doable inline
-but shouldn't be — because the cost is context, not tokens.
-
-When it applies:
-
-- **This session's context is scarce.** A busy session buys headroom by sending a bounded
-  job out and reading back a short result instead of the whole investigation.
-- **A finished swarm missed something.** A follow-up leaf answers the gap without
-  re-running the sweep or re-reading its raw output.
-- **The result should be auditable.** A leaf leaves `results/<id>.json` and a run dir on
-  disk; an inline read leaves only transcript.
+One leaf, no `after`, no digest — reading `results/<id>.json` *is* the digest. The shape for
+work that is perfectly doable inline but shouldn't be: when this session's context is scarce,
+when a finished swarm missed something, or when the result should be auditable on disk.
 
 ```json
 { "tasks": [
     { "id": "check", "model": "glm-5.2:cloud",
-      "prompt": "Your single job: <closed question>.\nFile scope: <paths>.\nReturn ≤10 bullets: claim, file:line. No prose. If you cannot answer, say so in one line." }
+      "prompt": "Your single job: <closed question>.
+File scope: <paths>.
+Return ≤10 bullets: claim, file:line. No prose. If you cannot answer, say so in one line." }
   ] }
 ```
 
-**The offer gate is a judgement call here, not a mandate.** The gate proper covers
-fan-out-shaped work (3+ leaves). For one leaf, still say what you are about to dispatch and
-on which model — briefly, so the operator can redirect the model or the scope before it
-runs — but a request already phrased as dispatch ("run a glm-5.2 session on swarm") has
-made the call, and re-asking it is friction. The Iron Law's hands-off rule applies in full
-once the leaf is running.
-
-Everything else still applies: one closed question, an explicit return contract. Skip the
-digest — with one leaf, reading `results/check.json` directly *is* the digest.
+**The offer gate is a judgement call here, not a mandate** — it covers fan-out-shaped work
+(3+ leaves). Say what you are about to dispatch and on which model so the operator can
+redirect it, but a request already phrased as dispatch has made that call. The Iron Law's
+hands-off rule applies in full once the leaf is running.
 
 ### Fan-out (the native shape)
 
@@ -235,12 +300,6 @@ If you cannot find the answer, say so in one line — do not expand scope.
 
 `{{result:<id>}}` passes raw (capped) output between links, so each link's *output* contract must be hard: **"return ONLY the N facts the next step needs."** It passes text, never edits — a link that must build on the previous link's *changes* needs a phased chain instead.
 
-```json
-{ "tasks": [
-    { "id": "extract", "model": "minimax-m3:cloud", "prompt": "List every route in src/routes/. Return ONLY a JSON array of {method, path, handler} — nothing else." },
-    { "id": "matrix",  "model": "glm-5.2:cloud", "after": ["extract"], "prompt": "Routes: {{result:extract}}\nProduce a markdown table: route × auth requirement." }
-  ] }
-```
 
 ### Phased chain — one branch, implement → review → implement
 
@@ -273,6 +332,7 @@ next implementer through `{{result:}}`.
 - **The tree is collected once**, after the last link — so one entry in `worktreesKept`, with a diffstat spanning every phase.
 - **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix p2, re-run, and p3/p4 redo their work on the corrected base.
 - **`forEach` cannot share a worktree** — clones are concurrent by construction.
+- **A leaf that branches off the chain needs its OWN worktree.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their tree — sharing demands total ordering, which would force a false dependency. Give it `isolation: "worktree"` with `"from"` naming the link it builds on, so it starts from that commit without joining the chain.
 - **A worktree name does not carry across manifests.** The tree lives under the
   run's `resultsDir`, so a later manifest naming the same worktree gets a *new*
   tree — and its branch `swarm/<name>` already exists, which fails. To put a tree
@@ -314,9 +374,7 @@ Same subject, diverse lenses, JSON verdicts; the digest presents agreement and d
 
 ### Mixed topology — one manifest whose width changes more than once
 
-**Shapes compose. A manifest is a dependency graph, not one pattern stamped across
-every task** — ask each task "what must FINISH before this can start?" and the
-width falls out of the answers. A run may narrow to one task and widen again:
+A run may narrow to one task and widen again:
 
 ```json
 { "tasks": [
@@ -327,14 +385,19 @@ width falls out of the answers. A run may narrow to one task and widen again:
       "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Read {{resultPath:survey-a}} and {{resultPath:survey-b}}. Write the helper. Commit before you finish." },
 
-    { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper", "survey-a"], "isolation": "worktree",
+    { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper", "survey-a"],
+      "isolation": { "worktree": "migrate-x", "from": "helper" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…migrate every site in {{resultPath:survey-a}}. Commit before you finish." },
-    { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper", "survey-b"], "isolation": "worktree",
+    { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper", "survey-b"],
+      "isolation": { "worktree": "migrate-y", "from": "helper" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish." },
 
-    { "id": "cleanup", "model": "glm-5.2:cloud", "after": ["migrate-x", "migrate-y"],
+    { "id": "join", "after": ["migrate-x", "migrate-y"],
+      "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
+
+    { "id": "cleanup", "model": "glm-5.2:cloud", "after": ["join"],
       "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…delete the dead code, run the suite. Commit before you finish." }
   ] }
@@ -345,37 +408,25 @@ Width goes `2 → 1 → 2 → 1`. This validates today: `migrate-x` and `migrate
 them, while the `feat` group (`helper`, `cleanup`) stays totally ordered through
 them.
 
-- **Two tasks that share a prerequisite but not each other run in parallel.**
-  Answer the question against the *work*, not against the task above it in your
-  list. `migrate-x` and `migrate-y` both take `after: ["helper"]` — chaining one
-  behind the other because they are adjacent is the common mistake.
-- **Chain them only for a real collision** — same file, same region — and name
-  that file in the prompt. "They're adjacent in the plan" is not a collision.
-- **`{{result:}}` / `{{resultPath:}}` reach only a DIRECT dependency.** In a wide
-  graph the task you want is often a grandparent — `migrate-x` needs the survey,
-  but its `after` names only `helper`. Referencing it anyway fails validation
-  (*"references 'survey' which is not a declared dependency in after"*). Add the
-  upstream id to `after` as well: `"after": ["helper", "survey-a"]`. The extra
-  edge changes no ordering — `helper` already waits on the survey — it just
-  declares what the prompt reads.
-- **Private trees do not see each other's commits.** Each branches from the repo's
-  HEAD, so `migrate-x`/`migrate-y` will not contain `helper`'s commit, and
-  `cleanup` must merge `swarm/migrate-x` and `swarm/migrate-y` itself (they are
-  listed in `worktreesKept`). Only a *shared* worktree accumulates automatically.
+- **`{{result:}}` / `{{resultPath:}}` reach only a DIRECT dependency.** In a wide graph the
+  task you want is often a grandparent — `migrate-x` needs the survey, but its `after` names
+  only `helper`. Referencing it anyway fails validation; add the upstream id to `after` too
+  (`["helper", "survey-a"]`). The extra edge changes no ordering, it declares what the
+  prompt reads.
+- **A private tree branches from repo HEAD unless you say otherwise.** `"from": "<task id>"`
+  bases it on that task's branch instead, so the leaf starts with the code it depends on. The
+  named task must be a declared dependency and worktree-isolated — `validate` says so if not.
+- **Sibling trees do not see each other.** `migrate-x` and `migrate-y` each carry `helper`'s
+  work but not each other's. Fold them back with an **`integrate`** node — agentless like
+  `compute`, so it spends nothing — which merges each named task's branch into `into`:
+  `{ "id": "join", "after": ["migrate-x", "migrate-y"], "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } }`.
+  **A conflict is not a failure**: the merge stops with markers in the tree, the node stays
+  `ok`, and the conflicting paths land in its result — pass `{{result:join}}` to the next leaf
+  and tell it to resolve them. Without an integrate node that merge is the next leaf's job.
 
 ### Sweep-then-synthesize
 
-Fan-out plus an explicit synthesis leaf (use when synthesis needs richer instructions than the digest, or a Claude tier): sweep leaves with no `after`, then one task `after: [all sweeps]` reading `{{resultPath:…}}` for each.
-
-```json
-{ "tasks": [
-    { "id": "s1", "model": "minimax-m3:cloud", "prompt": "…closed question, cluster 1…" },
-    { "id": "s2", "model": "minimax-m3:cloud", "prompt": "…cluster 2…" },
-    { "id": "s3", "model": "minimax-m3:cloud", "prompt": "…cluster 3…" },
-    { "id": "synth", "model": "sonnet", "effort": "high", "after": ["s1", "s2", "s3"],
-      "prompt": "Read {{resultPath:s1}}, {{resultPath:s2}}, {{resultPath:s3}}. Reconcile conflicts and produce the migration checklist." }
-  ] }
-```
+Fan-out plus an explicit synthesis leaf — sweeps with no `after`, then one task `after: [all sweeps]` reading `{{resultPath:…}}` for each. Use when synthesis needs richer instructions than the digest, or a Claude tier. (The *Mixed topology* example above shows the shape.)
 
 ### Deterministic steps — find → dedupe → fan out → gate
 
