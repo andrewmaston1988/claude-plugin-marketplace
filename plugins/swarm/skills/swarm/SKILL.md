@@ -191,6 +191,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
                                                //   { "worktree": "feat" } — SHARED tree, phased chains, see Plan patterns
                                                //   optional "branch": names the branch explicitly (default swarm/<worktree>)
                                                //   optional "from": base this tree on that task's branch, not repo HEAD
+                                               //     (that task must WRITE — a read-only task owns no branch)
     "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 3600000,
@@ -332,7 +333,7 @@ next implementer through `{{result:}}`.
 - **The tree is collected once**, after the last link — so one entry in `worktreesKept`, with a diffstat spanning every phase.
 - **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix p2, re-run, and p3/p4 redo their work on the corrected base.
 - **`forEach` cannot share a worktree** — clones are concurrent by construction.
-- **A leaf that branches off the chain needs its OWN worktree.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their tree — sharing demands total ordering, which would force a false dependency. Give it `isolation: "worktree"` with `"from"` naming the link it builds on, so it starts from that commit without joining the chain.
+- **A leaf that branches off the chain needs its OWN worktree.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their tree — sharing demands total ordering, which would force a false dependency. Give it `isolation: "worktree"` with `"from"` naming the link it builds on — the last link that WRITES, never the reviewer between them — so it starts from that commit without joining the chain.
 - **A worktree name does not carry across manifests.** The tree lives under the
   run's `resultsDir`, so a later manifest naming the same worktree gets a *new*
   tree — and its branch `swarm/<name>` already exists, which fails. To put a tree
@@ -415,11 +416,28 @@ them.
   prompt reads.
 - **A private tree branches from repo HEAD unless you say otherwise.** `"from": "<task id>"`
   bases it on that task's branch instead, so the leaf starts with the code it depends on. The
-  named task must be a declared dependency and worktree-isolated — `validate` says so if not.
+  named task must be a declared dependency, worktree-isolated, and able to WRITE — `validate`
+  says so if not.
+- **`from` names a TASK that commits, not the STAGE this leaf follows.** Ordering is what
+  `after` expresses; `from` answers a narrower question — whose branch carries the code. In a
+  fan-out → review → fan-out shape those are different tasks by construction: the last task in
+  a stage is usually a reviewer, and a reviewer owns no branch, so `from` must reach *past* it
+  to the last writer. Pass the reviewer's findings as information instead:
+  `{ "after": ["review", "extract"], "isolation": { "worktree": "impl", "from": "extract" }, "prompt": "The reviewer reported: {{result:review}} …" }`.
+  `from` is where the CODE comes from; `{{result:X}}` is where the INFORMATION comes from.
+- **A task only owns a branch if it COMMITS.** A leaf that changes no files has its worktree
+  reaped, and `from` naming it fails at runtime with `cannot resolve base`. `validate` rejects
+  the provable case — a source with no write tools at all. It cannot catch a reviewer holding
+  `Bash` to run a test suite: that reads as write-capable but still commits nothing. Judge by
+  what the task DOES, not by its tool list. If a task exists to report rather than to change
+  code, it is never a `from` target — and a consolidator that only reads result files needs no
+  worktree at all.
 - **Sibling trees do not see each other.** `migrate-x` and `migrate-y` each carry `helper`'s
   work but not each other's. Fold them back with an **`integrate`** node — agentless like
   `compute`, so it spends nothing — which merges each named task's branch into `into`:
   `{ "id": "join", "after": ["migrate-x", "migrate-y"], "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } }`.
+  Every id in `from` must be a task that WRITES, for the same reason `isolation.from` must be:
+  a read-only task has no branch to merge.
   **A conflict is not a failure**: the merge stops with markers in the tree, the node stays
   `ok`, and the conflicting paths land in its result — pass `{{result:join}}` to the next leaf
   and tell it to resolve them. Without an integrate node that merge is the next leaf's job.

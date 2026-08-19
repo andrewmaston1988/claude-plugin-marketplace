@@ -479,9 +479,10 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
       }
     }
 
-    // isolation.from bases this tree on another task's branch — that task must be
-    // a declared dependency (so its branch exists by then) AND worktree-isolated
-    // (so it HAS a branch). Both are silent wrong-base bugs otherwise.
+    // isolation.from bases this tree on another task's branch — that task must be a
+    // declared dependency (so its branch exists by then), worktree-isolated, and able
+    // to WRITE: a read-only task commits nothing, so its worktree is reaped and the
+    // branch never exists. All three are silent wrong-base bugs otherwise.
     const isoFrom = t.isolation && typeof t.isolation === "object" && !Array.isArray(t.isolation)
       ? t.isolation.from : undefined;
     if (isoFrom !== undefined) {
@@ -500,6 +501,16 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
             `${l}: isolation.from '${isoFrom}' is a forEach task — its clones own the branches ` +
             `('${isoFrom}[0]', '${isoFrom}[1]', …) and '${isoFrom}' itself never gets one. ` +
             `Base on a single-tree task instead.`);
+        } else if (src && src.when !== undefined) {
+          errors.push(
+            `${l}: isolation.from '${isoFrom}' is when-gated — if its gate is false it is skipped ` +
+            `before its worktree exists, so the branch may never be created. Base on an ` +
+            `unconditional task, or move the gate onto this leaf too`);
+        } else if (src && !hasWriteTools(src.allowedTools || DEFAULT_TOOLS)) {
+          errors.push(
+            `${l}: isolation.from '${isoFrom}' has no write tools, so it commits nothing and its ` +
+            `branch will never exist — base from on the last task that WRITES, and pass ` +
+            `'${isoFrom}' findings to this leaf with {{result:${isoFrom}}} instead`);
         }
       }
     }
@@ -521,6 +532,16 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
               `${l}: integrate.from '${srcId}' is a forEach task — its clones own the branches ` +
               `('${srcId}[0]', '${srcId}[1]', …) and '${srcId}' itself never gets one. ` +
               `Merge a single-tree task instead.`);
+          } else if (src && src.when !== undefined) {
+            errors.push(
+              `${l}: integrate.from '${srcId}' is when-gated — if its gate is false it is skipped ` +
+              `before its worktree exists, so there may be no branch to merge. Merge an ` +
+              `unconditional task, or move the gate onto this node too`);
+          } else if (src && !hasWriteTools(src.allowedTools || DEFAULT_TOOLS)) {
+            errors.push(
+              `${l}: integrate.from '${srcId}' has no write tools, so it commits nothing and its ` +
+              `branch will never exist — merge the tasks that WRITE, and pass '${srcId}' findings ` +
+              `to a leaf with {{result:${srcId}}} instead`);
           }
         }
       }

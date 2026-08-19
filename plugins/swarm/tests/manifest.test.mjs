@@ -1159,12 +1159,39 @@ test("isolation.from must name a declared, worktree-isolated dependency", () => 
     ok(errorsOf(() => loadManifest(noTree, CFG, dir))
       .some((e) => /no worktree, so it has no branch/.test(e)));
 
+    const noWrite = writeManifest(dir, { tasks: [
+      claudeTask({ id: "review", allowedTools: "Read,Grep,Glob", isolation: { worktree: "brief" } }),
+      claudeTask({ id: "x", after: ["review"], isolation: { worktree: "x", from: "review" } }),
+    ] }, "nowrite.json");
+    ok(errorsOf(() => loadManifest(noWrite, CFG, dir))
+      .some((e) => /has no write tools, so it commits nothing/.test(e)),
+      "a read-only source commits nothing, so its branch never exists");
+
     const good = writeManifest(dir, { tasks: [
-      claudeTask({ id: "helper", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "helper", allowedTools: "Read,Edit", isolation: { worktree: "feat" } }),
       claudeTask({ id: "x", after: ["helper"], isolation: { worktree: "x", from: "helper" } }),
     ] }, "good.json");
     const plan = loadManifest(good, CFG, dir);
     equal(plan.tasks.find((t) => t.id === "x").from, "helper");
+
+    // A when-gated source may be skipped at runtime, and a skipped task never
+    // reaches prepareIsolation — so its branch is conditional, not guaranteed.
+    const gated = writeManifest(dir, { tasks: [
+      claudeTask({ id: "probe", prompt: "…return JSON" }),
+      claudeTask({ id: "helper", after: ["probe"], allowedTools: "Read,Edit",
+        when: { from: "probe", expr: "length(value) > 0" }, isolation: { worktree: "feat" } }),
+      claudeTask({ id: "x", after: ["helper"], isolation: { worktree: "x", from: "helper" } }),
+    ] }, "gated.json");
+    ok(errorsOf(() => loadManifest(gated, CFG, dir))
+      .some((e) => /is when-gated/.test(e)),
+      "a conditional source owns no branch when its gate is false");
+
+    // Bash-only commits via `git commit` — must not trip the write-tools check.
+    const bashOnly = writeManifest(dir, { tasks: [
+      claudeTask({ id: "helper", allowedTools: "Bash", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "x", after: ["helper"], isolation: { worktree: "x", from: "helper" } }),
+    ] }, "bashonly.json");
+    equal(loadManifest(bashOnly, CFG, dir).tasks.find((t) => t.id === "x").from, "helper");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -1193,9 +1220,17 @@ test("integrate node: agentless, validated, normalized onto its target worktree"
     ok(errorsOf(() => loadManifest(noTree, CFG, dir))
       .some((e) => /no worktree, so it has no branch to merge/.test(e)));
 
+    const noWriteSrc = writeManifest(dir, { tasks: [
+      claudeTask({ id: "x", allowedTools: "Read,Grep,Glob", isolation: "worktree" }),
+      { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] } },
+    ] }, "nowritesrc.json");
+    ok(errorsOf(() => loadManifest(noWriteSrc, CFG, dir))
+      .some((e) => /has no write tools, so it commits nothing/.test(e)),
+      "nothing to merge from a branch that never exists");
+
     const good = writeManifest(dir, { tasks: [
-      claudeTask({ id: "x", isolation: "worktree" }),
-      claudeTask({ id: "y", isolation: "worktree" }),
+      claudeTask({ id: "x", allowedTools: "Read,Edit", isolation: "worktree" }),
+      claudeTask({ id: "y", allowedTools: "Bash", isolation: "worktree" }),
       { id: "join", after: ["x", "y"], integrate: { into: "feat", from: ["x", "y"] } },
       claudeTask({ id: "next", after: ["join"], isolation: { worktree: "feat" } }),
     ] }, "good.json");
@@ -1226,7 +1261,7 @@ test("agentless nodes reject outputDir; from/integrate reject a forEach source",
 
     const fe = writeManifest(dir, { tasks: [
       claudeTask({ id: "src", prompt: "…return JSON list" }),
-      claudeTask({ id: "fan", after: ["src"], isolation: "worktree",
+      claudeTask({ id: "fan", after: ["src"], isolation: "worktree", allowedTools: "Read,Edit",
         forEach: { from: "src", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
       claudeTask({ id: "next", after: ["fan"], isolation: { worktree: "n", from: "fan" } }),
     ] }, "fe.json");
@@ -1235,11 +1270,22 @@ test("agentless nodes reject outputDir; from/integrate reject a forEach source",
 
     const fei = writeManifest(dir, { tasks: [
       claudeTask({ id: "src2", prompt: "…return JSON list" }),
-      claudeTask({ id: "fan2", after: ["src2"], isolation: "worktree",
+      claudeTask({ id: "fan2", after: ["src2"], isolation: "worktree", allowedTools: "Read,Edit",
         forEach: { from: "src2", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
       { id: "join2", after: ["fan2"], integrate: { into: "feat", from: ["fan2"] } },
     ] }, "fei.json");
     ok(errorsOf(() => loadManifest(fei, CFG, dir)).some((e) => /is a forEach task/.test(e)),
       "integrate.from rejects a forEach parent");
+
+    // A read-only forEach parent trips both rules; the forEach one is the more
+    // specific diagnosis, so it must be the one reported.
+    const feRo = writeManifest(dir, { tasks: [
+      claudeTask({ id: "src3", prompt: "…return JSON list" }),
+      claudeTask({ id: "fan3", after: ["src3"], isolation: "worktree", allowedTools: "Read,Grep",
+        forEach: { from: "src3", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
+      claudeTask({ id: "next3", after: ["fan3"], isolation: { worktree: "n3", from: "fan3" } }),
+    ] }, "fero.json");
+    ok(errorsOf(() => loadManifest(feRo, CFG, dir)).some((e) => /is a forEach task/.test(e)),
+      "forEach beats no-write-tools — the clones own branches, which is the real fix");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

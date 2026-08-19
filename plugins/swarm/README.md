@@ -146,9 +146,11 @@ Private trees branch from repo HEAD and never see each other's commits, so a fan
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…write the helper. Commit before you finish." },
 
     { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper"],
-      "isolation": { "worktree": "migrate-x", "from": "helper" }, "prompt": "…" },
+      "isolation": { "worktree": "migrate-x", "from": "helper" },
+      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…Commit before you finish." },
     { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper"],
-      "isolation": { "worktree": "migrate-y", "from": "helper" }, "prompt": "…" },
+      "isolation": { "worktree": "migrate-y", "from": "helper" },
+      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…Commit before you finish." },
 
     { "id": "join", "after": ["migrate-x", "migrate-y"],
       "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
@@ -181,7 +183,7 @@ Width goes `1 → 2 → 1`: `migrate-x` and `migrate-y` run concurrently in priv
 |---|---|
 | `worktree` | Every leaf naming this name meets in **one** tree on one branch, so an ordered chain accumulates: phase 1 commits, a read-only reviewer sees those commits, phase 2 builds on them. Links sharing a name must be totally ordered by `after`, and `forEach` cannot share a tree. |
 | `branch` | Names the branch explicitly instead of deriving it from the worktree name (default `swarm/<worktree>`) — for continuing work onto a branch that already exists. |
-| `from` | Bases this tree on **that task's branch tip** instead of repo HEAD, so the leaf starts holding the code it builds on. The named task must be a declared dependency and worktree-isolated; a `forEach` parent is rejected, since its clones own the branches. |
+| `from` | Bases this tree on **that task's branch tip** instead of repo HEAD, so the leaf starts holding the code it builds on. The named task must be a declared dependency, worktree-isolated, and able to WRITE (a read-only task commits nothing, so it owns no branch); a `forEach` parent is rejected, since its clones own the branches. |
 
 `worktreesKept` in `summary.json` carries one entry per shared group — `{ id, name, branch, path, diffstat, taskIds }`, its diffstat spanning every phase — not one per task. A branch carrying commits not yet landed (compared by patch, so squash-merges count as landed) is never deleted or force-reset; the engine refuses rather than lose it.
 
