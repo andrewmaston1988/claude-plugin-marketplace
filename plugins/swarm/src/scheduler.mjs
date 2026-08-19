@@ -432,6 +432,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // plans — resolveWorktreeName covers both rather than silently skipping isolation.
   const nameOf = resolveWorktreeName;
 
+  // The branch a task id resolves to, for `isolation.from` and `integrate.from`.
+  // Both ask the same question, so both ask it here — the id may name a task
+  // whose worktree name differs from it, or (defensively) no task at all.
+  const branchOf = (srcId) => {
+    const src = tasks.find((o) => o.id === srcId);
+    return worktree.branchNameFor(
+      src ? { ...src, worktreeName: nameOf(src) ?? src.id } : { id: srcId }, cfg);
+  };
+
   const groupMembers = new Map();   // name -> [task ids, in manifest order]
   const groupFinal = new Map();
   const groupFirst = new Map();
@@ -676,12 +685,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     const t0 = io.now();
     let result;
     try {
-      const byId = new Map(tasks.map((o) => [o.id, o]));
-      const sources = task.integrate.from.map((srcId) => {
-        const src = byId.get(srcId);
-        return worktree.branchNameFor(
-          src ? { ...src, worktreeName: nameOf(src) ?? src.id } : { id: srcId }, cfg);
-      });
+      const sources = task.integrate.from.map(branchOf);
       const out = worktree.integrate(
         { ...task, worktreeName: task.integrate.into, sources }, cfg, plan.resultsDir,
         { repo: task.originalCwd || plan.cwd });
@@ -865,12 +869,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         try {
           // `from` names a task; base this tree on THAT task's branch, derived
           // the same way its own isolation did (explicit branch, else prefix+name).
-          let baseRef;
-          if (task.from) {
-            const src = tasks.find((o) => o.id === task.from);
-            baseRef = worktree.branchNameFor(
-              src ? { ...src, worktreeName: nameOf(src) ?? src.id } : { id: task.from }, cfg);
-          }
+          const baseRef = task.from ? branchOf(task.from) : undefined;
           wt = worktree.prepareIsolation({ ...task, worktreeName: wtName, baseRef }, cfg, plan.resultsDir, {
             reset: force && groupFirst.get(wtName) === task.id,
           });
