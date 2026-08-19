@@ -87,7 +87,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     const unlanded = unlandedCount(head.stdout, branch, repo);
     if (unlanded > 0 && !reset) {
       throw new Error(
-        `worktree branch '${branch}' carries ${unlanded} unlanded commit(s) — refusing to reset it ` +
+        `worktree branch '${branch}' carries ${unlanded === Infinity ? "an unknown number of" : unlanded} unlanded commit(s) — refusing to reset it ` +
         `for task '${task.id}'. That work came from an earlier run and would be lost.\n` +
         `    inspect:  git log ${branch}\n` +
         `    reuse it: name a different worktree, merge/delete '${branch}' yourself, or re-run with --force`);

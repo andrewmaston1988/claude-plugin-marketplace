@@ -7,7 +7,7 @@ import {
   buildDigestTask, DIGEST_ID,
   reportPath as digestReportPath, scratchPath as digestScratchPath,
 } from "./digest.mjs";
-import { effectivePlanDoc, resolveWorktreeName } from "./manifest.mjs";
+import { effectivePlanDoc, resolveWorktreeName, makeReaches } from "./manifest.mjs";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
@@ -452,14 +452,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     // edge, picks the FIRST task as the collector, and sweeps the tree before
     // the last member has run — silently dropping its work. This mirrors
     // validateWorktreeGroups, which already permits such a topology.
-    const byId = new Map(tasks.map((t) => [t.id, t]));
-    const reaches = (fromId, toId, seen = new Set()) => {
-      if (fromId === toId) return true;
-      if (seen.has(fromId)) return false;
-      seen.add(fromId);
-      const after = byId.get(fromId)?.after;
-      return Array.isArray(after) && after.some((a) => reaches(a, toId, seen));
-    };
+    const reaches = makeReaches(tasks);
     for (const [name, ids] of groupMembers) {
       groupFinal.set(name, ids.find((id) => !ids.some((o) => o !== id && reaches(o, id))) ?? ids[ids.length - 1]);
       groupFirst.set(name, ids.find((id) => !ids.some((o) => o !== id && reaches(id, o))) ?? ids[0]);

@@ -276,6 +276,22 @@ export function resolveWorktreeName(t) {
 
 // Tasks sharing a worktree run in ONE directory, so they must form a single
 // ordered chain — two unordered members would race and corrupt each other.
+// Transitive `after` reachability over a task list. Exported because the
+// scheduler must group worktrees by the SAME edges validation accepted them on —
+// two copies of this walk is how the two drift into disagreeing about which task
+// collects a tree.
+export function makeReaches(tasks) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const reaches = (fromId, toId, seen = new Set()) => {
+    if (fromId === toId) return true;
+    if (seen.has(fromId)) return false;
+    seen.add(fromId);
+    const after = byId.get(fromId)?.after;
+    return Array.isArray(after) && after.some((a) => reaches(a, toId, seen));
+  };
+  return reaches;
+}
+
 function validateWorktreeGroups(rawTasks, errors, label) {
   const groups = new Map();
   for (const t of rawTasks) {
@@ -286,14 +302,7 @@ function validateWorktreeGroups(rawTasks, errors, label) {
   }
 
   // Reachability over `after`, the same edges detectCycle walks.
-  const byId = new Map(rawTasks.map((t) => [t.id, t]));
-  const reaches = (fromId, toId, seen = new Set()) => {
-    if (fromId === toId) return true;
-    if (seen.has(fromId)) return false;
-    seen.add(fromId);
-    const after = byId.get(fromId)?.after;
-    return Array.isArray(after) && after.some((a) => reaches(a, toId, seen));
-  };
+  const reaches = makeReaches(rawTasks);
 
   for (const [name, members] of groups) {
     const shared = members.filter((t) => typeof t.isolation === "object" && t.isolation !== null);
