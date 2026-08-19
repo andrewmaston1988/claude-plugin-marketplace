@@ -16,7 +16,7 @@ Context heavy → nudge → `/checkpoint` → start a fresh session → SessionS
 
 ## STATE.md location
 
-`~/.claude/projects/<encoded-cwd>/STATE_<slug>_<sessionId>_<YYYYMMDDTHHMMSSZ>.md` (cwd with `\`, `/`, `:` rewritten to `-`; slug = short kebab-case task descriptor so files are recognisable when browsing — PreCompact skeletons omit it). One file per session, UTC-stamped — multiple sessions sharing a cwd no longer clobber each other. SessionStart offers the **most recent** `STATE_*` file as the resume candidate. Override with `CLAUDE_STATE_PATH`.
+`~/.claude/projects/<encoded-cwd>/STATE_<slug>_<sessionId>_<YYYYMMDDTHHMMSSZ>.md` (cwd with `\`, `/`, `:` rewritten to `-`; slug = short kebab-case task descriptor so files are recognisable when browsing — PreCompact skeletons omit it). One file per session, UTC-stamped — multiple sessions sharing a cwd no longer clobber each other. SessionStart offers the **most recent** `STATE_*` file as the resume candidate. Override with `CLAUDE_STATE_PATH`. A sibling `<slug>_<sessionId>-docs/` dir (lazily created by the skill, named via `docsDirForStatePath`) holds substantial write-ups, linked from STATE.md as `path — one-line hook`.
 
 ## Cache keepalive (opt-in)
 
