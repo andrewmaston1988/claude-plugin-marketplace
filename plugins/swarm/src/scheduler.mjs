@@ -7,7 +7,7 @@ import {
   buildDigestTask, DIGEST_ID,
   reportPath as digestReportPath, scratchPath as digestScratchPath,
 } from "./digest.mjs";
-import { effectivePlanDoc, resolveWorktreeName, makeReaches } from "./manifest.mjs";
+import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from "./manifest.mjs";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
@@ -325,7 +325,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // Preflights must see composed leaves too — a manifest node's children are
   // known statically even though they splice in at run time.
   const leafView = tasks.flatMap((t) => (t.childPlan ? t.childPlan.tasks : [t]));
-  if (leafView.some((t) => !t.compute && !t.integrate && t.model !== "manifest" && !isClaudeModel(t.model))) {
+  if (leafView.some((t) => !isAgentless(t) && t.model !== "manifest" && !isClaudeModel(t.model))) {
     try {
       await io.fetch(cfg.provider.url);
     } catch (e) {
@@ -341,7 +341,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // classification is the backstop). Exhausted quota with undefended Claude
   // leaves aborts BEFORE dispatch — a run that would deterministically fail
   // should fail in one second with the reset time, not after four minutes.
-  const claudeTasks = leafView.filter((t) => !t.compute && !t.integrate && isClaudeModel(t.model));
+  const claudeTasks = leafView.filter((t) => !isAgentless(t) && isClaudeModel(t.model));
   if (claudeTasks.length && cfg.quotaPreflight !== false) {
     const env = io.env || process.env;
     const q = await checkQuota({
@@ -1000,7 +1000,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         if (st === "quota") {
           const family = isClaudeModel(task.model);
           for (const t of tasks) {
-            if (!t.compute && !t.integrate && state.get(t.id) === "pending" && isClaudeModel(t.model) === family && !t.fallbackModel) {
+            if (!isAgentless(t) && state.get(t.id) === "pending" && isClaudeModel(t.model) === family && !t.fallbackModel) {
               record(t, "quota");
             }
           }
@@ -1024,9 +1024,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       costIsRealComplete &&= r.costUsd != null && realKey;
       if (cfg.costWarn !== false && !costWarnFired) {
         const remaining = tasks.reduce((n, t) => {
-          if (t.compute || t.integrate || t.aggregate || t.aggregateManifest || !ALIVE_STATES.has(state.get(t.id))) return n;
+          if (isAgentless(t) || t.aggregate || t.aggregateManifest || !ALIVE_STATES.has(state.get(t.id))) return n;
           const mult = t.forEach ? t.forEach.maxItems : 1;
-          if (t.childPlan) return n + mult * t.childPlan.tasks.filter((c) => c.compute === undefined && c.integrate === undefined).length;
+          if (t.childPlan) return n + mult * t.childPlan.tasks.filter((c) => !isAgentless(c)).length;
           return n + mult;
         }, 0);
         const useUsd = costIsRealComplete && spentUsd > 0;

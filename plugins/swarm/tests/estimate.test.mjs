@@ -3,7 +3,7 @@ import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { median, loadCorpus, estimateRun, projectRun, formatEstimate } from "../src/estimate.mjs";
+import { median, loadCorpus, estimateRun, projectRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
 
 // Estimates are consent infrastructure: worst-case leaf counts × historical
 // per-model medians, labelled ~, never a guess on cold start.
@@ -185,4 +185,22 @@ test("estimateRun: manifest nodes count child leaves × maxItems per model; chil
   ];
   const est = estimateRun(tasks, undefined, corpusOf({ haiku: [100], "glm-5.2:cloud": [200] }));
   equal(est.tokens, 100 + 3 * 200 + 3 * 100); // seed + 3×scan + 3×sum
+});
+
+test("agentless nodes are counted the same whether they carry the key or only the sentinel", () => {
+  // estimate.mjs and the scheduler's cost projection each asked this question
+  // their own way: one tested key-or-sentinel, the other key-only. A hand-built
+  // plan (runPlan takes one directly) with model:"compute" and no compute key
+  // was skipped by one and counted as a real leaf by the other.
+  const withKey = [{ id: "a", model: "haiku" }, { id: "c", compute: "x", model: "compute" }];
+  const sentinelOnly = [{ id: "a", model: "haiku" }, { id: "c", model: "compute" }];
+  const keyOnly = [{ id: "a", model: "haiku" }, { id: "c", compute: "x" }];
+  for (const [label, tasks] of [["key+sentinel", withKey], ["sentinel only", sentinelOnly], ["key only", keyOnly]]) {
+    const counts = leafCounts(tasks, null);
+    equal(counts.get("haiku"), 1, `${label}: the real leaf counts`);
+    equal(counts.get("compute"), undefined, `${label}: the agentless node must never be counted`);
+  }
+
+  const ints = [{ id: "a", model: "haiku" }, { id: "j", integrate: { into: "f", from: ["a"] } }];
+  equal(leafCounts(ints, null).get("integrate"), undefined, "integrate is agentless too");
 });

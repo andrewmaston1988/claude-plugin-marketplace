@@ -276,6 +276,17 @@ export function resolveWorktreeName(t) {
 
 // Tasks sharing a worktree run in ONE directory, so they must form a single
 // ordered chain — two unordered members would race and corrupt each other.
+// The kinds that run in the engine and spawn no leaf. `model` carries a display
+// sentinel for a normalized task, but a hand-built plan (tests, runPlan callers)
+// may set only the key — so both are checked, in ONE place. Every site that asks
+// "does this spend a model call?" must route here: the sites disagreeing is how a
+// node gets counted as a leaf in one place and skipped in another, and how a new
+// kind gets a dispatch branch everywhere but one.
+const AGENTLESS = ["compute", "integrate"];
+export function isAgentless(t) {
+  return AGENTLESS.some((k) => t?.[k] !== undefined || t?.model === k);
+}
+
 // Transitive `after` reachability over a task list. Exported because the
 // scheduler must group worktrees by the SAME edges validation accepted them on —
 // two copies of this walk is how the two drift into disagreeing about which task

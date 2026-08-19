@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { tokenTotal } from "./stream.mjs";
 import { formatTokens } from "./results.mjs";
 import { isClaudeModel } from "./models.mjs";
+import { isAgentless } from "./manifest.mjs";
 
 export function median(nums) {
   const s = [...nums].sort((a, b) => a - b);
@@ -36,7 +37,7 @@ export function loadCorpus(runsRoot) {
       let summary;
       try { summary = JSON.parse(readFileSync(join(runsRoot, a, b, "summary.json"), "utf8")); } catch { continue; }
       for (const row of summary?.tasks || []) {
-        if (row?.state !== "ok" || typeof row.model !== "string" || row.model === "compute" || row.model === "integrate" || !row.tokens) continue;
+        if (row?.state !== "ok" || typeof row.model !== "string" || isAgentless(row) || !row.tokens) continue;
         push(tokens, row.model, tokenTotal(row.tokens));
         // costUsd is real only for Anthropic-billed leaves. On a :cloud row the CLI
         // applies its own price table to token counts, but the provider bills on
@@ -59,13 +60,11 @@ export function leafCounts(tasks, digest) {
   const counts = new Map();
   const add = (model, n) => counts.set(model, (counts.get(model) || 0) + n);
   for (const t of tasks) {
-    if (t.compute !== undefined || t.model === "compute") continue;
-    if (t.integrate !== undefined || t.model === "integrate") continue;
+    if (isAgentless(t)) continue;
     const mult = t.forEach ? t.forEach.maxItems : 1;
     if (t.childPlan) {
       for (const c of t.childPlan.tasks) {
-        if (c.compute !== undefined || c.model === "compute") continue;
-        if (c.integrate !== undefined || c.model === "integrate") continue;
+        if (isAgentless(c)) continue;
         add(c.model, mult * (c.forEach ? c.forEach.maxItems : 1));
       }
       continue;
