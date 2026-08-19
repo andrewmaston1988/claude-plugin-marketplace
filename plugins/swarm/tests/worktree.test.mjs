@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, readFileSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { prepareIsolation, collect } from "../src/worktree.mjs";
+import { prepareIsolation, collect, integrate } from "../src/worktree.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 
@@ -589,4 +589,100 @@ test("a squash-merged branch no longer blocks reuse; --force overrides an unland
       ok(existsSync(reused.path), "a squash-merged branch is reusable");
     } finally { cleanup(after); }
   } finally { cleanup(repo, results); }
+});
+
+test("integrate merges sibling branches into the target tree", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-int-"));
+  try {
+    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    writeFileSync(join(base.path, "helper.txt"), "helper\n");
+    commitAll(base.path, "helper");
+
+    for (const id of ["x", "y"]) {
+      const wt = prepareIsolation(
+        { id, originalCwd: repo, worktreeName: id, baseRef: "swarm/feat" }, CFG, results);
+      writeFileSync(join(wt.path, `${id}.txt`), `${id} work\n`);
+      commitAll(wt.path, `${id} work`);
+    }
+
+    const out = integrate(
+      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo });
+
+    equal(out.conflicts.length, 0, "disjoint files merge cleanly");
+    ok(existsSync(join(out.path, "x.txt")) && existsSync(join(out.path, "y.txt")),
+      "both siblings' work is present in the target tree");
+  } finally { cleanup(repo, results); }
+});
+
+test("integrate leaves conflict markers in place and reports the paths", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-int2-"));
+  try {
+    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results);
+    writeFileSync(join(base.path, "shared.txt"), "original\n");
+    commitAll(base.path, "base");
+
+    for (const [id, text] of [["x", "x version\n"], ["y", "y version\n"]]) {
+      const wt = prepareIsolation(
+        { id, originalCwd: repo, worktreeName: id, baseRef: "swarm/feat" }, CFG, results);
+      writeFileSync(join(wt.path, "shared.txt"), text);
+      commitAll(wt.path, `${id} edits shared`);
+    }
+
+    const out = integrate(
+      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo });
+
+    deepEqual(out.conflicts, ["shared.txt"], "the conflicting path is reported");
+    const body = readFileSync(join(out.path, "shared.txt"), "utf8");
+    ok(body.includes("<<<<<<<") && body.includes(">>>>>>>"),
+      "conflict markers are left for the next leaf to resolve");
+    ok(out.merged.includes("swarm/x"), "the clean merge before the conflict still landed");
+  } finally { cleanup(repo, results); }
+});
+
+test("scheduler integration: an integrate node merges sibling branches into the target tree", async () => {
+  const repo = initRepo();
+  const dir = mkdtempSync(join(tmpdir(), "swarm-wt-intsched-"));
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      if (cwd.endsWith("wt-feat")) {
+        writeFileSync(join(cwd, "helper.txt"), "helper\n");
+        commitAll(cwd, "helper");
+      } else if (cwd.endsWith("wt-mx")) {
+        writeFileSync(join(cwd, "mx.txt"), "x work\n");
+        commitAll(cwd, "mx");
+      } else if (cwd.endsWith("wt-my")) {
+        writeFileSync(join(cwd, "my.txt"), "y work\n");
+        commitAll(cwd, "my");
+      }
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const leaf = (id, over) => ({
+      id, prompt: "p", model: "haiku", allowedTools: "Read,Edit,Bash",
+      cwd: repo, originalCwd: repo, timeoutMs: 5000, after: [], ...over,
+    });
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        leaf("helper", { isolation: { worktree: "feat" }, worktreeName: "feat" }),
+        leaf("mx", { after: ["helper"], isolation: { worktree: "mx", from: "helper" }, worktreeName: "mx", from: "helper" }),
+        leaf("my", { after: ["helper"], isolation: { worktree: "my", from: "helper" }, worktreeName: "my", from: "helper" }),
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["mx", "my"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["mx", "my"] } },
+      ],
+    };
+    await runPlan(p, CFG, io);
+
+    const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
+    equal(res.ok, true, "the node completes ok");
+    deepEqual(res.outputJson.merged, ["swarm/mx", "swarm/my"], "task ids resolved to branch names");
+    deepEqual(res.outputJson.conflicts, [], "disjoint files merged cleanly");
+    const tree = join(p.resultsDir, "wt-feat");
+    ok(existsSync(join(tree, "mx.txt")) && existsSync(join(tree, "my.txt")),
+      "both siblings' work landed in the target tree");
+  } finally { cleanup(repo, dir); }
 });

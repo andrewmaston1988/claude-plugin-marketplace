@@ -149,3 +149,38 @@ export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
     diffstat: diffstat.stdout,
   };
 }
+
+// Fold sibling branches into one tree so a later leaf can carry on from the
+// combined state. Deliberately NOT atomic: a conflicted merge is left in the
+// tree with its markers, because the next link is a model that can read them
+// and resolve. Failing the node instead would turn an ordinary conflict — the
+// thing merges do — into a dead run needing operator rescue.
+//
+// The node owns the target tree: it creates it (or re-enters a kept one) rather
+// than borrowing a tree a leaf is using, so nothing races.
+export function integrate(task, cfg, resultsDir, { repo: repoOverride } = {}) {
+  const repo = repoOverride || task.originalCwd || task.cwd;
+  const wt = prepareIsolation({ ...task, originalCwd: repo }, cfg, resultsDir);
+
+  const merged = [];
+  const conflicts = [];
+  for (const src of task.sources || []) {
+    const m = git(["merge", "--no-edit", src], wt.path);
+    if (m.status === 0) { merged.push(src); continue; }
+    // Conflicted: keep the markers, record the paths, move on. `git merge` has
+    // already staged what it could and left the rest marked.
+    const conflicted = git(["diff", "--name-only", "--diff-filter=U"], wt.path);
+    const paths = conflicted.stdout
+      ? conflicted.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean) : [];
+    if (!paths.length) {
+      // Failed for a reason other than content conflict (missing ref, unrelated
+      // histories) — surface it rather than pretending it merged.
+      git(["merge", "--abort"], wt.path);
+      throw new Error(`integrate '${task.id}': cannot merge ${src}: ${m.stderr || m.stdout}`);
+    }
+    for (const p of paths) if (!conflicts.includes(p)) conflicts.push(p);
+    merged.push(src);
+  }
+
+  return { path: wt.path, branch: wt.branch, name: wt.name, repo, merged, conflicts };
+}
