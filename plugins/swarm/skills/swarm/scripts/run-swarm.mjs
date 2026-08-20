@@ -55,20 +55,53 @@ export function inlineEstimate({ totalLines = 0, comparable = true } = {}) {
 // ── Liveness ──────────────────────────────────────────────────────────────────
 
 // ONE check, immediately after dispatch. A bare re-run of an already-complete
-// manifest replays cache and exits in seconds; a session that skipped this
-// announced "Round 3 is running" when nothing was.
-export function livenessVerdict({ states = [], skipped = 0, total = 0 } = {}) {
+// manifest replays cache and exits in seconds, which is not a live run.
+//
+// Health comes from what the engine RAISES — quiet leaves and state tags — never
+// from token magnitude, which is an accounting artefact on :cloud (no prompt-cache
+// buckets, so every turn re-sends the transcript as fresh input).
+const ATTENTION = ["failed", "rate-limited", "quota", "blocked"];
+
+// The count is worth showing — agents should be able to read it. What fails is
+// reading MAGNITUDE as health, so the number always arrives with the arithmetic
+// that explains it. `anomalous` is deliberately never set from size: a runaway
+// surfaces through timeoutMs or the citation check, not through a big number.
+export function tokenNote({ input = 0, output = 0, cloud = true } = {}) {
+  const m = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : `${Math.round(n / 1000)}k`);
+  if (!cloud) {
+    return {
+      anomalous: false,
+      text: `${m(input)} in / ${m(output)} out — a Claude leaf parks its re-sent prefix in cacheRead, which is excluded, so this is not comparable to a :cloud count`,
+    };
+  }
+  const ratio = output > 0 ? Math.round(input / output) : null;
+  return {
+    anomalous: false,
+    text:
+      `${m(input)} in / ${m(output)} out` +
+      (ratio ? ` (${ratio}x)` : "") +
+      ` — output is the work; input is the transcript re-sent once per turn, ` +
+      `uncached on :cloud. A 100-180x ratio is normal for a working agent.`,
+  };
+}
+
+export function livenessVerdict({ states = [], skipped = 0, total = 0, quiet = [] } = {}) {
+  const attention = ATTENTION.filter((s) => states.includes(s));
   const live = states.includes("running") || states.includes("retrying");
-  if (live) return { live: true, cacheReplay: false, reason: "at least one leaf is running" };
+  if (live) {
+    return { live: true, cacheReplay: false, attention, quiet, reason: "at least one leaf is running" };
+  }
   const allSkipped = total > 0 && skipped === total;
   if (allSkipped) {
     return {
       live: false,
       cacheReplay: true,
+      attention,
+      quiet,
       reason: `cache replay — ${skipped}/${total} [skipped], nothing re-executed`,
     };
   }
-  return { live: false, cacheReplay: false, reason: "no leaf is running" };
+  return { live: false, cacheReplay: false, attention, quiet, reason: "no leaf is running" };
 }
 
 // ── Failure routing ───────────────────────────────────────────────────────────
@@ -134,12 +167,43 @@ export function leafStates(events) {
 }
 
 // The roster the liveness check needs, derived from the log.
-export function rosterFrom(resultsDir) {
+export function rosterFrom(resultsDir, { now = Date.now(), quietMs = 60000 } = {}) {
   const events = readRunLog(resultsDir);
   const byId = leafStates(events);
   const states = [...byId.values()];
   const skipped = states.filter((v) => v === "skipped").length;
-  return { states, skipped, total: states.length, byId };
+
+  // A running leaf that has emitted nothing for longer than the threshold is the
+  // real stall indicator; the engine renders the same thing as `quiet <N>s`.
+  const lastSeen = new Map();
+  for (const e of events) {
+    if (e && e.id && e.ts) lastSeen.set(e.id, Date.parse(e.ts));
+  }
+  const quiet = [];
+  for (const [id, state] of byId) {
+    if (state !== "running" && state !== "retrying") continue;
+    const t = lastSeen.get(id);
+    if (t && now - t > quietMs) quiet.push({ id, secs: Math.round((now - t) / 1000) });
+  }
+
+  // Live usage ticks: { ts, id, event: "tokens", tokens }. Last tick wins.
+  const tokens = new Map();
+  for (const e of events) {
+    if (e && e.id && e.event === "tokens" && e.tokens) tokens.set(e.id, e.tokens);
+  }
+  return { states, skipped, total: states.length, byId, quiet, tokens };
+}
+
+// Render each leaf's usage with the arithmetic that makes it readable, so the
+// number informs rather than alarms.
+function tokenLines(roster) {
+  const out = [];
+  for (const [id, t] of roster.tokens ?? []) {
+    const input = (t.input ?? 0) + (t.cacheCreation ?? 0);
+    const note = tokenNote({ input, output: t.output ?? 0, cloud: t.cloud !== false });
+    out.push(`  ${id}: ${note.text}`);
+  }
+  return out;
 }
 
 // ── Progress state ────────────────────────────────────────────────────────────
@@ -297,6 +361,14 @@ async function main() {
         `liveness: ${v.live ? "LIVE" : "NOT LIVE"}`,
         `  ${v.reason}`,
         `  leaves: ${roster.total}` + (roster.skipped ? ` (${roster.skipped} skipped)` : ""),
+        ...(v.attention.length ? [`  needs attention: ${v.attention.join(", ")}`] : []),
+        ...(v.quiet.length
+          ? v.quiet.map((q) => `  quiet: ${q.id} — no event for ${q.secs}s`)
+          : []),
+        ...tokenLines(roster),
+        ...(v.live && !v.attention.length && !v.quiet.length
+          ? ["  nothing to act on"]
+          : []),
         "",
         v.cacheReplay
           ? "This run replayed cache — NOTHING RE-EXECUTED. Do not report it as running."

@@ -18,6 +18,7 @@ import {
   leafStates,
   rosterFrom,
   readRunLog,
+  tokenNote,
 } from "./run-swarm.mjs";
 
 // ── Exit-mode contract ───────────────────────────────────────────────────────
@@ -288,4 +289,77 @@ test("execution-strategy.md carries the procedure the gate presumes", async () =
 test("strategy is recorded like a gate answer — presence, not truthiness", () => {
   const meta = recordGate({}, "strategy", "");
   ok("strategy" in meta, "an empty confirmation is still a confirmation");
+});
+
+// ── The verdict names the real signals, never raw magnitude ──────────────────
+// Token counts on a :cloud leaf are an accounting artefact, and every recorded
+// interference began with reading one as a health signal. The driver reports
+// what the engine actually raises — quiet leaves and state tags — so there is no
+// magnitude to misread.
+
+test("livenessVerdict: surfaces quiet leaves, which ARE the stall signal", () => {
+  const v = livenessVerdict({
+    states: ["running", "running"],
+    quiet: [{ id: "scan-a", secs: 90 }],
+  });
+  equal(v.live, true);
+  deepEqual(v.quiet, [{ id: "scan-a", secs: 90 }]);
+});
+
+test("livenessVerdict: surfaces failure states by name", () => {
+  const v = livenessVerdict({ states: ["running", "failed", "quota"] });
+  deepEqual(v.attention.sort(), ["failed", "quota"]);
+});
+
+test("livenessVerdict: a healthy run reports nothing to act on", () => {
+  const v = livenessVerdict({ states: ["running", "ok"] });
+  deepEqual(v.attention, []);
+  deepEqual(v.quiet, []);
+});
+
+// Agents need the number — the failure was reading MAGNITUDE as health. So the
+// driver reports it with its interpretation attached: a :cloud leaf has no
+// prompt-cache buckets, so every turn re-sends the transcript as fresh input and
+// a 100-180x input/output ratio is the ordinary signature of a working agent.
+test("tokenNote: a huge :cloud count with a working ratio reads as normal", () => {
+  const n = tokenNote({ input: 21_000_000, output: 116_000, cloud: true });
+  equal(n.anomalous, false);
+  match(n.text, /180x|1[0-9][0-9]x/);
+  match(n.text, /normal/i);
+});
+
+test("tokenNote: output is the work, input is the transcript re-sent", () => {
+  const n = tokenNote({ input: 21_000_000, output: 116_000, cloud: true });
+  match(n.text, /output/);
+});
+
+test("tokenNote: a Claude leaf's counts are not comparable to a :cloud leaf's", () => {
+  const n = tokenNote({ input: 50_000, output: 10_000, cloud: false });
+  match(n.text, /cacheRead|not comparable|Claude/i);
+});
+
+test("tokenNote: never calls a leaf sick from magnitude alone ★", () => {
+  for (const input of [1e6, 5e6, 21e6, 50e6]) {
+    equal(tokenNote({ input, output: input / 150, cloud: true }).anomalous, false);
+  }
+});
+
+test("rosterFrom: a token tick is proof of life, so it clears quiet ★", async () => {
+  const { mkdtempSync, writeFileSync: wf } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join: j } = await import("node:path");
+  const dir = mkdtempSync(j(tmpdir(), "swarm-quiet-"));
+  const old = new Date(Date.now() - 120000).toISOString();
+  const now = new Date().toISOString();
+  wf(
+    j(dir, "run.log"),
+    [
+      JSON.stringify({ ts: old, id: "a", state: "running" }),
+      JSON.stringify({ ts: old, id: "b", state: "running" }),
+      // `a` is still emitting usage; `b` has said nothing for two minutes.
+      JSON.stringify({ ts: now, id: "a", event: "tokens", tokens: { input: 9e6, output: 5e4 } }),
+    ].join("\n"),
+  );
+  const r = rosterFrom(dir);
+  deepEqual(r.quiet.map((q) => q.id), ["b"]);
 });
