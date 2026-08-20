@@ -66,6 +66,16 @@ export function recordValidation(meta = {}, { ok, estimate = null, file = null }
 
 // The gate verdict: passes ONLY when a successful validation is recorded. Returns
 // the estimate line so the offer gate can quote the real number.
+// The gates chain backwards: each precondition is only reachable once every prior
+// one is satisfied. read-strategy -> strategy -> validate -> offer. A later gate's
+// input (a --validate-output) must be IGNORED until the earlier gates are answered,
+// so a session cannot bank validation before it has read the strategy and placed
+// the shape. `priorGatesMet` is that predicate.
+export const GATE_CHAIN = ["read-strategy", "strategy"];
+export function priorGatesMet(meta = {}) {
+  return GATE_CHAIN.every((k) => k in meta);
+}
+
 export function validateGate({ meta = {} } = {}) {
   const v = meta.validate;
   if (!v || !v.ok) {
@@ -338,8 +348,13 @@ async function main() {
   // the driver records a REAL validation (ok + the estimate line) rather than
   // trusting a hand-computed number. Presence of a passing validation is what
   // unlocks the offer gate below.
+  // Chain guard: a --validate-output only counts once the PRIOR gates are met
+  // (read-strategy, strategy). Otherwise a session banks validation on the first
+  // call and satisfies the validate gate before ever reading the strategy or
+  // placing the shape. Ignored-until-earlier-gates-answered is what makes the
+  // chain strict; the read/strategy pauses below then fire in order.
   const validateOut = getFlag("validate-output", argv);
-  if (validateOut !== undefined) {
+  if (validateOut !== undefined && priorGatesMet(meta)) {
     const text = existsSync(validateOut) ? readFileSync(validateOut, "utf8") : validateOut;
     const parsed = parseValidateOutput(text);
     meta = recordValidation(meta, { ...parsed, file: getFlag("manifest-file", argv) || manifest });

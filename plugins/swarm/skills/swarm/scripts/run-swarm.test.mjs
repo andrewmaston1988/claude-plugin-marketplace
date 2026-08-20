@@ -20,6 +20,7 @@ import {
   readRunLog,
   tokenNote,
   validateGate,
+  priorGatesMet,
   recordValidation,
   parseValidateOutput,
 } from "./run-swarm.mjs";
@@ -441,4 +442,16 @@ test("parseValidateOutput: pulls the estimate line and OK from engine stdout", (
 test("parseValidateOutput: no 'manifest OK' line means not ok", () => {
   const r = parseValidateOutput("manifest validation failed:\n  - task 'a': bad");
   equal(r.ok, false);
+});
+
+// ── The gates chain backwards ────────────────────────────────────────────────
+// validate must be unreachable until strategy is answered, which is unreachable
+// until read-strategy is. Otherwise a session banks a --validate-output on the
+// first call and satisfies the validate gate before ever reading the strategy.
+
+test("priorGatesMet: false until BOTH read-strategy and strategy are recorded", () => {
+  ok(!priorGatesMet({}), "empty meta");
+  ok(!priorGatesMet({ "read-strategy": "done" }), "read alone is not enough");
+  ok(!priorGatesMet({ strategy: "done" }), "strategy alone is not enough");
+  ok(priorGatesMet({ "read-strategy": "done", strategy: "done" }), "both present");
 });
