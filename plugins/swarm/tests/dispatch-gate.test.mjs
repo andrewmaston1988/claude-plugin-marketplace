@@ -9,6 +9,7 @@ import { shouldAck } from "../hooks/skill-ack.mjs";
 // command itself, the one thing every path through the bypass has in common.
 // Each case below pins a violation observed on 2026-07-12 (long-night P5 review).
 
+const ENGINE = "swarm" + ".mjs";
 const RUN = 'node "C:/p/swarm/scripts/swarm.mjs" run p5-review';
 
 test("gate ignores the free subcommands — they spend nothing", () => {
@@ -114,4 +115,71 @@ test("marker is NOT written for another skill or another tool", () => {
   equal(shouldAck({ tool_name: "Bash", tool_input: { command: "node swarm.mjs run x" } }), false);
   equal(shouldAck({}), false);
   equal(shouldAck({ tool_name: "Skill", tool_input: {} }), false);
+});
+
+// ── The gate must fire on EXECUTION, not on a mention ────────────────────────
+// Observed 2026-08-20: the gate blocked five consecutive non-executing commands
+// — a grep searching FOR the string, a heredoc writing a plan that documents it,
+// a pipeline grep, a shell comment, and its own probe script. None of them spend
+// anything. Over-blocking is not the safe direction here: it makes the gate
+// impossible to test through Bash, and it teaches the model to route around a
+// safety control to do ordinary work, which is the opposite of what it is for.
+
+test("gate ignores a command that only MENTIONS the dispatch", () => {
+  for (const command of [
+    `grep -rn "${ENGINE} run" .`,
+    `rg "${ENGINE} run" --glob '*.md'`,
+    `echo "node ${ENGINE} run x" >> plan.md`,
+    `cat notes.md | grep "${ENGINE} run"`,
+    `# node ${ENGINE} run x`,
+    `git commit -m "document the ${ENGINE} run flow"`,
+  ]) {
+    equal(
+      gateDispatch({ command, runInBackground: true, markerExists: false }).block,
+      false,
+      `should not block: ${command}`,
+    );
+  }
+});
+
+test("gate still fires on a real dispatch in a compound command", () => {
+  // The narrowing must not open a hole: a dispatch after a separator still runs.
+  for (const command of [
+    `cd /tmp && node ${ENGINE} run plan.json`,
+    `cd /tmp; node ${ENGINE} run plan.json`,
+  ]) {
+    equal(
+      gateDispatch({ command, runInBackground: true, markerExists: false }).block,
+      true,
+      `should block: ${command}`,
+    );
+  }
+});
+
+// The narrowing above must not open a hole. Every form below actually executes the
+// engine and must stay blocked — this is the adversarial half of the same change.
+test("narrowing to executable position opens no bypass", () => {
+  for (const command of [
+    `node ${ENGINE} run p`,
+    `node "C:/p/scripts/${ENGINE}" run p`,
+    `node 'C:\\p\\scripts\\${ENGINE}' run p`,
+    `cd /tmp && node ${ENGINE} run p`,
+    `cd /tmp; node ${ENGINE} run p`,
+    `nohup node ${ENGINE} run p &`,
+    `exec node ${ENGINE} run p`,
+    `time node ${ENGINE} run p`,
+    `env FOO=1 node ${ENGINE} run p`,
+    `  node ${ENGINE} run p`,
+    `node ${ENGINE} run p --force`,
+    `(node ${ENGINE} run p)`,
+    `/usr/bin/node ${ENGINE} run p`,
+    `node.exe ${ENGINE} run p`,
+    `node ${ENGINE} run p | tail`,
+  ]) {
+    equal(
+      gateDispatch({ command, runInBackground: true, markerExists: false }).block,
+      true,
+      `must still block: ${command}`,
+    );
+  }
 });

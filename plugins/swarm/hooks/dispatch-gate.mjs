@@ -23,7 +23,27 @@ export function markerPath(sessionId, home = SWARM_HOME) {
 }
 
 // `swarm.mjs run` — path may be quoted, either slash style, with flags after.
-const DISPATCH_RE = /swarm\.mjs["']?\s+run\b/;
+//
+// The engine must be in EXECUTABLE POSITION: at the start of the command or right
+// after a shell separator (`;` `&&` `||` `|` `(`), preceded by its interpreter.
+// Matching the bare string anywhere blocked five consecutive non-executing commands
+// on 2026-08-20 — a grep searching for it, a heredoc documenting it, a pipeline
+// grep, a comment, and the gate's own probe script. Over-blocking is not the safe
+// direction: it makes the gate untestable through Bash and teaches the model to
+// route around a safety control to do ordinary work.
+// Wrappers that precede the interpreter without changing what is executed.
+const WRAPPER = "(?:(?:nohup|command|exec|time|env|setsid)\\s+(?:-\\S+\\s+|\\w+=\\S+\\s+)*)*";
+const DISPATCH_RE = new RegExp(
+  `(?:^|[;&|(]|&&|\\|\\|)\\s*${WRAPPER}` +
+    `(?:[\\w./\\\\-]*\\bnode(?:\\.exe)?\\b|["'][^"']*node[^"']*["'])` +
+    `\\s+["']?[^"'\\s]*swarm\\.mjs["']?\\s+run\\b`,
+);
+
+// A `#` comment: everything after it is inert.
+function stripComment(cmd) {
+  const i = cmd.indexOf("#");
+  return i === -1 ? cmd : cmd.slice(0, i);
+}
 
 // Shell decorations that steal the stream from the operator.
 const PIPE_RE = /\|/;
@@ -40,7 +60,7 @@ const BARE_HINT =
 // Pure decision, so the harness is not needed to test it.
 export function gateDispatch({ command, runInBackground, markerExists }) {
   const cmd = String(command || "");
-  if (!DISPATCH_RE.test(cmd)) return { block: false };
+  if (!DISPATCH_RE.test(stripComment(cmd))) return { block: false };
 
   if (!markerExists) {
     return { block: true, reason: `A swarm run requires the swarm skill. ${SKILL_HINT}` };
