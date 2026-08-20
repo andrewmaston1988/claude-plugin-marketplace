@@ -123,9 +123,48 @@ export function captureResultsDir(stdout) {
   return m ? m[1] : null;
 }
 
+
+// ── Reading a run's state ─────────────────────────────────────────────────────
+
+// run.log is JSONL and tailable mid-run; each state change is { ts, id, state }.
+// Parsing it beats parsing `status` output, which is rendered for a human.
+export function readRunLog(resultsDir) {
+  const p = join(resultsDir, "run.log");
+  if (!existsSync(p)) return [];
+  return readFileSync(p, "utf8")
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((l) => { try { return JSON.parse(l); } catch { return null; } })
+    .filter(Boolean);
+}
+
+// Last state wins per leaf — a leaf moves pending -> running -> ok/failed.
+export function leafStates(events) {
+  const byId = new Map();
+  for (const e of events) {
+    if (e && e.id && e.state) byId.set(e.id, e.state);
+  }
+  return byId;
+}
+
+// The roster the liveness check needs, derived from the log.
+export function rosterFrom(resultsDir) {
+  const events = readRunLog(resultsDir);
+  const byId = leafStates(events);
+  const states = [...byId.values()];
+  const skipped = states.filter((v) => v === "skipped").length;
+  return { states, skipped, total: states.length, byId };
+}
+
 // ── Progress state ────────────────────────────────────────────────────────────
 
 const STATE_DIR = join(process.env.SWARM_HOME || join(process.env.USERPROFILE || process.env.HOME || ".", ".swarm"), "driver");
+
+// The strategy procedure lives in one file and is delivered by path, never
+// summarised here — an inline copy would rot against the real one.
+const STRATEGY_DOC = fileURLToPath(new URL("../execution-strategy.md", import.meta.url))
+  .split("\\")
+  .join("/");
 
 export function statePath(manifest) {
   const stem = String(manifest).split(/[/\\]/).pop().replace(/\.json$/i, "");
@@ -174,8 +213,39 @@ async function main() {
   for (const key of GATE_KEYS) {
     meta = recordGate(meta, key, getFlag(`gate-${key}`, argv));
   }
+  meta = recordGate(meta, "strategy", getFlag("strategy", argv));
   state.meta = meta;
   writeState(manifest, state, { dryRun });
+
+  // The gate's three questions are unanswerable without a manifest and the
+  // grouping arithmetic behind it. Route there first, once, rather than letting a
+  // model invent a leaf count at the moment it is asked to justify one.
+  if (!("strategy" in meta) && !gateAnswered(meta)) {
+    const self = fileURLToPath(import.meta.url).split("\\").join("/");
+    out(
+      banner(
+        "Strategy — decide the shape before the gate can be answered",
+        [
+          "The gate asks how many leaves, on which models, at which batching point.",
+          "None of that is answerable from the request alone.",
+          "",
+          "READ THIS NOW — mandatory, in full:",
+          `  ${STRATEGY_DOC}`,
+          "",
+          "It is a seven-step procedure and every step produces an input the gate",
+          "consumes: the grouping arithmetic (via Skill(swarm:orchestrating-agents),",
+          "which it will send you to first), the contract frame, the placement",
+          "digraph that yields the topology, one-manifest-vs-two-waves, the model",
+          "roster and quota, both sides of the cost comparison, and validate.",
+          "",
+          "Then re-run with --strategy to confirm it is settled. Recorded once;",
+          "you will not be asked again for this manifest.",
+        ],
+        `node "${self}" --manifest "${manifest}" --strategy done`,
+      ),
+    );
+    return 0;
+  }
 
   if (!gateAnswered(meta)) {
     const missing = GATE_KEYS.filter((k) => !(k in meta));
@@ -206,15 +276,91 @@ async function main() {
     return 0;
   }
 
+  // --dispatch-output: hand the driver the engine's stdout so it captures the
+  // results dir rather than letting anyone reconstruct one from the manifest stem.
+  const dispatchOut = getFlag("dispatch-output", argv);
+  if (dispatchOut !== undefined) {
+    const captured = captureResultsDir(
+      existsSync(dispatchOut) ? readFileSync(dispatchOut, "utf8") : dispatchOut,
+    );
+    if (!captured) {
+      process.stderr.write(
+        "FAILED: no 'resultsDir:' line in the dispatch output.\n" +
+          "Copy the engine's printed line verbatim; never reconstruct the path.\n",
+      );
+      return 1;
+    }
+    state.resultsDir = captured;
+    writeState(manifest, state, { dryRun });
+  }
+
+  const resultsDir = getFlag("results-dir", argv) || state.resultsDir;
+
+  // The mandatory liveness check: ONE look, and a cache replay is not a live run.
+  if (argv.includes("--check-liveness")) {
+    if (!resultsDir) {
+      out(needInput("results-dir", "Pass --dispatch-output <file|text> first, or --results-dir <path>"));
+      return 0;
+    }
+    const roster = rosterFrom(resultsDir);
+    const v = livenessVerdict(roster);
+    state.liveness = { checkedAt: new Date().toISOString(), ...v };
+    writeState(manifest, state, { dryRun });
+    out(
+      [
+        `liveness: ${v.live ? "LIVE" : "NOT LIVE"}`,
+        `  ${v.reason}`,
+        `  leaves: ${roster.total}` + (roster.skipped ? ` (${roster.skipped} skipped)` : ""),
+        "",
+        v.cacheReplay
+          ? "This run replayed cache — NOTHING RE-EXECUTED. Do not report it as running."
+          : v.live
+            ? "Hands off until the completion notification. One check is all you get."
+            : "No leaf is running. Check the dispatch before reporting anything.",
+        "",
+      ].join("\n"),
+    );
+    return 0;
+  }
+
+  // Failure routing, once a run has ended badly.
+  if (argv.includes("--route-failure")) {
+    const r = routeFailure({
+      timedOut: argv.includes("--timed-out"),
+      erroredOnce: argv.includes("--errored"),
+      committedSince: argv.includes("--committed-since"),
+      quota: argv.includes("--quota"),
+      attempts: Number(getFlag("attempts", argv) || 1),
+    });
+    out(
+      [
+        `route: ${r.action}${r.ask ? " (ASK the user)" : " (no ask)"}`,
+        `  ${r.reason}`,
+        "",
+        ...(r.ask ? ["Offer via AskUserQuestion:", ...r.options.map((o) => `  - ${o}`), ""] : []),
+      ].join("\n"),
+    );
+    return 0;
+  }
+
+  const est = getFlag("inline-lines", argv);
+  const estimate =
+    est === undefined
+      ? null
+      : inlineEstimate({ totalLines: Number(est) || 0, comparable: !argv.includes("--not-comparable") });
+
   out(
     [
       "gate: answered",
       ...GATE_KEYS.map((k) => `  ${k}: ${JSON.stringify(meta[k])}`),
+      ...(estimate ? ["", estimate.text] : []),
+      ...(resultsDir ? ["", `resultsDir: ${resultsDir}`] : []),
       "",
       `state: ${statePath(manifest)}`,
       "",
-      "The gate is recorded. Validate, then dispatch BARE via Bash run_in_background,",
-      "then run ONE status check before reporting anything.",
+      "The gate is recorded. Validate, then dispatch BARE via Bash run_in_background.",
+      "Then hand the dispatch output back:",
+      `  node "${fileURLToPath(import.meta.url).split("\\\\").join("/")}" --manifest "${manifest}" --dispatch-output <file> --check-liveness`,
       "",
     ].join("\n"),
   );

@@ -43,42 +43,13 @@ Prompt templating: `{{result:<id>}}` inlines a dependency's output, **capped at 
 ## Plan patterns
 
 **Asked as dispatch** ("run a glm-5.2 session on swarm")? One delegated leaf — see below.
-Otherwise **a manifest is a dependency graph, not one pattern stamped across every task**:
-take one task at a time and ask what must FINISH before it can start. Width falls out of the
-answers; you never pick a shape.
 
-```dot
-digraph swarm_place {
-    left [label="Any task left to place?", shape=diamond];
-    need [label="What must FINISH before this starts?", shape=diamond];
-    nothing [label="Nothing — no after", shape=box];
-    output [label="Another task OUTPUT — after + resultPath", shape=box];
-    edits [label="Another task EDITS — after + shared worktree, or isolation.from", shape=box];
-    done [label="Done — one manifest", shape=ellipse];
+**How to place tasks and what shape that yields — including the placement digraph —
+lives in [execution-strategy.md](execution-strategy.md) §3.** It is mandatory reading
+before the offer gate, and the driver delivers it by path. Not repeated here: two copies
+of a decision procedure diverge, and the one you did not edit is the one that gets read.
 
-    left -> need [label="yes — take one"];
-    need -> nothing;
-    need -> output;
-    need -> edits;
-    nothing -> left;
-    output -> left;
-    edits -> left;
-    left -> done [label="no"];
-}
-```
-
-Loop until every task is placed — one manifest holds as many segments as the work needs.
-The named shapes below are what these answers *produce*, not a menu: fan-out is every task
-answering **nothing**; a phased chain is each answering **edits of the previous**; mixed
-topology is a run where the answers differ and the width changes more than once.
-
-**Two tasks that share a prerequisite but not each other run in parallel** — answer against
-the work, not against the task above it in your list. Chain them only for a real collision
-(same file, same region), and name that file in the prompt.
-
-**Output vs edits is the discriminating question**, not whether leaves touch the same repo.
-`{{result:}}` passes text, never changes. Leaves editing disjoint files stay parallel with
-private trees; only accumulation needs a shared tree or `isolation.from`.
+What follows are the field-level recipes for the shapes that procedure produces.
 
 ### Single delegated leaf
 

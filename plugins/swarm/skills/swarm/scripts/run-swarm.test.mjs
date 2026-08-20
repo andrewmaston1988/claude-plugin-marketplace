@@ -15,6 +15,9 @@ import {
   livenessVerdict,
   routeFailure,
   captureResultsDir,
+  leafStates,
+  rosterFrom,
+  readRunLog,
 } from "./run-swarm.mjs";
 
 // ── Exit-mode contract ───────────────────────────────────────────────────────
@@ -177,4 +180,115 @@ test("captureResultsDir: absent line yields null, never a guess ★", () => {
 test("captureResultsDir: takes the FIRST printed dir, not a later mention", () => {
   const out = "resultsDir: C:/runs/a-1\nchatter C:/runs/a-2\n";
   equal(captureResultsDir(out), "C:/runs/a-1");
+});
+
+// ── Reading the engine's real run.log ────────────────────────────────────────
+// run.log is JSONL: { ts, id, state } per state change, plus event rows. Parsing
+// it beats parsing `status`, which renders for a human tail.
+
+test("leafStates: the LAST state per leaf wins", () => {
+  const events = [
+    { id: "a", state: "pending" },
+    { id: "a", state: "running" },
+    { id: "a", state: "ok" },
+    { id: "b", state: "pending" },
+  ];
+  const m = leafStates(events);
+  equal(m.get("a"), "ok");
+  equal(m.get("b"), "pending");
+});
+
+test("leafStates: event rows without an id are ignored", () => {
+  const m = leafStates([{ event: "run-start", tasks: [] }, { id: "a", state: "running" }]);
+  equal(m.size, 1);
+});
+
+test("readRunLog: a missing run.log is empty, never a throw", () => {
+  deepEqual(readRunLog("C:/definitely/not/a/run/dir"), []);
+});
+
+test("rosterFrom + livenessVerdict: a cache replay is detected end to end ★", async () => {
+  const { mkdtempSync, writeFileSync: wf } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join: j } = await import("node:path");
+  const dir = mkdtempSync(j(tmpdir(), "swarm-roster-"));
+  wf(
+    j(dir, "run.log"),
+    [
+      JSON.stringify({ event: "run-start", tasks: [{ id: "a" }, { id: "b" }] }),
+      JSON.stringify({ id: "a", state: "skipped" }),
+      JSON.stringify({ id: "b", state: "skipped" }),
+    ].join("\n"),
+  );
+  const roster = rosterFrom(dir);
+  equal(roster.total, 2);
+  equal(roster.skipped, 2);
+  const v = livenessVerdict(roster);
+  equal(v.live, false);
+  equal(v.cacheReplay, true);
+});
+
+test("rosterFrom + livenessVerdict: one running leaf reads as live", async () => {
+  const { mkdtempSync, writeFileSync: wf } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join: j } = await import("node:path");
+  const dir = mkdtempSync(j(tmpdir(), "swarm-roster-"));
+  wf(
+    j(dir, "run.log"),
+    [
+      JSON.stringify({ id: "a", state: "pending" }),
+      JSON.stringify({ id: "a", state: "running" }),
+    ].join("\n"),
+  );
+  equal(livenessVerdict(rosterFrom(dir)).live, true);
+});
+
+test("readRunLog: a malformed line is skipped, not fatal", async () => {
+  const { mkdtempSync, writeFileSync: wf } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join: j } = await import("node:path");
+  const dir = mkdtempSync(j(tmpdir(), "swarm-roster-"));
+  wf(j(dir, "run.log"), '{"id":"a","state":"running"}\n{ broken\n');
+  // A half-written final line is normal when tailing a live run.
+  equal(readRunLog(dir).length, 1);
+});
+
+// ── The strategy pause teaches what the gate presumes ────────────────────────
+// Observed 2026-08-20 (operator): the gate pause told a model to ask three
+// questions but nothing about how to arrive at answerable ones — no leaf count,
+// no topology, no routing to orchestrating-agents, which owns the grouping
+// arithmetic the third question carries. A pause must carry the state needed to
+// decide, not just the question.
+
+test("the strategy pause delivers execution-strategy.md by resolvable path ★", async () => {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const src = readFileSync(new URL("./run-swarm.mjs", import.meta.url), "utf8");
+  // The pause hands over a path, not a summary — an inline copy would rot
+  // against the real procedure. So the contract is: the file exists, and the
+  // driver resolves it relative to itself rather than to the caller's cwd.
+  ok(src.includes('new URL("../execution-strategy.md", import.meta.url)'),
+     "must resolve the doc from import.meta.url, never process.cwd()");
+  ok(existsSync(new URL("../execution-strategy.md", import.meta.url)),
+     "the doc the pause points at must exist");
+  ok(src.includes("swarm:orchestrating-agents"),
+     "must still name the prerequisite skill — it gates step 1");
+});
+
+test("execution-strategy.md carries the procedure the gate presumes", async () => {
+  const { readFileSync } = await import("node:fs");
+  const doc = readFileSync(new URL("../execution-strategy.md", import.meta.url), "utf8");
+  // Each is an input the gate's three questions consume.
+  ok(/orchestrating-agents/.test(doc), "grouping arithmetic");
+  ok(/goal · return_shape/.test(doc), "the contract frame");
+  ok(/digraph/.test(doc), "the placement procedure");
+  ok(/isolation\.from/.test(doc) && /integrate/.test(doc),
+     "widening — the fields that make a second wave unnecessary");
+  ok(/forEach/.test(doc) && /when/.test(doc) && /compute/.test(doc),
+     "the runtime-expansion fields");
+  ok(/not comparable/.test(doc), "both sides of the cost comparison");
+});
+
+test("strategy is recorded like a gate answer — presence, not truthiness", () => {
+  const meta = recordGate({}, "strategy", "");
+  ok("strategy" in meta, "an empty confirmation is still a confirmation");
 });

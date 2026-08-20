@@ -104,15 +104,18 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 
 ## Procedure — run the driver, do what it asks, re-run
 
-`scripts/run-swarm.mjs` owns the session-side state: it records the gate answers
-so they survive compaction, and pauses until all three are given. Your job is the
-loop.
+`scripts/run-swarm.mjs` owns the session-side state: the gate answers (recorded
+so they survive compaction), the cost arithmetic, the results directory, the one
+liveness check, and failure routing. Your job is the loop.
 
-It also exports the decisions that were prose — `inlineEstimate` (the cost
-formula), `livenessVerdict` (is a leaf actually running, or did cache replay),
-`routeFailure` (the timeout/error/commits-since table), and `captureResultsDir`.
-These are tested and callable; the gate is the only one wired into the driver's
-own flow so far.
+| Flag | What it does |
+|---|---|
+| *(none)* | Pauses until all three gate answers are given; then prints them |
+| `--gate-fanout/-mix/-batching "<answer>"` | Records one answer. An empty string and "no" are real answers |
+| `--inline-lines <n> [--not-comparable]` | The cost side of the gate's first question |
+| `--dispatch-output <file\|text>` | Captures `resultsDir:` from the engine's output; **refuses** if the line is absent |
+| `--check-liveness` | Reads the run's own `run.log` once and rules live / not-live / cache replay |
+| `--route-failure [--timed-out] [--errored] [--committed-since] [--quota] [--attempts n]` | The routing verdict and whether to ask |
 
 ```bash
 node "<this skill's base directory>/scripts/run-swarm.mjs" --manifest <manifest.json | name>
@@ -130,9 +133,11 @@ stopped. **It records consent; it does not enforce it** — the gate below gover
 two dispatch paths no hook can see (`src/ask.mjs` and any direct `runPlan`
 import), so the rules there bind whether or not you ran the driver.
 
-**Steps the driver does not perform.** Author the manifest (read
-[authoring.md](authoring.md) for the schema, plan patterns, and leaf shapes),
-`validate` it, dispatch it, and read `digest.md`. The engine's subcommands are
+**Steps the driver does not perform.** Decide the shape
+([execution-strategy.md](execution-strategy.md) — the driver pauses and hands you
+this before the gate, because the gate's questions are unanswerable without it),
+author the manifest ([authoring.md](authoring.md) for the field-level schema and
+recipes), `validate` it, dispatch it, and read `digest.md`. The engine's subcommands are
 `models`, `list`, `validate`, `run`, `status`, `report`, `ask`, `quota`; resolve
 it as `<this skill's base directory>/../../scripts/swarm.mjs`.
 
