@@ -42,16 +42,16 @@ skill exists to catch — the command arrives without the rules that govern it.
 
 ## The Iron Law — never interfere with a live dispatch
 
-**Violating the letter of this rule is violating its spirit.** After you dispatch a run you get exactly ONE `status` check; from then until the completion notification fires, you are **hands-off**:
+**Violating the letter of this rule is violating its spirit.** After you dispatch a run you get exactly ONE liveness check — `run-swarm.mjs --check-liveness`; from then until the completion notification fires, you are **hands-off**:
 
-- **Do NOT read a leaf's raw output** — not `tail`/`cat`/`Read`/`grep` on `results/*.log`. Use `status` (it reads `run.log`).
+- **Do NOT read a leaf's raw output** — not `tail`/`cat`/`Read`/`grep` on `results/*.log`. Run `run-swarm.mjs --check-liveness`: it reads `run.log` and returns the verdict (state tags, quiet leaves, each leaf's usage with the ratio that explains it).
 - **Do NOT kill anything** — no `Stop-Process`/`taskkill`, no killing the shell. There is no per-leaf kill and no engine kill.
 - **Do NOT `git`-touch a run's worktree or branch** — no `worktree remove`, `branch -D`, `reset --hard`, `clean`, `rm -rf` of a run dir.
 - **Do NOT judge a leaf failed from a mid-flight view** — a tool-call count (`0 writes so far`) is never a health signal; a leaf reads for many turns before it writes. Only the final result (or a `failed` state the engine sets) is a verdict.
 
 A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the above — those govern *stalling*, never *interfering with a live dispatch*. When a leaf genuinely ended badly, the engine marks it `failed`; recover per "A leaf ended and produced no commit" (below) — never by killing or deleting, which is only ever the operator's call. **This exists because a session that had this skill loaded broke every clause under directive pressure — killed a healthy leaf, orphaned its worktree, deleted branches, and misdiagnosed the cause three times (2026-07-15).** The pre-dispatch twin of this gate is the offer gate (below): consent before spend, hands-off after.
 
-**Instantiate this as tasks — do not just read it.** The moment you dispatch, create these as `TaskCreate` items: `offer-gate answered` · `one status check, then hands-off` · `recover a bad leaf by re-dispatch, never kill/delete`. A skimmed rule gets rationalised past; a task you created and left undone is *visible*. If you did not make the tasks, you did not engage the discipline.
+**Instantiate this as tasks — do not just read it.** The moment you dispatch, create these as `TaskCreate` items: `offer-gate answered` · `one liveness check, then hands-off` · `recover a bad leaf by re-dispatch, never kill/delete`. A skimmed rule gets rationalised past; a task you created and left undone is *visible*. If you did not make the tasks, you did not engage the discipline.
 
 ## Data governance — read this first
 
@@ -65,9 +65,27 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 - **pipeline** — durable queued throughput ending in PRs. Huge capacity, not fast.
 - **Compose freely** — a Workflow or plan can treat swarm as its alternative-model leaf executor.
 
-## MANDATORY first step — the offer gate
+## MANDATORY before you draft a manifest
 
-**Before you draft the manifest, invoke `swarm:orchestrating-agents`.** It decides how many leaves and which items share one, and it produces the numbers the gate's third question carries. Drafting a leaf-per-item manifest without it is the failure that skill exists to catch. It does not restate the gate and the gate does not restate it.
+**Start the driver first — before any JSON exists:**
+
+```bash
+node "<this skill's base directory>/scripts/run-swarm.mjs" --manifest <name-for-this-run>
+```
+
+`--manifest` is a **state key, not a file that must already exist.** Name the run and the
+driver walks you through the two steps below, then the gate. Reaching it only after the
+manifest is written means every pause can do nothing but rubber-stamp a shape you have
+already fixed — which is the same as not running it.
+
+Two steps, in order. Both come before a single line of JSON.
+
+1. **`Read` [execution-strategy.md](execution-strategy.md) — the file, with the Read tool.** Not from memory of a pattern seen elsewhere, and not from this page's summary of it. It carries the placement digraph that decides the topology and §4 on where the manifest's edge sits. *"I have seen this shape before"* is the exact substitution it exists to prevent: a manifest drafted on recall is how a reconcile step ends up outside the graph.
+2. **Invoke `swarm:orchestrating-agents`.** It decides how many leaves and which items share one, and produces the numbers the gate's third question carries. Drafting a leaf-per-item manifest without it is the failure that skill exists to catch. It does not restate the gate and the gate does not restate it.
+
+`run-swarm.mjs` pauses for both and records the answer — but the pause only fires if you run the driver. Reaching for a manifest first is what skips it.
+
+## The offer gate
 
 **THE GATE'S ANSWER IS THE ONLY CONSENT TO SPEND. NO ANSWER IS NO.** Violating the letter of this rule is violating its spirit.
 
@@ -113,7 +131,7 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 | "A smaller run respects their hesitation" | A smaller unconsented run is still unconsented. |
 | "Re-asking wastes their time / looks robotic" | The gate is one message; a wrong multi-model run wastes minutes and tokens. |
 
-**Red flags — you are mid-rationalisation if you think:** "the directive/goal/hook authorizes this" · "the condition is the approval" · "probably a mis-click" · "half the leaves is a fair compromise" · "`--force` gets past it" · "`tail` keeps the dispatch tidy" (see Run, step 5) · **"I already know the command — I don't need the skill"** (the command arrived without the rules that govern it; that is the bypass, not a shortcut) · **"the run finished suspiciously fast"** (you replayed cache — check for `[skipped]` and `NOTHING RE-EXECUTED` before claiming anything ran) · **"I'll redirect it to a log so the tool result stays tidy"** (the forbidden pipe wearing a different hat) · **"I'll just read the run's output file to see how it's going"** (that file is the operator's live view, not your status API — use `status`).
+**Red flags — you are mid-rationalisation if you think:** "the directive/goal/hook authorizes this" · "the condition is the approval" · "probably a mis-click" · "half the leaves is a fair compromise" · "`--force` gets past it" · "`tail` keeps the dispatch tidy" (see Run, step 5) · **"I already know the command — I don't need the skill"** (the command arrived without the rules that govern it; that is the bypass, not a shortcut) · **"the run finished suspiciously fast"** (you replayed cache — check for `[skipped]` and `NOTHING RE-EXECUTED` before claiming anything ran) · **"I'll redirect it to a log so the tool result stays tidy"** (the forbidden pipe wearing a different hat) · **"I'll just read the run's output file to see how it's going"** (that file is the operator's live view, not your status API — use `--check-liveness`).
 
 ## Procedure — run the driver, do what it asks, re-run
 
@@ -139,7 +157,7 @@ node "<this skill's base directory>/scripts/run-swarm.mjs" --manifest <manifest.
 | `{"error":"missing_required_field",...}` | Supply the field, re-run with the flag |
 | `PAUSE: <what>` banner | The judgement it names, then re-run the printed `RE-RUN EXACTLY` command |
 | Non-zero exit | Surface it; do not retry blindly |
-| `gate: answered` | Validate, dispatch, then one status check |
+| `gate: answered` | Validate, dispatch, then one `--check-liveness` |
 
 Re-running is always safe: the driver re-reads its state and picks up where it
 stopped. **It records consent; it does not enforce it** — the gate below governs
@@ -160,7 +178,7 @@ user's only view of a run that may spend millions of tokens. Copy the `resultsDi
 and `watch:` lines the engine prints; hand the user the `watch:` line and copy it
 to their clipboard.
 
-**Then ONE `status` check, and stop.** The driver reports `cache replay` when a
+**Then ONE `--check-liveness`, and stop.** The driver reports `cache replay` when a
 bare re-run of a complete manifest replays cache (16/16 `[skipped]`, seconds) —
 that is *not* a live run, and announcing one is the documented failure.
 

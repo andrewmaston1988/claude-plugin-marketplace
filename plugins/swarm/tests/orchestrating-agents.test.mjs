@@ -126,7 +126,7 @@ test("T1 — orchestrating-agents/SKILL.md exists with valid name + description 
 // ---- T2: swarm gate references the skill, inside the gate section ----
 
 test("T2 — swarm offer gate references orchestrating-agents within the gate section", () => {
-  const gate = sectionSlice(read(SWARM_SKILL), "## MANDATORY first step — the offer gate");
+  const gate = sectionSlice(read(SWARM_SKILL), "## MANDATORY before you draft a manifest");
   ok(gate.length > 0, "gate section found");
   ok(gate.includes("orchestrating-agents"), "gate section names the skill");
 });
@@ -134,7 +134,7 @@ test("T2 — swarm offer gate references orchestrating-agents within the gate se
 // ---- T3: three questions, no surviving TWO ----
 
 test("T3 — gate carries THREE questions, no surviving TWO", () => {
-  const gate = sectionSlice(read(SWARM_SKILL), "## MANDATORY first step — the offer gate");
+  const gate = sectionSlice(read(SWARM_SKILL), "## The offer gate");
   ok(!/two questions/i.test(gate), "no 'two questions' phrasing survives");
   ok(/THREE questions/.test(gate), "'THREE questions' present");
   const stanzas = gate.split("\n").filter((l) => /^\d+\.\s+>/.test(l));
@@ -192,7 +192,7 @@ test("T9 — timeout present with commit-as-you-go line, per-leaf sizing, and 45
 // ---- T10: resume carve-out in swarm, keyed on failure kind, not in the new skill ----
 
 test("T10 — resume carve-out is in swarm gate, three branches, and absent from new skill", () => {
-  const gate = sectionSlice(read(SWARM_SKILL), "## MANDATORY first step — the offer gate");
+  const gate = sectionSlice(read(SWARM_SKILL), "## The offer gate");
   match(gate, /carve-out/i);                        // (a) present in gate section
   match(gate, /timed out|timeout/i);                // (b1) timeout branch
   match(gate, /retry|once/i);                       // (b2) error-retry branch
@@ -240,7 +240,7 @@ test("T13 — skill follows the Superpowers discipline-skill structure", () => {
 // ---- T14: the resume carve-out spells out the mechanics agents spin on ----
 
 test("T14 — resume carve-out states --resume, no re-onboard, and ok-leaves-skipped", () => {
-  const gate = sectionSlice(read(SWARM_SKILL), "## MANDATORY first step — the offer gate");
+  const gate = sectionSlice(read(SWARM_SKILL), "## The offer gate");
   match(gate, /--resume/, "names the underlying `claude --resume <sessionId>` mechanism");
   match(gate, /re-?onboard/i, "states the no-re-onboarding invariant");
   match(gate, /never re-run|skipped, never|already-?`?ok`?[^\n]*skipped/i, "states already-ok leaves are not re-run");
