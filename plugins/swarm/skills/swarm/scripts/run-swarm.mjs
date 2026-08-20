@@ -250,9 +250,38 @@ async function main() {
   const argv = process.argv.slice(2);
   const out = (s) => process.stdout.write(s);
 
+  // The read pause sits BEFORE --manifest: a session names a manifest once it
+  // has drafted one, by which point the pause can only rubber-stamp the shape.
+  const self = fileURLToPath(import.meta.url).split("\\").join("/");
   const manifest = getFlag("manifest", argv);
+  const recorded = (manifest && readState(manifest)?.meta) || {};
+  if (getFlag("read-strategy", argv) === undefined && !("read-strategy" in recorded)) {
+    out(
+      banner(
+        "Read the execution strategy — before anything else",
+        [
+          "The STRATEGY is the manifest's SHAPE: which tasks exist, what each one",
+          "must wait for, and therefore how wide the graph is at each step. You do",
+          "not pick a shape — you place each task by asking what must FINISH before",
+          "it can start, and the shape falls out. That procedure, the digraph that",
+          "drives it, and where the manifest's edge sits are in this file:",
+          "",
+          `  ${STRATEGY_DOC}`,
+          "",
+          "Open it with the Read tool. Not a summary, not a pattern you have seen",
+          "before, not this driver's paraphrase — ~2k tokens. A manifest drafted",
+          "from recall is how a reconcile step ends up outside the graph.",
+          "",
+          "Nothing else is asked at this pause. Read it, then re-run.",
+        ],
+        `node "${self}" --manifest <name-this-run> --read-strategy done`,
+      ),
+    );
+    return 0;
+  }
+
   if (!manifest) {
-    out(needInput("manifest", "Which manifest? e.g. --manifest plan.json (or a saved name)"));
+    out(needInput("manifest", "Name this run: --manifest <name>. The file need not exist yet."));
     return 0;
   }
 
@@ -263,6 +292,7 @@ async function main() {
   for (const key of GATE_KEYS) {
     meta = recordGate(meta, key, getFlag(`gate-${key}`, argv));
   }
+  meta = recordGate(meta, "read-strategy", getFlag("read-strategy", argv));
   meta = recordGate(meta, "strategy", getFlag("strategy", argv));
   state.meta = meta;
   writeState(manifest, state, { dryRun });
@@ -270,26 +300,24 @@ async function main() {
   // The gate's three questions are unanswerable without a manifest and the
   // grouping arithmetic behind it. Route there first, once, rather than letting a
   // model invent a leaf count at the moment it is asked to justify one.
+  // Separate from the read pause: one "done" covering both let the read be skipped.
   if (!("strategy" in meta) && !gateAnswered(meta)) {
-    const self = fileURLToPath(import.meta.url).split("\\").join("/");
     out(
       banner(
-        "Strategy — decide the shape before the gate can be answered",
+        "Strategy — work the procedure you just read",
         [
-          "The gate asks how many leaves, on which models, at which batching point.",
-          "None of that is answerable from the request alone.",
+          "You have read the strategy. Now work it, in its order — every step",
+          "produces an input the gate consumes:",
           "",
-          "READ THIS NOW — mandatory, in full:",
-          `  ${STRATEGY_DOC}`,
+          "  1. Skill(swarm:orchestrating-agents) — the grouping arithmetic",
+          "  2. the contract frame: goal · return_shape · must_be_sure · scope · done_when",
+          "  3. place every task with the digraph — the shape falls out",
+          "  4. `models`, and `quota` if any leaf is a Claude model",
+          "  5. both sides of the cost comparison",
+          "  6. author the manifest, then `validate` it",
           "",
-          "It is a seven-step procedure and every step produces an input the gate",
-          "consumes: the grouping arithmetic (via Skill(swarm:orchestrating-agents),",
-          "which it will send you to first), the contract frame, the placement",
-          "digraph that yields the topology, one-manifest-vs-two-waves, the model",
-          "roster and quota, both sides of the cost comparison, and validate.",
-          "",
-          "Then re-run with --strategy to confirm it is settled. Recorded once;",
-          "you will not be asked again for this manifest.",
+          "Re-run when that is settled. Recorded once; you will not be asked again",
+          "for this manifest.",
         ],
         `node "${self}" --manifest "${manifest}" --strategy done`,
       ),

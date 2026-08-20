@@ -363,3 +363,36 @@ test("rosterFrom: a token tick is proof of life, so it clears quiet ★", async 
   const r = rosterFrom(dir);
   deepEqual(r.quiet.map((q) => q.id), ["b"]);
 });
+
+// ── The read is its own pause ────────────────────────────────────────────────
+// One pause carrying five steps gets one "done" that attests to all of them, and
+// the read is the step that gets skipped: two sessions drafted a manifest from a
+// remembered pattern and confirmed the pause anyway. Splitting it means "done"
+// can only mean the one thing the pause asked for.
+
+test("the read pause asks for exactly one thing ★", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("./run-swarm.mjs", import.meta.url), "utf8");
+  // Anchor on the guard, not the banner title — the title also appears in the
+  // adjacent pause's text, and slicing from there yields an empty window that
+  // passes every negative assertion for the wrong reason.
+  const i = src.indexOf('!("read-strategy" in recorded)');
+  ok(i > 0, "the read pause must exist");
+  const body = src.slice(i, src.indexOf("return 0;", i));
+  ok(/Nothing else is asked at this pause/.test(body),
+     "must state that nothing else is asked, or it becomes a bundle again");
+  ok(!/orchestrating-agents/.test(body),
+     "must not smuggle the grouping step into the read pause");
+});
+
+test("the read gates the strategy pause, not the reverse", async () => {
+  const { readFileSync } = await import("node:fs");
+  const src = readFileSync(new URL("./run-swarm.mjs", import.meta.url), "utf8");
+  ok(src.indexOf('"read-strategy" in recorded') < src.indexOf('"strategy" in meta'),
+     "the read pause must be evaluated first");
+});
+
+test("read-strategy is recorded on presence, like every other answer", () => {
+  const meta = recordGate({}, "read-strategy", "");
+  ok("read-strategy" in meta);
+});

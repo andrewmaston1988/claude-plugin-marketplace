@@ -1289,3 +1289,109 @@ test("agentless nodes reject outputDir; from/integrate reject a forEach source",
       "forEach beats no-write-tools — the clones own branches, which is the real fix");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ── An unverified finder must not feed a consumer ────────────────────────────
+// A session read the fabrication counter and merged verification into its
+// synthesis leaf to save leaf count — its words: "rationalizing away the
+// structure". Prose lost to the batching arithmetic, so validate catches it:
+// the digest rule (only CONFIRMED findings become headlines) is unenforceable
+// when the confirmer and the headline-writer are the same leaf.
+
+const CITE = {
+  type: "object",
+  required: ["findings"],
+  properties: {
+    findings: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["file", "line", "quote"],
+        properties: { file: { type: "string" }, line: { type: "integer" }, quote: { type: "string" } },
+      },
+    },
+  },
+};
+
+test("citation-bearing finder consumed with no verifier between them is rejected", () => {
+  const dir = tmp();
+  const p = writeManifest(dir, {
+    tasks: [
+      { id: "find-a", model: "claude-sonnet-4-6", prompt: "find things", returns: CITE },
+      { id: "synth", model: "claude-sonnet-4-6", after: ["find-a"], prompt: "write it up from {{resultPath:find-a}}" },
+    ],
+  });
+  const errs = errorsOf(() => loadManifest(p, CFG, dir));
+  ok(errs.some((e) => /verif/i.test(e)), `expected a verifier error, got: ${errs.join(" | ")}`);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a verifier on a different family satisfies it", () => {
+  const dir = tmp();
+  const p = writeManifest(dir, {
+    tasks: [
+      { id: "find-a", model: "claude-sonnet-4-6", prompt: "find things", returns: CITE },
+      { id: "verify-a", model: "claude-haiku-4-5", after: ["find-a"], prompt: "check {{resultPath:find-a}}" },
+      { id: "synth", model: "claude-sonnet-4-6", after: ["verify-a"], prompt: "write up {{resultPath:verify-a}}" },
+    ],
+  });
+  const plan = loadManifest(p, CFG, dir);
+  equal(plan.tasks.length, 3);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a verifier on the SAME family as its finder is rejected", () => {
+  const dir = tmp();
+  const p = writeManifest(dir, {
+    tasks: [
+      { id: "find-a", model: "claude-sonnet-4-6", prompt: "find", returns: CITE },
+      { id: "verify-a", model: "claude-sonnet-4-6", after: ["find-a"], prompt: "check {{resultPath:find-a}}" },
+    ],
+  });
+  const errs = errorsOf(() => loadManifest(p, CFG, dir));
+  ok(errs.some((e) => /family/i.test(e)), `expected a family error, got: ${errs.join(" | ")}`);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("a finder nothing consumes needs no verifier — the digest reads it directly", () => {
+  const dir = tmp();
+  const p = writeManifest(dir, {
+    tasks: [{ id: "find-a", model: "claude-sonnet-4-6", prompt: "find", returns: CITE }],
+  });
+  const plan = loadManifest(p, CFG, dir);
+  equal(plan.tasks.length, 1);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+// The check must see the shape agents actually write. Observed 2026-08-20: a
+// well-formed 13-leaf review demanded `file:line` + verbatim quotes in PROSE and
+// carried no `returns` schema at all — so a schema-only predicate would pass a
+// verifier-less version of it silently.
+test("a prose-citation finder consumed with no verifier is rejected too", () => {
+  const dir = tmp();
+  const p = writeManifest(dir, {
+    tasks: [
+      {
+        id: "find-a",
+        model: "claude-sonnet-4-6",
+        prompt: "List every swallowed exception. Every finding MUST carry file:line and a short verbatim quote of the cited span.",
+      },
+      { id: "synth", model: "claude-sonnet-4-6", after: ["find-a"], prompt: "write up {{resultPath:find-a}}" },
+    ],
+  });
+  const errs = errorsOf(() => loadManifest(p, CFG, dir));
+  ok(errs.some((e) => /verif/i.test(e)), `expected a verifier error, got: ${errs.join(" | ")}`);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("an ordinary leaf that merely mentions a path is not treated as a finder", () => {
+  const dir = tmp();
+  const p = writeManifest(dir, {
+    tasks: [
+      { id: "gen", model: "claude-sonnet-4-6", prompt: "Write a README at docs/readme.md describing the layout." },
+      { id: "next", model: "claude-sonnet-4-6", after: ["gen"], prompt: "polish {{resultPath:gen}}" },
+    ],
+  });
+  const plan = loadManifest(p, CFG, dir);
+  equal(plan.tasks.length, 2);
+  rmSync(dir, { recursive: true, force: true });
+});

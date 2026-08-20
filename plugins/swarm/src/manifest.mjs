@@ -3,6 +3,7 @@ import { resolve, join, basename, dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
+import { citationPaths } from "./citations.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
 import { validateSchemaShape } from "./schema.mjs";
 
@@ -728,6 +729,55 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
 // `fromRegistry` (child manifest paths then resolve against the parent's dir),
 // and `ref` (the pre-resolution registry name, recorded on the plan for the
 // run dir snapshot).
+// A finder whose returns carry citations must be checked by a SEPARATE leaf on a
+// different family before anything consumes it. Folding that into the consumer
+// makes the digest rule unenforceable: nothing can count only CONFIRMED findings
+// as headlines when the confirmer and the headline-writer are one leaf. Prose
+// alone lost this to the batching arithmetic, so it is caught here.
+function modelFamily(model) {
+  const m = String(model || "");
+  // Within Claude, the tier is the family for this purpose: haiku checking sonnet
+  // is a different model with different failure modes, which is what the rule is
+  // for. Across providers the vendor prefix is the family (glm-5.2:cloud ->
+  // "glm-5.2"), since a provider's models share a lineage.
+  if (isClaudeModel(m)) return `claude:${tierFromModel(m) || m}`;
+  return m.split(/[:@/]/)[0].toLowerCase() || "unknown";
+}
+
+function checkVerifierCoverage(tasks, errors) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  // A finder is a leaf whose findings carry citations — declared as a schema, or
+  // demanded in prose. The prose form is the common one; keying only on `returns`
+  // would miss the shape agents actually write.
+  const demandsCitations = (t) =>
+    /file:line/i.test(t.prompt || "") &&
+    /(verbatim|quote|cited span)/i.test(t.prompt || "");
+  const finders = tasks.filter(
+    (t) => (t.returns && citationPaths(t.returns).length > 0) || demandsCitations(t),
+  );
+  if (!finders.length) return;
+
+  for (const finder of finders) {
+    const consumers = tasks.filter((t) => Array.isArray(t.after) && t.after.includes(finder.id));
+    if (!consumers.length) continue; // nothing consumes it — the digest reads it directly
+
+    const verifiers = consumers.filter(
+      (c) => modelFamily(c.model) !== modelFamily(finder.model),
+    );
+    if (!verifiers.length) {
+      const names = consumers.map((c) => `'${c.id}'`).join(", ");
+      errors.push(
+        `task '${finder.id}': returns citations but every task consuming it (${names}) is on ` +
+          `the same model family — a finder pack without verifiers is not a review. Add a ` +
+          `verifier node after it on a different family, fed {{resultPath:${finder.id}}}, ` +
+          `e.g. { "id": "verify-${finder.id}", "model": "claude-haiku-4-5", "after": ["${finder.id}"] }. ` +
+          `Batching may resize the verifier wave; it may not fold verification into the leaf ` +
+          `that consumes the findings.`,
+      );
+    }
+  }
+}
+
 export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref } = {}) {
   const errors = [];
   if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
@@ -824,6 +874,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     }
   }
 
+  checkVerifierCoverage(tasks, errors);
   if (errors.length) throw new ValidationError(errors);
 
   return {
