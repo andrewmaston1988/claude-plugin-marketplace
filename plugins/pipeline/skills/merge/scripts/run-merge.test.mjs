@@ -5,6 +5,7 @@
 // merge.mjs unchanged. These tests pin the port, not the merge.
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   parseBranches,
   resolvePlansDir,
@@ -12,6 +13,11 @@ import {
   banner,
   needInput,
   collectSignals,
+  stepDone,
+  resumeFrom,
+  mutexConflict,
+  taskLines,
+  DRIVER_STEPS,
 } from "./run-merge.mjs";
 
 // ── Scenario 2 — branch parsing ───────────────────────────────────────────────
@@ -180,5 +186,82 @@ test("MERGE_MJS resolves inside the plugin tree, not the merged repo", async () 
   ok(
     !src.includes('join(projectDir, "plugins/pipeline'),
     "merge.mjs must not be derived from projectDir",
+  );
+});
+
+// ── Scenario 7 — resume guards key on reality, never on the marker ★ ─────────
+// The single most important behaviour in this driver. A guard that reads the
+// progress marker instead of the world produces a silently wrong resume: the
+// marker says pending, the side effect already landed, and the re-run does it
+// twice. These prove each guard consults the world.
+
+test("stepDone: squash guard reads git ancestry, not the marker", () => {
+  // merged=true means the branch is already an ancestor of the target: the
+  // squash landed, whatever the marker claims.
+  equal(stepDone("squash", { merged: true, planMoved: false, marker: "pending" }), true);
+  equal(stepDone("squash", { merged: false, planMoved: false, marker: "completed" }), false);
+});
+
+test("stepDone: plan-move guard reads the complete/ dir, not the marker", () => {
+  equal(stepDone("move-plans", { merged: true, planMoved: true, marker: "pending" }), true);
+  equal(stepDone("move-plans", { merged: true, planMoved: false, marker: "completed" }), false);
+});
+
+test("stepDone: an unknown step is never assumed done", () => {
+  equal(stepDone("no-such-step", { merged: true, planMoved: true, marker: "completed" }), false);
+});
+
+test("resumeFrom: picks the first step the world says is incomplete", () => {
+  // Squash landed, plan move did not — the classic half-completed merge.
+  equal(resumeFrom({ merged: true, planMoved: false }), "move-plans");
+});
+
+test("resumeFrom: nothing done yet resumes at the squash", () => {
+  equal(resumeFrom({ merged: false, planMoved: false }), "squash");
+});
+
+test("resumeFrom: everything done resumes at nothing", () => {
+  equal(resumeFrom({ merged: true, planMoved: true }), null);
+});
+
+// ── Scenario 8 — mutex on a foreign subject ──────────────────────────────────
+
+test("mutexConflict: a progress entry for other branches blocks the run", () => {
+  const c = mutexConflict({ existingSubject: "autonomous/other", requested: "autonomous/mine" });
+  equal(c, true);
+});
+
+test("mutexConflict: the same subject is a resume, not a conflict", () => {
+  equal(mutexConflict({ existingSubject: "autonomous/mine", requested: "autonomous/mine" }), false);
+});
+
+test("mutexConflict: no existing entry is never a conflict", () => {
+  equal(mutexConflict({ existingSubject: null, requested: "autonomous/mine" }), false);
+});
+
+// ── Scenario 10 — [TASK_*] lines ─────────────────────────────────────────────
+
+test("taskLines: one TASK_CREATE per step on init", () => {
+  const out = taskLines("create", DRIVER_STEPS);
+  const created = out.trim().split("\n").filter((l) => l.startsWith("[TASK_CREATE]"));
+  equal(created.length, DRIVER_STEPS.length);
+});
+
+test("taskLines: an update names the index and the status", () => {
+  const out = taskLines("update", DRIVER_STEPS, { index: 2, status: "completed" });
+  match(out, /\[TASK_UPDATE\] 2 completed/);
+});
+
+// Found by I2, not by the unit tests: `merge-base --is-ancestor` is blind to a
+// squash merge — the squash rewrites the commits, so the branch never becomes an
+// ancestor. Checking ancestry alone reported a landed merge as pending, and the
+// resume would have squashed it a second time. observeWorld now falls back to
+// `git cherry`, whose "-" prefix means already-applied-upstream.
+test("observeWorld: detects a landed SQUASH merge, not just a fast-forward", () => {
+  const src = readFileSync(new URL("./run-merge.mjs", import.meta.url), "utf8");
+  ok(src.includes('"cherry"'), "must probe git cherry, not ancestry alone");
+  ok(
+    src.indexOf('"cherry"') > src.indexOf('"--is-ancestor"'),
+    "ancestry first (cheap), cherry as the squash-aware fallback",
   );
 });
