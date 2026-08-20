@@ -23,6 +23,7 @@ import {
   priorGatesMet,
   taskLines,
   IRON_LAW_TASKS,
+  buildManifest,
   recordValidation,
   parseValidateOutput,
 } from "./run-swarm.mjs";
@@ -469,4 +470,66 @@ test("taskLines: emits one [TASK_CREATE] per Iron Law clause", () => {
   ok(lines.every((l) => l.startsWith("[TASK_CREATE] ")), lines.join("\n"));
   ok(lines.some((l) => /liveness/.test(l)), "names the liveness check");
   ok(lines.some((l) => /re-dispatch, never kill/.test(l)), "names the recovery rule");
+});
+
+// ── buildManifest emits the graph — the model supplies values, not structure ──
+// The inversion: the driver constructs the tasks array, after-edges, and the
+// integrate/forEach nodes from narrow answers. The model can no longer omit a
+// required node because it never hand-authors the node list. Assertions pin the
+// EMITTED GRAPH, never any narration.
+
+test("buildManifest: a combined output forces an integrate node the model cannot drop ★", () => {
+  const plan = buildManifest({
+    items: [
+      { id: "ref-a", prompt: "document module a", model: "glm-5.2:cloud" },
+      { id: "ref-b", prompt: "document module b", model: "glm-5.2:cloud" },
+      { id: "ref-c", prompt: "document module c", model: "glm-5.2:cloud" },
+    ],
+    combinedOutput: { into: "reference", label: "one REFERENCE.md, consistent terms" },
+  });
+  // A combined output must emit ONE node consuming every leaf — a synthesis leaf
+  // (text results, the doc case) or an integrate node (commits). The model cannot
+  // omit it either way. Here the leaves return text, so it is a synthesis leaf.
+  const leafIds = ["ref-a", "ref-b", "ref-c"];
+  const consumer = plan.tasks.find((x) => Array.isArray(x.after) && leafIds.every((l) => x.after.includes(l)));
+  ok(consumer, "a node consuming all three leaves must be emitted: " + JSON.stringify(plan.tasks.map((x) => x.id)));
+  ok(consumer.integrate || /result:ref-a/.test(consumer.prompt || ""), "it integrates the branches or synthesises the results");
+});
+
+test("buildManifest: no combined output -> parallel leaves, no integrate", () => {
+  const plan = buildManifest({
+    items: [
+      { id: "a", prompt: "p", model: "haiku" },
+      { id: "b", prompt: "p", model: "haiku" },
+      { id: "c", prompt: "p", model: "haiku" },
+    ],
+  });
+  ok(!plan.tasks.some((x) => x.integrate), "no integrate node when output is not combined");
+  ok(plan.tasks.every((x) => !x.after || x.after.length === 0), "independent leaves have no after edges");
+  equal(plan.tasks.length, 3);
+});
+
+test("buildManifest: a runtime list emits a find task + forEach, not N static siblings", () => {
+  const plan = buildManifest({
+    itemSource: { findPrompt: "list every .mjs importing child_process; return an array", model: "glm-5.2:cloud" },
+    perItem: { prompt: "review {{item}} for unescaped args", model: "glm-5.2:cloud", maxItems: 30 },
+  });
+  const finder = plan.tasks.find((x) => /list every/.test(x.prompt || ""));
+  ok(finder, "a discovery/find task is emitted");
+  const fan = plan.tasks.find((x) => x.forEach);
+  ok(fan, "a forEach leaf is emitted, not hand-expanded siblings");
+  equal(fan.forEach.from, finder.id);
+  equal(fan.forEach.maxItems, 30);
+});
+
+test("buildManifest: an item that builds on another's commits gets isolation.from", () => {
+  const plan = buildManifest({
+    items: [
+      { id: "impl", prompt: "add the flag", model: "haiku" },
+      { id: "test", prompt: "test the flag", model: "haiku", buildsOnCommitsOf: "impl" },
+    ],
+  });
+  const test = plan.tasks.find((x) => x.id === "test");
+  deepEqual(test.after, ["impl"]);
+  ok(test.isolation && test.isolation.from === "impl", "builds-on-commits emits isolation.from, not just {{result}}");
 });

@@ -53,6 +53,96 @@ export function recordGate(meta = {}, key, value) {
   return { ...meta, [key]: value };
 }
 
+// ── The driver AUTHORS the graph — the model supplies values, not structure ───
+// The inversion at the heart of the rewrite. The model answers narrow questions
+// (the items, each item's blocking dependency, whether the request names a
+// COMBINED output, whether the list is only known at runtime); buildManifest
+// constructs the tasks array, the after-edges, and the forEach/integrate/
+// isolation nodes. Because the script emits the node list, the model cannot
+// route a required node out — the failure the whole rewrite exists to kill.
+//
+// Answers shape (all optional; the caller supplies what the request implies):
+//   items:        [{ id, prompt, model, buildsOnCommitsOf? }]  — a known list
+//   itemSource:   { findPrompt, model }        — the list is discovered at runtime
+//   perItem:      { prompt, model, maxItems }  — the leaf cloned per discovered item
+//   combinedOutput: { into, label }            — one artifact assembled from the leaves
+// Returns a raw manifest object ({ tasks, ...digest? }) ready for validate.
+export function buildManifest(answers = {}) {
+  const tasks = [];
+
+  if (answers.itemSource) {
+    // Runtime list: a discovery task feeding a single forEach leaf. Never expand
+    // the list into N static siblings — that is the S5 failure, prevented here at
+    // emission rather than caught at validate.
+    const findId = "find";
+    tasks.push({
+      id: findId,
+      model: answers.itemSource.model,
+      prompt: answers.itemSource.findPrompt,
+      returns: { type: "array", items: { type: "string" } },
+    });
+    tasks.push({
+      id: "each",
+      model: answers.perItem.model,
+      after: [findId],
+      forEach: { from: findId, maxItems: answers.perItem.maxItems },
+      prompt: answers.perItem.prompt,
+    });
+  } else if (Array.isArray(answers.items)) {
+    const buildsOn = new Set(answers.items.map((it) => it.buildsOnCommitsOf).filter(Boolean));
+    for (const it of answers.items) {
+      const task = { id: it.id, model: it.model, prompt: it.prompt };
+      if (buildsOn.has(it.id)) {
+        task.isolation = { worktree: it.id };
+        task.allowedTools = "Read,Grep,Glob,Write,Edit";
+      }
+      if (it.buildsOnCommitsOf) {
+        // Depends on another's EDITS (commits), not just its output text: seed a
+        // private tree from that task's branch, and add the after-edge.
+        task.after = [it.buildsOnCommitsOf];
+        task.isolation = { worktree: it.id, from: it.buildsOnCommitsOf };
+      }
+      tasks.push(task);
+    }
+  }
+
+  // A COMBINED output forces a node consuming every leaf — the model has no
+  // opportunity to omit it. HOW it combines depends on what the leaves produce:
+  //   - text results (docs, findings): a SYNTHESIS leaf that reads {{result:}} of
+  //     each and writes the one artifact. This is the common case (E2).
+  //   - commits (code edits in private worktrees): an agentless `integrate` node
+  //     that merges the branches. Requires the leaves to isolate + write.
+  // mode defaults to "results" (text); "commits" selects integrate.
+  if (answers.combinedOutput) {
+    const leafIds = tasks
+      .filter((t) => !t.integrate && !t.forEach && !t.compute)
+      .map((t) => t.id);
+    if (leafIds.length) {
+      const co = answers.combinedOutput;
+      const id = co.id || (co.mode === "commits" ? "integrate" : "assemble");
+      if (co.mode === "commits") {
+        // Every merged leaf needs its own worktree so a branch exists to merge.
+        for (const t of tasks) if (leafIds.includes(t.id)) { t.isolation = { ...(t.isolation || {}), worktree: t.id }; t.allowedTools = "Read,Grep,Glob,Write,Edit"; }
+        tasks.push({ id, after: [...leafIds], integrate: { into: co.into, from: leafIds } });
+      } else {
+        // Synthesis leaf: reads each leaf's result text and writes the artifact.
+        const refs = leafIds.map((lid) => `{{result:${lid}}}`).join("\n");
+        tasks.push({
+          id,
+          model: co.model || tasks.find((t) => leafIds.includes(t.id))?.model,
+          after: [...leafIds],
+          prompt:
+            `Assemble a single ${co.into} from these leaf results, reconciling ` +
+            `cross-cutting terms so they are used consistently across all of them:\n${refs}` +
+            (co.label ? `\n\nGoal: ${co.label}` : ""),
+        });
+      }
+    }
+  }
+
+  return { tasks };
+}
+
 // ── The validate gate — the offer gate guards on the WORLD, not the marker ────
 // A recorded gate answer is not consent to spend if no VALIDATED manifest file
 // exists: the cost line the gate quotes must be the engine's real estimate, not
