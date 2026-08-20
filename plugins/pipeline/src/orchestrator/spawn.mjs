@@ -735,6 +735,14 @@ export function spawnMerge(project, row, projectRoot, model, { db, dryRun, logFn
     } catch (e) {
       logFn(`[${project}] WARN: could not read shim ${claudePath}: ${e.message}`, "WARN");
     }
+
+    // Still a .cmd/.bat? Node 20+ refuses to spawn one directly (EINVAL), so route
+    // it through cmd.exe. Args stay an array — `shell: true` would concatenate them
+    // unescaped, and the prompt is arbitrary text.
+    if (spawnCmd === claudePath) {
+      spawnArgs = ["/d", "/s", "/c", claudePath, ...args];
+      spawnCmd = process.env.COMSPEC || "cmd.exe";
+    }
   }
 
   const proc = spawn(spawnCmd, spawnArgs, {
