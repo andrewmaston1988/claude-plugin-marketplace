@@ -19,6 +19,9 @@ import {
   rosterFrom,
   readRunLog,
   tokenNote,
+  validateGate,
+  recordValidation,
+  parseValidateOutput,
 } from "./run-swarm.mjs";
 
 // ── Exit-mode contract ───────────────────────────────────────────────────────
@@ -395,4 +398,47 @@ test("the read gates the strategy pause, not the reverse", async () => {
 test("read-strategy is recorded on presence, like every other answer", () => {
   const meta = recordGate({}, "read-strategy", "");
   ok("read-strategy" in meta);
+});
+
+// ── The offer gate is unreachable until validate passes on a real file ────────
+// Observed live: a session reached the offer gate with --manifest <name> and NO
+// JSON on disk, then answered the three questions from hand-computed numbers —
+// validate never ran, so the cost line, schema/dep/governance checks, and the
+// estimate were all fabricated. The gate must guard on the WORLD (a validated
+// manifest file), not on the recorded answers alone.
+
+test("validateGate: no manifest file recorded -> not passed, demands one", () => {
+  const v = validateGate({ meta: {} });
+  ok(!v.passed, "unvalidated meta must not pass the validate gate");
+  ok(/authored|validate|manifest file/i.test(v.reason), v.reason);
+});
+
+test("validateGate: a stored validation with an estimate passes and carries the line", () => {
+  const v = validateGate({ meta: { validate: { ok: true, estimate: "estimated ~1.58M tokens", file: "x.json" } } });
+  ok(v.passed, "a recorded successful validation passes");
+  equal(v.estimate, "estimated ~1.58M tokens");
+});
+
+test("validateGate: a stored FAILED validation does not pass", () => {
+  const v = validateGate({ meta: { validate: { ok: false, file: "x.json" } } });
+  ok(!v.passed, "a failed validation must not pass");
+});
+
+test("recordValidation: stores ok + estimate + file, keyed under meta.validate", () => {
+  const meta = recordValidation({}, { ok: true, estimate: "estimated ~900k tokens", file: "plan.json" });
+  equal(meta.validate.ok, true);
+  equal(meta.validate.estimate, "estimated ~900k tokens");
+  equal(meta.validate.file, "plan.json");
+});
+
+test("parseValidateOutput: pulls the estimate line and OK from engine stdout", () => {
+  const stdout = "manifest OK: 2 task(s) + digest\nestimated ~1.58M tokens\nresultsDir: C:/x";
+  const r = parseValidateOutput(stdout);
+  equal(r.ok, true);
+  equal(r.estimate, "estimated ~1.58M tokens");
+});
+
+test("parseValidateOutput: no 'manifest OK' line means not ok", () => {
+  const r = parseValidateOutput("manifest validation failed:\n  - task 'a': bad");
+  equal(r.ok, false);
 });

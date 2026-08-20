@@ -144,6 +144,7 @@ liveness check, and failure routing. Your job is the loop.
 |---|---|
 | *(none)* | Pauses until all three gate answers are given; then prints them |
 | `--gate-fanout/-mix/-batching "<answer>"` | Records one answer. An empty string and "no" are real answers |
+| `--validate-output <file\|text>` `--manifest-file <path>` | Records the engine's `validate` result; the offer gate **refuses** until a passing validation exists, and quotes its real estimate |
 | `--inline-lines <n> [--not-comparable]` | The cost side of the gate's first question |
 | `--dispatch-output <file\|text>` | Captures `resultsDir:` from the engine's output; **refuses** if the line is absent |
 | `--check-liveness` | Reads the run's own `run.log` once and rules live / not-live / cache replay |

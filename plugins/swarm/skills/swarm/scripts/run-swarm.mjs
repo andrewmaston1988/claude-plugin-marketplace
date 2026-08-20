@@ -41,6 +41,45 @@ export function recordGate(meta = {}, key, value) {
   return { ...meta, [key]: value };
 }
 
+// ── The validate gate — the offer gate guards on the WORLD, not the marker ────
+// A recorded gate answer is not consent to spend if no VALIDATED manifest file
+// exists: the cost line the gate quotes must be the engine's real estimate, not
+// a number a session computed by hand. `--manifest` is only a state key, so the
+// driver cannot assume a file behind it — the model authors the JSON, runs the
+// engine's `validate`, and hands the result back with --validate-output. Until
+// that lands, the offer gate is unreachable.
+
+// Parse the engine's `validate` stdout: OK is the "manifest OK" line, and the
+// estimate is the "estimated ~…" line it prints for the gate to quote verbatim.
+export function parseValidateOutput(stdout = "") {
+  const text = String(stdout);
+  const ok = /^manifest OK\b/m.test(text);
+  const m = text.match(/^estimated .*/m);
+  return { ok, estimate: m ? m[0].trim() : null };
+}
+
+// Store a validation result under meta.validate — presence + ok is what the gate
+// reads, and the estimate is what it quotes.
+export function recordValidation(meta = {}, { ok, estimate = null, file = null } = {}) {
+  return { ...meta, validate: { ok: !!ok, estimate, file } };
+}
+
+// The gate verdict: passes ONLY when a successful validation is recorded. Returns
+// the estimate line so the offer gate can quote the real number.
+export function validateGate({ meta = {} } = {}) {
+  const v = meta.validate;
+  if (!v || !v.ok) {
+    return {
+      passed: false,
+      reason:
+        "No validated manifest. Author the manifest JSON, run " +
+        "`swarm.mjs validate <file>`, and re-run with --validate-output <file|text> " +
+        "so the gate quotes the engine's real estimate — a hand-computed cost is not consent.",
+    };
+  }
+  return { passed: true, estimate: v.estimate || null };
+}
+
 // ── Inline-cost arithmetic ────────────────────────────────────────────────────
 
 // The skill's formula: total lines x ~10. `none` on a cold corpus is itself the
@@ -294,6 +333,17 @@ async function main() {
   }
   meta = recordGate(meta, "read-strategy", getFlag("read-strategy", argv));
   meta = recordGate(meta, "strategy", getFlag("strategy", argv));
+
+  // --validate-output <file|text>: the engine's `validate` stdout, handed back so
+  // the driver records a REAL validation (ok + the estimate line) rather than
+  // trusting a hand-computed number. Presence of a passing validation is what
+  // unlocks the offer gate below.
+  const validateOut = getFlag("validate-output", argv);
+  if (validateOut !== undefined) {
+    const text = existsSync(validateOut) ? readFileSync(validateOut, "utf8") : validateOut;
+    const parsed = parseValidateOutput(text);
+    meta = recordValidation(meta, { ...parsed, file: getFlag("manifest-file", argv) || manifest });
+  }
   state.meta = meta;
   writeState(manifest, state, { dryRun });
 
@@ -325,6 +375,31 @@ async function main() {
     return 0;
   }
 
+  // The validate gate — guards the offer gate on OBSERVABLE REALITY. A recorded
+  // trio of answers is not consent if no validated manifest FILE exists: the cost
+  // line the gate quotes must be the engine's estimate, not a hand-computed one.
+  const vg = validateGate({ meta });
+  if (!vg.passed) {
+    out(
+      banner(
+        "Validate the manifest — before the gate can quote a real cost",
+        [
+          "The offer gate quotes the ENGINE's estimate, not a number you compute by",
+          "hand. So a manifest FILE must exist and pass validation first:",
+          "",
+          "  1. Author the manifest JSON on disk (authoring.md for the schema).",
+          "  2. node \"<base>/../../scripts/swarm.mjs\" validate <manifest-file>",
+          "  3. Re-run this driver with --validate-output <the validate stdout, file or text>",
+          "     and --manifest-file <path>, so the gate carries the real estimate.",
+          "",
+          vg.reason,
+        ],
+        `node "${self}" --manifest "${manifest}" --manifest-file <path> --validate-output <file|text>`,
+      ),
+    );
+    return 0;
+  }
+
   if (!gateAnswered(meta)) {
     const missing = GATE_KEYS.filter((k) => !(k in meta));
     const self = fileURLToPath(import.meta.url).split("\\").join("/");
@@ -342,6 +417,7 @@ async function main() {
           `  2. mix      — "Model mix?" (quote real numbers from the engine's quota)`,
           `  3. batching — "<M> leaves as proposed, or a different point on the curve?"`,
           "",
+          ...(vg.estimate ? [`Real cost from validate: ${vg.estimate}`, ""] : []),
           `Already recorded: ${GATE_KEYS.filter((k) => k in meta).map((k) => `${k}=${JSON.stringify(meta[k])}`).join(", ") || "(none)"}`,
           `Still needed:     ${missing.join(", ")}`,
           "",
