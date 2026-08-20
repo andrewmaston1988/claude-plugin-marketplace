@@ -21,6 +21,8 @@ import {
   tokenNote,
   validateGate,
   priorGatesMet,
+  taskLines,
+  IRON_LAW_TASKS,
   recordValidation,
   parseValidateOutput,
 } from "./run-swarm.mjs";
@@ -454,4 +456,17 @@ test("priorGatesMet: false until BOTH read-strategy and strategy are recorded", 
   ok(!priorGatesMet({ "read-strategy": "done" }), "read alone is not enough");
   ok(!priorGatesMet({ strategy: "done" }), "strategy alone is not enough");
   ok(priorGatesMet({ "read-strategy": "done", strategy: "done" }), "both present");
+});
+
+// ── The driver owns the Iron Law task list ───────────────────────────────────
+// Prose told the model to hand-author three TaskCreate items at dispatch; that is
+// a parallel list the model improvises. The driver prints [TASK_CREATE] lines and
+// the SKILL.md mirrors them (writing-skills+ Gate 1).
+
+test("taskLines: emits one [TASK_CREATE] per Iron Law clause", () => {
+  const lines = taskLines();
+  equal(lines.length, IRON_LAW_TASKS.length);
+  ok(lines.every((l) => l.startsWith("[TASK_CREATE] ")), lines.join("\n"));
+  ok(lines.some((l) => /liveness/.test(l)), "names the liveness check");
+  ok(lines.some((l) => /re-dispatch, never kill/.test(l)), "names the recovery rule");
 });

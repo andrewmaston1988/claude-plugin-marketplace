@@ -51,7 +51,7 @@ skill exists to catch — the command arrives without the rules that govern it.
 
 A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the above — those govern *stalling*, never *interfering with a live dispatch*. When a leaf genuinely ended badly, the engine marks it `failed`; recover per "A leaf ended and produced no commit" (below) — never by killing or deleting, which is only ever the operator's call. **This exists because a session that had this skill loaded broke every clause under directive pressure — killed a healthy leaf, orphaned its worktree, deleted branches, and misdiagnosed the cause three times (2026-07-15).** The pre-dispatch twin of this gate is the offer gate (below): consent before spend, hands-off after.
 
-**Instantiate this as tasks — do not just read it.** The moment you dispatch, create these as `TaskCreate` items: `offer-gate answered` · `one liveness check, then hands-off` · `recover a bad leaf by re-dispatch, never kill/delete`. A skimmed rule gets rationalised past; a task you created and left undone is *visible*. If you did not make the tasks, you did not engage the discipline.
+**Instantiate this as tasks — do not just read it.** The driver prints these as `[TASK_CREATE]` lines when the gate is answered; mirror each into the harness task list with one `TaskCreate`. A skimmed rule gets rationalised past; a task left undone is *visible*. Mirror the driver's lines — do not author your own list.
 
 ## Data governance — read this first
 

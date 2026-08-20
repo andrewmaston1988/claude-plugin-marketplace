@@ -29,6 +29,18 @@ export function needInput(field, hint) {
 // the driver only records them.
 export const GATE_KEYS = ["fanout", "mix", "batching"];
 
+// The Iron Law's post-dispatch discipline, as the task list the driver OWNS. It
+// prints these as [TASK_CREATE] lines at the gate-answered moment; SKILL.md tells
+// the model to mirror them, not to author its own from prose.
+export const IRON_LAW_TASKS = [
+  "offer-gate answered",
+  "one liveness check (--check-liveness), then hands-off",
+  "recover a bad leaf by re-dispatch, never kill/delete",
+];
+export function taskLines(items = IRON_LAW_TASKS) {
+  return items.map((t) => `[TASK_CREATE] ${t}`);
+}
+
 // Presence, not truthiness. An empty string and a "no" are real answers — gating
 // on `!meta[k]` makes the honest answer unreachable and loops the pause forever
 // (the shipped defect in run-workflow.mjs's --plans-line).
@@ -534,6 +546,9 @@ async function main() {
       ...(resultsDir ? ["", `resultsDir: ${resultsDir}`] : []),
       "",
       `state: ${statePath(manifest)}`,
+      "",
+      "Mirror these into the harness task list — one TaskCreate each:",
+      ...taskLines().map((l) => `  ${l}`),
       "",
       "The gate is recorded. Validate, then dispatch BARE via Bash run_in_background.",
       "Then hand the dispatch output back:",
