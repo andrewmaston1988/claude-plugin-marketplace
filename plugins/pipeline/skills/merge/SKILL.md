@@ -4,195 +4,100 @@ description: Merge one or more tested autonomous branches to main — closes pla
 argument-hint: <branch> [branch ...]
 ---
 
-Merge the branches listed in `$ARGUMENTS` to main. Each branch must have
-passing test results before this command is run — this command does not run
-tests, it closes out completed work.
+Merge the branches in `$ARGUMENTS` to the target branch. Each branch must already
+have passing test results — this command closes out completed work, it does not
+run tests.
 
 **Branches to merge:** $ARGUMENTS
 
-All mechanical work (git, plan moves, pipeline updates, doc edits, commit
-bodies, smoke check) is performed by `skills/merge/merge.mjs`. This page
-is a thin wrapper: locate `PLUGIN_ROOT`, parse `$ARGUMENTS` into a branch
-list, invoke the script, surface stderr to the user.
-
-## Step 1 — Locate `PLUGIN_ROOT` and derive `PROJECT_DIR`
+`scripts/run-merge.mjs` owns the mechanics: root and branch resolution, the
+target-branch lookup, the `rebase_required` and `(needs testing)` pre-checks,
+model selection, and building the merge invocation. Your job is a loop — run it,
+do only what its output asks, re-run.
 
 ```bash
-PLUGIN_ROOT=$(pipeline plugin-root)
-PROJECT_DIR=$(git rev-parse --show-toplevel)
-PROJECT=$(basename "$PROJECT_DIR")
+node "$(pipeline plugin-root)/skills/merge/scripts/run-merge.mjs" --branches <b1>[,<b2>...]
 ```
 
-## Step 1.5 — Resolve target branch
+## The loop
 
-Detect the repo's default branch, then check the pipeline DB for a plan-level override:
+Each run ends one of four ways. Branch on which:
 
-```bash
-DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|.*/||')
-[ -z "$DEFAULT_BRANCH" ] && DEFAULT_BRANCH=$(git config init.defaultBranch 2>/dev/null || echo "main")
+| Driver output | You do |
+|---|---|
+| `{"error":"missing_required_field",...}` | Ask the user for the field, re-run with the flag |
+| `PAUSE: <what>` banner | The judgement it names, then re-run the printed `RE-RUN EXACTLY` command |
+| Non-zero exit | Surface the message verbatim; do not retry blindly |
+| `resolved:` block + `Spawn a background agent running:` | Spawn it (below) |
 
-FEATURE="${branch#autonomous/}"
-TARGET_BRANCH=$(pipeline rows "$PROJECT" --feature "$FEATURE" --format json \
-  | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const r=JSON.parse(d);process.stdout.write(r[0]?.target_branch||'');}catch{}})" 2>/dev/null)
-[ -z "$TARGET_BRANCH" ] && TARGET_BRANCH="$DEFAULT_BRANCH"
-```
+The driver re-reads reality on every run, so re-running is always safe.
 
-Capture as `$target_branch`. If the DB lookup fails or returns blank, fall back to `$DEFAULT_BRANCH`.
+## Spawning
 
-## Step 2 — Parse `$ARGUMENTS` into a branch list
-
-Split `$ARGUMENTS` on whitespace or commas. Each entry should already be in
-`autonomous/<slug>` form (or `<slug>` — the runner normalises). Join into a
-single comma-separated list for the `--branches` flag.
-
-## Step 2.4 — Pre-check: refuse if any branch has `rebase_required=1`
-
-For each branch, look up its row in the project's pipeline DB and read the `rebase_required` column. If any row has `rebase_required=1`, the dev session aborted its rebase — refuse outright; do not spawn the merge agent.
-
-```bash
-for branch in <b1> <b2> ...; do
-  FEATURE="${branch#autonomous/}"
-  FLAG=$(pipeline rows "$PROJECT" --feature "$FEATURE" --format json \
-    | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const r=JSON.parse(d);process.stdout.write(r[0]?.rebase_required?'1':'0');}catch{process.stdout.write('0');}})")
-  if [ "$FLAG" = "1" ]; then
-    echo "REFUSED: $branch has rebase_required=1 — rebase manually, then clear with: pipeline rebase-required-set $PROJECT $FEATURE 0"
-    exit 1
-  fi
-done
-```
-
-If any branch fails the check: tell the user verbatim which branch is flagged and stop. Do not proceed to Step 2.5.
-
-## Step 2.5 — Pre-check: Model selection (inline, fast)
-
-Run two checks before spawning:
-
-```bash
-# Check 1: is any branch diverged from the target branch (rebase required)?
-DIVERGED=0
-for branch in <b1> <b2> ...; do
-  if ! git merge-base --is-ancestor "$target_branch" "$branch"; then
-    DIVERGED=1
-    break
-  fi
-done
-
-# Check 2: does any plan have (needs testing) items?
-# Resolve plan file path from the pipeline DB row.
-NEEDS_TESTING=0
-for branch in <b1> <b2> ...; do
-  FEATURE="${branch#autonomous/}"
-  PLAN_FILE=$(pipeline rows "$PROJECT" --feature "$FEATURE" --format json \
-    | node -e "let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{try{const r=JSON.parse(d);process.stdout.write(r[0]?.plan_file||'');}catch{}})")
-  if [ -f "$PLAN_FILE" ] && grep -q "(needs testing)" "$PLAN_FILE"; then
-    NEEDS_TESTING=1
-    break
-  fi
-done
-
-# Check 3: is the working tree dirty?
-DIRTY_STASH=0
-if [ -n "$(git status --short)" ]; then
-  DIRTY_STASH=1
-fi
-```
-
-**Model decision (Haiku or Sonnet only — no Opus):**
-- Any of: diverged branch, `(needs testing)` in plan, dirty stash → **Sonnet**
-- All clean → **Haiku**
-
-Announce: `"Spawning merge for <branch(es)> — model: <Haiku|Sonnet> (<reason>)"`
-
-## Step 2.7 — Resolve `--plans-dir` from config
-
-Read `plansDir` from the pipeline config via the CLI (platform-safe, uses the same path resolution as `loadPipelineConfig()`). If set, resolve the `{project}` placeholder and compute an absolute path. If relative, resolve relative to `PROJECT_DIR`.
-
-```bash
-PLANS_DIR_FLAG=""
-RAW_PLANS_DIR=$(pipeline config-get plansDir 2>/dev/null)
-
-if [ -n "$RAW_PLANS_DIR" ]; then
-  # Replace {project} placeholder with the project name
-  RESOLVED_PLANS_DIR="${RAW_PLANS_DIR/\{project\}/$PROJECT}"
-  # If relative, make it absolute relative to PROJECT_DIR
-  case "$RESOLVED_PLANS_DIR" in
-    /*) ;;  # already absolute
-    *)  RESOLVED_PLANS_DIR="$PROJECT_DIR/$RESOLVED_PLANS_DIR" ;;
-  esac
-  PLANS_DIR_FLAG="--plans-dir $RESOLVED_PLANS_DIR"
-fi
-```
-
-## Step 3 — Spawn background agent
+The driver prints a fully-resolved command and the model to run it on. Spawn a
+background agent with **exactly** that command — do not reconstruct it:
 
 ```
 Agent(
-  description="Merge <branch(es)> to main",
+  description="Merge <branch(es)>",
   run_in_background=True,
-  model="haiku" | "sonnet",   ← from Step 2.5 pre-check
+  model=<the model the driver printed>,
   prompt="""
-    Run the merge for <branch(es)>.
-    plugin-root: <PLUGIN_ROOT>. project-dir: <PROJECT_DIR>.
-    branches: <b1,b2,...>
+    Run this command exactly as given, from <PROJECT_DIR>:
 
-    Steps:
-    1. If working tree is dirty, stash changes first (git stash --include-untracked); remember to pop stash after merge completes.
-    2. Ensure you are on the target branch (git checkout "$target_branch").
-    3. Run: node <PLUGIN_ROOT>/skills/merge/scripts/merge.mjs \
-         --branches <b1,b2,...> \
-         --project-dir <PROJECT_DIR> \
-         --session-slug merge_<session-id> \
-         <PLANS_DIR_FLAG>
-    4. If exit code is non-zero, report the BLOCKER lines from stderr.
-    5. If exit code is zero, report: branch(es) merged, plan location(s), squash commit hash.
-    5.5. For each merged branch: read the completed plan file from <PROJECT_DIR>/plans/complete/<slug>.md (or the plansDir equivalent). In the ## Open Questions section, remove any bullets that were clearly resolved by the branch work — i.e., questions about implementation approach, design decisions, or unknowns the branch demonstrably answered. Leave questions that remain genuinely open. Use Edit to apply removals.
-    5.6. For each merged branch: clean up any lingering session progress entries whose slug contains the branch stem. Run:
-         pipeline progress-list-active $PROJECT
-         Parse the JSON output and collect slugs that contain the feature stem (the part after "autonomous/" in the branch name). For each matching slug, run: pipeline progress-delete $PROJECT <slug>
-         This removes orphaned dev/review/test progress dashboards for the feature.
-    6. If stash was created in step 1, pop it now (git stash pop).
+      <the command the driver printed>
 
-    Report back with: PASS or FAIL, one-line summary, any BLOCKER messages.
+    1. If the working tree is dirty, `git stash --include-untracked` first and pop it at the end.
+    2. Ensure you are on the target branch before running.
+    3. Non-zero exit → report the BLOCKER lines from stderr and stop.
+    4. Zero exit → report branch(es) merged, plan location(s), and the squash commit hash.
+    5. For each merged branch, prune resolved bullets from the completed plan's
+       `## Open Questions` — those the branch demonstrably answered. Leave genuinely
+       open ones. This is judgement; read the plan, do not pattern-match.
+    6. Clean up stale progress entries:
+         pipeline progress-list-active <PROJECT>
+       and for each slug containing the feature stem: `pipeline progress-delete <PROJECT> <slug>`.
+
+    Report: PASS or FAIL, a one-line summary, and any BLOCKER messages.
   """
 )
 ```
 
-## Step 4 — Return immediately
+Then tell the user it is spawned and on which model. **On notification:** relay the
+agent's summary verbatim.
 
-Tell the user: `"Merge spawned for <branch(es)> — will report back when done. (model: <Haiku|Sonnet>)"`
+## What needs your judgement
 
-**On notification:** relay the agent's summary to the user verbatim.
+**Untested items.** The driver pauses when a plan carries `(needs testing)` and
+lists them. Put it to the user — skip and force through, or stop? Only they can
+answer. `--skip-testing` rewrites those markers to `(skipped)` and logs a WARNING,
+so the override stays visible; never pass it without being told to.
 
-If the BLOCKER is `plan has (needs testing) items`, do not re-run silently. Surface the untested items to the user and ask:
+**Resolved Open Questions** (in the spawn prompt, step 5). Judge whether the branch
+actually answered a question, not whether it touched nearby code.
 
-> "These items are untested — skip and mark as `(skipped)` to force through? (yes/no)"
+**Squash-merged history.** `step0aRebase` runs `git rebase <target>` on each branch
+and fails when earlier commits were already squash-merged: the squash carries a
+combined patch-id that does not match the individual commits, so the replay
+conflicts against content that is already present. Git cannot infer the fork-point,
+so this one is yours:
 
-On `yes`: add `--skip-testing` to the runner command and re-spawn. The flag rewrites `(needs testing)` → `(skipped)` in the plan with a WARNING in the merge log so the override is visible.
+```bash
+git checkout <branch>
+git rebase --onto <target_branch> <fork-point> <branch>   # fork-point = last commit predating the upstream squash
+```
 
-On `no` (or any other response): stop and tell the user to complete testing first.
+Then re-run the driver's printed command with `--no-rebase` appended, which skips
+`step0aRebase` and goes straight to the 3-way squash merge. Operator-only — the
+default path must keep rebasing for every branch that has not hit this exact
+failure.
 
-## Recovery — squash-merged-history branches (`--no-rebase`)
+## Rationalisations — all rejected
 
-`step0aRebase` runs `git rebase <target_branch>` on each feature branch. This fails when the branch's earlier commits were already squash-merged into the target: the squash carries a combined patch-id that doesn't match the individual commits, so `git rebase` replays them, conflicts against their already-present content, and aborts the whole merge. This is a git limitation — the script cannot infer the fork-point automatically.
-
-The operator-driven recipe:
-
-1. **Linearise the branch manually** using `--onto` to skip past the already-squashed commits. `<fork-point>` is the sha of the last commit on the branch that pre-dates the upstream squash (typically the commit where the branch diverged from the pre-squash state):
-
-   ```bash
-   git checkout <branch>
-   git rebase --onto <target_branch> <fork-point> <branch>
-   # Resolve any conflicts on the genuinely new commits, then continue.
-   ```
-
-2. **Invoke the merge with `--no-rebase`** so `step0aRebase` is skipped and the runner goes straight to the 3-way squash merge against the linearised branch:
-
-   ```bash
-   node <PLUGIN_ROOT>/skills/merge/scripts/merge.mjs \
-     --branches <branch> \
-     --project-dir <PROJECT_DIR> \
-     --no-rebase \
-     <PLANS_DIR_FLAG>
-   ```
-
-All other behaviour (DoD checks, squash, plan move to `complete/`, project commit, smoke check) is preserved. `--no-rebase` is operator-only: the default merge path still runs `step0aRebase` and should not be changed for branches that haven't hit this exact failure mode.
+| Excuse | Reality |
+|---|---|
+| "I remember the flags — I'll just call `merge.mjs` directly." | The driver resolves the target branch, the plans dir, and the model from live state. A remembered invocation is a guess, and it skips both pre-checks. |
+| "I'll reconstruct the command, it's obvious." | It is printed. Copying it is free; retyping it is how a wrong `--plans-dir` reaches a real merge. |
+| "The tree is dirty but the merge is simple — Haiku is fine." | The model is computed from three signals, not chosen. Overriding it discards the reason it was raised. |
+| "`rebase_required=1` is stale, I'll merge anyway." | It means a dev session aborted its rebase. Rebase manually, then clear it explicitly with `pipeline rebase-required-set`. |
+| "I'll add `--skip-testing` to get past the pause." | That flag is the user's answer, not yours. It ships untested work and says so in the log. |
