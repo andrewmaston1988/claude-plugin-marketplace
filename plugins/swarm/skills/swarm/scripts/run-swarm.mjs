@@ -58,6 +58,14 @@ export function recordGate(meta = {}, key, value) {
 // Because the script emits the node list, the model cannot route a required node
 // out — the failure the whole rewrite exists to kill. The answer fields are the
 // ones `parseShape` accepts and `SHAPE_EXAMPLE` shows; do not restate them here.
+// A leaf whose branch must exist needs write tools. FILL a missing allowedTools;
+// never overwrite a stated one — an implementation leaf asked to commit needs
+// Bash, and silently stripping it leaves the leaf unable to do its job.
+const WRITE_TOOLS = "Read,Grep,Glob,Write,Edit";
+function withWriteTools(stated) {
+  return stated || WRITE_TOOLS;
+}
+
 export function buildManifest(answers = {}) {
   const tasks = [];
 
@@ -87,7 +95,7 @@ export function buildManifest(answers = {}) {
       const { buildsOnCommitsOf, ...task } = it;
       if (buildsOn.has(it.id)) {
         task.isolation = { worktree: it.id };
-        task.allowedTools = "Read,Grep,Glob,Write,Edit";
+        task.allowedTools = withWriteTools(task.allowedTools);
       }
       if (it.buildsOnCommitsOf) {
         // Depends on another's EDITS (commits), not just its output text: seed a
@@ -119,7 +127,11 @@ export function buildManifest(answers = {}) {
       const id = co.id || (co.mode === "commits" ? "integrate" : "assemble");
       if (co.mode === "commits") {
         // Every merged leaf needs its own worktree so a branch exists to merge.
-        for (const t of tasks) if (leafIds.includes(t.id)) { t.isolation = { ...(t.isolation || {}), worktree: t.id }; t.allowedTools = "Read,Grep,Glob,Write,Edit"; }
+        for (const t of tasks) {
+          if (!leafIds.includes(t.id)) continue;
+          t.isolation = { ...(t.isolation || {}), worktree: t.id };
+          t.allowedTools = withWriteTools(t.allowedTools);
+        }
         tasks.push({ id, after: [...leafIds], integrate: { into: co.into, from: leafIds } });
       } else {
         // Synthesis leaf: reads each leaf's result text and writes the artifact.

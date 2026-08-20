@@ -559,6 +559,31 @@ test("buildManifest: a combined output over a RUNTIME list consumes the forEach 
   ok(/\{\{result:each\}\}/.test(consumer.prompt || ""), "reads the forEach leaf's results: " + consumer.prompt);
 });
 
+test("buildManifest: an explicit allowedTools survives the write-tools default ★", () => {
+  // An implementation leaf is told to COMMIT its work, so it needs Bash. The
+  // driver may only FILL a missing allowedTools, never overwrite a stated one —
+  // silently stripping Bash leaves the leaf unable to do the job it was given.
+  const plan = buildManifest({
+    items: [
+      { id: "p1", prompt: "implement and commit", model: "haiku", allowedTools: "Read,Grep,Glob,Write,Edit,Bash" },
+      { id: "p2", prompt: "build on it and commit", model: "haiku", buildsOnCommitsOf: "p1",
+        allowedTools: "Read,Grep,Glob,Write,Edit,Bash" },
+    ],
+    combinedOutput: { into: "feat", mode: "commits" },
+  });
+  for (const id of ["p1", "p2"]) {
+    const t = plan.tasks.find((x) => x.id === id);
+    ok(/Bash/.test(t.allowedTools), `${id} keeps its stated tools, got: ${t.allowedTools}`);
+  }
+});
+
+test("buildManifest: a leaf that must write gets write tools when none were stated", () => {
+  const plan = buildManifest({
+    items: [{ id: "a", prompt: "edit", model: "haiku" }, { id: "b", prompt: "edit on top", model: "haiku", buildsOnCommitsOf: "a" }],
+  });
+  ok(/Write/.test(plan.tasks.find((t) => t.id === "a").allowedTools), "the default still fills a gap");
+});
+
 test("buildManifest: per-item engine fields pass through — one blob keeps the engine's full surface", () => {
   const plan = buildManifest({
     items: [
