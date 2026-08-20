@@ -1,11 +1,12 @@
 # Execution strategy — deciding the shape before anything spends
 
-**Mandatory reading before the offer gate.** The gate asks how many leaves, on which
-models, at which batching point. None of that is answerable from the request alone, and a
-leaf count invented at the moment you are asked to justify one is the failure this page
-exists to prevent.
+**The driver's first pause hands you this page.** Its next pause asks for a shape file:
+the items, what each must wait for, whether one artifact is assembled from them. The
+driver turns those answers into the graph — §3 is the procedure it runs, spelled out so
+you answer its questions correctly. You never write the tasks array.
 
-Work through it in order. Every step produces an input the gate consumes.
+Work through it in order. Every step produces a value the shape file carries or the gate
+consumes.
 
 ---
 
@@ -36,7 +37,15 @@ manifest you should not dispatch.
 
 **A manifest is a dependency graph, not one pattern stamped across every task.** Take one
 task at a time and ask what must FINISH before it can start. Width is an output of the
-answers.
+answers — and the driver computes it. Each answer is one field in the shape file:
+
+| The answer | Shape-file field | The driver emits |
+|---|---|---|
+| nothing | an `items[]` entry | a parallel leaf |
+| another's **output** (text) | `combinedOutput` when it is the one assembled artifact | a synthesis leaf `after` every item, reading each `{{result:}}` |
+| another's **commits** | `buildsOnCommitsOf: "<id>"` on the item | `after` + `isolation.from` seeded from that branch |
+| a list only known at runtime | `itemSource` + `perItem` | a `find` task + one `forEach` leaf |
+| several branches folded together | `combinedOutput: { mode: "commits" }` | private worktrees + an `integrate` node |
 
 ```dot
 digraph swarm_place {
@@ -136,20 +145,23 @@ Claude role — digest included — onto a capable `:cloud` model before running
 The gate's first question quotes both:
 
 ```
-swarm: <the estimate line from validate> · inline: ~<N>k tokens
+swarm: <the estimate line in the gate banner> · inline: ~<N>k tokens
 ```
 
-The inline side is **required** and counted mechanically — Glob plus line counts over the
-file scope you just wrote into the leaf prompts, then `total lines × ~10`. Where no inline
-path exists (judge panels, cross-model dissent, generation), write `inline: not comparable`
-plus one clause saying why.
+The swarm side is the engine's — the driver ran `validate` on the manifest it built and
+carries the estimate into the gate banner. The inline side is **required** and counted
+mechanically — Glob plus line counts over the file scope you wrote into the leaf prompts,
+then `run-swarm.mjs --inline-lines <n>` (`total lines × ~10`). Where no inline path exists
+(judge panels, cross-model dissent, generation), pass `--not-comparable` plus one clause
+saying why.
 
 `estimate: none` on a cold corpus is itself the honest answer. **Never invent a number on
-either side.** `run-swarm.mjs --inline-lines <n> [--not-comparable]` does this arithmetic.
+either side.**
 
 ## 7. Validate, then gate
 
-`validate <manifest>` surfaces id, dependency, governance, and effort errors now rather
-than after a background wait. A manifest that fails validation is not ready to be offered.
+The driver validates before it lets you reach the gate. A failed validation pauses with
+the engine's errors; the fix is a value in the shape file (a model name, a governance root,
+an id) — the driver rebuilds and re-validates on the next run.
 
 Then, and only then, the offer gate — the user's answer is the only consent to spend.

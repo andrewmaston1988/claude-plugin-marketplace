@@ -26,7 +26,16 @@ import {
   buildManifest,
   recordValidation,
   parseValidateOutput,
+  DRIVER_STEPS,
+  stepDone,
+  firstIncompleteStep,
+  stepTaskLines,
 } from "./run-swarm.mjs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync as wfs, readFileSync as rfs, existsSync as exs } from "node:fs";
+import { tmpdir } from "node:os";
+import { join as pj } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // ── Exit-mode contract ───────────────────────────────────────────────────────
 // A driver must never exit 0 with no output: a caller branching on the exit
@@ -290,12 +299,12 @@ test("execution-strategy.md carries the procedure the gate presumes", async () =
      "widening — the fields that make a second wave unnecessary");
   ok(/forEach/.test(doc) && /when/.test(doc) && /compute/.test(doc),
      "the runtime-expansion fields");
-  ok(/not comparable/.test(doc), "both sides of the cost comparison");
+  ok(/not[- ]comparable/.test(doc), "both sides of the cost comparison");
 });
 
-test("strategy is recorded like a gate answer — presence, not truthiness", () => {
-  const meta = recordGate({}, "strategy", "");
-  ok("strategy" in meta, "an empty confirmation is still a confirmation");
+test("the shape answer is recorded like a gate answer — presence, not truthiness", () => {
+  const meta = recordGate({}, "shape", "");
+  ok("shape" in meta, "an empty confirmation is still a confirmation");
 });
 
 // ── The verdict names the real signals, never raw magnitude ──────────────────
@@ -395,7 +404,7 @@ test("the read pause asks for exactly one thing ★", async () => {
 test("the read gates the strategy pause, not the reverse", async () => {
   const { readFileSync } = await import("node:fs");
   const src = readFileSync(new URL("./run-swarm.mjs", import.meta.url), "utf8");
-  ok(src.indexOf('"read-strategy" in recorded') < src.indexOf('"strategy" in meta'),
+  ok(src.indexOf('"read-strategy" in recorded') < src.indexOf('getFlag("shape-file"'),
      "the read pause must be evaluated first");
 });
 
@@ -452,11 +461,11 @@ test("parseValidateOutput: no 'manifest OK' line means not ok", () => {
 // until read-strategy is. Otherwise a session banks a --validate-output on the
 // first call and satisfies the validate gate before ever reading the strategy.
 
-test("priorGatesMet: false until BOTH read-strategy and strategy are recorded", () => {
+test("priorGatesMet: false until BOTH read-strategy and shape are recorded", () => {
   ok(!priorGatesMet({}), "empty meta");
   ok(!priorGatesMet({ "read-strategy": "done" }), "read alone is not enough");
-  ok(!priorGatesMet({ strategy: "done" }), "strategy alone is not enough");
-  ok(priorGatesMet({ "read-strategy": "done", strategy: "done" }), "both present");
+  ok(!priorGatesMet({ shape: "x.json" }), "shape alone is not enough");
+  ok(priorGatesMet({ "read-strategy": "done", shape: "x.json" }), "both present");
 });
 
 // ── The driver owns the Iron Law task list ───────────────────────────────────
@@ -532,4 +541,206 @@ test("buildManifest: an item that builds on another's commits gets isolation.fro
   const test = plan.tasks.find((x) => x.id === "test");
   deepEqual(test.after, ["impl"]);
   ok(test.isolation && test.isolation.from === "impl", "builds-on-commits emits isolation.from, not just {{result}}");
+});
+
+test("buildManifest: a combined output over a RUNTIME list consumes the forEach leaf, not the finder ★", () => {
+  // The finder returns a file LIST; `each` produces the actual work. A consuming
+  // node wired to `find` would synthesise from filenames and silently ignore every
+  // result — the routed-out-node failure this whole design exists to prevent.
+  const plan = buildManifest({
+    itemSource: { findPrompt: "list every module", model: "haiku" },
+    perItem: { prompt: "document {{item}}", model: "haiku", maxItems: 10 },
+    combinedOutput: { into: "REFERENCE.md" },
+  });
+  const consumer = plan.tasks.find((t) => t.id === "assemble" || t.integrate);
+  ok(consumer, "a consuming node is emitted: " + JSON.stringify(plan.tasks.map((t) => t.id)));
+  ok(consumer.after.includes("each"), "must wait on the forEach leaf: after=" + JSON.stringify(consumer.after));
+  ok(!consumer.after.includes("find"), "must NOT consume the finder's raw list: after=" + JSON.stringify(consumer.after));
+  ok(/\{\{result:each\}\}/.test(consumer.prompt || ""), "reads the forEach leaf's results: " + consumer.prompt);
+});
+
+test("buildManifest: per-item engine fields pass through — one blob keeps the engine's full surface", () => {
+  const plan = buildManifest({
+    items: [
+      { id: "a", prompt: "p", model: "haiku", allowedTools: "Read,Grep,Glob,Write,Edit", effort: "high",
+        cwd: "C:/code/x", timeoutMs: 1234, returns: { type: "object" }, fallbackModel: "glm-5.2:cloud",
+        outputDir: "out", when: { from: "z", expr: "true" } },
+    ],
+  });
+  const a = plan.tasks[0];
+  equal(a.allowedTools, "Read,Grep,Glob,Write,Edit");
+  equal(a.effort, "high");
+  equal(a.cwd, "C:/code/x");
+  equal(a.timeoutMs, 1234);
+  deepEqual(a.returns, { type: "object" });
+  equal(a.fallbackModel, "glm-5.2:cloud");
+  equal(a.outputDir, "out");
+  deepEqual(a.when, { from: "z", expr: "true" });
+  ok(!("buildsOnCommitsOf" in a), "shape-only keys never reach the engine");
+});
+
+test("buildManifest: an item that consumes another's OUTPUT gets the after edge (a chain link)", () => {
+  const plan = buildManifest({
+    items: [
+      { id: "scan", prompt: "scan", model: "haiku" },
+      { id: "fix", prompt: "fix what {{result:scan}} found", model: "haiku", after: ["scan"] },
+    ],
+  });
+  deepEqual(plan.tasks.find((t) => t.id === "fix").after, ["scan"]);
+  ok(!plan.tasks.find((t) => t.id === "fix").isolation, "output, not commits: no isolation.from");
+});
+
+// ── The step machine — the driver owns sequencing and the task list ──────────
+// writing-skills+ driver contract: a fixed step list, each step guarded on the
+// WORLD (never the marker), seeded as [TASK_CREATE] lines on the first run and
+// advanced with [TASK_UPDATE] as reality changes. The model mirrors; it never
+// authors a parallel list.
+
+const DRIVER_PATH = fileURLToPath(new URL("./run-swarm.mjs", import.meta.url));
+function runDriver(home, args) {
+  const r = spawnSync(process.execPath, [DRIVER_PATH, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, SWARM_HOME: home },
+  });
+  return { code: r.status, out: (r.stdout || "") + (r.stderr || "") };
+}
+const SHAPE_COMBINED = {
+  items: [
+    { id: "ref-a", prompt: "document a", model: "haiku" },
+    { id: "ref-b", prompt: "document b", model: "haiku" },
+  ],
+  combinedOutput: { into: "REFERENCE.md", label: "consistent terms" },
+};
+
+test("DRIVER_STEPS: the full sequence, read first, liveness last", () => {
+  equal(DRIVER_STEPS[0], "read-strategy");
+  equal(DRIVER_STEPS[DRIVER_STEPS.length - 1], "liveness");
+  for (const s of ["shape", "author", "validate", "gate", "dispatch"]) ok(DRIVER_STEPS.includes(s), s);
+  ok(DRIVER_STEPS.indexOf("author") < DRIVER_STEPS.indexOf("validate"), "author before validate");
+  ok(DRIVER_STEPS.indexOf("validate") < DRIVER_STEPS.indexOf("gate"), "validate before gate");
+});
+
+test("stepDone(author): guards on the manifest FILE holding the emitted graph, not the marker ★", () => {
+  const shape = SHAPE_COMBINED;
+  ok(!stepDone("author", { meta: { author: "done" }, shape, manifestOnDisk: null }),
+     "a marker with no file is not done");
+  const built = buildManifest(shape);
+  ok(stepDone("author", { meta: {}, shape, manifestOnDisk: built }), "the file with the emitted graph is done");
+  const missingNode = { tasks: built.tasks.filter((t) => !t.after) };
+  ok(!stepDone("author", { meta: {}, shape, manifestOnDisk: missingNode }),
+     "a file missing the consuming node is NOT done — the driver rewrites it");
+});
+
+test("stepDone(author): a digest-only shape edit still rewrites the manifest ★", () => {
+  // digest is model-editable per the shape banner. Comparing only `tasks` reports
+  // author-done and the stale digest block ships to dispatch forever.
+  const items = [{ id: "a", prompt: "p", model: "haiku" }];
+  const onDisk = { ...buildManifest({ items }), digest: { model: "haiku", instructions: "OLD" } };
+  const edited = { items, digest: { model: "haiku", instructions: "NEW" } };
+  ok(!stepDone("author", { meta: {}, shape: edited, manifestOnDisk: onDisk }),
+     "a changed digest must not count as authored");
+});
+
+test("stepDone(validate): needs a passing validation OF the file that is on disk", () => {
+  const w = { meta: { validate: { ok: true, file: "/m.json" } }, manifestFile: "/m.json", manifestOnDisk: { tasks: [] } };
+  ok(stepDone("validate", w));
+  ok(!stepDone("validate", { ...w, manifestOnDisk: null }), "file gone -> not done");
+  ok(!stepDone("validate", { ...w, meta: { validate: { ok: false, file: "/m.json" } } }));
+  ok(!stepDone("validate", { ...w, meta: { validate: { ok: true, file: "/other.json" } } }),
+     "a different file's validation does not count");
+});
+
+test("stepDone: an unrecognised step is never assumed done", () => {
+  ok(!stepDone("nonsense", { meta: { nonsense: true } }));
+});
+
+test("firstIncompleteStep: resumes at the first step the world says is outstanding", () => {
+  const shape = SHAPE_COMBINED;
+  equal(firstIncompleteStep({ meta: {} }), "read-strategy");
+  equal(firstIncompleteStep({ meta: { "read-strategy": "done" } }), "shape");
+  equal(firstIncompleteStep({ meta: { "read-strategy": "done" }, shape, manifestOnDisk: null }), "author");
+  const built = buildManifest(shape);
+  equal(firstIncompleteStep({ meta: { "read-strategy": "done" }, shape, manifestOnDisk: built, manifestFile: "/m" }), "validate");
+  equal(firstIncompleteStep({
+    meta: { "read-strategy": "done", validate: { ok: true, file: "/m" } }, shape, manifestOnDisk: built, manifestFile: "/m",
+  }), "gate");
+});
+
+test("stepTaskLines: seeds every step on first run, then emits only the changed statuses", () => {
+  const seed = stepTaskLines({ previous: null, current: { "read-strategy": "completed", shape: "in_progress" } });
+  equal(seed.filter((l) => l.startsWith("[TASK_CREATE] swarm: ")).length, DRIVER_STEPS.length);
+  ok(seed.includes("[TASK_UPDATE] 0 completed"), seed.join("\n"));
+  ok(seed.includes("[TASK_UPDATE] 1 in_progress"));
+  const later = stepTaskLines({
+    previous: { "read-strategy": "completed", shape: "in_progress" },
+    current: { "read-strategy": "completed", shape: "completed", author: "completed", validate: "in_progress" },
+  });
+  ok(!later.some((l) => l.startsWith("[TASK_CREATE]")), "no re-seeding");
+  deepEqual(later, ["[TASK_UPDATE] 1 completed", "[TASK_UPDATE] 2 completed", "[TASK_UPDATE] 3 in_progress"]);
+});
+
+test("driver: first named run seeds one [TASK_CREATE] per step and asks for the shape, not a manifest ★", () => {
+  const home = mkdtempSync(pj(tmpdir(), "swarm-drv-"));
+  const r = runDriver(home, ["--manifest", "t1", "--read-strategy", "done"]);
+  equal(r.code, 0, r.out);
+  for (const s of DRIVER_STEPS) ok(r.out.includes(`[TASK_CREATE] swarm: ${s}`), `seeds ${s}: ${r.out}`);
+  ok(/shape-file/.test(r.out), "asks for the shape answers: " + r.out);
+  ok(!/author the manifest/i.test(r.out), "never asks the model to author the manifest JSON");
+  ok(/combinedOutput/.test(r.out), "the shape question names the combined-output field");
+});
+
+test("driver: given the shape, it WRITES the manifest with the consuming node and runs validate itself ★", () => {
+  const home = mkdtempSync(pj(tmpdir(), "swarm-drv-"));
+  const shapeFile = pj(home, "shape.json");
+  wfs(shapeFile, JSON.stringify(SHAPE_COMBINED));
+  runDriver(home, ["--manifest", "t2", "--read-strategy", "done"]);
+  const r = runDriver(home, ["--manifest", "t2", "--shape-file", shapeFile]);
+  equal(r.code, 0, r.out);
+  const state = JSON.parse(rfs(pj(home, "driver", "t2.json"), "utf8"));
+  ok(state.meta.manifestFile && exs(state.meta.manifestFile), "driver wrote the manifest file: " + r.out);
+  const m = JSON.parse(rfs(state.meta.manifestFile, "utf8"));
+  ok(m.tasks.some((t) => Array.isArray(t.after) && t.after.includes("ref-a") && t.after.includes("ref-b")),
+     "the consuming node is in the FILE the engine will run");
+  ok(state.meta.validate && state.meta.validate.ok === true, "validate ran and passed: " + r.out);
+  ok(/TASK_UPDATE\] 1 completed/.test(r.out) && /TASK_UPDATE\] 2 completed/.test(r.out), "shape+author flipped: " + r.out);
+  ok(/offer gate/i.test(r.out), "advanced straight to the gate: " + r.out);
+});
+
+test("driver: re-running mid-loop does not re-do a completed step (idempotent)", () => {
+  const home = mkdtempSync(pj(tmpdir(), "swarm-drv-"));
+  const shapeFile = pj(home, "shape.json");
+  wfs(shapeFile, JSON.stringify(SHAPE_COMBINED));
+  runDriver(home, ["--manifest", "t3", "--read-strategy", "done"]);
+  runDriver(home, ["--manifest", "t3", "--shape-file", shapeFile]);
+  const again = runDriver(home, ["--manifest", "t3"]);
+  equal(again.code, 0, again.out);
+  ok(!/TASK_CREATE/.test(again.out), "no re-seed");
+  ok(!/shape-file/.test(again.out), "does not re-ask for the shape");
+  ok(/offer gate/i.test(again.out), "still at the gate: " + again.out);
+});
+
+test("driver: gate answers are IGNORED until validate has passed — the chain stays backward ★", () => {
+  const home = mkdtempSync(pj(tmpdir(), "swarm-drv-"));
+  const shapeFile = pj(home, "shape.json");
+  // An unlaunchable model makes validate fail, so the world never reaches the gate.
+  wfs(shapeFile, JSON.stringify({ items: [{ id: "a", prompt: "p", model: "no-such-model-xyz" }] }));
+  runDriver(home, ["--manifest", "t5", "--read-strategy", "done"]);
+  const r = runDriver(home, ["--manifest", "t5", "--shape-file", shapeFile,
+    "--gate-fanout", "yes", "--gate-mix", "as drafted", "--gate-batching", "1"]);
+  equal(r.code, 0, r.out);
+  const state = JSON.parse(rfs(pj(home, "driver", "t5.json"), "utf8"));
+  ok(!("fanout" in state.meta), "a gate answer banked before validation is not consent: " + JSON.stringify(state.meta));
+  ok(!/TASK_UPDATE\] 4 completed/.test(r.out), "the gate step must not flip to completed");
+});
+
+test("driver --dry-run: walks the same path, reports the writes, performs none ★", () => {
+  const home = mkdtempSync(pj(tmpdir(), "swarm-drv-"));
+  const shapeFile = pj(home, "shape.json");
+  wfs(shapeFile, JSON.stringify(SHAPE_COMBINED));
+  const r = runDriver(home, ["--manifest", "t4", "--read-strategy", "done", "--shape-file", shapeFile, "--dry-run"]);
+  equal(r.code, 0, r.out);
+  ok(/dry-run: would write/i.test(r.out), "reports the manifest write: " + r.out);
+  ok(!exs(pj(home, "driver", "t4.json")), "no state file written");
+  ok(!exs(pj(home, "driver", "t4.manifest.json")), "no manifest written");
+  ok(/TASK_CREATE/.test(r.out), "the task projection still prints — it is output, not state");
 });

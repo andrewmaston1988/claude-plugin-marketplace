@@ -1,7 +1,9 @@
 # Manifest authoring — schema, plan patterns, leaf shapes
 
-Read this when you are WRITING a manifest. The skill body covers when to swarm
-and what happens at the driver's pauses; this file is the authoring surface.
+Read this to understand a field in the manifest the driver built from your shape
+file, or to write a `digest` block into that shape file. The driver owns the tasks
+array; the plan patterns below describe the graphs it emits and the leaf shapes
+that work inside them.
 
 ## Manifest quick reference
 

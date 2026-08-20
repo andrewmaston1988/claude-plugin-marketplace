@@ -126,7 +126,7 @@ test("T1 — orchestrating-agents/SKILL.md exists with valid name + description 
 // ---- T2: swarm gate references the skill, inside the gate section ----
 
 test("T2 — swarm offer gate references orchestrating-agents within the gate section", () => {
-  const gate = sectionSlice(read(SWARM_SKILL), "## MANDATORY before you draft a manifest");
+  const gate = sectionSlice(read(SWARM_SKILL), "## Start the driver first — there is no manifest to draft");
   ok(gate.length > 0, "gate section found");
   ok(gate.includes("orchestrating-agents"), "gate section names the skill");
 });

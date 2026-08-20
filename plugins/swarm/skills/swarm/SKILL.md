@@ -8,9 +8,9 @@ description: >-
 
 ## Overview
 
-Swarm runs work in headless Claude Code sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Powered by capable `:cloud` models (GLM, MiniMax — not an opus swarm, but almost) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context.
+Swarm runs work in headless Claude Code sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Powered by capable `:cloud` models (GLM, MiniMax — not an opus swarm, but almost) alongside Claude tiers, at interactive speed. You supply the **values** — the items, what each must wait for, whether one artifact is assembled from them — in a small shape file; the driver builds the manifest graph from those answers, validates it, and the engine runs the dependency graph in the background, compressing results through a digest so raw output never floods your context.
 
-**Core principle:** the smarts live in the plan and the leaves; the plumbing has none. A manifest you could not defend line by line is a manifest you should not dispatch.
+**Core principle:** the smarts live in the leaf prompts and the judgement at the pauses; the graph is the script's. You never hand-write the tasks array, so you can never leave a required node out of it.
 
 Engine: `node ../../scripts/swarm.mjs` (from this skill dir, same base as the driver). Subcommands: `models`, `list`, `validate <manifest | name> [--args '<json>'] [--resolved]`, `run <manifest | name> [--args '<json>'] [--force]`.
 
@@ -19,9 +19,9 @@ filed by *when you need it*, and nothing here is repeated there:
 
 | Read | When |
 |---|---|
-| [execution-strategy.md](execution-strategy.md) | Before the gate — the driver pauses and hands it to you. Grouping, topology, cost, validate |
-| [authoring.md](authoring.md) | Writing the manifest — field-level schema and recipes |
-| ↳ [manifest-fields.md](manifest-fields.md) | Writing `returns`, a child `manifest`, or a named run |
+| [execution-strategy.md](execution-strategy.md) | The driver's first pause hands it to you. How to answer the shape questions: what each item must wait for, output vs edits, the one combined artifact |
+| [authoring.md](authoring.md) | Reading the manifest the driver built, or adding a `digest` block to the shape file — field-level schema |
+| ↳ [manifest-fields.md](manifest-fields.md) | `returns`, a child `manifest`, or a named run |
 | ↳ [references/model-selection.md](references/model-selection.md) | Choosing a leaf's tier or effort |
 | [references/reading-the-roster.md](references/reading-the-roster.md) | A run is live, or a leaf ended empty |
 
@@ -65,35 +65,31 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 - **pipeline** — durable queued throughput ending in PRs. Huge capacity, not fast.
 - **Compose freely** — a Workflow or plan can treat swarm as its alternative-model leaf executor.
 
-## MANDATORY before you draft a manifest
-
-**Start the driver first — before any JSON exists:**
+## Start the driver first — there is no manifest to draft
 
 ```bash
-node scripts/run-swarm.mjs --manifest <name-for-this-run>
+node scripts/run-swarm.mjs
 ```
 
-`--manifest` is a **state key, not a file that must already exist.** Name the run and the
-driver walks you through the two steps below, then the gate. Reaching it only after the
-manifest is written means every pause can do nothing but rubber-stamp a shape you have
-already fixed — which is the same as not running it.
+The driver owns the sequence: it pauses for the strategy read, then asks for the **shape
+file** (the values — never the tasks array), builds and writes the manifest itself, runs
+`validate` itself, and only then reaches the gate. `--manifest <name>` is a state key, not
+a file. Writing manifest JSON by hand and running the engine on it is the bypass this
+skill exists to catch: a hand-written graph is one a required node can be left out of.
 
-Two steps, in order. Both come before a single line of JSON.
-
-1. **`Read` [execution-strategy.md](execution-strategy.md) — the file, with the Read tool.** Not from memory of a pattern seen elsewhere, and not from this page's summary of it. It carries the placement digraph that decides the topology and §4 on where the manifest's edge sits. *"I have seen this shape before"* is the exact substitution it exists to prevent: a manifest drafted on recall is how a reconcile step ends up outside the graph.
-2. **Invoke `swarm:orchestrating-agents`.** It decides how many leaves and which items share one, and produces the numbers the gate's third question carries. Drafting a leaf-per-item manifest without it is the failure that skill exists to catch. It does not restate the gate and the gate does not restate it.
-
-`run-swarm.mjs` pauses for both and records the answer — but the pause only fires if you run the driver. Reaching for a manifest first is what skips it.
+At the shape pause, **invoke `swarm:orchestrating-agents`** for the grouping — it decides
+how many leaves and which items share one, and produces the numbers the gate's third
+question carries.
 
 ## The offer gate
 
 **THE GATE'S ANSWER IS THE ONLY CONSENT TO SPEND. NO ANSWER IS NO.** Violating the letter of this rule is violating its spirit.
 
-Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), draft the manifest and put it through ONE AskUserQuestion call carrying THREE questions:
+Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), run the driver to its gate pause and put its THREE questions through ONE AskUserQuestion call:
 
 1. > "Fan this out via swarm — <n> leaves on <models>?"
-   > Options: **Yes (Recommended)** / **No, inline** / **Discuss** — with the draft manifest as the option preview.
-   > Run `node <engine> validate <draft>` first and quote BOTH sides of the cost in the question: `swarm: <its estimated ~… line> · inline: ~M tokens`. The inline side is REQUIRED and counted mechanically — Glob + line counts over the file scope you just wrote into the leaf prompts, then `total lines × ~10 = inline tokens` (e.g. 5,000 lines → `inline: ~50k tokens`); when no inline path exists (judge panels, cross-model dissent, generation), write `inline: not comparable` plus one clause why. `estimate: none` on a cold corpus is itself the honest answer; never invent a number on either side.
+   > Options: **Yes (Recommended)** / **No, inline** / **Discuss** — with the manifest the driver wrote (path in the banner) as the option preview.
+   > Quote BOTH sides of the cost: `swarm: <the estimate line in the gate banner> · inline: ~M tokens`. The swarm side is the engine's, from the validate the driver ran. The inline side is yours and counted mechanically — Glob + line counts over the file scope you wrote into the leaf prompts, then `--inline-lines <n>` (`total lines × ~10`; e.g. 5,000 lines → `inline: ~50k tokens`); when no inline path exists (judge panels, cross-model dissent, generation), pass `--not-comparable` plus one clause why. `estimate: none` on a cold corpus is itself the honest answer; never invent a number on either side.
 2. > "Model mix?" — state the split explicitly in the question (e.g. "5 leaves alternative, digest on sonnet = 1 Anthropic call").
    > Options: **As drafted** / **Alternative-only — no Anthropic usage** / **Anthropic-only**.
    > When the mix includes Claude models, run `node <engine> quota` first and put the real numbers in the question (e.g. "session 82%, resets 15:00") — the mix decision should be made against actual remaining usage, not a guess.
@@ -130,48 +126,54 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 | "A gate violation under emergency beats an unmet goal" | Backwards. The unmet goal is honest; the unconsented spend is the violation. |
 | "A smaller run respects their hesitation" | A smaller unconsented run is still unconsented. |
 | "Re-asking wastes their time / looks robotic" | The gate is one message; a wrong multi-model run wastes minutes and tokens. |
+| "I remember where we were — no need to re-run the driver" | The driver's state is the record; your memory is a compaction away from gone. Re-run: it is idempotent. |
+| "I'll just write the manifest JSON myself — it's three tasks" | A hand-written graph is one a required node can be left out of (observed: the assembly step "done inline" and never in the graph). The shape file is the only authoring surface. |
+| "I'll patch the manifest the driver wrote" | The driver rewrites it from the shape on the next run. Edit the shape file. |
 
 **Red flags — you are mid-rationalisation if you think:** "the directive/goal/hook authorizes this" · "the condition is the approval" · "probably a mis-click" · "half the leaves is a fair compromise" · "`--force` gets past it" · "`tail` keeps the dispatch tidy" (see Run, step 5) · **"I already know the command — I don't need the skill"** (the command arrived without the rules that govern it; that is the bypass, not a shortcut) · **"the run finished suspiciously fast"** (you replayed cache — check for `[skipped]` and `NOTHING RE-EXECUTED` before claiming anything ran) · **"I'll redirect it to a log so the tool result stays tidy"** (the forbidden pipe wearing a different hat) · **"I'll just read the run's output file to see how it's going"** (that file is the operator's live view, not your status API — use `--check-liveness`).
 
 ## Procedure — run the driver, do what it asks, re-run
 
-`scripts/run-swarm.mjs` owns the session-side state: the gate answers (recorded
-so they survive compaction), the cost arithmetic, the results directory, the one
-liveness check, and failure routing. Your job is the loop.
+`scripts/run-swarm.mjs` owns the sequence and the state: the step list, the
+manifest it builds from your shape file, the validate it runs, the gate answers
+(recorded so they survive compaction), the results directory, the one liveness
+check, and failure routing. Your job is the loop: run it, do exactly what its
+output asks, re-run.
 
-| Flag | What it does |
-|---|---|
-| *(none)* | Pauses until all three gate answers are given; then prints them |
-| `--gate-fanout/-mix/-batching "<answer>"` | Records one answer. An empty string and "no" are real answers |
-| `--validate-output <file\|text>` `--manifest-file <path>` | Records the engine's `validate` result; the offer gate **refuses** until a passing validation exists, and quotes its real estimate |
-| `--inline-lines <n> [--not-comparable]` | The cost side of the gate's first question |
-| `--dispatch-output <file\|text>` | Captures `resultsDir:` from the engine's output; **refuses** if the line is absent |
-| `--check-liveness` | Reads the run's own `run.log` once and rules live / not-live / cache replay |
-| `--route-failure [--timed-out] [--errored] [--committed-since] [--quota] [--attempts n]` | The routing verdict and whether to ask |
-
-```bash
-node scripts/run-swarm.mjs --manifest <manifest.json | name>
-```
+| Step | Driver does | You do at the pause |
+|---|---|---|
+| read-strategy | pauses | `Read` [execution-strategy.md](execution-strategy.md), re-run with `--read-strategy done` |
+| shape | pauses, prints the fields + an example | `Skill(swarm:orchestrating-agents)`, write the shape JSON, re-run with `--shape-file <path>` |
+| author | **writes the manifest** from the shape | nothing |
+| validate | **runs the engine's `validate`** | on failure: fix the shape file's values, re-run |
+| gate | pauses with the real estimate | ONE AskUserQuestion, re-run with the three `--gate-*` answers |
+| dispatch | prints the exact `run` command | run it BARE via `run_in_background`, re-run with `--dispatch-output` |
+| liveness | rules live / not-live / cache replay | hands off |
 
 | Driver output | You do |
 |---|---|
+| `Mirror into the harness task list:` + `[TASK_CREATE]`/`[TASK_UPDATE]` lines | **After every run**, mirror each line with `TaskCreate` / `TaskUpdate` — the driver's state is the source of truth; never author a parallel list |
 | `{"error":"missing_required_field",...}` | Supply the field, re-run with the flag |
 | `PAUSE: <what>` banner | The judgement it names, then re-run the printed `RE-RUN EXACTLY` command |
 | Non-zero exit | Surface it; do not retry blindly |
-| `gate: answered` | Validate, dispatch, then one `--check-liveness` |
 
-Re-running is always safe: the driver re-reads its state and picks up where it
-stopped. **It records consent; it does not enforce it** — the gate below governs
-two dispatch paths no hook can see (`src/ask.mjs` and any direct `runPlan`
-import), so the rules there bind whether or not you ran the driver.
+Other flags: `--inline-lines <n> [--not-comparable]` (the inline side of the gate's cost),
+`--route-failure [--timed-out] [--errored] [--committed-since] [--quota] [--attempts n]`
+(the routing verdict once a run ends badly), `--dry-run` (walks the same path and reports
+each write instead of performing it).
 
-**Steps the driver does not perform.** Decide the shape
-([execution-strategy.md](execution-strategy.md) — the driver pauses and hands you
-this before the gate, because the gate's questions are unanswerable without it),
-author the manifest ([authoring.md](authoring.md) for the field-level schema and
-recipes), `validate` it, dispatch it, and read `digest.md`. The engine's subcommands
-(`models`, `list`, `validate`, `run`, `status`, `report`, `ask`, `quota`) run as
-`node ../../scripts/swarm.mjs <subcommand>` from this skill dir.
+Re-running is always safe: the driver re-reads reality — the shape file, the
+manifest on disk, the recorded validation — and picks up at the first step whose
+effect is missing. Edit the **shape file** to change the graph, never the manifest
+the driver wrote; it rebuilds and re-validates on the next run. **It records
+consent; it does not enforce it** — the gate below governs two dispatch paths no
+hook can see (`src/ask.mjs` and any direct `runPlan` import), so the rules there
+bind whether or not you ran the driver.
+
+**Steps the driver does not perform.** Dispatch (copy the `run` command it prints)
+and reading `digest.md`. The engine's other subcommands (`models`, `list`, `status`,
+`report`, `ask`, `quota`) run as `node ../../scripts/swarm.mjs <subcommand>` from
+this skill dir.
 
 **Dispatch BARE via Bash `run_in_background`** — never through a pipe, filter, or
 redirect. A pipe stage buffers the stream, and the live progress frames are the

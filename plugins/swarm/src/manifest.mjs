@@ -744,45 +744,6 @@ function modelFamily(model) {
   return m.split(/[:@/]/)[0].toLowerCase() || "unknown";
 }
 
-// A hand-expanded list is N static sibling leaves a session produced by running the
-// discovery ITSELF and baking each result into its own leaf — instead of a `find` task
-// plus `forEach` over its output (S5, observed three times). The tell: independent leaves
-// (no `after`, not already a forEach) whose prompts are identical once one path-shaped
-// token is blanked. Threshold 3: two siblings are an ordinary pair; three near-identical
-// is a list. Prose lost this to the batching arithmetic twice — it is caught here.
-function normalisePathTokens(prompt) {
-  // Blank path-shaped tokens: a/b/c.ext, backslash variants, bare file.ext.
-  return String(prompt || "")
-    .replace(/[\w./\-]+\.[A-Za-z0-9]+/g, "«PATH»")
-    .trim();
-}
-
-function checkHandExpandedList(tasks, errors) {
-  const candidates = tasks.filter(
-    (t) => !t.forEach && !t.compute && (!Array.isArray(t.after) || t.after.length === 0),
-  );
-  const groups = new Map();
-  for (const t of candidates) {
-    const key = normalisePathTokens(t.prompt);
-    // Only cluster prompts that actually CONTAIN a path token — else two unrelated
-    // short prompts that happen to match after blanking nothing would false-positive.
-    if (!/«PATH»/.test(key)) continue;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(t);
-  }
-  for (const [, members] of groups) {
-    if (members.length < 3) continue; // a pair is not a list
-    const ids = members.map((m) => `'${m.id}'`).join(", ");
-    errors.push(
-      `tasks ${ids} are the same shape with only a path swapped — this is a hand-expanded ` +
-        `list, the failure where a session runs the discovery itself and bakes each item into ` +
-        `its own leaf. Replace them with a \`find\` task that returns the list, then one leaf ` +
-        `with \`forEach: { from: "<find-id>", maxItems: N }\` cloned per-item over {{item}}. ` +
-        `The list must come from a task, not from a grep you ran while authoring.`,
-    );
-  }
-}
-
 function checkVerifierCoverage(tasks, errors) {
   const byId = new Map(tasks.map((t) => [t.id, t]));
   // A finder is a leaf whose findings carry citations — declared as a schema, or
@@ -914,7 +875,6 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   }
 
   checkVerifierCoverage(tasks, errors);
-  checkHandExpandedList(tasks, errors);
   if (errors.length) throw new ValidationError(errors);
 
   return {

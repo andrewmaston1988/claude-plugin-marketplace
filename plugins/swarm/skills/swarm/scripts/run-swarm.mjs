@@ -9,7 +9,8 @@
  * Never exit 0 silently — a caller cannot tell that from success.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 // ── Exit modes ────────────────────────────────────────────────────────────────
@@ -54,19 +55,9 @@ export function recordGate(meta = {}, key, value) {
 }
 
 // ── The driver AUTHORS the graph — the model supplies values, not structure ───
-// The inversion at the heart of the rewrite. The model answers narrow questions
-// (the items, each item's blocking dependency, whether the request names a
-// COMBINED output, whether the list is only known at runtime); buildManifest
-// constructs the tasks array, the after-edges, and the forEach/integrate/
-// isolation nodes. Because the script emits the node list, the model cannot
-// route a required node out — the failure the whole rewrite exists to kill.
-//
-// Answers shape (all optional; the caller supplies what the request implies):
-//   items:        [{ id, prompt, model, buildsOnCommitsOf? }]  — a known list
-//   itemSource:   { findPrompt, model }        — the list is discovered at runtime
-//   perItem:      { prompt, model, maxItems }  — the leaf cloned per discovered item
-//   combinedOutput: { into, label }            — one artifact assembled from the leaves
-// Returns a raw manifest object ({ tasks, ...digest? }) ready for validate.
+// Because the script emits the node list, the model cannot route a required node
+// out — the failure the whole rewrite exists to kill. The answer fields are the
+// ones `parseShape` accepts and `SHAPE_EXAMPLE` shows; do not restate them here.
 export function buildManifest(answers = {}) {
   const tasks = [];
 
@@ -91,7 +82,9 @@ export function buildManifest(answers = {}) {
   } else if (Array.isArray(answers.items)) {
     const buildsOn = new Set(answers.items.map((it) => it.buildsOnCommitsOf).filter(Boolean));
     for (const it of answers.items) {
-      const task = { id: it.id, model: it.model, prompt: it.prompt };
+      // Every engine field passes through untouched — one blob keeps the engine's
+      // full surface. Only the shape-level keys the driver interprets are dropped.
+      const { buildsOnCommitsOf, ...task } = it;
       if (buildsOn.has(it.id)) {
         task.isolation = { worktree: it.id };
         task.allowedTools = "Read,Grep,Glob,Write,Edit";
@@ -114,9 +107,13 @@ export function buildManifest(answers = {}) {
   //     that merges the branches. Requires the leaves to isolate + write.
   // mode defaults to "results" (text); "commits" selects integrate.
   if (answers.combinedOutput) {
-    const leafIds = tasks
-      .filter((t) => !t.integrate && !t.forEach && !t.compute)
-      .map((t) => t.id);
+    // What the consuming node reads is WORK, never inputs. On a runtime list the
+    // finder returns a file list and the forEach leaf does the work, so the
+    // consumer must wait on the leaf — wiring it to the finder would synthesise
+    // from filenames and silently ignore every result.
+    const leafIds = answers.itemSource
+      ? tasks.filter((t) => t.forEach).map((t) => t.id)
+      : tasks.filter((t) => !t.integrate && !t.forEach && !t.compute).map((t) => t.id);
     if (leafIds.length) {
       const co = answers.combinedOutput;
       const id = co.id || (co.mode === "commits" ? "integrate" : "assemble");
@@ -141,6 +138,98 @@ export function buildManifest(answers = {}) {
   }
 
   return { tasks };
+}
+
+// ── The step machine — guards on observable reality, never the marker ─────────
+// The driver's canonical step list. Each run re-reads the world, finds the first
+// step whose EFFECT is absent, and either performs it (author, validate) or pauses
+// for the one judgement it needs (shape values, gate consent, dispatch, liveness).
+export const DRIVER_STEPS = ["read-strategy", "shape", "author", "validate", "gate", "dispatch", "liveness"];
+
+// Compare the WHOLE emitted document, digest included — a shape edit that touches
+// only `digest` must still rewrite the manifest, or the stale block ships forever.
+function sameTasks(a, b) {
+  const key = (m) => JSON.stringify({ tasks: m?.tasks ?? null, digest: m?.digest ?? null });
+  return key(a) === key(b);
+}
+
+// The world: { meta, shape, manifestFile, manifestOnDisk, resultsDir, liveness }.
+// `author` is done only when the file on disk holds exactly the graph the shape
+// builds — a file missing the consuming node is rewritten, never trusted.
+export function stepDone(step, world = {}) {
+  const meta = world.meta || {};
+  if (step === "read-strategy") return "read-strategy" in meta;
+  if (step === "shape") return !!world.shape;
+  if (step === "author") {
+    return !!world.shape && !!world.manifestOnDisk && sameTasks(world.manifestOnDisk, buildManifest(world.shape));
+  }
+  if (step === "validate") {
+    const v = meta.validate;
+    return !!world.manifestOnDisk && !!v && v.ok === true && v.file === world.manifestFile;
+  }
+  if (step === "gate") return gateAnswered(meta);
+  if (step === "dispatch") return !!world.resultsDir;
+  if (step === "liveness") return !!world.liveness;
+  return false; // an unrecognised step is never assumed done
+}
+
+export function firstIncompleteStep(world) {
+  for (const step of DRIVER_STEPS) if (!stepDone(step, world)) return step;
+  return null;
+}
+
+// The harness task list is a projection of the driver's state: seed every step
+// once, then emit only the statuses that changed since the last run.
+export function stepTaskLines({ previous = null, current = {} } = {}) {
+  const lines = [];
+  if (!previous) lines.push(...DRIVER_STEPS.map((s) => `[TASK_CREATE] swarm: ${s}`));
+  DRIVER_STEPS.forEach((s, i) => {
+    const st = current[s];
+    if (st && st !== (previous || {})[s]) lines.push(`[TASK_UPDATE] ${i} ${st}`);
+  });
+  return lines;
+}
+
+export function taskProjection(world) {
+  const first = firstIncompleteStep(world);
+  const out = {};
+  for (const s of DRIVER_STEPS) {
+    if (stepDone(s, world)) out[s] = "completed";
+    else if (s === first) out[s] = "in_progress";
+  }
+  return out;
+}
+
+// The shape file is the model's ONLY authoring surface: values, never nodes.
+// Errors name the field and show a correct example, so one round-trip reaches green.
+export const SHAPE_EXAMPLE = {
+  items: [
+    { id: "ref-scheduler", prompt: "Write a one-page API reference for src/scheduler.mjs", model: "glm-5.2:cloud" },
+    { id: "ref-manifest", prompt: "Write a one-page API reference for src/manifest.mjs", model: "glm-5.2:cloud" },
+  ],
+  combinedOutput: { into: "REFERENCE.md", label: "one document, consistent terms", model: "glm-5.2:cloud" },
+};
+export function parseShape(text) {
+  let shape;
+  try { shape = JSON.parse(text); } catch (e) { return { error: `shape file is not valid JSON: ${e.message}` }; }
+  if (!shape || typeof shape !== "object") return { error: "shape file must be a JSON object" };
+  if (shape.itemSource) {
+    if (!shape.itemSource.findPrompt || !shape.itemSource.model) return { error: "itemSource needs { findPrompt, model }" };
+    if (!shape.perItem || !shape.perItem.prompt || !shape.perItem.model || !shape.perItem.maxItems) {
+      return { error: "a runtime list needs perItem: { prompt (use {{item}}), model, maxItems }" };
+    }
+  } else if (Array.isArray(shape.items)) {
+    if (!shape.items.length) return { error: "items is empty — list at least one { id, prompt, model }" };
+    for (const it of shape.items) {
+      if (!it.id || !it.prompt || !it.model) return { error: `every item needs { id, prompt, model }; got ${JSON.stringify(it)}` };
+    }
+  } else {
+    return { error: "shape needs either items: [...] (a known list) or itemSource + perItem (a list discovered at runtime)" };
+  }
+  if (shape.combinedOutput && !shape.combinedOutput.into) {
+    return { error: 'combinedOutput needs { into: "<the one artifact>" } (and mode: "commits" when leaves commit code)' };
+  }
+  return { shape };
 }
 
 // ── The validate gate — the offer gate guards on the WORLD, not the marker ────
@@ -173,7 +262,7 @@ export function recordValidation(meta = {}, { ok, estimate = null, file = null }
 // input (a --validate-output) must be IGNORED until the earlier gates are answered,
 // so a session cannot bank validation before it has read the strategy and placed
 // the shape. `priorGatesMet` is that predicate.
-export const GATE_CHAIN = ["read-strategy", "strategy"];
+export const GATE_CHAIN = ["read-strategy", "shape"];
 export function priorGatesMet(meta = {}) {
   return GATE_CHAIN.every((k) => k in meta);
 }
@@ -184,9 +273,8 @@ export function validateGate({ meta = {} } = {}) {
     return {
       passed: false,
       reason:
-        "No validated manifest. Author the manifest JSON, run " +
-        "`swarm.mjs validate <file>`, and re-run with --validate-output <file|text> " +
-        "so the gate quotes the engine's real estimate — a hand-computed cost is not consent.",
+        "No validated manifest. The driver builds the manifest from the shape file and runs " +
+        "the engine's validate itself; the gate quotes that estimate — a hand-computed cost is not consent.",
     };
   }
   return { passed: true, estimate: v.estimate || null };
@@ -400,10 +488,11 @@ function getFlag(name, argv) {
 async function main() {
   const argv = process.argv.slice(2);
   const out = (s) => process.stdout.write(s);
+  const self = fileURLToPath(import.meta.url).split("\\").join("/");
+  const dryRun = argv.includes("--dry-run");
 
   // The read pause sits BEFORE --manifest: a session names a manifest once it
   // has drafted one, by which point the pause can only rubber-stamp the shape.
-  const self = fileURLToPath(import.meta.url).split("\\").join("/");
   const manifest = getFlag("manifest", argv);
   const recorded = (manifest && readState(manifest)?.meta) || {};
   if (getFlag("read-strategy", argv) === undefined && !("read-strategy" in recorded)) {
@@ -436,173 +525,47 @@ async function main() {
     return 0;
   }
 
-  const dryRun = argv.includes("--dry-run");
   const state = readState(manifest) || { manifest, meta: {} };
-
+  const previousTasks = state.tasks || null;
   let meta = state.meta || {};
-  for (const key of GATE_KEYS) {
-    meta = recordGate(meta, key, getFlag(`gate-${key}`, argv));
-  }
   meta = recordGate(meta, "read-strategy", getFlag("read-strategy", argv));
-  meta = recordGate(meta, "strategy", getFlag("strategy", argv));
 
-  // --validate-output <file|text>: the engine's `validate` stdout, handed back so
-  // the driver records a REAL validation (ok + the estimate line) rather than
-  // trusting a hand-computed number. Presence of a passing validation is what
-  // unlocks the offer gate below.
-  // Chain guard: a --validate-output only counts once the PRIOR gates are met
-  // (read-strategy, strategy). Otherwise a session banks validation on the first
-  // call and satisfies the validate gate before ever reading the strategy or
-  // placing the shape. Ignored-until-earlier-gates-answered is what makes the
-  // chain strict; the read/strategy pauses below then fire in order.
-  const validateOut = getFlag("validate-output", argv);
-  if (validateOut !== undefined && priorGatesMet(meta)) {
-    const text = existsSync(validateOut) ? readFileSync(validateOut, "utf8") : validateOut;
-    const parsed = parseValidateOutput(text);
-    meta = recordValidation(meta, { ...parsed, file: getFlag("manifest-file", argv) || manifest });
-  }
+  // --shape-file: the model's only authoring surface. Recorded by absolute path;
+  // the WORLD below re-reads it every run, so an edited shape rebuilds the graph.
+  const shapeFlag = getFlag("shape-file", argv);
+  if (shapeFlag !== undefined) meta = recordGate(meta, "shape", resolve(shapeFlag).split("\\").join("/"));
   state.meta = meta;
-  writeState(manifest, state, { dryRun });
 
-  // The gate's three questions are unanswerable without a manifest and the
-  // grouping arithmetic behind it. Route there first, once, rather than letting a
-  // model invent a leaf count at the moment it is asked to justify one.
-  // Separate from the read pause: one "done" covering both let the read be skipped.
-  if (!("strategy" in meta) && !gateAnswered(meta)) {
-    out(
-      banner(
-        "Strategy — work the procedure you just read",
-        [
-          "You have read the strategy. Now work it, in its order — every step",
-          "produces an input the gate consumes:",
-          "",
-          "  1. Skill(swarm:orchestrating-agents) — the grouping arithmetic",
-          "  2. the contract frame: goal · return_shape · must_be_sure · scope · done_when",
-          "  3. place every task with the digraph — the shape falls out",
-          "  4. `models`, and `quota` if any leaf is a Claude model",
-          "  5. both sides of the cost comparison",
-          "  6. author the manifest, then `validate` it",
-          "",
-          "Re-run when that is settled. Recorded once; you will not be asked again",
-          "for this manifest.",
-        ],
-        `node "${self}" --manifest "${manifest}" --strategy done`,
-      ),
-    );
-    return 0;
-  }
+  const manifestFile = (meta.manifestFile || statePath(manifest).replace(/\.json$/, ".manifest.json")).split("\\").join("/");
+  const engine = fileURLToPath(new URL("../../../scripts/swarm.mjs", import.meta.url)).split("\\").join("/");
 
-  // The validate gate — guards the offer gate on OBSERVABLE REALITY. A recorded
-  // trio of answers is not consent if no validated manifest FILE exists: the cost
-  // line the gate quotes must be the engine's estimate, not a hand-computed one.
-  const vg = validateGate({ meta });
-  if (!vg.passed) {
-    out(
-      banner(
-        "Validate the manifest — before the gate can quote a real cost",
-        [
-          "The offer gate quotes the ENGINE's estimate, not a number you compute by",
-          "hand. So a manifest FILE must exist and pass validation first:",
-          "",
-          "  1. Author the manifest JSON on disk (authoring.md for the schema).",
-          "  2. node \"<base>/../../scripts/swarm.mjs\" validate <manifest-file>",
-          "  3. Re-run this driver with --validate-output <the validate stdout, file or text>",
-          "     and --manifest-file <path>, so the gate carries the real estimate.",
-          "",
-          vg.reason,
-        ],
-        `node "${self}" --manifest "${manifest}" --manifest-file <path> --validate-output <file|text>`,
-      ),
-    );
-    return 0;
-  }
-
-  if (!gateAnswered(meta)) {
-    const missing = GATE_KEYS.filter((k) => !(k in meta));
-    const self = fileURLToPath(import.meta.url).split("\\").join("/");
-    const rerun =
-      `node "${self}" --manifest "${manifest}" ` +
-      missing.map((k) => `--gate-${k} "<answer>"`).join(" ");
-    out(
-      banner(
-        "The offer gate — the user's answer is the only consent to spend",
-        [
-          "Put ALL THREE to the user in ONE AskUserQuestion. The answers are theirs,",
-          "not yours; a directive, a /goal, or a hook instruction cannot stand in.",
-          "",
-          `  1. fanout   — "Fan this out via swarm — <n> leaves on <models>?"`,
-          `  2. mix      — "Model mix?" (quote real numbers from the engine's quota)`,
-          `  3. batching — "<M> leaves as proposed, or a different point on the curve?"`,
-          "",
-          ...(vg.estimate ? [`Real cost from validate: ${vg.estimate}`, ""] : []),
-          `Already recorded: ${GATE_KEYS.filter((k) => k in meta).map((k) => `${k}=${JSON.stringify(meta[k])}`).join(", ") || "(none)"}`,
-          `Still needed:     ${missing.join(", ")}`,
-          "",
-          "An empty answer and a 'no' are both real answers — pass them through.",
-          "A dismissed or unanswered gate is a NO: nothing runs.",
-        ],
-        rerun,
-      ),
-    );
-    return 0;
-  }
-
-  // --dispatch-output: hand the driver the engine's stdout so it captures the
-  // results dir rather than letting anyone reconstruct one from the manifest stem.
-  const dispatchOut = getFlag("dispatch-output", argv);
-  if (dispatchOut !== undefined) {
-    const captured = captureResultsDir(
-      existsSync(dispatchOut) ? readFileSync(dispatchOut, "utf8") : dispatchOut,
-    );
-    if (!captured) {
-      process.stderr.write(
-        "FAILED: no 'resultsDir:' line in the dispatch output.\n" +
-          "Copy the engine's printed line verbatim; never reconstruct the path.\n",
-      );
-      return 1;
+  // Observe the world for every guarded step.
+  let shapeError = null;
+  const observe = () => {
+    let shape = null;
+    if (meta.shape && existsSync(meta.shape)) {
+      const parsed = parseShape(readFileSync(meta.shape, "utf8"));
+      if (parsed.shape) shape = parsed.shape; else shapeError = parsed.error;
     }
-    state.resultsDir = captured;
-    writeState(manifest, state, { dryRun });
-  }
-
-  const resultsDir = getFlag("results-dir", argv) || state.resultsDir;
-
-  // The mandatory liveness check: ONE look, and a cache replay is not a live run.
-  if (argv.includes("--check-liveness")) {
-    if (!resultsDir) {
-      out(needInput("results-dir", "Pass --dispatch-output <file|text> first, or --results-dir <path>"));
-      return 0;
+    let manifestOnDisk = null;
+    if (existsSync(manifestFile)) {
+      try { manifestOnDisk = JSON.parse(readFileSync(manifestFile, "utf8")); } catch { manifestOnDisk = null; }
     }
-    const roster = rosterFrom(resultsDir);
-    const v = livenessVerdict(roster);
-    state.liveness = { checkedAt: new Date().toISOString(), ...v };
-    writeState(manifest, state, { dryRun });
-    out(
-      [
-        `liveness: ${v.live ? "LIVE" : "NOT LIVE"}`,
-        `  ${v.reason}`,
-        `  leaves: ${roster.total}` + (roster.skipped ? ` (${roster.skipped} skipped)` : ""),
-        ...(v.attention.length ? [`  needs attention: ${v.attention.join(", ")}`] : []),
-        ...(v.quiet.length
-          ? v.quiet.map((q) => `  quiet: ${q.id} — no event for ${q.secs}s`)
-          : []),
-        ...tokenLines(roster),
-        ...(v.live && !v.attention.length && !v.quiet.length
-          ? ["  nothing to act on"]
-          : []),
-        "",
-        v.cacheReplay
-          ? "This run replayed cache — NOTHING RE-EXECUTED. Do not report it as running."
-          : v.live
-            ? "Hands off until the completion notification. One check is all you get."
-            : "No leaf is running. Check the dispatch before reporting anything.",
-        "",
-      ].join("\n"),
-    );
-    return 0;
-  }
+    return { meta, shape, manifestFile, manifestOnDisk, resultsDir: getFlag("results-dir", argv) || state.resultsDir, liveness: state.liveness };
+  };
 
-  // Failure routing, once a run has ended badly.
+  const lines = [];
+  const finish = (code = 0) => {
+    const world = observe();
+    const current = taskProjection(world);
+    const tasks = stepTaskLines({ previous: previousTasks, current });
+    if (!dryRun) { state.tasks = current; writeState(manifest, state); }
+    if (tasks.length) out(["Mirror into the harness task list:", ...tasks.map((l) => `  ${l}`), ""].join("\n"));
+    out(lines.join("\n"));
+    return code;
+  };
+
+  // Failure routing is askable at any point once a run has ended badly.
   if (argv.includes("--route-failure")) {
     const r = routeFailure({
       timedOut: argv.includes("--timed-out"),
@@ -611,42 +574,200 @@ async function main() {
       quota: argv.includes("--quota"),
       attempts: Number(getFlag("attempts", argv) || 1),
     });
-    out(
-      [
-        `route: ${r.action}${r.ask ? " (ASK the user)" : " (no ask)"}`,
-        `  ${r.reason}`,
-        "",
-        ...(r.ask ? ["Offer via AskUserQuestion:", ...r.options.map((o) => `  - ${o}`), ""] : []),
-      ].join("\n"),
+    lines.push(
+      `route: ${r.action}${r.ask ? " (ASK the user)" : " (no ask)"}`,
+      `  ${r.reason}`,
+      "",
+      ...(r.ask ? ["Offer via AskUserQuestion:", ...r.options.map((o) => `  - ${o}`), ""] : []),
     );
-    return 0;
+    return finish(0);
   }
 
-  const est = getFlag("inline-lines", argv);
-  const estimate =
-    est === undefined
-      ? null
-      : inlineEstimate({ totalLines: Number(est) || 0, comparable: !argv.includes("--not-comparable") });
+  // --dispatch-output: the engine's stdout, so the driver captures the results
+  // dir rather than letting anyone reconstruct one from the manifest stem.
+  const dispatchOut = getFlag("dispatch-output", argv);
+  if (dispatchOut !== undefined && gateAnswered(meta)) {
+    const captured = captureResultsDir(existsSync(dispatchOut) ? readFileSync(dispatchOut, "utf8") : dispatchOut);
+    if (!captured) {
+      process.stderr.write(
+        "FAILED: no 'resultsDir:' line in the dispatch output.\n" +
+          "Copy the engine's printed line verbatim; never reconstruct the path.\n",
+      );
+      return 1;
+    }
+    state.resultsDir = captured;
+  }
 
-  out(
-    [
-      "gate: answered",
-      ...GATE_KEYS.map((k) => `  ${k}: ${JSON.stringify(meta[k])}`),
-      ...(estimate ? ["", estimate.text] : []),
-      ...(resultsDir ? ["", `resultsDir: ${resultsDir}`] : []),
-      "",
-      `state: ${statePath(manifest)}`,
-      "",
-      "Mirror these into the harness task list — one TaskCreate each:",
-      ...taskLines().map((l) => `  ${l}`),
-      "",
-      "The gate is recorded. Validate, then dispatch BARE via Bash run_in_background.",
-      "Then hand the dispatch output back:",
-      `  node "${fileURLToPath(import.meta.url).split("\\").join("/")}" --manifest "${manifest}" --dispatch-output <file> --check-liveness`,
-      "",
-    ].join("\n"),
-  );
-  return 0;
+  // The loop: perform what the script can, pause for what it cannot.
+  for (;;) {
+    const world = observe();
+    const step = firstIncompleteStep(world);
+
+    if (step === "shape") {
+      lines.push(
+        banner(
+          "Shape — supply the VALUES; the driver builds the graph",
+          [
+            "You do not write the tasks array. Invoke Skill(swarm:orchestrating-agents)",
+            "for the grouping, then write ONE JSON file answering these questions:",
+            "",
+            "  items          — the known list: [{ id, prompt, model, after?, buildsOnCommitsOf? }]",
+            "                   after: ids whose OUTPUT this one reads ({{result:<id>}} in its prompt)",
+            "                   buildsOnCommitsOf: the id whose COMMITS this one edits on top of",
+            "                   any other engine field (allowedTools, effort, cwd, timeoutMs, returns,",
+            "                   when, fallbackModel, outputDir) passes through as written",
+            "  itemSource     — OR, a list only known at runtime: { findPrompt, model }",
+            "  perItem        — with itemSource: { prompt (use {{item}}), model, maxItems }",
+            "  combinedOutput — when the request names ONE artifact assembled from the",
+            '                   leaves: { into, label?, model?, mode?: "commits" }.',
+            "                   The driver then EMITS the consuming node; it cannot be left out.",
+            "  digest         — optional: the engine's digest block (instructions, model)",
+            "",
+            "Example:",
+            ...JSON.stringify(SHAPE_EXAMPLE, null, 2).split("\n").map((l) => `  ${l}`),
+            "",
+            ...(shapeError ? [`Last shape file rejected: ${shapeError}`, `  (${meta.shape})`, ""] : []),
+            `Run \`node "${engine}" models\` for launchable model names.`,
+          ],
+          `node "${self}" --manifest "${manifest}" --shape-file <path>`,
+        ),
+      );
+      return finish(0);
+    }
+
+    if (step === "author") {
+      const built = { ...buildManifest(world.shape), ...(world.shape.digest ? { digest: world.shape.digest } : {}) };
+      if (dryRun) {
+        lines.push(`dry-run: would write ${manifestFile} (${built.tasks.length} task(s): ${built.tasks.map((t) => t.id).join(", ")})`, "");
+        lines.push("dry-run: would run validate on it, then reach the offer gate.", "");
+        return finish(0);
+      }
+      mkdirSync(dirname(manifestFile), { recursive: true });
+      writeFileSync(`${manifestFile}.tmp`, JSON.stringify(built, null, 2));
+      renameSync(`${manifestFile}.tmp`, manifestFile);
+      meta = { ...meta, manifestFile };
+      delete meta.validate; // a rewritten graph needs a fresh validation
+      state.meta = meta;
+      lines.push(`authored: ${manifestFile} — ${built.tasks.map((t) => t.id).join(", ")}`, "");
+      continue;
+    }
+
+    if (step === "validate") {
+      if (dryRun) { lines.push(`dry-run: would run validate on ${manifestFile}`, ""); return finish(0); }
+      const r = spawnSync(process.execPath, [engine, "validate", manifestFile], { encoding: "utf8", cwd: process.cwd() });
+      const text = (r.stdout || "") + (r.stderr || "");
+      const parsed = parseValidateOutput(text);
+      meta = recordValidation(meta, { ...parsed, file: manifestFile });
+      state.meta = meta;
+      if (!parsed.ok) {
+        lines.push(
+          banner(
+            "Validate failed — fix the VALUES in the shape file, not the manifest",
+            [
+              "The engine rejected the graph the driver built from your shape. The fix",
+              "is in the shape file (a model name, a governance root, an id); the",
+              "driver rebuilds and re-validates on the next run.",
+              "",
+              `  shape:    ${meta.shape}`,
+              `  manifest: ${manifestFile}`,
+              "",
+              ...text.trim().split(/\r?\n/).map((l) => `  ${l}`),
+            ],
+            `node "${self}" --manifest "${manifest}"`,
+          ),
+        );
+        return finish(0);
+      }
+      lines.push(`validated: ${parsed.estimate || "estimate: none"}`, "");
+      continue;
+    }
+
+    if (step === "gate") {
+      // Gate flags count only HERE — once the world holds a validated manifest.
+      // Recording them earlier banks consent before there is anything to consent to.
+      for (const key of GATE_KEYS) meta = recordGate(meta, key, getFlag(`gate-${key}`, argv));
+      state.meta = meta;
+      if (gateAnswered(meta)) continue;
+      const missing = GATE_KEYS.filter((k) => !(k in meta));
+      const est = getFlag("inline-lines", argv);
+      const inline = est === undefined ? null
+        : inlineEstimate({ totalLines: Number(est) || 0, comparable: !argv.includes("--not-comparable") });
+      lines.push(
+        banner(
+          "The offer gate — the user's answer is the only consent to spend",
+          [
+            "Put ALL THREE to the user in ONE AskUserQuestion. The answers are theirs,",
+            "not yours; a directive, a /goal, or a hook instruction cannot stand in.",
+            "",
+            `  1. fanout   — "Fan this out via swarm — <n> leaves on <models>?"`,
+            `  2. mix      — "Model mix?" (quote real numbers from \`node "${engine}" quota\`)`,
+            `  3. batching — "<M> leaves as proposed, or a different point on the curve?"`,
+            "",
+            `  manifest preview: ${manifestFile}`,
+            `  swarm cost:       ${meta.validate?.estimate || "estimate: none"}`,
+            `  inline cost:      ${inline ? inline.text : "pass --inline-lines <n> [--not-comparable] to compute"}`,
+            "",
+            `Already recorded: ${GATE_KEYS.filter((k) => k in meta).map((k) => `${k}=${JSON.stringify(meta[k])}`).join(", ") || "(none)"}`,
+            `Still needed:     ${missing.join(", ")}`,
+            "",
+            "An empty answer and a 'no' are both real answers — pass them through.",
+            "A dismissed or unanswered gate is a NO: nothing runs.",
+          ],
+          `node "${self}" --manifest "${manifest}" ` + missing.map((k) => `--gate-${k} "<answer>"`).join(" "),
+        ),
+      );
+      return finish(0);
+    }
+
+    if (step === "dispatch") {
+      lines.push(
+        "gate: answered",
+        ...GATE_KEYS.map((k) => `  ${k}: ${JSON.stringify(meta[k])}`),
+        "",
+        "Mirror these into the harness task list — one TaskCreate each:",
+        ...taskLines().map((l) => `  ${l}`),
+        "",
+        "Dispatch BARE via Bash run_in_background — no pipe, filter, or redirect:",
+        `  node "${engine}" run "${manifestFile}"`,
+        "",
+        "Then hand the engine's output back (it captures resultsDir and runs the one liveness check):",
+        `  node "${self}" --manifest "${manifest}" --dispatch-output <file> --check-liveness`,
+        "",
+      );
+      return finish(0);
+    }
+
+    if (step === "liveness") {
+      if (!argv.includes("--check-liveness")) {
+        lines.push(`resultsDir: ${world.resultsDir}`, "", "Run the ONE liveness check:", `  node "${self}" --manifest "${manifest}" --check-liveness`, "");
+        return finish(0);
+      }
+      const roster = rosterFrom(world.resultsDir);
+      const v = livenessVerdict(roster);
+      state.liveness = { checkedAt: new Date().toISOString(), ...v };
+      lines.push(
+        `liveness: ${v.live ? "LIVE" : "NOT LIVE"}`,
+        `  ${v.reason}`,
+        `  leaves: ${roster.total}` + (roster.skipped ? ` (${roster.skipped} skipped)` : ""),
+        ...(v.attention.length ? [`  needs attention: ${v.attention.join(", ")}`] : []),
+        ...v.quiet.map((q) => `  quiet: ${q.id} — no event for ${q.secs}s`),
+        ...tokenLines(roster),
+        ...(v.live && !v.attention.length && !v.quiet.length ? ["  nothing to act on"] : []),
+        "",
+        v.cacheReplay
+          ? "This run replayed cache — NOTHING RE-EXECUTED. Do not report it as running."
+          : v.live
+            ? "Hands off until the completion notification. One check is all you get."
+            : "No leaf is running. Check the dispatch before reporting anything.",
+        "",
+      );
+      return finish(0);
+    }
+
+    // null: every step's effect is present.
+    lines.push("swarm: all driver steps complete — hands off until the completion notification.", `state: ${statePath(manifest)}`, "");
+    return finish(0);
+  }
 }
 
 // Guard by resolved path, not basename: a symlinked skills dir makes argv[1]
