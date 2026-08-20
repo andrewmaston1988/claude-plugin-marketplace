@@ -12,7 +12,7 @@ Swarm runs work in headless Claude Code sessions on models this session isn't us
 
 **Core principle:** the smarts live in the plan and the leaves; the plumbing has none. A manifest you could not defend line by line is a manifest you should not dispatch.
 
-Engine: `scripts/swarm.mjs` at the plugin root — resolve it as `<base>/../../scripts/swarm.mjs` (<base> = this skill's base directory). Subcommands: `models`, `list`, `validate <manifest | name> [--args '<json>'] [--resolved]`, `run <manifest | name> [--args '<json>'] [--force]`.
+Engine: `node ../../scripts/swarm.mjs` (from this skill dir, same base as the driver). Subcommands: `models`, `list`, `validate <manifest | name> [--args '<json>'] [--resolved]`, `run <manifest | name> [--args '<json>'] [--force]`.
 
 **Where everything lives.** This page is the loop and the judgement; the depth is
 filed by *when you need it*, and nothing here is repeated there:
@@ -70,8 +70,7 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 **Start the driver first — before any JSON exists:**
 
 ```bash
-# <base> = this skill's base directory from the load header — .../plugins/swarm/skills/swarm
-node "<base>/scripts/run-swarm.mjs" --manifest <name-for-this-run>
+node scripts/run-swarm.mjs --manifest <name-for-this-run>
 ```
 
 `--manifest` is a **state key, not a file that must already exist.** Name the run and the
@@ -151,8 +150,7 @@ liveness check, and failure routing. Your job is the loop.
 | `--route-failure [--timed-out] [--errored] [--committed-since] [--quota] [--attempts n]` | The routing verdict and whether to ask |
 
 ```bash
-# <base> = this skill's base directory from the load header (.../plugins/swarm/skills/swarm)
-node "<base>/scripts/run-swarm.mjs" --manifest <manifest.json | name>
+node scripts/run-swarm.mjs --manifest <manifest.json | name>
 ```
 
 | Driver output | You do |
@@ -171,9 +169,9 @@ import), so the rules there bind whether or not you ran the driver.
 ([execution-strategy.md](execution-strategy.md) — the driver pauses and hands you
 this before the gate, because the gate's questions are unanswerable without it),
 author the manifest ([authoring.md](authoring.md) for the field-level schema and
-recipes), `validate` it, dispatch it, and read `digest.md`. The engine's subcommands are
-`models`, `list`, `validate`, `run`, `status`, `report`, `ask`, `quota`; resolve
-it as `<base>/../../scripts/swarm.mjs`.
+recipes), `validate` it, dispatch it, and read `digest.md`. The engine's subcommands
+(`models`, `list`, `validate`, `run`, `status`, `report`, `ask`, `quota`) run as
+`node ../../scripts/swarm.mjs <subcommand>` from this skill dir.
 
 **Dispatch BARE via Bash `run_in_background`** — never through a pipe, filter, or
 redirect. A pipe stage buffers the stream, and the live progress frames are the
