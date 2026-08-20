@@ -1,17 +1,12 @@
 #!/usr/bin/env node
-// PreToolUse hook on Bash: guards `swarm.mjs run` — the only subcommand that spends.
+// PreToolUse hook on Bash: guards the engine's `run` subcommand — the only one
+// that spends. It keys on the COMMAND, not on the skill, because a rule that must
+// be read to apply cannot defend against not being read: a raw command inherited
+// through a handover is bound by nothing in SKILL.md.
 //
-// Every swarm rule lives in SKILL.md prose, so the rulebook is opt-in: a session
-// that runs the engine from a raw command inherited via a STATE handover meets none
-// of it. That is not hypothetical — it is the observed vector, and it is
-// self-propagating, because such a session writes the same raw command into its own
-// handover. A rule that must be read to apply cannot defend against not being read.
-//
-// So the gate keys on the command, which every path through the bypass has in common:
-// dispatching the engine requires the skill to have been invoked this session (its
-// offer gate is the user's only consent to spend), and requires the dispatch to be
-// bare and backgrounded (a pipe or redirect buffers the stream, and the live frames
-// are the operator's only view of a run that may spend millions of tokens).
+// A dispatch therefore requires the skill invoked this session (its offer gate is
+// the only consent to spend), bare and backgrounded — a pipe or redirect buffers
+// the frames that are the operator's only view of the run.
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -22,8 +17,44 @@ export function markerPath(sessionId, home = SWARM_HOME) {
   return path.join(home, `.skill-ack-${sessionId}`);
 }
 
-// `swarm.mjs run` — path may be quoted, either slash style, with flags after.
-const DISPATCH_RE = /swarm\.mjs["']?\s+run\b/;
+// The engine must be in EXECUTABLE POSITION — start of command, after a
+// separator, or after a keyword that introduces one — preceded by its
+// interpreter. Matching the bare string anywhere blocks ordinary work: a grep
+// for it, a heredoc documenting it, a comment, the gate's own tests. That is not
+// the safe direction, because it makes the gate untestable through Bash and
+// teaches routing around a safety control.
+//
+// Anchors must cover every position a command can START at, not the ones that
+// came to mind: `\n` and backtick belong here as much as `;` and `&&`.
+const ANCHOR = "(?:^|[;&|(`\\n]|&&|\\|\\||\\b(?:then|do|else|elif)\\b|\\{)";
+
+// Wrappers that precede the interpreter without changing what is executed.
+const WRAPPER = "(?:(?:nohup|command|exec|time|env|setsid)\\s+(?:-\\S+\\s+|\\w+=\\S+\\s+)*)*";
+const DISPATCH_RE = new RegExp(
+  `${ANCHOR}\\s*${WRAPPER}` +
+    `(?:[\\w./\\\\-]*\\bnode(?:\\.exe)?\\b|["'][^"']*node[^"']*["'])` +
+    `\\s+["']?[^"'\\s]*swarm\\.mjs["']?\\s+run\\b`,
+);
+
+// A `#` comment runs to end of LINE, not end of command — cutting at the first
+// `#` in a multi-line command would hide a real dispatch on a later line.
+// Heredoc bodies are inert too: the shell feeds them to a program's stdin, so a
+// command quoted inside one is data, not something that runs.
+function stripComment(cmd) {
+  const out = [];
+  let heredoc = null;
+  for (const line of String(cmd).split("\n")) {
+    if (heredoc !== null) {
+      if (line.trim() === heredoc) heredoc = null;
+      continue;
+    }
+    const open = line.match(/<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?/);
+    const i = line.indexOf("#");
+    out.push(i === -1 ? line : line.slice(0, i));
+    if (open) heredoc = open[1];
+  }
+  return out.join("\n");
+}
 
 // Shell decorations that steal the stream from the operator.
 const PIPE_RE = /\|/;
@@ -40,7 +71,7 @@ const BARE_HINT =
 // Pure decision, so the harness is not needed to test it.
 export function gateDispatch({ command, runInBackground, markerExists }) {
   const cmd = String(command || "");
-  if (!DISPATCH_RE.test(cmd)) return { block: false };
+  if (!DISPATCH_RE.test(stripComment(cmd))) return { block: false };
 
   if (!markerExists) {
     return { block: true, reason: `A swarm run requires the swarm skill. ${SKILL_HINT}` };
