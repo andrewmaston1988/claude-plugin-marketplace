@@ -118,12 +118,10 @@ test("marker is NOT written for another skill or another tool", () => {
 });
 
 // ── The gate must fire on EXECUTION, not on a mention ────────────────────────
-// Observed 2026-08-20: the gate blocked five consecutive non-executing commands
-// — a grep searching FOR the string, a heredoc writing a plan that documents it,
-// a pipeline grep, a shell comment, and its own probe script. None of them spend
-// anything. Over-blocking is not the safe direction here: it makes the gate
-// impossible to test through Bash, and it teaches the model to route around a
-// safety control to do ordinary work, which is the opposite of what it is for.
+// The gate must key on executable position, not string presence: a grep for the
+// command, a heredoc documenting it, a comment, and the gate's own tests all
+// mention it without spending anything. Over-blocking is not the safe direction —
+// it makes the gate untestable through Bash and teaches routing around it.
 
 test("gate ignores a command that only MENTIONS the dispatch", () => {
   for (const command of [
@@ -180,6 +178,43 @@ test("narrowing to executable position opens no bypass", () => {
       gateDispatch({ command, runInBackground: true, markerExists: false }).block,
       true,
       `must still block: ${command}`,
+    );
+  }
+});
+
+// Four bypasses the first adversarial probe missed: it enumerated the shapes its
+// author thought of, and a newline was not among them. A gate that must catch
+// every real dispatch cannot miss the commonest multi-line shell shape there is.
+test("executable position includes newline, backtick and keyword introducers", () => {
+  for (const command of [
+    `echo hi\nnode ${ENGINE} run p`,
+    "echo `node " + ENGINE + " run p`",
+    `if true; then node ${ENGINE} run p; fi`,
+    `for i in 1; do node ${ENGINE} run p; done`,
+    `while :; do node ${ENGINE} run p; done`,
+    `if x; then y; else node ${ENGINE} run p; fi`,
+    `{ node ${ENGINE} run p; }`,
+    `echo a\n\tnode ${ENGINE} run p`,
+  ]) {
+    equal(
+      gateDispatch({ command, runInBackground: true, markerExists: false }).block,
+      true,
+      `must block: ${JSON.stringify(command)}`,
+    );
+  }
+});
+
+// The narrowing must not creep back into over-blocking: a mention on its own
+// line is still a mention.
+test("a mention on its own line is still not a dispatch", () => {
+  for (const command of [
+    `echo hi\ngrep "${ENGINE} run" .`,
+    `cat <<EOF\nnode ${ENGINE} run p\nEOF`,
+  ]) {
+    equal(
+      gateDispatch({ command, runInBackground: true, markerExists: false }).block,
+      false,
+      `must not block: ${JSON.stringify(command)}`,
     );
   }
 });

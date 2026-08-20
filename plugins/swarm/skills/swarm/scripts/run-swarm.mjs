@@ -1,26 +1,12 @@
 #!/usr/bin/env node
 /**
- * run-swarm.mjs — driver for the swarm skill's SESSION-side sequence.
+ * Driver for the swarm skill's session-side sequence: records the gate answers,
+ * which nothing else persists across compaction. It does not enforce consent —
+ * the Bash hook covers one of three dispatch paths, so SKILL.md's gate prose
+ * governs the rest.
  *
- * The engine already resumes: src/scheduler.mjs is a DAG state machine with
- * per-leaf `claude --resume`, kept worktrees, and skip-if-ok. What has no
- * persisted state is the session's own sequence — gate answered, validated,
- * dispatched, liveness checked, digest read — and both documented incidents
- * (2026-07-15) were lost-session-state failures, not knowledge failures.
- *
- * What this driver is NOT: an enforcement mechanism. A5 (2026-08-20) enumerated
- * the dispatch paths and found three, of which the Bash hook guards one —
- * `src/ask.mjs` and any direct `runPlan` import spend without consulting a
- * marker. The gate prose in SKILL.md governs those; this script records the
- * answer so it survives compaction, and writes the marker IN ADDITION to
- * skill-ack.mjs (never instead of it — that would break by-hand dispatch).
- *
- * Three exit modes:
- *   pause banner + exit 0   — a judgement call is needed
- *   needInput JSON + exit 0 — a required input is missing
- *   non-zero                — genuine failure
- * Never exit 0 with no output: a silent success cannot be told from a silent
- * failure by a caller branching on those modes.
+ * Exit modes: pause banner or needInput JSON (both 0), non-zero on failure.
+ * Never exit 0 silently — a caller cannot tell that from success.
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -360,16 +346,16 @@ async function main() {
       "",
       "The gate is recorded. Validate, then dispatch BARE via Bash run_in_background.",
       "Then hand the dispatch output back:",
-      `  node "${fileURLToPath(import.meta.url).split("\\\\").join("/")}" --manifest "${manifest}" --dispatch-output <file> --check-liveness`,
+      `  node "${fileURLToPath(import.meta.url).split("\\").join("/")}" --manifest "${manifest}" --dispatch-output <file> --check-liveness`,
       "",
     ].join("\n"),
   );
   return 0;
 }
 
-// Guard by resolved path, not basename: ~/.claude/skills is a symlink into the
-// real tree, so argv[1] and import.meta.url disagree there and a basename
-// comparison silently refuses to run (observed in run-workflow.mjs, 2026-08-20).
+// Guard by resolved path, not basename: a symlinked skills dir makes argv[1]
+// and import.meta.url disagree, and a basename comparison then silently
+// refuses to run.
 const invokedAs = process.argv[1] ? process.argv[1].split("\\").join("/") : "";
 if (invokedAs.endsWith("/run-swarm.mjs")) {
   main()

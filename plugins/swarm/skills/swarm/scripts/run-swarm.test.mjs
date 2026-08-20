@@ -21,9 +21,8 @@ import {
 } from "./run-swarm.mjs";
 
 // ── Exit-mode contract ───────────────────────────────────────────────────────
-// Observed 2026-08-20: run-workflow.mjs --phase authoring exited 0 with zero
-// output, matching none of its four documented outcomes and reading as success
-// to any caller branching on them. Pinned so this driver cannot repeat it.
+// A driver must never exit 0 with no output: a caller branching on the exit
+// modes cannot tell a silent success from a silent failure.
 
 test("banner: a pause is never silent and carries the re-run command", () => {
   const out = banner("Gate", ["1. Ask"], "node run-swarm.mjs --gate-fanout yes");
@@ -254,11 +253,9 @@ test("readRunLog: a malformed line is skipped, not fatal", async () => {
 });
 
 // ── The strategy pause teaches what the gate presumes ────────────────────────
-// Observed 2026-08-20 (operator): the gate pause told a model to ask three
-// questions but nothing about how to arrive at answerable ones — no leaf count,
-// no topology, no routing to orchestrating-agents, which owns the grouping
-// arithmetic the third question carries. A pause must carry the state needed to
-// decide, not just the question.
+// A pause must carry the state needed to decide, not just the question. The
+// gate asks for a leaf count, a model mix, and a batching point; none is
+// answerable without the grouping arithmetic orchestrating-agents owns.
 
 test("the strategy pause delivers execution-strategy.md by resolvable path ★", async () => {
   const { readFileSync, existsSync } = await import("node:fs");
