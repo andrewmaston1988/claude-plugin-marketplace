@@ -31,7 +31,8 @@ test("cleanTurn strips harness injections and keeps slash-command args", () => {
 
 test("classifyTurn tags pasted claude output, logs and code", () => {
   assert.equal(classifyTurn("● Done. The fix is in.\n\n  - item\n  - item"), "pasted-claude");
-  assert.equal(classifyTurn("[scout] Installing tree-sitter"), "pasted-log");
+  assert.equal(classifyTurn("[indexer] Installing tree-sitter"), "pasted-log");
+  assert.equal(classifyTurn("[2026/07/23 20:00:24] N: WS closed"), "pasted-log");
   assert.equal(classifyTurn("import x from 'y'\nexport const a = 1"), "pasted-code");
   assert.equal(classifyTurn("ok so back to cladding"), "typed");
 });

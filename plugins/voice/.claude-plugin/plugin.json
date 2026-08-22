@@ -1,6 +1,6 @@
 {
   "name": "voice",
-  "description": "Mine your own Claude Code transcripts into an operator profile — how you write and how to read you — injected at SessionStart so every session meets you warm.",
+  "description": "Builds a per-operator dictionary from their own Claude Code transcripts — mined cues injected only when a prompt matches, plus a reader's-guide profile at SessionStart. Nothing operator-specific ships in the plugin.",
   "author": {
     "name": "Andrew Maston",
     "email": "andrew.maston1988@gmail.com"
@@ -11,7 +11,8 @@
   "keywords": [
     "voice",
     "operator-profile",
+    "cues",
     "transcripts",
-    "session-start"
+    "user-prompt-submit"
   ]
 }

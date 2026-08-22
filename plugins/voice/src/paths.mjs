@@ -29,6 +29,7 @@ function transcriptsDir(env) {
 export function filesFor(p) {
   return {
     profile: path.join(p.configDir, "profile.md"),
+    cues: path.join(p.configDir, "cues.json"),
     turns: path.join(p.dataDir, "turns.jsonl"),
     stats: path.join(p.dataDir, "stats.json"),
     sample: path.join(p.dataDir, "sample.md"),

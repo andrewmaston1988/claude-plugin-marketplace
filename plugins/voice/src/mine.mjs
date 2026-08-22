@@ -59,7 +59,7 @@ export function classifyTurn(t) {
   const indented = lines.filter(l => /^ {2,}\S/.test(l)).length;
   if (/^[●⏺]/.test(t) || /\n[●⏺] /.test(t)) return "pasted-claude";
   if (lines.length >= 4 && indented / lines.length > 0.3) return "pasted-claude";
-  if (/^\[(scout|\d{4}\/\d\d)/.test(t) || /^(Traceback|Error:|PS [A-Z]:)/.test(t)) return "pasted-log";
+  if (/^\[(?:[a-z][a-z0-9_-]*\]|\d{4}\/\d\d)/i.test(t) || /^(Traceback|Error:|PS [A-Z]:)/.test(t)) return "pasted-log";
   if (/^@tool|^```|^\s*[{[]/.test(t) || /^(import|export|function|class|def|const|var)\b/.test(t)) return "pasted-code";
   return "typed";
 }
