@@ -14,11 +14,13 @@ export function buildPrompt(sampleMarkdown) {
 // Runs `claude -p` with the prompt on stdin. Injectable for tests.
 export function distil(sampleMarkdown, { model = "sonnet", _spawn = spawnSync, claudeBin } = {}) {
   const prompt = buildPrompt(sampleMarkdown);
-  // npm ships claude as a .cmd shim on Windows; naming it avoids shell:true and its escaping hazards.
-  const bin = claudeBin || (process.platform === "win32" ? "claude.cmd" : "claude");
-  const r = _spawn(bin, ["-p", "--model", model, "--output-format", "text"], {
-    input: prompt, encoding: "utf8", maxBuffer: 64 * 1024 * 1024,
-  });
+  const args = ["-p", "--model", model, "--output-format", "text"];
+  const opts = { input: prompt, encoding: "utf8", maxBuffer: 64 * 1024 * 1024, windowsHide: true };
+  let r = _spawn(claudeBin || "claude", args, opts);
+  // Native claude.exe resolves directly; npm's claude.cmd shim needs cmd.exe (spawn can't run .cmd without a shell).
+  if (r.error && process.platform === "win32" && !claudeBin) {
+    r = _spawn("cmd.exe", ["/d", "/s", "/c", "claude", ...args], opts);
+  }
   if (r.error) throw new Error(`claude -p failed to start: ${r.error.message}`);
   if (r.status !== 0) throw new Error(`claude -p exited ${r.status}: ${(r.stderr || "").trim().slice(0, 500)}`);
   const out = String(r.stdout || "").trim();

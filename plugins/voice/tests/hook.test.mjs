@@ -39,5 +39,14 @@ test("distil shells out once and validates the result shape", () => {
   assert.deepEqual(calls[0][1], ["-p", "--model", "sonnet", "--output-format", "text"]);
   assert.equal(calls[0][2], buildPrompt("SAMPLE"));
   assert.throws(() => distil("S", { _spawn: () => ({ status: 1, stderr: "boom" }) }), /exited 1: boom/);
+  // first spawn fails to start → falls back to cmd.exe on win32, errors elsewhere
+  const seq = [];
+  const fallback = (bin, a) => { seq.push(bin); return seq.length === 1 ? { error: new Error("ENOENT") } : { status: 0, stdout: "# Operator profile\n- y" }; };
+  if (process.platform === "win32") {
+    assert.equal(distil("S", { _spawn: fallback }), "# Operator profile\n- y");
+    assert.deepEqual(seq, ["claude", "cmd.exe"]);
+  } else {
+    assert.throws(() => distil("S", { _spawn: fallback }), /failed to start/);
+  }
   assert.throws(() => distil("S", { _spawn: () => ({ status: 0, stdout: "Sure! Here is" }) }), /not an operator profile/);
 });
