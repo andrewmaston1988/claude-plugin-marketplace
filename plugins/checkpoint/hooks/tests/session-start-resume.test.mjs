@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  isFreshSession, shouldOffer, relativeAge, renderResumeOffer,
+  isFreshSession, shouldOffer, longAge, optionLabel, renderResumeOffer,
 } from '../session-start-resume.mjs';
 
 test('isFreshSession: startup and clear are fresh; resume and compact are not', () => {
@@ -29,21 +29,31 @@ test('shouldOffer: true on a fresh, enabled, non-correlated start — regardless
 
 test('shouldOffer: ignores stateExists (legacy arg is silently dropped)', () => {
   const base = { source: 'startup', enabled: true, correlation: false };
-  // The legacy stateExists field is no longer part of the contract — even if
-  // a caller still passes it (or passes stateExists:false), the offer still
-  // fires when the other gates pass.
   assert.equal(shouldOffer({ ...base, stateExists: true }), true);
   assert.equal(shouldOffer({ ...base, stateExists: false }), true);
 });
 
-test('relativeAge formats minutes, hours, days', () => {
-  const now = 1_000_000_000_000;
-  assert.equal(relativeAge(now - 120_000, now), '2m ago');
-  assert.equal(relativeAge(now - 7_200_000, now), '2h ago');
-  assert.equal(relativeAge(now - 172_800_000, now), '2d ago');
+const NOW = 1_000_000_000_000;
+
+test('longAge spells the unit out and singularises', () => {
+  assert.equal(longAge(NOW - 30_000, NOW), 'just now');
+  assert.equal(longAge(NOW - 60_000, NOW), '1 minute ago');
+  assert.equal(longAge(NOW - 120_000, NOW), '2 minutes ago');
+  assert.equal(longAge(NOW - 3_600_000, NOW), '1 hour ago');
+  assert.equal(longAge(NOW - 7_200_000, NOW), '2 hours ago');
+  assert.equal(longAge(NOW - 86_400_000, NOW), '1 day ago');
+  assert.equal(longAge(NOW - 172_800_000, NOW), '2 days ago');
 });
 
-// ---- renderResumeOffer: template behaviour ----
+test('optionLabel reads as an operator-facing choice, falling back to the sid', () => {
+  assert.equal(
+    optionLabel({ slug: 'compact-note-truth', stampMs: NOW - 7_200_000 }, NOW),
+    'Resume compact-note-truth (2 hours ago)');
+  // PreCompact skeletons carry no slug.
+  assert.equal(
+    optionLabel({ slug: '', sid: '49c3934f-1bbd-40cd', stampMs: NOW - 60_000 }, NOW),
+    'Resume session 49c3934f (1 minute ago)');
+});
 
 // Read the template fresh from disk so the test exercises the actual shipped
 // copy, not a duplicated inline string (single source of truth).
@@ -52,42 +62,55 @@ function loadTemplate() {
   return fs.readFileSync(path.join(here, '..', 'templates', 'resume-offer.md'), 'utf8');
 }
 
-test('renderResumeOffer: no STATE file → still emits the find-instructions with the project dir', () => {
-  const tmpl = loadTemplate();
+test('renderResumeOffer: no candidates → find-instructions only, and nothing to ask about', () => {
   const out = renderResumeOffer({
-    template: tmpl,
+    template: loadTemplate(),
     dir: '/home/u/.claude/projects/C--foo',
-    statePath: '',
-    mtimeMs: 0,
-    now: 1_000_000_000_000,
+    candidates: [],
+    now: NOW,
   });
-  // Always-actionable: the agent must know where to look and how to pick a file.
   assert.match(out, /STATE handoffs for this directory live in/);
   assert.match(out, /\/home\/u\/\.claude\/projects\/C--foo/);
   assert.match(out, /newest `STATE\*\.md`/);
   assert.match(out, /plain `STATE\.md`/);
-  // No "Current best match" line when no file was found.
-  assert.doesNotMatch(out, /Current best match/);
+  // Nothing to choose between — the hook must not tell the agent to ask.
+  assert.doesNotMatch(out, /AskUserQuestion/);
+  assert.doesNotMatch(out, /Start fresh/);
 });
 
-test('renderResumeOffer: with a STATE file → adds a current-best-match line with path + age', () => {
-  const tmpl = loadTemplate();
-  const now = 1_000_000_000_000;
+test('renderResumeOffer: candidates → one labelled row each, plus the instruction to ask', () => {
   const out = renderResumeOffer({
-    template: tmpl,
+    template: loadTemplate(),
     dir: '/home/u/.claude/projects/C--foo',
-    statePath: '/home/u/.claude/projects/C--foo/STATE_sid_20260625T030000Z.md',
-    mtimeMs: now - 120_000,
-    now,
+    candidates: [
+      { slug: 'note-truth', sid: 'aaa', stampMs: NOW - 120_000, path: '/p/STATE_a.md', summary: 'first thing' },
+      { slug: 'voice', sid: 'bbb', stampMs: NOW - 7_200_000, path: '/p/STATE_b.md', summary: 'second thing' },
+    ],
+    now: NOW,
   });
-  assert.match(out, /Current best match: `\/home\/u\/\.claude\/projects\/C--foo\/STATE_sid_20260625T030000Z\.md` \(from 2m ago\)\./);
-  // The find-instructions are still present — the path is additive, not a replacement.
+  assert.match(out, /AskUserQuestion/);
+  assert.match(out, /"Start fresh" option/);
+  assert.match(out, /- Resume note-truth \(2 minutes ago\) — `\/p\/STATE_a\.md` — first thing/);
+  assert.match(out, /- Resume voice \(2 hours ago\) — `\/p\/STATE_b\.md` — second thing/);
+  // The find-instructions survive — the shortlist is additive.
   assert.match(out, /newest `STATE\*\.md`/);
 });
 
+test('renderResumeOffer: a rambling session line is capped, not pasted whole', () => {
+  const long = 'x'.repeat(400) + ' tail';
+  const out = renderResumeOffer({
+    template: loadTemplate(),
+    dir: '/d',
+    candidates: [{ slug: 's', sid: 'i', stampMs: NOW, path: '/p/STATE_a.md', summary: long }],
+    now: NOW,
+  });
+  assert.ok(!out.includes(long), 'the full summary must not be pasted');
+  assert.match(out, /…/);
+  // Newlines in a summary would break the one-row-per-candidate shape.
+  assert.equal(out.split('- Resume').length, 2);
+});
+
 test('renderResumeOffer: empty dir is tolerated (no throw, blank where dir should be)', () => {
-  const tmpl = loadTemplate();
-  const out = renderResumeOffer({ template: tmpl, dir: '', statePath: '', mtimeMs: 0 });
+  const out = renderResumeOffer({ template: loadTemplate(), dir: '', candidates: [] });
   assert.match(out, /STATE handoffs for this directory live in ``\./);
-  assert.doesNotMatch(out, /Current best match/);
 });
