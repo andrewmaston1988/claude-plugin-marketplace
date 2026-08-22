@@ -68,6 +68,15 @@
         "name": "Andrew Maston",
         "email": "andrew.maston1988@gmail.com"
       }
+    },
+    {
+      "name": "voice",
+      "description": "Mine your own transcripts into an operator profile — how you write and how to read you — injected at SessionStart",
+      "source": "./plugins/voice",
+      "author": {
+        "name": "Andrew Maston",
+        "email": "andrew.maston1988@gmail.com"
+      }
     }
   ]
 }
