@@ -148,6 +148,14 @@ export function renameStateToNow(oldPath, now = new Date()) {
   throw new Error(`renameStateToNow: could not find free stamp in 60s window for ${oldPath}`);
 }
 
+// The line pre-compact-snapshot.mjs stamps into every skeletal backstop, and
+// the only way a reader can tell a skeleton from a real checkpoint.
+export const SKELETON_MARKER = 'Skeletal backstop written by `pre-compact-snapshot.mjs`';
+
+export function isSkeletonState(body) {
+  return typeof body === 'string' && body.includes(SKELETON_MARKER);
+}
+
 export function isMeaningfulState(body) {
   if (typeof body !== 'string') return false;
   const stripped = body.replace(/[\s ]+/g, '');
