@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook: context nudge, post-compact pickup, keepalive (opt-in). Always exits 0; skips if CORRELATION_ID set.
+// UserPromptSubmit hook: context nudge, keepalive (opt-in). Always exits 0; skips if CORRELATION_ID set.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import {
-  STATE_DB, MARKER, KEEPALIVE_LOG,
+  STATE_DB, KEEPALIVE_LOG,
   readJSON, writeJSON, getSessionState, appendJSONL,
 } from './lib/paths.mjs';
 import {
@@ -15,7 +15,7 @@ import {
 import {
   contextWindowFor, contextUtilization, decideCheckpointNudge, readRecentAssistantTurns,
 } from './lib/context.mjs';
-import { SKILL_ID, SKILL_DISAMBIGUATION } from './lib/skill-ref.mjs';
+import { SKILL_DISAMBIGUATION } from './lib/skill-ref.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const TEMPLATES_DIR = path.resolve(HERE, 'templates');
@@ -172,15 +172,6 @@ async function main() {
     state[sessionId] = sState;
     const nudge = buildCheckpointNudge(pct);
     ctx = ctx ? `${ctx}\n\n${nudge}` : nudge;
-  }
-
-  // --- 2. Post-compact pickup ---
-  if (fs.existsSync(MARKER)) {
-    try { fs.unlinkSync(MARKER); } catch {}
-    const note = '**Compaction just happened.** A skeletal STATE.md was written by the PreCompact '
-      + 'backstop. While your post-compact summary is still in context, call the Skill tool with '
-      + `skill="${SKILL_ID}" to reconcile it into a richer STATE.md. ${SKILL_DISAMBIGUATION}`;
-    ctx = ctx ? `${ctx}\n\n${note}` : note;
   }
 
   writeJSON(STATE_DB, state);

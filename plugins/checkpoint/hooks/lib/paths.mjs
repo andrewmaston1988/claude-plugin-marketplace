@@ -3,7 +3,6 @@ import path from 'node:path';
 import os from 'node:os';
 
 export const STATE_DB = path.join(os.homedir(), '.claude', '.checkpoint-state.json');
-export const MARKER   = path.join(os.homedir(), '.claude', '.compact_just_ran');
 export const KEEPALIVE_LOG = path.join(os.homedir(), '.claude', '.checkpoint-keepalive.jsonl');
 
 export function encodeProject(p) { return p.replace(/[\\/:]/g, '-'); }
