@@ -1,16 +1,9 @@
 #!/usr/bin/env node
 // SessionStart hook, source 'compact' only: tells the agent to reconcile the
 // skeletal STATE the PreCompact backstop just wrote, while the post-compact
-// summary is still in context.
-//
-// This replaces a global `~/.claude/.compact_just_ran` sentinel that carried no
-// session id: any concurrent session's compaction raised it and whichever
-// session prompted next consumed it (2026-08-22 — an uncompacted session was
-// told to reconcile a STATE.md nothing had written for it). The harness already
-// routes source='compact' to the session that actually compacted, so the event
-// is the scoping. Opt out via checkpoint.sessionStartResume=false. Never
-// throws; exits 0 with optional additionalContext.
-import fs from 'node:fs';
+// summary is still in context. The event is the session scoping — a shared
+// on-disk flag cannot tell which session compacted. Opt out via
+// checkpoint.sessionStartResume=false. Never throws.
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';

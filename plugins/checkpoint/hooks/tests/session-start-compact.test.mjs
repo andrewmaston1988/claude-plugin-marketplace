@@ -25,11 +25,8 @@ test('buildPickupNote names the qualified skill id and disambiguates it', () => 
   assert.match(note, /compact/i);
 });
 
-// The bug this file exists for (2026-08-22): the pickup used to key off a
-// single global `~/.claude/.compact_just_ran` flag with no session scoping, so
-// a compaction in ANY concurrent session fired the note in an unrelated one.
-// The harness already routes SessionStart source='compact' to the session that
-// actually compacted, so the sentinel must not come back.
+// A shared on-disk flag cannot say which session compacted; the harness event
+// can. Guards against the sentinel being reintroduced.
 test('no compaction sentinel file survives anywhere in the plugin', () => {
   const offenders = [];
   const walk = (dir) => {
