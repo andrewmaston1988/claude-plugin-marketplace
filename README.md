@@ -13,6 +13,7 @@ A collection of [Claude Code](https://claude.ai/code) plugins.
 | claude-peers | Peer discovery and real-time messaging between local Claude Code sessions — per-session stdio MCP server plus a self-healing singleton localhost broker | beta | [Setup guide](./plugins/claude-peers/README.md) |
 | agent-investigation | Investigate agent transcripts — locate, summary, errors, retries, pivots, report | beta | [Setup guide](./plugins/agent-investigation/README.md) |
 | discipline | Per-model discipline deltas injected on every prompt (Sonnet 5 first), with baseline scanner and blind judge grader for measuring violation rates | beta | [Setup guide](./plugins/discipline/README.md) |
+| voice | Per-operator dictionary mined from their own transcripts — cues injected only on a matching prompt, plus a SessionStart profile; nothing operator-specific ships in the plugin | beta | [Setup guide](./plugins/voice/README.md) |
 
 ## Using the marketplace
 
