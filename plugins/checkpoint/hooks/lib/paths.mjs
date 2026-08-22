@@ -90,6 +90,65 @@ export function resolveLatestStatePath(cwd) {
   return best ? path.join(projectDir(cwd), best) : '';
 }
 
+// Parse a STATE filename into its parts. Slug is kebab-only (never `_`), so on a
+// slugged name the text before the first `_` is unambiguously the slug. An
+// UNSLUGGED sid containing `_` would mis-yield a slug here — sanitizeSid permits
+// underscores even though session ids in practice do not have them. That is
+// tolerable because the result is display-only: never resolve a path from it.
+export function parseStateName(basename) {
+  const m = String(basename).match(STATE_FILE_RE);
+  if (!m) return null;
+  const blob = m[1];
+  const cut = blob.indexOf('_');
+  return {
+    slug: cut > 0 ? blob.slice(0, cut) : '',
+    sid: cut > 0 ? blob.slice(cut + 1) : blob,
+    stamp: m[2],
+    stampMs: stampToMs(m[2]),
+  };
+}
+
+export function stampToMs(stamp) {
+  const m = String(stamp).match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+  if (!m) return 0;
+  const [, y, mo, d, h, mi, sec] = m.map(Number);
+  return Date.UTC(y, mo - 1, d, h, mi, sec);
+}
+
+// First `session:` frontmatter line of a STATE file — already a one-line
+// summary, so it feeds option descriptions directly. '' when absent/unreadable.
+export function readStateSummary(statePath) {
+  let body = '';
+  try { body = fs.readFileSync(statePath, 'utf8'); } catch { return ''; }
+  const m = body.match(/^session:\s*(.+)$/m);
+  return m ? m[1].trim() : '';
+}
+
+// Resume shortlist: the newest STATE files in this cwd, newest first. No time
+// window — age is shown to the operator rather than used to filter.
+// `resolveLatestStatePath` is this with limit 1, collapsed to a path.
+export function listStates(cwd, { limit = 3 } = {}) {
+  // Same escape hatch every other resolver honours: an explicit override is the
+  // only candidate.
+  const override = process.env.CLAUDE_STATE_PATH;
+  if (override) {
+    if (!fs.existsSync(override)) return [];
+    const parsed = parseStateName(path.basename(override))
+      || { slug: '', sid: '', stamp: '', stampMs: 0 };
+    return [{ ...parsed, path: override, summary: readStateSummary(override) }];
+  }
+  let entries = [];
+  try { entries = fs.readdirSync(projectDir(cwd)); } catch { return []; }
+  const out = [];
+  for (const name of entries) {
+    const parsed = parseStateName(name);
+    if (!parsed) continue;
+    out.push({ ...parsed, path: path.join(projectDir(cwd), name) });
+  }
+  out.sort((a, b) => (a.stamp < b.stamp ? 1 : a.stamp > b.stamp ? -1 : 0));
+  return out.slice(0, limit).map(c => ({ ...c, summary: readStateSummary(c.path) }));
+}
+
 // Backwards-compat shim: prefer per-session path if one exists, else fall back
 // to the legacy `STATE.md` only if the per-session dir is empty. Callers that
 // wrote before this migration still hit a stable path; new callers write into
@@ -146,6 +205,14 @@ export function renameStateToNow(oldPath, now = new Date()) {
     stamp = nowStamp(d);
   }
   throw new Error(`renameStateToNow: could not find free stamp in 60s window for ${oldPath}`);
+}
+
+// The line pre-compact-snapshot.mjs stamps into every skeletal backstop, and
+// the only way a reader can tell a skeleton from a real checkpoint.
+export const SKELETON_MARKER = 'Skeletal backstop written by `pre-compact-snapshot.mjs`';
+
+export function isSkeletonState(body) {
+  return typeof body === 'string' && body.includes(SKELETON_MARKER);
 }
 
 export function isMeaningfulState(body) {

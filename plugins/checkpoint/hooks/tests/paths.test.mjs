@@ -7,6 +7,7 @@ import {
   sanitizeSid, sanitizeSlug, nowStamp, sessionStateFilename,
   resolveOwnStatePath, resolveLatestStatePath,
   isMeaningfulState, resolveStatePath, projectDir, docsDirForStatePath,
+  stampToMs, parseStateName, listStates,
 } from '../lib/paths.mjs';
 
 // ---- pure helpers ----
@@ -211,4 +212,71 @@ test('projectDir: encodes the cwd into ~/.claude/projects/<sanitized>', () => {
 test('projectDir: forward-slash cwd is encoded the same way', () => {
   const cwd = '/home/u/work';
   assert.equal(projectDir(cwd), path.join(os.homedir(), '.claude', 'projects', '-home-u-work'));
+});
+
+// ---- resume shortlist ----
+
+test('stampToMs parses the filename stamp as UTC, and rejects junk', () => {
+  assert.equal(stampToMs('20260822T160056Z'), Date.UTC(2026, 7, 22, 16, 0, 56));
+  assert.equal(stampToMs('nonsense'), 0);
+});
+
+test('parseStateName splits slug from sid, and tolerates unslugged names', () => {
+  const a = parseStateName('STATE_my-slug_49c3934f-1bbd_20260822T160056Z.md');
+  assert.equal(a.slug, 'my-slug');
+  assert.equal(a.sid, '49c3934f-1bbd');
+  // PreCompact skeletons omit the slug.
+  const b = parseStateName('STATE_49c3934f-1bbd_20260822T160056Z.md');
+  assert.equal(b.slug, '');
+  assert.equal(b.sid, '49c3934f-1bbd');
+  assert.equal(parseStateName('notes.md'), null);
+});
+
+test('listStates returns the newest first, capped, with each session line', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ckpt-list-'));
+  t.mock.method(os, 'homedir', () => home);
+  const cwd = 'C:/code/demo';
+  const dir = projectDir(cwd);
+  fs.mkdirSync(dir, { recursive: true });
+
+  const write = (name, session) =>
+    fs.writeFileSync(path.join(dir, name), `---\nsession: ${session}\n---\nbody\n`);
+  write('STATE_oldest_s1_20260101T000000Z.md', 'one');
+  write('STATE_newest_s2_20260820T000000Z.md', 'two');
+  write('STATE_middle_s3_20260610T000000Z.md', 'three');
+  write('STATE_extra_s4_20250101T000000Z.md', 'four');
+  fs.writeFileSync(path.join(dir, 'unrelated.md'), 'ignored');
+
+  const got = listStates(cwd, { limit: 3 });
+  assert.deepEqual(got.map(c => c.slug), ['newest', 'middle', 'oldest']);
+  assert.deepEqual(got.map(c => c.summary), ['two', 'three', 'one']);
+  assert.ok(got.every(c => path.isAbsolute(c.path)));
+
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('listStates is empty when the project dir does not exist', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'ckpt-empty-'));
+  t.mock.method(os, 'homedir', () => home);
+  assert.deepEqual(listStates('C:/code/never-used'), []);
+  fs.rmSync(home, { recursive: true, force: true });
+});
+
+test('listStates: CLAUDE_STATE_PATH overrides the scan, and yields nothing when absent', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ckpt-override-'));
+  const override = path.join(dir, 'STATE_pinned_sid_20260822T160056Z.md');
+  fs.writeFileSync(override, '---\nsession: pinned\n---\n');
+  const prev = process.env.CLAUDE_STATE_PATH;
+  try {
+    process.env.CLAUDE_STATE_PATH = override;
+    const got = listStates('C:/code/anything');
+    assert.deepEqual(got.map(c => c.path), [override]);
+    assert.equal(got[0].summary, 'pinned');
+    process.env.CLAUDE_STATE_PATH = path.join(dir, 'gone.md');
+    assert.deepEqual(listStates('C:/code/anything'), []);
+  } finally {
+    if (prev === undefined) delete process.env.CLAUDE_STATE_PATH;
+    else process.env.CLAUDE_STATE_PATH = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
