@@ -123,6 +123,27 @@ export function wrapAt(s, width = 120, indent = "    ") {
   return out.join(`\n${indent}`);
 }
 
+// Peers read a summary as current and act on it. Nothing else can refresh it,
+// and the peer who could is the one party that never sees its own row — so the
+// reminder has to travel back to them, on the calls they already make.
+export const SUMMARY_STALE_MS = 15 * 60 * 1000;
+
+export function formatAge(ms) {
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
+}
+
+// Null when there is nothing to say. Only fires on a summary that has gone
+// stale — a session that has published nothing yet is still finding its feet,
+// and nagging it before it has anything to say is noise.
+export function summaryNag(summary, setAt, now, staleMs = SUMMARY_STALE_MS) {
+  if (!summary || !setAt) return null;
+  const age = now - new Date(setAt).getTime();
+  if (!(age >= staleMs)) return null;
+  return `[claude-peers] WARNING: Your summary is ${formatAge(age)} stale — please set it via \`set_summary\`.`;
+}
+
 const text = (t, isError = false) => ({ content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) });
 const errText = (prefix, e) => text(`${prefix}: ${e instanceof Error ? e.message : String(e)}`, true);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -144,12 +165,18 @@ export function createPeersServer({
   _cwd = process.cwd(),
   _setInterval = setInterval,
   _detectChannels = detectChannelsEnabled,
+  _now = () => Date.now(),
 } = {}) {
   const brokerUrl = `http://127.0.0.1:${config.port}`;
   const binPath = fileURLToPath(new URL("../../bin/claude-peers.mjs", import.meta.url));
 
   let myId = null;
   let myGitRoot = null;
+  // Our own published summary, tracked locally: both nag sites would otherwise
+  // need a broker round-trip to read a row we already know. Only ever written
+  // by the set_summary handler, which requires registration.
+  let mySummary = "";
+  let mySummaryAt = null;
   let channelsAvailable; // memoised: reading the process table is not free
 
   async function isBrokerAlive() {
@@ -264,7 +291,10 @@ export function createPeersServer({
       try {
         const result = await brokerFetch("/send-message", { from_id: myId, to_id: args.to_id, text: args.message });
         if (!result.ok) return text(`Failed to send: ${result.error}`, true);
-        return text(`Message sent to peer ${args.to_id}`);
+        // Telling a peer what you are doing is the moment your published
+        // summary should agree with you.
+        const nag = summaryNag(mySummary, mySummaryAt, _now());
+        return text([`Message sent to peer ${args.to_id}`, nag].filter(Boolean).join("\n\n"));
       } catch (e) {
         return errText("Error sending message", e);
       }
@@ -281,6 +311,8 @@ export function createPeersServer({
       }
       try {
         await brokerFetch("/set-summary", { id: myId, summary: args.summary, cwd: workCwd });
+        mySummary = String(args.summary ?? "");
+        mySummaryAt = _now();
         return text(`Summary updated: "${args.summary}" (working in ${workCwd})`);
       } catch (e) {
         return errText("Error setting summary", e);
@@ -347,13 +379,16 @@ export function createPeersServer({
           const sender = peers.find((p) => p.id === msg.from_id);
           if (sender) {
             fromSummary = sender.summary;
-            fromCwd = sender.cwd;
+            fromCwd = sender.work_cwd || sender.cwd;
           }
         } catch {
           // sender context is best-effort
         }
+        // The highest-attention moment a peer gets: it is about to reply, and
+        // restating its context anyway.
+        const nag = summaryNag(mySummary, mySummaryAt, _now());
         rpc.notify("notifications/claude/channel", {
-          content: msg.text,
+          content: [msg.text, nag].filter(Boolean).join("\n\n"),
           meta: { from_id: msg.from_id, from_summary: fromSummary, from_cwd: fromCwd, sent_at: msg.sent_at },
         });
         log(`pushed message from ${msg.from_id}`);
