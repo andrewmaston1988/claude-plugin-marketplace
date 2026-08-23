@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, rea
 import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal } from "./stream.mjs";
+import { isCloudModel } from "./models.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -74,7 +75,7 @@ export function listLeaves(dir, { cloudOnly = false } = {}) {
       const result = readResult(dir, id);
       return result && { id, model: result.model, result, resultPath: resultPath(dir, id), transcriptPath: transcriptPath(dir, id) };
     })
-    .filter((leaf) => leaf && (!cloudOnly || /(:|-)cloud$/i.test(leaf.model || "")));
+    .filter((leaf) => leaf && (!cloudOnly || isCloudModel(leaf.model)));
 }
 
 // The mechanical block a score row copies — a projection of an existing result,

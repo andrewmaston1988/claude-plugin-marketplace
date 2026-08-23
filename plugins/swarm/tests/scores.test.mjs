@@ -115,6 +115,14 @@ for (const outcome of ["completed", "wrong"]) {
   });
 }
 
+// Padding passed the lowercase check while `aggregate` filters on `===`, so a
+// stored " godot " would match no query and never raise anything.
+test("validateRow: a whitespace-padded domain is rejected, not silently stored", () => {
+  const errs = validateRow(row({ domain: " godot " }));
+  ok(errs.some((e) => e.startsWith("domain")), errs.join(" | "));
+  deepEqual(aggregate([row({ domain: " godot ", note: "x" })], { aspect: "depth", domain: "godot" }).aspects[0].cells, []);
+});
+
 for (const bad of ["Godot", "", "   ", undefined]) {
   test(`validateRow: domain ${JSON.stringify(bad)} is rejected`, () => {
     const errs = validateRow(row({ domain: bad }));

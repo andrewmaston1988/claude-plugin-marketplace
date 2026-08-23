@@ -8,6 +8,13 @@ export function isClaudeModel(model) {
   return m.startsWith("claude-") || CLAUDE_ALIASES.has(m);
 }
 
+// Both separators occur in the roster — discovery derives `:cloud` names from
+// bare tags, and the entitlement probe matches either. Single home: the score
+// store and the run-enumeration helper must agree on which leaves are gradeable.
+export function isCloudModel(model) {
+  return /(:|-)cloud$/i.test(String(model || ""));
+}
+
 // Valid --effort levels per Claude tier. Open models accept any effort —
 // it passes through to the proxy and is harmlessly ignored when unsupported.
 export const TIER_EFFORTS = {

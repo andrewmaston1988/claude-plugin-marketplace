@@ -315,12 +315,15 @@ async function cmdGradeFile(path) {
   const ts = new Date().toISOString();
   const manifestTasks = await readManifestTasks(dir);
   const rows = [];
+  // Collect every missing leaf before failing, matching validateRow's batch-wide
+  // error collection — one round-trip should surface all of them, not the first.
+  const missing = batch.rows.filter((r) => !readResult(dir, r?.leaf)).map((r) => r?.leaf);
+  if (missing.length) {
+    err(`swarm: no results/<id>.json in ${dir} for: ${missing.join(", ")} — the mechanical block cannot be fabricated, so nothing was written.`);
+    return 1;
+  }
   for (const r of batch.rows) {
-    const result = readResult(dir, r?.leaf);
-    if (!result) {
-      err(`swarm: no results/${r?.leaf}.json in ${dir} — the mechanical block cannot be fabricated, so nothing was written.`);
-      return 1;
-    }
+    const result = readResult(dir, r.leaf);
     const declared = cacheEntries.get(result.model);
     if (!declared) err(dim(`warning: ${result.model} is not in models-cache.json — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
     rows.push({

@@ -8,15 +8,11 @@ import { appendFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { UNIVERSAL, ASPECTS, OUTCOMES, GRADED_OUTCOMES } from "./aspects.mjs";
+import { isCloudModel } from "./models.mjs";
 
 export function scoresPath(env = process.env) {
   return join(swarmHome(env), "model-scores.jsonl");
 }
-
-// Only :cloud leaves are graded — the Claude tiers are known quantities. Both
-// separators occur in the roster (discovery derives names from bare tags), so
-// the suffix check matches what probeTopModels already treats as cloud.
-const CLOUD_RE = /(:|-)cloud$/i;
 
 const isInt1to10 = (v) => Number.isInteger(v) && v >= 1 && v <= 10;
 
@@ -37,13 +33,15 @@ export function validateRow(row) {
   if (typeof row.leaf !== "string" || !row.leaf.trim()) {
     errs.push("leaf: required, the task id as it appears in results/<id>.json");
   }
-  if (typeof row.model !== "string" || !CLOUD_RE.test(row.model)) {
+  if (typeof row.model !== "string" || !isCloudModel(row.model)) {
     errs.push(`model: must be a :cloud model name (got ${JSON.stringify(row.model)}) — Claude tiers are out of scope for this store`);
   }
   if (typeof row.domain !== "string" || !row.domain.trim() || PLACEHOLDER_RE.test(row.domain.trim())) {
     errs.push('domain: required, free lowercase text naming the ecosystem — e.g. "godot", "rust", "this-repo"');
-  } else if (row.domain !== row.domain.toLowerCase()) {
-    errs.push(`domain: must be lowercase (got ${JSON.stringify(row.domain)})`);
+  } else if (row.domain !== row.domain.toLowerCase().trim()) {
+    // Padding is rejected, not trimmed away: `aggregate` filters on `===`, so a
+    // stored " godot " would match no query and never raise anything.
+    errs.push(`domain: must be lowercase with no surrounding whitespace (got ${JSON.stringify(row.domain)})`);
   }
   const outcomeOk = OUTCOMES.includes(row.outcome);
   if (!outcomeOk) {

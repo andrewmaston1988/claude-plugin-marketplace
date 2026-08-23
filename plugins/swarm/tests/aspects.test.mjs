@@ -25,7 +25,6 @@ test("aspects: the six outcomes, not-capable among them", () => {
   deepEqual(OUTCOMES, ["completed", "wrong", "failed", "timeout", "session-died", "not-capable"]);
   ok(OUTCOMES.includes("not-capable"));
   deepEqual(GRADED_OUTCOMES, ["completed", "wrong"]);
-  for (const o of GRADED_OUTCOMES) ok(OUTCOMES.includes(o));
 });
 
 // Aspect inference was cut for cause and looks like an obviously helpful

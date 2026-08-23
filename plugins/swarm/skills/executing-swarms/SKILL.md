@@ -30,13 +30,9 @@ manifest without it is precisely the failure it was written to catch.
 
 ## 2. Frame the contract — before the manifest, not after
 
-```
-goal · return_shape · must_be_sure · scope{in,out} · done_when
-```
-
-- **scope** → per-leaf prompts and file scopes
-- **must_be_sure** → `digest.instructions`
-- **done_when** → what you check after the run
+**The five-part contract and where each clause lands is `swarm:swarm` → *Procedure* step 2.**
+State it before you place a single task: the shape of the graph is decided by what each task
+must produce, and you cannot answer that for a task whose contract you have not written.
 
 A contract you cannot state is a manifest you cannot defend line by line, which is a manifest
 you should not dispatch.
