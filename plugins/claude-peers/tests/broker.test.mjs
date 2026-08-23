@@ -56,6 +56,50 @@ test('heartbeat advances last_seen', async (t) => {
   assert.equal(peers[0].last_seen, new Date(5000).toISOString());
 });
 
+// The whole point of the field: last_seen tracks liveness and the heartbeat
+// bumps it every few seconds, so without a separate stamp an hours-old summary
+// sits next to a fresh Last seen and reads as current.
+test('set-summary stamps summary_updated_at, independently of last_seen', async (t) => {
+  let now = 1000;
+  const { broker, call } = await startBroker(t, { _now: () => new Date(now) });
+  const { body: reg } = await call('/register', REG);
+
+  now = 2000;
+  await call('/set-summary', { id: reg.id, summary: 'porting the nursery stage' });
+
+  // an hour of heartbeats later, the summary has not changed
+  now = 3_602_000;
+  await call('/heartbeat', { id: reg.id });
+
+  const { body: peers } = await call('/list-peers', { scope: 'machine', cwd: 'x', git_root: null });
+  assert.equal(peers[0].summary, 'porting the nursery stage');
+  assert.equal(peers[0].summary_updated_at, new Date(2000).toISOString());
+  assert.equal(peers[0].last_seen, new Date(3_602_000).toISOString());
+  assert.notEqual(peers[0].summary_updated_at, peers[0].last_seen);
+});
+
+test('register: summary_updated_at is null until a summary exists, then set', async (t) => {
+  let now = 1000;
+  const { broker, call } = await startBroker(t, { _now: () => new Date(now) });
+
+  // the MCP server registers with an empty summary — an empty one has no age,
+  // and registered_at would read as one
+  const { body: reg } = await call('/register', { ...REG, summary: '' });
+  let { body: peers } = await call('/list-peers', { scope: 'machine', cwd: 'x', git_root: null });
+  assert.equal(peers[0].summary_updated_at, null);
+
+  now = 4000;
+  await call('/set-summary', { id: reg.id, summary: 'now working' });
+  ({ body: peers } = await call('/list-peers', { scope: 'machine', cwd: 'x', git_root: null }));
+  assert.equal(peers[0].summary_updated_at, new Date(4000).toISOString());
+
+  // clearing it clears the stamp too, rather than leaving a stale age behind
+  now = 5000;
+  await call('/set-summary', { id: reg.id, summary: '' });
+  ({ body: peers } = await call('/list-peers', { scope: 'machine', cwd: 'x', git_root: null }));
+  assert.equal(peers[0].summary_updated_at, null);
+});
+
 test('list-peers scopes: directory filters by cwd, repo by git_root (cwd fallback)', async (t) => {
   const { broker, call } = await startBroker(t);
   await call('/register', { ...REG, pid: process.pid, cwd: 'C:/work/a', git_root: 'C:/work/a' });

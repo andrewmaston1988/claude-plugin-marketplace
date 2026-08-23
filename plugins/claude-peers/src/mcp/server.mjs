@@ -76,7 +76,7 @@ export const TOOLS = [
   {
     name: "set_summary",
     description:
-      "Set a brief summary (1-2 sentences) of what you are currently working on. This is visible to other Claude Code instances when they list peers.",
+      "Set a brief summary (1-2 sentences) of what you are currently working on, and the directory you are working IN. Both are visible to other Claude Code instances when they list peers. Call this again whenever what you are doing changes, not only at startup — peers read your summary as current and act on it, and only you can refresh it. Your row shows when you last set it, so a stale one is at least visible.",
     inputSchema: {
       type: "object",
       properties: {
@@ -84,8 +84,13 @@ export const TOOLS = [
           type: "string",
           description: "A 1-2 sentence summary of your current work",
         },
+        cwd: {
+          type: "string",
+          description:
+            "Absolute path of the directory you are actually working in — the worktree, if you are in one. Your peer row's CWD is where your session was launched and cannot detect a worktree you moved into, so peers cannot tell which tree you are committing to unless you say. Run `git rev-parse --show-toplevel` if unsure.",
+        },
       },
-      required: ["summary"],
+      required: ["summary", "cwd"],
     },
   },
   {
@@ -98,6 +103,25 @@ export const TOOLS = [
     },
   },
 ];
+
+// Summaries run to several hundred characters and rendered as one line they
+// push every following field off the right edge. Wrap on word boundaries;
+// break a single over-long token (a path) rather than let it overrun.
+export function wrapAt(s, width = 120, indent = "    ") {
+  const out = [];
+  let line = "";
+  for (const word of String(s ?? "").split(/\s+/).filter(Boolean)) {
+    if (!line) line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else { out.push(line); line = word; }
+    while (line.length > width) {
+      out.push(line.slice(0, width));
+      line = line.slice(width);
+    }
+  }
+  if (line) out.push(line);
+  return out.join(`\n${indent}`);
+}
 
 const text = (t, isError = false) => ({ content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) });
 const errText = (prefix, e) => text(`${prefix}: ${e instanceof Error ? e.message : String(e)}`, true);
@@ -210,10 +234,24 @@ export function createPeersServer({
         });
         if (peers.length === 0) return text(`No other Claude Code instances found (scope: ${scope}).`);
         const lines = peers.map((p) => {
-          const parts = [`ID: ${p.id}`, `PID: ${p.pid}`, `CWD: ${p.cwd}`];
+          const parts = [`ID: ${p.id}`, `PID: ${p.pid}`];
+          // Two different facts, and conflating them is the bug this fixes:
+          // `cwd` is where the session was LAUNCHED and never moves, while
+          // `work_cwd` is what the agent reported — the only way a worktree
+          // it moved into after launch can show up here at all.
+          if (p.work_cwd && p.work_cwd !== p.cwd) {
+            parts.push(`Working in: ${p.work_cwd}`, `Launched in: ${p.cwd}`);
+          } else {
+            parts.push(`CWD: ${p.cwd}`);
+          }
           if (p.git_root) parts.push(`Repo: ${p.git_root}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
-          if (p.summary) parts.push(`Summary: ${p.summary}`);
+          if (p.summary) parts.push(`Summary: ${wrapAt(p.summary)}`);
+          // Distinct from Last seen, which the heartbeat bumps every few
+          // seconds: a summary can be hours older than the liveness beside it
+          // and still read as current. Covers the working directory too — one
+          // call sets both.
+          if (p.summary) parts.push(`Summary set: ${p.summary_updated_at ?? "unknown"}`);
           parts.push(`Last seen: ${p.last_seen}`);
           return parts.join("\n  ");
         });
@@ -236,9 +274,16 @@ export function createPeersServer({
 
     async set_summary(args) {
       if (!myId) return text("Not registered with broker yet", true);
+      // The registered cwd is where the SESSION launched; a session that moves
+      // into a worktree mid-run cannot detect it (the MCP server's own cwd is
+      // fixed at spawn), so the working directory has to be told to us.
+      const workCwd = String(args.cwd ?? "").trim();
+      if (!workCwd) {
+        return text("set_summary requires `cwd` — the directory you are actually working in. Run `git rev-parse --show-toplevel` if unsure.", true);
+      }
       try {
-        await brokerFetch("/set-summary", { id: myId, summary: args.summary });
-        return text(`Summary updated: "${args.summary}"`);
+        await brokerFetch("/set-summary", { id: myId, summary: args.summary, cwd: workCwd });
+        return text(`Summary updated: "${args.summary}" (working in ${workCwd})`);
       } catch (e) {
         return errText("Error setting summary", e);
       }
