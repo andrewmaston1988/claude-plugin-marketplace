@@ -22,7 +22,10 @@ const USAGE = `usage: swarm.mjs <command>
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
-  quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)`;
+  quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)
+  grade --init <resultsDir>  write grades.json — one skeleton row per :cloud leaf, for you to fill in
+  grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
+  perf [--aspect X] [--model Y] [--domain D]   aspect x model table with sample counts`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -239,6 +242,177 @@ async function cmdRun(rest) {
   return 0;
 }
 
+function getFlag(name, args) {
+  const i = args.indexOf(`--${name}`);
+  return i < 0 ? undefined : args[i + 1];
+}
+
+// `grade --init` — one skeleton row per :cloud leaf, every grade null. It is
+// deliberately unappendable as written: validation rejects a null universal, so
+// an untouched skeleton cannot land.
+async function cmdGradeInit(dir) {
+  const { writeFileSync } = await import("node:fs");
+  const { listLeaves } = await import("../src/results.mjs");
+  const { UNIVERSAL, CAPABILITY, OUTCOMES } = await import("../src/aspects.mjs");
+  const leaves = listLeaves(dir, { cloudOnly: true });
+  if (!leaves.length) {
+    err(`swarm: no :cloud leaves with results in ${dir} — Claude-tier leaves are out of scope for the score store, so there is nothing to grade.`);
+    return 1;
+  }
+  const skeleton = {
+    resultsDir: dir,
+    session: "<this session's id>",
+    rows: leaves.map((l) => ({
+      leaf: l.id,
+      model: l.model,
+      read: { result: l.resultPath, transcript: l.transcriptPath },
+      domain: "<lowercase ecosystem — e.g. godot, rust, images, this-repo>",
+      outcome: `<${OUTCOMES.join(" | ")}>`,
+      note: "",
+      grades: {
+        ...Object.fromEntries(UNIVERSAL.map((a) => [a, null])),
+        ...Object.fromEntries(CAPABILITY.map((a) => [a, null])),
+      },
+    })),
+  };
+  const p = join(dir, "grades.json");
+  writeFileSync(p, JSON.stringify(skeleton, null, 2) + "\n");
+  out(p);
+  out(`${leaves.length} :cloud leaf/leaves. Grade the four universal aspects 1-10 on every row; leave a`);
+  out("capability aspect null unless the leaf stressed it. Drop `grades` entirely on a row whose leaf");
+  out("produced no output (failed / timeout / session-died / not-capable), then:");
+  out(`  swarm grade --file ${p}`);
+  return 0;
+}
+
+// `grade --file` — the batch carries only judgement. model, mechanical and
+// declared are resolved from disk here, so they cannot be fabricated.
+async function cmdGradeFile(path) {
+  const { readFileSync, existsSync } = await import("node:fs");
+  const { readResult, mechanicalOf } = await import("../src/results.mjs");
+  const { appendRows, scoresPath } = await import("../src/scores.mjs");
+  if (!existsSync(path)) { err(`swarm: no grades file at ${path}`); return 1; }
+  let batch;
+  try {
+    batch = JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    err(`swarm: ${path} is not valid JSON: ${e.message}`);
+    return 1;
+  }
+  const dir = batch?.resultsDir;
+  const session = batch?.session;
+  if (typeof dir !== "string" || !dir.trim() || !Array.isArray(batch.rows) || !batch.rows.length) {
+    err('swarm: grades file must be { "resultsDir": "<run dir>", "session": "<id>", "rows": [ … ] }');
+    return 1;
+  }
+  if (typeof session !== "string" || !session.trim() || session.startsWith("<")) {
+    err('swarm: fill in "session" with this session\'s id — every row records who graded it.');
+    return 1;
+  }
+
+  const cacheEntries = await readModelsCache();
+  const date = new Date().toISOString().slice(0, 10);
+  const ts = new Date().toISOString();
+  const manifestTasks = await readManifestTasks(dir);
+  const rows = [];
+  for (const r of batch.rows) {
+    const result = readResult(dir, r?.leaf);
+    if (!result) {
+      err(`swarm: no results/${r?.leaf}.json in ${dir} — the mechanical block cannot be fabricated, so nothing was written.`);
+      return 1;
+    }
+    const declared = cacheEntries.get(result.model);
+    if (!declared) err(dim(`warning: ${result.model} is not in models-cache.json — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
+    rows.push({
+      ts,
+      resultsDir: dir,
+      leaf: r.leaf,
+      model: result.model,
+      effort: manifestTasks.get(r.leaf)?.effort ?? null,
+      domain: r.domain,
+      ...(r.grades !== undefined && { grades: r.grades }),
+      outcome: r.outcome,
+      note: r.note ?? "",
+      assessedBy: { session, date },
+      mechanical: mechanicalOf(result),
+      declared: declared ?? null,
+    });
+  }
+  try {
+    appendRows(rows, scoresPath());
+  } catch (e) {
+    err(`swarm: ${e.message}`);
+    return 1;
+  }
+  out(`${rows.length} row(s) appended to ${scoresPath()}`);
+  return 0;
+}
+
+async function readModelsCache() {
+  const map = new Map();
+  try {
+    const { readFileSync } = await import("node:fs");
+    const cache = JSON.parse(readFileSync(join(swarmHome(), "models-cache.json"), "utf8"));
+    for (const m of cache?.models || []) {
+      map.set(m.model, {
+        capabilities: m.capabilities ?? null,
+        contextLength: m.contextLength ?? null,
+        parameterCount: m.parameterCount ?? null,
+      });
+    }
+  } catch { /* no cache — declared stays null and the caller warns */ }
+  return map;
+}
+
+// Effort is a manifest field, not a result field; the snapshot at dispatch is
+// where a run records its own intent.
+async function readManifestTasks(dir) {
+  const map = new Map();
+  try {
+    const { readFileSync } = await import("node:fs");
+    const doc = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"));
+    for (const t of doc?.tasks || []) map.set(t.id, t);
+  } catch { /* a run without a snapshot simply records no effort */ }
+  return map;
+}
+
+async function cmdPerf(rest) {
+  const { readRows, aggregate, dedupe, scoresPath } = await import("../src/scores.mjs");
+  const aspect = getFlag("aspect", rest);
+  const model = getFlag("model", rest);
+  const domain = getFlag("domain", rest);
+  const path = scoresPath();
+  const rows = readRows(path);
+  const report = aggregate(rows, { aspect, model, domain });
+  const filters = Object.entries(report.filters).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" · ");
+  // Lines and rows differ after a re-grade: the store is append-only and the
+  // newest row per (resultsDir, leaf) wins, so say both rather than let the raw
+  // line count read as coverage.
+  const live = dedupe(rows).length;
+  const counted = live === rows.length ? `${live} row(s)` : `${live} row(s) (${rows.length} lines, re-grades superseded)`;
+  out(`model scores: ${counted} · ${path}`);
+  if (filters) out(`filters: ${filters}`);
+  out("");
+  for (const a of report.aspects) {
+    out(`${a.aspect}${a.universal ? dim("  (universal)") : ""}`);
+    if (!a.cells.length) {
+      // Absence is evidence: an aspect nothing has been graded on is a finding,
+      // never a row to hide.
+      out(dim("    n=0 — no rows"));
+      continue;
+    }
+    const w = Math.max(...a.cells.map((c) => c.model.length));
+    for (const c of a.cells) {
+      const mean = c.mean == null ? "—" : c.mean.toFixed(2);
+      const flag = c.n === 0 ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
+      const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
+      const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
+      out(`    ${c.model.padEnd(w)}  n=${String(c.n).padStart(3)}  mean ${mean.padStart(5)}${flag}${tail}`);
+    }
+  }
+  return 0;
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   try {
@@ -318,6 +492,16 @@ async function main() {
         out(dim(`tokens: ${formatTokens(tokenTotal(r.tokens))} · session ${r.sessionId} · log: results/${taskId}.ask.log`));
         return 0;
       }
+      case "grade": {
+        const initDir = getFlag("init", rest);
+        const file = getFlag("file", rest);
+        if (initDir) return await cmdGradeInit(initDir);
+        if (file) return await cmdGradeFile(file);
+        err(USAGE);
+        return 1;
+      }
+      case "perf":
+        return await cmdPerf(rest);
       case "quota": {
         const { checkQuota } = await import("../src/quota.mjs");
         const q = await checkQuota({

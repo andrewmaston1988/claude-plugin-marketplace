@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal } from "./stream.mjs";
@@ -54,6 +54,44 @@ export function readResult(dir, id) {
   } catch {
     return null; // corrupt result — treat as absent so resume re-runs it
   }
+}
+
+// The leaf's raw stream-json events — the deeper read a grading agent reaches
+// for when the result alone does not say whether the work was any good.
+export function transcriptPath(dir, id) {
+  return join(dir, "results", `${id}.log`);
+}
+
+// Every leaf a run wrote a result for, with both paths. `cloudOnly` is the
+// grading store's scope: Claude tiers are known quantities and produce no row.
+export function listLeaves(dir, { cloudOnly = false } = {}) {
+  const resultsRoot = join(dir, "results");
+  if (!existsSync(resultsRoot)) return [];
+  return readdirSync(resultsRoot)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => {
+      const id = f.slice(0, -".json".length);
+      const result = readResult(dir, id);
+      return result && { id, model: result.model, result, resultPath: resultPath(dir, id), transcriptPath: transcriptPath(dir, id) };
+    })
+    .filter((leaf) => leaf && (!cloudOnly || /(:|-)cloud$/i.test(leaf.model || "")));
+}
+
+// The mechanical block a score row copies — a projection of an existing result,
+// never a re-read of the leaf. These columns make a grade auditable; they never
+// replace one (numTurns cannot separate three turns doing the wrong thing from
+// thirty being thorough).
+export function mechanicalOf(result) {
+  return {
+    ok: result.ok ?? null,
+    exit: result.exit ?? null,
+    durationMs: result.durationMs ?? null,
+    tokens: result.tokens ? tokenTotal(result.tokens) : null,
+    costUsd: result.costUsd ?? null,
+    numTurns: result.numTurns ?? null,
+    schemaRetried: result.schemaRetried ?? false,
+    citations: result.citations ?? null,
+  };
 }
 
 export function writeManifestSnapshot(dir, doc) {
