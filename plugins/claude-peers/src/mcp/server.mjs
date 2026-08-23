@@ -234,17 +234,15 @@ export function createPeersServer({
         });
         if (peers.length === 0) return text(`No other Claude Code instances found (scope: ${scope}).`);
         const lines = peers.map((p) => {
-          const parts = [`ID: ${p.id}`, `PID: ${p.pid}`];
-          // Two different facts, and conflating them is the bug this fixes:
-          // `cwd` is where the session was LAUNCHED and never moves, while
-          // `work_cwd` is what the agent reported — the only way a worktree
-          // it moved into after launch can show up here at all.
-          if (p.work_cwd && p.work_cwd !== p.cwd) {
-            parts.push(`Working in: ${p.work_cwd}`, `Launched in: ${p.cwd}`);
-          } else {
-            parts.push(`CWD: ${p.cwd}`);
-          }
-          if (p.git_root) parts.push(`Repo: ${p.git_root}`);
+          // The reported working directory wins: the registered `cwd` is only
+          // ever where the session LAUNCHED — fixed when the MCP server spawns,
+          // and unmoved by the agent's own `cd`, so a session that created a
+          // worktree mid-run reports the checkout it started in.
+          const parts = [`ID: ${p.id}`, `PID: ${p.pid}`, `CWD: ${p.work_cwd || p.cwd}`];
+          // The checkout the session was launched against, and what repo scope
+          // groups on — deliberately NOT the worktree above it, so a fleet
+          // working one repository from separate trees still finds each other.
+          if (p.git_root) parts.push(`Checkout: ${p.git_root}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
           if (p.summary) parts.push(`Summary: ${wrapAt(p.summary)}`);
           // Distinct from Last seen, which the heartbeat bumps every few
