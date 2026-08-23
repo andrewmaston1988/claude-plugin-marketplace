@@ -18,6 +18,27 @@ restates the other.
 Work through it in order. Every step produces a value the manifest carries or the gate
 consumes.
 
+## The Iron Law
+
+```
+NO MANIFEST WITHOUT EVERY TASK PLACED BY ITS OWN DEPENDENCY ANSWER
+```
+
+**Violating the letter of this rule is violating its spirit.** Every task, one at a time,
+answers *what must FINISH before this starts?* — and the graph is whatever those answers
+build. You never choose a shape and fill it in.
+
+**No exceptions:**
+- Not "it's obviously a fan-out" — naming a shape before placing tasks IS choosing one.
+- Not "I already know the six items, I'll write the six leaves" — a list you can enumerate
+  now still needs `forEach` when it comes from a dependency's output at runtime.
+- Not "the branches will merge cleanly" — sibling trees never see each other; a fold-back
+  needs an `integrate` node, and its absence is silent.
+- Not "the consumer can check its own input" — a verifier folded into the leaf it verifies
+  is not a verifier.
+- Not "this graph is too complex to write in one manifest" — every reason to split has a
+  first-class field (§4). Only a human judgement between segments earns a second wave.
+
 ## 1. Grouping — invoke `swarm:orchestrating-agents` first
 
 **Not optional, and not summarisable here.** That skill owns the onboarding arithmetic: a
@@ -65,13 +86,9 @@ digraph swarm_place {
 
 Loop until every task is placed — one manifest holds as many segments as the work needs.
 
-**Two tasks that share a prerequisite but not each other run in parallel** — answer against
-the work, not against the task above it in your list. Chain them only for a real collision
-(same file, same region), and name that file in the prompt.
-
 **Output vs edits is the discriminating question**, not whether leaves touch the same repo.
-`{{result:}}` passes text, never changes. Leaves editing disjoint files stay parallel with
-private trees; only accumulation needs a shared tree or `isolation.from`.
+`{{result:}}` passes text, never changes.
+
 ### The names are descriptions, not a menu
 
 A "fan-out" or a "chain" is what a *segment* of the graph looks like once its tasks are
@@ -92,8 +109,7 @@ manifest. `1 → N → 1 → M → 1` is ordinary, not a special case, because e
 its own answer to "what must FINISH before this starts?" and nothing forces neighbouring
 segments to share a shape.
 
-There is no manifest-level shape to choose. There is only the per-task question, asked until
-every task is placed. The sections below are what those answers *produce*.
+The sections below are what those answers *produce* — descriptions, not a menu.
 
 
 ### Single delegated leaf
@@ -113,8 +129,8 @@ Return ≤10 bullets: claim, file:line. No prose. If you cannot answer, say so i
 
 **The offer gate is a judgement call here, not a mandate** — it covers fan-out-shaped work
 (3+ leaves). Say what you are about to dispatch and on which model so the operator can
-redirect it, but a request already phrased as dispatch has made that call. The Iron Law's
-hands-off rule applies in full once the leaf is running.
+redirect it, but a request already phrased as dispatch has made that call. `swarm:swarm`'s Iron
+Law — hands off a live dispatch — applies in full once the leaf is running.
 
 ### Fan-out (the native shape)
 
@@ -179,31 +195,8 @@ next implementer through `{{result:}}`.
 - **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix p2, re-run, and p3/p4 redo their work on the corrected base.
 - **`forEach` cannot share a worktree** — clones are concurrent by construction.
 - **A leaf that branches off the chain needs its OWN worktree.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their tree — sharing demands total ordering, which would force a false dependency. Give it `isolation: "worktree"` with `"from"` naming the link it builds on — the last link that WRITES, never the reviewer between them — so it starts from that commit without joining the chain.
-- **A worktree name does not carry across manifests.** The tree lives under the
-  run's `resultsDir`, so a later manifest naming the same worktree gets a *new*
-  tree — and its branch `swarm/<name>` already exists, which fails. To put a tree
-  on a specific branch, name it: `"isolation": { "worktree": "p3", "branch":
-  "swarm/eco-p3" }`. The engine refuses to reset a branch that carries commits
-  HEAD does not have, so a previous run's phases cannot be silently discarded.
 
-**How a verifier link works.** A reviewer with no write tools still does its whole job,
-because its findings do not travel through files:
-
-- **Its output is its return value.** The engine writes every leaf's result to
-  `results/<id>.json`; the next link reads it via `{{result:<reviewer-id>}}`. A reviewer
-  never needs `Write` to report — it needs `Write` only to *change* things, which is the
-  one thing it must not do.
-- **It sees more than a fresh checkout.** Same working directory as the link before it, so
-  it reads that link's commits *and* anything left uncommitted. `git log`, `git diff`, and
-  the files themselves all work.
-- **It never ends the chain's tree.** Collection is deferred to the group's last link, so a
-  reviewer changing nothing cannot trigger the empty-tree cleanup that would delete the
-  work its successor needs.
-- **Giving a reviewer write tools breaks the contract silently.** It will fix things
-  instead of reporting them, and `{{result:}}` then describes work the next link cannot
-  see the reasoning for. Nothing in the engine prevents this — `--allowedTools` is
-  tool-name-only and a leaf holding `Write` can write anywhere — so the tool list is the
-  whole mechanism.
+**How a verifier link works** — why a reviewer needs no write tools to report, and what breaks if you give it some: [references/topology.md](references/topology.md).
 
 ### Judge panel
 
@@ -250,42 +243,12 @@ A run may narrow to one task and widen again:
 ```
 
 Width goes `2 → 1 → 2 → 1`. This validates today: `migrate-x` and `migrate-y` are
-**separate private trees**, so the shared-worktree ordering rule never applies to
-them, while the `feat` group (`helper`, `cleanup`) stays totally ordered through
-them.
+**separate private trees**, so the shared-worktree ordering rule never applies to them, while the
+`feat` group (`helper`, `cleanup`) stays totally ordered through them.
 
-- **`{{result:}}` / `{{resultPath:}}` reach only a DIRECT dependency.** In a wide graph the
-  task you want is often a grandparent — `migrate-x` needs the survey, but its `after` names
-  only `helper`. Referencing it anyway fails validation; add the upstream id to `after` too
-  (`["helper", "survey-a"]`). The extra edge changes no ordering, it declares what the
-  prompt reads.
-- **A private tree branches from repo HEAD unless you say otherwise.** `"from": "<task id>"`
-  bases it on that task's branch instead, so the leaf starts with the code it depends on. The
-  named task must be a declared dependency, worktree-isolated, and able to WRITE — `validate`
-  says so if not.
-- **`from` names a TASK that commits, not the STAGE this leaf follows.** Ordering is what
-  `after` expresses; `from` answers a narrower question — whose branch carries the code. In a
-  fan-out → review → fan-out shape those are different tasks by construction: the last task in
-  a stage is usually a reviewer, and a reviewer owns no branch, so `from` must reach *past* it
-  to the last writer. Pass the reviewer's findings as information instead:
-  `{ "after": ["review", "extract"], "isolation": { "worktree": "impl", "from": "extract" }, "prompt": "The reviewer reported: {{result:review}} …" }`.
-  `from` is where the CODE comes from; `{{result:X}}` is where the INFORMATION comes from.
-- **A task only owns a branch if it COMMITS.** A leaf that changes no files has its worktree
-  reaped, and `from` naming it fails at runtime with `cannot resolve base`. `validate` rejects
-  the provable case — a source with no write tools at all. It cannot catch a reviewer holding
-  `Bash` to run a test suite: that reads as write-capable but still commits nothing. Judge by
-  what the task DOES, not by its tool list. If a task exists to report rather than to change
-  code, it is never a `from` target — and a consolidator that only reads result files needs no
-  worktree at all.
-- **Sibling trees do not see each other.** `migrate-x` and `migrate-y` each carry `helper`'s
-  work but not each other's. Fold them back with an **`integrate`** node — agentless like
-  `compute`, so it spends nothing — which merges each named task's branch into `into`:
-  `{ "id": "join", "after": ["migrate-x", "migrate-y"], "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } }`.
-  Every id in `from` must be a task that WRITES, for the same reason `isolation.from` must be:
-  a read-only task has no branch to merge.
-  **A conflict is not a failure**: the merge stops with markers in the tree, the node stays
-  `ok`, and the conflicting paths land in its result — pass `{{result:join}}` to the next leaf
-  and tell it to resolve them. Without an integrate node that merge is the next leaf's job.
+**Field-by-field semantics live in [references/topology.md](references/topology.md)** — which
+dependency `{{result:}}` can reach, what `isolation.from` may name, why a reviewer is never a
+`from` target, and how `integrate` folds sibling trees back. Read it before writing any of them.
 
 ### Sweep-then-synthesize
 
@@ -354,12 +317,9 @@ field, resolved by the engine at runtime:
 | it's a whole sub-graph | a `manifest` node — *Deeper manifest fields* |
 
 **The one thing that cannot be automated** is a judgement someone must make *between*
-segments — compressing findings into `[SHARED_CONTEXT]`, or an operator verdict. Stopping for
-that is a deliberate choice to put a human in the loop, and it is the only reason to run a
-second manifest (see *Two waves* above). Never reach for one because the graph looks hard to
-write; the fields above are how the graph gets written.
-
-A second manifest is a different manifest: different prompts, fresh spend, full gate.
+segments — compressing findings into `[SHARED_CONTEXT]`, or an operator verdict. That is the
+only reason to run a second manifest (see *Two waves* above), and it is a different manifest:
+different prompts, fresh spend, full gate.
 
 ## 5. Hand off — models, cost, gate
 
@@ -367,9 +327,45 @@ The shape is now fixed. The three steps that follow it live in `swarm:swarm` and
 restated here, because a second copy of a consent rule is a copy that rots:
 
 - **Models** — `swarm models` for the launchable names, `swarm quota` whenever the mix
-  includes Claude leaves. `references/model-selection.md` in that skill covers tier and effort.
+  includes Claude leaves. [Tier and effort guidance](../swarm/references/model-selection.md).
 - **Validate** — `swarm validate <manifest.json>`. Fix what it names and re-validate; its
   errors name the field, the fix, and an example. Never carry an unvalidated manifest to the gate.
 - **The offer gate** — `swarm:swarm` → *MANDATORY first step*. Its answer is the only consent
   to spend, and it owns the both-sides cost wording. This skill supplies the graph the gate
   previews; it grants nothing.
+
+## Rationalisations — rejected
+
+Every row is a shape a real session chose, in one evening, with this guidance available as
+prose. That is why the law above is a law.
+
+| Excuse | Reality |
+|---|---|
+| "The verifier can just be part of the consumer leaf." | A leaf checking its own input is not verification — it has every incentive the finder had. The verifier is its own task, `after` the finder, fed `{{resultPath:}}`, on a different model family. **Observed: a verifier wave folded into its consumer.** |
+| "I know there are six items — I'll write the six leaves out." | If the list comes from a dependency's *output*, the count is a runtime fact and hand-expanding it hardcodes today's answer. `forEach` clones from the actual result. **Observed: hand-expanded static leaves.** |
+| "The branches will merge fine, an integrate node is ceremony." | Sibling private trees never see each other. Without the node the merge silently becomes the next leaf's job, and nothing announces it. **Observed: a dropped integrate node.** |
+| "This is basically a fan-out." | You have named a shape before placing a task. Ask the per-task question and see what the answers build — "basically" is the tell that you skipped it. |
+| "The graph is too hard to write, I'll do it in two waves." | Every reason to split has a field (§4). A second manifest is fresh prompts, fresh spend, a full gate — earned only by a judgement a human must make between segments. |
+| "They both touch the repo, so they must be chained." | Output vs edits is the question, not the repo. Leaves editing disjoint files stay parallel in private trees; only accumulation needs a shared tree or `isolation.from`. |
+| "B obviously comes after A." | Name the file they collide on, or they run in parallel. Two tasks sharing a prerequisite but not each other are independent. |
+
+## Red Flags — STOP
+
+You are mid-rationalisation if you catch yourself thinking:
+
+- "this is basically a fan-out / a chain" — before any task is placed
+- "I'll just write the leaves out, I know how many there are"
+- "the second wave can handle that part"
+- "they both write to the repo so they'd better be sequential"
+- "the consumer can sanity-check its own input"
+- about to reach for `references/topology.md`'s fields *after* the manifest is drafted
+- about to name a shape in the same sentence you first read the request
+
+## Why this skill exists
+
+One evening, one session, with all of this available as prose in `swarm:SKILL.md`: a dropped
+`integrate` node, a hand-expanded static list, and a verifier wave folded into the leaf it was
+meant to check. The operator's verdict on prose-only shape guidance was that it was "proven all
+evening not to hold", and the proposed fix — a driver that *emits* the graph so the model cannot
+route a node out — was designed and then shelved. Until it returns, this skill is the guard, and
+a guard without a law is a suggestion.
