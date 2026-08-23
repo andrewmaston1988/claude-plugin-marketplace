@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
 import { ASPECTS } from "../src/aspects.mjs";
+import { formatClosing } from "../src/results.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-grade-cli-"));
@@ -120,6 +121,33 @@ test("grade --file: a filled batch lands, with model and mechanical taken from t
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// The closing block is the only mechanical prompt to grade — a SKILL.md step is
+// trust, and the store only fills if something asks. It must be printed by the
+// engine, last, and carry a runnable command.
+test("formatClosing: a run with :cloud leaves ends by asking for a grade", () => {
+  const out = formatClosing({
+    summaryPath: "C:/runs/r1/summary.json",
+    gradeable: { count: 5, resultsDir: "C:/runs/r1", cli: "C:/swarm/scripts/swarm.mjs" },
+  });
+  ok(out.includes("<IMPORTANT>"), out);
+  ok(out.includes("5 results are awaiting grading"), out);
+  ok(out.includes("MUST always complete this step"), out);
+  ok(out.includes("grade --init C:/runs/r1"), out);
+  ok(out.includes("C:/swarm/scripts/swarm.mjs"), out);
+  // the call to action is the tail of the block, after every path and count
+  ok(out.indexOf("<IMPORTANT>") > out.indexOf("summary.json"), out);
+});
+
+test("formatClosing: an all-Claude run is not asked to grade", () => {
+  const out = formatClosing({
+    summaryPath: "C:/runs/r1/summary.json",
+    gradeable: { count: 0, resultsDir: "C:/runs/r1", cli: "C:/swarm/scripts/swarm.mjs" },
+  });
+  ok(!out.includes("grade"), out);
+  // and a caller that passes nothing at all behaves the same
+  ok(!formatClosing({ summaryPath: "C:/runs/r1/summary.json" }).includes("grade"));
 });
 
 test("perf: an empty store prints all ten aspects at n=0", () => {

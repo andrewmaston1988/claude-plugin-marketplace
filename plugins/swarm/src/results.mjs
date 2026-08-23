@@ -390,7 +390,7 @@ export function renderProvenance({ tasks = [], truncations = [] }) {
   return lines.join("\n") + "\n";
 }
 
-export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate }) {
+export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate, gradeable }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -435,6 +435,17 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
       const chain = wt.taskIds?.length > 1 ? ` ${dim(`(${wt.taskIds.join(" → ")})`)}` : "";
       lines.push(`  ${bold(wt.name)}: ${magenta(wt.branch)} at ${wt.path}${chain}`);
     }
+  }
+  // LAST, and printed by the engine — not left to the session's memory. Which
+  // model to use for what is otherwise decided by remembered incidents, and the
+  // store only fills if something asks. A skill instruction is trust; this is
+  // mechanical, and it fires whether or not the skill was ever read.
+  if (gradeable?.count > 0) {
+    lines.push(bold(`<IMPORTANT>${gradeable.count} results are awaiting grading — you MUST always complete this step.</IMPORTANT>`));
+    lines.push(`  node ${gradeable.cli} grade --init ${gradeable.resultsDir}`);
+    lines.push(dim("  Fill in every relevant capability and all universal aspects, then grade --file."));
+    lines.push(dim("  This is the only record of how these models performed; skipping it loses the"));
+    lines.push(dim("  run's evidence."));
   }
   return lines.join("\n");
 }

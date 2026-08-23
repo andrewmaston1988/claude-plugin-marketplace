@@ -10,7 +10,7 @@ import { discoverModels, writeModelsCache, visibleModels, probeTopModels } from 
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, renderStatus, readResult } from "../src/results.mjs";
+import { formatClosing, renderStatus, readResult, listLeaves } from "../src/results.mjs";
 import { dim } from "../src/ui.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
@@ -218,6 +218,11 @@ async function cmdRun(rest) {
     truncations: r.summary.truncations,
     refutations: r.summary.refutations,
     estimate: plan.estimate,
+    gradeable: {
+      count: listLeaves(plan.resultsDir, { cloudOnly: true }).length,
+      resultsDir: plan.resultsDir,
+      cli: fileURLToPath(import.meta.url),
+    },
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
@@ -252,7 +257,6 @@ function getFlag(name, args) {
 // an untouched skeleton cannot land.
 async function cmdGradeInit(dir) {
   const { writeFileSync } = await import("node:fs");
-  const { listLeaves } = await import("../src/results.mjs");
   const { UNIVERSAL, CAPABILITY, OUTCOMES } = await import("../src/aspects.mjs");
   const leaves = listLeaves(dir, { cloudOnly: true });
   if (!leaves.length) {
