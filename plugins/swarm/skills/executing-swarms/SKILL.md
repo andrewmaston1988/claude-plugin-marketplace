@@ -2,11 +2,9 @@
 name: executing-swarms
 description: >-
   Use before drafting any swarm manifest — deciding what shape the dependency graph takes,
-  and what each task must wait for. Width is an output of those answers, never a pattern
-  picked up front. Triggers — "what shape should this run be", "one manifest or two",
-  "does this need a second wave", "should these leaves be chained", "phased chain",
-  "fan out then integrate". SKIP for: how many agents and which items share one — that is
-  swarm:orchestrating-agents.
+  and what each task must wait for. Triggers — "what shape should this run be", "one manifest
+  or two", "does this need a second wave", "phased chain", "fan out then integrate". SKIP for:
+  how many agents and which items share one — that is swarm:orchestrating-agents.
 ---
 
 # Executing swarms — deciding the shape before anything spends
