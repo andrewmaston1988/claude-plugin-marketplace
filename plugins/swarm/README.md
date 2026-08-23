@@ -72,6 +72,9 @@ node plugins/swarm/scripts/swarm.mjs validate <plan.json | name> [--args '<json>
 node plugins/swarm/scripts/swarm.mjs run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
 node plugins/swarm/scripts/swarm.mjs ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
 node plugins/swarm/scripts/swarm.mjs quota                # Anthropic utilization per limit window
+node plugins/swarm/scripts/swarm.mjs grade --init <resultsDir>   # write grades.json — one skeleton row per :cloud leaf
+node plugins/swarm/scripts/swarm.mjs grade --file <grades.json>  # validate the filled batch and append it to the score store
+node plugins/swarm/scripts/swarm.mjs perf [--aspect X] [--model Y] [--domain D]   # aspect x model table with sample counts
 ```
 
 A bare name resolves through the manifest registry (`<cwd>/.swarm/manifests/<name>.json`, then `~/.swarm/manifests/`; the resolution is always announced). `--args` fills `{{args.*}}` placeholders — `validate --resolved` prints the fully substituted document as the approval preview, and each distinct args value gets its own fingerprinted results dir so resume never crosses parameterizations.
@@ -213,6 +216,44 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
 - **Quota preflight**: when a plan contains Claude leaves, the engine first queries Anthropic's usage endpoint with Claude Code's own local OAuth credentials (free, predictive — utilization % and reset times per window, cached `quotaCacheSecs`). Exhausted quota with undefended Claude leaves aborts *before* dispatch with the leaf list and reset time; ≥`quotaWarnPct` (80) warns and proceeds. Strictly best-effort — any endpoint failure and the run proceeds; mid-run classification is the backstop. Disable with `"quotaPreflight": false`; `quotaPatterns` extends message matching without a plugin update.
 
 `swarm quota` prints the same utilization table on demand — useful before choosing a model mix.
+
+## Model capability scores
+
+Which model to use for what is otherwise decided by remembered incidents. `grade` records what a run's `:cloud` leaves actually did; `perf` reads it back.
+
+The agent that authored the manifest grades it — it is the only party that knows what each leaf was *asked* for, which the digest does not hold. Claude tiers produce no rows: their capability is not what is in question.
+
+```bash
+node plugins/swarm/scripts/swarm.mjs grade --init <resultsDir>   # → <resultsDir>/grades.json, one row per :cloud leaf
+# fill in session, and per row: domain, outcome, note, grades
+node plugins/swarm/scripts/swarm.mjs grade --file <resultsDir>/grades.json
+node plugins/swarm/scripts/swarm.mjs perf --aspect search --domain godot
+```
+
+**Ten aspects, graded 1-10.** Four are graded on every leaf; six only where the leaf stressed them, and stay `null` otherwise. They co-occur freely — a leaf that reads reference images and then designs geometry from them has no single primary act.
+
+| | aspect | the question |
+|---|---|---|
+| **universal** | `adherence` | did the asked job without wandering, inventing work, or ignoring a stated constraint |
+| | `handoff` | could the next agent act on the output without coming back for more |
+| | `truthfulness` | were its assertions actually so, or fabricated |
+| | `depth` | did the real work, or produce a plausible-looking shell |
+| **capability** | `discrimination` | right call at the right severity — real separated from noise |
+| | `code` | understood the code it had to work in |
+| | `search` | went after the right thing, and kept at it until it surfaced |
+| | `web` | operated the web-search tools competently |
+| | `vision` | interpreted an image correctly |
+| | `geometry` | proportion, structure and layout came out right |
+
+**`domain`** is free lowercase text on every row — `godot`, `rust`, `images`, `this-repo`. A field, not a category, so adding an ecosystem costs nothing and never closes the list.
+
+**`outcome`** is separate from the grades, because a 1-10 cannot say "the session died": `completed | wrong | failed | timeout | session-died | not-capable`. The first two require grades; the rest **forbid** them — you cannot grade a report that was never submitted, and averaging a number that describes nothing buries the outcome. `not-capable` is the useful one: it records that the model could not do the thing *on this harness*, which is often not what its catalogue entry claims.
+
+Each row also snapshots the mechanical columns from the leaf's result (`ok`, `durationMs`, `tokens`, `numTurns`, citation counts) and the model's declared `capabilities`/`contextLength`/`parameterCount` from `models-cache.json`. Those make a grade auditable; they never replace one — `numTurns` cannot separate three turns doing the wrong thing from thirty being thorough.
+
+**Store:** `~/.swarm/model-scores.jsonl`, append-only, one line per graded leaf. Line-atomic, so concurrent runs cannot corrupt it, and no run dirties the repo. Re-grading a run replaces its rows rather than double-weighting the model: the newest row per `(resultsDir, leaf)` wins.
+
+`perf` prints every cell's sample count and marks `n < 5` provisional — there is no shrinkage or confidence maths, because inventing statistics over agent impressions would imply precision that is not there. An aspect with no rows prints at `n=0` rather than being omitted: absence is evidence.
 
 ## Statusline segment
 
