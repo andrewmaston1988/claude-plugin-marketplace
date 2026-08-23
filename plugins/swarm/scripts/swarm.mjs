@@ -380,7 +380,7 @@ async function readManifestTasks(dir) {
 }
 
 async function cmdPerf(rest) {
-  const { readRows, aggregate, dedupe, scoresPath } = await import("../src/scores.mjs");
+  const { readRows, aggregate, dedupe, scoresPath, PRIOR_WEIGHT } = await import("../src/scores.mjs");
   const aspect = getFlag("aspect", rest);
   const model = getFlag("model", rest);
   const domain = getFlag("domain", rest);
@@ -407,11 +407,15 @@ async function cmdPerf(rest) {
     const w = Math.max(...a.cells.map((c) => c.model.length));
     for (const c of a.cells) {
       const mean = c.mean == null ? "—" : c.mean.toFixed(2);
+      const wtd = c.weighted == null ? "—" : c.weighted.toFixed(2);
       const flag = c.n === 0 ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
       const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
       const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
-      out(`    ${c.model.padEnd(w)}  n=${String(c.n).padStart(3)}  mean ${mean.padStart(5)}${flag}${tail}`);
+      out(`    ${c.model.padEnd(w)}  n=${String(c.n).padStart(3)}  mean ${mean.padStart(5)}  wtd ${wtd.padStart(5)}${flag}${tail}`);
     }
+    // Both columns show, ranked on wtd: the raw mean is the evidence, the
+    // weighted score is what it is worth given how much of it there is.
+    if (a.prior != null) out(dim(`    prior ${a.prior.toFixed(2)} (mean of per-model means; k=${PRIOR_WEIGHT})`));
   }
   return 0;
 }

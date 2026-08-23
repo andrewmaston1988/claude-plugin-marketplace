@@ -186,13 +186,18 @@ export function aggregate(rows, { aspect, model, domain } = {}) {
           cell.sum += grade;
         }
       }
-      const list = [...cells.values()].map(({ sum, ...c }) => ({
+      const raw = [...cells.values()].map(({ sum, ...c }) => ({
         ...c,
         mean: c.n ? Number((sum / c.n).toFixed(2)) : null,
         provisional: c.n < 5,
       }));
-      list.sort((x, y) => (y.mean ?? -1) - (x.mean ?? -1) || x.model.localeCompare(y.model));
-      return { aspect: a, universal: UNIVERSAL.includes(a), cells: list };
+      const prior = fairPrior(raw);
+      const list = raw.map((c) => ({ ...c, weighted: shrink(c.mean, c.n, prior) }));
+      // Ranked on the shrunk score: an unweighted mean lets one lucky sample head
+      // the table two points clear of a forty-sample cell, which the provisional
+      // tag warns about but the ordering contradicts.
+      list.sort((x, y) => (y.weighted ?? -1) - (x.weighted ?? -1) || x.model.localeCompare(y.model));
+      return { aspect: a, universal: UNIVERSAL.includes(a), cells: list, prior };
     }),
     filters: { aspect: aspect ?? null, model: model ?? null, domain: domain ?? null },
   };
@@ -200,4 +205,31 @@ export function aggregate(rows, { aspect, model, domain } = {}) {
 
 function blankOutcomes() {
   return Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
+}
+
+// Virtual prior observations every cell starts with. 5 matches the provisional
+// threshold, so one constant governs both: a cell needs roughly that many real
+// samples before its own mean outweighs the field's.
+export const PRIOR_WEIGHT = 5;
+
+// The unweighted mean of per-model means — NEVER the mean of all rows.
+//
+// This is the whole fairness argument. Rows accumulate where routing already
+// sends work, so a row-weighted prior IS the most-dispatched model's mean, and
+// shrinking a rarely-used model toward it would pull it toward its busiest
+// rival — importing exactly the usage bias the store exists to remove. One
+// model, one vote.
+export function fairPrior(cells) {
+  const means = cells.map((c) => c.mean).filter((m) => m != null);
+  if (!means.length) return null;
+  return means.reduce((a, b) => a + b, 0) / means.length;
+}
+
+// Empirical-Bayes shrinkage toward the prior. A thin cell is pulled most; a
+// well-evidenced one barely moves. No cell is dropped or penalised for being
+// rare — it simply has to earn its position.
+export function shrink(mean, n, prior, k = PRIOR_WEIGHT) {
+  if (mean == null) return null;
+  if (prior == null) return mean;
+  return Number(((n * mean + k * prior) / (n + k)).toFixed(2));
 }

@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync } from "n
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, scoresPath,
+  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, scoresPath, shrink, fairPrior, PRIOR_WEIGHT,
 } from "../src/scores.mjs";
 import { ASPECTS, OUTCOMES } from "../src/aspects.mjs";
 
@@ -296,6 +296,73 @@ test("aggregate: every aspect gets an entry even with no rows — absence is evi
 
 test("aggregate: an unknown aspect throws, naming the valid set", () => {
   throws(() => aggregate([], { aspect: "godot" }), /unknown aspect/);
+});
+
+// ── shrinkage ─────────────────────────────────────────────────────────────────
+
+// The operator's case: Kimi dispatched once, GLM forty-five times. Unweighted,
+// Kimi's single 9 heads the table two points clear of GLM's forty-five 7s.
+function lopsided() {
+  const rows = [];
+  for (let i = 0; i < 45; i++) {
+    rows.push(graded({ leaf: `g${i}`, model: "glm-5.2:cloud", grades: { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 } }));
+  }
+  rows.push(graded({ leaf: "k0", model: "kimi-k2.7-code:cloud", grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 } }));
+  for (let i = 0; i < 8; i++) {
+    rows.push(graded({ leaf: `d${i}`, model: "deepseek-v4-pro:cloud", grades: { adherence: 6, handoff: 6, truthfulness: 6, depth: 6 } }));
+  }
+  return rows;
+}
+
+test("shrink: a thin cell is pulled toward the prior, a thick one barely moves", () => {
+  equal(shrink(9, 1, 7.5), 7.75);
+  equal(shrink(7, 45, 7.5), 7.05);
+  equal(shrink(8, 0, 7.5), 7.5);   // no evidence at all → the prior
+  equal(shrink(null, 0, 7.5), null);
+  equal(shrink(9, 1, null), 9);    // no prior to shrink toward → unchanged
+});
+
+// The load-bearing fairness property. A row-weighted prior IS the busiest
+// model's mean, so shrinking a rare model toward it drags it toward its most-
+// dispatched rival — the exact usage bias the store exists to remove.
+test("fairPrior: one model one vote — dispatch frequency cannot move the prior", () => {
+  const cells = [
+    { model: "glm", n: 45, mean: 7 },
+    { model: "kimi", n: 1, mean: 9 },
+    { model: "deepseek", n: 8, mean: 6.5 },
+  ];
+  equal(fairPrior(cells), 7.5);                       // (7 + 9 + 6.5) / 3
+  ok(Math.abs(fairPrior(cells) - 6.96) > 0.5, "prior collapsed onto the row-weighted mean");
+  // The same three models, GLM now dispatched 500 times: the prior must not move.
+  equal(fairPrior([{ model: "glm", n: 500, mean: 7 }, ...cells.slice(1)]), 7.5);
+});
+
+test("fairPrior: null when nothing has been graded", () => {
+  equal(fairPrior([]), null);
+  equal(fairPrior([{ model: "glm", n: 0, mean: null }]), null);
+});
+
+test("aggregate: a one-sample cell no longer outranks a forty-five-sample cell by two points", () => {
+  const cells = aggregate(lopsided(), { aspect: "adherence" }).aspects[0].cells;
+  const kimi = cells.find((c) => c.model === "kimi-k2.7-code:cloud");
+  const glm = cells.find((c) => c.model === "glm-5.2:cloud");
+  equal(kimi.mean, 9);          // the raw evidence is untouched and still shown
+  equal(glm.mean, 7);
+  ok(kimi.mean - glm.mean === 2, "raw means changed");
+  ok(kimi.weighted - glm.weighted < 1, `gap not narrowed: ${kimi.weighted} vs ${glm.weighted}`);
+  ok(kimi.weighted > glm.weighted, "a rare model was penalised into second place for being rare");
+});
+
+test("aggregate: cells rank on weighted, not raw mean", () => {
+  const { cells } = aggregate(lopsided(), { aspect: "adherence" }).aspects[0];
+  const scores = cells.map((c) => c.weighted);
+  deepEqual(scores, [...scores].sort((a, b) => b - a));
+});
+
+test("aggregate: the prior is reported so the shrinkage is auditable", () => {
+  const a = aggregate(lopsided(), { aspect: "adherence" }).aspects[0];
+  equal(a.prior, fairPrior(a.cells));
+  equal(a.prior, (7 + 9 + 6) / 3);
 });
 
 test("aggregate: pure — equal results on repeat, input untouched", () => {
