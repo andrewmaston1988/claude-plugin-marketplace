@@ -253,15 +253,7 @@ Each row also snapshots the mechanical columns from the leaf's result (`ok`, `du
 
 **Store:** `~/.swarm/model-scores.jsonl`, append-only, one line per graded leaf. Line-atomic, so concurrent runs cannot corrupt it, and no run dirties the repo. Re-grading a run replaces its rows rather than double-weighting the model: the newest row per `(resultsDir, leaf)` wins.
 
-**Reading `perf`.** Every cell shows `n`, the raw `mean`, and a shrunk `wtd` score; `n < 5` is marked provisional, and an aspect with no rows prints at `n=0` rather than being omitted — absence is evidence.
-
-Cells rank on `wtd`, not on `mean`. An unweighted mean lets a single lucky leaf head the table two points clear of a forty-sample cell, which the provisional tag warns about but the ordering flatly contradicts. `wtd` is the mean pulled toward a prior in proportion to how thin the evidence is:
-
-```
-wtd = (n · mean + k · prior) / (n + k)          k = 5, matching the provisional threshold
-```
-
-**The prior is the unweighted mean of per-model means — never the mean of all rows.** This is the whole fairness argument. Rows accumulate wherever routing already sends work, so a row-weighted prior would essentially *be* the most-dispatched model's mean, and shrinking a rarely-used model toward it would drag it toward its busiest rival — importing exactly the usage bias this store exists to remove. One model, one vote. A rare model is never penalised for being rare; it simply has to earn its position, and its raw `mean` stays on display beside the shrunk score so you can see how far it moved and on what evidence.
+**Reading `perf`.** Retrievable aggregated scores, per aspect × model. Every cell shows its sample count `n`, the raw `mean`, and a `wtd` score that cells rank on — the mean weighted for how much evidence stands behind it, so a single lucky leaf cannot head the table. `n < 5` is marked provisional, and an aspect with no rows prints at `n=0` rather than being omitted: absence is evidence.
 
 ## Statusline segment
 
