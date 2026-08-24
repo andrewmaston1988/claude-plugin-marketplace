@@ -21,11 +21,14 @@
  *                      [--skip-testing] [--dry-run]
  */
 import { existsSync, readFileSync } from "node:fs";
-import { join, isAbsolute } from "node:path";
+import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { queryRow, pipelineSpawn } from "./pipeline-query.mjs";
+import { queryRow } from "./pipeline-query.mjs";
+import { resolvePlansDir, PLANS_DIR_KEYS } from "../../../src/plans-resolver.mjs";
+import { unresolvedPlaceholders } from "../../../src/worktree-paths.mjs";
+import { connectUnified, close, projectGetByName } from "../../../src/db/index.mjs";
 
 // merge.mjs is our sibling in the PLUGIN tree. Deriving it from projectDir would
 // point into the repo being merged, which does not contain the plugin.
@@ -71,15 +74,6 @@ export function parseBranches(raw) {
     if (part) seen.add(part);
   }
   return [...seen];
-}
-
-// ── Step 2.7 — resolve plansDir ───────────────────────────────────────────────
-
-export function resolvePlansDir(rawPlansDir, project, projectDir) {
-  if (!rawPlansDir) return null;
-  const substituted = String(rawPlansDir).replace(/\{project\}/g, project);
-  if (isAbsolute(substituted) || /^[A-Za-z]:[/\\]/.test(substituted)) return substituted;
-  return join(projectDir, substituted).replace(/\\/g, "/");
 }
 
 // ── Step 2.5 — model selection ────────────────────────────────────────────────
@@ -254,8 +248,10 @@ function getFlag(name, argv) {
   return i >= 0 ? argv[i + 1] : null;
 }
 
-async function main() {
-  const argv = process.argv.slice(2);
+// Exported with a dependency seam so the resolution and PAUSE paths are testable: they
+// depend on live config and the project row, neither of which a test can otherwise supply.
+export async function main({ _argv, _config, _projectRow } = {}) {
+  const argv = _argv ?? process.argv.slice(2);
   const out = (s) => process.stdout.write(s);
 
   const branchesRaw = getFlag("branches", argv);
@@ -291,18 +287,23 @@ async function main() {
   }
 
   const targetBranch = resolveTargetBranch(project, featureOf(branches[0]), projectDir);
-  const rawPlansDir = (() => {
-    const r = pipelineSpawn(["config-get", "plansDir"]);
-    return r.status === 0 ? (r.stdout ?? "").trim() : "";
-  })();
-  let plansDir = resolvePlansDir(rawPlansDir, project, projectDir);
-  // Global config can name a plans dir that does not exist for THIS repo. Falling
-  // back to the repo's own plans/ keeps the plan-move guard answerable; without it
-  // `planMoved` is permanently false and the resume never completes.
-  if ((!plansDir || !existsSync(plansDir)) && existsSync(join(projectDir, "plans"))) {
-    plansDir = join(projectDir, "plans").replace(/\\/g, "/");
-  }
-
+  // One resolver, four precedence tiers — see REFERENCE.md. The driver used to hand-roll a
+  // {project}-only substitution here, which saw neither plansDirs[<project>] nor the project
+  // row's plans_dir column.
+  const projectPlansDir = _projectRow !== undefined
+    ? (_projectRow?.plans_dir ?? null)
+    : (() => {
+        const db = connectUnified();
+        try { return projectGetByName(db, project)?.plans_dir ?? null; }
+        catch { return null; }
+        finally { close(db); }
+      })();
+  let plansDir = resolvePlansDir({
+    project,
+    projectRoot: projectDir,
+    projectPlansDir,
+    _config: _config,
+  });
   const signals = collectSignals(project, branches, projectDir, targetBranch);
   if (signals.missing.length) {
     process.stderr.write(
@@ -310,6 +311,45 @@ async function main() {
         `Check the name, or fetch it first. Nothing was merged.\n`,
     );
     return 1;
+  }
+
+  // A template naming something the plansDir vocabulary cannot supply resolves to a path with
+  // the token still in it. That is a config error, and guessing past it is how a wrong
+  // --plans-dir reaches a real merge. Checked against PLANS_DIR_KEYS, not the global list:
+  // {branch} is a legal placeholder elsewhere and is never substituted here.
+  //
+  // Ordered after the branch check (a typo'd branch is the more actionable failure) and
+  // before the existence fallback below, which must only ever see a substituted path.
+  const unresolved = unresolvedPlaceholders(plansDir, PLANS_DIR_KEYS);
+  if (unresolved.length) {
+    const source = projectPlansDir
+      ? `the ${project} project row's plans_dir column`
+      : `plansDirs["${project}"] or plansDir in ~/.pipeline/config.json`;
+    out(
+      banner(
+        "Plans directory template cannot resolve",
+        [
+          `  resolved:   ${posix(plansDir)}`,
+          `  unresolved: ${unresolved.map((t) => `{${t}}`).join(", ")}`,
+          `  from:       ${source}`,
+          "",
+          `  valid for a plans dir: ${PLANS_DIR_KEYS.map((k) => `{${k}}`).join(" ")}`,
+          `  e.g.  "{root_parent}/CLAUDE/repos/{project}/plans"`,
+          "",
+          "  Fix the template, then re-run. Nothing was merged.",
+        ],
+        `node "${posix(process.argv[1])}" --branches "${branches.join(",")}" ` +
+          `--project-dir "${projectDir}"`,
+      ),
+    );
+    return 0;
+  }
+
+  // A configured plans dir can legitimately not apply to THIS repo. Falling back to the
+  // repo's own plans/ keeps the plan-move guard answerable; without it `planMoved` is
+  // permanently false and the resume never completes.
+  if ((!plansDir || !existsSync(plansDir)) && existsSync(join(projectDir, "plans"))) {
+    plansDir = join(projectDir, "plans").replace(/\\/g, "/");
   }
 
   // Resume: ask the WORLD what is already done before proposing any work. A merge

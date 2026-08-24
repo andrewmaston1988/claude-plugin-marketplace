@@ -3,6 +3,13 @@ import { loadPipelineConfig } from "./pipeline-config.mjs";
 import { resolveTemplate } from "./worktree-paths.mjs";
 import { getPaths } from "./paths.mjs";
 
+// The subset of PLACEHOLDER_KEYS resolvePlansDir actually supplies. Anything else in a
+// plansDir template is unresolvable however legal it looks against the global vocabulary.
+// Must stay in step with the `vars` object below.
+export const PLANS_DIR_KEYS = Object.freeze([
+  "root", "root_parent", "root_grandparent", "project", "config_dir",
+]);
+
 // Canonical plans-directory resolver. Precedence + placeholders documented in REFERENCE.md.
 //
 // Precedence (first hit wins):
@@ -25,7 +32,9 @@ export function resolvePlansDir({ project, projectRoot, projectPlansDir, _config
   const configOverride = projectName ? cfg?.plansDirs?.[projectName] : null;
   if (configOverride) return resolveTemplate(configOverride, vars, opts);
 
-  if (projectPlansDir) return projectPlansDir;
+  // Substituted like every other tier: an absolute value passes through unchanged, and a
+  // template in this column would otherwise reach callers with its placeholders intact.
+  if (projectPlansDir) return resolveTemplate(projectPlansDir, vars, opts);
 
   const template = cfg?.plansDir || "plans";
   return resolveTemplate(template, vars, opts);

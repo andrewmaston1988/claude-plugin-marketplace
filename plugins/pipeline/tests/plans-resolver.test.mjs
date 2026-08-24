@@ -84,6 +84,19 @@ test("project-row plans_dir overrides cfg.plansDir", () => {
   assert.equal(out, override);
 });
 
+// The legacy column used to be returned byte-for-byte, so a template in it reached callers
+// with its placeholders intact — invisible to the unresolved-placeholder check, which sees a
+// known key and clears it.
+test("project-row plans_dir is substituted, not returned raw", () => {
+  const out = resolvePlansDir({
+    project: "myproj",
+    projectRoot: ROOT,
+    projectPlansDir: "{root}/legacy-plans",
+    _config: { plansDir: "{root_parent}/shared-plans" },
+  });
+  assert.equal(out.replaceAll("\\", "/"), `${ROOT}/legacy-plans`);
+});
+
 test("project name falls back to basename(projectRoot)", () => {
   const out = resolvePlansDir({
     projectRoot: ROOT,

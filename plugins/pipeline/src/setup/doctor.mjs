@@ -5,18 +5,18 @@ import { homedir } from "node:os";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { loadPipelineConfig } from "../pipeline-config.mjs";
-import { resolvePlansDir } from "../plans-resolver.mjs";
+import { resolvePlansDir, PLANS_DIR_KEYS } from "../plans-resolver.mjs";
 import { connectUnified, close, dbPathUnified } from "../db/connection.mjs";
 import { projectList } from "../db/projects.mjs";
 import { readState, pidAlive } from "../orchestrator/state-file.mjs";
 import { findClaudeSlackPlugin } from "../locators/claude-slack.mjs";
-import { resolveTemplate, resolveHookFirstToken, featureWorktreePath } from "../worktree-paths.mjs";
+import { resolveTemplate, resolveHookFirstToken, featureWorktreePath, unresolvedPlaceholders } from "../worktree-paths.mjs";
 import { spawnSync } from "node:child_process";
 import { findUnknownTemplateVars } from "../governor/env-contract.mjs";
 
 const execFileAsync = promisify(execFile);
 
-function _pathResolutionChecks(cfg, projects, paths) {
+export function _pathResolutionChecks(cfg, projects, paths) {
   const out = [];
   const cd = paths.configDir;
   const _global = (raw) => raw
@@ -45,7 +45,16 @@ function _pathResolutionChecks(cfg, projects, paths) {
       projectPlansDir: p.plans_dir,
       _config:         cfg,
     });
-    out.push({ key: `[${p.name}] plansDir`,             raw: p.plans_dir ?? cfg.plansDir, resolved: plansResolved ?? join(p.root_path, "plans"), warn: false });
+    // The check that would have caught a {codeRoot} template: a plansDir that still holds a
+    // placeholder, or names a directory that is not there, is a config error — not a row to
+    // print green.
+    const plansPath = plansResolved ?? join(p.root_path, "plans");
+    out.push({
+      key:      `[${p.name}] plansDir`,
+      raw:      p.plans_dir ?? cfg.plansDir,
+      resolved: plansPath,
+      warn:     unresolvedPlaceholders(plansPath, PLANS_DIR_KEYS).length > 0 || !existsSync(plansPath),
+    });
     out.push({ key: `[${p.name}] governor.reports_dir`, raw: cfg.governor?.reports_dir, resolved: _proj(cfg.governor?.reports_dir) ?? join(p.root_path, "reports"), warn: false });
     out.push({ key: `[${p.name}] governor.session_dir`, raw: cfg.governor?.session_dir, resolved: _proj(cfg.governor?.session_dir) ?? join(p.root_path, "sessions"), warn: false });
     out.push({ key: `[${p.name}] governor.log_dir`,     raw: cfg.governor?.log_dir,     resolved: _proj(cfg.governor?.log_dir)     ?? join(p.root_path, "logs"), warn: false });
