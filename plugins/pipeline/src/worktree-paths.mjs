@@ -17,6 +17,21 @@ export const PLACEHOLDER_KEYS = Object.freeze([
   "config_dir",
 ]);
 
+// A resolved path still holding a {token} means the template named something this call site
+// does not supply. resolveTemplate passes those through by design; this is how a caller asks
+// whether that happened. knownKeys is the CALLER's vocabulary, not the global one — passing
+// PLACEHOLDER_KEYS here would clear {branch} for a plans dir, which resolvePlansDir never
+// substitutes.
+export function unresolvedPlaceholders(value, knownKeys = PLACEHOLDER_KEYS) {
+  if (!value) return [];
+  const known = new Set(knownKeys);
+  const found = [];
+  for (const m of String(value).matchAll(/\{([A-Za-z_][A-Za-z0-9_]*)\}/g)) {
+    if (!known.has(m[1]) && !found.includes(m[1])) found.push(m[1]);
+  }
+  return found;
+}
+
 // Empty/nullish → null (not "") so a missing guard can't route "" into
 // path.join and yield a CWD-relative path.
 export function resolveTemplate(

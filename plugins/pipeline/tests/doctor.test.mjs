@@ -7,7 +7,7 @@ import { equal, ok, match, deepEqual } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { runDoctor, printDoctor, doctorExitCode, parseNetstatPids, parseTasklist, parseWmicCommandLine, parseCimCommandLine, detectPortOccupant } from "../src/setup/doctor.mjs";
+import { runDoctor, printDoctor, doctorExitCode, parseNetstatPids, parseTasklist, parseWmicCommandLine, parseCimCommandLine, detectPortOccupant, _pathResolutionChecks } from "../src/setup/doctor.mjs";
 import { connectUnified, close } from "../src/db/connection.mjs";
 import { projectAdd } from "../src/db/projects.mjs";
 
@@ -436,4 +436,53 @@ test("detectPortOccupant: missing port → {inUse:false, ours:false}", () => {
   const verdict = detectPortOccupant({ port: 0, run: () => ({ status: 0, stdout: "" }) });
   equal(verdict.inUse, false);
   equal(verdict.ours, false);
+});
+
+// ── plansDir warn ────────────────────────────────────────────────────────────
+// The row that stayed silent through a {codeRoot} template for weeks: `warn` was a
+// hardcoded false, so the one pre-flight for this printed the broken path as normal.
+
+function plansRow(cfg, project) {
+  const rows = _pathResolutionChecks(cfg, [project], { configDir: "C:/cfgdir", stateDir: "C:/statedir" });
+  return rows.find(r => r.key === `[${project.name}] plansDir`);
+}
+
+test("plansDir row warns when the resolved path still holds a placeholder", () => {
+  const row = plansRow(
+    { plansDir: "{nope}/plans" },
+    { name: "p", root_path: "C:/code/p", plans_dir: null },
+  );
+  equal(row.warn, true);
+});
+
+test("plansDir row warns on {branch} — legal globally, unresolvable for a plans dir", () => {
+  const row = plansRow(
+    { plansDir: "{root_parent}/{branch}/plans" },
+    { name: "p", root_path: "C:/code/p", plans_dir: null },
+  );
+  equal(row.warn, true);
+});
+
+test("plansDir row warns when the resolved path does not exist", () => {
+  const row = plansRow(
+    { plansDir: "{root}/definitely-not-here" },
+    { name: "p", root_path: "C:/code/p", plans_dir: null },
+  );
+  equal(row.warn, true);
+});
+
+// Guards the opposite failure: a warn that fires on everything is as useless as one
+// that never fires.
+test("plansDir row does not warn when the resolved dir exists", () => {
+  const tmp = mkdtempSync(join(tmpdir(), "pipeline-plansdir-"));
+  mkdirSync(join(tmp, "plans"));
+  try {
+    const row = plansRow(
+      { plansDir: "{root}/plans" },
+      { name: "p", root_path: tmp, plans_dir: null },
+    );
+    equal(row.warn, false);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
 });
