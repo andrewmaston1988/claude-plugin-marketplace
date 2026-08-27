@@ -2132,3 +2132,36 @@ test("--force resets only the first link of a shared worktree group", async () =
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("every leaf is spawned with CORRELATION_ID so session hooks stay out of it", async () => {
+  const dir = tmp();
+  try {
+    mkdirSync(join(dir, "results"), { recursive: true });
+    const leafLog = createWriteStream(join(dir, "results", "a.log"));
+    const spawn = fakeSpawnFactory(() => ({ output: "x" }));
+    const io = makeIo(spawn, { env: { PATH: process.env.PATH } });
+
+    await runTask(task("a"), "do a", CFG, io, leafLog, {});
+
+    equal(spawn.calls[0].opts.env.CORRELATION_ID, "swarm:a",
+      "a headless leaf must carry the marker the checkpoint hooks exit on");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a caller's own CORRELATION_ID is kept on the leaf", async () => {
+  const dir = tmp();
+  try {
+    mkdirSync(join(dir, "results"), { recursive: true });
+    const leafLog = createWriteStream(join(dir, "results", "a.log"));
+    const spawn = fakeSpawnFactory(() => ({ output: "x" }));
+    const io = makeIo(spawn, { env: { PATH: process.env.PATH, CORRELATION_ID: "pipeline-77" } });
+
+    await runTask(task("a"), "do a", CFG, io, leafLog, {});
+
+    equal(spawn.calls[0].opts.env.CORRELATION_ID, "pipeline-77");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

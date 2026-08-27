@@ -217,7 +217,14 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
     try {
       child = io.spawn(argv[0], argv.slice(1), {
         cwd: task.cwd,
-        env: { ...(io.env || process.env), ...env },
+        // A leaf is a headless session: CORRELATION_ID is the marker every
+        // session hook already honours to stay out of autonomous runs (the
+        // checkpoint plugin's resume offer, keepalive tick, stop nudge and
+        // pre-compact snapshot all exit on it). Without it the resume offer
+        // reaches the leaf's first turn — a model that follows it literally
+        // burns the leaf (mistral-large-3, twice, 2026-08-27). A caller's own
+        // CORRELATION_ID wins so a pipeline-launched swarm keeps its id.
+        env: { ...(io.env || process.env), CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`, ...env },
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
