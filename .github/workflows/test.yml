@@ -53,7 +53,7 @@ jobs:
           git config --global user.email "ci@example.com"
           git config --global user.name "CI"
       - name: Run tests
-        run: node --test plugins/swarm/tests/*.test.mjs
+        run: node --test plugins/swarm/tests/*.test.mjs plugins/swarm/skills/*/scripts/*.test.mjs
 
   pipeline:
     name: pipeline
