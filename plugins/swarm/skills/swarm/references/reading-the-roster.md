@@ -1,13 +1,8 @@
 # Reading a live roster — mid-run reference
 
-Read this when a completed leaf produced nothing, or when you are looking at a
-raw `status` roster rather than the driver's verdict.
-
-**For a live run, prefer `run-swarm.mjs --check-liveness`.** It reports the state
-tags, any quiet leaf, and each leaf's usage *with the ratio that explains it* — so
-the number is readable rather than alarming, and you do not have to hold the
-arithmetic below in your head. The rest of this page is the background behind
-that verdict, and the recovery procedure the driver does not perform.
+Read this when a run is in flight and you are judging whether a leaf is healthy,
+or when a completed leaf produced nothing. It is situational: none of it is needed
+to author a manifest.
 
 ## Reading the roster — a leaf is an AGENT, not an API call
 

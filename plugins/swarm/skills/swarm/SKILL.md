@@ -102,42 +102,6 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 
 **Red flags — you are mid-rationalisation if you think:** "the directive/goal/hook authorizes this" · "the condition is the approval" · "probably a mis-click" · "half the leaves is a fair compromise" · "`--force` gets past it" · "`tail` keeps the dispatch tidy" (see Run, step 5) · **"I already know the command — I don't need the skill"** (the command arrived without the rules that govern it; that is the bypass, not a shortcut) · **"the run finished suspiciously fast"** (you replayed cache — check for `[skipped]` and `NOTHING RE-EXECUTED` before claiming anything ran) · **"I'll redirect it to a log so the tool result stays tidy"** (the forbidden pipe wearing a different hat) · **"I'll just read the run's output file to see how it's going"** (that file is the operator's live view, not your status API — use `status`).
 
-## The driver — run it, do what it asks, re-run
-
-`scripts/run-swarm.mjs` owns the session-side state the Procedure below assumes: the three
-gate answers (recorded so they survive compaction), the cost arithmetic, the results
-directory, the one liveness check, and failure routing.
-
-| Flag | What it does |
-|---|---|
-| *(none)* | Pauses until all three gate answers are given; then prints them |
-| `--gate-fanout/-mix/-batching "<answer>"` | Records one answer. An empty string and "no" are real answers |
-| `--inline-lines <n> [--not-comparable]` | The cost side of the gate's first question |
-| `--dispatch-output <file\|text>` | Captures `resultsDir:` from the engine's output; **refuses** if the line is absent |
-| `--check-liveness` | Reads the run's own `run.log` once and rules live / not-live / cache replay |
-| `--route-failure [--timed-out] [--errored] [--committed-since] [--quota] [--attempts n]` | The routing verdict and whether to ask |
-
-```bash
-node "<this skill's base directory>/scripts/run-swarm.mjs" --manifest <manifest.json | name>
-```
-
-| Driver output | You do |
-|---|---|
-| `{"error":"missing_required_field",...}` | Supply the field, re-run with the flag |
-| `PAUSE: <what>` banner | The judgement it names, then re-run the printed `RE-RUN EXACTLY` command |
-| Non-zero exit | Surface it; do not retry blindly |
-| `gate: answered` | Validate, dispatch, then one status check |
-
-Re-running is always safe: the driver re-reads its state and picks up where it stopped.
-**It records consent; it does not enforce it** — the gate above governs two dispatch paths no
-hook can see (`src/ask.mjs` and any direct `runPlan` import), so those rules bind whether or
-not you ran the driver.
-
-**What it does not do**, and does not restate: decide the shape (`swarm:executing-swarms` —
-the driver pauses and hands you that skill by path before the gate, because the gate's three
-questions are unanswerable without it), author the manifest, validate, dispatch, or read the
-digest. Those are the Procedure below.
-
 ## Procedure
 
 1. **Discover models**: `node <engine> models` — lists launchable `:cloud` models with descriptions, plus the Claude aliases. Run FIRST so the manifest names models the account can launch right now. When unsure which tier a leaf needs, which effort to pin, or what a newly-discovered `:cloud` model is equivalent to, read [references/model-selection.md](references/model-selection.md).
