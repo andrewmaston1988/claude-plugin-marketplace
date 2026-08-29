@@ -4,13 +4,11 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
-import { resolveOwnStatePath, isMeaningfulState } from './lib/paths.mjs';
+import { resolveOwnStatePath, isMeaningfulState, SKELETON_MARKER } from './lib/paths.mjs';
 import { SKILL_ID, SKILL_DISAMBIGUATION } from './lib/skill-ref.mjs';
 
-const MARKER = path.join(os.homedir(), '.claude', '.compact_just_ran');
 // Read this much from the end of the JSONL — enough to find the last user/assistant
 // pair + recent tool uses without slurping multi-MB transcripts.
 const TRANSCRIPT_TAIL_BYTES = 250_000;
@@ -88,7 +86,7 @@ export function buildSkeleton(entries, trigger, sid, cwd, size) {
   const lines = [
     `# STATE.md (auto-snapshot before ${trigger} compaction at ${ts})`,
     '',
-    `_Skeletal backstop written by \`pre-compact-snapshot.mjs\`. After compaction, call the Skill tool with skill="${SKILL_ID}" to reconcile it into a rich version. ${SKILL_DISAMBIGUATION}_`,
+    `_${SKELETON_MARKER}. After compaction, call the Skill tool with skill="${SKILL_ID}" to reconcile it into a rich version. ${SKILL_DISAMBIGUATION}_`,
     '',
     '## Session',
     `- session_id: \`${sidShort}\``,
@@ -130,12 +128,6 @@ function main() {
     const cwd = payload.cwd || '';
     const sid = payload.session_id || '';
     const trigger = payload.trigger || 'auto';
-
-    // Always touch the marker so a UserPromptSubmit hook (if wired) can pick it up
-    try {
-      fs.mkdirSync(path.dirname(MARKER), { recursive: true });
-      fs.writeFileSync(MARKER, String(Date.now()));
-    } catch { /* non-fatal */ }
 
     if (!cwd) process.exit(0);
 

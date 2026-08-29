@@ -5,10 +5,13 @@
 // merge.mjs unchanged. These tests pin the port, not the merge.
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import {
   parseBranches,
-  resolvePlansDir,
+  main,
   chooseModel,
   banner,
   needInput,
@@ -44,33 +47,6 @@ test("parseBranches: empty input is an empty list, not [''] ", () => {
 
 test("parseBranches: de-duplicates — merging a branch twice is never intended", () => {
   deepEqual(parseBranches("a,a,b"), ["a", "b"]);
-});
-
-// ── Scenario 2 — plansDir resolution ──────────────────────────────────────────
-// Step 2.7: substitute {project}, absolutise against PROJECT_DIR if relative.
-
-test("resolvePlansDir: substitutes the {project} placeholder", () => {
-  equal(
-    resolvePlansDir("C:/plans/{project}", "myproj", "C:/code/myproj"),
-    "C:/plans/myproj",
-  );
-});
-
-test("resolvePlansDir: absolutises a relative path against PROJECT_DIR", () => {
-  equal(resolvePlansDir("plans", "myproj", "C:/code/myproj"), "C:/code/myproj/plans");
-});
-
-test("resolvePlansDir: leaves an absolute POSIX path alone", () => {
-  equal(resolvePlansDir("/srv/plans", "myproj", "/code/myproj"), "/srv/plans");
-});
-
-test("resolvePlansDir: leaves an absolute Windows path alone", () => {
-  equal(resolvePlansDir("C:/srv/plans", "myproj", "C:/code/myproj"), "C:/srv/plans");
-});
-
-test("resolvePlansDir: unset config yields null, not a bogus path", () => {
-  equal(resolvePlansDir("", "myproj", "C:/code/myproj"), null);
-  equal(resolvePlansDir(null, "myproj", "C:/code/myproj"), null);
 });
 
 // ── Scenario 3 — model decision table, exhaustive ─────────────────────────────
@@ -264,4 +240,126 @@ test("observeWorld: detects a landed SQUASH merge, not just a fast-forward", () 
     src.indexOf('"cherry"') > src.indexOf('"--is-ancestor"'),
     "ancestry first (cheap), cherry as the squash-aware fallback",
   );
+});
+
+// ── Scenario 2 — plansDir resolution and the unresolvable-template PAUSE ──────
+// Drives main() over a throwaway git repo. The production failure this reproduces: a
+// {codeRoot} template resolved to a path with the token intact and the driver printed the
+// spawn command with that path attached to --plans-dir.
+//
+// Fixture precondition, load-bearing: the repo must NOT contain a plans/ directory. The
+// existence fallback substitutes <projectDir>/plans whenever the configured dir is missing,
+// which would swallow the RED and make these pass against unfixed code.
+
+function tmpRepo(branch = "autonomous/feat-x") {
+  const dir = mkdtempSync(join(tmpdir(), "run-merge-")).replace(/\\/g, "/");
+  // -c core.hooksPath= : a global hooksPath would run the operator's real hooks in this
+  // throwaway repo and fail the seed commit, leaving no HEAD for `git branch` to point at.
+  const g = (...a) => {
+    const r = spawnSync("git", ["-c", "core.hooksPath=", ...a], { cwd: dir, encoding: "utf8" });
+    if (r.status !== 0) throw new Error(`fixture git ${a.join(" ")} failed: ${r.stderr || r.stdout}`);
+    return r;
+  };
+  g("init", "-q", "-b", "main");
+  g("config", "user.email", "t@t");
+  g("config", "user.name", "t");
+  // resolveTargetBranch falls back to `git config init.defaultBranch`, which reads system
+  // config — "master" on this machine. Pin it so the target branch is one the fixture has.
+  g("config", "init.defaultBranch", "main");
+  // A global core.hooksPath would run the operator's real hooks in this throwaway repo and
+  // fail the seed commit — leaving no HEAD, so `git branch` silently makes no branch.
+  writeFileSync(join(dir, "seed.txt"), "seed\n");
+  g("add", "-A");
+  g("commit", "-qm", "seed");
+  g("branch", branch);
+  ok(!existsSync(join(dir, "plans")), "fixture must have no plans/ — it would mask the RED");
+  return dir;
+}
+
+async function runMain(dir, config, { branch = "autonomous/feat-x", projectRow = null } = {}) {
+  let buf = "";
+  const write = process.stdout.write;
+  const ewrite = process.stderr.write;
+  process.stdout.write = (s) => { buf += s; return true; };
+  process.stderr.write = (s) => { buf += s; return true; };
+  try {
+    await main({
+      _argv:       ["--branches", branch, "--project-dir", dir, "--dry-run"],
+      _config:     config,
+      _projectRow: projectRow,
+    });
+  } finally {
+    process.stdout.write = write;
+    process.stderr.write = ewrite;
+  }
+  return buf;
+}
+
+test("PAUSE: an unresolvable template stops the merge instead of reaching --plans-dir", async () => {
+  const dir = tmpRepo();
+  try {
+    const outText = await runMain(dir, { plansDir: "{codeRoot}/x/{project}" });
+    match(outText, /PAUSE: Plans directory template cannot resolve/);
+    match(outText, /\{codeRoot\}/);
+    match(outText, /RE-RUN EXACTLY/);
+    // The assertion that matters. Asserting only on the word PAUSE would still pass if the
+    // driver printed the banner AND the command — which is the bug.
+    ok(!outText.includes("Spawn a background agent"), "must not reach the spawn");
+    ok(!outText.includes("--plans-dir"), "must not emit a broken --plans-dir");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("PAUSE: fires on {branch} too — known globally, unresolvable for a plans dir", async () => {
+  const dir = tmpRepo();
+  try {
+    const outText = await runMain(dir, { plansDir: "{root_parent}/{branch}/plans" });
+    match(outText, /PAUSE: Plans directory template cannot resolve/);
+    match(outText, /\{branch\}/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The false-positive guard: without it the pause could fire on everything and the suite
+// would report green.
+test("PAUSE: a valid template still reaches the spawn", async () => {
+  const dir = tmpRepo();
+  try {
+    const outText = await runMain(dir, { plansDir: "{root}/plans" });
+    ok(!outText.includes("PAUSE: Plans directory template"), "valid template must not pause");
+    match(outText, /would spawn a background agent|Spawn a background agent/i);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Ordering: a typo'd branch and a stale template can both be true. The branch name is the
+// more actionable failure, so it must win.
+test("a missing branch is reported before the plansDir pause", async () => {
+  const dir = tmpRepo();
+  try {
+    const outText = await runMain(dir, { plansDir: "{codeRoot}/x" }, { branch: "autonomous/typo-brnach" });
+    match(outText, /branch not found/);
+    ok(!outText.includes("PAUSE: Plans directory template"), "branch check must come first");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Precedence the hand-rolled resolver never saw: the project row's plans_dir column.
+test("the project row's plans_dir column wins over cfg.plansDir", async () => {
+  const dir = tmpRepo();
+  mkdirSync(join(dir, "row-plans"));
+  try {
+    const outText = await runMain(
+      dir,
+      { plansDir: "{root}/plans" },
+      { projectRow: { plans_dir: `${dir}/row-plans` } },
+    );
+    match(outText, new RegExp(`plansDir:\\s+${dir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/row-plans`));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

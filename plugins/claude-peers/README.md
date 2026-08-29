@@ -23,8 +23,27 @@ The flag is the only signal read. If a session that cannot render channels is no
 |---|---|
 | `list_peers` | Discover other sessions (`scope`: `machine` / `directory` / `repo`) |
 | `send_message` | Message a peer by id — lands in their console immediately |
-| `set_summary` | Publish a 1–2 sentence "what I'm working on" |
+| `set_summary` | Publish a 1–2 sentence "what I'm working on", plus the directory you're working in (both required) |
 | `check_messages` | Recover messages the broker is holding — including ones already pushed as a notification, so a push missed while idle is not lost |
+
+### Reading a peer row
+
+```
+ID: b381npjl
+  PID: 53960
+  CWD: C:/code/.worktrees/primordial/nursery-stage
+  Checkout: C:/code/primordial
+  Summary: primordial PORTER — nursery-stage IMPLEMENTED, all four plan steps written,
+    workspace green. Now: mutation sweep, then fmt/clippy, then swarm review, then land.
+  Summary set: 2026-08-23T16:12:04.310Z
+  Last seen: 2026-08-23T17:52:19.882Z
+```
+
+**`Summary set` and `Last seen` are different facts, and the distinction is the point.** `Last seen` is the heartbeat — it advances every few seconds for as long as the session lives, so it tells you a peer is *alive* and nothing about whether what it says is still true. A summary left unchanged for hours sits beside a `Last seen` from ten seconds ago and reads as current. Only `Summary set` tells you it isn't. Re-call `set_summary` whenever your work changes; nothing else can refresh it.
+
+**`CWD` is what the agent reported, not where it launched.** The registered directory is fixed when the MCP server spawns and the agent's own `cd` cannot move it — it runs in tool subprocesses. So a session that creates a git worktree mid-run would otherwise still report the checkout it started in, and peers could not tell which tree it is committing to. `set_summary` requires `cwd` for exactly this reason; a session that has not set one yet falls back to the launch directory.
+
+**`Checkout` stays the launch repo** even when `CWD` is a worktree: a worktree is its own git toplevel, so following it would split `scope: "repo"` across trees and stop a fleet working one repository from discovering each other.
 
 ## CLI
 

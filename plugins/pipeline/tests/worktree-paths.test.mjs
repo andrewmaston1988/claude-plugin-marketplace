@@ -10,11 +10,14 @@ import {
   branchLocal,
   branchType,
   substitute,
+  unresolvedPlaceholders,
+  PLACEHOLDER_KEYS,
   featureWorktreePath,
   orchestratorWorktreePath,
   handlerWorktreePath,
   reportPath,
 } from "../src/worktree-paths.mjs";
+import { PLANS_DIR_KEYS } from "../src/plans-resolver.mjs";
 
 // ── branchLocal / branchType helpers ─────────────────────────────────────────
 
@@ -50,6 +53,38 @@ test("substitute: known placeholders replaced; literal text preserved", () => {
 test("substitute: unknown placeholders left untouched", () => {
   const out = substitute("{a}/{b}", { a: "A" });
   equal(out, "A/{b}");
+});
+
+// ── unresolvedPlaceholders ──────────────────────────────────────────────────
+
+test("unresolvedPlaceholders: names a token outside the vocabulary", () => {
+  deepEqual(unresolvedPlaceholders("C:/x/{codeRoot}/y", PLANS_DIR_KEYS), ["codeRoot"]);
+});
+
+// The case the knownKeys parameter exists for: {branch} is a real placeholder elsewhere in
+// the plugin, so a check against PLACEHOLDER_KEYS clears it — and a plansDir template naming
+// it resolves to a literal {branch} directory with nothing to say so.
+test("unresolvedPlaceholders: {branch} is unresolved for a plans dir but known globally", () => {
+  deepEqual(unresolvedPlaceholders("C:/x/{branch}/y", PLANS_DIR_KEYS), ["branch"]);
+  deepEqual(unresolvedPlaceholders("C:/x/{branch}/y", PLACEHOLDER_KEYS), []);
+});
+
+test("unresolvedPlaceholders: a fully-supported template reports nothing", () => {
+  deepEqual(unresolvedPlaceholders("{root_parent}/x/{project}/plans", PLANS_DIR_KEYS), []);
+});
+
+test("unresolvedPlaceholders: empty and nullish inputs report nothing", () => {
+  deepEqual(unresolvedPlaceholders(""), []);
+  deepEqual(unresolvedPlaceholders(null), []);
+  deepEqual(unresolvedPlaceholders(undefined), []);
+});
+
+test("unresolvedPlaceholders: a repeated token reports once", () => {
+  deepEqual(unresolvedPlaceholders("{nope}/a/{nope}/b", PLANS_DIR_KEYS), ["nope"]);
+});
+
+test("unresolvedPlaceholders: defaults to the global vocabulary", () => {
+  deepEqual(unresolvedPlaceholders("{feature}/{nope}"), ["nope"]);
 });
 
 test("substitute: null/undefined render as empty strings", () => {

@@ -1,7 +1,8 @@
-import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal } from "./stream.mjs";
+import { isCloudModel } from "./models.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -54,6 +55,44 @@ export function readResult(dir, id) {
   } catch {
     return null; // corrupt result — treat as absent so resume re-runs it
   }
+}
+
+// The leaf's raw stream-json events — the deeper read a grading agent reaches
+// for when the result alone does not say whether the work was any good.
+export function transcriptPath(dir, id) {
+  return join(dir, "results", `${id}.log`);
+}
+
+// Every leaf a run wrote a result for, with both paths. `cloudOnly` is the
+// grading store's scope: Claude tiers are known quantities and produce no row.
+export function listLeaves(dir, { cloudOnly = false } = {}) {
+  const resultsRoot = join(dir, "results");
+  if (!existsSync(resultsRoot)) return [];
+  return readdirSync(resultsRoot)
+    .filter((f) => f.endsWith(".json"))
+    .map((f) => {
+      const id = f.slice(0, -".json".length);
+      const result = readResult(dir, id);
+      return result && { id, model: result.model, result, resultPath: resultPath(dir, id), transcriptPath: transcriptPath(dir, id) };
+    })
+    .filter((leaf) => leaf && (!cloudOnly || isCloudModel(leaf.model)));
+}
+
+// The mechanical block a score row copies — a projection of an existing result,
+// never a re-read of the leaf. These columns make a grade auditable; they never
+// replace one (numTurns cannot separate three turns doing the wrong thing from
+// thirty being thorough).
+export function mechanicalOf(result) {
+  return {
+    ok: result.ok ?? null,
+    exit: result.exit ?? null,
+    durationMs: result.durationMs ?? null,
+    tokens: result.tokens ? tokenTotal(result.tokens) : null,
+    costUsd: result.costUsd ?? null,
+    numTurns: result.numTurns ?? null,
+    schemaRetried: result.schemaRetried ?? false,
+    citations: result.citations ?? null,
+  };
 }
 
 export function writeManifestSnapshot(dir, doc) {
@@ -351,7 +390,7 @@ export function renderProvenance({ tasks = [], truncations = [] }) {
   return lines.join("\n") + "\n";
 }
 
-export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate }) {
+export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate, gradeable }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -396,6 +435,17 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
       const chain = wt.taskIds?.length > 1 ? ` ${dim(`(${wt.taskIds.join(" → ")})`)}` : "";
       lines.push(`  ${bold(wt.name)}: ${magenta(wt.branch)} at ${wt.path}${chain}`);
     }
+  }
+  // LAST, and printed by the engine — not left to the session's memory. Which
+  // model to use for what is otherwise decided by remembered incidents, and the
+  // store only fills if something asks. A skill instruction is trust; this is
+  // mechanical, and it fires whether or not the skill was ever read.
+  if (gradeable?.count > 0) {
+    lines.push(bold(`<IMPORTANT>${gradeable.count} results are awaiting grading — you MUST always complete this step.</IMPORTANT>`));
+    lines.push(`  node ${gradeable.cli} grade --init ${gradeable.resultsDir}`);
+    lines.push(dim("  Fill in every relevant capability and all universal aspects, then grade --file."));
+    lines.push(dim("  This is the only record of how these models performed; skipping it loses the"));
+    lines.push(dim("  run's evidence."));
   }
   return lines.join("\n");
 }

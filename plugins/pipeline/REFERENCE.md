@@ -385,6 +385,8 @@ Every config-driven path key in the plugin is resolved through one helper:
 `src/worktree-paths.mjs`. The rule:
 
 1. Substitute `{placeholder}` tokens from `vars`; unknown placeholders pass through literally. `{config_dir}` is filled from the `configDir` option.
+
+   Pass-through means a template naming something the call site cannot supply resolves to a path with the token still in it, silently. `unresolvedPlaceholders(value, knownKeys)` in `src/worktree-paths.mjs` is how a caller asks whether that happened — `knownKeys` is the **call site's own** vocabulary, not the global list. For plans dirs that is `PLANS_DIR_KEYS` (`src/plans-resolver.mjs`): `{branch}` is a legal placeholder elsewhere but is never substituted for a plans dir, so checking it against `PLACEHOLDER_KEYS` would clear a template that cannot resolve. `pipeline doctor` warns on any project whose plansDir still holds a placeholder or names a directory that is not there, and `/merge`'s driver pauses rather than passing such a path to `merge.mjs`.
 2. Expand a leading `~/` to `os.homedir()`.
 3. If the result is absolute (POSIX `/...`, drive letter `C:\...`, UNC `\\server\share`), use verbatim. Otherwise resolve against `resolveBase`.
 

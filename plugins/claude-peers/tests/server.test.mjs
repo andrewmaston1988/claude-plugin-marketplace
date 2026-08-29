@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { createPeersServer, TOOLS, INSTRUCTIONS, POLLING_INSTRUCTIONS } from '../src/mcp/server.mjs';
+import { createPeersServer, TOOLS, INSTRUCTIONS, POLLING_INSTRUCTIONS, wrapAt, summaryNag, SUMMARY_STALE_MS } from '../src/mcp/server.mjs';
 
 const FIXTURE = JSON.parse(fs.readFileSync(new URL('./fixtures/initialize.json', import.meta.url), 'utf8'));
 const CONFIG = { port: 65001, pollIntervalMs: 1000, heartbeatIntervalMs: 15000 };
@@ -116,6 +116,171 @@ test('tools/list returns the four upstream tools with identical names and requir
   assert.deepEqual(tools[0].inputSchema.required, ['scope']);
   assert.deepEqual(tools[1].inputSchema.required, ['to_id', 'message']);
   assert.equal(tools, TOOLS);
+});
+
+// cwd is REQUIRED, not optional: the registered cwd is only ever the session's
+// launch dir, so a peer that moved into a worktree is invisible unless it says
+// so — and an optional field is one an agent forgets.
+test('set_summary requires cwd in its schema', async () => {
+  const { server } = makeServer();
+  const { tools } = await server._onRequest('tools/list', {});
+  const setSummary = tools.find(t => t.name === 'set_summary');
+  assert.deepEqual(setSummary.inputSchema.required, ['summary', 'cwd']);
+  assert.ok(setSummary.inputSchema.properties.cwd);
+});
+
+test('set_summary refuses a blank cwd rather than storing a summary without one', async () => {
+  const calls = [];
+  const { server } = makeServer({
+    fetchImpl: async (url, init) => { calls.push({ url, body: JSON.parse(init.body) }); return okJson({ id: 'p1' }); },
+  });
+  await server._register();
+  calls.length = 0;
+
+  for (const bad of [undefined, '', '   ']) {
+    const res = await server._onRequest('tools/call', { name: 'set_summary', arguments: { summary: 'working', cwd: bad } });
+    assert.equal(res.isError, true, `cwd ${JSON.stringify(bad)} was accepted`);
+    assert.match(res.content[0].text, /requires `cwd`/);
+  }
+  assert.equal(calls.filter(c => c.url.includes('/set-summary')).length, 0, 'a summary was stored without a working dir');
+});
+
+test('set_summary sends the reported cwd, leaving repo scoping on the launch repo', async () => {
+  const calls = [];
+  const { server } = makeServer({
+    fetchImpl: async (url, init) => { calls.push({ url, body: JSON.parse(init.body) }); return okJson({ id: 'p1' }); },
+  });
+  await server._register();
+
+  const res = await server._onRequest('tools/call', {
+    name: 'set_summary',
+    arguments: { summary: 'porting the nursery stage', cwd: 'C:/code/.worktrees/primordial/nursery-stage' },
+  });
+  assert.equal(res.isError, undefined);
+  const sent = calls.find(c => c.url.includes('/set-summary'));
+  assert.equal(sent.body.cwd, 'C:/code/.worktrees/primordial/nursery-stage');
+  assert.equal(sent.body.summary, 'porting the nursery stage');
+  // git_root is deliberately NOT sent: repo scope must keep grouping a fleet
+  // working one repo from separate worktrees, which following the worktree
+  // toplevel would break.
+  assert.equal('git_root' in sent.body, false);
+});
+
+test('wrapAt: wraps on word boundaries at the width, indenting continuations', () => {
+  const words = Array.from({ length: 40 }, (_, i) => `word${i}`).join(' ');
+  const lines = wrapAt(words, 40, '    ').split('\n');
+  assert.ok(lines.length > 1, 'did not wrap');
+  assert.equal(lines[0].length <= 40, true, lines[0]);
+  for (const l of lines.slice(1)) {
+    assert.match(l, /^ {4}/, `continuation not indented: ${JSON.stringify(l)}`);
+    assert.equal(l.trimStart().length <= 40, true, l);
+  }
+  // no word was cut in half
+  assert.deepEqual(lines.join('\n').split(/\s+/).filter(Boolean), words.split(' '));
+});
+
+test('wrapAt: breaks a single token longer than the width rather than overrunning', () => {
+  const long = 'C:/' + 'x'.repeat(200);
+  for (const l of wrapAt(long, 40).split('\n')) {
+    assert.equal(l.trimStart().length <= 40, true, `overran: ${l.length}`);
+  }
+});
+
+test('wrapAt: short text and empty input pass through unwrapped', () => {
+  assert.equal(wrapAt('short one', 120), 'short one');
+  assert.equal(wrapAt('', 120), '');
+  assert.equal(wrapAt(undefined, 120), '');
+});
+
+test('list_peers wraps a long summary instead of emitting one enormous line', async () => {
+  const summary = Array.from({ length: 60 }, (_, i) => `token${i}`).join(' ');
+  const { server } = makeServer({
+    fetchImpl: async () => okJson([
+      { id: 'p1', pid: 1, cwd: 'C:/work/repo', git_root: null, summary, summary_updated_at: '2026-08-23T10:00:00.000Z', last_seen: '2026-08-23T12:00:00.000Z' },
+    ]),
+  });
+  const res = await server._onRequest('tools/call', { name: 'list_peers', arguments: { scope: 'machine' } });
+  for (const l of res.content[0].text.split('\n')) {
+    assert.equal(l.length <= 130, true, `line too long (${l.length}): ${l.slice(0, 60)}…`);
+  }
+});
+
+// The peer who can refresh a summary is the one party that never sees its own
+// row, so the reminder has to travel back to them on calls they already make.
+test('summaryNag: silent while fresh, fires once past the threshold', () => {
+  const t0 = 1_000_000;
+  assert.equal(summaryNag('working', t0, t0 + SUMMARY_STALE_MS - 1), null);
+  const nag = summaryNag('working', t0, t0 + SUMMARY_STALE_MS);
+  assert.match(nag, /\[claude-peers\] WARNING/);
+  assert.match(nag, /set_summary/);
+});
+
+test('summaryNag: says nothing when no summary has been published yet', () => {
+  assert.equal(summaryNag('', null, 9_999_999), null);
+  assert.equal(summaryNag('', 1000, 9_999_999), null);
+  assert.equal(summaryNag('set but unstamped', null, 9_999_999), null);
+});
+
+test('summaryNag: reports the age', () => {
+  const t0 = 1_000_000;
+  assert.match(summaryNag('x', t0, t0 + 20 * 60_000), /20m stale/);
+  assert.match(summaryNag('x', t0, t0 + 252 * 60_000), /4h12m stale/);
+});
+
+test('send_message appends the nag once the sender own summary is stale', async () => {
+  let now = 1_000_000;
+  const server = createPeersServer({
+    config: CONFIG, input: new PassThrough(), output: new PassThrough(),
+    _fetch: async () => okJson({ id: 'p1', ok: true }),
+    _detectChannels: () => true,
+    _now: () => now,
+  });
+  await server._register();
+  await server._onRequest('tools/call', { name: 'set_summary', arguments: { summary: 'reading the plan', cwd: 'C:/work/repo' } });
+
+  let res = await server._onRequest('tools/call', { name: 'send_message', arguments: { to_id: 'x', message: 'hi' } });
+  assert.equal(res.content[0].text.includes('WARNING'), false, 'nagged while fresh');
+
+  now += SUMMARY_STALE_MS;
+  res = await server._onRequest('tools/call', { name: 'send_message', arguments: { to_id: 'x', message: 'hi' } });
+  assert.match(res.content[0].text, /Message sent to peer x/);
+  assert.match(res.content[0].text, /\[claude-peers\] WARNING/);
+
+  // and setting it again clears the nag
+  await server._onRequest('tools/call', { name: 'set_summary', arguments: { summary: 'now implementing', cwd: 'C:/work/repo' } });
+  res = await server._onRequest('tools/call', { name: 'send_message', arguments: { to_id: 'x', message: 'hi' } });
+  assert.equal(res.content[0].text.includes('WARNING'), false, 'still nagging after a refresh');
+});
+
+test('an inbound message carries the nag when the receiver own summary is stale', async () => {
+  let now = 1_000_000;
+  const inbox = [{ id: 1, from_id: 'other', text: 'ping', sent_at: 'now' }];
+  const { server, notifications } = (() => {
+    const output = new PassThrough();
+    const written = [];
+    output.on('data', (c) => written.push(c.toString()));
+    const s = createPeersServer({
+      config: CONFIG, input: new PassThrough(), output,
+      _fetch: async (url) => okJson(
+        String(url).includes('/poll-messages') ? { messages: inbox.splice(0) }
+          : String(url).includes('/list-peers') ? []
+            : { id: 'p1', ok: true },
+      ),
+      _detectChannels: () => true,
+      _now: () => now,
+    });
+    return { server: s, notifications: () => written.join('').split('\n').filter(Boolean).map(JSON.parse) };
+  })();
+
+  await server._register();
+  await server._onRequest('tools/call', { name: 'set_summary', arguments: { summary: 'reading the plan', cwd: 'C:/work/repo' } });
+  now += SUMMARY_STALE_MS;
+  await server._poll();
+
+  const pushed = notifications().find(n => n.method === 'notifications/claude/channel');
+  assert.ok(pushed, 'no channel notification');
+  assert.match(pushed.params.content, /^ping/);
+  assert.match(pushed.params.content, /\[claude-peers\] WARNING/);
 });
 
 test('unknown rpc method throws with rpcCode -32601', async () => {

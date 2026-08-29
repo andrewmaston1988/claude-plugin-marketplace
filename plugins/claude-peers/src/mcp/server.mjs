@@ -76,7 +76,7 @@ export const TOOLS = [
   {
     name: "set_summary",
     description:
-      "Set a brief summary (1-2 sentences) of what you are currently working on. This is visible to other Claude Code instances when they list peers.",
+      "Set a brief summary (1-2 sentences) of what you are currently working on, and the directory you are working IN. Both are visible to other Claude Code instances when they list peers. Call this again whenever what you are doing changes, not only at startup — peers read your summary as current and act on it, and only you can refresh it. Your row shows when you last set it, so a stale one is at least visible.",
     inputSchema: {
       type: "object",
       properties: {
@@ -84,8 +84,13 @@ export const TOOLS = [
           type: "string",
           description: "A 1-2 sentence summary of your current work",
         },
+        cwd: {
+          type: "string",
+          description:
+            "Absolute path of the directory you are actually working in — the worktree, if you are in one. Your peer row's CWD is where your session was launched and cannot detect a worktree you moved into, so peers cannot tell which tree you are committing to unless you say. Run `git rev-parse --show-toplevel` if unsure.",
+        },
       },
-      required: ["summary"],
+      required: ["summary", "cwd"],
     },
   },
   {
@@ -98,6 +103,46 @@ export const TOOLS = [
     },
   },
 ];
+
+// Summaries run to several hundred characters and rendered as one line they
+// push every following field off the right edge. Wrap on word boundaries;
+// break a single over-long token (a path) rather than let it overrun.
+export function wrapAt(s, width = 120, indent = "    ") {
+  const out = [];
+  let line = "";
+  for (const word of String(s ?? "").split(/\s+/).filter(Boolean)) {
+    if (!line) line = word;
+    else if (line.length + 1 + word.length <= width) line += ` ${word}`;
+    else { out.push(line); line = word; }
+    while (line.length > width) {
+      out.push(line.slice(0, width));
+      line = line.slice(width);
+    }
+  }
+  if (line) out.push(line);
+  return out.join(`\n${indent}`);
+}
+
+// Peers read a summary as current and act on it. Nothing else can refresh it,
+// and the peer who could is the one party that never sees its own row — so the
+// reminder has to travel back to them, on the calls they already make.
+export const SUMMARY_STALE_MS = 15 * 60 * 1000;
+
+export function formatAge(ms) {
+  const m = Math.floor(ms / 60000);
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}m`;
+}
+
+// Null when there is nothing to say. Only fires on a summary that has gone
+// stale — a session that has published nothing yet is still finding its feet,
+// and nagging it before it has anything to say is noise.
+export function summaryNag(summary, setAt, now, staleMs = SUMMARY_STALE_MS) {
+  if (!summary || !setAt) return null;
+  const age = now - new Date(setAt).getTime();
+  if (!(age >= staleMs)) return null;
+  return `[claude-peers] WARNING: Your summary is ${formatAge(age)} stale — please set it via \`set_summary\`.`;
+}
 
 const text = (t, isError = false) => ({ content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) });
 const errText = (prefix, e) => text(`${prefix}: ${e instanceof Error ? e.message : String(e)}`, true);
@@ -120,12 +165,18 @@ export function createPeersServer({
   _cwd = process.cwd(),
   _setInterval = setInterval,
   _detectChannels = detectChannelsEnabled,
+  _now = () => Date.now(),
 } = {}) {
   const brokerUrl = `http://127.0.0.1:${config.port}`;
   const binPath = fileURLToPath(new URL("../../bin/claude-peers.mjs", import.meta.url));
 
   let myId = null;
   let myGitRoot = null;
+  // Our own published summary, tracked locally: both nag sites would otherwise
+  // need a broker round-trip to read a row we already know. Only ever written
+  // by the set_summary handler, which requires registration.
+  let mySummary = "";
+  let mySummaryAt = null;
   let channelsAvailable; // memoised: reading the process table is not free
 
   async function isBrokerAlive() {
@@ -210,10 +261,22 @@ export function createPeersServer({
         });
         if (peers.length === 0) return text(`No other Claude Code instances found (scope: ${scope}).`);
         const lines = peers.map((p) => {
-          const parts = [`ID: ${p.id}`, `PID: ${p.pid}`, `CWD: ${p.cwd}`];
-          if (p.git_root) parts.push(`Repo: ${p.git_root}`);
+          // The reported working directory wins: the registered `cwd` is only
+          // ever where the session LAUNCHED — fixed when the MCP server spawns,
+          // and unmoved by the agent's own `cd`, so a session that created a
+          // worktree mid-run reports the checkout it started in.
+          const parts = [`ID: ${p.id}`, `PID: ${p.pid}`, `CWD: ${p.work_cwd || p.cwd}`];
+          // The checkout the session was launched against, and what repo scope
+          // groups on — deliberately NOT the worktree above it, so a fleet
+          // working one repository from separate trees still finds each other.
+          if (p.git_root) parts.push(`Checkout: ${p.git_root}`);
           if (p.tty) parts.push(`TTY: ${p.tty}`);
-          if (p.summary) parts.push(`Summary: ${p.summary}`);
+          if (p.summary) parts.push(`Summary: ${wrapAt(p.summary)}`);
+          // Distinct from Last seen, which the heartbeat bumps every few
+          // seconds: a summary can be hours older than the liveness beside it
+          // and still read as current. Covers the working directory too — one
+          // call sets both.
+          if (p.summary) parts.push(`Summary set: ${p.summary_updated_at ?? "unknown"}`);
           parts.push(`Last seen: ${p.last_seen}`);
           return parts.join("\n  ");
         });
@@ -228,7 +291,10 @@ export function createPeersServer({
       try {
         const result = await brokerFetch("/send-message", { from_id: myId, to_id: args.to_id, text: args.message });
         if (!result.ok) return text(`Failed to send: ${result.error}`, true);
-        return text(`Message sent to peer ${args.to_id}`);
+        // Telling a peer what you are doing is the moment your published
+        // summary should agree with you.
+        const nag = summaryNag(mySummary, mySummaryAt, _now());
+        return text([`Message sent to peer ${args.to_id}`, nag].filter(Boolean).join("\n\n"));
       } catch (e) {
         return errText("Error sending message", e);
       }
@@ -236,9 +302,18 @@ export function createPeersServer({
 
     async set_summary(args) {
       if (!myId) return text("Not registered with broker yet", true);
+      // The registered cwd is where the SESSION launched; a session that moves
+      // into a worktree mid-run cannot detect it (the MCP server's own cwd is
+      // fixed at spawn), so the working directory has to be told to us.
+      const workCwd = String(args.cwd ?? "").trim();
+      if (!workCwd) {
+        return text("set_summary requires `cwd` — the directory you are actually working in. Run `git rev-parse --show-toplevel` if unsure.", true);
+      }
       try {
-        await brokerFetch("/set-summary", { id: myId, summary: args.summary });
-        return text(`Summary updated: "${args.summary}"`);
+        await brokerFetch("/set-summary", { id: myId, summary: args.summary, cwd: workCwd });
+        mySummary = String(args.summary ?? "");
+        mySummaryAt = _now();
+        return text(`Summary updated: "${args.summary}" (working in ${workCwd})`);
       } catch (e) {
         return errText("Error setting summary", e);
       }
@@ -304,13 +379,16 @@ export function createPeersServer({
           const sender = peers.find((p) => p.id === msg.from_id);
           if (sender) {
             fromSummary = sender.summary;
-            fromCwd = sender.cwd;
+            fromCwd = sender.work_cwd || sender.cwd;
           }
         } catch {
           // sender context is best-effort
         }
+        // The highest-attention moment a peer gets: it is about to reply, and
+        // restating its context anyway.
+        const nag = summaryNag(mySummary, mySummaryAt, _now());
         rpc.notify("notifications/claude/channel", {
-          content: msg.text,
+          content: [msg.text, nag].filter(Boolean).join("\n\n"),
           meta: { from_id: msg.from_id, from_summary: fromSummary, from_cwd: fromCwd, sent_at: msg.sent_at },
         });
         log(`pushed message from ${msg.from_id}`);

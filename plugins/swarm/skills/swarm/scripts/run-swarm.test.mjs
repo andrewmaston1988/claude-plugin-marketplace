@@ -258,32 +258,37 @@ test("readRunLog: a malformed line is skipped, not fatal", async () => {
 // gate asks for a leaf count, a model mix, and a batching point; none is
 // answerable without the grouping arithmetic orchestrating-agents owns.
 
-test("the strategy pause delivers execution-strategy.md by resolvable path ★", async () => {
+test("the strategy pause delivers swarm:executing-swarms by resolvable path ★", async () => {
   const { readFileSync, existsSync } = await import("node:fs");
   const src = readFileSync(new URL("./run-swarm.mjs", import.meta.url), "utf8");
   // The pause hands over a path, not a summary — an inline copy would rot
   // against the real procedure. So the contract is: the file exists, and the
   // driver resolves it relative to itself rather than to the caller's cwd.
-  ok(src.includes('new URL("../execution-strategy.md", import.meta.url)'),
+  // Red: point STRATEGY_DOC at a sibling that does not exist, or at a cwd-relative path.
+  ok(src.includes('new URL("../../executing-swarms/SKILL.md", import.meta.url)'),
      "must resolve the doc from import.meta.url, never process.cwd()");
-  ok(existsSync(new URL("../execution-strategy.md", import.meta.url)),
+  ok(existsSync(new URL("../../executing-swarms/SKILL.md", import.meta.url)),
      "the doc the pause points at must exist");
   ok(src.includes("swarm:orchestrating-agents"),
      "must still name the prerequisite skill — it gates step 1");
 });
 
-test("execution-strategy.md carries the procedure the gate presumes", async () => {
+test("the delivered docs carry the procedure the gate presumes", async () => {
   const { readFileSync } = await import("node:fs");
-  const doc = readFileSync(new URL("../execution-strategy.md", import.meta.url), "utf8");
-  // Each is an input the gate's three questions consume.
+  const doc = readFileSync(new URL("../../executing-swarms/SKILL.md", import.meta.url), "utf8");
+  // Each is an input the gate's three questions consume. Red: delete any one of
+  // these sections from the doc the pause points at.
   ok(/orchestrating-agents/.test(doc), "grouping arithmetic");
-  ok(/goal · return_shape/.test(doc), "the contract frame");
   ok(/digraph/.test(doc), "the placement procedure");
   ok(/isolation\.from/.test(doc) && /integrate/.test(doc),
      "widening — the fields that make a second wave unnecessary");
   ok(/forEach/.test(doc) && /when/.test(doc) && /compute/.test(doc),
      "the runtime-expansion fields");
-  ok(/not comparable/.test(doc), "both sides of the cost comparison");
+  // executing-swarms hands the contract frame and the cost wording back to
+  // swarm:swarm rather than keeping a second copy, so they are pinned there.
+  const skill = readFileSync(new URL("../SKILL.md", import.meta.url), "utf8");
+  ok(/goal · return_shape/.test(skill), "the contract frame");
+  ok(/not comparable/.test(skill), "both sides of the cost comparison");
 });
 
 test("strategy is recorded like a gate answer — presence, not truthiness", () => {

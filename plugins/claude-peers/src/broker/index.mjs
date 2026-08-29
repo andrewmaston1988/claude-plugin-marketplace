@@ -84,6 +84,9 @@ export function createBroker({
         git_root: body.git_root ?? null,
         tty: body.tty ?? null,
         summary: body.summary ?? "",
+        // Null until a summary is actually set — an empty summary has no age,
+        // and registered_at would read as one.
+        summary_updated_at: body.summary ? now : null,
         kind: "session",
         registered_at: now,
         last_seen: now,
@@ -101,10 +104,19 @@ export function createBroker({
       return { ok: true };
     },
 
+    // Stamped separately from last_seen, which the heartbeat bumps every few
+    // seconds: a peer that set its summary hours ago still looks freshly seen,
+    // so the row reads as current when only the liveness is.
     "/set-summary"(body) {
       const peer = state.peers[body.id];
       if (peer) {
         peer.summary = String(body.summary ?? "");
+        peer.summary_updated_at = peer.summary ? _now().toISOString() : null;
+        // Display only — `git_root` deliberately stays the LAUNCH repo. A
+        // worktree is its own toplevel, so following it here would split
+        // scope:"repo" across trees and stop a fleet working the same repo from
+        // discovering each other, which is the thing repo scope is for.
+        if (body.cwd) peer.work_cwd = String(body.cwd);
         persist();
       }
       return { ok: true };

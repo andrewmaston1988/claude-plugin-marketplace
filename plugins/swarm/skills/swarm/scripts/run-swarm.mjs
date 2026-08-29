@@ -210,9 +210,9 @@ function tokenLines(roster) {
 
 const STATE_DIR = join(process.env.SWARM_HOME || join(process.env.USERPROFILE || process.env.HOME || ".", ".swarm"), "driver");
 
-// The strategy procedure lives in one file and is delivered by path, never
-// summarised here — an inline copy would rot against the real one.
-const STRATEGY_DOC = fileURLToPath(new URL("../execution-strategy.md", import.meta.url))
+// The shape-decision procedure lives in swarm:executing-swarms and is delivered by
+// path, never summarised here — an inline copy would rot against the real one.
+const STRATEGY_DOC = fileURLToPath(new URL("../../executing-swarms/SKILL.md", import.meta.url))
   .split("\\")
   .join("/");
 
@@ -282,11 +282,11 @@ async function main() {
           "READ THIS NOW — mandatory, in full:",
           `  ${STRATEGY_DOC}`,
           "",
-          "It is a seven-step procedure and every step produces an input the gate",
+          "It is a five-step procedure and every step produces an input the gate",
           "consumes: the grouping arithmetic (via Skill(swarm:orchestrating-agents),",
           "which it will send you to first), the contract frame, the placement",
-          "digraph that yields the topology, one-manifest-vs-two-waves, the model",
-          "roster and quota, both sides of the cost comparison, and validate.",
+          "digraph that yields the topology, one-manifest-vs-two-waves, and the",
+          "hand-off to models, cost and validate.",
           "",
           "Then re-run with --strategy to confirm it is settled. Recorded once;",
           "you will not be asked again for this manifest.",
