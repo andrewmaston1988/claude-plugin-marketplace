@@ -58,6 +58,19 @@ test('keepalive-init template answers the ScheduleWakeup no-cache-warming contra
   assert.match(tmpl, /operator-opted-in cache keepalive/); // reason string says what it really is
 });
 
+// The 2026-08-31 stall: ScheduleWakeup's RESULT text ("Nothing more to do this
+// turn — the harness re-invokes you…") lands after the injection prose and
+// reads as a stop order, so a session that scheduled the tick as a lone call
+// abandoned its mid-flight task. The template must (a) instruct batching the
+// tick with the next real tool call and (b) pre-empt the result line by name.
+// RED input: a template missing either instruction — the exact pre-fix text.
+test('keepalive-init template defuses the ScheduleWakeup result stop-order', () => {
+  const tmpl = fs.readFileSync(new URL('../templates/keepalive-init.md', import.meta.url), 'utf8');
+  assert.match(tmpl, /same assistant message as your next real tool call/i);
+  assert.match(tmpl, /not a stop order/i);
+  assert.match(tmpl, /Nothing more to do this turn/); // pre-empts the exact line
+});
+
 // Third-party providers expose no prompt-cache TTL — nothing to keep warm, so
 // the keepalive is Claude-model-only.
 test('isThirdPartyModel: non-Claude model on the newest turn skips keepalive', () => {
