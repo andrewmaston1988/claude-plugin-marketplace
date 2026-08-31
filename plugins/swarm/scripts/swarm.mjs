@@ -252,7 +252,7 @@ function getFlag(name, args) {
   return i < 0 ? undefined : args[i + 1];
 }
 
-// `grade --init` — one skeleton row per :cloud leaf, every grade null. It is
+// `grade --init` — one skeleton row per model leaf, every grade null. It is
 // deliberately unappendable as written: validation rejects a null universal, so
 // an untouched skeleton cannot land.
 async function cmdGradeInit(dir) {
@@ -329,7 +329,8 @@ async function cmdGradeFile(path) {
   for (const r of batch.rows) {
     const result = readResult(dir, r.leaf);
     const declared = cacheEntries.get(result.model);
-    if (!declared) err(dim(`warning: ${result.model} is not in models-cache.json — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
+    const { isClaudeModel } = await import("../src/models.mjs");
+    if (!declared && !isClaudeModel(result.model)) err(dim(`warning: ${result.model} is not in models-cache.json — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
     rows.push({
       ts,
       resultsDir: dir,
