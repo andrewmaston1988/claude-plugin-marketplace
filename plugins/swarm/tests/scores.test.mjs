@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync } from "n
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, scoresPath, shrink, fairPrior, PRIOR_WEIGHT,
+  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, overall, scoresPath, shrink, fairPrior, PRIOR_WEIGHT,
 } from "../src/scores.mjs";
 import { ASPECTS, OUTCOMES } from "../src/aspects.mjs";
 
@@ -385,4 +385,41 @@ test("validateRow: Claude tiers are accepted, junk models are not", () => {
   }
   const errs = validateRow(row({ model: "not-a-model" }));
   ok(errs.some((e) => e.startsWith("model:")), String(errs));
+});
+
+// ── overall ──────────────────────────────────────────────────────────────────
+// Red input: overall() must rank models by the mean of their four UNIVERSAL
+// weighted scores — the single-table ranking perf lacked. A capability grade
+// (geometry 2 below) must NOT drag the combined score.
+test("overall: one table, combined = mean of universal weighted, capabilities excluded", () => {
+  const rows = [];
+  for (let i = 0; i < 6; i++) {
+    rows.push(row({ resultsDir: `C:/runs/a-${i}`, model: "strong:cloud",
+      grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9, geometry: 2 } }));
+    rows.push(row({ resultsDir: `C:/runs/b-${i}`, model: "weak:cloud",
+      grades: { adherence: 6, handoff: 6, truthfulness: 6, depth: 6 } }));
+  }
+  const o = overall(rows, {});
+  deepEqual(o.cells.map((c) => c.model), ["strong:cloud", "weak:cloud"]);
+  // combined must equal the mean of the same four weighted values aggregate reports
+  const agg = aggregate(rows, {});
+  for (const cell of o.cells) {
+    const wtds = agg.aspects.filter((a) => a.universal)
+      .map((a) => a.cells.find((c) => c.model === cell.model).weighted);
+    equal(cell.combined, Number((wtds.reduce((x, y) => x + y, 0) / wtds.length).toFixed(2)));
+    equal(cell.n, 6);
+  }
+  // geometry 2 must not appear anywhere in the combined maths
+  ok(o.cells[0].combined > 8, "capability grade leaked into the combined score");
+});
+
+test("overall: an outcomes-only model has combined null and sorts last", () => {
+  const rows = [
+    row({ resultsDir: "C:/runs/x-1" }),
+    { ...row({ resultsDir: "C:/runs/y-1", model: "dead:cloud", outcome: "failed",
+        note: "died" }), grades: undefined },
+  ];
+  const o = overall(rows, {});
+  equal(o.cells.at(-1).model, "dead:cloud");
+  equal(o.cells.at(-1).combined, null);
 });

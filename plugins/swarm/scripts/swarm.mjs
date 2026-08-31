@@ -25,7 +25,7 @@ const USAGE = `usage: swarm.mjs <command>
   quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)
   grade --init <resultsDir>  write grades.json — one skeleton row per model leaf (Claude tiers included), for you to fill in
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
-  perf [--aspect X] [--model Y] [--domain D]   aspect x model table with sample counts`;
+  perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -385,7 +385,7 @@ async function readManifestTasks(dir) {
 }
 
 async function cmdPerf(rest) {
-  const { readRows, aggregate, dedupe, scoresPath, PRIOR_WEIGHT } = await import("../src/scores.mjs");
+  const { readRows, aggregate, overall, dedupe, scoresPath, PRIOR_WEIGHT } = await import("../src/scores.mjs");
   const aspect = getFlag("aspect", rest);
   const model = getFlag("model", rest);
   const domain = getFlag("domain", rest);
@@ -401,6 +401,22 @@ async function cmdPerf(rest) {
   out(`model scores: ${counted} · ${path}`);
   if (filters) out(`filters: ${filters}`);
   out("");
+  if (rest.includes("--overall")) {
+    // One table: models ranked on the mean of the four universal weighted
+    // scores; per-aspect columns beside it so the average cannot hide a hole.
+    const o = overall(rows, { model, domain });
+    const w = Math.max(5, ...o.cells.map((c) => c.model.length));
+    out(`    ${"model".padEnd(w)}    n  overall  ${o.universals.map((a) => a.slice(0, 5).padStart(5)).join("  ")}`);
+    for (const c of o.cells) {
+      const cols = o.universals.map((a) => (c.wtds[a] == null ? "—" : c.wtds[a].toFixed(2)).padStart(5)).join("  ");
+      const flag = c.combined == null ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
+      const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
+      const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
+      out(`    ${c.model.padEnd(w)}  ${String(c.n).padStart(3)}  ${(c.combined == null ? "—" : c.combined.toFixed(2)).padStart(7)}  ${cols}${flag}${tail}`);
+    }
+    out(dim("    overall = mean of the four universal weighted scores; capability aspects excluded"));
+    return 0;
+  }
   for (const a of report.aspects) {
     out(`${a.aspect}${a.universal ? dim("  (universal)") : ""}`);
     if (!a.cells.length) {
