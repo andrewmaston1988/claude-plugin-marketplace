@@ -2165,3 +2165,50 @@ test("a caller's own CORRELATION_ID is kept on the leaf", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Red input for the real-model stamp: the CLI's stream-json init event names
+// the model that actually ran (claude-sonnet-5), while task.model is the
+// alias (sonnet). Without the stamp the result records only the alias and
+// every generation (opus 4.8 vs 5) collapses into one perf row.
+test("result stamps the init event's real model id; alias kept as modelAlias", async () => {
+  const dir = tmp();
+  try {
+    const stream = [
+      JSON.stringify({ type: "system", subtype: "init", model: "claude-sonnet-5", session_id: "s1" }),
+      JSON.stringify({ type: "result", subtype: "success", result: "hi", session_id: "s1" }),
+      "",
+    ].join("\n");
+    const spawn = fakeSpawnFactory(() => ({ output: stream }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { model: "sonnet" })]);
+    await runPlan(p, CFG, io);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.model, "claude-sonnet-5");
+    equal(res.modelAlias, "sonnet");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Control: a non-Claude leaf keeps its manifest model verbatim — the :cloud
+// suffix is a routing/governance identity, so an init-reported bare name must
+// never overwrite it.
+test("non-Claude leaf keeps its manifest model; no modelAlias", async () => {
+  const dir = tmp();
+  try {
+    const stream = [
+      JSON.stringify({ type: "system", subtype: "init", model: "glm-5.2", session_id: "s2" }),
+      JSON.stringify({ type: "result", subtype: "success", result: "hi", session_id: "s2" }),
+      "",
+    ].join("\n");
+    const spawn = fakeSpawnFactory(() => ({ output: stream }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { model: "glm-5.2:cloud", cwd: tmpdir(), originalCwd: tmpdir() })]);
+    await runPlan(p, { ...CFG, provider: { ...CFG.provider, allowedRoots: [tmpdir()] } }, io);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.model, "glm-5.2:cloud");
+    equal(res.modelAlias, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

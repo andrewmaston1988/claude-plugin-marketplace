@@ -304,6 +304,10 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
         tokens: pickFinalTokens(resultEvt?.usage, acc.totals()),
         costUsd: resultEvt?.total_cost_usd,
         numTurns: resultEvt?.num_turns,
+        // The model that actually ran, from the CLI's init event. A Claude alias
+        // (sonnet) launches whatever the tier currently maps to, so only this id
+        // can split generations (opus 4.8 vs 5) in the grading store.
+        realModel: initEvt?.model ?? null,
         sessionId: initEvt?.session_id ?? resultEvt?.session_id ?? null,
         // "none" on subscription auth — costUsd is synthetic there, real only
         // when a key source is named (unit honesty for estimates and warns)
@@ -907,9 +911,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         r = await enforceReturns(task, r, taskCwd, plan.resultsDir, cfg, io, streamHooks(task));
       }
 
+      // Claude leaves record the REAL model id (from the init event) with the
+      // manifest alias kept as modelAlias — grade rows resolve model from here.
+      // Non-Claude models keep the manifest name verbatim: ':cloud' is a
+      // routing/governance identity an init-reported bare name must not clobber.
+      const stamped = r.realModel && isClaudeModel(task.model) && r.realModel !== task.model;
       const result = {
         id: task.id,
-        model: task.model,
+        model: stamped ? r.realModel : task.model,
+        ...(stamped && { modelAlias: task.model }),
         ok: r.ok,
         exit: r.exit,
         durationMs: r.durationMs,
