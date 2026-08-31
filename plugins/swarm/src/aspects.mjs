@@ -11,7 +11,10 @@
 export const UNIVERSAL = ["adherence", "handoff", "truthfulness", "depth"];
 
 // Graded only when the leaf stressed them.
-export const CAPABILITY = ["discrimination", "code", "search", "web", "vision", "geometry"];
+// `code` is judging/understanding existing code; `impl` is producing or
+// modifying working code. Separate columns so implementation signal is not
+// diluted by understanding grades (operator, 2026-08-31).
+export const CAPABILITY = ["discrimination", "code", "impl", "search", "web", "vision", "geometry"];
 
 export const ASPECTS = [...UNIVERSAL, ...CAPABILITY];
 

@@ -23,7 +23,7 @@ const USAGE = `usage: swarm.mjs <command>
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)
-  grade --init <resultsDir>  write grades.json — one skeleton row per :cloud leaf, for you to fill in
+  grade --init <resultsDir>  write grades.json — one skeleton row per model leaf (Claude tiers included), for you to fill in
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
   perf [--aspect X] [--model Y] [--domain D]   aspect x model table with sample counts`;
 
@@ -219,7 +219,7 @@ async function cmdRun(rest) {
     refutations: r.summary.refutations,
     estimate: plan.estimate,
     gradeable: {
-      count: listLeaves(plan.resultsDir, { cloudOnly: true }).length,
+      count: listLeaves(plan.resultsDir, { gradeable: true }).length,
       resultsDir: plan.resultsDir,
       cli: fileURLToPath(import.meta.url),
     },
@@ -258,9 +258,9 @@ function getFlag(name, args) {
 async function cmdGradeInit(dir) {
   const { writeFileSync } = await import("node:fs");
   const { UNIVERSAL, CAPABILITY, OUTCOMES } = await import("../src/aspects.mjs");
-  const leaves = listLeaves(dir, { cloudOnly: true });
+  const leaves = listLeaves(dir, { gradeable: true });
   if (!leaves.length) {
-    err(`swarm: no :cloud leaves with results in ${dir} — Claude-tier leaves are out of scope for the score store, so there is nothing to grade.`);
+    err(`swarm: no gradeable leaves with results in ${dir} — agentless nodes carry no model, so there is nothing to grade.`);
     return 1;
   }
   const skeleton = {
@@ -282,7 +282,7 @@ async function cmdGradeInit(dir) {
   const p = join(dir, "grades.json");
   writeFileSync(p, JSON.stringify(skeleton, null, 2) + "\n");
   out(p);
-  out(`${leaves.length} :cloud leaf/leaves. Grade the four universal aspects 1-10 on every row; leave a`);
+  out(`${leaves.length} gradeable leaf/leaves. Grade the four universal aspects 1-10 on every row; leave a`);
   out("capability aspect null unless the leaf stressed it. Drop `grades` entirely on a row whose leaf");
   out("produced no output (failed / timeout / session-died / not-capable), then:");
   out(`  swarm grade --file ${p}`);

@@ -12,13 +12,13 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 // silently split the store into two vocabularies.
 test("aspects: the four universal and six capability names, exactly", () => {
   deepEqual(UNIVERSAL, ["adherence", "handoff", "truthfulness", "depth"]);
-  deepEqual(CAPABILITY, ["discrimination", "code", "search", "web", "vision", "geometry"]);
+  deepEqual(CAPABILITY, ["discrimination", "code", "impl", "search", "web", "vision", "geometry"]);
 });
 
 test("aspects: UNIVERSAL and CAPABILITY are disjoint, and ASPECTS is their concatenation", () => {
   for (const a of UNIVERSAL) ok(!CAPABILITY.includes(a), `${a} is in both sets`);
   deepEqual(ASPECTS, [...UNIVERSAL, ...CAPABILITY]);
-  equal(new Set(ASPECTS).size, 10);
+  equal(new Set(ASPECTS).size, 11);
 });
 
 test("aspects: the six outcomes, not-capable among them", () => {

@@ -8,7 +8,7 @@ import { appendFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { UNIVERSAL, ASPECTS, OUTCOMES, GRADED_OUTCOMES } from "./aspects.mjs";
-import { isCloudModel } from "./models.mjs";
+import { isCloudModel, isClaudeModel } from "./models.mjs";
 
 export function scoresPath(env = process.env) {
   return join(swarmHome(env), "model-scores.jsonl");
@@ -33,8 +33,8 @@ export function validateRow(row) {
   if (typeof row.leaf !== "string" || !row.leaf.trim()) {
     errs.push("leaf: required, the task id as it appears in results/<id>.json");
   }
-  if (typeof row.model !== "string" || !isCloudModel(row.model)) {
-    errs.push(`model: must be a :cloud model name (got ${JSON.stringify(row.model)}) — Claude tiers are out of scope for this store`);
+  if (typeof row.model !== "string" || !(isCloudModel(row.model) || isClaudeModel(row.model))) {
+    errs.push(`model: must be a :cloud model name or a Claude tier (got ${JSON.stringify(row.model)}) — e.g. "glm-5.2:cloud" or "sonnet"`);
   }
   if (typeof row.domain !== "string" || !row.domain.trim() || PLACEHOLDER_RE.test(row.domain.trim())) {
     errs.push('domain: required, free lowercase text naming the ecosystem — e.g. "godot", "rust", "this-repo"');
