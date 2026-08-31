@@ -210,6 +210,35 @@ function blankOutcomes() {
 // Virtual prior observations every cell starts with. 5 matches the provisional
 // threshold, so one constant governs both: a cell needs roughly that many real
 // samples before its own mean outweighs the field's.
+
+// One combined ranking across models: the mean of the four UNIVERSAL weighted
+// scores. Capability aspects stay out — they are graded only where a leaf
+// stressed them, so averaging them in would punish exactly the models seated
+// on hard capability work. Same definition as the seat-economics chart's
+// quality axis, but owned here.
+export function overall(rows, { model, domain } = {}) {
+  const report = aggregate(rows, { model, domain });
+  const universals = report.aspects.filter((a) => a.universal);
+  const byModel = new Map();
+  for (const a of universals) {
+    for (const c of a.cells) {
+      if (!byModel.has(c.model)) {
+        byModel.set(c.model, { model: c.model, n: 0, combined: null, wtds: {}, provisional: false, outcomes: c.outcomes });
+      }
+      const cell = byModel.get(c.model);
+      cell.wtds[a.aspect] = c.weighted;
+      cell.n = Math.max(cell.n, c.n);
+      cell.provisional = cell.provisional || (c.n > 0 && c.provisional);
+    }
+  }
+  const cells = [...byModel.values()].map((c) => {
+    const got = universals.map((a) => c.wtds[a.aspect]).filter((v) => v != null);
+    return { ...c, combined: got.length ? Number((got.reduce((x, y) => x + y, 0) / got.length).toFixed(2)) : null };
+  });
+  cells.sort((x, y) => (y.combined ?? -1) - (x.combined ?? -1) || x.model.localeCompare(y.model));
+  return { cells, universals: universals.map((a) => a.aspect), filters: report.filters };
+}
+
 export const PRIOR_WEIGHT = 5;
 
 // The unweighted mean of per-model means — NEVER the mean of all rows.
