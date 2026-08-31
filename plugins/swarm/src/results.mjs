@@ -63,9 +63,9 @@ export function transcriptPath(dir, id) {
   return join(dir, "results", `${id}.log`);
 }
 
-// Every leaf a run wrote a result for, with both paths. `cloudOnly` is the
+// Every leaf a run wrote a result for, with both paths. `gradeable` is the
 // grading store's scope: Claude tiers are known quantities and produce no row.
-export function listLeaves(dir, { cloudOnly = false } = {}) {
+export function listLeaves(dir, { gradeable = false } = {}) {
   const resultsRoot = join(dir, "results");
   if (!existsSync(resultsRoot)) return [];
   return readdirSync(resultsRoot)
@@ -75,7 +75,7 @@ export function listLeaves(dir, { cloudOnly = false } = {}) {
       const result = readResult(dir, id);
       return result && { id, model: result.model, result, resultPath: resultPath(dir, id), transcriptPath: transcriptPath(dir, id) };
     })
-    .filter((leaf) => leaf && (!cloudOnly || isCloudModel(leaf.model)));
+    .filter((leaf) => leaf && (!gradeable || leaf.model));
 }
 
 // The mechanical block a score row copies — a projection of an existing result,

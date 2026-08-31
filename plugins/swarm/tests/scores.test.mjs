@@ -130,12 +130,9 @@ for (const bad of ["Godot", "", "   ", undefined]) {
   });
 }
 
-test("validateRow: a non-:cloud model is rejected — Claude tiers are out of scope", () => {
-  for (const m of ["sonnet", "opus", "claude-opus-5", "glm-5.2"]) {
-    const errs = validateRow(row({ model: m }));
-    ok(errs.some((e) => e.startsWith("model:")), `${m}: ${errs.join(" | ")}`);
-  }
-});
+// Superseded by "Claude tiers are accepted" below (grade-claude-tiers,
+// 2026-08-31): Claude models are now in scope; the junk-string rejection
+// this test also carried lives in that case's not-a-model assertion.
 
 test("validateRow: a grade <= 4 with no note is rejected", () => {
   const errs = validateRow(row({ grades: { ...row().grades, depth: 4 } }));
@@ -376,4 +373,16 @@ test("aggregate: pure — equal results on repeat, input untouched", () => {
 
 test("scoresPath: derives from SWARM_HOME, never a hardcoded home", () => {
   match(scoresPath({ SWARM_HOME: join("C:", "custom") }), /custom[\\/]model-scores\.jsonl$/);
+});
+
+// --- Claude tiers are gradeable (grade-claude-tiers) --------------------
+// Red input: the old validator rejected any non-:cloud model with
+// "out of scope". A baseline row whose model is a Claude tier must pass;
+// a junk model name must still fail (two families, not any string).
+test("validateRow: Claude tiers are accepted, junk models are not", () => {
+  for (const model of ["sonnet", "claude-haiku-4-5-20251001"]) {
+    deepEqual(validateRow(row({ model })), []);
+  }
+  const errs = validateRow(row({ model: "not-a-model" }));
+  ok(errs.some((e) => e.startsWith("model:")), String(errs));
 });

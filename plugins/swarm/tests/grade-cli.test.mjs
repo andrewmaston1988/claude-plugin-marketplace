@@ -11,8 +11,8 @@ function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-grade-cli-"));
 }
 
-// A finished run on disk: two :cloud leaves and one Claude leaf, which the
-// store is not interested in.
+// A finished run on disk: two :cloud leaves and one Claude leaf — all three
+// gradeable since grade-claude-tiers.
 function fakeRun(dir) {
   const run = join(dir, "run-1");
   mkdirSync(join(run, "results"), { recursive: true });
@@ -24,15 +24,15 @@ function fakeRun(dir) {
   return run;
 }
 
-test("grade --init: one row per :cloud leaf, Claude leaves skipped", () => {
+test("grade --init: one row per model leaf, Claude leaves included", () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
     const r = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
-    equal(batch.rows.length, 2);
-    ok(!batch.rows.some((x) => x.leaf === "verdict"), "a Claude leaf produced a row");
+    equal(batch.rows.length, 3);
+    ok(batch.rows.some((x) => x.leaf === "verdict" && x.model === "sonnet"), "the Claude leaf gets a row too");
     // every aspect key present and null — the skeleton is a form to fill, and
     // validation refuses it until it has been
     for (const row of batch.rows) {
@@ -43,15 +43,15 @@ test("grade --init: one row per :cloud leaf, Claude leaves skipped", () => {
   }
 });
 
-test("grade --init: a run with no :cloud leaves says so rather than writing an empty form", () => {
+test("grade --init: a run with only agentless nodes says so rather than writing an empty form", () => {
   const dir = tmp();
   try {
-    const run = join(dir, "claude-only");
+    const run = join(dir, "agentless-only");
     mkdirSync(join(run, "results"), { recursive: true });
-    writeFileSync(join(run, "results", "a.json"), JSON.stringify({ id: "a", model: "opus", ok: true }));
+    writeFileSync(join(run, "results", "a.json"), JSON.stringify({ id: "a", ok: true }));
     const r = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 1);
-    ok(r.stderr.includes("no :cloud leaves"), r.stderr);
+    ok(r.stderr.includes("no gradeable leaves"), r.stderr);
     ok(!existsSync(join(run, "grades.json")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -140,7 +140,9 @@ test("formatClosing: a run with :cloud leaves ends by asking for a grade", () =>
   ok(out.indexOf("<IMPORTANT>") > out.indexOf("summary.json"), out);
 });
 
-test("formatClosing: an all-Claude run is not asked to grade", () => {
+// Since grade-claude-tiers an all-Claude run IS gradeable; the no-ask case
+// is a run with nothing but agentless nodes (count 0).
+test("formatClosing: a run with no gradeable leaves is not asked to grade", () => {
   const out = formatClosing({
     summaryPath: "C:/runs/r1/summary.json",
     gradeable: { count: 0, resultsDir: "C:/runs/r1", cli: "C:/swarm/scripts/swarm.mjs" },
@@ -150,7 +152,7 @@ test("formatClosing: an all-Claude run is not asked to grade", () => {
   ok(!formatClosing({ summaryPath: "C:/runs/r1/summary.json" }).includes("grade"));
 });
 
-test("perf: an empty store prints all ten aspects at n=0", () => {
+test("perf: an empty store prints all eleven aspects at n=0", () => {
   const dir = tmp();
   try {
     const r = runCli(["perf"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
