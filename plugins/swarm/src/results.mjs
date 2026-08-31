@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, rea
 import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal } from "./stream.mjs";
-import { isCloudModel } from "./models.mjs";
+import { isSentinelModel } from "./manifest.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -64,7 +64,7 @@ export function transcriptPath(dir, id) {
 }
 
 // Every leaf a run wrote a result for, with both paths. `gradeable` is the
-// grading store's scope: Claude tiers are known quantities and produce no row.
+// grading store's scope: a gradeable leaf is one a real model ran (sentinel-model nodes produce no row).
 export function listLeaves(dir, { gradeable = false } = {}) {
   const resultsRoot = join(dir, "results");
   if (!existsSync(resultsRoot)) return [];
@@ -75,7 +75,7 @@ export function listLeaves(dir, { gradeable = false } = {}) {
       const result = readResult(dir, id);
       return result && { id, model: result.model, result, resultPath: resultPath(dir, id), transcriptPath: transcriptPath(dir, id) };
     })
-    .filter((leaf) => leaf && (!gradeable || leaf.model));
+    .filter((leaf) => leaf && (!gradeable || (leaf.model && !isSentinelModel(leaf.model))));
 }
 
 // The mechanical block a score row copies — a projection of an existing result,

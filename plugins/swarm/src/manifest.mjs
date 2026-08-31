@@ -287,6 +287,14 @@ export function isAgentless(t) {
   return AGENTLESS.some((k) => t?.[k] !== undefined || t?.model === k);
 }
 
+// The display-sentinel models normalization stamps on never-dispatched nodes
+// (see the note at the normalization site). Single home: every "did a model
+// actually run?" check on a RESULT routes through this.
+const SENTINEL_MODELS = new Set(["compute", "integrate", "manifest"]);
+export function isSentinelModel(model) {
+  return SENTINEL_MODELS.has(String(model || ""));
+}
+
 // Transitive `after` reachability over a task list. Exported because the
 // scheduler must group worktrees by the SAME edges validation accepted them on —
 // two copies of this walk is how the two drift into disagreeing about which task

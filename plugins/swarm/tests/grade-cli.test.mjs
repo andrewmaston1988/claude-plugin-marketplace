@@ -175,3 +175,22 @@ test("perf: an unknown aspect fails with the valid list", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Red input for the agentless-sentinel fix (fresh review of PR #228):
+// normalization stamps compute/integrate/manifest nodes with a display
+// sentinel model that reaches results/<id>.json, so a truthy-model
+// gradeable filter hands them skeleton rows.
+test("grade --init: a sentinel-model (compute) result gets no row", () => {
+  const dir = tmp();
+  try {
+    const run = fakeRun(dir);
+    writeFileSync(join(run, "results", "dedupe.json"), JSON.stringify({ id: "dedupe", model: "compute", ok: true }));
+    const r = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, r.stderr);
+    const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
+    equal(batch.rows.length, 3);
+    ok(!batch.rows.some((x) => x.leaf === "dedupe"), "a compute node produced a row");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

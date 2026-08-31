@@ -10,7 +10,7 @@ const SRC = fileURLToPath(new URL("../src/", import.meta.url));
 // The exact names, asserted literally: the skill doc, the README and the row
 // schema all key off these strings, so a rename must break a test rather than
 // silently split the store into two vocabularies.
-test("aspects: the four universal and six capability names, exactly", () => {
+test("aspects: the four universal and seven capability names, exactly", () => {
   deepEqual(UNIVERSAL, ["adherence", "handoff", "truthfulness", "depth"]);
   deepEqual(CAPABILITY, ["discrimination", "code", "impl", "search", "web", "vision", "geometry"]);
 });
