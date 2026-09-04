@@ -43,7 +43,8 @@ numbers are not on the page (§2), the decision was not made.
 
 **How aggressively to batch is the operator's call, not yours.** You present the numbers and a
 recommendation; the operator picks the point on the curve. The floor — everything inline, zero
-agents — is always one of the options.
+agents — is always one of the options. Under `swarm.always` (swarm skill → *Standing consent*)
+the recommendation is taken: state the numbers and the chosen point, do not ask.
 
 ## 1. Instrument — read the onboarding cost, never estimate it
 
@@ -126,8 +127,8 @@ wave is cut twice — by dependency, then by pin — and on a well-specified pla
 dependency graph is sparse and the tier column is not, the **pin cut usually sets the agent
 count**.
 
-**Which tier an item deserves is not this skill's question — `pipeline:model-selection` owns
-that judgement.** This section owns only what a pin *boundary* does to the agent count. Do not
+**Which tier an item deserves is not this skill's question —
+[the swarm tier guide](../swarm/references/model-selection.md) owns that judgement.** This section owns only what a pin *boundary* does to the agent count. Do not
 restate the tier guide here.
 
 Merging across a tier boundary is not free, and the two directions are not symmetrical:
@@ -225,7 +226,8 @@ Present the numbers, lead with a recommendation, then let the operator choose:
 | **Per-item** — one agent per item | maximum isolation and parallelism; N × onboarding |
 
 The two axes the question trades are **capability vs. risk** and **wall-clock vs. efficiency**.
-Name both, and always lead with a recommendation rather than a bare menu.
+Name both, and always lead with a recommendation rather than a bare menu. Under `swarm.always`
+the recommendation is taken: state the numbers and the chosen point, do not ask.
 
 ## 10. Where this fires
 

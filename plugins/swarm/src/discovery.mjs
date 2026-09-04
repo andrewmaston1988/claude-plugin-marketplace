@@ -224,8 +224,8 @@ export async function discoverModels(cfg, fetchImpl = globalThis.fetch, { spawnI
   return sortModelsBySize(collapseFamilies(await enrichWithShow([...merged.values()], base, fetchImpl), suffix));
 }
 
-// Cache the last discovery so the ultraswarm hook can name real models in its
-// offers without a network round-trip. Written on every `models` run.
+// Cache the last discovery so the 402 removal and the next `models` refresh work
+// from a durable roster. Written on every `models` run.
 export function writeModelsCache(models, env = process.env) {
   const dir = swarmHome(env);
   mkdirSync(dir, { recursive: true });
