@@ -328,8 +328,9 @@ restated here, because a second copy of a consent rule is a copy that rots:
   includes Claude leaves. [Tier and effort guidance](../swarm/references/model-selection.md).
 - **Validate** — `swarm validate <manifest.json>`. Fix what it names and re-validate; its
   errors name the field, the fix, and an example. Never carry an unvalidated manifest to the gate.
-- **The offer gate** — `swarm:swarm` → *MANDATORY first step*. Its answer is the only consent
-  to spend, and it owns the both-sides cost wording. This skill supplies the graph the gate
+- **The offer gate** — `swarm:swarm` → *MANDATORY first step*. Its answer — or, under
+  `swarm.always`, its printed statement — is the only consent to spend, and it owns the
+  both-sides cost wording. This skill supplies the graph the gate
   previews; it grants nothing.
 
 ## Rationalisations — rejected

@@ -202,10 +202,11 @@ test("T10 — resume carve-out is in swarm gate, three branches, and absent from
 
 // ---- T11: tier partition present, defers tier judgement, no model names in prose ----
 
-test("T11 — tier partition names pipeline:model-selection with both asymmetry directions", () => {
+test("T11 — tier partition defers to swarm's own tier guide with both asymmetry directions", () => {
   const content = read(NEW_SKILL);
-  // arm (a)
-  ok(content.includes("pipeline:model-selection"), "defers tier judgement to pipeline:model-selection");
+  // arm (a) — the guide lives in this plugin; a cross-plugin pointer breaks standalone installs
+  ok(content.includes("../swarm/references/model-selection.md"), "defers tier judgement to swarm's references/model-selection.md");
+  ok(!content.includes("pipeline:model-selection"), "no pointer into the pipeline plugin");
   match(content, /one pin|single model|one model pin/i);
   match(content, /upward/i);
   match(content, /never the session's call|prohibition/i);
@@ -213,6 +214,21 @@ test("T11 — tier partition names pipeline:model-selection with both asymmetry 
   const prose = stripFences(content);
   ok(!/\b(Haiku|Sonnet|Opus)\b/.test(prose), "no model-family name in prose");
   ok(!/:cloud/.test(prose), "no :cloud token in prose");
+});
+
+// ---- T15: standing consent lives inside the gate section, alongside the three stanzas ----
+
+test("T15 — gate section carries Standing consent under swarm.always, and states rather than asks", () => {
+  const gate = sectionSlice(read(SWARM_SKILL), "## MANDATORY first step — the offer gate");
+  ok(/^### Standing consent/m.test(gate), "'### Standing consent' subsection present in the gate");
+  ok(gate.includes("swarm.always"), "names the config key");
+  match(gate, /printed statement/i);
+  match(gate, /waives the question, never the ceremony/i);
+  // the skip is stated in the mix stanza itself, in both modes
+  match(gate, /Anthropic-only by construction/);
+  // orchestrating-agents and executing-swarms echo the same mode
+  ok(read(NEW_SKILL).includes("swarm.always"), "orchestrating-agents knows the mode");
+  ok(read(join(SKILLS_DIR, "executing-swarms", "SKILL.md")).includes("swarm.always"), "executing-swarms knows the mode");
 });
 
 // ---- T13: Superpowers discipline-skill house style (Anthropic RED-GREEN template) ----

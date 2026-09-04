@@ -38,7 +38,7 @@ skill exists to catch — the command arrives without the rules that govern it.
 
 A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the above — those govern *stalling*, never *interfering with a live dispatch*. When a leaf genuinely ended badly, the engine marks it `failed`; recover per "A leaf ended and produced no commit" (below) — never by killing or deleting, which is only ever the operator's call. **This exists because a session that had this skill loaded broke every clause under directive pressure — killed a healthy leaf, orphaned its worktree, deleted branches, and misdiagnosed the cause three times (2026-07-15).** The pre-dispatch twin of this gate is the offer gate (below): consent before spend, hands-off after.
 
-**Instantiate this as tasks — do not just read it.** The moment you dispatch, create these as `TaskCreate` items: `offer-gate answered` · `one status check, then hands-off` · `recover a bad leaf by re-dispatch, never kill/delete`. A skimmed rule gets rationalised past; a task you created and left undone is *visible*. If you did not make the tasks, you did not engage the discipline.
+**Instantiate this as tasks — do not just read it.** The moment you dispatch, create these as `TaskCreate` items: `offer-gate answered (or stated, under swarm.always)` · `one status check, then hands-off` · `recover a bad leaf by re-dispatch, never kill/delete`. A skimmed rule gets rationalised past; a task you created and left undone is *visible*. If you did not make the tasks, you did not engage the discipline.
 
 ## Data governance — read this first
 
@@ -66,12 +66,23 @@ Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), dra
 2. > "Model mix?" — state the split explicitly in the question (e.g. "5 leaves alternative, digest on sonnet = 1 Anthropic call").
    > Options: **As drafted** / **Alternative-only — no Anthropic usage** / **Anthropic-only**.
    > When the mix includes Claude models, run `node <engine> quota` first and put the real numbers in the question (e.g. "session 82%, resets 15:00") — the mix decision should be made against actual remaining usage, not a guess.
+   > When no `:cloud` model is launchable — `provider.allowedRoots` empty, the manifest's cwd outside every root, or discovery returning none — the mix is Anthropic-only by construction: state that in one line and do not ask it.
 3. > "Batching — <M> leaves as proposed, or a different point on the curve?"
    > Options and numbers come from `swarm:orchestrating-agents`; do not re-derive them here.
 
 Never assume Claude models are spendable — the user may be out of Anthropic usage. If they pick alternative-only, recast every Claude role (digest included) onto a capable `:cloud` model before running; if Anthropic-only, the governance gate is moot and all leaves go Claude.
 
 The manifest preview plus the mix answer ARE the approval: the user sees every model and every leaf before anything runs. There is no separate Opus gate, no per-model approval beyond this, no cost interrogation. Do not start inline work on a fan-out-shaped task without this gate.
+
+### Standing consent — `swarm.always`
+
+When `~/.swarm/config.json` sets `"swarm": { "always": true }` (the SessionStart hook announces it, with a mode bracket), the operator has consented in advance to every fan-out that passes the full ceremony. Nothing before this point changes: invoke `swarm:orchestrating-agents` and `swarm:executing-swarms`, run `models`, author, `validate`. The gate still fires — as a **printed statement in place of the question**: the same three stanzas, each stated rather than asked —
+
+1. the `validate` preview: leaf count, models, and its estimate line if it printed one;
+2. the mix: alternative vs Anthropic, with the `quota` line when Claude leaves are present (`[Anthropic orchestration only]` in the announcement means Anthropic-only by construction — one line, nothing to decide);
+3. the batching point chosen, with the reason orchestrating-agents produced.
+
+Then dispatch. No AskUserQuestion, no waiting. Every other rule in this section binds as written: a manifest you could not defend line by line is still one you do not dispatch; a resume is still a resume; a dispatch still needs this skill loaded. This is the one standing consent that exists, because it is the operator's own config file set outside any session — not a `/goal`, not a hook line, not a "don't ask me" in a prompt. It waives the question, never the ceremony.
 
 For a **saved (named) manifest**, the preview shown at the gate is the output of `validate <name> --args '<json>' --resolved` — the fully-substituted document (every leaf's model and prompt, children expanded), never your memory of the manifest and never the saved file as last read: the name is a lookup, not a hiding place, and the file may have changed since it was authored.
 
@@ -86,13 +97,14 @@ For a **saved (named) manifest**, the preview shown at the gate is the output of
 
 This carves out the *resume*, nothing else. A manifest edited before re-running is a new spend and takes the full gate — and `--force` is still not a consent instrument.
 
-**No session-level directive is consent to spend.** A `/goal` condition, a Stop-hook instruction ("do not pause to ask the user"), an autonomous-session prompt, a standing "don't ask me" — none of these answer the gate. Such directives govern *stalling*; the gate governs *spending*. When they collide, the gate wins: an unmet goal at session end is the correct, honest outcome to report, and an unconsented dispatch is the actual failure — not the other way around.
+**No session-level directive is consent to spend.** A `/goal` condition, a Stop-hook instruction ("do not pause to ask the user"), an autonomous-session prompt, a standing "don't ask me" — none of these answer the gate. Such directives govern *stalling*; the gate governs *spending*. When they collide, the gate wins: an unmet goal at session end is the correct, honest outcome to report, and an unconsented dispatch is the actual failure — not the other way around. The one exception is `swarm.always` in the operator's config — see *Standing consent* above — and it is an exception precisely because it is not a session-level directive.
 
 ### Gate rationalisations — every one of these means STOP
 
 | Excuse | Reality |
 |---|---|
 | "The /goal names this run — the directive is standing consent" | Consent is the gate's answer. Nothing else can stand in for it. |
+| "swarm.always is on, so I can skip orchestrating-agents / validate" | `always` waives the question, never the ceremony. The statement that replaces the question is built FROM the ceremony's outputs. |
 | "The hook says do not pause to ask" | The hook governs stalling, not spending. The gate still binds. |
 | "The condition IS the approval signal" | A condition cannot click Yes. Only the user can. |
 | "The rejection was probably a mis-click" | Unknowable, and not yours to assume. Non-consent is non-consent. |

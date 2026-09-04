@@ -79,7 +79,7 @@ node plugins/swarm/scripts/swarm.mjs perf [--aspect X] [--model Y] [--domain D] 
 
 A bare name resolves through the manifest registry (`<cwd>/.swarm/manifests/<name>.json`, then `~/.swarm/manifests/`; the resolution is always announced). `--args` fills `{{args.*}}` placeholders — `validate --resolved` prints the fully substituted document as the approval preview, and each distinct args value gets its own fingerprinted results dir so resume never crosses parameterizations.
 
-In a session, the **swarm** skill drives this end-to-end: it drafts the manifest, shows it in an AskUserQuestion box (the preview is the approval — every model and leaf visible before anything runs), runs in the background, and reads only `digest.md` when the run completes.
+In a session, the **swarm** skill drives this end-to-end: it drafts the manifest, shows it in an AskUserQuestion box (the preview is the approval — every model and leaf visible before anything runs) — or, with `swarm.always`, states it and runs — runs in the background, and reads only `digest.md` when the run completes.
 
 ## Model discovery
 
@@ -285,12 +285,7 @@ Make offering swarm a standing habit by adding one line to your CLAUDE.md:
 
 ## Ultraswarm standing mode
 
-The plugin ships a `UserPromptSubmit` hook that is silent by default. It activates when:
-
-- a prompt contains the keyword **`ultraswarm`**, or
-- `~/.swarm/config.json` sets `"swarm": { "always": true }`.
-
-When active it injects standing instructions to propose a swarm manifest via the question box for every substantive task, including the cached model list from the last `models` discovery so offers name real, launchable models.
+`"swarm": { "always": true }` in `~/.swarm/config.json` is standing consent: the swarm skill runs its full ceremony (orchestrating-agents, executing-swarms, `models`, `validate`) and then dispatches on a printed gate statement instead of an AskUserQuestion. A `SessionStart` hook (re-injected after `/clear` and compaction) announces it in a short `<EXTREMELY_IMPORTANT>` block carrying one mode bracket — `[:cloud tier preferred]` when the session's cwd is under a `provider.allowedRoots` entry, `[Anthropic orchestration only]` otherwise, decided the same way the governance gate decides it. The keyword **`ultraswarm`** in a prompt injects the same block for that session without the config flag. Silent otherwise; no model list — the skill's own `models` step discovers what is launchable.
 
 ## Workflow nudge
 

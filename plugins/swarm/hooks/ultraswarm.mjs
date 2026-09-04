@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// UserPromptSubmit hook: opt-in ultraswarm standing mode. Emits standing instructions
-// when the prompt contains 'ultraswarm' or ~/.swarm/config.json sets swarm.always: true.
+// Standing-mode announcement, one block, two events: SessionStart (startup|clear|compact)
+// when ~/.swarm/config.json sets swarm.always, UserPromptSubmit on the 'ultraswarm' keyword.
 // Silent otherwise. Never throws — always exits 0; skips if CORRELATION_ID set.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,54 +8,46 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 
 const CONFIG = path.join(os.homedir(), '.swarm', 'config.json');
-const MODELS_CACHE = path.join(os.homedir(), '.swarm', 'models-cache.json');
-const MAX_MODELS = 40;
+
+export const MODE_CLOUD = '[:cloud tier preferred]';
+export const MODE_ANTHROPIC = '[Anthropic orchestration only]';
 
 function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
 
-// Cache shape is owned by `swarm.mjs models`; accept the plausible shapes defensively.
-// Same visibility rule as cmdModels — superseded and denylisted entries are dropped
-// so the standing offer names only live, usable models.
-export async function formatModelList(cache, cfg) {
-  try {
-    // Lazy: keeps src/ out of the hook's per-prompt startup parse (only the
-    // active branch pays it). The other hooks import node builtins only.
-    const [{ visibleModels }, { matchDenylist }] = await Promise.all([
-      import('../src/discovery.mjs'),
-      import('../src/manifest.mjs'),
-    ]);
-    const list = Array.isArray(cache) ? cache
-      : Array.isArray(cache?.models) ? cache.models
-        : Array.isArray(cache?.recommendations) ? cache.recommendations
-          : null;
-    if (!list || list.length === 0) return '';
-    const objs = list.filter((m) => m && typeof m === 'object' && m.model);
-    const visible = new Set(
-      visibleModels(objs, { isDenylisted: (n) => !!matchDenylist(n, cfg) }).map((m) => m.model),
-    );
-    return list.map((m) => {
-      if (typeof m === 'string') return matchDenylist(m, cfg) ? null : `- ${m}`;
-      const name = m?.model || m?.name;
-      if (!name || matchDenylist(name, cfg)) return null;
-      if (m.model && !visible.has(m.model)) return null;
-      return m.description ? `- ${name} — ${m.description}` : `- ${name}`;
-    }).filter(Boolean).slice(0, MAX_MODELS).join('\n');
-  } catch { return ''; }
+export function standingBlock(mode) {
+  return [
+    '<EXTREMELY_IMPORTANT>',
+    'Swarm standing mode is ON (swarm.always): the swarm skill is PRE-AUTHORISED for',
+    'model orchestration and explicitly expected whenever a multi-phase task begins.',
+    "The offer gate's consent is already given — invoke Skill(swarm), run its ceremony",
+    '(orchestrating-agents, executing-swarms, models, validate), state the gate, dispatch.',
+    'Token cost is not the reason to stay inline; leaves spend other budgets and cheaper tiers.',
+    'Solo only on conversational turns, a single bounded question, or a trivial edit.',
+    `Mode: ${mode}`,
+    '</EXTREMELY_IMPORTANT>',
+  ].join('\n');
 }
 
-export function buildStandingInstructions(modelList) {
-  let ctx = 'Ultraswarm standing mode is active. For every substantive task in this prompt that '
-    + 'decomposes into independent bounded leaves, draft a swarm manifest and propose it via '
-    + 'AskUserQuestion — options: Yes (Recommended) / No, inline / Discuss, with the draft manifest '
-    + 'as the option preview — before doing the work inline. Invoke the **swarm** skill for the '
-    + 'manifest schema, plan patterns, and the data-governance rule. Do not swarm a single bounded '
-    + 'question — answer it inline.';
-  if (modelList) {
-    ctx += '\n\nModels available from the last discovery (refresh with `swarm.mjs models`):\n' + modelList;
-  }
-  return ctx;
+// cwd under any allowed root -> alternative models are launchable here. Lazy import:
+// manifest.mjs is the governance source of truth but heavy for a per-prompt hook.
+export async function modeFor({ cwd, config }) {
+  const roots = config?.provider?.allowedRoots ?? [];
+  if (!roots.length || !cwd) return MODE_ANTHROPIC;
+  const { isUnderRoot } = await import('../src/manifest.mjs');
+  return roots.some((r) => isUnderRoot(cwd, r)) ? MODE_CLOUD : MODE_ANTHROPIC;
+}
+
+// The keyword as a standalone word — `ultraswarm.mjs` in a prompt about this file is not an opt-in.
+const KEYWORD_RE = /(^|[^\w./-])ultraswarm(?![\w./-])/i;
+
+// Pure: which event, what prompt, what config/cwd -> standing block or null.
+export async function decide({ event, prompt = '', cwd, config }) {
+  const armed = event === 'SessionStart' ? config?.swarm?.always === true
+    : event === 'UserPromptSubmit' ? KEYWORD_RE.test(prompt)
+      : false;
+  return armed ? standingBlock(await modeFor({ cwd, config })) : null;
 }
 
 async function main() {
@@ -67,18 +59,21 @@ async function main() {
   try { payload = JSON.parse(stdin); } catch { process.exit(0); }
   if (process.env.CORRELATION_ID) process.exit(0);
 
-  const prompt = String(payload.prompt || '');
-  const config = readJSON(CONFIG);
-  const active = prompt.toLowerCase().includes('ultraswarm') || config?.swarm?.always === true;
-  if (!active) process.exit(0);
+  const event = String(payload.hook_event_name || '');
+  const ctx = await decide({
+    event,
+    prompt: String(payload.prompt || ''),
+    cwd: payload.cwd || process.cwd(),
+    config: readJSON(CONFIG),
+  });
+  if (!ctx) process.exit(0);
 
-  const ctx = buildStandingInstructions(await formatModelList(readJSON(MODELS_CACHE), config));
   process.stdout.write(JSON.stringify({
-    hookSpecificOutput: { hookEventName: 'UserPromptSubmit', additionalContext: ctx },
+    hookSpecificOutput: { hookEventName: event, additionalContext: ctx },
   }) + '\n');
   process.exit(0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   main().catch(() => process.exit(0));
 }
