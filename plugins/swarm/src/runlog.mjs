@@ -2,7 +2,7 @@
 // manifest snapshot supplies the graph; summary.json says when it finished.
 // Pure data out — the roster, the statusline glyph and the dashboard all render
 // from this, so none of them carries its own parser.
-import { readFileSync, readdirSync, statSync, existsSync, openSync, readSync, closeSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { DIGEST_ID } from "./digest.mjs";
 
@@ -196,7 +196,8 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, recentMs 
 // Every run dir under <home>/runs/<project>/<run>/, newest run.log first.
 // `active` = not summarised, written within recentMs, and — when the run-start
 // line recorded the engine pid — that engine still alive. `aborted` = engine gone
-// with no summary. Only the head of run.log is read for the pid.
+// with no summary. The pid is the LAST run-start's: a resume appends a new
+// run-start for the new engine, and the reaped one stays on line 1.
 export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _alive = engineAlive } = {}) {
   const runsRoot = join(home, "runs");
   const out = [];
@@ -211,7 +212,7 @@ export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _aliv
       let mtimeMs;
       try { mtimeMs = statSync(logPath).mtimeMs; } catch { continue; }
       const finished = existsSync(join(dir, "summary.json"));
-      const alive = finished ? null : _alive(headPid(logPath));
+      const alive = finished ? null : _alive(lastEnginePid(logPath));
       const aborted = !finished && alive === false;
       out.push({ dir, project, name, mtimeMs, active: !finished && !aborted && now - mtimeMs < recentMs, aborted });
     }
@@ -219,15 +220,15 @@ export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _aliv
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
-// The engine pid from the FIRST run-start line, reading only the head of the file.
-function headPid(logPath) {
-  let fd;
+// The engine pid from the LAST run-start line — the engine currently driving the
+// run. Only unfinished runs reach here (finished ones skip the liveness read), so
+// reading the whole log is a handful of files per listing, not the whole estate.
+function lastEnginePid(logPath) {
   try {
-    fd = openSync(logPath, "r");
-    const buf = Buffer.alloc(4096);
-    const n = readSync(fd, buf, 0, buf.length, 0);
-    const head = buf.toString("utf8", 0, n);
-    const m = /"event":"run-start"[^\n]*?"pid":(\d+)/.exec(head);
-    return m ? Number(m[1]) : null;
-  } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
+    const text = readFileSync(logPath, "utf8");
+    let pid = null;
+    const re = /"event":"run-start"[^\n]*?"pid":(\d+)/g;
+    for (let m = re.exec(text); m; m = re.exec(text)) pid = Number(m[1]);
+    return pid;
+  } catch { return null; }
 }
