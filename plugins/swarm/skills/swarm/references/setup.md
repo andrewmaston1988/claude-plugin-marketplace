@@ -114,7 +114,7 @@ from the appendix. If no, close.
 | `timeoutMs` | `3600000` | Per-leaf wall clock; past it the leaf is `timeout`, slot freed. |
 | `retry.rateLimited` / `retry.backoffMs` | `2` / `30000` | Retries after a rate-limit failure, exponential from the backoff; the slot frees while waiting. |
 | `retry.spawnError` | `1` | Retries when the leaf process fails to start. |
-| `resultInlineCap` | `4000` | `{{result:id}}` inlines at most this many chars, tail dropped — why verifiers take `{{resultPath:id}}`. |
+| `resultInlineCap` | `4000` | Between leaves, during a run: when leaf B's prompt says `{{result:A}}`, the engine pastes A's output text into B's prompt before launching B — up to this many characters, then cuts (flagged on the leaf, in `run.log` and the closing block). `{{resultPath:A}}` pastes the file path instead, uncapped; verifiers must use that. Not the digest — the digest reads every result file from disk after the run. |
 | `worktreeBranchPrefix` | `swarm/` | Branch prefix for worktree-isolated leaves. |
 | `modelDenylist` | `[]` | Case-insensitive substrings; matching models fail `validate` and vanish from `models`. |
 | `notifyCmd` | `null` | Stage 5. |
@@ -122,8 +122,8 @@ from the appendix. If no, close.
 | `quotaWarnPct` | `80` | Warn once when the worst window is at or past this percent. |
 | `quotaCacheSecs` | `300` | How long one usage read is reused. |
 | `quotaPatterns` | four strings | Output substrings that classify a failed leaf as quota-hit. |
-| `heartbeatSecs` | `15` | Roster repaint cadence while anything runs. |
-| `quietWarnSecs` | `60` | A running leaf silent this long gets the quiet marker (roster, statusline, dashboard). |
+| `heartbeatSecs` | `15` | The roster is the boxed table the engine prints while a run is live — one row per leaf: state glyph, id, model, elapsed, work tokens, last tool call. It repaints on every leaf event and, so timers and token counts keep moving between events, every this-many seconds. Cosmetic cadence for the operator's watch terminal; leaves are unaffected. |
+| `quietWarnSecs` | `60` | A running leaf that has emitted no event (no tool call, no token update) for this long gets `⚠ quiet Ns` in the roster, the statusline and the dashboard. The stall signal — token counts are not. Raise it for models that think in long silent turns. |
 | `dashboard.enabled` / `bind` / `token` | `true` / `0.0.0.0` / `null` | Stage 3. |
 | `dashboard.port` | `7331` | Listen port; also the firewall rule's port. |
 | `dashboard.recentMs` | `1800000` | A run with no live engine and no event in this window lists as stale; the statusline glyph uses the same window. |
