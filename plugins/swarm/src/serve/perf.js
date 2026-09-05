@@ -24,16 +24,19 @@
     const { esc } = h;
     const { aspects, models, cells } = data;
     if (!models.length) return `<div class="empty">no graded leaves yet — nothing to cover.</div>`;
-    const short = (a) => (a.length > 5 ? a.slice(0, 5) : a);
+    // Model names lose the provider suffix (the page's convention); aspect
+    // headers rotate so the full word fits a 34px column on a phone.
+    const shortModel = (m) => m.replace(/(:|-)cloud$/, "");
     // JSON-encoded tuple, not a joined string — a plain delimiter collides
     // whenever a model or aspect name itself contains that delimiter.
     const keyOf = (model, aspect) => JSON.stringify([model, aspect]);
     const byKey = new Map(cells.map((c) => [keyOf(c.model, c.aspect), c]));
-    const CW = 34, CH = 28, GAP = 2, HEAD = 20;
+    const CW = 34, CH = 28, GAP = 2, HEAD = 72;
     const w = aspects.length * CW, gridH = models.length * CH;
     let svg = `<svg viewBox="0 0 ${w} ${gridH + HEAD}" width="${w}" height="${gridH + HEAD}">${HATCH_DEFS}`;
     aspects.forEach((a, i) => {
-      svg += `<text x="${i * CW + CW / 2}" y="12" text-anchor="middle" font-size="9" fill="var(--muted)">${esc(short(a))}</text>`;
+      const cx = i * CW + CW / 2 + 3;
+      svg += `<text transform="translate(${cx},${HEAD - 6}) rotate(-60)" font-size="10" fill="var(--muted)">${esc(a)}</text>`;
     });
     models.forEach((m, r) => {
       aspects.forEach((a, c) => {
@@ -46,8 +49,8 @@
       });
     });
     svg += `</svg>`;
-    const labels = models.map((m) => `<div class="cov-row-label">${esc(m)}</div>`).join("");
-    return `<div class="cov"><div class="cov-labels"><div class="cov-corner"></div>${labels}</div><div class="cov-scroll">${svg}</div></div>`;
+    const labels = models.map((m) => `<div class="cov-row-label" title="${esc(m)}">${esc(shortModel(m))}</div>`).join("");
+    return `<div class="cov"><div class="cov-labels"><div class="cov-corner" style="height:${HEAD}px"></div>${labels}</div><div class="cov-scroll">${svg}</div></div>`;
   }
 
   // A legend row always accompanies >=2 series (six outcome buckets here) —
