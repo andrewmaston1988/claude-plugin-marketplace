@@ -261,6 +261,8 @@ A read-only LAN web page over `~/.swarm/runs`: every project's runs, the live ro
 
 The menu also opens **Performance**: the model score store (`~/.swarm/model-scores.jsonl`) ranked exactly as `swarm perf` ranks it — the maths is `scores.mjs`, the page only draws. One ranking list serves every table: overall (mean of the four universal weighted scores) with a chip per aspect, a domain filter, and a tap on a model for its per-aspect breakdown. A provisional cell (n<5) draws its bar dashed and says so; a model with no grades shows its outcomes only. Re-read when the store's mtime moves, so a grade landing between requests shows on the next tap.
 
+Three view chips sit alongside rank: **coverage** (a model × aspect grid, cell shade + count showing evidence depth, hatched where n<5 and outlined where n=0), **reliability** (each model's outcome mix — completed, wrong, failed, timeout, session-died, not-capable — as a stacked bar with a legend), and **leaders** (top 3 per aspect, the same weighted ranking capped and grouped). All three are computed server-side (`perf-views.mjs`) and drawn by a lazily-loaded `perf.js`.
+
 ```bash
 node plugins/swarm/scripts/swarm.mjs serve --daemon        # detached; pid ~/.swarm/dashboard.pid, log ~/.swarm/dashboard.log
 node plugins/swarm/scripts/swarm.mjs serve                 # foreground
