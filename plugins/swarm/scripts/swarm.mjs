@@ -28,7 +28,8 @@ const USAGE = `usage: swarm.mjs <command>
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
   serve stop | status | install-autostart | uninstall-autostart
-  config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it`;
+  config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it
+  statusline install         write the self-resolving statusline shim to ~/.swarm/statusline.mjs and print the settings.json line`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -550,6 +551,19 @@ async function main() {
       }
       case "serve":
         return await cmdServe(rest);
+      case "statusline": {
+        if (rest[0] !== "install") { err(USAGE); return 1; }
+        const { copyFileSync, mkdirSync } = await import("node:fs");
+        const home = swarmHome();
+        mkdirSync(home, { recursive: true });
+        const shim = join(home, "statusline.mjs");
+        copyFileSync(fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)), shim);
+        const cmd = `node ${shim.replaceAll("\\", "/")}`;
+        out(`statusline: shim written to ${shim} — it resolves the installed plugin on every paint, so plugin updates never break it.`);
+        out("Add to ~/.claude/settings.json (edit the file in place; a symlinked settings.json must not be replaced):");
+        out(JSON.stringify({ statusLine: { type: "command", command: cmd } }, null, 2));
+        return 0;
+      }
       case "config": {
         if (rest[0] !== "init") { err(USAGE); return 1; }
         const { initConfig } = await import("../src/config.mjs");

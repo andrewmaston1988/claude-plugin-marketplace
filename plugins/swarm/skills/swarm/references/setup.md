@@ -56,16 +56,33 @@ combined options if the operator is brisk, or one each if not:
 - `bind` — `0.0.0.0` is reachable on the LAN and Tailscale; `127.0.0.1` is this machine only.
 - `token` — when set, every request needs `?t=<token>`; bookmark the URL with it. Offer to
   generate one; never invent one silently.
-`port` and `recentMs` are advanced (Stage 6).
+`port` and `recentMs` are advanced (Stage 7).
 
-### Stage 4 — telling the operator a run finished (`notifyCmd`)
+### Stage 4 — the status bar (settings.json `statusLine`)
+
+The plugin ships a status bar for Claude Code's bottom line: every live run THIS session
+launched — done/total, a live symbol, the models seated on running leaves, work tokens, and a
+yellow flag on a leaf quiet for over five minutes. Zero model cost. It cannot live in the
+swarm config: Claude Code reads `statusLine` from `~/.claude/settings.json` only. Ask
+whether they want it. On yes:
+1. `node <engine> statusline install` — writes `~/.swarm/statusline.mjs`, a shim that
+   resolves the installed plugin on every paint (so plugin updates never break the bar), and
+   prints the exact `statusLine` block.
+2. Put that block into `~/.claude/settings.json` with the `Edit` tool, **in place** — never
+   tmp+rename (the file may be a symlink) — replacing any existing `statusLine`. Say that
+   `/model` and `/effort` reserialise settings.json from the copy taken at session start,
+   so an edit made mid-session can be reverted by them: the safe moment is the start of a
+   session, or right before ending this one.
+If settings.json already has a `statusLine`, the harness runs ONE command per bar: offer to keep theirs, switch to this one, or point settings at a wrapper script of their own that prints both.
+
+### Stage 5 — telling the operator a run finished (`notifyCmd`)
 
 Runs take minutes and the operator walks away. `notifyCmd` is a shell command fired at the
 end with `{status}`, `{digest}` and `{summary}` substituted — the slack-bridge plugin's
 `claude-slack notify --message "{status} — {digest}"` is the usual shape. `null` = nothing.
 Ask whether they want a ping and, if so, through what.
 
-### Stage 5 — grading the models (`grading.enabled`)
+### Stage 6 — grading the models (`grading.enabled`)
 
 After a run, the session can grade each leaf's model on adherence, handoff, truthfulness,
 depth and any capability it stressed; grades accumulate in `~/.swarm/model-scores.jsonl`,
@@ -74,7 +91,7 @@ pass per run. Off (the shipped default): no run asks, the tier guide routes mode
 Performance page is disabled. Worth turning on once the operator runs alternative models
 often enough for the numbers to mean something. Ask.
 
-### Stage 6 — advanced, only on request
+### Stage 7 — advanced, only on request
 
 Say once: "the remaining keys are tuning — timeouts, retries, concurrency, quota thresholds,
 display cadence, provider plumbing. Want any of them?" If yes, explain only the ones named,
@@ -100,7 +117,7 @@ from the appendix. If no, close.
 | `resultInlineCap` | `4000` | `{{result:id}}` inlines at most this many chars, tail dropped — why verifiers take `{{resultPath:id}}`. |
 | `worktreeBranchPrefix` | `swarm/` | Branch prefix for worktree-isolated leaves. |
 | `modelDenylist` | `[]` | Case-insensitive substrings; matching models fail `validate` and vanish from `models`. |
-| `notifyCmd` | `null` | Stage 4. |
+| `notifyCmd` | `null` | Stage 5. |
 | `quotaPreflight` | `true` | Before a run with Claude leaves, read Anthropic's usage with Claude Code's own sign-in; refuse when a window is exhausted. |
 | `quotaWarnPct` | `80` | Warn once when the worst window is at or past this percent. |
 | `quotaCacheSecs` | `300` | How long one usage read is reused. |
@@ -112,7 +129,7 @@ from the appendix. If no, close.
 | `dashboard.recentMs` | `1800000` | A run with no live engine and no event in this window lists as stale; the statusline glyph uses the same window. |
 | `swarm.always` | `false` | Stage 2. |
 | `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |
-| `grading.enabled` | `false` | Stage 5. |
+| `grading.enabled` | `false` | Stage 6. |
 
 ## Common mistakes
 

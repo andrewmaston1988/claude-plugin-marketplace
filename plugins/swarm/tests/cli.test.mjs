@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
@@ -825,5 +826,27 @@ test("run: the closing block asks for grading only when grading.enabled is true"
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  }
+});
+
+test("statusline install: writes the self-resolving shim into ~/.swarm and prints the settings.json line; the shim runs the installed plugin's bar", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const r = runCli(["statusline", "install"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    const shim = join(home, "statusline.mjs");
+    ok(existsSync(shim), "shim written");
+    ok(r.stdout.includes('"statusLine"'), r.stdout);
+    ok(r.stdout.includes(shim.replaceAll("\\", "/")), "forward-slash path in the snippet");
+    // a fake registry whose installPath is THIS working tree: the shim must resolve through it
+    const registry = join(dir, "installed_plugins.json");
+    const pluginRoot = join(import.meta.dirname, "..");
+    writeFileSync(registry, JSON.stringify({ plugins: { "swarm@andrewmaston1988-claude-plugins": [{ scope: "user", installPath: pluginRoot, lastUpdated: "2026-09-05T00:00:00Z" }] } }));
+    const out = spawnSync(process.execPath, [shim], { encoding: "utf8", input: "{}", env: { ...process.env, SWARM_HOME: home, SWARM_PLUGIN_REGISTRY: registry } });
+    equal(out.status, 0, out.stderr);
+    equal(out.stdout, "\n", "no live runs → blank bar, exit 0");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
