@@ -24,31 +24,31 @@
     const { esc, enc } = h;
     const { aspects, models, cells } = data;
     if (!models.length) return `<div class="empty">no graded leaves yet — nothing to cover.</div>`;
-    // One responsive SVG: labels live inside it, so a viewBox scales the whole
-    // grid to the phone's width — no horizontal scroll, no HTML/SVG row drift.
-    // mild truncation: drop the provider suffix, then cap at 18 chars — the full name stays in the <title>
-    const shortModel = (m) => { const s = m.replace(/(:|-)cloud$/, ""); return s.length > 18 ? s.slice(0, 17) + "…" : s; };
+    // One responsive SVG scaled to the phone by its viewBox. Each model gets a
+    // small label line ABOVE its tile row, so the tiles take the full width and
+    // the name never truncates. Tap a label → the model's page; tap an aspect
+    // header → that aspect's ranking.
+    const shortModel = (m) => m.replace(/(:|-)cloud$/, "");
     const keyOf = (model, aspect) => JSON.stringify([model, aspect]);
     const byKey = new Map(cells.map((c) => [keyOf(c.model, c.aspect), c]));
-    const LABEL = 128, CW = 22, CH = 24, GAP = 2, HEAD = 84;
-    const w = LABEL + aspects.length * CW, hgt = HEAD + models.length * CH;
+    const CW = 34, TILE = 22, LBL = 15, GAP = 2, HEAD = 84;
+    const ROW = LBL + TILE;
+    const w = aspects.length * CW, hgt = HEAD + models.length * ROW;
     let svg = `<svg viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="xMinYMin meet" class="covgrid">${HATCH_DEFS}`;
     aspects.forEach((a, i) => {
-      // vertical header, bottom-anchored so every column's word ends at the grid edge
-      const x = LABEL + i * CW + CW / 2 + 4;
-      // tap an aspect header → that aspect's ranking; tap a model label → its page (full name + rank)
+      const x = i * CW + CW / 2 + 4;
       svg += `<text transform="translate(${x},${HEAD - 6}) rotate(-90)" font-size="11" fill="var(--muted)" data-href="#/perf/aspect/${enc(a)}" style="cursor:pointer">${esc(a)}</text>`;
     });
     models.forEach((m, r) => {
-      const y = HEAD + r * CH;
-      svg += `<text x="${LABEL - 8}" y="${y + CH / 2 + 4}" text-anchor="end" font-size="11" fill="var(--muted)" data-href="#/perf/model/${enc(m)}" style="cursor:pointer">${esc(shortModel(m))}</text>`;
+      const y = HEAD + r * ROW;
+      svg += `<text x="2" y="${y + 11}" font-size="10" fill="var(--muted)" data-href="#/perf/model/${enc(m)}" style="cursor:pointer">${esc(shortModel(m))}</text>`;
       aspects.forEach((a, c) => {
         const cell = byKey.get(keyOf(m, a)) || { n: 0, provisional: true };
-        const x = LABEL + c * CW + GAP / 2, cy = y + GAP / 2, cw = CW - GAP, ch = CH - GAP;
+        const x = c * CW + GAP / 2, cy = y + LBL + GAP / 2, cw = CW - GAP, ch = TILE - GAP;
         const fill = cell.n === 0 ? "none" : cell.provisional ? `url(#${HATCH_ID})` : "var(--accent)";
         const stroke = cell.n === 0 ? "var(--rule)" : "none";
         svg += `<rect x="${x}" y="${cy}" width="${cw}" height="${ch}" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="1"><title>${esc(m)} · ${esc(a)} · n=${cell.n}${cell.provisional && cell.n ? " (provisional)" : ""}</title></rect>`;
-        if (cell.n > 0) svg += `<text x="${x + cw / 2}" y="${cy + ch / 2 + 3.5}" text-anchor="middle" font-size="9" fill="#fff">${cell.n}</text>`;
+        if (cell.n > 0) svg += `<text x="${x + cw / 2}" y="${cy + ch / 2 + 3.5}" text-anchor="middle" font-size="10" fill="#fff">${cell.n}</text>`;
       });
     });
     svg += `</svg>`;
