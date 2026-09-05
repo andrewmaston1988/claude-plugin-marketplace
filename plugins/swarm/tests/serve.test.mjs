@@ -233,7 +233,7 @@ test("perf: the score store ranked as scores.mjs ranks it — overall + every as
     const path = join(home, "model-scores.jsonl");
     writeFileSync(path, [row("a", "m-good", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9, code: 8 }), row("b", "m-thin", { adherence: 4, handoff: 5, truthfulness: 4, depth: 5 }), row("c", "m-thin", {}, "session-died")].join("\n") + "\n", "utf8");
     const { readRows, overall, aggregate } = await import("../src/scores.mjs");
-    await withServer({ home }, async ({ get }) => {
+    await withServer({ home, cfg: { ...cfg(), grading: { enabled: true } } }, async ({ get }) => {
       const p = await get("/api/perf");
       assert.equal(p.status, 200);
       assert.deepEqual(p.body.overall, overall(readRows(path)).cells, "overall is scores.mjs's ranking, untouched");
@@ -260,11 +260,16 @@ test("grading flag: /api/runs and /api/perf carry grading.enabled — false by d
   try {
     await withServer({ home }, async ({ get }) => {
       assert.equal((await get("/api/runs")).body.grading, false);
-      assert.equal((await get("/api/perf")).body.grading, false);
+      const off = (await get("/api/perf")).body;
+      assert.equal(off.grading, false);
+      assert.equal(off.overall, undefined, "off serves no ranking");
+      assert.equal(off.report, undefined, "off serves no aspect table");
     });
     await withServer({ home, cfg: { ...cfg(), grading: { enabled: true } } }, async ({ get }) => {
       assert.equal((await get("/api/runs")).body.grading, true);
-      assert.equal((await get("/api/perf")).body.grading, true);
+      const on = (await get("/api/perf")).body;
+      assert.equal(on.grading, true);
+      assert.ok(Array.isArray(on.overall), "on serves the ranking");
     });
   } finally {
     rmSync(home, { recursive: true, force: true });

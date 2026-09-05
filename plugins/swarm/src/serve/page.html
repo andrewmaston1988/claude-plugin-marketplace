@@ -626,9 +626,13 @@
     if (model) qs.set("model", model);
     const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
     const title = model ? esc(model) : aspect ? esc(aspect) : "performance";
+    if (!p.grading) {
+      setHeader(`${backBtn("#/")}<div class="title"><b>performance</b><small>off</small></div>${menuBtn}`);
+      setHtml(main, `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`);
+      return;
+    }
     setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}</b><small>${p.rows} graded leaves${p.lines !== p.rows ? ` (${p.lines} lines, re-grades superseded)` : ""} · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
     let html = "";
-    if (!p.grading) html += `<div class="note">grading is off — runs are not asked for grades. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>). Grades already recorded are below.</div>`;
     if (!model) {
       // Aspect chips: overall, the universals, then the capability columns.
       const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;

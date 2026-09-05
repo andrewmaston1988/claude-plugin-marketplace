@@ -172,6 +172,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const q = (k) => url.searchParams.get(k) || undefined;
     const aspect = q("aspect"), model = q("model"), domain = q("domain");
     if (aspect && !ASPECTS.includes(aspect)) return send(res, 400, { error: `unknown aspect ${aspect}`, aspects: ASPECTS });
+    if (!grading) return send(res, 200, { grading, path: scoresFile }); // off means off: nothing ranked, nothing listed
     const rows = scoreRows();
     const live = dedupe(rows);
     const domains = [...new Set(live.map((r) => r.domain).filter(Boolean))].sort();
