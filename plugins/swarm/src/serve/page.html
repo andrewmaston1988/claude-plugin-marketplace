@@ -123,6 +123,14 @@
   .chip.ok { color:var(--ok); background:var(--ok-bg); }
   .chip.bad { color:var(--bad); background:var(--bad-bg); }
   .chip.warn { color:var(--warn); background:var(--warn-bg); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; }
+  /* coverage grid: labels fixed, the aspect×model grid scrolls in its own box
+     so a wide aspect list never forces the page itself past 412px. */
+  .cov { display:flex; gap:8px; padding:0 16px 16px; }
+  .cov-labels { display:flex; flex-direction:column; flex:none; padding-top:20px; }
+  .cov-corner { height:20px; }
+  .cov-row-label { height:28px; display:flex; align-items:center; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:96px; }
+  .cov-scroll { overflow-x:auto; }
   pre.out { margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.5; color:var(--ink); max-height:60vh; overflow:auto; }
   .json { font-size:12px; line-height:1.5; max-height:70vh; overflow:auto; word-break:break-word; }
   .json dl, .json ol { margin:0; padding:0; }
@@ -618,6 +626,7 @@
     if (bad) bits.push(`<span class="c-bad">${esc(bad)}</span>`);
     return bits.join(" · ");
   };
+  const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders"]);
   async function renderPerf(kind, which) {
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
     const domain = ui.perfDomain;
@@ -625,17 +634,35 @@
     if (domain) qs.set("domain", domain);
     if (model) qs.set("model", model);
     const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
-    const title = model ? esc(model) : aspect ? esc(aspect) : "performance";
+    const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind : "performance";
     if (!p.grading) {
       setHeader(`${backBtn("#/")}<div class="title"><b>performance</b><small>off</small></div>${menuBtn}`);
       setHtml(main, `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`);
       return;
     }
     setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}</b><small>${p.rows} graded leaves${p.lines !== p.rows ? ` (${p.lines} lines, re-grades superseded)` : ""} · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
+    const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
     let html = "";
     if (!model) {
+      // View switcher: the existing ranking view plus the three new ones.
+      html += `<div class="chips">${chip("rank", "#/perf", !NEW_PERF_KINDS.has(kind))}${chip("coverage", "#/perf/coverage", kind === "coverage")}${chip("reliability", "#/perf/reliability", kind === "reliability")}${chip("leaders", "#/perf/leaders", kind === "leaders")}</div>`;
+    }
+    if (NEW_PERF_KINDS.has(kind)) {
+      if (p.domains.length > 1) {
+        const dchip = (label, d) => `<span class="chip${(d || null) === (domain || null) ? " on" : ""}" data-domain="${esc(d || "")}">${esc(label)}</span>`;
+        html += `<div class="chips" style="padding-top:8px">${dchip("all domains", "")}${p.domains.map((d) => dchip(d, d)).join("")}</div>`;
+      }
+      html += `<div style="height:12px"></div>`;
+      await loadPerfJs();
+      const h = { esc, enc, fmtScore, chip };
+      html += kind === "coverage" ? window.perfViews.coverageGrid(p.views.coverage, h)
+        : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
+        : window.perfViews.leadersList(p.views.leaders, h);
+      setHtml(main, html);
+      return;
+    }
+    if (!model) {
       // Aspect chips: overall, the universals, then the capability columns.
-      const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
       html += `<div class="chips">${chip("overall", "#/perf", !aspect)}${p.aspects.map((a) => chip(a, `#/perf/aspect/${enc(a)}`, a === aspect)).join("")}</div>`;
     }
     if (p.domains.length > 1) {
@@ -740,6 +767,20 @@
   // is noticed (nothing writes run.log when the engine dies).
   setInterval(() => { if (view.name === "run" && currentRun && !runEnded(currentRun)) route(); }, 15000);
   window.addEventListener("resize", () => { if (view.name === "run" && currentRun) rerender(); });
+
+  // perf.js is a served static, loaded lazily and once — its src carries the
+  // token via the same q() every fetch uses. Awaited only by the three new
+  // Performance kinds; runs/leaf views never touch it.
+  let perfJsReady;
+  function loadPerfJs() {
+    if (!perfJsReady) perfJsReady = new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = q("/perf.js");
+      s.onload = s.onerror = () => resolve();
+      document.head.appendChild(s);
+    });
+    return perfJsReady;
+  }
 
   route();
   connect();

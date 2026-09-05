@@ -264,14 +264,36 @@ test("grading flag: /api/runs and /api/perf carry grading.enabled — false by d
       assert.equal(off.grading, false);
       assert.equal(off.overall, undefined, "off serves no ranking");
       assert.equal(off.report, undefined, "off serves no aspect table");
+      assert.equal(off.views, undefined, "off serves no views either");
     });
     await withServer({ home, cfg: { ...cfg(), grading: { enabled: true } } }, async ({ get }) => {
       assert.equal((await get("/api/runs")).body.grading, true);
       const on = (await get("/api/perf")).body;
       assert.equal(on.grading, true);
       assert.ok(Array.isArray(on.overall), "on serves the ranking");
+      assert.ok(on.views, "on serves the three perf-views read-models");
+      assert.ok(Array.isArray(on.views.coverage.cells));
+      assert.ok(Array.isArray(on.views.reliability));
+      assert.ok(Array.isArray(on.views.leaders));
     });
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("/perf.js: served as text/javascript, no-store, token-gated like everything else", async () => {
+  const { home } = seedHome();
+  try {
+    await withServer({ home }, async ({ get }) => {
+      const r = await get("/perf.js", { raw: true });
+      assert.equal(r.status, 200);
+      assert.match(r.headers["content-type"], /text\/javascript/);
+      assert.equal(r.headers["cache-control"], "no-store");
+      assert.match(r.body, /window\.perfViews/);
+    });
+    await withServer({ home, cfg: cfg({ token: "s3cret" }) }, async ({ get }) => {
+      assert.equal((await get("/perf.js")).status, 401);
+      assert.equal((await get("/perf.js?t=s3cret")).status, 200);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
