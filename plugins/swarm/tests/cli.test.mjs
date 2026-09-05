@@ -761,3 +761,21 @@ test("report: missing report.md exits 1 with a readable error", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("serve: dashboard.enabled=false refuses to start (foreground and --daemon), names the key, writes no pid", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({ dashboard: { enabled: false, port: 0 } }));
+    for (const args of [["serve"], ["serve", "--daemon"]]) {
+      const r = runCli(args, { cwd: dir, env: { SWARM_HOME: home } });
+      equal(r.status, 0, r.stderr);
+      ok(/dashboard: disabled/.test(r.stdout), r.stdout);
+      ok(r.stdout.includes("dashboard.enabled"), r.stdout);
+      ok(!existsSync(join(home, "dashboard.pid")), "no pid file");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

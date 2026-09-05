@@ -26,7 +26,7 @@ const USAGE = `usage: swarm.mjs <command>
   grade --init <resultsDir>  write grades.json — one skeleton row per model leaf (Claude tiers included), for you to fill in
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
-  serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.port/bind/token)
+  serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
   serve stop | status | install-autostart | uninstall-autostart`;
 
 // Always-available Claude aliases, appended after discovered models.
@@ -479,6 +479,10 @@ async function cmdServe(rest) {
     exitSoon(0); return 0;
   }
   if (verb !== "start") { err(USAGE); return 1; }
+
+  // The off switch. stop/status/autostart verbs still work above, so a Startup
+  // launcher left installed becomes a no-op instead of needing uninstalling.
+  if (cfg.dashboard?.enabled === false) { out("dashboard: disabled (dashboard.enabled=false in ~/.swarm/config.json)"); exitSoon(0); return 0; }
 
   // The --daemon parent records the child's pid before the child gets here, so a
   // pid equal to our own is us, not a rival.

@@ -33,6 +33,7 @@
   "worktreeBranchPrefix": "swarm/",
   "notifyCmd": null,
   "dashboard": {
+    "enabled": true,
     "port": 7331,
     "bind": "0.0.0.0",
     "token": null,
