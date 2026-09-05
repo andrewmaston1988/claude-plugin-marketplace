@@ -123,6 +123,20 @@
   .chips.views .chip { justify-content:center; }
   /* aspect + domain pickers: the lists are too long for pills on a phone */
   .selrow { display:flex; gap:8px; padding:8px 16px 0; }
+  /* model dashboard: four stat tiles, compressed aspect bars, widget headers that can hold a picker */
+  .kv.dash4 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .kv.dash4 span small { font-size:12px; color:var(--muted); }
+  .section .secsel { margin-left:auto; text-transform:none; letter-spacing:0; }
+  .section .secsel .sel { padding:4px 8px; font-size:11px; }
+  .aspects { padding:4px 16px 12px; display:flex; flex-direction:column; gap:6px; }
+  .arow { display:grid; grid-template-columns:96px 1fr 64px; align-items:center; gap:8px; min-height:22px; cursor:pointer; }
+  .arow .alabel { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .arow .bar { height:6px; border-radius:3px; }
+  .arow .bar span { background:var(--accent); border-radius:3px; }
+  .arow .bar.prov span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
+  .arow .aval { font-size:12px; text-align:right; white-space:nowrap; }
+  .arow .aval small { color:var(--faint); }
+  .arow.none .aval { color:var(--faint); }
   .sel { flex:1; min-width:0; font:inherit; font-size:12px; color:var(--ink); background:var(--surface-2); border:1px solid var(--rule); border-radius:8px; padding:8px 10px; }
   .chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--surface-2); border-radius:999px; padding:6px 10px; }
   .chip.run { color:var(--accent); background:var(--accent-soft); }
@@ -673,14 +687,23 @@
       // Aspect picker (overall, the universals, then the capability columns) and
       // the domain filter share one row; a model's own page keeps just the domain.
       const aspectSel = model ? "" : sel('data-nav', [["#/perf", "overall"], ...p.aspects.map((a) => [`#/perf/aspect/${enc(a)}`, a])], aspect ? `#/perf/aspect/${enc(aspect)}` : "#/perf");
-      const row = aspectSel + domainSel();
+      const row = model ? "" : aspectSel + domainSel();
       if (row) html += `<div class="selrow">${row}</div>`;
     }
     html += `<div style="height:12px"></div>`;
     if (model) {
-      // One model: its overall line, then every aspect it has been graded on.
-      const o = p.overall[0];
-      if (o) html += `<div class="totals"><span><b>overall</b> ${fmtScore(o.combined)}</span><span class="meta">${cellSub(o)}</span></div>`;
+      // One model as a dashboard: tiles, compressed aspect bars, its coverage row, its reliability bar.
+      await loadPerfJs();
+      const h = { esc, enc, fmtScore, chip };
+      const cov = p.views.coverage;
+      html += window.perfViews.modelDashboard({
+        model, overall: p.overall[0] || null, rank: p.rank || null, domain, domainSelect: domainSel(),
+        aspects: p.report.map((a) => ({ aspect: a.aspect, universal: a.universal, cell: a.cells.find((x) => x.model === model) || null })),
+        coverage: { aspects: cov.aspects, models: cov.models.filter((m) => m === model), cells: cov.cells.filter((c) => c.model === model) },
+        reliability: p.views.reliability.filter((r) => r.model === model),
+      }, h);
+      setHtml(main, html);
+      return;
       html += rankList(p.report.map((a) => {
         const c = a.cells.find((x) => x.model === model) || { n: 0, mean: null, weighted: null, provisional: true, outcomes: {} };
         return { key: `a:${a.aspect}`, href: `#/perf/aspect/${enc(a.aspect)}`, label: `${esc(a.aspect)}${a.universal ? ` <span class="tag faint">universal</span>` : ""}`, val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional };

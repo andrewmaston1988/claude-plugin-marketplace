@@ -88,5 +88,32 @@
     }).join("");
   }
 
-  window.perfViews = { coverageGrid, reliabilityBars, leadersList };
+  // One model's page as a dashboard: stat tiles, compressed aspect bars (with
+  // the domain picker in the widget header), its coverage row, its reliability bar.
+  function modelDashboard(data, h) {
+    const { esc, enc, fmtScore } = h;
+    const { model, overall, rank, aspects, coverage, reliability, domainSelect, domain } = data;
+    const medal = rank ? (["🏆", "🥈", "🥉"][rank.position - 1] || `#${rank.position}`) : "—";
+    const rel = reliability[0];
+    const total = rel ? rel.total : 0;
+    const done = rel ? (rel.byOutcome.completed || 0) : 0;
+    const tiles = `<div class="kv dash4">
+      <div><label>overall</label><span>${fmtScore(overall ? overall.combined : null)} <small>${esc(medal)}${rank ? ` of ${rank.of}` : ""}</small></span></div>
+      <div><label>graded leaves</label><span>${total}</span></div>
+      <div><label>completed</label><span>${total ? Math.round((done / total) * 100) + "%" : "—"}</span></div>
+      <div><label>domain</label><span>${esc(domain || "all")}</span></div>
+    </div>`;
+    const rows = aspects.map((a) => {
+      const c = a.cell;
+      const w = c && c.weighted != null ? Math.max(0, Math.min(100, (c.weighted / 10) * 100)) : 0;
+      const none = !c || c.weighted == null;
+      return `<div class="arow${none ? " none" : ""}" data-href="#/perf/aspect/${enc(a.aspect)}"><span class="alabel">${esc(a.aspect)}</span><div class="bar${c && c.provisional ? " prov" : ""}"><span style="width:${w}%"></span></div><span class="aval">${none ? "—" : fmtScore(c.weighted)}<small>${c ? " n=" + c.n : ""}</small></span></div>`;
+    }).join("");
+    const aspectWidget = `<div class="section"><span>aspects</span><span class="line"></span>${domainSelect ? `<span class="secsel">${domainSelect}</span>` : ""}</div><div class="aspects">${rows}</div>`;
+    const covWidget = `<div class="section"><span>coverage</span><span class="line"></span></div>${coverageGrid(coverage, h)}`;
+    const relWidget = `<div class="section"><span>reliability</span><span class="line"></span></div>${reliabilityBars(reliability, h)}`;
+    return tiles + aspectWidget + covWidget + relWidget;
+  }
+
+  window.perfViews = { coverageGrid, reliabilityBars, leadersList, modelDashboard };
 })();
