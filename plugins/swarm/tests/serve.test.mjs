@@ -13,7 +13,9 @@ function seedHome() {
   const home = mkdtempSync(join(tmpdir(), "swarm-serve-"));
   const live = join(home, "runs", "C--code-a", "live-1");
   buildFixture(live);
-  writeFileSync(join(live, "manifest.json"), JSON.stringify({ tasks: [{ id: "find-a", model: "m" }, { id: "find-b", model: "m" }, { id: "fix", model: "m", after: ["find-a"] }, { id: "review", model: "m", after: ["fix"] }] }), "utf8");
+  // find-b carries a prompt but NO result file: the in-flight case, where the prompt is
+  // only knowable from this snapshot. `join` is agentless — no prompt, and must stay 404.
+  writeFileSync(join(live, "manifest.json"), JSON.stringify({ tasks: [{ id: "find-a", model: "m", prompt: "authored a" }, { id: "find-b", model: "m", prompt: "authored b" }, { id: "fix", model: "m", after: ["find-a"] }, { id: "review", model: "m", after: ["fix"] }, { id: "join", compute: "1" }], digest: { model: "m", instructions: "steer the digest" } }), "utf8");
   writeFileSync(join(live, "results", "find-a.json"), JSON.stringify({ id: "find-a", model: "m", ok: true, output: "ten bullets", tokens: { input: 1, output: 2 }, numTurns: 7, prompt: "secret prompt" }), "utf8");
   writeFileSync(join(live, "results", "find-a.log"), "raw stream json — never served", "utf8");
   const done = join(home, "runs", "C--code-b", "done-1");
@@ -33,7 +35,9 @@ async function withServer(opts, fn) {
   const { home } = opts;
   const watchers = [];
   const _watch = (path, listener) => { const w = { path, listener, closed: false, close() { this.closed = true; } }; watchers.push(w); return w; };
-  const server = createServer({ home, cfg: opts.cfg || cfg(), now: () => opts.now ?? NOW, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30 });
+  // _pollMs defaults slow: only the poll tests opt into a fast tick, so no other
+  // test's frame counting can be perturbed by a liveness broadcast landing mid-window.
+  const server = createServer({ home, cfg: opts.cfg || cfg(), now: () => opts.now ?? NOW, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30, _pollMs: opts.pollMs ?? 60_000 });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const port = server.address().port;
   const get = (path, { raw = false } = {}) => new Promise((resolve, reject) => {
@@ -53,7 +57,7 @@ test("safeSegment: ids with [ ] ~ . - pass; traversal, slashes, empties do not",
   for (const bad of ["..", "../x", "a/b", "a\\b", "", ".", "a b", "%2e%2e", "C:"]) assert.ok(!safeSegment(bad), JSON.stringify(bad));
 });
 
-test("routes: runs list, run, leaf (no raw log, no prompt), digest fallback, manifest", async () => {
+test("routes: runs list, run, leaf (no raw log; prompt exposed for the accordion), digest fallback, manifest", async () => {
   const { home } = seedHome();
   try {
     await withServer({ home }, async ({ get }) => {
@@ -73,7 +77,13 @@ test("routes: runs list, run, leaf (no raw log, no prompt), digest fallback, man
       assert.equal(leaf.status, 200);
       assert.equal(leaf.body.output, "ten bullets");
       assert.equal(leaf.body.numTurns, 7);
-      assert.equal(leaf.body.prompt, undefined, "the prompt stays on disk");
+      // Reversal of a deliberate earlier guard ("the prompt stays on disk"), on the
+      // operator's explicit call (2026-09-05) so the leaf view can show what the leaf
+      // was actually asked. Note the surface this widens: the dashboard binds 0.0.0.0
+      // and `dashboard.token` is null by default, so any host that can reach the port
+      // can now read prompts as well as outputs. Pinned so the exposure stays
+      // intentional and a future reader sees it was chosen, not leaked.
+      assert.equal(leaf.body.prompt, "secret prompt", "the prompt is served for the leaf-view accordion");
       assert.equal(leaf.body.log, undefined);
       assert.equal((await get("/api/runs/C--code-a/live-1/leaves/nope")).status, 404);
 
@@ -178,6 +188,87 @@ test("events: SSE emits one debounced run event per burst, names the run, and he
       assert.match(runEvents[0], /"project":"C--code-a"/);
       assert.match(runEvents[0], /"name":"live-1"/);
       assert.match(text, /^: ping/m, "heartbeat comment present");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("leaf route: an in-flight leaf serves its authored prompt from the manifest, not a 404", async () => {
+  // results/<id>.json only appears when a leaf finishes, so before this the leaf view had
+  // nothing to show for a running leaf — which is exactly when you want to know what it
+  // was asked. An agentless node has no prompt and must still 404.
+  const { home } = seedHome();
+  try {
+    await withServer({ home }, async ({ get }) => {
+      const inflight = await get("/api/runs/C--code-a/live-1/leaves/find-b");
+      assert.equal(inflight.status, 200, "an in-flight leaf is served, not 404'd");
+      assert.equal(inflight.body.prompt, "authored b");
+      assert.equal(inflight.body.authored, true, "flagged authored — placeholders are unsubstituted");
+
+      const finished = await get("/api/runs/C--code-a/live-1/leaves/find-a");
+      assert.equal(finished.body.prompt, "secret prompt", "a finished leaf keeps the dispatched prompt");
+      assert.equal(finished.body.authored, undefined, "not the authored fallback");
+
+      // __digest lives in the manifest's `digest` block, not in tasks — without a case
+      // for it, the run's most-watched node is the one that stays 404 while in flight.
+      const digest = await get("/api/runs/C--code-a/live-1/leaves/__digest");
+      assert.equal(digest.status, 200, "an in-flight digest is served too");
+      assert.equal(digest.body.prompt, "steer the digest");
+      assert.equal(digest.body.authored, true);
+
+      assert.equal((await get("/api/runs/C--code-a/live-1/leaves/join")).status, 404, "agentless node has no prompt");
+      assert.equal((await get("/api/runs/C--code-a/live-1/leaves/nope")).status, 404, "unknown id still 404s");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("events: the poll reports a run that FINISHED, with no filesystem event at all", async () => {
+  // summary.json lands in a path nothing watches (only run.log is watched), and an
+  // engine dying is not an fs event in the first place. So the clock is the only
+  // signal for either. Deliberately fires NO watcher listener: doing so would route
+  // through onRootOrProject, which broadcasts unconditionally, and the unfixed code
+  // would pass while asserting nothing.
+  const { home, live } = seedHome();
+  try {
+    await withServer({ home, pollMs: 40 }, async ({ port }) => {
+      const frames = [];
+      const req = http.get({ host: "127.0.0.1", port, path: "/events" }, (res) => {
+        res.setEncoding("utf8");
+        res.on("data", (c) => frames.push(c));
+      });
+      await new Promise((r) => setTimeout(r, 60));
+      frames.length = 0; // drop the connect frame and any first-tick noise
+      writeFileSync(join(live, "summary.json"), JSON.stringify({ started: "2026-09-05T00:00:00Z", finished: "2026-09-05T00:30:00Z", tasks: [] }), "utf8");
+      await new Promise((r) => setTimeout(r, 160));
+      req.destroy();
+      const runsEvents = frames.join("").split("\n\n").filter((f) => /^event: runs$/m.test(f));
+      assert.ok(runsEvents.length >= 1, `the poll must announce the finish; got:\n${frames.join("")}`);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("events: the poll picks up a NEW run when no watcher fires — a dead handle cannot hide it", async () => {
+  // The arrival half of the same fault: refreshWatchers is otherwise only reachable
+  // from the watchers' own events, so once a handle goes quiet nothing rebuilds it.
+  // No listener is fired here — that is the point.
+  const { home } = seedHome();
+  try {
+    await withServer({ home, pollMs: 40 }, async ({ port, watchers }) => {
+      const frames = [];
+      const req = http.get({ host: "127.0.0.1", port, path: "/events" }, (res) => {
+        res.setEncoding("utf8");
+        res.on("data", (c) => frames.push(c));
+      });
+      await new Promise((r) => setTimeout(r, 60));
+      frames.length = 0;
+      const fresh = join(home, "runs", "C--code-a", "live-2");
+      buildFixture(fresh);
+      const t = (NOW - 1000) / 1000;
+      utimesSync(join(fresh, "run.log"), t, t);
+      await new Promise((r) => setTimeout(r, 160));
+      req.destroy();
+      const runsEvents = frames.join("").split("\n\n").filter((f) => /^event: runs$/m.test(f));
+      assert.ok(runsEvents.length >= 1, `the poll must announce the new run; got:\n${frames.join("")}`);
+      assert.ok(watchers.some((w) => w.path === join(fresh, "run.log")), "the poll also starts watching it");
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

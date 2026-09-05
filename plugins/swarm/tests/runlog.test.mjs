@@ -184,6 +184,36 @@ test("listRuns: a resumed run is live by its LAST run-start pid, not the reaped 
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test("listRuns: the engine pid is memoised on the log's mtime — a repeated sweep re-reads nothing", () => {
+  // The dashboard polls listRuns. Uncached, every tick re-reads every summary-less
+  // run.log in full — 521 logs / 39 MB on one real estate, six times a minute for as
+  // long as a tab is open. Proof the memo holds, without exposing internals: rewrite
+  // the log with a DIFFERENT pid but restore its mtime. A re-reading implementation
+  // reports the new pid; a memoising one still reports the old.
+  const home = mkdtempSync(join(tmpdir(), "swarm-runs-pidmemo-"));
+  try {
+    const d = join(home, "runs", "C--code-a", "memo-1");
+    mkdirSync(d, { recursive: true });
+    const body = RUN_LOG.split("\n").slice(1).join("\n");
+    const withPid = (pid) =>
+      [`{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":${pid},"tasks":[{"id":"find-a","model":"m"}]}`, body].join("\n");
+    const log = join(d, "run.log");
+    const t = (NOW - 60_000) / 1000;
+    const seen = [];
+    const alive = (pid) => { seen.push(pid); return true; };
+
+    writeFileSync(log, withPid(4242), "utf8");
+    utimesSync(log, t, t);
+    listRuns(home, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
+    assert.deepEqual(seen, [4242], "first sweep reads the log");
+
+    writeFileSync(log, withPid(9999), "utf8");
+    utimesSync(log, t, t); // same mtime as before — the memo must win over the new bytes
+    listRuns(home, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
+    assert.deepEqual(seen, [4242, 4242], "second sweep must use the memo, not re-read the log");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("readRunLog: a line that parses to null is skipped, not dereferenced", () => {
   const { tasks } = readRun(join(tmpdir(), "no-such"), { now: NOW }) ?? { tasks: null };
   assert.equal(tasks, null);

@@ -37,7 +37,8 @@
     "port": 7331,
     "bind": "0.0.0.0",
     "token": null,
-    "recentMs": 1800000
+    "recentMs": 1800000,
+    "livenessPollMs": 10000
   },
   "swarm": {
     "always": false,
