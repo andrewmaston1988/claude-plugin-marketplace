@@ -173,3 +173,22 @@ test("initConfig materialises every shipped key into the user file, keeps set va
 });
 
 
+
+// config.concurrency is a CEILING, not a default: a manifest may run narrower,
+// never wider. The machine that pays for the sessions sets the limit; an
+// authoring model does not raise it by writing a bigger number (operator, 2026-09-05).
+test("config concurrency is a ceiling: a manifest may ask for less, asking for more fails validation naming the key", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "plan.json");
+    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000 };
+    writeFileSync(p, JSON.stringify({ concurrency: 2, tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    equal(loadManifest(p, cfg, dir).concurrency, 2, "narrower is fine");
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    equal(loadManifest(p, cfg, dir).concurrency, 4, "unset → the ceiling");
+    writeFileSync(p, JSON.stringify({ concurrency: 8, tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    throws(() => loadManifest(p, cfg, dir), (e) => /concurrency 8 exceeds the ceiling 4/.test(e.message) && /config\.json/.test(e.message));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

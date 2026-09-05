@@ -201,7 +201,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
 ```json
 {
   "resultsDir": null,                           // OMIT - default ~/.swarm/runs/<encoded-cwd>/<stem>-<n>/ keeps runs out of the repo entirely
-  "concurrency": 4,
+  "concurrency": 4,                           // optional; at most the config ceiling (concurrency in ~/.swarm/config.json) — higher fails validate
   "tasks": [{
     "id": "scan-a",                            // unique, filename-safe
     "prompt": "…",

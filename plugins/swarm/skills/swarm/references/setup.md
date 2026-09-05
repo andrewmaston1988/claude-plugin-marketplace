@@ -110,7 +110,7 @@ from the appendix. If no, close.
 | `provider.cloudSuffix` | `:cloud` | Which model names count as cloud tier. |
 | `provider.authToken` | `ollama` | Sent as the API key in `env` mode. Placeholder, not a secret. |
 | `provider.name` | `ollama` | Label only. |
-| `concurrency` | `4` | Parallel leaves cap; a manifest may set its own. |
+| `concurrency` | `4` | Ceiling on leaves alive at once (each is a full headless `claude` session). A manifest may run narrower, never wider — asking for more fails `validate`. A rate-limited leaf frees its slot while it backs off. |
 | `timeoutMs` | `3600000` | Per-leaf wall clock; past it the leaf is `timeout`, slot freed. |
 | `retry.rateLimited` / `retry.backoffMs` | `2` / `30000` | Retries after a rate-limit failure, exponential from the backoff; the slot frees while waiting. |
 | `retry.spawnError` | `1` | Retries when the leaf process fails to start. |
