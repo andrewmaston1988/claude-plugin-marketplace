@@ -118,6 +118,12 @@
   .chip[data-href], .chip[data-domain] { cursor:pointer; }
   .foot { padding:10px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
+  /* perf view switcher: four pills, one column each, centred — never a ragged wrap */
+  .chips.views { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; }
+  .chips.views .chip { justify-content:center; }
+  /* aspect + domain pickers: the lists are too long for pills on a phone */
+  .selrow { display:flex; gap:8px; padding:8px 16px 0; }
+  .sel { flex:1; min-width:0; font:inherit; font-size:12px; color:var(--ink); background:var(--surface-2); border:1px solid var(--rule); border-radius:8px; padding:8px 10px; }
   .chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--surface-2); border-radius:999px; padding:6px 10px; }
   .chip.run { color:var(--accent); background:var(--accent-soft); }
   .chip.ok { color:var(--ok); background:var(--ok-bg); }
@@ -647,16 +653,15 @@
     }
     setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}</b><small>${p.rows} graded leaves${p.lines !== p.rows ? ` (${p.lines} lines, re-grades superseded)` : ""} · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
     const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
+    const sel = (attr, opts, current) => `<select class="sel" ${attr}>${opts.map(([v, label]) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
+    const domainSel = () => p.domains.length > 1 ? sel('data-domain-select', [["", "all domains"], ...p.domains.map((d) => [d, d])], domain || "") : "";
     let html = "";
     if (!model) {
       // View switcher: the existing ranking view plus the three new ones.
-      html += `<div class="chips">${chip("rank", "#/perf", !NEW_PERF_KINDS.has(kind))}${chip("coverage", "#/perf/coverage", kind === "coverage")}${chip("reliability", "#/perf/reliability", kind === "reliability")}${chip("leaders", "#/perf/leaders", kind === "leaders")}</div>`;
+      html += `<div class="chips views">${chip("rank", "#/perf", !NEW_PERF_KINDS.has(kind))}${chip("coverage", "#/perf/coverage", kind === "coverage")}${chip("reliability", "#/perf/reliability", kind === "reliability")}${chip("leaders", "#/perf/leaders", kind === "leaders")}</div>`;
     }
     if (NEW_PERF_KINDS.has(kind)) {
-      if (p.domains.length > 1) {
-        const dchip = (label, d) => `<span class="chip${(d || null) === (domain || null) ? " on" : ""}" data-domain="${esc(d || "")}">${esc(label)}</span>`;
-        html += `<div class="chips" style="padding-top:8px">${dchip("all domains", "")}${p.domains.map((d) => dchip(d, d)).join("")}</div>`;
-      }
+      if (p.domains.length > 1) html += `<div class="selrow">${domainSel()}</div>`;
       html += `<div style="height:12px"></div>`;
       await loadPerfJs();
       const h = { esc, enc, fmtScore, chip };
@@ -666,13 +671,12 @@
       setHtml(main, html);
       return;
     }
-    if (!model) {
-      // Aspect chips: overall, the universals, then the capability columns.
-      html += `<div class="chips">${chip("overall", "#/perf", !aspect)}${p.aspects.map((a) => chip(a, `#/perf/aspect/${enc(a)}`, a === aspect)).join("")}</div>`;
-    }
-    if (p.domains.length > 1) {
-      const dchip = (label, d) => `<span class="chip${(d || null) === (domain || null) ? " on" : ""}" data-domain="${esc(d || "")}">${esc(label)}</span>`;
-      html += `<div class="chips" style="padding-top:8px">${dchip("all domains", "")}${p.domains.map((d) => dchip(d, d)).join("")}</div>`;
+    {
+      // Aspect picker (overall, the universals, then the capability columns) and
+      // the domain filter share one row; a model's own page keeps just the domain.
+      const aspectSel = model ? "" : sel('data-nav', [["#/perf", "overall"], ...p.aspects.map((a) => [`#/perf/aspect/${enc(a)}`, a])], aspect ? `#/perf/aspect/${enc(aspect)}` : "#/perf");
+      const row = aspectSel + domainSel();
+      if (row) html += `<div class="selrow">${row}</div>`;
     }
     html += `<div style="height:12px"></div>`;
     if (model) {
@@ -732,6 +736,12 @@
   }
   // One delegated click handler for everything in main: navigation rows, the wave
   // and group toggles, the "show all clones" row. Survives morphing, no rebinding.
+  main.addEventListener("change", (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLSelectElement)) return;
+    if (t.dataset.nav != null) { location.hash = t.value; return; }
+    if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; route(); }
+  });
   main.addEventListener("click", (e) => {
     const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more], [data-pretty], [data-project], [data-domain]");
     if (!t || !main.contains(t)) return;
