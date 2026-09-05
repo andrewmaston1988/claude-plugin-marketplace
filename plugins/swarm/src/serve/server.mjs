@@ -2,7 +2,7 @@
 // segment is validated and re-resolved under the runs root, so a request can
 // never name a file outside it. Zero deps — node:http only.
 import http from "node:http";
-import { readFileSync, existsSync, watch as fsWatch } from "node:fs";
+import { readFileSync, readdirSync, existsSync, watch as fsWatch } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readRun, listRuns } from "../runlog.mjs";
@@ -11,7 +11,9 @@ import { renderIconPng, ICON_SIZES } from "./icon.mjs";
 
 const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
 const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
-const LIST_LIMIT = 40;
+// The estate view: every live run, plus the newest few finished PER PROJECT — a
+// global newest-N let one busy project crowd the others off the list entirely.
+const FINISHED_PER_PROJECT = 8;
 
 // A single path segment as the engine writes them (ids, encoded cwds, run names):
 // no separators, no dot-only names, nothing a URL decoder could turn into one.
@@ -75,7 +77,18 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       broadcast("run", { project: run.project, name: run.name });
     }, _debounceMs));
   };
+  const projectWatchers = new Map(); // project dir -> watcher (a new run dir appears here, not at the root)
+  const onRootOrProject = () => { refreshWatchers(); broadcast("runs", {}); };
   const refreshWatchers = () => {
+    // fs.watch is not recursive: the root sees new PROJECT dirs, each project dir sees
+    // new RUN dirs, and each active run's run.log sees its own appends.
+    let projects = [];
+    try { projects = readdirSync(runsRoot).map((p) => join(runsRoot, p)); } catch {}
+    for (const [dir, w] of projectWatchers) if (!projects.includes(dir)) { try { w.close(); } catch {} projectWatchers.delete(dir); }
+    for (const dir of projects) {
+      if (projectWatchers.has(dir)) continue;
+      try { projectWatchers.set(dir, _watch(dir, onRootOrProject)); } catch (e) { log(`watch ${dir}: ${e.message}`); }
+    }
     const active = new Map(listRuns(home, { now: now(), recentMs }).filter((r) => r.active).map((r) => [r.dir, r]));
     for (const [dir, w] of runWatchers) if (!active.has(dir)) { try { w.close(); } catch {} runWatchers.delete(dir); }
     for (const [dir, run] of active) {
@@ -88,7 +101,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const startHub = () => {
     if (rootWatcher) return;
     try {
-      rootWatcher = _watch(runsRoot, () => { refreshWatchers(); broadcast("runs", {}); });
+      rootWatcher = _watch(runsRoot, onRootOrProject);
     } catch (e) { log(`watch ${runsRoot}: ${e.message}`); rootWatcher = { close() {} }; }
     refreshWatchers();
     heartbeat = setInterval(() => { for (const res of clients) res.write(": ping\n\n"); }, _heartbeatMs);
@@ -99,6 +112,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     rootWatcher = null;
     for (const w of runWatchers.values()) { try { w.close(); } catch {} }
     runWatchers.clear();
+    for (const w of projectWatchers.values()) { try { w.close(); } catch {} }
+    projectWatchers.clear();
     clearInterval(heartbeat);
     for (const t of pending.values()) clearTimeout(t);
     pending.clear();
@@ -114,10 +129,17 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
 
   const routes = {
     "/api/runs": (res) => {
-      const rows = listRuns(home, { now: now(), recentMs }).slice(0, LIST_LIMIT).map((r) => {
+      const seen = new Map();
+      const picked = listRuns(home, { now: now(), recentMs }).filter((r) => {
+        if (r.active) return true;
+        const n = seen.get(r.project) || 0;
+        seen.set(r.project, n + 1);
+        return n < FINISHED_PER_PROJECT;
+      });
+      const rows = picked.map((r) => {
         const run = readRun(r.dir, { now: now(), quietWarnMs });
         return {
-          project: r.project, name: r.name, active: r.active, mtimeMs: r.mtimeMs,
+          project: r.project, name: r.name, active: r.active, aborted: r.aborted, mtimeMs: r.mtimeMs,
           startedMs: run?.startedMs ?? null, finishedMs: run?.finishedMs ?? null,
           byState: run?.totals.byState ?? {}, leaves: run?.tasks.length ?? 0, waves: run?.waves.length ?? 0,
           tokens: run ? run.tasks.reduce((n, t) => n + (t.tokens ? (t.tokens.input || 0) + (t.tokens.output || 0) + (t.tokens.cacheCreation || 0) : 0), 0) : 0,

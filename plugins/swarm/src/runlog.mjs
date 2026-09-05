@@ -2,7 +2,7 @@
 // manifest snapshot supplies the graph; summary.json says when it finished.
 // Pure data out — the roster, the statusline glyph and the dashboard all render
 // from this, so none of them carries its own parser.
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync, readdirSync, statSync, existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { DIGEST_ID } from "./digest.mjs";
 
@@ -13,6 +13,7 @@ const CLONE_RE = /^(.+)\[(\d+)\]$/;
 export function readRunLog(content, { now = Date.now() } = {}) {
   let roster = [];
   let startedMs = null;
+  let enginePid = null;
   const state = new Map();
   const tokens = new Map();
   const durations = new Map();
@@ -29,10 +30,12 @@ export function readRunLog(content, { now = Date.now() } = {}) {
     } catch {
       continue; // torn tail write mid-run
     }
+    if (!entry || typeof entry !== "object") continue; // `null` parses; it is not an event
     if (entry.event === "run-start") {
       // pre-token logs recorded plain id strings
       roster = (entry.tasks || []).map((t) => (typeof t === "string" ? { id: t, model: "?" } : t));
       startedMs = Date.parse(entry.ts) || now;
+      enginePid = Number.isInteger(entry.pid) ? entry.pid : null;
       state.clear(); tokens.clear(); durations.clear(); runningSince.clear();
       activity.clear(); lastEvent.clear(); clones.clear(); children.clear();
       continue;
@@ -80,7 +83,13 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       quietMs: st === "running" && last != null ? now - last : null,
     };
   });
-  return { startedMs, tasks };
+  return { startedMs, enginePid, tasks };
+}
+
+// Is the engine that wrote this run still alive? Unknown pid → assume yes (old logs).
+export function engineAlive(pid, _kill = process.kill) {
+  if (pid == null) return null;
+  try { _kill(pid, 0); return true; } catch { return false; }
 }
 
 // Graph annotations from the manifest snapshot: after / kind / parent / depth,
@@ -150,11 +159,14 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000 } = {}) {
   dir = resolve(dir);
   const logPath = join(dir, "run.log");
   if (!existsSync(logPath)) return null;
-  const { startedMs, tasks: logged } = readRunLog(readFileSync(logPath, "utf8"), { now });
+  const { startedMs, enginePid, tasks: logged } = readRunLog(readFileSync(logPath, "utf8"), { now });
   const manifest = readJson(join(dir, "manifest.json"));
   const { tasks, waves } = topology(logged, manifest);
   const summary = readJson(join(dir, "summary.json"));
   const finishedMs = summary?.finished ? Date.parse(summary.finished) || null : null;
+  const alive = engineAlive(enginePid);
+  // Aborted: the engine died (killed, crashed, machine slept) before writing a summary.
+  const abortedMs = !finishedMs && alive === false ? statSync(logPath).mtimeMs : null;
   const byState = {};
   for (const t of tasks) byState[t.state] = (byState[t.state] || 0) + 1;
   const optional = (name) => (existsSync(join(dir, name)) ? join(dir, name) : null);
@@ -164,6 +176,8 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000 } = {}) {
     project: basename(dirname(dir)),
     startedMs,
     finishedMs,
+    abortedMs,
+    enginePid,
     quietWarnMs,
     tasks,
     waves,
@@ -175,8 +189,10 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000 } = {}) {
 }
 
 // Every run dir under <home>/runs/<project>/<run>/, newest run.log first.
-// `active` = written within recentMs and not yet summarised.
-export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000 } = {}) {
+// `active` = not summarised, written within recentMs, and — when the run-start
+// line recorded the engine pid — that engine still alive. `aborted` = engine gone
+// with no summary. Only the head of run.log is read for the pid.
+export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _alive = engineAlive } = {}) {
   const runsRoot = join(home, "runs");
   const out = [];
   let projects = [];
@@ -186,11 +202,27 @@ export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000 } = {}
     try { runs = readdirSync(join(runsRoot, project)); } catch { continue; }
     for (const name of runs) {
       const dir = join(runsRoot, project, name);
+      const logPath = join(dir, "run.log");
       let mtimeMs;
-      try { mtimeMs = statSync(join(dir, "run.log")).mtimeMs; } catch { continue; }
+      try { mtimeMs = statSync(logPath).mtimeMs; } catch { continue; }
       const finished = existsSync(join(dir, "summary.json"));
-      out.push({ dir, project, name, mtimeMs, active: !finished && now - mtimeMs < recentMs });
+      const alive = finished ? null : _alive(headPid(logPath));
+      const aborted = !finished && alive === false;
+      out.push({ dir, project, name, mtimeMs, active: !finished && !aborted && now - mtimeMs < recentMs, aborted });
     }
   }
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+// The engine pid from the FIRST run-start line, reading only the head of the file.
+function headPid(logPath) {
+  let fd;
+  try {
+    fd = openSync(logPath, "r");
+    const buf = Buffer.alloc(4096);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    const head = buf.toString("utf8", 0, n);
+    const m = /"event":"run-start"[^\n]*?"pid":(\d+)/.exec(head);
+    return m ? Number(m[1]) : null;
+  } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
 }

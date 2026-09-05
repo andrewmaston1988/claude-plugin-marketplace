@@ -20,8 +20,12 @@ function seedHome() {
   buildFixture(done);
   writeFileSync(join(done, "summary.json"), JSON.stringify({ started: "2026-09-05T00:00:00Z", finished: "2026-09-05T00:30:00Z", tasks: [] }), "utf8");
   writeFileSync(join(done, "report.md"), "# Report\n\nPROVEN — a claim", "utf8");
+  // Both logs get explicit stamps: the live one 5 s before NOW, the finished one an
+  // hour earlier — otherwise the finished fixture carries the real clock and sorts first.
   const t = (NOW - 5000) / 1000;
   utimesSync(join(live, "run.log"), t, t);
+  const td = (NOW - 3600_000) / 1000;
+  utimesSync(join(done, "run.log"), td, td);
   return { home, live, done };
 }
 
@@ -93,6 +97,26 @@ test("routes: runs list, run, leaf (no raw log, no prompt), digest fallback, man
       assert.match(page.body, /id="rail"/, "the rail overlay is in the page");
       assert.equal((await get("/icon-999.png")).status, 404);
       assert.equal((await get("/api/runs/C--code-a/nope")).status, 404);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("runs list is per project: a busy project cannot crowd a quiet one off the estate", async () => {
+  const { home } = seedHome();
+  try {
+    for (let i = 0; i < 12; i++) {
+      const d = join(home, "runs", "C--code-busy", `old-${i}`);
+      buildFixture(d);
+      writeFileSync(join(d, "summary.json"), JSON.stringify({ finished: "2026-09-04T00:00:00Z", tasks: [] }), "utf8");
+      const t = (NOW - 3600_000 * (i + 2)) / 1000;
+      utimesSync(join(d, "run.log"), t, t);
+    }
+    await withServer({ home }, async ({ get }) => {
+      const { body } = await get("/api/runs");
+      const busy = body.runs.filter((r) => r.project === "C--code-busy");
+      assert.equal(busy.length, 8, "capped per project");
+      assert.ok(body.runs.some((r) => r.project === "C--code-b"), "the quiet project's finished run still listed");
+      assert.ok(body.runs.some((r) => r.project === "C--code-a" && r.active), "live run always listed");
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
@@ -170,9 +194,13 @@ test("events: a root change refreshes watchers so a new run gets watched", async
       utimesSync(join(fresh, "run.log"), t, t);
       const root = watchers.find((w) => w.path === join(home, "runs"));
       assert.ok(root, "runs root watched");
-      root.listener("rename", "C--code-a");
+      // fs.watch is not recursive: a new run under an EXISTING project is only seen
+      // by that project dir's watcher, so one must exist.
+      const proj = watchers.find((w) => w.path === join(home, "runs", "C--code-a"));
+      assert.ok(proj, "each project dir is watched");
+      proj.listener("rename", "live-2");
       await new Promise((r) => setTimeout(r, 80));
-      assert.ok(watchers.some((w) => w.path === join(fresh, "run.log")), "new active run is watched after a root event");
+      assert.ok(watchers.some((w) => w.path === join(fresh, "run.log")), "new active run is watched after a project-dir event");
       req.destroy();
     });
   } finally { rmSync(home, { recursive: true, force: true }); }

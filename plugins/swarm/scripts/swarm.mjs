@@ -502,8 +502,10 @@ async function cmdServe(rest) {
 
   const { createServer } = await import("../src/serve/server.mjs");
   const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`) });
-  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, cfg.dashboard?.bind ?? "0.0.0.0", resolve); });
-  writePid(home, process.pid);
+  writePid(home, process.pid); // before listen, per the daemon lifecycle rule; cleared again if listen fails
+  try {
+    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, cfg.dashboard?.bind ?? "0.0.0.0", resolve); });
+  } catch (e) { clearPid(home); throw e; }
   out(`dashboard: serving ~/.swarm/runs on port ${port}`);
   for (const u of urlLines(port)) out(`  ${u}`);
   out(dim(`firewall (once, elevated): ${firewallHint(port)}`));

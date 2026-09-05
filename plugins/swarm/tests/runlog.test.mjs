@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readRun, listRuns, topology } from "../src/runlog.mjs";
+import { readRun, listRuns, topology, readRunLog } from "../src/runlog.mjs";
+const require_runlog = () => ({ readRunLog });
 import { RUN_LOG, NOW, buildFixture } from "./fixtures/run-fixture.mjs";
 
 // The manifest snapshot the engine writes at dispatch (effectivePlanDoc shape):
@@ -125,6 +126,38 @@ test("readRun without a manifest.json still returns tasks, with empty edges and 
     assert.equal(run.waves.length, 2, "everything at depth 0 except the digest, which always waits on the rest");
     assert.deepEqual(run.waves[1], ["__digest"]);
   }, { manifest: null });
+});
+
+test("listRuns: a run whose recorded engine pid is dead is aborted, not active; no pid falls back to recency", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-runs-pid-"));
+  try {
+    const mk = (name, firstLine) => {
+      const d = join(home, "runs", "C--code-a", name);
+      mkdirSync(d, { recursive: true });
+      writeFileSync(join(d, "run.log"), firstLine + "\n" + RUN_LOG.split("\n").slice(1).join("\n"), "utf8");
+      const t = (NOW - 60_000) / 1000;
+      utimesSync(join(d, "run.log"), t, t);
+      return d;
+    };
+    mk("dead-1", '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":4242,"tasks":[{"id":"find-a","model":"m"}]}');
+    mk("live-1", '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":4343,"tasks":[{"id":"find-a","model":"m"}]}');
+    mk("nopid-1", '{"ts":"2026-09-05T01:00:00Z","event":"run-start","tasks":[{"id":"find-a","model":"m"}]}');
+    const alive = (pid) => (pid == null ? null : pid === 4343);
+    const runs = listRuns(home, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
+    const by = Object.fromEntries(runs.map((r) => [r.name, r]));
+    assert.equal(by["dead-1"].active, false); assert.equal(by["dead-1"].aborted, true);
+    assert.equal(by["live-1"].active, true); assert.equal(by["live-1"].aborted, false);
+    assert.equal(by["nopid-1"].active, true, "no pid recorded → recency rule");
+    assert.equal(readRun(by["dead-1"].dir, { now: NOW }).enginePid, 4242);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("readRunLog: a line that parses to null is skipped, not dereferenced", () => {
+  const { tasks } = readRun(join(tmpdir(), "no-such"), { now: NOW }) ?? { tasks: null };
+  assert.equal(tasks, null);
+  const { readRunLog } = require_runlog();
+  const r = readRunLog('{"event":"run-start","tasks":["a"]}\nnull\n{"id":"a","state":"ok"}', { now: NOW });
+  assert.equal(r.tasks[0].state, "ok");
 });
 
 test("listRuns: newest first across projects, active only while run.log is fresh and no summary.json", () => {
