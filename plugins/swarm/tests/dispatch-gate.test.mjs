@@ -17,6 +17,7 @@ test("gate ignores the free subcommands — they spend nothing", () => {
     "node swarm.mjs validate p5-review",
     "node swarm.mjs models",
     "node swarm.mjs list",
+    "node swarm.mjs serve --daemon",
     'node swarm.mjs ask C:/runs/x find-a "what did you mean"',
   ]) {
     equal(gateDispatch({ command, runInBackground: false, markerExists: false }).block, false, command);

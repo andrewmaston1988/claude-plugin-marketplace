@@ -1,0 +1,739 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101219">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="swarm">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" sizes="180x180" href="/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="/icon-192.png">
+<title>swarm</title>
+<style>
+  :root {
+    --ground:#101219; --surface:#181b24; --surface-2:#1e222d; --ink:#e7e9f1; --muted:#9aa0b1; --faint:#6b7181; --rule:#2b3040;
+    --accent:#8e7ff2; --accent-soft:#241f3d; --ok:#4fc98a; --ok-bg:#123324; --warn:#e0aa4e; --warn-bg:#33280f; --bad:#e8776a; --bad-bg:#341916;
+    --mono:"SF Mono","Cascadia Code","JetBrains Mono",Consolas,ui-monospace,monospace;
+    --rail:56px;
+  }
+  * { box-sizing:border-box; }
+  html, body { margin:0; background:var(--ground); color:var(--ink); font-family:var(--mono); font-size:14px; -webkit-text-size-adjust:100%; }
+  body { padding-bottom:env(safe-area-inset-bottom); overflow-x:hidden; }
+  main { overflow-x:hidden; }
+  a { color:var(--accent); text-decoration:none; }
+  button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
+  header { position:sticky; top:0; z-index:2; background:var(--ground); border-bottom:1px solid var(--rule); display:flex; align-items:center; gap:4px; padding:8px 8px 8px 4px; padding-top:calc(8px + env(safe-area-inset-top)); }
+  header .btn { width:44px; height:44px; display:flex; align-items:center; justify-content:center; flex:none; }
+  header .title { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+  header .title b { font-size:16px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  header .title small { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  header.home .title b { font-size:18px; }
+  .section { display:flex; align-items:center; gap:10px; padding:16px 16px 6px; font-size:11px; line-height:1; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); }
+  .section.dim { color:var(--faint); }
+  .section > span, .section small { line-height:1; display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .section > span:first-child { flex:0 1 auto; }
+  .section small { flex:none; }
+  .section .line { min-width:24px; }
+  .section.tap { min-height:44px; padding-top:10px; padding-bottom:10px; }
+  .section .chev { flex:none; margin-left:2px; }
+  .section .line { flex:1; height:1px; background:var(--rule); align-self:center; }
+  .section small { letter-spacing:0; text-transform:none; color:var(--muted); font-size:11px; }
+  header.home .title b { display:flex; align-items:baseline; gap:12px; }
+  header.home .title b small { font-weight:400; font-size:12px; color:var(--muted); }
+  ul { list-style:none; margin:0; padding:0; }
+  .row { display:flex; align-items:stretch; min-height:44px; }
+  .row .rail { width:var(--rail); flex:none; }
+  .row .body { flex:1; min-width:0; padding:10px 16px 10px 0; border-bottom:1px solid var(--rule); display:flex; flex-direction:column; gap:6px; }
+  .row .head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
+  .row .name { font-size:15px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .row .meta { font-size:12px; color:var(--muted); white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis; }
+  .row .sub { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; }
+  .counts { display:inline-flex; align-items:center; gap:10px; vertical-align:middle; }
+  .c-ok { color:var(--ok); } .c-run { color:var(--accent); } .c-warn { color:var(--warn); } .c-bad { color:var(--bad); } .c-pend { color:var(--faint); }
+  .bar { display:flex; height:3px; overflow:hidden; background:var(--surface-2); }
+  .bar span { display:block; }
+  .tap { -webkit-tap-highlight-color:transparent; cursor:pointer; }
+  .dim { color:var(--muted); }
+  .faint { color:var(--faint); }
+  /* run view */
+  .graph { position:relative; }
+  /* --rail is set per run by drawRail from the widest open wave, so lanes never
+     run under the row text; the rows' spacer and the overlay share the variable. */
+  .graph svg.overlay { position:absolute; left:0; top:0; width:var(--rail); pointer-events:none; overflow:visible; }
+  .wave-label { padding:12px 16px 2px var(--rail); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); display:flex; gap:10px; }
+  .wave-label.live { color:var(--accent); }
+  .wave-label small { letter-spacing:0; text-transform:none; }
+  .leaf .body { padding:8px 12px 8px 0; flex-direction:row; align-items:center; gap:10px; }
+  .leaf .txt { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .leaf .txt .name { font-size:14px; }
+  .leaf .txt .meta { white-space:normal; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; }
+  .leaf .right { display:flex; flex-direction:column; align-items:flex-end; gap:2px; font-size:12px; color:var(--muted); white-space:nowrap; }
+  .leaf.quiet .body { background:var(--warn-bg); }
+  .leaf.quiet .txt .meta { color:var(--warn); }
+  .strip { display:flex; flex-wrap:wrap; gap:3px; align-items:center; }
+  .strip i { display:block; width:8px; height:8px; border-radius:50%; background:var(--rule); }
+  .strip i.sq { border-radius:2px; }
+  .strip i.ok { background:var(--ok); } .strip i.run { background:var(--accent); animation:pulse 1.6s ease-in-out infinite; } .strip i.warn { background:var(--warn); } .strip i.bad { background:var(--bad); }
+  .strip .more { font-size:11px; color:var(--faint); margin-left:4px; }
+  .chev { flex:none; }
+  .digest { display:flex; width:100%; align-items:center; gap:12px; padding:12px 16px; min-height:44px; border-bottom:1px solid var(--ok); background:var(--ok-bg); }
+  .digest .g { font-size:20px; color:var(--ok); flex:none; }
+  .digest .txt { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .digest .meta { font-size:12px; color:var(--muted); }
+  .digest .meta .counts { display:inline-flex; }
+  .digest b { font-size:14px; font-weight:650; }
+  .totals { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px; border-bottom:1px solid var(--rule); font-size:13px; line-height:1; }
+  .totals > * { line-height:1; }
+  .totals .bar { width:150px; flex:none; }
+  .counts, .counts > span, .meta { line-height:1; }
+  .row .sub { line-height:1; }
+  .row .sub .meta { line-height:1; }
+  /* leaf view */
+  .kv { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); padding:14px 16px; border-bottom:1px solid var(--rule); gap:8px; }
+  .kv div { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .kv label { font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
+  .kv span { font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .block { display:flex; flex-direction:column; gap:8px; padding:14px 16px; border-bottom:1px solid var(--rule); }
+  .block label { display:flex; justify-content:space-between; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
+  .block label small { letter-spacing:0; text-transform:none; }
+  .menu .nav { display:flex; flex-direction:column; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); }
+  .menu .nav a { display:flex; align-items:center; min-height:44px; padding:0 4px; color:var(--ink); font-size:14px; border-bottom:1px solid var(--rule); }
+  .menu .nav a:last-child { border-bottom:0; }
+  /* performance view: one ranking list, whichever table feeds it */
+  .rank .body { gap:5px; }
+  .rank .head .name { font-size:14px; }
+  .rank .head .val { font-size:15px; font-weight:650; white-space:nowrap; }
+  .rank .head .val.none { color:var(--faint); font-weight:400; }
+  .rank .bar { height:3px; background:var(--surface-2); }
+  .rank .bar span { background:var(--accent); }
+  .rank .bar.prov span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
+  .rank .meta .tag { color:var(--faint); }
+  .chip.on { color:var(--ink); background:var(--accent-soft); border:1px solid var(--accent); }
+  .chip[data-href], .chip[data-domain] { cursor:pointer; }
+  .foot { padding:10px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
+  .chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--surface-2); border-radius:999px; padding:6px 10px; }
+  .chip.run { color:var(--accent); background:var(--accent-soft); }
+  .chip.ok { color:var(--ok); background:var(--ok-bg); }
+  .chip.bad { color:var(--bad); background:var(--bad-bg); }
+  .chip.warn { color:var(--warn); background:var(--warn-bg); }
+  pre.out { margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.5; color:var(--ink); max-height:60vh; overflow:auto; }
+  .json { font-size:12px; line-height:1.5; max-height:70vh; overflow:auto; word-break:break-word; }
+  .json dl, .json ol { margin:0; padding:0; }
+  .json .jo { display:flex; flex-direction:column; gap:4px; }
+  .json .jr { display:flex; gap:8px; align-items:baseline; }
+  .json .jr > dt { flex:none; color:var(--accent); min-width:0; }
+  .json .jr > dt::after { content:":"; color:var(--faint); }
+  .json .jr > dd { margin:0; flex:1; min-width:0; }
+  .json .jr.nested { flex-direction:column; gap:2px; }
+  .json .jr.nested > dd { padding-left:8px; border-left:1px solid var(--rule); }
+  .json .ja { list-style:none; display:flex; flex-direction:column; gap:6px; }
+  .json .ja > li { border-left:2px solid var(--rule); padding-left:10px; }
+  .json .ja > li::before { content:counter(item) ""; counter-increment:item; color:var(--faint); margin-right:6px; font-size:11px; }
+  .json .ja { counter-reset:item; }
+  .json .jv { color:var(--ink); white-space:pre-wrap; }
+  .json dd > .jo, .json dd > .ja { padding-left:6px; margin-top:4px; }
+  .empty { padding:24px 16px; color:var(--faint); font-size:13px; }
+  .menu { position:fixed; inset:0; background:rgba(16,18,25,.85); z-index:5; display:none; }
+  .menu.open { display:block; }
+  .menu .panel { position:absolute; right:0; top:0; bottom:0; width:min(320px, 85vw); background:var(--surface); border-left:1px solid var(--rule); padding:16px; display:flex; flex-direction:column; gap:14px; padding-top:calc(16px + env(safe-area-inset-top)); }
+  .menu .panel h2 { margin:0; font-size:14px; font-weight:700; }
+  .menu .panel .k { font-size:12px; color:var(--muted); word-break:break-all; }
+  iframe.digestframe { width:100%; height:calc(100vh - 100px); border:0; background:var(--ground); }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  @keyframes dash { to { stroke-dashoffset:-56; } }
+  .ring { fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:14 42; animation:dash 1.4s linear infinite; }
+  .flash { animation:pulse .8s ease-in-out 3; }
+</style>
+</head>
+<body>
+<header id="hdr" class="home"></header>
+<main id="main"></main>
+<div id="menu" class="menu"><div class="panel">
+  <h2>swarm dashboard</h2>
+  <nav class="nav"><a href="#/">runs</a><a href="#/perf">performance</a></nav>
+  <div class="k" id="menu-url"></div>
+  <div class="k" id="menu-token"></div>
+  <div class="k dim">Reads ~/.swarm/runs on the PC. Read-only. Live over server-sent events; reconnects on its own.</div>
+  <button class="chip" id="menu-close" style="align-self:flex-start">close</button>
+</div></div>
+<script>
+(() => {
+  const TOKEN = new URLSearchParams(location.search).get("t");
+  const q = (p) => TOKEN ? `${p}${p.includes("?") ? "&" : "?"}t=${encodeURIComponent(TOKEN)}` : p;
+  const $ = (s) => document.querySelector(s);
+  const hdr = $("#hdr"), main = $("#main");
+  const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  const enc = encodeURIComponent;
+  // Same glyphs as the CLI roster (src/results.mjs GLYPHS); colours map the CLI's
+  // stateColor onto the page's four tones (magenta→bad, dim→pend).
+  const GLYPH = { ok: "✓", skipped: "↷", failed: "✗", "failed:timeout": "✗", blocked: "⊘", "rate-limited": "⧖", quota: "⏳", retrying: "↻", running: "◐", pending: "·", aborted: "✕" };
+  const CLASS = { ok: "ok", skipped: "pend", failed: "bad", "failed:timeout": "bad", blocked: "bad", "rate-limited": "warn", quota: "warn", retrying: "warn", running: "run", pending: "pend", aborted: "pend" };
+  // States a leaf can still leave on its own. A run whose engine is gone (aborted)
+  // or silent past recentMs (stale) has none, whatever the log last said: those
+  // leaves show as aborted and nothing spins.
+  const LIVE = new Set(["running", "retrying", "pending", "rate-limited", "quota"]);
+  const runEnded = (run) => !!(run.finishedMs || run.abortedMs || run.staleMs);
+  const abortCounts = (byState) => { const out = {}; for (const [s, n] of Object.entries(byState)) { const k = LIVE.has(s) ? "aborted" : s; out[k] = (out[k] || 0) + n; } return out; };
+  function endRun(run) {
+    if (run.finishedMs || !(run.abortedMs || run.staleMs)) return run;
+    run.tasks = run.tasks.map((t) => (LIVE.has(t.state) ? { ...t, state: "aborted" } : t));
+    run.totals.byState = abortCounts(run.totals.byState);
+    return run;
+  }
+  const COLOR = { ok: "var(--ok)", run: "var(--accent)", warn: "var(--warn)", bad: "var(--bad)", pend: "var(--rule)" };
+  const cls = (state) => CLASS[state] || "pend";
+
+  const fmtTok = (n) => !n ? "—" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
+  const fmtDur = (ms) => { if (ms == null) return "—"; const s = Math.max(0, Math.round(ms / 1000)); const m = Math.floor(s / 60); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
+  const ago = (ms) => { const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+  const tokTotal = (t) => t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
+  // Runs are keyed by their encoded cwd. A worktree (`<root>-.worktrees-<repo>-<branch>`,
+  // `<repo>-.claude-worktrees-<branch>`) belongs to its repo, and the label is the key
+  // with the prefix every plain repo shares stripped — nothing machine-specific is assumed.
+  const projectGrouping = (keys) => {
+    const plain = keys.filter((k) => !/\.(claude-)?worktrees|\.swarm/.test(k));
+    const norm = (k) => k.replace(/-\.(claude-)?worktrees-/g, "-").replace(/-\.swarm[^-]*/g, "");
+    // The shared prefix is taken over drive-rooted keys only (`C--code-…`); a key that
+    // IS the prefix (runs dispatched from the root itself) labels as its last segment.
+    const rooted = plain.filter((k) => /^[A-Za-z]--/.test(k));
+    let cp = rooted[0] || "";
+    for (const k of rooted) { let i = 0; while (i < cp.length && i < k.length && cp[i] === k[i]) i++; cp = cp.slice(0, i); }
+    cp = rooted.includes(cp) ? cp + "-" : cp.slice(0, cp.lastIndexOf("-") + 1);
+    const groupOf = (k) => {
+      const n = norm(k);
+      let best = null;
+      for (const p of plain) if ((n === p || n.startsWith(p + "-")) && (!best || p.length > best.length)) best = p;
+      return best || k;
+    };
+    const labelOf = (g) => {
+      const l = g.startsWith(cp) ? g.slice(cp.length) : g;
+      return l || g.split("-").filter(Boolean).slice(-1)[0] || g;
+    };
+    return { groupOf, labelOf };
+  };
+  let shortProject = (p) => p;
+  const countsHtml = (byState) => {
+    const n = (...ks) => ks.reduce((a, k) => a + (byState[k] || 0), 0);
+    const parts = [["ok", n("ok", "skipped"), "✓"], ["run", n("running", "retrying"), "◐"], ["warn", n("rate-limited") + n("quota"), "⧖"], ["bad", n("failed", "failed:timeout", "blocked"), "✗"], ["pend", n("pending"), "·"], ["pend", n("aborted"), "✕"]];
+    return `<span class="counts">${parts.filter(([, v]) => v).map(([c, v, g]) => `<span class="c-${c}">${v}${g}</span>`).join("")}</span>`;
+  };
+  const barHtml = (byState, total) => {
+    const seg = (ks, color) => { const v = ks.reduce((a, k) => a + (byState[k] || 0), 0); return v ? `<span style="flex:${v};background:${color}"></span>` : ""; };
+    const done = ["ok", "skipped", "failed", "failed:timeout", "blocked", "running", "retrying", "rate-limited", "quota"].reduce((a, k) => a + (byState[k] || 0), 0);
+    return `<div class="bar">${seg(["ok", "skipped"], "var(--ok)")}${seg(["failed", "failed:timeout", "blocked"], "var(--bad)")}${seg(["running", "retrying"], "var(--accent)")}${seg(["rate-limited", "quota"], "var(--warn)")}<span style="flex:${Math.max(0, total - done)};background:transparent"></span></div>`;
+  };
+  const runState = (r) => { const b = r.byState || {}; if (b.failed || b["failed:timeout"] || b.blocked) return "bad"; if (b.running || b.retrying) return "run"; if (b["rate-limited"] || b.quota) return "warn"; if (r.active) return "run"; return "ok"; };
+  const dot = (c, ring) => `<svg class="rail" viewBox="0 0 56 56" width="56" height="56" preserveAspectRatio="none"><path d="M12 0v56" stroke="var(--rule)" stroke-width="2"/><circle cx="12" cy="28" r="5" fill="${COLOR[c]}"/>${ring ? '<circle class="ring" cx="12" cy="28" r="9"/>' : ""}</svg>`;
+
+  const api = async (p) => { const r = await fetch(q(p), { cache: "no-store" }); if (!r.ok) throw new Error(`${r.status} ${p}`); return r.json(); };
+
+  // Partial updates: render to markup, then patch the live DOM in place — attributes
+  // and text updated, elements kept — so a rerender never recreates the spinning
+  // rings (a recreated element restarts its CSS animation: the twitch). A keyed child
+  // (data-key) is found by key wherever it sits, so a ring survives paths appearing
+  // before it; unkeyed children match by position. A node is only moved when it is
+  // out of place — a move re-inserts, which restarts the animation too. An element
+  // marked data-keep keeps its children: the rail's overlay is drawn by drawRail
+  // after the morph, and wiping it here would recreate every ring each tick.
+  function morph(from, to) {
+    if (from.nodeType === 1 && to.nodeType === 1) { // the top-level `to` is a fragment
+      for (const a of [...from.attributes]) if (!to.hasAttribute(a.name)) from.removeAttribute(a.name);
+      for (const a of [...to.attributes]) if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
+      if (to.hasAttribute("data-keep")) return;
+    }
+    const fc = [...from.childNodes], tc = [...to.childNodes];
+    const keyOf = (n) => (n.nodeType === 1 && n.getAttribute("data-key")) || "";
+    const byKey = new Map();
+    for (const f of fc) { const k = keyOf(f); if (k) byKey.set(k, f); }
+    const used = new Set();
+    const alike = (f, t) => f.nodeType === t.nodeType && (f.nodeType !== 1 || f.tagName === t.tagName);
+    for (let i = 0; i < tc.length; i++) {
+      const t = tc[i], k = keyOf(t);
+      let f = k ? byKey.get(k) : fc[i];
+      if (f && (used.has(f) || !alike(f, t) || (!k && keyOf(f)))) f = null;
+      const ref = from.childNodes[i] || null;
+      if (!f) { const n = t.cloneNode(true); from.insertBefore(n, ref); used.add(n); continue; }
+      used.add(f);
+      if (f !== ref) from.insertBefore(f, ref);
+      if (f.nodeType === 3) { if (f.nodeValue !== t.nodeValue) f.nodeValue = t.nodeValue; continue; }
+      if (f.nodeType === 1) morph(f, t);
+    }
+    for (const f of fc) if (!used.has(f) && f.parentNode === from) from.removeChild(f);
+  }
+  function setHtml(el, html) { const tpl = document.createElement("template"); tpl.innerHTML = html; morph(el, tpl.content); }
+  function setSvg(svg, inner) {
+    const doc = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${inner}</svg>`, "image/svg+xml");
+    // Only the children are morphed: the parsed root carries none of the live svg's
+    // class/size attributes, and syncing them would strip the overlay off the rail.
+    const root = doc.documentElement;
+    root.removeAttribute("xmlns");
+    for (const a of svg.attributes) root.setAttribute(a.name, a.value);
+    root.removeAttribute("data-keep"); // this IS the draw — the markup's keep flag must not block it
+    morph(svg, root);
+  }
+
+  // ── views ──────────────────────────────────────────────────────────────
+  const view = { name: "runs", project: null, run: null, leaf: null };
+  const ui = { openWaves: new Set(), closedWaves: new Set(), openGroups: new Set(), allClones: new Set(), closedProjects: new Set(), perfDomain: null, pretty: false };
+  let lastList = null;
+  const seenActive = new Map();
+
+  function setHeader(html, home) { hdr.className = home ? "home" : ""; setHtml(hdr, html); }
+  const backBtn = (href) => `<a class="btn" href="${href}" aria-label="back"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9aa0b1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>`;
+  const menuBtn = `<button class="btn" id="menu-open" aria-label="menu"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9aa0b1" stroke-width="2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>`;
+  const chev = (open) => `<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7181" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${open ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"}"/></svg>`;
+  const chevRight = `<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7181" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`;
+
+  async function renderRuns() {
+    const data = await api("/api/runs");
+    lastList = data;
+    const runs = data.runs;
+    const active = runs.filter((r) => r.active);
+    // Every project gets a section — the estate view — projects with a live run first,
+    // then by their newest run; inside a section live rows lead, finished follow.
+    const { groupOf, labelOf } = projectGrouping([...new Set(runs.map((r) => r.project))]);
+    shortProject = labelOf;
+    const byProject = new Map();
+    for (const r of runs) { const g = groupOf(r.project); if (!byProject.has(g)) byProject.set(g, []); byProject.get(g).push(r); }
+    for (const rows of byProject.values()) rows.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    const projects = [...byProject.keys()].sort((a, b) => {
+      const la = byProject.get(a).some((r) => r.active), lb = byProject.get(b).some((r) => r.active);
+      if (la !== lb) return la ? -1 : 1;
+      return byProject.get(b)[0].mtimeMs - byProject.get(a)[0].mtimeMs;
+    });
+    const tok = runs.reduce((n, r) => n + (r.tokens || 0), 0);
+    setHeader(`<div class="title" style="padding-left:12px"><b><span>swarm</span><small>${active.length} active · ${projects.length} project${projects.length === 1 ? "" : "s"} · ${fmtTok(tok)}</small></b></div>${menuBtn}`, true);
+    let html = "";
+    // Live band first: every running run, across all projects, on the first screen —
+    // a busy project's finished stack must never hide another project's live run.
+    for (const p of projects) {
+      const live = byProject.get(p).filter((r) => r.active);
+      if (!live.length) continue;
+      html += `<div class="section"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${live.length} running</small></div><ul>`;
+      for (const r of live) html += runRow(r);
+      html += "</ul>";
+    }
+    // Finished stacks open by default; tapping a project header folds it away so the
+    // live band stays in reach on a long estate.
+    for (const p of projects) {
+      const rest = byProject.get(p).filter((r) => !r.active);
+      if (!rest.length) continue;
+      const open = !ui.closedProjects.has(p);
+      html += `<div class="section dim tap" data-key="ps:${esc(p)}" data-project="${esc(p)}"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length} finished</small>${chev(open)}</div>`;
+      if (open) { html += `<ul data-key="pl:${esc(p)}">`; for (const r of rest) html += runRow(r, true); html += "</ul>"; }
+    }
+    if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
+    setHtml(main, html);
+    for (const r of runs) {
+      const was = seenActive.get(r.project + "/" + r.name);
+      if (was === true && !r.active) celebrate(r.name);
+      seenActive.set(r.project + "/" + r.name, r.active);
+    }
+  }
+  function runRow(r, done) {
+    // Navigation is a data-href picked up by one delegated listener — never an inline
+    // onclick, whose quoted string a run or leaf name could break out of.
+    const href = `#/run/${enc(r.project)}/${enc(r.name)}`;
+    const key = esc(`${r.project}/${r.name}`);
+    const elapsed = r.finishedMs ? fmtDur(r.finishedMs - r.startedMs) : r.startedMs ? fmtDur(Date.now() - r.startedMs) : "—";
+    const st = runState(r);
+    if (done) {
+      // No summary.json and gone quiet past the recency window: the engine never
+      // closed it (killed, crashed, machine slept). Say so rather than "done".
+      const stale = !r.finishedMs;
+      const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
+      return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
+    }
+    return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(st, st === "run")}<div class="body"><div class="head"><span class="name">${esc(r.name)}</span><span class="meta">${elapsed}</span></div><div class="sub">${countsHtml(r.byState)}<span class="meta">${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</span></div>${barHtml(r.byState, r.leaves)}</div></li>`;
+  }
+
+  // ── run view: rows + rail ──────────────────────────────────────────────
+  function buildRows(run) {
+    const byId = new Map(run.tasks.map((t) => [t.id, t]));
+    const rows = [];
+    run.waves.forEach((ids, w) => {
+      const tasks = ids.map((id) => byId.get(id)).filter(Boolean);
+      const parents = new Map();
+      const singles = [];
+      for (const t of tasks) {
+        if ((t.kind === "clone" || t.kind === "child") && byId.has(t.parent)) {
+          if (!parents.has(t.parent)) parents.set(t.parent, []);
+          parents.get(t.parent).push(t);
+        } else singles.push(t);
+      }
+      const members = [];
+      for (const t of singles) {
+        if (parents.has(t.id)) members.push({ type: "group", id: t.id, task: t, kids: parents.get(t.id) });
+        else members.push({ type: "task", id: t.id, task: t });
+      }
+      for (const [pid, kids] of parents) if (!byId.has(pid) || !singles.find((s) => s.id === pid)) for (const k of kids) members.push({ type: "task", id: k.id, task: k });
+      const big = members.length > 8; // eight is the widest wave the operator runs; wider collapses to the strip
+      // A wave that has entirely finished folds to its strip so the live wave is not
+      // pushed under the fold by a stack of done rows; tapping reopens it.
+      const settled = tasks.length > 0 && tasks.every((t) => !LIVE.has(t.state));
+      const open = ui.openWaves.has(w) || (!big && !settled && !ui.closedWaves.has(w));
+      rows.push({ type: "wave", wave: w, members, open, tasks });
+      if (open) {
+        for (const m of members) {
+          if (m.type === "group") {
+            const gOpen = ui.openGroups.has(m.id);
+            rows.push({ type: "group", wave: w, id: m.id, task: m.task, kids: m.kids, open: gOpen });
+            if (gOpen) {
+              const all = ui.allClones.has(m.id);
+              const shown = all ? m.kids : m.kids.filter((k) => k.state === "running" || k.state === "retrying" || k.state === "rate-limited" || k.state === "failed");
+              for (const k of shown) rows.push({ type: "task", wave: w, id: k.id, task: k, nested: true });
+              if (!all && shown.length < m.kids.length) rows.push({ type: "more", wave: w, id: m.id, hidden: m.kids.length - shown.length });
+            }
+          } else rows.push({ type: "task", wave: w, id: m.id, task: m.task });
+        }
+      }
+    });
+    return rows;
+  }
+  const stateOfGroup = (kids) => kids.some((k) => k.state === "running" || k.state === "retrying") ? "run" : kids.some((k) => /failed|blocked/.test(k.state)) ? "bad" : kids.some((k) => k.state === "rate-limited" || k.state === "quota") ? "warn" : kids.every((k) => k.state === "ok" || k.state === "skipped") ? "ok" : "pend";
+  const stripHtml = (kids, sq) => {
+    const max = 40;
+    const dots = kids.slice(0, max).map((k) => `<i class="${sq ? "sq " : ""}${cls(k.state)}"></i>`).join("");
+    return `<div class="strip">${dots}${kids.length > max ? `<span class="more">+${kids.length - max}</span>` : ""}</div>`;
+  };
+  const byStateOf = (tasks) => tasks.reduce((b, t) => (b[t.state] = (b[t.state] || 0) + 1, b), {});
+
+  function renderRunHtml(run) {
+    const rows = buildRows(run);
+    const quietWarn = run.quietWarnMs || 60000;
+    let html = "";
+    const finished = !!run.finishedMs;
+    if (finished && (run.digestPath || run.reportPath)) {
+      const b = run.totals.byState;
+      const dhref = `#/run/${enc(run.project)}/${enc(run.name)}/digest`;
+      html += `<div class="digest tap" role="link" data-key="digest" data-href="${esc(dhref)}"><span class="g">✓</span><div class="txt"><b>Digest</b><span class="meta">${run.tasks.length} leaves · ${countsHtml(b)}${run.reportPath ? " · report" : ""}</span></div><svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4fc98a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>`;
+    }
+    const total = run.tasks.reduce((n, t) => n + tokTotal(t.tokens), 0);
+    html += `<div class="totals">${countsHtml(run.totals.byState)}<span class="meta">${fmtTok(total)}</span>${barHtml(run.totals.byState, run.tasks.length)}</div>`;
+    html += `<div class="graph"><svg class="overlay" id="rail" data-keep></svg><ul id="rows">`;
+    for (const r of rows) {
+      if (r.type === "wave") {
+        const live = r.tasks.some((t) => t.state === "running" || t.state === "retrying");
+        const label = r.wave === 0 ? "wave 1" : `wave ${r.wave + 1}`;
+        const isDigest = r.tasks.length === 1 && r.tasks[0].kind === "digest";
+        const after = [...new Set(r.tasks.flatMap((t) => t.after || []))];
+        const desc = isDigest ? `after all ${after.length}` : `${r.members.length} ${r.members.length === 1 ? "node" : "in parallel"}${after.length ? ` · after ${after.length <= 2 ? after.map(esc).join(", ") : after.length + " upstream"}` : ""}`;
+        if (r.open) {
+          html += `<li class="wave-label${live ? " live" : ""} tap" data-wave="${r.wave}"><span>${isDigest ? "digest" : label}</span><small>· ${desc}</small></li>`;
+        } else {
+          const st = stateOfGroup(r.tasks);
+          html += `<li class="row leaf tap" data-node="wave:${r.wave}" data-wave="${r.wave}"><div class="rail"></div><div class="body"><div class="txt"><span class="meta"><span style="letter-spacing:.12em;text-transform:uppercase;font-size:11px;color:${live ? "var(--accent)" : "var(--faint)"}">${label}</span> · ${desc}</span>${stripHtml(r.tasks)}<span class="meta">${countsHtml(byStateOf(r.tasks))} · ${fmtTok(r.tasks.reduce((n, t) => n + tokTotal(t.tokens), 0))}</span></div>${chev(false)}</div></li>`;
+        }
+        continue;
+      }
+      if (r.type === "group") {
+        const t = r.task, st = stateOfGroup([t, ...r.kids]);
+        const kind = t.kind === "forEach" ? `forEach ×${r.kids.length}` : `manifest · ${r.kids.length} inside`;
+        html += `<li class="row leaf tap" data-node="${esc(t.id)}" data-group="${esc(t.id)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· ${kind}</span></span>${stripHtml(r.kids, t.kind === "manifest")}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(t.model || "")} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chev(r.open)}</div></li>`;
+        continue;
+      }
+      if (r.type === "more") {
+        html += `<li class="row" data-more="${esc(r.id)}"><div class="rail"></div><div class="body tap" style="align-items:center;justify-content:center;padding:6px 0;color:var(--faint);font-size:12px">+ ${r.hidden} more, not running · tap to show all</div></li>`;
+        continue;
+      }
+      const t = r.task;
+      const quiet = t.state === "running" && t.quietMs != null && t.quietMs > quietWarn;
+      const right = t.state === "running" ? `${fmtDur(Date.now() - (t.startedMs || Date.now()))}` : t.durationMs != null ? fmtDur(t.durationMs) : t.state;
+      const sub = quiet ? `quiet ${Math.round(t.quietMs / 1000)}s · ${esc(t.model)}` : t.state === "running" && t.activity ? `${esc(t.model)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(t.model || "");
+      const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
+      html += `<li class="row leaf tap${quiet ? " quiet" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.nested ? "&nbsp;&nbsp;" : ""}${esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
+    }
+    html += `</ul></div>`;
+    return { html, rows };
+  }
+
+  // Draw the rail as ONE overlay: node centres measured from the rows, so lanes
+  // and fan-in curves meet at every row boundary regardless of row height.
+  function drawRail(run, rows) {
+    const svg = $("#rail"), list = $("#rows");
+    if (!svg || !list) return;
+    const byId = new Map(run.tasks.map((t) => [t.id, t]));
+    // Lane assignment first, so the rail can be sized before anything is measured:
+    // rows re-measure after the width changes, since the text column reflows.
+    const rowMeta = new Map(rows.map((r, i) => [i, r]));
+    const laneFor = new Map();
+    let laneCounter = 0, currentWave = -1, maxLane = 0;
+    const MAX_LANES = 8;
+    rows.forEach((r, i) => {
+      if (!r || r.type === "more" || (r.type === "wave" && r.open)) return;
+      if (r.wave !== currentWave) { currentWave = r.wave; laneCounter = 0; }
+      const lane = r.nested ? 1 : laneCounter++;
+      laneFor.set(i, lane);
+      maxLane = Math.max(maxLane, Math.min(lane, MAX_LANES - 1));
+    });
+    // Wide open waves narrow the pitch rather than sharing a lane: 14px up to six
+    // lanes, 8px beyond, so a 10-wide wave still reads one lane per leaf.
+    const LANE_W = maxLane > 5 ? 8 : 14, LANE_X0 = 12, R = maxLane > 5 ? 3.5 : 5;
+    const railW = LANE_X0 + maxLane * LANE_W + 9 + 10; // last lane + ring radius + breathing room
+    const graph = list.parentElement;
+    graph.style.setProperty("--rail", `${Math.max(56, railW)}px`);
+
+    const listTop = list.getBoundingClientRect().top;
+    const nodes = new Map(); // node key -> {x,y,c,ring}
+    const laneOf = new Map();
+    const rowEls = [...list.children];
+    rowEls.forEach((el, i) => {
+      const r = rowMeta.get(i);
+      if (!laneFor.has(i)) return;
+      const lane = laneFor.get(i);
+      const rect = el.getBoundingClientRect();
+      const y = rect.top - listTop + rect.height / 2;
+      const x = LANE_X0 + Math.min(lane, MAX_LANES - 1) * LANE_W;
+      let key, c, ring = false, ids;
+      if (r.type === "wave") { key = `wave:${r.wave}`; ids = r.tasks.map((t) => t.id); c = stateOfGroup(r.tasks); ring = c === "run"; }
+      else if (r.type === "group") { key = r.id; ids = [r.id, ...r.kids.map((k) => k.id)]; c = stateOfGroup([r.task, ...r.kids]); ring = c === "run"; }
+      else { key = r.id; ids = [r.id]; c = cls(r.task.state); ring = r.task.state === "running" || r.task.state === "retrying"; }
+      nodes.set(key, { x, y, c, ring, ids, after: [...new Set(ids.flatMap((id) => byId.get(id)?.after || []))] });
+      for (const id of ids) laneOf.set(id, key);
+    });
+    const height = list.getBoundingClientRect().height;
+    const width = Math.max(56, railW);
+    svg.setAttribute("height", height);
+    svg.setAttribute("width", width);
+    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    let out = "";
+    for (const [key, n] of nodes) {
+      const targets = new Set(n.after.map((a) => laneOf.get(a)).filter((k) => k && k !== key));
+      for (const tk of targets) {
+        const d = nodes.get(tk);
+        if (!d || d.y >= n.y) continue;
+        const ym = n.y - 22;
+        const col = COLOR[d.c === "pend" ? "pend" : d.c];
+        out += `<path d="M${d.x} ${d.y} L${d.x} ${Math.max(d.y, ym)} C${d.x} ${n.y} ${n.x} ${ym} ${n.x} ${n.y}" stroke="${col}" stroke-width="2" fill="none"/>`;
+      }
+      if (!targets.size && n.y > 30) out += `<path d="M${n.x} ${n.y - 28} L${n.x} ${n.y}" stroke="var(--rule)" stroke-width="2"/>`;
+    }
+    for (const [key, n] of nodes) {
+      const hollow = n.c === "pend";
+      const k = esc(key);
+      out += hollow ? `<circle data-key="${k}" cx="${n.x}" cy="${n.y}" r="${R}" fill="none" stroke="var(--faint)" stroke-width="2"/>` : `<circle data-key="${k}" cx="${n.x}" cy="${n.y}" r="${R}" fill="${COLOR[n.c]}"/>`;
+      if (n.ring) out += `<circle class="ring" data-key="ring:${k}" cx="${n.x}" cy="${n.y}" r="${R + 4}"/>`;
+    }
+    setSvg(svg, out);
+  }
+
+  let currentRun = null;
+  async function renderRun(project, name) {
+    const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
+    currentRun = run;
+    const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.abortedMs ? `aborted · engine gone · ${ago(run.abortedMs)}` : run.staleMs ? `stale · last event ${ago(run.staleMs)}` : run.startedMs ? fmtDur(Date.now() - run.startedMs) : "";
+    setHeader(`${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>${menuBtn}`);
+    const { html, rows } = renderRunHtml(run);
+    setHtml(main, html);
+    drawRail(run, rows);
+  }
+  // Toggles are handled by the delegated listener on main; a rerender just morphs.
+  function rerender() { if (view.name === "run" && currentRun) { const { html, rows } = renderRunHtml(currentRun); setHtml(main, html); drawRail(currentRun, rows); } }
+
+  async function renderLeaf(project, name, id) {
+    const [run, leaf] = await Promise.all([api(`/api/runs/${enc(project)}/${enc(name)}`), api(`/api/runs/${enc(project)}/${enc(name)}/leaves/${enc(id)}`).catch(() => null)]);
+    currentRun = run;
+    const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
+    const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
+    setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`);
+    const quiet = t.state === "running" && t.quietMs > (run.quietWarnMs || 60000);
+    let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip">${esc(t.model)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${Math.round(t.quietMs / 1000)}s</span>` : ""}</div>`;
+    html += `<div class="block"><label>graph</label><div class="meta"><span class="faint">after</span> ${t.after?.length ? t.after.map(esc).join(", ") : "— (nothing upstream)"}</div><div class="meta"><span class="faint">feeds</span> ${feeds.length ? feeds.map(esc).join(", ") : "—"}</div></div>`;
+    const elapsed = t.state === "running" ? fmtDur(Date.now() - (t.startedMs || Date.now())) : fmtDur(t.durationMs);
+    html += `<div class="kv"><div><label>${t.state === "running" ? "elapsed" : "duration"}</label><span>${elapsed}</span></div><div><label>turns</label><span>${leaf?.numTurns ?? "—"}</span></div><div><label>last event</label><span>${t.lastEventMs ? ago(t.lastEventMs) : "—"}</span></div></div>`;
+    const tk = t.tokens || leaf?.tokens;
+    if (tk) {
+      const inp = tk.input || 0, outp = tk.output || 0, cc = tk.cacheCreation || 0, cr = tk.cacheRead || 0;
+      html += `<div class="block"><label><span>tokens</span><small>${fmtTok(inp + outp + cc)}</small></label><div class="bar"><span style="flex:${inp};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span><span style="flex:${cc};background:var(--warn)"></span></div><div class="kv" style="padding:0;border:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(inp)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label style="color:var(--warn)">cache write</label><span>${cc ? fmtTok(cc) : "—"}${cr ? ` <span class="faint">· ${fmtTok(cr)} read</span>` : ""}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
+    }
+    html += `<div class="block"><label>activity</label><div class="meta">${t.activity ? esc(t.activity) : "<span class='faint'>—</span>"}</div></div>`;
+    // Raw by default; a prettify chip appears when the output carries JSON.
+    const canPretty = !!leaf?.output && (typeof leaf.outputJson === "object" && leaf.outputJson !== null || !!splitJson(leaf.output));
+    const toggle = canPretty ? `<button class="chip" data-pretty="1" style="padding:4px 10px">${ui.pretty ? "raw" : "prettify"}</button>` : (leaf?.output ? "" : "appears when the leaf finishes");
+    html += `<div class="block"><label><span>output</span><small>${toggle}</small></label>${leaf?.output ? (ui.pretty && canPretty ? outputHtml(leaf) : `<pre class="out">${esc(leaf.output)}</pre>`) : "<div class='faint'>—</div>"}</div>`;
+    if (leaf?.citations) html += `<div class="block"><label>citations</label><div class="meta">checked ${leaf.citations.checked ?? 0} · drifted ${leaf.citations.drifted ?? 0} · refuted ${leaf.citations.refuted ?? 0}</div></div>`;
+    setHtml(main, html);
+  }
+
+  // A leaf's output is usually JSON (the engine parses it into outputJson) — render
+  // it as structured text: objects as key/value rows, arrays as numbered items,
+  // nesting indented. Anything else is shown as the text it is.
+  function jsonHtml(v, depth = 0) {
+    if (v === null || typeof v !== "object") return `<span class="jv">${esc(typeof v === "string" ? v : JSON.stringify(v))}</span>`;
+    if (Array.isArray(v)) {
+      if (!v.length) return `<span class="faint">[]</span>`;
+      return `<ol class="ja" style="--d:${depth}">${v.map((x) => `<li>${jsonHtml(x, depth + 1)}</li>`).join("")}</ol>`;
+    }
+    const keys = Object.keys(v);
+    if (!keys.length) return `<span class="faint">{}</span>`;
+    const nested = (x) => x !== null && typeof x === "object" && (Array.isArray(x) ? x.length : Object.keys(x).length);
+    return `<dl class="jo" style="--d:${depth}">${keys.map((k) => `<div class="jr${nested(v[k]) ? " nested" : ""}"><dt>${esc(k)}${nested(v[k]) ? `<span class="faint"> ${Array.isArray(v[k]) ? `[${v[k].length}]` : "{…}"}</span>` : ""}</dt><dd>${jsonHtml(v[k], depth + 1)}</dd></div>`).join("")}</dl>`;
+  }
+  // Leaves often wrap their JSON in a sentence or two ("Spot-checks confirmed… {…}"):
+  // find the first { or [ and the matching end, render the prose around it as text.
+  function splitJson(text) {
+    const s = String(text ?? "");
+    const start = Math.min(...["{", "["].map((c) => { const i = s.indexOf(c); return i < 0 ? Infinity : i; }));
+    if (!Number.isFinite(start)) return null;
+    const closer = s[start] === "{" ? "}" : "]";
+    for (let end = s.lastIndexOf(closer); end > start; end = s.lastIndexOf(closer, end - 1)) {
+      try { return { before: s.slice(0, start).trim(), data: JSON.parse(s.slice(start, end + 1)), after: s.slice(end + 1).trim() }; } catch {}
+    }
+    return null;
+  }
+  function outputHtml(leaf) {
+    let data = leaf.outputJson, before = "", after = "";
+    if (data === undefined || data === null || typeof data !== "object") {
+      const found = splitJson(leaf.output);
+      if (found) ({ data, before, after } = found); else data = undefined;
+    }
+    if (data !== undefined && typeof data === "object" && data !== null) {
+      return `${before ? `<pre class="out">${esc(before)}</pre>` : ""}<div class="json">${jsonHtml(data)}</div>${after ? `<pre class="out">${esc(after)}</pre>` : ""}`;
+    }
+    return `<pre class="out">${esc(leaf.output)}</pre>`;
+  }
+
+  // ── performance: the score store ranked as `swarm perf` ranks it ──────────
+  // One ranking list for every table — overall, one aspect, one model's aspects.
+  // Rows carry a label, a value, one meta line and a 0–10 bar; a provisional cell
+  // (n<5) draws its bar dashed and says so, a cell with no grades shows only its
+  // outcomes. Numbers are the server's (scores.mjs), never recomputed here.
+  const rankRow = ({ key, href, label, val, sub, frac, prov, none }) => `<li class="row tap" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${label}</span><span class="val${none ? " none" : ""}">${val}</span></div><div class="meta">${sub}</div><div class="bar${prov ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div></div></li>`;
+  const rankList = (rows) => `<ul class="rank">${rows.map(rankRow).join("")}</ul>`;
+  const badOutcomes = (o) => Object.entries(o || {}).filter(([k, v]) => v > 0 && k !== "completed").map(([k, v]) => `${k} ${v}`).join(", ");
+  const fmtScore = (v) => (v == null ? "—" : v.toFixed(2));
+  const cellSub = (c, extra) => {
+    const bits = [`n=${c.n}`, ...(extra || [])];
+    if (c.n === 0) bits.push(`<span class="tag">no grades — outcomes only</span>`);
+    else if (c.provisional) bits.push(`<span class="tag">provisional n&lt;5</span>`);
+    const bad = badOutcomes(c.outcomes);
+    if (bad) bits.push(`<span class="c-bad">${esc(bad)}</span>`);
+    return bits.join(" · ");
+  };
+  async function renderPerf(kind, which) {
+    const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
+    const domain = ui.perfDomain;
+    const qs = new URLSearchParams();
+    if (domain) qs.set("domain", domain);
+    if (model) qs.set("model", model);
+    const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
+    const title = model ? esc(model) : aspect ? esc(aspect) : "performance";
+    setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}</b><small>${p.rows} graded leaves${p.lines !== p.rows ? ` (${p.lines} lines, re-grades superseded)` : ""} · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
+    let html = "";
+    if (!model) {
+      // Aspect chips: overall, the universals, then the capability columns.
+      const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
+      html += `<div class="chips">${chip("overall", "#/perf", !aspect)}${p.aspects.map((a) => chip(a, `#/perf/aspect/${enc(a)}`, a === aspect)).join("")}</div>`;
+    }
+    if (p.domains.length > 1) {
+      const dchip = (label, d) => `<span class="chip${(d || null) === (domain || null) ? " on" : ""}" data-domain="${esc(d || "")}">${esc(label)}</span>`;
+      html += `<div class="chips" style="padding-top:8px">${dchip("all domains", "")}${p.domains.map((d) => dchip(d, d)).join("")}</div>`;
+    }
+    html += `<div style="height:12px"></div>`;
+    if (model) {
+      // One model: its overall line, then every aspect it has been graded on.
+      const o = p.overall[0];
+      if (o) html += `<div class="totals"><span><b>overall</b> ${fmtScore(o.combined)}</span><span class="meta">${cellSub(o)}</span></div>`;
+      html += rankList(p.report.map((a) => {
+        const c = a.cells.find((x) => x.model === model) || { n: 0, mean: null, weighted: null, provisional: true, outcomes: {} };
+        return { key: `a:${a.aspect}`, href: `#/perf/aspect/${enc(a.aspect)}`, label: `${esc(a.aspect)}${a.universal ? ` <span class="tag faint">universal</span>` : ""}`, val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional };
+      }));
+    } else if (aspect) {
+      const a = p.report.find((x) => x.aspect === aspect);
+      if (!a || !a.cells.length) html += `<div class="empty">n=0 — nothing graded on ${esc(aspect)} yet. Absence is evidence.</div>`;
+      else {
+        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional })));
+        if (a.prior != null) html += `<div class="foot">ranked on the weighted score: the raw mean shrunk toward the prior ${a.prior.toFixed(2)} (mean of per-model means; k=${p.priorWeight}) — a thin cell is pulled most.${a.universal ? "" : " Capability aspect: graded only where a leaf stressed it."}</div>`;
+      }
+    } else {
+      if (!p.overall.length) html += `<div class="empty">no graded leaves under ${esc(p.path)} yet.</div>`;
+      else {
+        const short = (a) => a.slice(0, 5);
+        html += rankList(p.overall.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.combined), none: c.combined == null, sub: cellSub(c, p.universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), frac: (c.combined ?? 0) / 10, prov: c.provisional })));
+        html += `<div class="foot">overall = mean of the four universal weighted scores; capability aspects excluded — they are graded only where a leaf stressed them.</div>`;
+      }
+    }
+    setHtml(main, html);
+  }
+
+  async function renderDigest(project, name) {
+    setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(name)}</b><small>digest</small></div>${menuBtn}`);
+    setHtml(main, `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/digest`))}"></iframe>`);
+  }
+
+  function celebrate(name) {
+    try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch {}
+    const old = document.title; document.title = `✓ ${name}`; hdr.classList.add("flash");
+    setTimeout(() => { document.title = old; hdr.classList.remove("flash"); }, 4000);
+  }
+
+  // ── routing ─────────────────────────────────────────────────────────────
+  async function route() {
+    const h = location.hash.replace(/^#/, "") || "/";
+    const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
+    try {
+      if (seg[0] === "perf") {
+        view.name = "perf"; view.project = view.run = view.leaf = null;
+        await renderPerf(seg[1] || null, seg[2] || null);
+      } else if (seg[0] === "run" && seg.length >= 3) {
+        view.name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : "run"; view.project = seg[1]; view.run = seg[2]; view.leaf = seg[4] || null;
+        if (view.name === "leaf") await renderLeaf(seg[1], seg[2], seg[4]);
+        else if (view.name === "digest") await renderDigest(seg[1], seg[2]);
+        else await renderRun(seg[1], seg[2]);
+      } else { view.name = "runs"; view.project = view.run = view.leaf = null; await renderRuns(); }
+    } catch (e) {
+      setHtml(main, `<div class="empty">${esc(e.message)}</div>`);
+    }
+  }
+  // One delegated click handler for everything in main: navigation rows, the wave
+  // and group toggles, the "show all clones" row. Survives morphing, no rebinding.
+  main.addEventListener("click", (e) => {
+    const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more], [data-pretty], [data-project], [data-domain]");
+    if (!t || !main.contains(t)) return;
+    if (t.dataset.pretty) { ui.pretty = !ui.pretty; route(); return; }
+    if (t.dataset.domain != null) { ui.perfDomain = t.dataset.domain || null; route(); return; }
+    if (t.dataset.project) { const p = t.dataset.project; ui.closedProjects.has(p) ? ui.closedProjects.delete(p) : ui.closedProjects.add(p); route(); return; }
+    if (t.dataset.href) { location.hash = t.dataset.href; return; }
+    if (t.dataset.wave != null) {
+      const w = Number(t.dataset.wave);
+      const isOpen = t.classList.contains("wave-label");
+      if (isOpen) { ui.openWaves.delete(w); ui.closedWaves.add(w); } else { ui.closedWaves.delete(w); ui.openWaves.add(w); }
+      rerender(); return;
+    }
+    if (t.dataset.group) { const g = t.dataset.group; ui.openGroups.has(g) ? ui.openGroups.delete(g) : ui.openGroups.add(g); rerender(); return; }
+    if (t.dataset.more) { ui.allClones.add(t.dataset.more); rerender(); }
+  });
+  window.addEventListener("hashchange", route);
+  hdr.addEventListener("click", (e) => { if (e.target.closest("#menu-open")) $("#menu").classList.add("open"); });
+  $("#menu-close").addEventListener("click", () => $("#menu").classList.remove("open"));
+  $("#menu .nav").addEventListener("click", () => $("#menu").classList.remove("open"));
+  $("#menu").addEventListener("click", (e) => { if (e.target === $("#menu")) $("#menu").classList.remove("open"); });
+  $("#menu-url").textContent = location.origin + "/";
+  $("#menu-token").textContent = TOKEN ? "token: set (kept in this URL)" : "token: none configured";
+
+  // ── live ────────────────────────────────────────────────────────────────
+  let es;
+  function connect() {
+    es = new EventSource(q("/events"));
+    es.addEventListener("run", (e) => {
+      let d = {}; try { d = JSON.parse(e.data); } catch {}
+      if (view.name === "runs") route();
+      else if (view.project === d.project && view.run === d.name) route();
+    });
+    es.addEventListener("runs", () => { if (view.name === "runs") route(); });
+    es.onerror = () => { /* EventSource reconnects on its own */ };
+  }
+  // Running rows tick without a server event — a refetch, so a run that went quiet
+  // is noticed (nothing writes run.log when the engine dies).
+  setInterval(() => { if (view.name === "run" && currentRun && !runEnded(currentRun)) route(); }, 15000);
+  window.addEventListener("resize", () => { if (view.name === "run" && currentRun) rerender(); });
+
+  route();
+  connect();
+})();
+</script>
+</body>
+</html>

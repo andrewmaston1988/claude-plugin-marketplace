@@ -3,6 +3,7 @@ import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal } from "./stream.mjs";
 import { isSentinelModel } from "./manifest.mjs";
+import { readRun } from "./runlog.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -270,80 +271,29 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
   // Absolutise first: a relative resultsDir silently resolves against the
   // *viewer's* cwd (watch terminal), not the run's — the classic mismatch.
   dir = resolve(dir);
-  const logPath = join(dir, "run.log");
-  if (!existsSync(logPath)) {
-    return `no run.log at ${logPath} (absolute) — either the run has not started or this is not the run's resultsDir; pass the absolute path printed at dispatch.`;
+  const run = readRun(dir, { now, quietWarnMs });
+  if (!run) {
+    return `no run.log at ${join(dir, "run.log")} (absolute) — either the run has not started or this is not the run's resultsDir; pass the absolute path printed at dispatch.`;
   }
-  let roster = [];
-  let startedMs = null;
-  const state = new Map();
-  const tokens = new Map();
-  const durations = new Map();
-  const runningSince = new Map();
-  const activity = new Map();
-  const lastEvent = new Map();
-  for (const line of readFileSync(logPath, "utf8").split("\n")) {
-    if (!line.trim()) continue;
-    let entry;
-    try {
-      entry = JSON.parse(line);
-    } catch {
-      continue; // torn tail write mid-run
-    }
-    if (entry.event === "run-start") {
-      // pre-token logs recorded plain id strings
-      roster = (entry.tasks || []).map((t) => (typeof t === "string" ? { id: t, model: "?" } : t));
-      startedMs = Date.parse(entry.ts) || now;
-      state.clear(); tokens.clear(); durations.clear(); runningSince.clear();
-      activity.clear(); lastEvent.clear();
-      continue;
-    }
-    if (entry.event === "expand") {
-      // forEach clones join the roster directly under their parent
-      const rows = Array.from({ length: entry.clones || 0 }, (_, i) => ({ id: `${entry.id}[${i}]`, model: entry.model || "?" }));
-      const idx = roster.findIndex((r) => r.id === entry.id);
-      roster.splice(idx < 0 ? roster.length : idx + 1, 0, ...rows);
-      continue;
-    }
-    if (entry.event === "expand-manifest") {
-      // spliced child tasks join under their node, each with its own model
-      const rows = (entry.children || []).map((c) => ({ id: c.id, model: c.model || "?" }));
-      const idx = roster.findIndex((r) => r.id === entry.id);
-      roster.splice(idx < 0 ? roster.length : idx + 1, 0, ...rows);
-      continue;
-    }
-    if (!entry.id) continue;
-    lastEvent.set(entry.id, Date.parse(entry.ts) || now);
-    if (entry.event === "tokens") {
-      tokens.set(entry.id, entry.tokens);
-    } else if (entry.event === "activity") {
-      activity.set(entry.id, entry.activity);
-    } else if (entry.state) {
-      state.set(entry.id, entry.state);
-      if (entry.state === "running") runningSince.set(entry.id, Date.parse(entry.ts) || now);
-      if (entry.durationMs != null) durations.set(entry.id, entry.durationMs);
-      if (entry.tokens) tokens.set(entry.id, entry.tokens);
-    }
-  }
-  const tasks = roster.map(({ id, model }) => ({
-    id, model,
-    state: state.get(id) || "pending",
-    durationMs: durations.get(id),
-    startedMs: runningSince.get(id),
-    tokens: tokens.get(id),
-    activity: activity.get(id),
-    lastEventMs: lastEvent.get(id),
-  }));
+  return renderRun(run, { now, quietWarnMs });
+}
+
+// The roster view of an already-read run (see src/runlog.mjs readRun). Rows the
+// log never mentioned are graph-only (agentless nodes) and stay off the roster,
+// which counts leaves the engine dispatched.
+export function renderRun(run, { now = Date.now(), quietWarnMs = 60000 } = {}) {
+  const { dir } = run;
+  const tasks = run.tasks.filter((t) => t.kind !== "agentless" || t.lastEventMs != null);
   const lines = [
     `${bold("run:")} ${cyan(dir)}`,
     "",
-    renderRoster({ title: basename(dir), tasks, now, startedMs: startedMs ?? now, quietWarnMs }),
+    renderRoster({ title: run.name, tasks, now, startedMs: run.startedMs ?? now, quietWarnMs }),
     "",
     `${bold("results:")} ${join(dir, "results")}`,
   ];
-  if (existsSync(join(dir, "digest.md"))) lines.push(`${bold("digest:")} ${green(join(dir, "digest.md"))}`);
-  if (existsSync(join(dir, "report.md"))) lines.push(`${bold("report:")} ${green(join(dir, "report.md"))}`);
-  if (existsSync(join(dir, "summary.json"))) lines.push(`${bold("summary:")} ${join(dir, "summary.json")}`);
+  if (run.digestPath) lines.push(`${bold("digest:")} ${green(run.digestPath)}`);
+  if (run.reportPath) lines.push(`${bold("report:")} ${green(run.reportPath)}`);
+  if (run.summaryPath) lines.push(`${bold("summary:")} ${run.summaryPath}`);
   return lines.join("\n");
 }
 
