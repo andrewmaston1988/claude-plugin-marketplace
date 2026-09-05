@@ -31,13 +31,15 @@
     const shortModel = (m) => m.replace(/(:|-)cloud$/, "");
     const keyOf = (model, aspect) => JSON.stringify([model, aspect]);
     const byKey = new Map(cells.map((c) => [keyOf(c.model, c.aspect), c]));
-    const CW = 34, TILE = 22, LBL = 15, GAP = 2, HEAD = 84;
+    const CW = 34, TILE = 22, LBL = 15, GAP = 2, HEAD = 16;
+    // horizontal captions: the first five letters fit a 34px column; the full aspect name is one tap away
+    const caption = (a) => a.slice(0, 5);
     const ROW = LBL + TILE;
     const w = aspects.length * CW, hgt = HEAD + models.length * ROW;
     let svg = `<svg viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="xMinYMin meet" class="covgrid">${HATCH_DEFS}`;
     aspects.forEach((a, i) => {
-      const x = i * CW + CW / 2 + 4;
-      svg += `<text transform="translate(${x},${HEAD - 6}) rotate(-90)" font-size="11" fill="var(--muted)" data-href="#/perf/aspect/${enc(a)}" style="cursor:pointer">${esc(a)}</text>`;
+      const x = i * CW + CW / 2;
+      svg += `<text x="${x}" y="${HEAD - 5}" text-anchor="middle" font-size="9" fill="var(--muted)" data-href="#/perf/aspect/${enc(a)}" style="cursor:pointer"><title>${esc(a)}</title>${esc(caption(a))}</text>`;
     });
     models.forEach((m, r) => {
       const y = HEAD + r * ROW;
