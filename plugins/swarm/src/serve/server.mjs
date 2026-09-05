@@ -10,8 +10,10 @@ import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
+import { coverage, reliability, leaders } from "./perf-views.mjs";
 
 const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
+const PERF_JS = fileURLToPath(new URL("./perf.js", import.meta.url));
 const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
 // The estate view: every live run, plus the newest few finished PER PROJECT — a
 // global newest-N let one busy project crowd the others off the list entirely.
@@ -168,6 +170,11 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: readRows(scoresFile) };
     return scoreCache.rows;
   };
+  const rankOf = (cells, model) => {
+    const ranked = cells.filter((c) => c.combined != null);
+    const i = ranked.findIndex((c) => c.model === model);
+    return i < 0 ? null : { position: i + 1, of: ranked.length };
+  };
   const perf = (res, url) => {
     const q = (k) => url.searchParams.get(k) || undefined;
     const aspect = q("aspect"), model = q("model"), domain = q("domain");
@@ -182,7 +189,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       aspects: ASPECTS, universals: UNIVERSAL, domains,
       filters: report.filters,
       overall: overall(rows, { model, domain }).cells,
+      // Drill-in: where this model sits among every model in the same domain filter.
+      ...(model ? { rank: rankOf(overall(rows, { domain }).cells, model) } : {}),
       report: report.aspects,
+      views: { coverage: coverage(report), reliability: reliability(live), leaders: leaders(report) },
     });
   };
 
@@ -211,6 +221,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       startHub();
       req.on("close", () => { clients.delete(res); if (!clients.size) stopHub(); });
       return;
+    }
+    if (p === "/perf.js") {
+      if (!existsSync(PERF_JS)) return notFound(res);
+      return send(res, 200, readFileSync(PERF_JS, "utf8"), "text/javascript; charset=utf-8");
     }
     if (p === "/api/perf") return perf(res, url);
     if (routes[p]) return routes[p](res);

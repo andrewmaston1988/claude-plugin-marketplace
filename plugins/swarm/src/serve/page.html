@@ -118,11 +118,41 @@
   .chip[data-href], .chip[data-domain] { cursor:pointer; }
   .foot { padding:10px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
+  /* perf view switcher: four pills, one column each, centred — never a ragged wrap */
+  .chips.views { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; }
+  .chips.views .chip { justify-content:center; }
+  /* aspect + domain pickers: the lists are too long for pills on a phone */
+  .selrow { display:flex; gap:8px; padding:8px 16px 0; }
+  /* model dashboard: four stat tiles, compressed aspect bars, widget headers that can hold a picker */
+  .kv.dash4 { grid-template-columns:repeat(2, minmax(0,1fr)); }
+  .kv.dash4 span small { font-size:12px; color:var(--muted); }
+  .section .secsel { margin-left:auto; text-transform:none; letter-spacing:0; }
+  .section .secsel .sel { padding:4px 8px; font-size:11px; }
+  .aspects { padding:4px 16px 12px; display:flex; flex-direction:column; gap:6px; }
+  .arow { display:grid; grid-template-columns:96px 1fr 64px; align-items:center; gap:8px; min-height:22px; cursor:pointer; }
+  .arow .alabel { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .arow .bar { height:6px; border-radius:3px; }
+  .arow .bar span { background:var(--accent); border-radius:3px; }
+  .arow .bar.prov span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
+  .arow .aval { font-size:12px; text-align:right; white-space:nowrap; }
+  .arow .aval small { color:var(--faint); }
+  .arow.none .aval { color:var(--faint); }
+  .sel { flex:1; min-width:0; font:inherit; font-size:12px; color:var(--ink); background:var(--surface-2); border:1px solid var(--rule); border-radius:8px; padding:8px 10px; }
   .chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--surface-2); border-radius:999px; padding:6px 10px; }
   .chip.run { color:var(--accent); background:var(--accent-soft); }
   .chip.ok { color:var(--ok); background:var(--ok-bg); }
   .chip.bad { color:var(--bad); background:var(--bad-bg); }
   .chip.warn { color:var(--warn); background:var(--warn-bg); }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; }
+  /* coverage grid: one responsive SVG, labels inside it, scaled to the screen */
+  .cov { padding:0 12px 16px; }
+  .cov svg.covgrid { width:100%; height:auto; display:block; }
+  /* leaders: podium marks after the name — trophy, silver, bronze; the winner's row is lifted */
+  .rank .row.lead { background:var(--surface-2); }
+  .rank .row.lead .name { color:var(--ink); font-weight:600; }
+  .rank .row.p1 .name::after { content:" 🏆"; }
+  .rank .row.p2 .name::after { content:" 🥈"; }
+  .rank .row.p3 .name::after { content:" 🥉"; }
   pre.out { margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.5; color:var(--ink); max-height:60vh; overflow:auto; }
   .json { font-size:12px; line-height:1.5; max-height:70vh; overflow:auto; word-break:break-word; }
   .json dl, .json ol { margin:0; padding:0; }
@@ -606,8 +636,9 @@
   // Rows carry a label, a value, one meta line and a 0–10 bar; a provisional cell
   // (n<5) draws its bar dashed and says so, a cell with no grades shows only its
   // outcomes. Numbers are the server's (scores.mjs), never recomputed here.
-  const rankRow = ({ key, href, label, val, sub, frac, prov, none }) => `<li class="row tap" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${label}</span><span class="val${none ? " none" : ""}">${val}</span></div><div class="meta">${sub}</div><div class="bar${prov ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div></div></li>`;
-  const rankList = (rows) => `<ul class="rank">${rows.map(rankRow).join("")}</ul>`;
+  const rankRow = ({ key, href, label, val, sub, frac, prov, none, place }) => `<li class="row tap${place ? ` p${place}${place === 1 ? " lead" : ""}` : ""}" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${label}</span><span class="val${none ? " none" : ""}">${val}</span></div><div class="meta">${sub}</div><div class="bar${prov ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div></div></li>`;
+  // podium: the first three rows wear the medals (rank and per-aspect lists; never a model's own page)
+  const rankList = (rows, { podium = false } = {}) => `<ul class="rank">${rows.map((r, i) => rankRow(podium && i < 3 ? { ...r, place: i + 1 } : r)).join("")}</ul>`;
   const badOutcomes = (o) => Object.entries(o || {}).filter(([k, v]) => v > 0 && k !== "completed").map(([k, v]) => `${k} ${v}`).join(", ");
   const fmtScore = (v) => (v == null ? "—" : v.toFixed(2));
   const cellSub = (c, extra) => {
@@ -618,6 +649,7 @@
     if (bad) bits.push(`<span class="c-bad">${esc(bad)}</span>`);
     return bits.join(" · ");
   };
+  const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders"]);
   async function renderPerf(kind, which) {
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
     const domain = ui.perfDomain;
@@ -625,28 +657,53 @@
     if (domain) qs.set("domain", domain);
     if (model) qs.set("model", model);
     const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
-    const title = model ? esc(model) : aspect ? esc(aspect) : "performance";
+    const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind : "performance";
     if (!p.grading) {
       setHeader(`${backBtn("#/")}<div class="title"><b>performance</b><small>off</small></div>${menuBtn}`);
       setHtml(main, `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`);
       return;
     }
-    setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}</b><small>${p.rows} graded leaves${p.lines !== p.rows ? ` (${p.lines} lines, re-grades superseded)` : ""} · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
+    setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}${model && p.rank ? ` ${["🏆", "🥈", "🥉"][p.rank.position - 1] || `<span class="tag">#${p.rank.position}</span>`}` : ""}</b><small>${p.rows} graded leaves · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
+    const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
+    const sel = (attr, opts, current) => `<select class="sel" ${attr}>${opts.map(([v, label]) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
+    const domainSel = () => p.domains.length > 1 ? sel('data-domain-select', [["", "all domains"], ...p.domains.map((d) => [d, d])], domain || "") : "";
     let html = "";
     if (!model) {
-      // Aspect chips: overall, the universals, then the capability columns.
-      const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
-      html += `<div class="chips">${chip("overall", "#/perf", !aspect)}${p.aspects.map((a) => chip(a, `#/perf/aspect/${enc(a)}`, a === aspect)).join("")}</div>`;
+      // View switcher: the existing ranking view plus the three new ones.
+      html += `<div class="chips views">${chip("rank", "#/perf", !NEW_PERF_KINDS.has(kind))}${chip("coverage", "#/perf/coverage", kind === "coverage")}${chip("reliability", "#/perf/reliability", kind === "reliability")}${chip("leaders", "#/perf/leaders", kind === "leaders")}</div>`;
     }
-    if (p.domains.length > 1) {
-      const dchip = (label, d) => `<span class="chip${(d || null) === (domain || null) ? " on" : ""}" data-domain="${esc(d || "")}">${esc(label)}</span>`;
-      html += `<div class="chips" style="padding-top:8px">${dchip("all domains", "")}${p.domains.map((d) => dchip(d, d)).join("")}</div>`;
+    if (NEW_PERF_KINDS.has(kind)) {
+      if (p.domains.length > 1) html += `<div class="selrow">${domainSel()}</div>`;
+      html += `<div style="height:12px"></div>`;
+      await loadPerfJs();
+      const h = { esc, enc, fmtScore, chip };
+      html += kind === "coverage" ? window.perfViews.coverageGrid(p.views.coverage, h)
+        : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
+        : window.perfViews.leadersList(p.views.leaders, h);
+      setHtml(main, html);
+      return;
+    }
+    {
+      // Aspect picker (overall, the universals, then the capability columns) and
+      // the domain filter share one row; a model's own page keeps just the domain.
+      const aspectSel = model ? "" : sel('data-nav', [["#/perf", "overall"], ...p.aspects.map((a) => [`#/perf/aspect/${enc(a)}`, a])], aspect ? `#/perf/aspect/${enc(aspect)}` : "#/perf");
+      const row = model ? "" : aspectSel + domainSel();
+      if (row) html += `<div class="selrow">${row}</div>`;
     }
     html += `<div style="height:12px"></div>`;
     if (model) {
-      // One model: its overall line, then every aspect it has been graded on.
-      const o = p.overall[0];
-      if (o) html += `<div class="totals"><span><b>overall</b> ${fmtScore(o.combined)}</span><span class="meta">${cellSub(o)}</span></div>`;
+      // One model as a dashboard: tiles, compressed aspect bars, its coverage row, its reliability bar.
+      await loadPerfJs();
+      const h = { esc, enc, fmtScore, chip };
+      const cov = p.views.coverage;
+      html += window.perfViews.modelDashboard({
+        model, overall: p.overall[0] || null, rank: p.rank || null, domain, domainSelect: domainSel(),
+        aspects: p.report.map((a) => ({ aspect: a.aspect, universal: a.universal, cell: a.cells.find((x) => x.model === model) || null })),
+        coverage: { aspects: cov.aspects, models: cov.models.filter((m) => m === model), cells: cov.cells.filter((c) => c.model === model) },
+        reliability: p.views.reliability.filter((r) => r.model === model),
+      }, h);
+      setHtml(main, html);
+      return;
       html += rankList(p.report.map((a) => {
         const c = a.cells.find((x) => x.model === model) || { n: 0, mean: null, weighted: null, provisional: true, outcomes: {} };
         return { key: `a:${a.aspect}`, href: `#/perf/aspect/${enc(a.aspect)}`, label: `${esc(a.aspect)}${a.universal ? ` <span class="tag faint">universal</span>` : ""}`, val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional };
@@ -655,14 +712,14 @@
       const a = p.report.find((x) => x.aspect === aspect);
       if (!a || !a.cells.length) html += `<div class="empty">n=0 — nothing graded on ${esc(aspect)} yet. Absence is evidence.</div>`;
       else {
-        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional })));
+        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional })), { podium: true });
         if (a.prior != null) html += `<div class="foot">ranked on the weighted score: the raw mean shrunk toward the prior ${a.prior.toFixed(2)} (mean of per-model means; k=${p.priorWeight}) — a thin cell is pulled most.${a.universal ? "" : " Capability aspect: graded only where a leaf stressed it."}</div>`;
       }
     } else {
       if (!p.overall.length) html += `<div class="empty">no graded leaves under ${esc(p.path)} yet.</div>`;
       else {
         const short = (a) => a.slice(0, 5);
-        html += rankList(p.overall.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.combined), none: c.combined == null, sub: cellSub(c, p.universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), frac: (c.combined ?? 0) / 10, prov: c.provisional })));
+        html += rankList(p.overall.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.combined), none: c.combined == null, sub: cellSub(c, p.universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), frac: (c.combined ?? 0) / 10, prov: c.provisional })), { podium: true });
         html += `<div class="foot">overall = mean of the four universal weighted scores; capability aspects excluded — they are graded only where a leaf stressed them.</div>`;
       }
     }
@@ -700,6 +757,12 @@
   }
   // One delegated click handler for everything in main: navigation rows, the wave
   // and group toggles, the "show all clones" row. Survives morphing, no rebinding.
+  main.addEventListener("change", (e) => {
+    const t = e.target;
+    if (!(t instanceof HTMLSelectElement)) return;
+    if (t.dataset.nav != null) { location.hash = t.value; return; }
+    if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; route(); }
+  });
   main.addEventListener("click", (e) => {
     const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more], [data-pretty], [data-project], [data-domain]");
     if (!t || !main.contains(t)) return;
@@ -740,6 +803,20 @@
   // is noticed (nothing writes run.log when the engine dies).
   setInterval(() => { if (view.name === "run" && currentRun && !runEnded(currentRun)) route(); }, 15000);
   window.addEventListener("resize", () => { if (view.name === "run" && currentRun) rerender(); });
+
+  // perf.js is a served static, loaded lazily and once — its src carries the
+  // token via the same q() every fetch uses. Awaited only by the three new
+  // Performance kinds; runs/leaf views never touch it.
+  let perfJsReady;
+  function loadPerfJs() {
+    if (!perfJsReady) perfJsReady = new Promise((resolve) => {
+      const s = document.createElement("script");
+      s.src = q("/perf.js");
+      s.onload = s.onerror = () => resolve();
+      document.head.appendChild(s);
+    });
+    return perfJsReady;
+  }
 
   route();
   connect();

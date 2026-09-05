@@ -1,0 +1,52 @@
+// Three read-models over scores.mjs's own aggregate/dedupe output, computed
+// server-side so the page never re-derives a count it could get wrong.
+import { OUTCOMES } from "../aspects.mjs";
+
+const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
+
+// One cell per model×aspect, including pairs the model was never graded or
+// scored on at all (n=0) — absence is evidence the grid must still draw.
+// JSON-encoded tuple, not a joined string — a plain delimiter (space, ":") collides
+// whenever an aspect or model name itself contains that delimiter.
+const keyOf = (aspect, model) => JSON.stringify([aspect, model]);
+
+export function coverage(report) {
+  const aspects = report.aspects.map((a) => a.aspect);
+  const models = [...new Set(report.aspects.flatMap((a) => a.cells.map((c) => c.model)))].sort();
+  const byKey = new Map();
+  for (const a of report.aspects) for (const c of a.cells) byKey.set(keyOf(a.aspect, c.model), c);
+  const cells = [];
+  for (const model of models) {
+    for (const aspect of aspects) {
+      const c = byKey.get(keyOf(aspect, model));
+      cells.push({ model, aspect, n: c ? c.n : 0, provisional: c ? c.provisional : true });
+    }
+  }
+  return { aspects, models, cells };
+}
+
+// Each deduped leaf (one row, however many aspects its grades cover) counts
+// once — the aggregate report's per-aspect outcomes must never be summed
+// across aspects, or an ungraded leaf multiplies by the aspect count.
+export function reliability(liveRows) {
+  const byModel = new Map();
+  for (const r of liveRows) {
+    if (!byModel.has(r.model)) byModel.set(r.model, { model: r.model, total: 0, byOutcome: blankOutcomes() });
+    const m = byModel.get(r.model);
+    m.total += 1;
+    m.byOutcome[r.outcome] = (m.byOutcome[r.outcome] || 0) + 1;
+  }
+  return [...byModel.values()].sort((a, b) => b.total - a.total || a.model.localeCompare(b.model));
+}
+
+// Top k by weighted score per aspect — the same ranking `swarm perf` shows,
+// just capped. A cell with no grade (outcomes only) has nothing to lead with.
+export function leaders(report, k = 3) {
+  return report.aspects.map((a) => ({
+    aspect: a.aspect,
+    top: a.cells.filter((c) => c.weighted != null)
+      .slice().sort((x, y) => y.weighted - x.weighted || x.model.localeCompare(y.model))
+      .slice(0, k)
+      .map((c) => ({ model: c.model, weighted: c.weighted, n: c.n, provisional: c.provisional })),
+  }));
+}
