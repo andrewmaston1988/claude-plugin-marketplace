@@ -149,6 +149,15 @@ test("listRuns: a run whose recorded engine pid is dead is aborted, not active; 
     assert.equal(by["live-1"].active, true); assert.equal(by["live-1"].aborted, false);
     assert.equal(by["nopid-1"].active, true, "no pid recorded → recency rule");
     assert.equal(readRun(by["dead-1"].dir, { now: NOW }).enginePid, 4242);
+    // The run view reads readRun, not listRuns: it must reach the same verdicts.
+    const dead = readRun(by["dead-1"].dir, { now: NOW, _alive: alive });
+    assert.ok(dead.abortedMs, "dead pid → abortedMs"); assert.equal(dead.staleMs, null);
+    const live = readRun(by["live-1"].dir, { now: NOW, _alive: alive });
+    assert.equal(live.abortedMs, null); assert.equal(live.staleMs, null);
+    const fresh = readRun(by["nopid-1"].dir, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
+    assert.equal(fresh.abortedMs, null); assert.equal(fresh.staleMs, null, "no pid, written 60s ago → still live");
+    const stale = readRun(by["nopid-1"].dir, { now: NOW, recentMs: 30_000, _alive: alive });
+    assert.equal(stale.abortedMs, null); assert.ok(stale.staleMs, "no pid, quiet past recentMs → staleMs");
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

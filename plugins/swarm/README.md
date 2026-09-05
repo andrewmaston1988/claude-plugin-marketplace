@@ -259,6 +259,8 @@ Each row also snapshots the mechanical columns from the leaf's result (`ok`, `du
 
 A read-only LAN web page over `~/.swarm/runs`: every project's runs, the live roster of a run drawn as its own topology (a git-graph rail from the manifest's `after` edges and the `expand` / `expand-manifest` events — one lane per parallel leaf, fan-in into dependents, digest at the foot), a leaf's place in the graph plus its timing, tokens, activity and output, and a finished run's digest or report rendered through the same converter as `report`. Waves collapse to one row with a dot strip; `forEach` parents and nested manifests open into their members. Live over server-sent events; the running ring spins on the rail.
 
+The menu also opens **Performance**: the model score store (`~/.swarm/model-scores.jsonl`) ranked exactly as `swarm perf` ranks it — the maths is `scores.mjs`, the page only draws. One ranking list serves every table: overall (mean of the four universal weighted scores) with a chip per aspect, a domain filter, and a tap on a model for its per-aspect breakdown. A provisional cell (n<5) draws its bar dashed and says so; a model with no grades shows its outcomes only. Re-read when the store's mtime moves, so a grade landing between requests shows on the next tap.
+
 ```bash
 node plugins/swarm/scripts/swarm.mjs serve --daemon        # detached; pid ~/.swarm/dashboard.pid, log ~/.swarm/dashboard.log
 node plugins/swarm/scripts/swarm.mjs serve                 # foreground

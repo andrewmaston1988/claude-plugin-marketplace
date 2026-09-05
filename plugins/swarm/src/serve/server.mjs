@@ -2,10 +2,12 @@
 // segment is validated and re-resolved under the runs root, so a request can
 // never name a file outside it. Zero deps — node:http only.
 import http from "node:http";
-import { readFileSync, readdirSync, existsSync, watch as fsWatch } from "node:fs";
+import { readFileSync, readdirSync, existsSync, statSync, watch as fsWatch } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readRun, listRuns } from "../runlog.mjs";
+import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
+import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
 
@@ -137,7 +139,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
         return n < FINISHED_PER_PROJECT;
       });
       const rows = picked.map((r) => {
-        const run = readRun(r.dir, { now: now(), quietWarnMs });
+        const run = readRun(r.dir, { now: now(), quietWarnMs, recentMs });
         return {
           project: r.project, name: r.name, active: r.active, aborted: r.aborted, mtimeMs: r.mtimeMs,
           startedMs: run?.startedMs ?? null, finishedMs: run?.finishedMs ?? null,
@@ -148,6 +150,35 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       });
       send(res, 200, { runs: rows, recentMs });
     },
+  };
+
+  // ── performance: the score store, ranked exactly as `swarm perf` ranks it ──
+  // The maths stays in scores.mjs (overall / aggregate); this only reads the
+  // store — re-parsed when its mtime moves, a grade lands between requests — and
+  // hands both tables over so the page switches aspect without a round trip.
+  const scoresFile = scoresPath({ ...process.env, SWARM_HOME: home });
+  let scoreCache = { mtimeMs: -1, rows: [] };
+  const scoreRows = () => {
+    let mtimeMs = 0;
+    try { mtimeMs = statSync(scoresFile).mtimeMs; } catch { mtimeMs = 0; }
+    if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: readRows(scoresFile) };
+    return scoreCache.rows;
+  };
+  const perf = (res, url) => {
+    const q = (k) => url.searchParams.get(k) || undefined;
+    const aspect = q("aspect"), model = q("model"), domain = q("domain");
+    if (aspect && !ASPECTS.includes(aspect)) return send(res, 400, { error: `unknown aspect ${aspect}`, aspects: ASPECTS });
+    const rows = scoreRows();
+    const live = dedupe(rows);
+    const domains = [...new Set(live.map((r) => r.domain).filter(Boolean))].sort();
+    const report = aggregate(rows, { aspect, model, domain });
+    send(res, 200, {
+      path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
+      aspects: ASPECTS, universals: UNIVERSAL, domains,
+      filters: report.filters,
+      overall: overall(rows, { model, domain }).cells,
+      report: report.aspects,
+    });
   };
 
   const handle = (req, res) => {
@@ -176,6 +207,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       req.on("close", () => { clients.delete(res); if (!clients.size) stopHub(); });
       return;
     }
+    if (p === "/api/perf") return perf(res, url);
     if (routes[p]) return routes[p](res);
 
     // A trailing slash is what the URL parser leaves behind after collapsing an
@@ -187,7 +219,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (!dir) return notFound(res);
 
     if (seg.length === 2) {
-      const run = readRun(dir, { now: now(), quietWarnMs });
+      const run = readRun(dir, { now: now(), quietWarnMs, recentMs });
       return run ? send(res, 200, run) : notFound(res);
     }
     if (seg.length === 3 && seg[2] === "digest") {

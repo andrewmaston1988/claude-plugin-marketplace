@@ -36,6 +36,8 @@
   .section > span:first-child { flex:0 1 auto; }
   .section small { flex:none; }
   .section .line { min-width:24px; }
+  .section.tap { min-height:44px; padding-top:10px; padding-bottom:10px; }
+  .section .chev { flex:none; margin-left:2px; }
   .section .line { flex:1; height:1px; background:var(--rule); align-self:center; }
   .section small { letter-spacing:0; text-transform:none; color:var(--muted); font-size:11px; }
   header.home .title b { display:flex; align-items:baseline; gap:12px; }
@@ -96,6 +98,21 @@
   .block { display:flex; flex-direction:column; gap:8px; padding:14px 16px; border-bottom:1px solid var(--rule); }
   .block label { display:flex; justify-content:space-between; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
   .block label small { letter-spacing:0; text-transform:none; }
+  .menu .nav { display:flex; flex-direction:column; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); }
+  .menu .nav a { display:flex; align-items:center; min-height:44px; padding:0 4px; color:var(--ink); font-size:14px; border-bottom:1px solid var(--rule); }
+  .menu .nav a:last-child { border-bottom:0; }
+  /* performance view: one ranking list, whichever table feeds it */
+  .rank .body { gap:5px; }
+  .rank .head .name { font-size:14px; }
+  .rank .head .val { font-size:15px; font-weight:650; white-space:nowrap; }
+  .rank .head .val.none { color:var(--faint); font-weight:400; }
+  .rank .bar { height:3px; background:var(--surface-2); }
+  .rank .bar span { background:var(--accent); }
+  .rank .bar.prov span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
+  .rank .meta .tag { color:var(--faint); }
+  .chip.on { color:var(--ink); background:var(--accent-soft); border:1px solid var(--accent); }
+  .chip[data-href], .chip[data-domain] { cursor:pointer; }
+  .foot { padding:10px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
   .chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--surface-2); border-radius:999px; padding:6px 10px; }
   .chip.run { color:var(--accent); background:var(--accent-soft); }
@@ -110,6 +127,8 @@
   .json .jr > dt { flex:none; color:var(--accent); min-width:0; }
   .json .jr > dt::after { content:":"; color:var(--faint); }
   .json .jr > dd { margin:0; flex:1; min-width:0; }
+  .json .jr.nested { flex-direction:column; gap:2px; }
+  .json .jr.nested > dd { padding-left:8px; border-left:1px solid var(--rule); }
   .json .ja { list-style:none; display:flex; flex-direction:column; gap:6px; }
   .json .ja > li { border-left:2px solid var(--rule); padding-left:10px; }
   .json .ja > li::before { content:counter(item) ""; counter-increment:item; color:var(--faint); margin-right:6px; font-size:11px; }
@@ -134,6 +153,7 @@
 <main id="main"></main>
 <div id="menu" class="menu"><div class="panel">
   <h2>swarm dashboard</h2>
+  <nav class="nav"><a href="#/">runs</a><a href="#/perf">performance</a></nav>
   <div class="k" id="menu-url"></div>
   <div class="k" id="menu-token"></div>
   <div class="k dim">Reads ~/.swarm/runs on the PC. Read-only. Live over server-sent events; reconnects on its own.</div>
@@ -149,8 +169,20 @@
   const enc = encodeURIComponent;
   // Same glyphs as the CLI roster (src/results.mjs GLYPHS); colours map the CLI's
   // stateColor onto the page's four tones (magenta→bad, dim→pend).
-  const GLYPH = { ok: "✓", skipped: "↷", failed: "✗", "failed:timeout": "✗", blocked: "⊘", "rate-limited": "⧖", quota: "⏳", retrying: "↻", running: "◐", pending: "·" };
-  const CLASS = { ok: "ok", skipped: "pend", failed: "bad", "failed:timeout": "bad", blocked: "bad", "rate-limited": "warn", quota: "warn", retrying: "warn", running: "run", pending: "pend" };
+  const GLYPH = { ok: "✓", skipped: "↷", failed: "✗", "failed:timeout": "✗", blocked: "⊘", "rate-limited": "⧖", quota: "⏳", retrying: "↻", running: "◐", pending: "·", aborted: "✕" };
+  const CLASS = { ok: "ok", skipped: "pend", failed: "bad", "failed:timeout": "bad", blocked: "bad", "rate-limited": "warn", quota: "warn", retrying: "warn", running: "run", pending: "pend", aborted: "pend" };
+  // States a leaf can still leave on its own. A run whose engine is gone (aborted)
+  // or silent past recentMs (stale) has none, whatever the log last said: those
+  // leaves show as aborted and nothing spins.
+  const LIVE = new Set(["running", "retrying", "pending", "rate-limited", "quota"]);
+  const runEnded = (run) => !!(run.finishedMs || run.abortedMs || run.staleMs);
+  const abortCounts = (byState) => { const out = {}; for (const [s, n] of Object.entries(byState)) { const k = LIVE.has(s) ? "aborted" : s; out[k] = (out[k] || 0) + n; } return out; };
+  function endRun(run) {
+    if (run.finishedMs || !(run.abortedMs || run.staleMs)) return run;
+    run.tasks = run.tasks.map((t) => (LIVE.has(t.state) ? { ...t, state: "aborted" } : t));
+    run.totals.byState = abortCounts(run.totals.byState);
+    return run;
+  }
   const COLOR = { ok: "var(--ok)", run: "var(--accent)", warn: "var(--warn)", bad: "var(--bad)", pend: "var(--rule)" };
   const cls = (state) => CLASS[state] || "pend";
 
@@ -185,7 +217,7 @@
   let shortProject = (p) => p;
   const countsHtml = (byState) => {
     const n = (...ks) => ks.reduce((a, k) => a + (byState[k] || 0), 0);
-    const parts = [["ok", n("ok", "skipped"), "✓"], ["run", n("running", "retrying"), "◐"], ["warn", n("rate-limited") + n("quota"), "⧖"], ["bad", n("failed", "failed:timeout", "blocked"), "✗"], ["pend", n("pending"), "·"]];
+    const parts = [["ok", n("ok", "skipped"), "✓"], ["run", n("running", "retrying"), "◐"], ["warn", n("rate-limited") + n("quota"), "⧖"], ["bad", n("failed", "failed:timeout", "blocked"), "✗"], ["pend", n("pending"), "·"], ["pend", n("aborted"), "✕"]];
     return `<span class="counts">${parts.filter(([, v]) => v).map(([c, v, g]) => `<span class="c-${c}">${v}${g}</span>`).join("")}</span>`;
   };
   const barHtml = (byState, total) => {
@@ -200,34 +232,52 @@
 
   // Partial updates: render to markup, then patch the live DOM in place — attributes
   // and text updated, elements kept — so a rerender never recreates the spinning
-  // rings (a recreated element restarts its CSS animation: the twitch). Children are
-  // matched by position, and by data-key when present, so a row keeps its identity.
+  // rings (a recreated element restarts its CSS animation: the twitch). A keyed child
+  // (data-key) is found by key wherever it sits, so a ring survives paths appearing
+  // before it; unkeyed children match by position. A node is only moved when it is
+  // out of place — a move re-inserts, which restarts the animation too. An element
+  // marked data-keep keeps its children: the rail's overlay is drawn by drawRail
+  // after the morph, and wiping it here would recreate every ring each tick.
   function morph(from, to) {
     if (from.nodeType === 1 && to.nodeType === 1) { // the top-level `to` is a fragment
       for (const a of [...from.attributes]) if (!to.hasAttribute(a.name)) from.removeAttribute(a.name);
       for (const a of [...to.attributes]) if (from.getAttribute(a.name) !== a.value) from.setAttribute(a.name, a.value);
+      if (to.hasAttribute("data-keep")) return;
     }
     const fc = [...from.childNodes], tc = [...to.childNodes];
     const keyOf = (n) => (n.nodeType === 1 && n.getAttribute("data-key")) || "";
+    const byKey = new Map();
+    for (const f of fc) { const k = keyOf(f); if (k) byKey.set(k, f); }
+    const used = new Set();
+    const alike = (f, t) => f.nodeType === t.nodeType && (f.nodeType !== 1 || f.tagName === t.tagName);
     for (let i = 0; i < tc.length; i++) {
-      const f = fc[i], t = tc[i];
-      if (!f) { from.appendChild(t.cloneNode(true)); continue; }
-      const same = f.nodeType === t.nodeType && (f.nodeType !== 1 || (f.tagName === t.tagName && keyOf(f) === keyOf(t)));
-      if (!same) { from.replaceChild(t.cloneNode(true), f); continue; }
+      const t = tc[i], k = keyOf(t);
+      let f = k ? byKey.get(k) : fc[i];
+      if (f && (used.has(f) || !alike(f, t) || (!k && keyOf(f)))) f = null;
+      const ref = from.childNodes[i] || null;
+      if (!f) { const n = t.cloneNode(true); from.insertBefore(n, ref); used.add(n); continue; }
+      used.add(f);
+      if (f !== ref) from.insertBefore(f, ref);
       if (f.nodeType === 3) { if (f.nodeValue !== t.nodeValue) f.nodeValue = t.nodeValue; continue; }
       if (f.nodeType === 1) morph(f, t);
     }
-    for (let i = fc.length - 1; i >= tc.length; i--) from.removeChild(fc[i]);
+    for (const f of fc) if (!used.has(f) && f.parentNode === from) from.removeChild(f);
   }
   function setHtml(el, html) { const tpl = document.createElement("template"); tpl.innerHTML = html; morph(el, tpl.content); }
   function setSvg(svg, inner) {
     const doc = new DOMParser().parseFromString(`<svg xmlns="http://www.w3.org/2000/svg">${inner}</svg>`, "image/svg+xml");
-    morph(svg, doc.documentElement);
+    // Only the children are morphed: the parsed root carries none of the live svg's
+    // class/size attributes, and syncing them would strip the overlay off the rail.
+    const root = doc.documentElement;
+    root.removeAttribute("xmlns");
+    for (const a of svg.attributes) root.setAttribute(a.name, a.value);
+    root.removeAttribute("data-keep"); // this IS the draw — the markup's keep flag must not block it
+    morph(svg, root);
   }
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null };
-  const ui = { openWaves: new Set(), closedWaves: new Set(), openGroups: new Set(), allClones: new Set(), pretty: false };
+  const ui = { openWaves: new Set(), closedWaves: new Set(), openGroups: new Set(), allClones: new Set(), closedProjects: new Set(), perfDomain: null, pretty: false };
   let lastList = null;
   const seenActive = new Map();
 
@@ -266,12 +316,14 @@
       for (const r of live) html += runRow(r);
       html += "</ul>";
     }
+    // Finished stacks open by default; tapping a project header folds it away so the
+    // live band stays in reach on a long estate.
     for (const p of projects) {
       const rest = byProject.get(p).filter((r) => !r.active);
       if (!rest.length) continue;
-      html += `<div class="section dim"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length} finished</small></div><ul>`;
-      for (const r of rest) html += runRow(r, true);
-      html += "</ul>";
+      const open = !ui.closedProjects.has(p);
+      html += `<div class="section dim tap" data-key="ps:${esc(p)}" data-project="${esc(p)}"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length} finished</small>${chev(open)}</div>`;
+      if (open) { html += `<ul data-key="pl:${esc(p)}">`; for (const r of rest) html += runRow(r, true); html += "</ul>"; }
     }
     if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
     setHtml(main, html);
@@ -293,7 +345,7 @@
       // closed it (killed, crashed, machine slept). Say so rather than "done".
       const stale = !r.finishedMs;
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
-      return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(r.byState)}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
+      return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
     }
     return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(st, st === "run")}<div class="body"><div class="head"><span class="name">${esc(r.name)}</span><span class="meta">${elapsed}</span></div><div class="sub">${countsHtml(r.byState)}<span class="meta">${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</span></div>${barHtml(r.byState, r.leaves)}</div></li>`;
   }
@@ -321,7 +373,7 @@
       const big = members.length > 8; // eight is the widest wave the operator runs; wider collapses to the strip
       // A wave that has entirely finished folds to its strip so the live wave is not
       // pushed under the fold by a stack of done rows; tapping reopens it.
-      const settled = tasks.length > 0 && tasks.every((t) => !["running", "retrying", "pending", "rate-limited", "quota"].includes(t.state));
+      const settled = tasks.length > 0 && tasks.every((t) => !LIVE.has(t.state));
       const open = ui.openWaves.has(w) || (!big && !settled && !ui.closedWaves.has(w));
       rows.push({ type: "wave", wave: w, members, open, tasks });
       if (open) {
@@ -361,7 +413,7 @@
     }
     const total = run.tasks.reduce((n, t) => n + tokTotal(t.tokens), 0);
     html += `<div class="totals">${countsHtml(run.totals.byState)}<span class="meta">${fmtTok(total)}</span>${barHtml(run.totals.byState, run.tasks.length)}</div>`;
-    html += `<div class="graph"><svg class="overlay" id="rail"></svg><ul id="rows">`;
+    html += `<div class="graph"><svg class="overlay" id="rail" data-keep></svg><ul id="rows">`;
     for (const r of rows) {
       if (r.type === "wave") {
         const live = r.tasks.some((t) => t.state === "running" || t.state === "retrying");
@@ -470,9 +522,9 @@
 
   let currentRun = null;
   async function renderRun(project, name) {
-    const run = await api(`/api/runs/${enc(project)}/${enc(name)}`);
+    const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
     currentRun = run;
-    const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.startedMs ? fmtDur(Date.now() - run.startedMs) : "";
+    const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.abortedMs ? `aborted · engine gone · ${ago(run.abortedMs)}` : run.staleMs ? `stale · last event ${ago(run.staleMs)}` : run.startedMs ? fmtDur(Date.now() - run.startedMs) : "";
     setHeader(`${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>${menuBtn}`);
     const { html, rows } = renderRunHtml(run);
     setHtml(main, html);
@@ -517,7 +569,8 @@
     }
     const keys = Object.keys(v);
     if (!keys.length) return `<span class="faint">{}</span>`;
-    return `<dl class="jo" style="--d:${depth}">${keys.map((k) => `<div class="jr"><dt>${esc(k)}</dt><dd>${jsonHtml(v[k], depth + 1)}</dd></div>`).join("")}</dl>`;
+    const nested = (x) => x !== null && typeof x === "object" && (Array.isArray(x) ? x.length : Object.keys(x).length);
+    return `<dl class="jo" style="--d:${depth}">${keys.map((k) => `<div class="jr${nested(v[k]) ? " nested" : ""}"><dt>${esc(k)}${nested(v[k]) ? `<span class="faint"> ${Array.isArray(v[k]) ? `[${v[k].length}]` : "{…}"}</span>` : ""}</dt><dd>${jsonHtml(v[k], depth + 1)}</dd></div>`).join("")}</dl>`;
   }
   // Leaves often wrap their JSON in a sentence or two ("Spot-checks confirmed… {…}"):
   // find the first { or [ and the matching end, render the prose around it as text.
@@ -543,6 +596,69 @@
     return `<pre class="out">${esc(leaf.output)}</pre>`;
   }
 
+  // ── performance: the score store ranked as `swarm perf` ranks it ──────────
+  // One ranking list for every table — overall, one aspect, one model's aspects.
+  // Rows carry a label, a value, one meta line and a 0–10 bar; a provisional cell
+  // (n<5) draws its bar dashed and says so, a cell with no grades shows only its
+  // outcomes. Numbers are the server's (scores.mjs), never recomputed here.
+  const rankRow = ({ key, href, label, val, sub, frac, prov, none }) => `<li class="row tap" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${label}</span><span class="val${none ? " none" : ""}">${val}</span></div><div class="meta">${sub}</div><div class="bar${prov ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div></div></li>`;
+  const rankList = (rows) => `<ul class="rank">${rows.map(rankRow).join("")}</ul>`;
+  const badOutcomes = (o) => Object.entries(o || {}).filter(([k, v]) => v > 0 && k !== "completed").map(([k, v]) => `${k} ${v}`).join(", ");
+  const fmtScore = (v) => (v == null ? "—" : v.toFixed(2));
+  const cellSub = (c, extra) => {
+    const bits = [`n=${c.n}`, ...(extra || [])];
+    if (c.n === 0) bits.push(`<span class="tag">no grades — outcomes only</span>`);
+    else if (c.provisional) bits.push(`<span class="tag">provisional n&lt;5</span>`);
+    const bad = badOutcomes(c.outcomes);
+    if (bad) bits.push(`<span class="c-bad">${esc(bad)}</span>`);
+    return bits.join(" · ");
+  };
+  async function renderPerf(kind, which) {
+    const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
+    const domain = ui.perfDomain;
+    const qs = new URLSearchParams();
+    if (domain) qs.set("domain", domain);
+    if (model) qs.set("model", model);
+    const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
+    const title = model ? esc(model) : aspect ? esc(aspect) : "performance";
+    setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}</b><small>${p.rows} graded leaves${p.lines !== p.rows ? ` (${p.lines} lines, re-grades superseded)` : ""} · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
+    let html = "";
+    if (!model) {
+      // Aspect chips: overall, the universals, then the capability columns.
+      const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
+      html += `<div class="chips">${chip("overall", "#/perf", !aspect)}${p.aspects.map((a) => chip(a, `#/perf/aspect/${enc(a)}`, a === aspect)).join("")}</div>`;
+    }
+    if (p.domains.length > 1) {
+      const dchip = (label, d) => `<span class="chip${(d || null) === (domain || null) ? " on" : ""}" data-domain="${esc(d || "")}">${esc(label)}</span>`;
+      html += `<div class="chips" style="padding-top:8px">${dchip("all domains", "")}${p.domains.map((d) => dchip(d, d)).join("")}</div>`;
+    }
+    html += `<div style="height:12px"></div>`;
+    if (model) {
+      // One model: its overall line, then every aspect it has been graded on.
+      const o = p.overall[0];
+      if (o) html += `<div class="totals"><span><b>overall</b> ${fmtScore(o.combined)}</span><span class="meta">${cellSub(o)}</span></div>`;
+      html += rankList(p.report.map((a) => {
+        const c = a.cells.find((x) => x.model === model) || { n: 0, mean: null, weighted: null, provisional: true, outcomes: {} };
+        return { key: `a:${a.aspect}`, href: `#/perf/aspect/${enc(a.aspect)}`, label: `${esc(a.aspect)}${a.universal ? ` <span class="tag faint">universal</span>` : ""}`, val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional };
+      }));
+    } else if (aspect) {
+      const a = p.report.find((x) => x.aspect === aspect);
+      if (!a || !a.cells.length) html += `<div class="empty">n=0 — nothing graded on ${esc(aspect)} yet. Absence is evidence.</div>`;
+      else {
+        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional })));
+        if (a.prior != null) html += `<div class="foot">ranked on the weighted score: the raw mean shrunk toward the prior ${a.prior.toFixed(2)} (mean of per-model means; k=${p.priorWeight}) — a thin cell is pulled most.${a.universal ? "" : " Capability aspect: graded only where a leaf stressed it."}</div>`;
+      }
+    } else {
+      if (!p.overall.length) html += `<div class="empty">no graded leaves under ${esc(p.path)} yet.</div>`;
+      else {
+        const short = (a) => a.slice(0, 5);
+        html += rankList(p.overall.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.combined), none: c.combined == null, sub: cellSub(c, p.universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), frac: (c.combined ?? 0) / 10, prov: c.provisional })));
+        html += `<div class="foot">overall = mean of the four universal weighted scores; capability aspects excluded — they are graded only where a leaf stressed them.</div>`;
+      }
+    }
+    setHtml(main, html);
+  }
+
   async function renderDigest(project, name) {
     setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(name)}</b><small>digest</small></div>${menuBtn}`);
     setHtml(main, `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/digest`))}"></iframe>`);
@@ -559,7 +675,10 @@
     const h = location.hash.replace(/^#/, "") || "/";
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
     try {
-      if (seg[0] === "run" && seg.length >= 3) {
+      if (seg[0] === "perf") {
+        view.name = "perf"; view.project = view.run = view.leaf = null;
+        await renderPerf(seg[1] || null, seg[2] || null);
+      } else if (seg[0] === "run" && seg.length >= 3) {
         view.name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : "run"; view.project = seg[1]; view.run = seg[2]; view.leaf = seg[4] || null;
         if (view.name === "leaf") await renderLeaf(seg[1], seg[2], seg[4]);
         else if (view.name === "digest") await renderDigest(seg[1], seg[2]);
@@ -572,9 +691,11 @@
   // One delegated click handler for everything in main: navigation rows, the wave
   // and group toggles, the "show all clones" row. Survives morphing, no rebinding.
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more], [data-pretty]");
+    const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more], [data-pretty], [data-project], [data-domain]");
     if (!t || !main.contains(t)) return;
     if (t.dataset.pretty) { ui.pretty = !ui.pretty; route(); return; }
+    if (t.dataset.domain != null) { ui.perfDomain = t.dataset.domain || null; route(); return; }
+    if (t.dataset.project) { const p = t.dataset.project; ui.closedProjects.has(p) ? ui.closedProjects.delete(p) : ui.closedProjects.add(p); route(); return; }
     if (t.dataset.href) { location.hash = t.dataset.href; return; }
     if (t.dataset.wave != null) {
       const w = Number(t.dataset.wave);
@@ -588,6 +709,7 @@
   window.addEventListener("hashchange", route);
   hdr.addEventListener("click", (e) => { if (e.target.closest("#menu-open")) $("#menu").classList.add("open"); });
   $("#menu-close").addEventListener("click", () => $("#menu").classList.remove("open"));
+  $("#menu .nav").addEventListener("click", () => $("#menu").classList.remove("open"));
   $("#menu").addEventListener("click", (e) => { if (e.target === $("#menu")) $("#menu").classList.remove("open"); });
   $("#menu-url").textContent = location.origin + "/";
   $("#menu-token").textContent = TOKEN ? "token: set (kept in this URL)" : "token: none configured";
@@ -604,8 +726,9 @@
     es.addEventListener("runs", () => { if (view.name === "runs") route(); });
     es.onerror = () => { /* EventSource reconnects on its own */ };
   }
-  // Running rows tick without a server event.
-  setInterval(() => { if (view.name === "run" && currentRun && !currentRun.finishedMs) rerender(); }, 15000);
+  // Running rows tick without a server event — a refetch, so a run that went quiet
+  // is noticed (nothing writes run.log when the engine dies).
+  setInterval(() => { if (view.name === "run" && currentRun && !runEnded(currentRun)) route(); }, 15000);
   window.addEventListener("resize", () => { if (view.name === "run" && currentRun) rerender(); });
 
   route();

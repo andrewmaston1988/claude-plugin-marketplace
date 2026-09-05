@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import http from "node:http";
@@ -222,6 +222,35 @@ test("icons: PNGs are real PNGs at the declared sizes, cached, and drawn (not a 
         assert.equal(buf.readUInt32BE(20), size, "IHDR height");
         assert.ok(buf.length > 500 && buf.length < 60_000, `plausible size for ${size}: ${buf.length}`);
       }
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("perf: the score store ranked as scores.mjs ranks it — overall + every aspect, re-read when the file changes, bad aspect is a 400", async () => {
+  const { home } = seedHome();
+  try {
+    const row = (leaf, model, grades, outcome = "completed") => JSON.stringify({ ts: "2026-09-05T00:00:00Z", resultsDir: "/r/x-1", leaf, model, effort: null, domain: "this-repo", grades: { adherence: null, handoff: null, truthfulness: null, depth: null, discrimination: null, code: null, impl: null, search: null, web: null, vision: null, geometry: null, ...grades }, outcome, note: "", assessedBy: { session: "t" } });
+    const path = join(home, "model-scores.jsonl");
+    writeFileSync(path, [row("a", "m-good", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9, code: 8 }), row("b", "m-thin", { adherence: 4, handoff: 5, truthfulness: 4, depth: 5 }), row("c", "m-thin", {}, "session-died")].join("\n") + "\n", "utf8");
+    const { readRows, overall, aggregate } = await import("../src/scores.mjs");
+    await withServer({ home }, async ({ get }) => {
+      const p = await get("/api/perf");
+      assert.equal(p.status, 200);
+      assert.deepEqual(p.body.overall, overall(readRows(path)).cells, "overall is scores.mjs's ranking, untouched");
+      assert.deepEqual(p.body.report, aggregate(readRows(path)).aspects, "every aspect table rides along");
+      assert.equal(p.body.overall[0].model, "m-good");
+      assert.deepEqual(p.body.domains, ["this-repo"]);
+      assert.equal(p.body.rows, 3);
+      const one = await get("/api/perf?aspect=code&domain=this-repo");
+      assert.equal(one.body.report.length, 1); assert.equal(one.body.report[0].aspect, "code");
+      assert.deepEqual(one.body.filters, { aspect: "code", model: null, domain: "this-repo" });
+      const m = await get("/api/perf?model=m-thin");
+      assert.equal(m.body.overall.length, 1); assert.equal(m.body.overall[0].outcomes["session-died"], 1);
+      assert.equal((await get("/api/perf?aspect=vibes")).status, 400);
+      // A grade lands: the store's mtime moves and the next request sees the row.
+      writeFileSync(path, readFileSync(path, "utf8") + row("d", "m-new", { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 }) + "\n", "utf8");
+      const t = (NOW + 60_000) / 1000; utimesSync(path, t, t);
+      assert.equal((await get("/api/perf")).body.overall.length, 3);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

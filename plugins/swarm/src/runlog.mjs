@@ -155,7 +155,7 @@ function readJson(path) {
 }
 
 // -> null when the dir has no run.log (not started, or not a run dir).
-export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000 } = {}) {
+export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, recentMs = 30 * 60_000, _alive = engineAlive } = {}) {
   dir = resolve(dir);
   const logPath = join(dir, "run.log");
   if (!existsSync(logPath)) return null;
@@ -164,9 +164,13 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000 } = {}) {
   const { tasks, waves } = topology(logged, manifest);
   const summary = readJson(join(dir, "summary.json"));
   const finishedMs = summary?.finished ? Date.parse(summary.finished) || null : null;
-  const alive = engineAlive(enginePid);
+  const alive = _alive(enginePid);
+  const mtimeMs = statSync(logPath).mtimeMs;
   // Aborted: the engine died (killed, crashed, machine slept) before writing a summary.
-  const abortedMs = !finishedMs && alive === false ? statSync(logPath).mtimeMs : null;
+  // Stale: no pid on record (an older engine) and nothing written for recentMs — the
+  // same recency rule listRuns applies, so the run view and the list agree.
+  const abortedMs = !finishedMs && alive === false ? mtimeMs : null;
+  const staleMs = !finishedMs && alive === null && now - mtimeMs >= recentMs ? mtimeMs : null;
   const byState = {};
   for (const t of tasks) byState[t.state] = (byState[t.state] || 0) + 1;
   const optional = (name) => (existsSync(join(dir, name)) ? join(dir, name) : null);
@@ -177,6 +181,7 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000 } = {}) {
     startedMs,
     finishedMs,
     abortedMs,
+    staleMs,
     enginePid,
     quietWarnMs,
     tasks,
