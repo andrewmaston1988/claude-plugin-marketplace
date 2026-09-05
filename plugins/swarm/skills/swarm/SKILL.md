@@ -2,9 +2,14 @@
 name: swarm
 description: >-
   Use when a request fans out into 3+ independent bounded leaves, when alternative models are wanted for breadth or second opinions, or when one bounded task should run outside this session. Triggers — "swarm this", "fan out", "sweep", "judge panel", "run these in parallel", "use glm/minimax", "run a <model> session on swarm", "delegate this to a leaf".
+argument-hint: "[setup]"
 ---
 
 # swarm — alternative-model fan-out engine
+
+The arguments are: $ARGUMENTS
+
+**`setup`** → read [references/setup.md](references/setup.md) and follow it — materialise, explain and edit the operator's config. Nothing below applies to a setup call: no offer gate, no manifest, no dispatch.
 
 Swarm runs work in headless Claude Code sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Powered by capable `:cloud` models (GLM, MiniMax — not an opus swarm, but almost) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context.
 

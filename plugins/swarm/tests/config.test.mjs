@@ -138,3 +138,38 @@ test("no bare 600000 literal survives anywhere under src/", () => {
   })(srcDir);
   equal(hits.length, 0, `bare 600000 literal remains in: ${hits.join(", ")}`);
 });
+// ---- config init / explain / set (the /swarm:setup surface) ----
+import { initConfig } from "../src/config.mjs";
+
+test("initConfig materialises every shipped key into the user file, keeps set values, is idempotent", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "home", "config.json");
+    writeFileSync(join(dir, "nope"), ""); // dir exists; home/ does not — init must mkdir
+    const r1 = initConfig(p);
+    equal(r1.created, true);
+    const on = JSON.parse(readFileSync(p, "utf8"));
+    equal(on.provider.mode, "env");
+    equal(on.dashboard.port, 7331);
+    equal(on.swarm.always, false);            // shipped default now exists for swarm.always
+    deepEqual(on.provider.allowedRoots, []);
+    on.provider.allowedRoots = ["C:/code"];
+    on.timeoutMs = 5400000;
+    delete on.dashboard.recentMs;             // simulate a key added by a later plugin version
+    writeFileSync(p, JSON.stringify(on));
+    const r2 = initConfig(p);
+    equal(r2.created, false);
+    deepEqual(r2.added, ["dashboard.recentMs"]);
+    const after = JSON.parse(readFileSync(p, "utf8"));
+    deepEqual(after.provider.allowedRoots, ["C:/code"]);
+    equal(after.timeoutMs, 5400000);
+    equal(after.dashboard.recentMs, 1800000);
+    const r3 = initConfig(p);
+    deepEqual(r3.added, []);
+    equal(readdirSync(join(dir, "home")).some((f) => f.endsWith(".tmp")), false, "no tmp left behind");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+

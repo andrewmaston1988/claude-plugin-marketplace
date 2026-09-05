@@ -47,7 +47,7 @@ Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, g
 
 ## Setup
 
-Create `~/.swarm/config.json` to override any key in `config.default.json`. The one key you must set to arm alternative models:
+Run `/swarm:swarm setup` in a session — it materialises every key into `~/.swarm/config.json` (`node plugins/swarm/scripts/swarm.mjs config init`), explains each one, and edits the ones you name. The shipped `config.default.json` is overwritten on every plugin update, so your own file is the only durable copy; re-run `config init` after an update to pick up new keys. The one key you must set to arm alternative models:
 
 ```json
 {

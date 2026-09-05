@@ -27,7 +27,8 @@ const USAGE = `usage: swarm.mjs <command>
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
-  serve stop | status | install-autostart | uninstall-autostart`;
+  serve stop | status | install-autostart | uninstall-autostart
+  config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:setup skill walks it`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -547,6 +548,14 @@ async function main() {
       }
       case "serve":
         return await cmdServe(rest);
+      case "config": {
+        if (rest[0] !== "init") { err(USAGE); return 1; }
+        const { initConfig } = await import("../src/config.mjs");
+        const r = initConfig(process.env.SWARM_CONFIG);
+        out(`config: ${r.path} (${r.created ? "created" : r.added.length ? `added ${r.added.length} key${r.added.length === 1 ? "" : "s"}: ${r.added.join(", ")}` : "up to date"})`);
+        setTimeout(() => process.exit(0), 150);
+        return 0;
+      }
       case "status": {
         if (!rest[0]) { err(USAGE); return 1; }
         const quietWarnMs = (getConfig().quietWarnSecs ?? 60) * 1000;

@@ -38,5 +38,9 @@
     "bind": "0.0.0.0",
     "token": null,
     "recentMs": 1800000
+  },
+  "swarm": {
+    "always": false,
+    "workflowNudge": true
   }
 }

@@ -779,3 +779,29 @@ test("serve: dashboard.enabled=false refuses to start (foreground and --daemon),
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("config init: writes every shipped key into ~/.swarm/config.json, keeps set values, reports added keys", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    let r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    ok(r.stdout.includes(join(home, "config.json")), r.stdout);
+    ok(/created/.test(r.stdout), r.stdout);
+    const on = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
+    equal(on.swarm.always, false);
+    on.provider.allowedRoots = ["C:/code"];
+    delete on.dashboard.port;
+    writeFileSync(join(home, "config.json"), JSON.stringify(on));
+    r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    ok(/added 1 key.*dashboard.port/.test(r.stdout), r.stdout);
+    const after = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
+    deepEqual(after.provider.allowedRoots, ["C:/code"]);
+    equal(after.dashboard.port, 7331);
+    r = runCli(["config"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 1, "bare config is not a verb");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

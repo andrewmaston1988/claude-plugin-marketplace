@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -35,11 +35,81 @@ export function loadConfig(overridePath, env = process.env) {
   const defaults = JSON.parse(readFileSync(DEFAULTS_PATH, "utf8"));
   const userPath = overridePath || join(swarmHome(env), "config.json");
   if (!existsSync(userPath)) return defaults;
-  let user;
-  try {
-    user = JSON.parse(readFileSync(userPath, "utf8"));
-  } catch (e) {
-    throw new Error(`swarm config at ${userPath} is not valid JSON: ${e.message}`);
-  }
-  return deepMerge(defaults, user);
+  return deepMerge(defaults, parseUser(userPath));
 }
+
+// ---- the /swarm:setup surface ---------------------------------------------
+// The shipped config.default.json is overwritten on every plugin update, so the
+// user's own file is the only durable place for the full picture. initConfig
+// materialises every shipped key there (values already set are kept). Edits are
+// hand-made in that file — the /swarm:setup skill walks the keys with the user.
+
+function parseUser(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch (e) {
+    throw new Error(`swarm config at ${path} is not valid JSON: ${e.message}`);
+  }
+}
+
+function readDefaults() {
+  return JSON.parse(readFileSync(DEFAULTS_PATH, "utf8"));
+}
+
+function writeAtomic(path, obj) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path + ".tmp", JSON.stringify(obj, null, 2) + "\n");
+  renameSync(path + ".tmp", path);
+}
+
+// Depth-first leaf paths of a defaults tree; objects recurse, arrays/scalars are leaves.
+function leafKeys(obj, prefix = "") {
+  const out = [];
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (isPlainObject(v)) out.push(...leafKeys(v, key)); else out.push(key);
+  }
+  return out;
+}
+
+function getPath(obj, key) {
+  let cur = obj;
+  for (const k of key.split(".")) {
+    if (!isPlainObject(cur) || !(k in cur)) return { found: false };
+    cur = cur[k];
+  }
+  return { found: true, value: cur };
+}
+
+function setPath(obj, key, value) {
+  const ks = key.split(".");
+  let cur = obj;
+  for (const k of ks.slice(0, -1)) {
+    if (!isPlainObject(cur[k])) cur[k] = {};
+    cur = cur[k];
+  }
+  cur[ks[ks.length - 1]] = value;
+}
+
+export function userConfigPath(overridePath, env = process.env) {
+  return overridePath || join(swarmHome(env), "config.json");
+}
+
+// Write every shipped key into the user file, keeping whatever is already set.
+// Returns { path, created, added } — added = leaf keys filled in this call.
+export function initConfig(overridePath, env = process.env) {
+  const path = userConfigPath(overridePath, env);
+  const defaults = readDefaults();
+  const created = !existsSync(path);
+  const user = created ? {} : parseUser(path);
+  const added = [];
+  for (const key of leafKeys(defaults)) {
+    if (getPath(user, key).found) continue;
+    setPath(user, key, getPath(defaults, key).value);
+    added.push(key);
+  }
+  if (created || added.length) writeAtomic(path, user);
+  return { path, created, added };
+}
+
+
