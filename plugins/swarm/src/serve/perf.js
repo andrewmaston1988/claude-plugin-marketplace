@@ -26,10 +26,11 @@
     if (!models.length) return `<div class="empty">no graded leaves yet — nothing to cover.</div>`;
     // One responsive SVG: labels live inside it, so a viewBox scales the whole
     // grid to the phone's width — no horizontal scroll, no HTML/SVG row drift.
-    const shortModel = (m) => m.replace(/(:|-)cloud$/, "");
+    // mild truncation: drop the provider suffix, then cap at 18 chars — the full name stays in the <title>
+    const shortModel = (m) => { const s = m.replace(/(:|-)cloud$/, ""); return s.length > 18 ? s.slice(0, 17) + "…" : s; };
     const keyOf = (model, aspect) => JSON.stringify([model, aspect]);
     const byKey = new Map(cells.map((c) => [keyOf(c.model, c.aspect), c]));
-    const LABEL = 150, CW = 22, CH = 24, GAP = 2, HEAD = 84;
+    const LABEL = 128, CW = 22, CH = 24, GAP = 2, HEAD = 84;
     const w = LABEL + aspects.length * CW, hgt = HEAD + models.length * CH;
     let svg = `<svg viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="xMinYMin meet" class="covgrid">${HATCH_DEFS}`;
     aspects.forEach((a, i) => {
