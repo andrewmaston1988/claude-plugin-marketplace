@@ -90,6 +90,12 @@ Values shown are the shipped defaults. The file the operator has may differ — 
 | `swarm.always` | `false` | **Standing consent.** `true` = the offer gate prints its statement instead of asking; the full ceremony (orchestrating-agents, executing-swarms, `models`, `validate`) still runs. Announced by a SessionStart hook with a mode bracket. |
 | `swarm.workflowNudge` | `true` | On an armed machine, the first `Workflow` call of a session gets a one-time "consider swarm" reminder. `false` silences it. |
 
+### Grading — the model score store
+
+| Key | Default | What it does |
+|---|---|---|
+| `grading.enabled` | `false` | `true` = after every run the closing block asks the session to grade each leaf (`grade --init` → fill → `grade --file`), building `~/.swarm/model-scores.jsonl`; `swarm perf` and the dashboard's Performance page rank from it. Off, nothing asks and the tier guide in `references/model-selection.md` routes models; `grade` / `perf` still work when called, and Performance is greyed on the dashboard. Worth turning on once you run alternative models regularly enough for the numbers to mean something. |
+
 ## Common mistakes
 
 - **Editing `config.default.json`** — lost on the next plugin update. Only `~/.swarm/config.json` persists.

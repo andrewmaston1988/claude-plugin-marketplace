@@ -129,6 +129,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   };
   const notFound = (res) => send(res, 404, { error: "not found" });
 
+  // grading.enabled drives the page's Performance entry: greyed when off, the
+  // store still readable so old grades are not hidden.
+  const grading = cfg.grading?.enabled === true;
+
   const routes = {
     "/api/runs": (res) => {
       const seen = new Map();
@@ -148,7 +152,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
           hasDigest: !!(run?.digestPath || run?.reportPath),
         };
       });
-      send(res, 200, { runs: rows, recentMs });
+      send(res, 200, { runs: rows, recentMs, grading });
     },
   };
 
@@ -173,7 +177,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const domains = [...new Set(live.map((r) => r.domain).filter(Boolean))].sort();
     const report = aggregate(rows, { aspect, model, domain });
     send(res, 200, {
-      path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
+      grading, path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
       aspects: ASPECTS, universals: UNIVERSAL, domains,
       filters: report.filters,
       overall: overall(rows, { model, domain }).cells,

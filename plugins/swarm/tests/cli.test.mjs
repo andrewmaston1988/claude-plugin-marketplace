@@ -805,3 +805,25 @@ test("config init: writes every shipped key into ~/.swarm/config.json, keeps set
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("run: the closing block asks for grading only when grading.enabled is true", () => {
+  for (const enabled of [false, true]) {
+    const dir = tmp();
+    try {
+      const home = join(dir, "home");
+      mkdirSync(home, { recursive: true });
+      writeFileSync(join(home, "config.json"), JSON.stringify({ grading: { enabled } }));
+      const manifest = join(dir, "m.json");
+      writeFileSync(manifest, JSON.stringify({
+        resultsDir: "out",
+        goal: "grading gate",
+        tasks: [{ id: "one", prompt: "look", model: "haiku" }],
+      }));
+      const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
+      equal(r.status, 0, r.stderr);
+      equal(/awaiting grading/.test(r.stdout), enabled, `enabled=${enabled}\n${r.stdout}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});

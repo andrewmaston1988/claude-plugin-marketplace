@@ -42,5 +42,8 @@
   "swarm": {
     "always": false,
     "workflowNudge": true
+  },
+  "grading": {
+    "enabled": false
   }
 }

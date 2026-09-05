@@ -28,7 +28,7 @@ const USAGE = `usage: swarm.mjs <command>
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
   serve stop | status | install-autostart | uninstall-autostart
-  config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:setup skill walks it`;
+  config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -221,11 +221,13 @@ async function cmdRun(rest) {
     truncations: r.summary.truncations,
     refutations: r.summary.refutations,
     estimate: plan.estimate,
-    gradeable: {
+    // Grading is opt-in (grading.enabled): off, the closing block never asks and
+    // the skill's grade step is skipped; `grade`/`perf` still work when called.
+    gradeable: cfg.grading?.enabled === true ? {
       count: listLeaves(plan.resultsDir, { gradeable: true }).length,
       resultsDir: plan.resultsDir,
       cli: fileURLToPath(import.meta.url),
-    },
+    } : undefined,
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
@@ -553,7 +555,6 @@ async function main() {
         const { initConfig } = await import("../src/config.mjs");
         const r = initConfig(process.env.SWARM_CONFIG);
         out(`config: ${r.path} (${r.created ? "created" : r.added.length ? `added ${r.added.length} key${r.added.length === 1 ? "" : "s"}: ${r.added.join(", ")}` : "up to date"})`);
-        setTimeout(() => process.exit(0), 150);
         return 0;
       }
       case "status": {

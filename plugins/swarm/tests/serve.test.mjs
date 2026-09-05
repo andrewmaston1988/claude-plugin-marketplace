@@ -254,3 +254,19 @@ test("perf: the score store ranked as scores.mjs ranks it — overall + every as
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test("grading flag: /api/runs and /api/perf carry grading.enabled — false by default, true when the config says so", async () => {
+  const { home } = seedHome();
+  try {
+    await withServer({ home }, async ({ get }) => {
+      assert.equal((await get("/api/runs")).body.grading, false);
+      assert.equal((await get("/api/perf")).body.grading, false);
+    });
+    await withServer({ home, cfg: { ...cfg(), grading: { enabled: true } } }, async ({ get }) => {
+      assert.equal((await get("/api/runs")).body.grading, true);
+      assert.equal((await get("/api/perf")).body.grading, true);
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

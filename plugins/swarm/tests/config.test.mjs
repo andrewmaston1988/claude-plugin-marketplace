@@ -138,7 +138,7 @@ test("no bare 600000 literal survives anywhere under src/", () => {
   })(srcDir);
   equal(hits.length, 0, `bare 600000 literal remains in: ${hits.join(", ")}`);
 });
-// ---- config init / explain / set (the /swarm:setup surface) ----
+// ---- config init / explain / set (the /swarm:swarm setup surface) ----
 import { initConfig } from "../src/config.mjs";
 
 test("initConfig materialises every shipped key into the user file, keeps set values, is idempotent", () => {

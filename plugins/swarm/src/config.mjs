@@ -38,11 +38,11 @@ export function loadConfig(overridePath, env = process.env) {
   return deepMerge(defaults, parseUser(userPath));
 }
 
-// ---- the /swarm:setup surface ---------------------------------------------
+// ---- the /swarm:swarm setup surface ---------------------------------------------
 // The shipped config.default.json is overwritten on every plugin update, so the
 // user's own file is the only durable place for the full picture. initConfig
 // materialises every shipped key there (values already set are kept). Edits are
-// hand-made in that file — the /swarm:setup skill walks the keys with the user.
+// hand-made in that file — the /swarm:swarm setup skill walks the keys with the user.
 
 function parseUser(path) {
   try {
