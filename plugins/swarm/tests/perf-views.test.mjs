@@ -108,3 +108,29 @@ test("leaders: default k=3", () => {
   const report = aggregate(rows, { aspect: "adherence" });
   equal(leaders(report).find((r) => r.aspect === "adherence").top.length, 3);
 });
+
+test("leaders: sorts by weighted score itself, independent of the report's own cell order", () => {
+  const report = {
+    aspects: [
+      { aspect: "a", cells: [
+        { model: "m-low", weighted: 2, n: 5, provisional: false },
+        { model: "m-high", weighted: 9, n: 5, provisional: false },
+        { model: "m-mid", weighted: 5, n: 5, provisional: false },
+      ] },
+    ],
+  };
+  const { top } = leaders(report, 3).find((r) => r.aspect === "a");
+  deepEqual(top.map((t) => t.model), ["m-high", "m-mid", "m-low"], "leaders must not trust the report's own cell order");
+});
+
+test("coverage: composite key does not collide when a model or aspect name contains a space", () => {
+  const report = {
+    aspects: [
+      { aspect: "a", cells: [{ model: "b c", n: 3, provisional: false }] },
+      { aspect: "a b", cells: [{ model: "c", n: 9, provisional: false }] },
+    ],
+  };
+  const { cells } = coverage(report);
+  equal(cells.find((c) => c.aspect === "a" && c.model === "b c").n, 3);
+  equal(cells.find((c) => c.aspect === "a b" && c.model === "c").n, 9);
+});
