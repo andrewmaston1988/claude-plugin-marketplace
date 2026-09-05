@@ -21,7 +21,7 @@
   // Void (n=0) draws no fill — absence of evidence is never disguised as a
   // pale data point. Provisional (0<n<5) gets the hatch, not a lighter shade.
   function coverageGrid(data, h) {
-    const { esc } = h;
+    const { esc, enc } = h;
     const { aspects, models, cells } = data;
     if (!models.length) return `<div class="empty">no graded leaves yet — nothing to cover.</div>`;
     // One responsive SVG: labels live inside it, so a viewBox scales the whole
@@ -36,11 +36,12 @@
     aspects.forEach((a, i) => {
       // vertical header, bottom-anchored so every column's word ends at the grid edge
       const x = LABEL + i * CW + CW / 2 + 4;
-      svg += `<text transform="translate(${x},${HEAD - 6}) rotate(-90)" font-size="11" fill="var(--muted)">${esc(a)}</text>`;
+      // tap an aspect header → that aspect's ranking; tap a model label → its page (full name + rank)
+      svg += `<text transform="translate(${x},${HEAD - 6}) rotate(-90)" font-size="11" fill="var(--muted)" data-href="#/perf/aspect/${enc(a)}" style="cursor:pointer">${esc(a)}</text>`;
     });
     models.forEach((m, r) => {
       const y = HEAD + r * CH;
-      svg += `<text x="${LABEL - 8}" y="${y + CH / 2 + 4}" text-anchor="end" font-size="11" fill="var(--muted)"><title>${esc(m)}</title>${esc(shortModel(m))}</text>`;
+      svg += `<text x="${LABEL - 8}" y="${y + CH / 2 + 4}" text-anchor="end" font-size="11" fill="var(--muted)" data-href="#/perf/model/${enc(m)}" style="cursor:pointer">${esc(shortModel(m))}</text>`;
       aspects.forEach((a, c) => {
         const cell = byKey.get(keyOf(m, a)) || { n: 0, provisional: true };
         const x = LABEL + c * CW + GAP / 2, cy = y + GAP / 2, cw = CW - GAP, ch = CH - GAP;
