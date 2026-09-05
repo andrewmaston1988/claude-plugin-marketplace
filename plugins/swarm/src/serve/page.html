@@ -311,7 +311,7 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null };
-  const ui = { openWaves: new Set(), closedWaves: new Set(), openGroups: new Set(), allClones: new Set(), closedProjects: new Set(), perfDomain: null, pretty: false };
+  const ui = { openWaves: new Set(), closedWaves: new Set(), openGroups: new Set(), allClones: new Set(), closedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false };
   let lastList = null;
   const seenActive = new Map();
 
@@ -576,19 +576,36 @@
     setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`);
     const quiet = t.state === "running" && t.quietMs > (run.quietWarnMs || 60000);
     let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip">${esc(t.model)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${Math.round(t.quietMs / 1000)}s</span>` : ""}</div>`;
+    // What the leaf was actually asked, collapsed by default. Same section+chevron idiom
+    // as every other toggle on the page, so the whole row is the target. Omitted entirely
+    // for agentless compute/integrate nodes, which carry no prompt.
+    if (leaf?.prompt) {
+      html += `<div class="section tap" data-prompt="1"><span>prompt</span><span class="line"></span>${leaf.authored ? `<small>as authored · still in flight</small>` : ""}${chev(ui.promptOpen)}</div>`;
+      if (ui.promptOpen) html += `<div class="block"><pre class="out">${esc(leaf.prompt)}</pre></div>`;
+    }
     html += `<div class="block"><label>graph</label><div class="meta"><span class="faint">after</span> ${t.after?.length ? t.after.map(esc).join(", ") : "— (nothing upstream)"}</div><div class="meta"><span class="faint">feeds</span> ${feeds.length ? feeds.map(esc).join(", ") : "—"}</div></div>`;
     const elapsed = t.state === "running" ? fmtDur(Date.now() - (t.startedMs || Date.now())) : fmtDur(t.durationMs);
     html += `<div class="kv"><div><label>${t.state === "running" ? "elapsed" : "duration"}</label><span>${elapsed}</span></div><div><label>turns</label><span>${leaf?.numTurns ?? "—"}</span></div><div><label>last event</label><span>${t.lastEventMs ? ago(t.lastEventMs) : "—"}</span></div></div>`;
     const tk = t.tokens || leaf?.tokens;
     if (tk) {
       const inp = tk.input || 0, outp = tk.output || 0, cc = tk.cacheCreation || 0, cr = tk.cacheRead || 0;
-      html += `<div class="block"><label><span>tokens</span><small>${fmtTok(inp + outp + cc)}</small></label><div class="bar"><span style="flex:${inp};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span><span style="flex:${cc};background:var(--warn)"></span></div><div class="kv" style="padding:0;border:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(inp)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label style="color:var(--warn)">cache write</label><span>${cc ? fmtTok(cc) : "—"}${cr ? ` <span class="faint">· ${fmtTok(cr)} read</span>` : ""}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
+      // "input" means what the CLI means by it (results.mjs:369): input + cacheCreation.
+      // On a Claude leaf the whole prompt is cache-written on turn 1, so `input` alone is
+      // just the uncached tail — reporting it raw showed 18 next to the CLI's 78k for the
+      // same leaf. cacheRead stays its own row: it is re-read transcript, not billable input.
+      const billedIn = inp + cc;
+      html += `<div class="block"><label><span>tokens</span><small>${fmtTok(billedIn + outp)}</small></label><div class="bar"><span style="flex:${billedIn};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span></div><div class="kv" style="padding:0;border:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(billedIn)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label class="faint">cache read</label><span>${cr ? fmtTok(cr) : "—"}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
     }
     html += `<div class="block"><label>activity</label><div class="meta">${t.activity ? esc(t.activity) : "<span class='faint'>—</span>"}</div></div>`;
     // Raw by default; a prettify chip appears when the output carries JSON.
     const canPretty = !!leaf?.output && (typeof leaf.outputJson === "object" && leaf.outputJson !== null || !!splitJson(leaf.output));
     const toggle = canPretty ? `<button class="chip" data-pretty="1" style="padding:4px 10px">${ui.pretty ? "raw" : "prettify"}</button>` : (leaf?.output ? "" : "appears when the leaf finishes");
-    html += `<div class="block"><label><span>output</span><small>${toggle}</small></label>${leaf?.output ? (ui.pretty && canPretty ? outputHtml(leaf) : `<pre class="out">${esc(leaf.output)}</pre>`) : "<div class='faint'>—</div>"}</div>`;
+    // Collapsed like the prompt: both are long crafted text, and this view is read for
+    // state far more often than for prose. The prettify button sits inside the row; the
+    // delegated handler resolves to the button first (closest() walks up from the target),
+    // so it toggles format rather than collapsing the section.
+    html += `<div class="section tap" data-output="1"><span>output</span><span class="line"></span><small>${toggle}</small>${chev(ui.outputOpen)}</div>`;
+    if (ui.outputOpen) html += `<div class="block">${leaf?.output ? (ui.pretty && canPretty ? outputHtml(leaf) : `<pre class="out">${esc(leaf.output)}</pre>`) : "<div class='faint'>—</div>"}</div>`;
     if (leaf?.citations) html += `<div class="block"><label>citations</label><div class="meta">checked ${leaf.citations.checked ?? 0} · drifted ${leaf.citations.drifted ?? 0} · refuted ${leaf.citations.refuted ?? 0}</div></div>`;
     setHtml(main, html);
   }
@@ -764,8 +781,10 @@
     if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; route(); }
   });
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more], [data-pretty], [data-project], [data-domain]");
+    const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output]");
     if (!t || !main.contains(t)) return;
+    if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; route(); return; }
+    if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; route(); return; }
     if (t.dataset.pretty) { ui.pretty = !ui.pretty; route(); return; }
     if (t.dataset.domain != null) { ui.perfDomain = t.dataset.domain || null; route(); return; }
     if (t.dataset.project) { const p = t.dataset.project; ui.closedProjects.has(p) ? ui.closedProjects.delete(p) : ui.closedProjects.add(p); route(); return; }

@@ -6,6 +6,7 @@ import { readFileSync, readdirSync, existsSync, statSync, watch as fsWatch } fro
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readRun, listRuns } from "../runlog.mjs";
+import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
@@ -51,11 +52,12 @@ const MANIFEST = {
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250 }) {
+export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
   const recentMs = dash.recentMs ?? 30 * 60_000;
+  const pollMs = _pollMs ?? dash.livenessPollMs ?? 10_000;
 
   // Resolve a run dir from validated segments and prove it sits under the root.
   const runDir = (project, name) => {
@@ -68,6 +70,12 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const runWatchers = new Map(); // dir -> watcher
   let rootWatcher = null;
   let heartbeat = null;
+  let poll = null;
+  // Hub liveness is its own flag, NOT `rootWatcher != null`: a watcher handle stays
+  // non-null after it stops delivering, so gating on it let a dead hub refuse every
+  // rebuild — the run a client never saw appear.
+  let started = false;
+  let activeDirs = new Set(); // run dirs active as of the last refresh
   const pending = new Map(); // dir -> timer
 
   const broadcast = (event, data) => {
@@ -101,24 +109,43 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
         runWatchers.set(dir, _watch(join(dir, "run.log"), () => scheduleRun(run)));
       } catch (e) { log(`watch ${dir}: ${e.message}`); }
     }
+    // Whether the active set moved is RETURNED, never broadcast from here:
+    // onRootOrProject already broadcasts unconditionally right after calling us, so
+    // a broadcast inside would double-fire on every root/project event. Only the
+    // poll — which has no other signal — acts on the return.
+    const changed = active.size !== activeDirs.size || [...active.keys()].some((d) => !activeDirs.has(d));
+    activeDirs = new Set(active.keys());
+    return changed;
   };
   const startHub = () => {
-    if (rootWatcher) return;
+    if (started) return;
+    started = true;
     try {
       rootWatcher = _watch(runsRoot, onRootOrProject);
     } catch (e) { log(`watch ${runsRoot}: ${e.message}`); rootWatcher = { close() {} }; }
     refreshWatchers();
     heartbeat = setInterval(() => { for (const res of clients) res.write(": ping\n\n"); }, _heartbeatMs);
+    // The clock is the only signal for the two transitions no fs event can carry: a
+    // run finishing (summary.json lands in an unwatched path) and an engine dying
+    // (not a filesystem event at all). It also rebuilds watchers unconditionally,
+    // which is what recovers a handle that silently stopped delivering.
+    poll = setInterval(() => { if (refreshWatchers()) broadcast("runs", {}); }, pollMs);
   };
   const stopHub = () => {
-    if (!rootWatcher) return;
-    try { rootWatcher.close(); } catch {}
+    if (!started) return;
+    started = false;
+    try { rootWatcher?.close(); } catch {}
     rootWatcher = null;
     for (const w of runWatchers.values()) { try { w.close(); } catch {} }
     runWatchers.clear();
     for (const w of projectWatchers.values()) { try { w.close(); } catch {} }
     projectWatchers.clear();
     clearInterval(heartbeat);
+    clearInterval(poll);
+    poll = null;
+    // Cleared with the rest: a hub restarted for a fresh client must not compare
+    // against the previous session's set and broadcast a phantom transition.
+    activeDirs = new Set();
     for (const t of pending.values()) clearTimeout(t);
     pending.clear();
   };
@@ -130,6 +157,30 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     res.end(typeof body === "string" ? body : JSON.stringify(body));
   };
   const notFound = (res) => send(res, 404, { error: "not found" });
+
+  // The prompt a task was authored with, from the run's manifest snapshot. Mirrors the
+  // id conventions topology() uses: `fix[0]` belongs to `fix`, `node~child` to that
+  // node's child list. Null when the run has no snapshot or the id is not in it.
+  const authoredPrompt = (dir, id) => {
+    let m;
+    try { m = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")); } catch { return null; }
+    const tasks = m?.tasks || [];
+    // The digest is a `digest` block, never a member of tasks, so it would otherwise
+    // 404 while in flight. Its instructions are the authored steer; the prompt actually
+    // dispatched is assembled from every leaf's results at run time.
+    if (id === DIGEST_ID) return m?.digest?.instructions || null;
+    // Guarded like topology()'s `clone && defs.has(clone[1])`: a real task whose id merely
+    // ends in [n] is not a clone, and must fall through to the plain lookup rather than 404.
+    const clone = /^(.*)\[\d+\]$/.exec(id);
+    const parent = clone && tasks.find((t) => t.id === clone[1]);
+    if (parent) return parent.prompt || null;
+    const tilde = id.indexOf("~");
+    if (tilde > 0) {
+      const node = tasks.find((t) => t.id === id.slice(0, tilde));
+      return (node?.child || []).find((c) => c.id === id.slice(tilde + 1))?.prompt || null;
+    }
+    return tasks.find((t) => t.id === id)?.prompt || null;
+  };
 
   // grading.enabled drives the page's Performance entry: greyed when off, the
   // store still readable so old grades are not hidden.
@@ -248,11 +299,21 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     }
     if (seg.length === 4 && seg[2] === "leaves") {
       const file = resolve(dir, "results", `${seg[3]}.json`);
-      if (!file.startsWith(dir + sep) || !existsSync(file)) return notFound(res);
+      if (!file.startsWith(dir + sep)) return notFound(res);
+      // A result file only exists once the leaf FINISHES, but mid-run is exactly when
+      // you want to see what it was asked. The run's manifest snapshot has the authored
+      // prompt, so serve that rather than 404-ing an in-flight leaf. Flagged `authored`
+      // because {{result:…}} placeholders are substituted at dispatch, not in the snapshot.
+      if (!existsSync(file)) {
+        const prompt = authoredPrompt(dir, seg[3]);
+        return prompt ? send(res, 200, { id: seg[3], prompt, authored: true }) : notFound(res);
+      }
       let r;
       try { r = JSON.parse(readFileSync(file, "utf8")); } catch { return notFound(res); }
-      const { id, model, ok, exit, durationMs, tokens, costUsd, numTurns, output, outputJson, citations, worktree, cwd } = r;
-      return send(res, 200, { id, model, ok, exit, durationMs, tokens, costUsd, numTurns, output, outputJson, citations, worktree, cwd });
+      // `prompt` is exposed deliberately — the leaf view renders it as a collapsed
+      // accordion, and it is the one field that says what the leaf was actually asked.
+      const { id, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd } = r;
+      return send(res, 200, { id, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd });
     }
     return notFound(res);
   };

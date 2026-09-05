@@ -209,10 +209,11 @@ export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _aliv
     for (const name of runs) {
       const dir = join(runsRoot, project, name);
       const logPath = join(dir, "run.log");
-      let mtimeMs;
-      try { mtimeMs = statSync(logPath).mtimeMs; } catch { continue; }
+      let st;
+      try { st = statSync(logPath); } catch { continue; }
+      const mtimeMs = st.mtimeMs;
       const finished = existsSync(join(dir, "summary.json"));
-      const alive = finished ? null : _alive(lastEnginePid(logPath));
+      const alive = finished ? null : _alive(lastEnginePid(logPath, mtimeMs, st.size));
       const aborted = !finished && alive === false;
       out.push({ dir, project, name, mtimeMs, active: !finished && !aborted && now - mtimeMs < recentMs, aborted });
     }
@@ -220,15 +221,32 @@ export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _aliv
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
+// logPath -> { mtimeMs, pid }. The last run-start pid can only change when the log
+// is appended, so the mtime listRuns already stats is a sound cache key. Unbounded
+// by run count (entries are two fields); stale entries for deleted runs are inert.
+const pidCache = new Map();
+
 // The engine pid from the LAST run-start line — the engine currently driving the
-// run. Only unfinished runs reach here (finished ones skip the liveness read), so
-// reading the whole log is a handful of files per listing, not the whole estate.
-function lastEnginePid(logPath) {
-  try {
-    const text = readFileSync(logPath, "utf8");
-    let pid = null;
-    const re = /"event":"run-start"[^\n]*?"pid":(\d+)/g;
-    for (let m = re.exec(text); m; m = re.exec(text)) pid = Number(m[1]);
-    return pid;
-  } catch { return null; }
+// run. Only unfinished runs reach here (finished ones skip the liveness read), but
+// "unfinished" accumulates: every aborted run that never wrote a summary stays in
+// the set forever. The dashboard polls listRuns, so an uncached read here is once
+// per tick per such run — 521 logs / 39MB on one real estate. Hence the memo; pass
+// mtimeMs to use it. A failed read is never memoised, so a transient error retries.
+function lastEnginePid(logPath, mtimeMs, size) {
+  const hit = pidCache.get(logPath);
+  // Keyed on mtime AND size: mtimeMs has millisecond resolution, so an append landing
+  // in the same tick as the cached stat would otherwise serve a stale pid — and a
+  // resume appends a run-start with a NEW pid, which is exactly the reaped-engine
+  // misjudgment 0a01433 fixed. A resume always grows the file, so size closes it.
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.pid;
+  let text;
+  try { text = readFileSync(logPath, "utf8"); } catch { return null; }
+  let pid = null;
+  const re = /"event":"run-start"[^\n]*?"pid":(\d+)/g;
+  for (let m = re.exec(text); m; m = re.exec(text)) pid = Number(m[1]);
+  // Bounded rather than pruned: entries are two numbers and are capped by run dirs the
+  // daemon has seen, but a daemon runs for weeks — clearing wholesale costs one sweep.
+  if (pidCache.size > 10_000) pidCache.clear();
+  if (mtimeMs !== undefined) pidCache.set(logPath, { mtimeMs, size, pid });
+  return pid;
 }
