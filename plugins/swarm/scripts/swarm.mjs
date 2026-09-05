@@ -25,7 +25,9 @@ const USAGE = `usage: swarm.mjs <command>
   quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)
   grade --init <resultsDir>  write grades.json — one skeleton row per model leaf (Claude tiers included), for you to fill in
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
-  perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking`;
+  perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
+  serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.port/bind/token)
+  serve stop | status | install-autostart | uninstall-autostart`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -441,6 +443,77 @@ async function cmdPerf(rest) {
   return 0;
 }
 
+// serve — the LAN dashboard. Foreground by default; --daemon forks a detached
+// copy and records its pid (written by the parent, per the plugin daemon rule).
+async function cmdServe(rest) {
+  const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir } = await import("../src/serve/daemon.mjs");
+  const home = swarmHome();
+  const cfg = getConfig();
+  const port = cfg.dashboard?.port ?? 7331;
+  const enginePath = fileURLToPath(import.meta.url);
+  const verb = rest[0] && !rest[0].startsWith("--") ? rest[0] : "start";
+  const exitSoon = (code) => { setTimeout(() => process.exit(code), 150); };
+
+  if (verb === "stop") {
+    const pid = readPid(home);
+    if (!pid || !isAlive(pid)) { out("dashboard: not running"); clearPid(home); exitSoon(0); return 0; }
+    try { process.kill(pid); } catch (e) { err(`dashboard: could not stop pid ${pid}: ${e.message}`); exitSoon(1); return 1; }
+    clearPid(home);
+    out(`dashboard: stopped pid ${pid}`);
+    exitSoon(0); return 0;
+  }
+  if (verb === "status") {
+    const pid = readPid(home);
+    const alive = isAlive(pid);
+    out(alive ? `dashboard: running (pid ${pid})` : "dashboard: not running");
+    if (alive) for (const u of urlLines(port)) out(`  ${u}`);
+    exitSoon(alive ? 0 : 1); return alive ? 0 : 1;
+  }
+  if (verb === "install-autostart" || verb === "uninstall-autostart") {
+    const startupDir = defaultStartupDir();
+    const r = verb === "install-autostart"
+      ? installAutostart({ startupDir, nodePath: process.execPath, enginePath })
+      : uninstallAutostart({ startupDir });
+    if (!startupDir) out(`no Startup folder on this platform — add "${process.execPath}" "${enginePath}" serve --daemon to your login items by hand`);
+    else out(verb === "install-autostart" ? `autostart: ${r.changed ? "installed" : "already installed"} → ${r.path}` : `autostart: ${r.removed ? "removed" : "was not installed"}`);
+    exitSoon(0); return 0;
+  }
+  if (verb !== "start") { err(USAGE); return 1; }
+
+  // The --daemon parent records the child's pid before the child gets here, so a
+  // pid equal to our own is us, not a rival.
+  const running = readPid(home);
+  if (running && running !== process.pid && isAlive(running)) { out(`dashboard: already running (pid ${running})`); for (const u of urlLines(port)) out(`  ${u}`); exitSoon(0); return 0; }
+
+  if (rest.includes("--daemon")) {
+    const { spawn } = await import("node:child_process");
+    const { openSync, mkdirSync } = await import("node:fs");
+    mkdirSync(home, { recursive: true });
+    const logPath = join(home, "dashboard.log");
+    const logFd = openSync(logPath, "a");
+    const child = spawn(process.execPath, [enginePath, "serve"], { detached: true, stdio: ["ignore", logFd, logFd], windowsHide: true });
+    child.unref();
+    writePid(home, child.pid);
+    out(`dashboard: started pid ${child.pid} (log: ${logPath})`);
+    for (const u of urlLines(port)) out(`  ${u}`);
+    out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
+    exitSoon(0); return 0;
+  }
+
+  const { createServer } = await import("../src/serve/server.mjs");
+  const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`) });
+  await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, cfg.dashboard?.bind ?? "0.0.0.0", resolve); });
+  writePid(home, process.pid);
+  out(`dashboard: serving ~/.swarm/runs on port ${port}`);
+  for (const u of urlLines(port)) out(`  ${u}`);
+  out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
+  const stop = () => { clearPid(home); server.close(); setTimeout(() => process.exit(0), 150); };
+  process.on("SIGINT", stop);
+  process.on("SIGTERM", stop);
+  await new Promise(() => {}); // serve until signalled
+  return 0;
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
   try {
@@ -466,6 +539,8 @@ async function main() {
         if (!rest[0]) { err(USAGE); return 1; }
         return await cmdRun(rest);
       }
+      case "serve":
+        return await cmdServe(rest);
       case "status": {
         if (!rest[0]) { err(USAGE); return 1; }
         const quietWarnMs = (getConfig().quietWarnSecs ?? 60) * 1000;

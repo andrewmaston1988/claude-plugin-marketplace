@@ -255,6 +255,21 @@ Each row also snapshots the mechanical columns from the leaf's result (`ok`, `du
 
 **Reading `perf`.** Retrievable aggregated scores, per aspect × model. Every cell shows its sample count `n`, the raw `mean`, and a `wtd` score that cells rank on — the mean weighted for how much evidence stands behind it, so a single lucky leaf cannot head the table. `n < 5` is marked provisional, and an aspect with no rows prints at `n=0` rather than being omitted: absence is evidence.
 
+## Dashboard — the swarm estate on your phone
+
+A read-only LAN web page over `~/.swarm/runs`: every project's runs, the live roster of a run drawn as its own topology (a git-graph rail from the manifest's `after` edges and the `expand` / `expand-manifest` events — one lane per parallel leaf, fan-in into dependents, digest at the foot), a leaf's place in the graph plus its timing, tokens, activity and output, and a finished run's digest or report rendered through the same converter as `report`. Waves collapse to one row with a dot strip; `forEach` parents and nested manifests open into their members. Live over server-sent events; the running ring spins on the rail.
+
+```bash
+node plugins/swarm/scripts/swarm.mjs serve --daemon        # detached; pid ~/.swarm/dashboard.pid, log ~/.swarm/dashboard.log
+node plugins/swarm/scripts/swarm.mjs serve                 # foreground
+node plugins/swarm/scripts/swarm.mjs serve status | stop
+node plugins/swarm/scripts/swarm.mjs serve install-autostart   # Startup-folder launcher (Windows); uninstall-autostart removes it
+```
+
+On start it prints `http://<hostname>.local:<port>/` (phones resolve `.local` on the LAN without a static IP), every LAN IPv4, and the one-time elevated firewall rule for the port — printed, never run. Add to home screen from the phone browser: the page ships a manifest and an `apple-touch-icon`, both PNGs rendered by the server itself. On plain LAN HTTP there is no service worker (browsers require a secure context), so Android gets a bookmark-style icon and no install prompt; iOS "Add to Home Screen" opens it standalone.
+
+Config keys under `dashboard` in `~/.swarm/config.json` (defaults in `config.default.json`): `port` (7331), `bind` (`0.0.0.0`), `token` (when set, every request needs `?t=<token>` — bookmark the URL with it), `recentMs` (a run whose `run.log` is older than this and has no `summary.json` is listed as stale, not live; the statusline glyph uses the same window).
+
 ## Statusline segment
 
 Live progress of the most recent run in the Claude Code status bar — `🐝 5✓ 2▶ 1⧖ 160k` (state counts plus the run's work-token total) — appended to your existing statusLine command:
