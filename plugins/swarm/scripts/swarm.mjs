@@ -27,7 +27,9 @@ const USAGE = `usage: swarm.mjs <command>
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
-  serve stop | status | install-autostart | uninstall-autostart`;
+  serve stop | status | install-autostart | uninstall-autostart
+  config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it
+  statusline install         write the self-resolving statusline shim to ~/.swarm/statusline.mjs and print the settings.json line`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -220,11 +222,13 @@ async function cmdRun(rest) {
     truncations: r.summary.truncations,
     refutations: r.summary.refutations,
     estimate: plan.estimate,
-    gradeable: {
+    // Grading is opt-in (grading.enabled): off, the closing block never asks and
+    // the skill's grade step is skipped; `grade`/`perf` still work when called.
+    gradeable: cfg.grading?.enabled === true ? {
       count: listLeaves(plan.resultsDir, { gradeable: true }).length,
       resultsDir: plan.resultsDir,
       cli: fileURLToPath(import.meta.url),
-    },
+    } : undefined,
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
@@ -272,7 +276,7 @@ async function cmdGradeInit(dir) {
       leaf: l.id,
       model: l.model,
       read: { result: l.resultPath, transcript: l.transcriptPath },
-      domain: "<lowercase ecosystem — e.g. godot, rust, images, this-repo>",
+      domain: "<one lowercase token: the language or ecosystem the leaf worked in — rust, godot, node, python, docs. Not the repo, not the task>",
       outcome: `<${OUTCOMES.join(" | ")}>`,
       note: "",
       grades: {
@@ -547,6 +551,26 @@ async function main() {
       }
       case "serve":
         return await cmdServe(rest);
+      case "statusline": {
+        if (rest[0] !== "install") { err(USAGE); return 1; }
+        const { copyFileSync, mkdirSync } = await import("node:fs");
+        const home = swarmHome();
+        mkdirSync(home, { recursive: true });
+        const shim = join(home, "statusline.mjs");
+        copyFileSync(fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)), shim);
+        const cmd = `node ${shim.replaceAll("\\", "/")}`;
+        out(`statusline: shim written to ${shim} — it resolves the installed plugin on every paint, so plugin updates never break it.`);
+        out("Add to ~/.claude/settings.json (edit the file in place; a symlinked settings.json must not be replaced):");
+        out(JSON.stringify({ statusLine: { type: "command", command: cmd } }, null, 2));
+        return 0;
+      }
+      case "config": {
+        if (rest[0] !== "init") { err(USAGE); return 1; }
+        const { initConfig } = await import("../src/config.mjs");
+        const r = initConfig(process.env.SWARM_CONFIG);
+        out(`config: ${r.path} (${r.created ? "created" : r.added.length ? `added ${r.added.length} key${r.added.length === 1 ? "" : "s"}: ${r.added.join(", ")}` : "up to date"})`);
+        return 0;
+      }
       case "status": {
         if (!rest[0]) { err(USAGE); return 1; }
         const quietWarnMs = (getConfig().quietWarnSecs ?? 60) * 1000;

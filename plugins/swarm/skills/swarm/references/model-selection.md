@@ -4,6 +4,8 @@ Every task in a swarm manifest pins a **model** and, optionally, an **effort**. 
 
 > Adapted from /deep's model-selection reference. Deep's Workflow/conductor dispatch split does not apply here — swarm dispatches every leaf via CLI, so per-task `effort` is always honoured. What carries over is the tier/effort reasoning, which is general.
 
+This guide is the ranking whenever `grading.enabled` is off (the shipped default) or `swarm.mjs perf` has nothing graded; with grading on, `perf` is the record and this guide covers only what it has not measured.
+
 Run `swarm.mjs models` first — it lists the `:cloud` models the account can launch right now, each with a description, plus the always-available Claude aliases.
 
 ## Tier guide

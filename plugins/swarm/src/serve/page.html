@@ -101,6 +101,10 @@
   .menu .nav { display:flex; flex-direction:column; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); }
   .menu .nav a { display:flex; align-items:center; min-height:44px; padding:0 4px; color:var(--ink); font-size:14px; border-bottom:1px solid var(--rule); }
   .menu .nav a:last-child { border-bottom:0; }
+  .menu .nav a.off { color:var(--faint); }
+  .menu .nav a.off::after { content:"off"; margin-left:auto; font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
+  .note { margin:12px 16px; padding:10px 12px; border:1px solid var(--rule); border-radius:6px; font-size:12px; color:var(--muted); }
+  .note code { color:var(--ink); }
   /* performance view: one ranking list, whichever table feeds it */
   .rank .body { gap:5px; }
   .rank .head .name { font-size:14px; }
@@ -290,6 +294,7 @@
   async function renderRuns() {
     const data = await api("/api/runs");
     lastList = data;
+    $("#menu .nav a[href='#/perf']").classList.toggle("off", !data.grading);
     const runs = data.runs;
     const active = runs.filter((r) => r.active);
     // Every project gets a section — the estate view — projects with a live run first,
@@ -621,6 +626,11 @@
     if (model) qs.set("model", model);
     const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
     const title = model ? esc(model) : aspect ? esc(aspect) : "performance";
+    if (!p.grading) {
+      setHeader(`${backBtn("#/")}<div class="title"><b>performance</b><small>off</small></div>${menuBtn}`);
+      setHtml(main, `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`);
+      return;
+    }
     setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}</b><small>${p.rows} graded leaves${p.lines !== p.rows ? ` (${p.lines} lines, re-grades superseded)` : ""} · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
     let html = "";
     if (!model) {

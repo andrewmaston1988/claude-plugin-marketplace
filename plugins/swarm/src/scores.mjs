@@ -21,6 +21,14 @@ const isInt1to10 = (v) => Number.isInteger(v) && v >= 1 && v <= 10;
 // lowercase and non-empty, so the domain check alone would pass it.
 const PLACEHOLDER_RE = /^<.*>$/s;
 
+// One lowercase token naming the ecosystem the leaf worked in (rust, godot,
+// node, python, docs); hyphens allowed inside. Composites ("rust+plans") and
+// repo/task words are refused: the store once filled with the hint's own
+// "this-repo" example, and nothing decomposes "rust+plans" back into rust.
+const DOMAIN_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+const NON_DOMAINS = new Set(["this-repo", "repo", "repository", "project", "codebase", "general", "misc", "mixed", "various", "other", "unknown", "none", "code"]);
+const DOMAIN_HINT = 'one lowercase token naming the language or ecosystem the leaf worked in — e.g. "rust", "godot", "node", "python", "docs"; not the repo, not the task, no "+" or "/"';
+
 // Returns an array of human-readable problems; empty means valid. Errors name
 // the field and the fix — a bad batch must teach in one round-trip.
 export function validateRow(row) {
@@ -37,11 +45,13 @@ export function validateRow(row) {
     errs.push(`model: must be a :cloud model name or a Claude tier (got ${JSON.stringify(row.model)}) — e.g. "glm-5.2:cloud" or "sonnet"`);
   }
   if (typeof row.domain !== "string" || !row.domain.trim() || PLACEHOLDER_RE.test(row.domain.trim())) {
-    errs.push('domain: required, free lowercase text naming the ecosystem — e.g. "godot", "rust", "this-repo"');
+    errs.push(`domain: required, ${DOMAIN_HINT}`);
   } else if (row.domain !== row.domain.toLowerCase().trim()) {
     // Padding is rejected, not trimmed away: `aggregate` filters on `===`, so a
     // stored " godot " would match no query and never raise anything.
     errs.push(`domain: must be lowercase with no surrounding whitespace (got ${JSON.stringify(row.domain)})`);
+  } else if (!DOMAIN_RE.test(row.domain) || NON_DOMAINS.has(row.domain)) {
+    errs.push(`domain: ${JSON.stringify(row.domain)} is not a domain — ${DOMAIN_HINT}`);
   }
   const outcomeOk = OUTCOMES.includes(row.outcome);
   if (!outcomeOk) {

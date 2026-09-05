@@ -138,3 +138,57 @@ test("no bare 600000 literal survives anywhere under src/", () => {
   })(srcDir);
   equal(hits.length, 0, `bare 600000 literal remains in: ${hits.join(", ")}`);
 });
+// ---- config init / explain / set (the /swarm:swarm setup surface) ----
+import { initConfig } from "../src/config.mjs";
+
+test("initConfig materialises every shipped key into the user file, keeps set values, is idempotent", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "home", "config.json");
+    writeFileSync(join(dir, "nope"), ""); // dir exists; home/ does not — init must mkdir
+    const r1 = initConfig(p);
+    equal(r1.created, true);
+    const on = JSON.parse(readFileSync(p, "utf8"));
+    equal(on.provider.mode, "env");
+    equal(on.dashboard.port, 7331);
+    equal(on.swarm.always, false);            // shipped default now exists for swarm.always
+    deepEqual(on.provider.allowedRoots, []);
+    on.provider.allowedRoots = ["C:/code"];
+    on.timeoutMs = 5400000;
+    delete on.dashboard.recentMs;             // simulate a key added by a later plugin version
+    writeFileSync(p, JSON.stringify(on));
+    const r2 = initConfig(p);
+    equal(r2.created, false);
+    deepEqual(r2.added, ["dashboard.recentMs"]);
+    const after = JSON.parse(readFileSync(p, "utf8"));
+    deepEqual(after.provider.allowedRoots, ["C:/code"]);
+    equal(after.timeoutMs, 5400000);
+    equal(after.dashboard.recentMs, 1800000);
+    const r3 = initConfig(p);
+    deepEqual(r3.added, []);
+    equal(readdirSync(join(dir, "home")).some((f) => f.endsWith(".tmp")), false, "no tmp left behind");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+
+// config.concurrency is a CEILING, not a default: a manifest may run narrower,
+// never wider. The machine that pays for the sessions sets the limit; an
+// authoring model does not raise it by writing a bigger number (operator, 2026-09-05).
+test("config concurrency is a ceiling: a manifest may ask for less, asking for more fails validation naming the key", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "plan.json");
+    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000 };
+    writeFileSync(p, JSON.stringify({ concurrency: 2, tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    equal(loadManifest(p, cfg, dir).concurrency, 2, "narrower is fine");
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    equal(loadManifest(p, cfg, dir).concurrency, 4, "unset → the ceiling");
+    writeFileSync(p, JSON.stringify({ concurrency: 8, tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    throws(() => loadManifest(p, cfg, dir), (e) => /concurrency 8 exceeds the ceiling 4/.test(e.message) && /config\.json/.test(e.message));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

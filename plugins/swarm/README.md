@@ -47,7 +47,7 @@ Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, g
 
 ## Setup
 
-Create `~/.swarm/config.json` to override any key in `config.default.json`. The one key you must set to arm alternative models:
+Run `/swarm:swarm setup` in a session — it materialises every key into `~/.swarm/config.json` (`node plugins/swarm/scripts/swarm.mjs config init`), explains each one, and edits the ones you name. The shipped `config.default.json` is overwritten on every plugin update, so your own file is the only durable copy; re-run `config init` after an update to pick up new keys. The one key you must set to arm alternative models:
 
 ```json
 {
@@ -59,7 +59,7 @@ Create `~/.swarm/config.json` to override any key in `config.default.json`. The 
 
 **Why `allowedRoots` exists (data governance).** Your organisation may have a data agreement with Anthropic but not with other model providers. Non-Claude dispatch is therefore **deny-by-default**: an open-model task whose effective `cwd` is not under a listed root fails validation with the governance reason. With the default `[]`, swarm still runs fine with Claude models — the alternative-model path simply never arms. List only roots whose code is cleared to leave for your provider.
 
-Other useful keys (defaults shown in `config.default.json`): `provider.url` (Anthropic-format endpoint, default `http://localhost:11434` for a direct ollama setup), `provider.mode` (`"env"` merges `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` into a plain `claude -p` call — the default; `"launch"` shells out via `launchCmd`), `concurrency`, `timeoutMs`, `worktreeBranchPrefix`, `modelDenylist` (case-insensitive substrings — matching models fail validation and never appear in the `models` roster; for taking a model out of circulation on quality grounds). Swarm never manages credentials — auth is your provider app's ambient sign-in.
+Other useful keys (defaults shown in `config.default.json`): `provider.url` (Anthropic-format endpoint, default `http://localhost:11434` for a direct ollama setup), `provider.mode` (`"env"` merges `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` into a plain `claude -p` call — the default; `"launch"` shells out via `launchCmd`), `concurrency` (a ceiling — a manifest may run narrower, never wider), `timeoutMs`, `worktreeBranchPrefix`, `modelDenylist` (case-insensitive substrings — matching models fail validation and never appear in the `models` roster; for taking a model out of circulation on quality grounds). Swarm never manages credentials — auth is your provider app's ambient sign-in.
 
 Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama install recent enough to serve `/api/experimental/model-recommendations` (~v0.23+).
 
@@ -219,7 +219,7 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
 
 ## Model capability scores
 
-Which model to use for what is otherwise decided by remembered incidents. `grade` records what a run's `:cloud` leaves actually did; `perf` reads it back.
+Which model to use for what is otherwise decided by remembered incidents. `grade` records what a run's `:cloud` leaves actually did; `perf` reads it back. Opt-in: `"grading": { "enabled": true }` in `~/.swarm/config.json` makes every run's closing block ask for grades; off (the default) nothing asks, `grade`/`perf` still answer by hand, and the dashboard greys its Performance page.
 
 The agent that authored the manifest grades it — it is the only party that knows what each leaf was *asked* for, which the digest does not hold. Claude tiers produce no rows: their capability is not what is in question.
 
@@ -245,7 +245,7 @@ node plugins/swarm/scripts/swarm.mjs perf --aspect search --domain godot
 | | `vision` | interpreted an image correctly |
 | | `geometry` | proportion, structure and layout came out right |
 
-**`domain`** is free lowercase text on every row — `godot`, `rust`, `images`, `this-repo`. A field, not a category, so adding an ecosystem costs nothing and never closes the list.
+**`domain`** is one lowercase token on every row naming the language or ecosystem the leaf worked in — `godot`, `rust`, `node`, `python`, `docs`. A field, not a category, so adding an ecosystem costs nothing and never closes the list — but it is not the repo and not the task: `this-repo`, `rust+plans` and the like are refused, because nothing decomposes them back into a domain a query can ask for.
 
 **`outcome`** is separate from the grades, because a 1-10 cannot say "the session died": `completed | wrong | failed | timeout | session-died | not-capable`. The first two require grades; the rest **forbid** them — you cannot grade a report that was never submitted, and averaging a number that describes nothing buries the outcome. `not-capable` is the useful one: it records that the model could not do the thing *on this harness*, which is often not what its catalogue entry claims.
 
@@ -271,6 +271,16 @@ node plugins/swarm/scripts/swarm.mjs serve install-autostart   # Startup-folder 
 On start it prints `http://<hostname>.local:<port>/` (phones resolve `.local` on the LAN without a static IP), every LAN IPv4, and the one-time elevated firewall rule for the port — printed, never run. Add to home screen from the phone browser: the page ships a web manifest and an `apple-touch-icon`; the icon PNGs it references are rendered by the server itself (`/icon-180.png`, `/icon-192.png`, `/icon-512.png`). On plain LAN HTTP there is no service worker (browsers require a secure context), so Android gets a bookmark-style icon and no install prompt; iOS "Add to Home Screen" opens it standalone.
 
 Config keys under `dashboard` in `~/.swarm/config.json` (defaults in `config.default.json`): `enabled` (true; `false` makes `serve` and `serve --daemon` print "disabled" and exit 0, so an installed Startup launcher becomes a no-op — `stop`, `status` and the autostart verbs still work), `port` (7331), `bind` (`0.0.0.0`), `token` (when set, every request needs `?t=<token>` — bookmark the URL with it), `recentMs` (a run whose `run.log` is older than this and has no `summary.json` is listed as stale, not live; the statusline glyph uses the same window).
+
+## Status bar
+
+The fleet bar — every live run this session launched, as `swarm ▮1 · sweep 3/8 ◐ glm-5.2,minimax-m3 1.2M · ⚠ sweep verify-b quiet 6m` — is `statusline/swarm-statusline.mjs`. Install it once:
+
+```bash
+node plugins/swarm/scripts/swarm.mjs statusline install   # writes ~/.swarm/statusline.mjs, prints the settings.json block
+```
+
+`settings.json` points at the shim, never at the plugin's cache path: the shim looks up the installed plugin in `installed_plugins.json` on every paint, so plugin updates never break the bar. Only runs launched by the current session show (the engine stamps the launching session id on `run-start`); a manual run with no stdin shows every live run. `/swarm:swarm setup` offers this as one of its stages.
 
 ## Statusline segment
 

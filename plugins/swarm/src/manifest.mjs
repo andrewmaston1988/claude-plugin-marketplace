@@ -779,9 +779,14 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     ? resolve(cwd, raw.resultsDir)
     : defaultResultsDir(manifestPath, cwd, argsFingerprint(args));
 
-  const concurrency = raw.concurrency ?? cfg.concurrency ?? 4;
+  // config.concurrency is a ceiling: the machine paying for the sessions sets
+  // it, and a manifest may run narrower but never wider.
+  const ceiling = cfg.concurrency ?? 4;
+  const concurrency = raw.concurrency ?? ceiling;
   if (!Number.isInteger(concurrency) || concurrency < 1) {
     errors.push(`concurrency must be a positive integer (got ${JSON.stringify(raw.concurrency)})`);
+  } else if (concurrency > ceiling) {
+    errors.push(`concurrency ${concurrency} exceeds the ceiling ${ceiling} set by ~/.swarm/config.json — lower the manifest's concurrency, or raise the ceiling there`);
   }
 
   const label = (t) => (t?.id ? `task '${t.id}'` : "task with missing id");

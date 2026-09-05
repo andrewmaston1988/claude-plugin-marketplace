@@ -229,21 +229,21 @@ test("icons: PNGs are real PNGs at the declared sizes, cached, and drawn (not a 
 test("perf: the score store ranked as scores.mjs ranks it — overall + every aspect, re-read when the file changes, bad aspect is a 400", async () => {
   const { home } = seedHome();
   try {
-    const row = (leaf, model, grades, outcome = "completed") => JSON.stringify({ ts: "2026-09-05T00:00:00Z", resultsDir: "/r/x-1", leaf, model, effort: null, domain: "this-repo", grades: { adherence: null, handoff: null, truthfulness: null, depth: null, discrimination: null, code: null, impl: null, search: null, web: null, vision: null, geometry: null, ...grades }, outcome, note: "", assessedBy: { session: "t" } });
+    const row = (leaf, model, grades, outcome = "completed") => JSON.stringify({ ts: "2026-09-05T00:00:00Z", resultsDir: "/r/x-1", leaf, model, effort: null, domain: "node", grades: { adherence: null, handoff: null, truthfulness: null, depth: null, discrimination: null, code: null, impl: null, search: null, web: null, vision: null, geometry: null, ...grades }, outcome, note: "", assessedBy: { session: "t" } });
     const path = join(home, "model-scores.jsonl");
     writeFileSync(path, [row("a", "m-good", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9, code: 8 }), row("b", "m-thin", { adherence: 4, handoff: 5, truthfulness: 4, depth: 5 }), row("c", "m-thin", {}, "session-died")].join("\n") + "\n", "utf8");
     const { readRows, overall, aggregate } = await import("../src/scores.mjs");
-    await withServer({ home }, async ({ get }) => {
+    await withServer({ home, cfg: { ...cfg(), grading: { enabled: true } } }, async ({ get }) => {
       const p = await get("/api/perf");
       assert.equal(p.status, 200);
       assert.deepEqual(p.body.overall, overall(readRows(path)).cells, "overall is scores.mjs's ranking, untouched");
       assert.deepEqual(p.body.report, aggregate(readRows(path)).aspects, "every aspect table rides along");
       assert.equal(p.body.overall[0].model, "m-good");
-      assert.deepEqual(p.body.domains, ["this-repo"]);
+      assert.deepEqual(p.body.domains, ["node"]);
       assert.equal(p.body.rows, 3);
-      const one = await get("/api/perf?aspect=code&domain=this-repo");
+      const one = await get("/api/perf?aspect=code&domain=node");
       assert.equal(one.body.report.length, 1); assert.equal(one.body.report[0].aspect, "code");
-      assert.deepEqual(one.body.filters, { aspect: "code", model: null, domain: "this-repo" });
+      assert.deepEqual(one.body.filters, { aspect: "code", model: null, domain: "node" });
       const m = await get("/api/perf?model=m-thin");
       assert.equal(m.body.overall.length, 1); assert.equal(m.body.overall[0].outcomes["session-died"], 1);
       assert.equal((await get("/api/perf?aspect=vibes")).status, 400);
@@ -253,4 +253,25 @@ test("perf: the score store ranked as scores.mjs ranks it — overall + every as
       assert.equal((await get("/api/perf")).body.overall.length, 3);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("grading flag: /api/runs and /api/perf carry grading.enabled — false by default, true when the config says so", async () => {
+  const { home } = seedHome();
+  try {
+    await withServer({ home }, async ({ get }) => {
+      assert.equal((await get("/api/runs")).body.grading, false);
+      const off = (await get("/api/perf")).body;
+      assert.equal(off.grading, false);
+      assert.equal(off.overall, undefined, "off serves no ranking");
+      assert.equal(off.report, undefined, "off serves no aspect table");
+    });
+    await withServer({ home, cfg: { ...cfg(), grading: { enabled: true } } }, async ({ get }) => {
+      assert.equal((await get("/api/runs")).body.grading, true);
+      const on = (await get("/api/perf")).body;
+      assert.equal(on.grading, true);
+      assert.ok(Array.isArray(on.overall), "on serves the ranking");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
