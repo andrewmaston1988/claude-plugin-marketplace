@@ -161,6 +161,29 @@ test("listRuns: a run whose recorded engine pid is dead is aborted, not active; 
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test("listRuns: a resumed run is live by its LAST run-start pid, not the reaped engine's at the head", () => {
+  // A resume appends a second run-start (the new engine) to the same run.log; the
+  // first engine (killed, crashed, reaped) is still on line 1. Reading only the head
+  // marked every resumed run aborted and dropped it from the dashboard's live band.
+  const home = mkdtempSync(join(tmpdir(), "swarm-runs-resume-"));
+  try {
+    const d = join(home, "runs", "C--code-a", "resumed-1");
+    mkdirSync(d, { recursive: true });
+    const body = RUN_LOG.split("\n").slice(1).join("\n");
+    const first = '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":4242,"tasks":[{"id":"find-a","model":"m"}]}';
+    const again = '{"ts":"2026-09-05T02:00:00Z","event":"run-start","pid":4343,"tasks":[{"id":"find-a","model":"m"}]}';
+    // Enough events between the two headers that the second is well past the first 4 KiB.
+    const filler = Array.from({ length: 80 }, (_, i) => `{"ts":"2026-09-05T01:0${i % 10}:00Z","id":"find-a","event":"activity","activity":"Read file-${i}"}`).join("\n");
+    writeFileSync(join(d, "run.log"), [first, body, filler, again, body].join("\n"), "utf8");
+    const t = (NOW - 60_000) / 1000;
+    utimesSync(join(d, "run.log"), t, t);
+    const alive = (pid) => (pid == null ? null : pid === 4343);
+    const [run] = listRuns(home, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
+    assert.equal(run.aborted, false, "the reaped first engine must not mark the resumed run aborted");
+    assert.equal(run.active, true, "the resumed engine is alive and the log is fresh");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("readRunLog: a line that parses to null is skipped, not dereferenced", () => {
   const { tasks } = readRun(join(tmpdir(), "no-such"), { now: NOW }) ?? { tasks: null };
   assert.equal(tasks, null);
