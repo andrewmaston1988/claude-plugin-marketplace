@@ -227,7 +227,7 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null };
-  const ui = { openWaves: new Set(), closedWaves: new Set(), openGroups: new Set(), allClones: new Set() };
+  const ui = { openWaves: new Set(), closedWaves: new Set(), openGroups: new Set(), allClones: new Set(), pretty: false };
   let lastList = null;
   const seenActive = new Map();
 
@@ -498,7 +498,10 @@
       html += `<div class="block"><label><span>tokens</span><small>${fmtTok(inp + outp + cc)}</small></label><div class="bar"><span style="flex:${inp};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span><span style="flex:${cc};background:var(--warn)"></span></div><div class="kv" style="padding:0;border:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(inp)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label style="color:var(--warn)">cache write</label><span>${cc ? fmtTok(cc) : "—"}${cr ? ` <span class="faint">· ${fmtTok(cr)} read</span>` : ""}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
     }
     html += `<div class="block"><label>activity</label><div class="meta">${t.activity ? esc(t.activity) : "<span class='faint'>—</span>"}</div></div>`;
-    html += `<div class="block"><label><span>output</span><small>${leaf?.output ? "" : "appears when the leaf finishes"}</small></label>${leaf?.output ? outputHtml(leaf) : "<div class='faint'>—</div>"}</div>`;
+    // Raw by default; a prettify chip appears when the output carries JSON.
+    const canPretty = !!leaf?.output && (typeof leaf.outputJson === "object" && leaf.outputJson !== null || !!splitJson(leaf.output));
+    const toggle = canPretty ? `<button class="chip" data-pretty="1" style="padding:4px 10px">${ui.pretty ? "raw" : "prettify"}</button>` : (leaf?.output ? "" : "appears when the leaf finishes");
+    html += `<div class="block"><label><span>output</span><small>${toggle}</small></label>${leaf?.output ? (ui.pretty && canPretty ? outputHtml(leaf) : `<pre class="out">${esc(leaf.output)}</pre>`) : "<div class='faint'>—</div>"}</div>`;
     if (leaf?.citations) html += `<div class="block"><label>citations</label><div class="meta">checked ${leaf.citations.checked ?? 0} · drifted ${leaf.citations.drifted ?? 0} · refuted ${leaf.citations.refuted ?? 0}</div></div>`;
     setHtml(main, html);
   }
@@ -569,8 +572,9 @@
   // One delegated click handler for everything in main: navigation rows, the wave
   // and group toggles, the "show all clones" row. Survives morphing, no rebinding.
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more]");
+    const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more], [data-pretty]");
     if (!t || !main.contains(t)) return;
+    if (t.dataset.pretty) { ui.pretty = !ui.pretty; route(); return; }
     if (t.dataset.href) { location.hash = t.dataset.href; return; }
     if (t.dataset.wave != null) {
       const w = Number(t.dataset.wave);
