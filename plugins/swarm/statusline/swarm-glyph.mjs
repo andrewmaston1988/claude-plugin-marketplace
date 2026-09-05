@@ -3,13 +3,13 @@
 // Prints e.g. "🐝 5✓ 2▶ 1⧖" (ANSI-coloured — the statusline renders colour),
 // or nothing when there is no recent run. Append to an existing statusLine
 // command like the checkpoint plugin's cache-glyph.
-import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { tokenTotal } from "../src/stream.mjs";
 import { formatTokens } from "../src/results.mjs";
-
-const RECENT_MS = 30 * 60 * 1000; // ignore runs idle for >30 min
+import { readRunLog, listRuns } from "../src/runlog.mjs";
+import { loadConfig } from "../src/config.mjs";
 
 function swarmHome() {
   return process.env.SWARM_HOME || join(homedir(), ".swarm");
@@ -17,49 +17,19 @@ function swarmHome() {
 
 // Newest run.log under <home>/runs/<encoded-cwd>/<run>/ by mtime.
 export function newestRunLog(home = swarmHome()) {
-  const runsRoot = join(home, "runs");
-  if (!existsSync(runsRoot)) return null;
-  let best = null;
-  for (const proj of readdirSync(runsRoot)) {
-    const projDir = join(runsRoot, proj);
-    let runs = [];
-    try { runs = readdirSync(projDir); } catch { continue; }
-    for (const run of runs) {
-      const log = join(projDir, run, "run.log");
-      try {
-        const m = statSync(log).mtimeMs;
-        if (!best || m > best.mtimeMs) best = { path: log, mtimeMs: m };
-      } catch { /* not a run dir */ }
-    }
-  }
-  return best;
+  const [best] = listRuns(home, { recentMs: Infinity });
+  return best ? { path: join(best.dir, "run.log"), mtimeMs: best.mtimeMs } : null;
 }
 
 export function glyphFromLog(content) {
-  let tasks = [];
-  const last = new Map();
-  const tok = new Map();
-  for (const line of content.split("\n")) {
-    if (!line.trim()) continue;
-    let e;
-    try { e = JSON.parse(line); } catch { continue; }
-    if (e.event === "run-start") {
-      // pre-token logs recorded plain id strings
-      tasks = (e.tasks || []).map((t) => (typeof t === "string" ? t : t.id));
-      last.clear();
-      tok.clear();
-    } else if (e.id) {
-      if (e.state) last.set(e.id, e.state);
-      if (e.tokens) tok.set(e.id, e.tokens);
-    }
-  }
-  const count = (s) => [...last.values()].filter((v) => v === s || (s === "failed" && v === "failed:timeout")).length;
-  const running = count("running") + count("retrying");
-  const ok = count("ok") + count("skipped");
-  const failed = count("failed") + count("blocked");
+  const { tasks } = readRunLog(content);
+  const count = (...states) => tasks.filter((t) => states.includes(t.state)).length;
+  const running = count("running", "retrying");
+  const ok = count("ok", "skipped");
+  const failed = count("failed", "failed:timeout", "blocked");
   const limited = count("rate-limited");
   const quota = count("quota");
-  const pending = tasks.filter((id) => !last.has(id)).length;
+  const pending = count("pending");
   const c = (code, s) => `\x1b[${code}m${s}\x1b[0m`;
   const parts = [];
   if (ok) parts.push(c("32", `${ok}✓`));
@@ -68,16 +38,17 @@ export function glyphFromLog(content) {
   if (quota) parts.push(c("33", `${quota}⏳`));
   if (failed) parts.push(c("31", `${failed}✗`));
   if (pending) parts.push(c("2", `${pending}·`));
-  const total = [...tok.values()].reduce((n, t) => n + tokenTotal(t), 0);
+  const total = tasks.reduce((n, t) => n + (t.tokens ? tokenTotal(t.tokens) : 0), 0);
   if (total > 0) parts.push(c("2", formatTokens(total)));
   return parts.length ? `🐝 ${parts.join(" ")}` : "";
 }
 
 import { pathToFileURL } from "node:url";
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   try {
+    const recentMs = loadConfig().dashboard?.recentMs ?? 30 * 60 * 1000;
     const best = newestRunLog();
-    if (best && Date.now() - best.mtimeMs < RECENT_MS) {
+    if (best && Date.now() - best.mtimeMs < recentMs) {
       process.stdout.write(glyphFromLog(readFileSync(best.path, "utf8")));
     }
   } catch { /* statusline must never error */ }
