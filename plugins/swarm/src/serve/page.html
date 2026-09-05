@@ -130,13 +130,9 @@
   .chip.bad { color:var(--bad); background:var(--bad-bg); }
   .chip.warn { color:var(--warn); background:var(--warn-bg); }
   .dot { display:inline-block; width:8px; height:8px; border-radius:50%; flex:none; }
-  /* coverage grid: labels fixed, the aspect×model grid scrolls in its own box
-     so a wide aspect list never forces the page itself past 412px. */
-  .cov { display:flex; gap:8px; padding:0 16px 16px; }
-  .cov-labels { display:flex; flex-direction:column; flex:none; }
-  .cov-row-label { height:28px; display:flex; align-items:center; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:190px; }
-  .cov-scroll { overflow-x:auto; }
-  .cov-scroll svg { display:block; }
+  /* coverage grid: one responsive SVG, labels inside it, scaled to the screen */
+  .cov { padding:0 12px 16px; }
+  .cov svg.covgrid { width:100%; height:auto; display:block; }
   /* leaders: podium marks after the name — trophy, silver, bronze; the winner's row is lifted */
   .rank .row.lead { background:var(--surface-2); }
   .rank .row.lead .name { color:var(--ink); font-weight:600; }

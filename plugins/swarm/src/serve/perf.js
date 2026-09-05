@@ -24,33 +24,33 @@
     const { esc } = h;
     const { aspects, models, cells } = data;
     if (!models.length) return `<div class="empty">no graded leaves yet — nothing to cover.</div>`;
-    // Model names lose the provider suffix (the page's convention); aspect
-    // headers rotate so the full word fits a 34px column on a phone.
+    // One responsive SVG: labels live inside it, so a viewBox scales the whole
+    // grid to the phone's width — no horizontal scroll, no HTML/SVG row drift.
     const shortModel = (m) => m.replace(/(:|-)cloud$/, "");
-    // JSON-encoded tuple, not a joined string — a plain delimiter collides
-    // whenever a model or aspect name itself contains that delimiter.
     const keyOf = (model, aspect) => JSON.stringify([model, aspect]);
     const byKey = new Map(cells.map((c) => [keyOf(c.model, c.aspect), c]));
-    const CW = 34, CH = 28, GAP = 2, HEAD = 72;
-    const w = aspects.length * CW, gridH = models.length * CH;
-    let svg = `<svg viewBox="0 0 ${w} ${gridH + HEAD}" width="${w}" height="${gridH + HEAD}">${HATCH_DEFS}`;
+    const LABEL = 150, CW = 22, CH = 24, GAP = 2, HEAD = 84;
+    const w = LABEL + aspects.length * CW, hgt = HEAD + models.length * CH;
+    let svg = `<svg viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="xMinYMin meet" class="covgrid">${HATCH_DEFS}`;
     aspects.forEach((a, i) => {
-      const cx = i * CW + CW / 2 + 3;
-      svg += `<text transform="translate(${cx},${HEAD - 6}) rotate(-60)" font-size="10" fill="var(--muted)">${esc(a)}</text>`;
+      // vertical header, bottom-anchored so every column's word ends at the grid edge
+      const x = LABEL + i * CW + CW / 2 + 4;
+      svg += `<text transform="translate(${x},${HEAD - 6}) rotate(-90)" font-size="11" fill="var(--muted)">${esc(a)}</text>`;
     });
     models.forEach((m, r) => {
+      const y = HEAD + r * CH;
+      svg += `<text x="${LABEL - 8}" y="${y + CH / 2 + 4}" text-anchor="end" font-size="11" fill="var(--muted)"><title>${esc(m)}</title>${esc(shortModel(m))}</text>`;
       aspects.forEach((a, c) => {
         const cell = byKey.get(keyOf(m, a)) || { n: 0, provisional: true };
-        const x = c * CW + GAP / 2, y = HEAD + r * CH + GAP / 2, cw = CW - GAP, ch = CH - GAP;
+        const x = LABEL + c * CW + GAP / 2, cy = y + GAP / 2, cw = CW - GAP, ch = CH - GAP;
         const fill = cell.n === 0 ? "none" : cell.provisional ? `url(#${HATCH_ID})` : "var(--accent)";
         const stroke = cell.n === 0 ? "var(--rule)" : "none";
-        svg += `<rect x="${x}" y="${y}" width="${cw}" height="${ch}" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="1"><title>${esc(m)} · ${esc(a)} · n=${cell.n}</title></rect>`;
-        if (cell.n > 0) svg += `<text x="${x + cw / 2}" y="${y + ch / 2 + 3}" text-anchor="middle" font-size="10" fill="#fff">${cell.n}</text>`;
+        svg += `<rect x="${x}" y="${cy}" width="${cw}" height="${ch}" rx="3" fill="${fill}" stroke="${stroke}" stroke-width="1"><title>${esc(m)} · ${esc(a)} · n=${cell.n}${cell.provisional && cell.n ? " (provisional)" : ""}</title></rect>`;
+        if (cell.n > 0) svg += `<text x="${x + cw / 2}" y="${cy + ch / 2 + 3.5}" text-anchor="middle" font-size="9" fill="#fff">${cell.n}</text>`;
       });
     });
     svg += `</svg>`;
-    const labels = models.map((m) => `<div class="cov-row-label" title="${esc(m)}">${esc(shortModel(m))}</div>`).join("");
-    return `<div class="cov"><div class="cov-labels"><div class="cov-corner" style="height:${HEAD}px"></div>${labels}</div><div class="cov-scroll">${svg}</div></div>`;
+    return `<div class="cov">${svg}</div>`;
   }
 
   // A legend row always accompanies >=2 series (six outcome buckets here) —
