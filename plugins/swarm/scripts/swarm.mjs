@@ -275,7 +275,7 @@ async function cmdGradeInit(dir) {
       leaf: l.id,
       model: l.model,
       read: { result: l.resultPath, transcript: l.transcriptPath },
-      domain: "<lowercase ecosystem — e.g. godot, rust, images, this-repo>",
+      domain: "<one lowercase token: the language or ecosystem the leaf worked in — rust, godot, node, python, docs. Not the repo, not the task>",
       outcome: `<${OUTCOMES.join(" | ")}>`,
       note: "",
       grades: {

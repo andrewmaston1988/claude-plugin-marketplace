@@ -123,7 +123,10 @@ test("validateRow: a whitespace-padded domain is rejected, not silently stored",
   deepEqual(aggregate([row({ domain: " godot ", note: "x" })], { aspect: "depth", domain: "godot" }).aspects[0].cells, []);
 });
 
-for (const bad of ["Godot", "", "   ", undefined]) {
+// A domain is ONE token naming the ecosystem. The store had 370 "this-repo" rows
+// (the skeleton hint's own example) and composites like "rust+plans" that no
+// query decomposes (operator, 2026-09-05).
+for (const bad of ["Godot", "", "   ", undefined, "this-repo", "this repo", "rust+plans", "plans+rust", "web-research/test-architecture", "repo", "general", "misc"]) {
   test(`validateRow: domain ${JSON.stringify(bad)} is rejected`, () => {
     const errs = validateRow(row({ domain: bad }));
     ok(errs.some((e) => e.startsWith("domain")), errs.join(" | "));

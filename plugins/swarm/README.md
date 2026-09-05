@@ -245,7 +245,7 @@ node plugins/swarm/scripts/swarm.mjs perf --aspect search --domain godot
 | | `vision` | interpreted an image correctly |
 | | `geometry` | proportion, structure and layout came out right |
 
-**`domain`** is free lowercase text on every row — `godot`, `rust`, `images`, `this-repo`. A field, not a category, so adding an ecosystem costs nothing and never closes the list.
+**`domain`** is one lowercase token on every row naming the language or ecosystem the leaf worked in — `godot`, `rust`, `node`, `python`, `docs`. A field, not a category, so adding an ecosystem costs nothing and never closes the list — but it is not the repo and not the task: `this-repo`, `rust+plans` and the like are refused, because nothing decomposes them back into a domain a query can ask for.
 
 **`outcome`** is separate from the grades, because a 1-10 cannot say "the session died": `completed | wrong | failed | timeout | session-died | not-capable`. The first two require grades; the rest **forbid** them — you cannot grade a report that was never submitted, and averaging a number that describes nothing buries the outcome. `not-capable` is the useful one: it records that the model could not do the thing *on this harness*, which is often not what its catalogue entry claims.
 
