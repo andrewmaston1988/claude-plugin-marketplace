@@ -1,104 +1,125 @@
-# swarm setup — the config, explained and edited with the operator
+# swarm setup — a guided walk through the config
 
 Loaded by `/swarm:swarm setup`. The engine path is the one the swarm skill already resolved.
 
 Swarm has one config file: `~/.swarm/config.json`. The shipped `config.default.json` is
-**overwritten on every plugin update**, so the operator's own file is the only durable
-place for the full picture — this skill materialises every key there, explains what each
-one does, and edits the ones the operator wants changed. Nothing is written without the
-operator naming the value.
+**overwritten on every plugin update**, so the operator's own file is the only durable place
+for the full picture. This walk materialises every key there, then takes the operator through
+the decisions **in stages** — each stage explains one thing, shows the current value, and asks
+one question. Nothing is written without the operator naming the value.
+
+**This is a conversation, not a listing.** Do not print the key table at the operator; it is
+an appendix for you. Say what a stage controls and what the trade-off is, in two or three
+sentences, then ask. Skip a stage's question when the operator has already said what they want
+for it.
 
 ## Procedure
 
 1. **Materialise**: `node <engine> config init`. Creates the file with every shipped key, or
-   fills in keys a newer plugin version added; values already set are never touched. The
-   output names the path and what changed.
-2. **Read** the file (`Read` on the printed path).
-3. **Explain** — walk the reference below group by group, giving the operator's current value
-   for each key and what changing it does. Lead with the four that matter most:
-   `provider.allowedRoots`, `swarm.always`, `dashboard.enabled`, `notifyCmd`.
-4. **Ask** what to change — one `AskUserQuestion` per decision, options carrying the
-   concrete values. Never infer a value from a remark.
-5. **Edit** the file with the `Edit` tool, one key at a time, keeping JSON types (arrays stay
+   fills in keys a newer plugin version added; values already set are never touched. Say what
+   it did in one line (created / added N / up to date).
+2. **Read** the file (`Read` on the printed path). You need the current values for every stage.
+3. **Walk the stages below, one at a time.** For each: explain, state the current value, one
+   `AskUserQuestion` with concrete options. Then the next stage. Never batch the stages into one
+   question call, and never ask about a key you have not just explained.
+4. **Edit** the file with the `Edit` tool as each answer lands, keeping JSON types (arrays stay
    arrays, numbers stay numbers, `null` is a real value for `token` / `notifyCmd`).
-6. **Say what takes effect when**: every CLI call re-reads the file; `swarm.always` and
-   `swarm.workflowNudge` are read by hooks at the next session start; `dashboard.*` needs
-   `serve stop` then `serve --daemon`.
+5. **Close** with what takes effect when: CLI keys on the next call; `swarm.*` at the next
+   session start; `dashboard.*` after `serve stop` then `serve --daemon`. If the dashboard
+   daemon is running and a `dashboard.*` or `grading.*` key changed, offer to restart it.
 
-## Key reference
+## The stages
 
-Values shown are the shipped defaults. The file the operator has may differ — always read it.
+### Stage 1 — where alternative models may run (`provider.allowedRoots`)
 
-### Provider — the non-Claude side
+Swarm can dispatch leaves to non-Anthropic models (`:cloud` tier via ollama). Code under a
+listed root may be sent to that provider; anything else fails validation, because the
+operator's data agreement may cover Anthropic only. Empty means Claude-only — swarm still
+works, the cheap tier never arms. Ask which roots, if any, are cleared to leave. Do not
+suggest a root; the operator names it.
+
+### Stage 2 — standing consent (`swarm.always`)
+
+Every fan-out normally stops at an offer gate: a question showing the manifest, the model
+mix and the cost before anything spends. `true` waives that question — the gate prints the
+same facts and dispatches — while the rest of the ceremony (orchestrating-agents,
+executing-swarms, `models`, `validate`) still runs. Ask whether they want to keep answering
+the question or trust the ceremony. Mention `swarm.workflowNudge` only if they ask about
+Workflow: it is the one-time "consider swarm" reminder on an armed machine.
+
+### Stage 3 — the phone dashboard (`dashboard.*`)
+
+A LAN web page over every run: live rosters, the run graph, leaf output, digests, and (when
+grading is on) the model score tables. Three decisions, asked together as one question with
+combined options if the operator is brisk, or one each if not:
+- `enabled` — off makes `serve` a no-op so a Startup launcher stops it coming back.
+- `bind` — `0.0.0.0` is reachable on the LAN and Tailscale; `127.0.0.1` is this machine only.
+- `token` — when set, every request needs `?t=<token>`; bookmark the URL with it. Offer to
+  generate one; never invent one silently.
+`port` and `recentMs` are advanced (Stage 6).
+
+### Stage 4 — telling the operator a run finished (`notifyCmd`)
+
+Runs take minutes and the operator walks away. `notifyCmd` is a shell command fired at the
+end with `{status}`, `{digest}` and `{summary}` substituted — the slack-bridge plugin's
+`claude-slack notify --message "{status} — {digest}"` is the usual shape. `null` = nothing.
+Ask whether they want a ping and, if so, through what.
+
+### Stage 5 — grading the models (`grading.enabled`)
+
+After a run, the session can grade each leaf's model on adherence, handoff, truthfulness,
+depth and any capability it stressed; grades accumulate in `~/.swarm/model-scores.jsonl`,
+`swarm perf` ranks them, and the dashboard's Performance page draws them. It costs a grading
+pass per run. Off (the shipped default): no run asks, the tier guide routes models, the
+Performance page is disabled. Worth turning on once the operator runs alternative models
+often enough for the numbers to mean something. Ask.
+
+### Stage 6 — advanced, only on request
+
+Say once: "the remaining keys are tuning — timeouts, retries, concurrency, quota thresholds,
+display cadence, provider plumbing. Want any of them?" If yes, explain only the ones named,
+from the appendix. If no, close.
+
+## Appendix — every key, for you
 
 | Key | Default | What it does |
 |---|---|---|
-| `provider.allowedRoots` | `[]` | **The governance gate.** Directory roots whose code may leave for the alternative provider. A non-Claude leaf whose cwd is not under one fails `validate`. Empty = Claude-only forever; the `:cloud` path never arms. List only roots cleared to leave. |
-| `provider.url` | `http://localhost:11434` | Anthropic-format endpoint the leaves talk to. Pinged before any run with a `:cloud` leaf; unreachable = the run refuses. |
-| `provider.mode` | `env` | `env` = plain `claude -p` with `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` injected. `launch` = shell out through `launchCmd`. |
-| `provider.launchCmd` | `ollama launch claude --model {model} -- {args}` | Only used in `launch` mode. |
+| `provider.allowedRoots` | `[]` | Stage 1. |
+| `provider.url` | `http://localhost:11434` | Anthropic-format endpoint the leaves talk to; pinged before any run with a `:cloud` leaf, unreachable = refuse. |
+| `provider.mode` | `env` | `env` = plain `claude -p` with `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` injected; `launch` = shell out through `launchCmd`. |
+| `provider.launchCmd` | `ollama launch claude --model {model} -- {args}` | Only in `launch` mode. |
 | `provider.discoverCmd` | `ollama launch claude` | Scraped by `models` to find what is launchable. |
 | `provider.catalogUrl` | `https://ollama.com` | Where `models` reads the cloud catalogue and recommendations. |
 | `provider.cloudSuffix` | `:cloud` | Which model names count as cloud tier. |
-| `provider.authToken` | `ollama` | Sent as the API key in `env` mode. A placeholder for local ollama, not a secret. |
+| `provider.authToken` | `ollama` | Sent as the API key in `env` mode. Placeholder, not a secret. |
 | `provider.name` | `ollama` | Label only. |
-
-### Run behaviour
-
-| Key | Default | What it does |
-|---|---|---|
-| `concurrency` | `4` | Parallel leaves cap. A manifest may set its own. |
-| `timeoutMs` | `3600000` (60 min) | Per-leaf wall clock. A leaf past it is `timeout`, its slot freed. |
-| `retry.rateLimited` | `2` | Retries after a rate-limit failure, exponential backoff from `retry.backoffMs`; the slot frees while waiting. |
-| `retry.backoffMs` | `30000` | First backoff for the above. |
+| `concurrency` | `4` | Parallel leaves cap; a manifest may set its own. |
+| `timeoutMs` | `3600000` | Per-leaf wall clock; past it the leaf is `timeout`, slot freed. |
+| `retry.rateLimited` / `retry.backoffMs` | `2` / `30000` | Retries after a rate-limit failure, exponential from the backoff; the slot frees while waiting. |
 | `retry.spawnError` | `1` | Retries when the leaf process fails to start. |
-| `resultInlineCap` | `4000` | `{{result:id}}` inlines at most this many chars, tail dropped. Why verifiers take `{{resultPath:id}}`. |
+| `resultInlineCap` | `4000` | `{{result:id}}` inlines at most this many chars, tail dropped — why verifiers take `{{resultPath:id}}`. |
 | `worktreeBranchPrefix` | `swarm/` | Branch prefix for worktree-isolated leaves. |
-| `modelDenylist` | `[]` | Case-insensitive substrings. Matching models fail `validate` and vanish from `models`. For retiring a model on quality grounds. |
-| `notifyCmd` | `null` | Shell command run when a run finishes; tokens `{status}` `{digest}` `{summary}`. E.g. the slack-bridge `claude-slack notify --message "{status} — {digest}"`. |
-
-### Quota — Claude leaves
-
-| Key | Default | What it does |
-|---|---|---|
-| `quotaPreflight` | `true` | Before a run with Claude leaves, read Anthropic's usage endpoint with Claude Code's own sign-in; refuse when a window is exhausted. |
+| `modelDenylist` | `[]` | Case-insensitive substrings; matching models fail `validate` and vanish from `models`. |
+| `notifyCmd` | `null` | Stage 4. |
+| `quotaPreflight` | `true` | Before a run with Claude leaves, read Anthropic's usage with Claude Code's own sign-in; refuse when a window is exhausted. |
 | `quotaWarnPct` | `80` | Warn once when the worst window is at or past this percent. |
 | `quotaCacheSecs` | `300` | How long one usage read is reused. |
-| `quotaPatterns` | four strings | Output substrings that classify a failed leaf as quota-hit rather than a real failure. |
-
-### Display
-
-| Key | Default | What it does |
-|---|---|---|
+| `quotaPatterns` | four strings | Output substrings that classify a failed leaf as quota-hit. |
 | `heartbeatSecs` | `15` | Roster repaint cadence while anything runs. |
-| `quietWarnSecs` | `60` | A running leaf silent this long gets the quiet marker in the roster, statusline and dashboard. |
-
-### Dashboard — the phone page
-
-| Key | Default | What it does |
-|---|---|---|
-| `dashboard.enabled` | `true` | Off switch. `false` makes `serve` / `serve --daemon` print `disabled` and exit, so an installed Startup launcher is a no-op. |
+| `quietWarnSecs` | `60` | A running leaf silent this long gets the quiet marker (roster, statusline, dashboard). |
+| `dashboard.enabled` / `bind` / `token` | `true` / `0.0.0.0` / `null` | Stage 3. |
 | `dashboard.port` | `7331` | Listen port; also the firewall rule's port. |
-| `dashboard.bind` | `0.0.0.0` | Interface. `127.0.0.1` keeps it off the LAN. |
-| `dashboard.token` | `null` | When set, every request needs `?t=<token>` — bookmark the URL with it. |
-| `dashboard.recentMs` | `1800000` (30 min) | A run with no live engine and no event in this window lists as stale. The statusline glyph uses the same window. |
-
-### Swarm — session behaviour
-
-| Key | Default | What it does |
-|---|---|---|
-| `swarm.always` | `false` | **Standing consent.** `true` = the offer gate prints its statement instead of asking; the full ceremony (orchestrating-agents, executing-swarms, `models`, `validate`) still runs. Announced by a SessionStart hook with a mode bracket. |
-| `swarm.workflowNudge` | `true` | On an armed machine, the first `Workflow` call of a session gets a one-time "consider swarm" reminder. `false` silences it. |
-
-### Grading — the model score store
-
-| Key | Default | What it does |
-|---|---|---|
-| `grading.enabled` | `false` | `true` = after every run the closing block asks the session to grade each leaf (`grade --init` → fill → `grade --file`), building `~/.swarm/model-scores.jsonl`; `swarm perf` and the dashboard's Performance page rank from it. Off, nothing asks and the tier guide in `references/model-selection.md` routes models; `grade` / `perf` still work when called, and Performance is greyed on the dashboard. Worth turning on once you run alternative models regularly enough for the numbers to mean something. |
+| `dashboard.recentMs` | `1800000` | A run with no live engine and no event in this window lists as stale; the statusline glyph uses the same window. |
+| `swarm.always` | `false` | Stage 2. |
+| `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |
+| `grading.enabled` | `false` | Stage 5. |
 
 ## Common mistakes
 
+- **Printing the appendix at the operator.** Observed 2026-09-05: a session dumped every key
+  with its value in one message and then asked four questions at once — "you just bombed me
+  with a list of settings without telling me what they do". Stages, one at a time.
 - **Editing `config.default.json`** — lost on the next plugin update. Only `~/.swarm/config.json` persists.
-- **Setting a key to a value from a remark** ("I suppose C:/code is fine") — ask, then write what the operator said.
+- **Setting a key from a remark** ("I suppose C:/code is fine") — ask, then write what the operator said.
 - **Skipping `config init` after a plugin update** — new keys stay invisible; the engine still uses their defaults, but the operator never sees them.
 - **Adding a root to `allowedRoots` that is not cleared to leave** — the gate exists for the data agreement; explain that before asking.
