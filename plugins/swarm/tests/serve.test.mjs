@@ -297,3 +297,22 @@ test("/perf.js: served as text/javascript, no-store, token-gated like everything
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+test("perf: a model-filtered request carries the model's overall rank among every model in the domain", async () => {
+  const { home } = seedHome();
+  try {
+    const row = (leaf, model, grades) => JSON.stringify({ ts: "2026-09-05T00:00:00Z", resultsDir: "/r/x-1", leaf, model, effort: null, domain: "node", grades: { adherence: null, handoff: null, truthfulness: null, depth: null, discrimination: null, code: null, impl: null, search: null, web: null, vision: null, geometry: null, ...grades }, outcome: "completed", note: "", assessedBy: { session: "t" } });
+    const g = (v) => ({ adherence: v, handoff: v, truthfulness: v, depth: v });
+    const lines = [];
+    for (let i = 0; i < 6; i++) { lines.push(row(`a${i}`, "top", g(9))); lines.push(row(`b${i}`, "mid", g(7))); lines.push(row(`c${i}`, "low", g(4))); }
+    writeFileSync(join(home, "model-scores.jsonl"), lines.join("\n") + "\n");
+    await withServer({ home, cfg: { ...cfg(), grading: { enabled: true } } }, async ({ get }) => {
+      const mid = (await get("/api/perf?model=mid")).body;
+      assert.deepEqual(mid.rank, { position: 2, of: 3 });
+      const all = (await get("/api/perf")).body;
+      assert.equal(all.rank, undefined, "no model filter → no rank");
+    });
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

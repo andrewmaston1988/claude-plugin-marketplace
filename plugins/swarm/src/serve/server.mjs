@@ -170,6 +170,11 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: readRows(scoresFile) };
     return scoreCache.rows;
   };
+  const rankOf = (cells, model) => {
+    const ranked = cells.filter((c) => c.combined != null);
+    const i = ranked.findIndex((c) => c.model === model);
+    return i < 0 ? null : { position: i + 1, of: ranked.length };
+  };
   const perf = (res, url) => {
     const q = (k) => url.searchParams.get(k) || undefined;
     const aspect = q("aspect"), model = q("model"), domain = q("domain");
@@ -184,6 +189,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       aspects: ASPECTS, universals: UNIVERSAL, domains,
       filters: report.filters,
       overall: overall(rows, { model, domain }).cells,
+      // Drill-in: where this model sits among every model in the same domain filter.
+      ...(model ? { rank: rankOf(overall(rows, { domain }).cells, model) } : {}),
       report: report.aspects,
       views: { coverage: coverage(report), reliability: reliability(live), leaders: leaders(report) },
     });

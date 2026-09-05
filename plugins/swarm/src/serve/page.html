@@ -626,8 +626,9 @@
   // Rows carry a label, a value, one meta line and a 0–10 bar; a provisional cell
   // (n<5) draws its bar dashed and says so, a cell with no grades shows only its
   // outcomes. Numbers are the server's (scores.mjs), never recomputed here.
-  const rankRow = ({ key, href, label, val, sub, frac, prov, none }) => `<li class="row tap" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${label}</span><span class="val${none ? " none" : ""}">${val}</span></div><div class="meta">${sub}</div><div class="bar${prov ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div></div></li>`;
-  const rankList = (rows) => `<ul class="rank">${rows.map(rankRow).join("")}</ul>`;
+  const rankRow = ({ key, href, label, val, sub, frac, prov, none, place }) => `<li class="row tap${place ? ` p${place}${place === 1 ? " lead" : ""}` : ""}" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${label}</span><span class="val${none ? " none" : ""}">${val}</span></div><div class="meta">${sub}</div><div class="bar${prov ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div></div></li>`;
+  // podium: the first three rows wear the medals (rank and per-aspect lists; never a model's own page)
+  const rankList = (rows, { podium = false } = {}) => `<ul class="rank">${rows.map((r, i) => rankRow(podium && i < 3 ? { ...r, place: i + 1 } : r)).join("")}</ul>`;
   const badOutcomes = (o) => Object.entries(o || {}).filter(([k, v]) => v > 0 && k !== "completed").map(([k, v]) => `${k} ${v}`).join(", ");
   const fmtScore = (v) => (v == null ? "—" : v.toFixed(2));
   const cellSub = (c, extra) => {
@@ -652,7 +653,7 @@
       setHtml(main, `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`);
       return;
     }
-    setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}</b><small>${p.rows} graded leaves${p.lines !== p.rows ? ` (${p.lines} lines, re-grades superseded)` : ""} · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
+    setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}${model && p.rank ? ` <span class="tag">#${p.rank.position} of ${p.rank.of}</span>` : ""}</b><small>${p.rows} graded leaves${p.lines !== p.rows ? ` (${p.lines} lines, re-grades superseded)` : ""} · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
     const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
     const sel = (attr, opts, current) => `<select class="sel" ${attr}>${opts.map(([v, label]) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
     const domainSel = () => p.domains.length > 1 ? sel('data-domain-select', [["", "all domains"], ...p.domains.map((d) => [d, d])], domain || "") : "";
@@ -692,14 +693,14 @@
       const a = p.report.find((x) => x.aspect === aspect);
       if (!a || !a.cells.length) html += `<div class="empty">n=0 — nothing graded on ${esc(aspect)} yet. Absence is evidence.</div>`;
       else {
-        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional })));
+        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional })), { podium: true });
         if (a.prior != null) html += `<div class="foot">ranked on the weighted score: the raw mean shrunk toward the prior ${a.prior.toFixed(2)} (mean of per-model means; k=${p.priorWeight}) — a thin cell is pulled most.${a.universal ? "" : " Capability aspect: graded only where a leaf stressed it."}</div>`;
       }
     } else {
       if (!p.overall.length) html += `<div class="empty">no graded leaves under ${esc(p.path)} yet.</div>`;
       else {
         const short = (a) => a.slice(0, 5);
-        html += rankList(p.overall.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.combined), none: c.combined == null, sub: cellSub(c, p.universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), frac: (c.combined ?? 0) / 10, prov: c.provisional })));
+        html += rankList(p.overall.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.combined), none: c.combined == null, sub: cellSub(c, p.universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), frac: (c.combined ?? 0) / 10, prov: c.provisional })), { podium: true });
         html += `<div class="foot">overall = mean of the four universal weighted scores; capability aspects excluded — they are graded only where a leaf stressed them.</div>`;
       }
     }
