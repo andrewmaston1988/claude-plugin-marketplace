@@ -88,7 +88,7 @@ test("leaders: ordered by weighted score, capped at k, provisional flagged, outc
   const rows = [
     ...Array.from({ length: 6 }, (_, i) => graded({ leaf: `s${i}`, model: "m-strong", grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 } })),
     ...Array.from({ length: 6 }, (_, i) => graded({ leaf: `w${i}`, model: "m-weak", grades: { adherence: 6, handoff: 6, truthfulness: 6, depth: 6 } })),
-    graded({ leaf: "t0", model: "m-thin", grades: { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 } }),
+    graded({ leaf: "t0", model: "m-thin", grades: { adherence: 3, handoff: 3, truthfulness: 3, depth: 3 } }),
     row({ leaf: "d0", model: "m-dead", outcome: "session-died", note: "died", grades: undefined }),
   ];
   const report = aggregate(rows, { aspect: "adherence" });
