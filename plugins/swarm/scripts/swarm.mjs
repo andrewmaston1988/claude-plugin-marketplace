@@ -475,10 +475,20 @@ async function cmdServe(rest) {
   }
   if (verb === "install-autostart" || verb === "uninstall-autostart") {
     const startupDir = defaultStartupDir();
+    // Point the launcher at the resolver shim on a stable path, never at this file:
+    // enginePath is inside the sha-versioned plugin cache and moves on every update.
+    let shimPath = enginePath, shimArgs = ["serve", "--daemon"];
+    if (verb === "install-autostart") {
+      const { copyFileSync, mkdirSync } = await import("node:fs");
+      mkdirSync(home, { recursive: true });
+      shimPath = join(home, "serve.mjs");
+      copyFileSync(fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)), shimPath);
+      shimArgs = ["scripts/swarm.mjs", "serve", "--daemon"];
+    }
     const r = verb === "install-autostart"
-      ? installAutostart({ startupDir, nodePath: process.execPath, enginePath })
+      ? installAutostart({ startupDir, nodePath: process.execPath, enginePath: shimPath, engineArgs: shimArgs })
       : uninstallAutostart({ startupDir });
-    if (!startupDir) out(`no Startup folder on this platform — add "${process.execPath}" "${enginePath}" serve --daemon to your login items by hand`);
+    if (!startupDir) out(`no Startup folder on this platform — add "${process.execPath}" "${shimPath}" ${shimArgs.join(" ")} to your login items by hand`);
     else out(verb === "install-autostart" ? `autostart: ${r.changed ? "installed" : "already installed"} → ${r.path}` : `autostart: ${r.removed ? "removed" : "was not installed"}`);
     exitSoon(0); return 0;
   }

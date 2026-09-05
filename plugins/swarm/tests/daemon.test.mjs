@@ -47,6 +47,20 @@ test("autostart: install writes the launcher once (idempotent), uninstall remove
     const second = installAutostart(args);
     assert.equal(second.changed, false, "same content → untouched");
     assert.equal(readdirSync(dir).length, 1);
+    // The launcher must run whatever argv it is given, so the caller can point it at a
+    // stable resolver shim instead of the sha-versioned plugin dir. Without this the
+    // engine path is frozen at install time and every plugin update strands it.
+    const shim = installAutostart({
+      startupDir: dir,
+      nodePath: "C:\\node\\node.exe",
+      enginePath: "C:\\Users\\a\\.swarm\\serve.mjs",
+      engineArgs: ["scripts/swarm.mjs", "serve", "--daemon"],
+    });
+    assert.equal(shim.changed, true, "different argv → rewritten");
+    const shimBody = readFileSync(launcherPath(dir), "utf8");
+    assert.match(shimBody, /"C:\\Users\\a\\\.swarm\\serve\.mjs" scripts\/swarm\.mjs serve --daemon/);
+    assert.ok(!/plugins[\\/]cache/.test(shimBody), "launcher must not embed the plugin cache path");
+
     assert.equal(uninstallAutostart({ startupDir: dir }).removed, true);
     assert.ok(!existsSync(launcherPath(dir)));
     assert.equal(uninstallAutostart({ startupDir: dir }).removed, false);
