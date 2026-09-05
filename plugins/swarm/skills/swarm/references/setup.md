@@ -58,6 +58,14 @@ combined options if the operator is brisk, or one each if not:
   generate one; never invent one silently.
 `port` and `recentMs` are advanced (Stage 7).
 
+Starting it: `node <engine> serve --daemon` (or `serve` to stay in the foreground), and
+`serve stop` to end it. To bring it back at login, `node <engine> serve install-autostart`
+writes a Startup launcher pointing at `~/.swarm/serve.mjs` — the same self-resolving shim
+the status bar uses, so it follows plugin updates instead of freezing on the sha-versioned
+cache dir the install happened to run from. `serve uninstall-autostart` removes it. A
+launcher written before this shim existed is pinned to an old build and keeps starting it
+silently; re-run `install-autostart` once to repoint it.
+
 ### Stage 4 — the status bar (settings.json `statusLine`)
 
 The plugin ships a status bar for Claude Code's bottom line: every live run THIS session

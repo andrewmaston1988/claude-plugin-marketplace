@@ -43,10 +43,14 @@ export const defaultStartupDir = (env = process.env) =>
   env.APPDATA ? join(env.APPDATA, "Microsoft", "Windows", "Start Menu", "Programs", "Startup") : null;
 export const launcherPath = (startupDir) => join(startupDir, "swarm-dashboard.cmd");
 
-export function installAutostart({ startupDir, nodePath, enginePath }) {
+// `enginePath` must be a STABLE path — the ~/.swarm resolver shim, not this file. Baking
+// the plugin's sha-versioned cache dir into the launcher pinned it to whichever build ran
+// the install: every `claude plugin update` then left the machine booting an older
+// dashboard with nothing to say so (observed pinned 3 versions behind, 2026-09-05).
+export function installAutostart({ startupDir, nodePath, enginePath, engineArgs = ["serve", "--daemon"] }) {
   if (!startupDir) return { installed: false, reason: "no Startup folder on this platform" };
   mkdirSync(startupDir, { recursive: true });
-  const body = `@echo off\r\nstart "" /min "${nodePath}" "${enginePath}" serve --daemon\r\n`;
+  const body = `@echo off\r\nstart "" /min "${nodePath}" "${enginePath}" ${engineArgs.join(" ")}\r\n`;
   const p = launcherPath(startupDir);
   const already = existsSync(p) && readFileSync(p, "utf8") === body;
   if (!already) writeFileSync(p, body, "utf8");
