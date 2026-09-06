@@ -23,6 +23,7 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Per-agent model + effort selection | ✅ | ✅ |
 | Worktree isolation for write-capable agents | ✅ | ✅ |
 | Leaves run foreground-only — a headless session that yields its turn is over, so `run_in_background` is denied inside a leaf | ✅ `hooks/foreground-guard.mjs` | — |
+| Per-repo PreToolUse guard — a project script denies tool calls inside leaves | ✅ `hooks/leaf-guard.mjs` | — |
 | Full headless Claude Code agents — complete tool roster | ✅ | ✅ |
 | Deterministic mid-run steps — fan out over a discovered list, gate, dedupe/count | ✅ `forEach`/`when`/`compute` | ✅ full JS |
 | Schema-validated output — corrective retry on mismatch | ✅ `returns` | ✅ `agent({schema})` |
@@ -72,6 +73,31 @@ Other useful keys (defaults shown in `config.default.json`): `provider.url` (Ant
 ```
 
 `provider.cloud.ollama.enabled` arms ollama.com cloud-usage preflight — false by default, so a user who has never heard of it meets nothing. `cookiePath` overrides where the session cookie is stored (default `~/.swarm/ollama-cookie.json`, written by `ollama-usage --cookie`, never `config.json` — a cookie in a file that's read/printed/diffed constantly would end up in a transcript). `usageStaleMs` (default 24h) is how long a cached reading stays trusted before it's reported `stale` instead of its last percentage.
+
+### Per-repo leaf guard (`leafGuards`)
+
+A swarm leaf is a full headless Claude Code session — `allowedTools` scopes tool names, not
+commands, and prompt prose ("only run `cargo test -p <crate>`") is not enforcement. `leafGuards`
+in `~/.swarm/config.json` gives a project one mechanical place to deny specific tool calls
+inside its own leaves:
+
+```json
+{ "leafGuards": { "C:/code/primordial": "python scripts/swarm_leaf_guard.py" } }
+```
+
+— primordial's own guard, which denies every `cargo` invocation so a lane can no longer
+cold-compile a multi-GB dependency tree in each of several worktrees at once. Keys are absolute
+project roots (case-insensitive on Windows, longest match wins for nested roots); the value is a
+shell command run from the leaf's cwd. `hooks/leaf-guard.mjs` fires as a no-matcher `PreToolUse`
+hook for every task whose `originalCwd` falls under a configured root, piping the tool-call
+payload (`tool_name`, `tool_input`, …) to the command on stdin. Exit 2 denies the call with the
+command's stderr as the reason; **any other outcome — a different exit code, a timeout, a spawn
+error — also denies**, naming the failure, because a guard that fails open silently is the same
+disk-filling incident this exists to stop. A distinct guard is probed once at `validate`
+(`{"tool_name":"Bash","tool_input":{"command":"true"}}`) so a broken script is caught before any
+leaf dispatches, not at its first tool call. A task opts out with `"leafGuard": false` in the
+manifest — the only accepted value — for the one leaf (typically a serial build tail) that must
+keep running the thing the guard would otherwise deny.
 
 Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama install recent enough to serve `/api/experimental/model-recommendations` (~v0.23+).
 
