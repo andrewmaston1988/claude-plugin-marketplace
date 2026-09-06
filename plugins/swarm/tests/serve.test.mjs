@@ -68,6 +68,7 @@ test("routes: runs list, run, leaf (no raw log; prompt exposed for the accordion
       assert.equal(runs.status, 200);
       assert.deepEqual(runs.body.runs.map((r) => [r.project, r.name, r.active]), [["C--code-a", "live-1", true], ["C--code-b", "done-1", false]]);
       assert.equal(runs.body.runs[0].byState.running, 2, "list rows carry the state counts");
+      assert.equal(typeof runs.body.runs[0].startedMs, "number", "the page's per-project live-row sort needs startedMs on every row");
 
       const run = await get("/api/runs/C--code-a/live-1");
       assert.equal(run.status, 200);
