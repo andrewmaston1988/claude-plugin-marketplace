@@ -591,7 +591,11 @@ test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare
     }));
     const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
     equal(r.status, 0, r.stderr + r.stdout);
-    ok(!/gate|batching|mix summary/i.test(r.stdout), r.stdout);
+    // Exclude path-bearing lines (resultsDir:/watch:/summary:) before matching — an
+    // absolute path can contain "gate" (e.g. a worktree named gate-*) without that
+    // being the offer-gate/batching/mix-summary prose this test guards against.
+    const prose = r.stdout.split("\n").filter((line) => !/^(resultsDir|watch|summary):/.test(line)).join("\n");
+    ok(!/gate|batching|mix summary/i.test(prose), prose);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
