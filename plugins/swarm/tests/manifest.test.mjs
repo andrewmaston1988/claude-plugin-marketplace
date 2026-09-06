@@ -82,6 +82,21 @@ test("fully valid manifest normalizes with defaults", () => {
   }
 });
 
+test("settings must be a JSON object", () => {
+  const dir = tmp();
+  try {
+    const p1 = writeManifest(dir, { tasks: [claudeTask({ settings: "x" })] });
+    const errs = errorsOf(() => loadManifest(p1, CFG, dir));
+    ok(errs.some((e) => e.includes("settings must be a JSON object")), errs.join("\n"));
+
+    const p2 = writeManifest(dir, { tasks: [claudeTask({ settings: { env: {} } })] }, "ok.json");
+    const plan = loadManifest(p2, CFG, dir);
+    deepEqual(plan.tasks[0].settings, { env: {} });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("duplicate ids rejected", () => {
   const dir = tmp();
   try {
