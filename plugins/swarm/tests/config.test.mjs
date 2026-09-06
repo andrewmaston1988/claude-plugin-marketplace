@@ -25,6 +25,29 @@ test("loadConfig returns shipped defaults when user config is missing", () => {
     equal(cfg.timeoutMs, DEFAULT_TIMEOUT_MS);
     equal(cfg.resultInlineCap, 4000);
     equal(cfg.worktreeBranchPrefix, "swarm/");
+    equal(cfg.disable1mContext, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("disable1mContext must be a boolean: a string throws naming the key and the example", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ disable1mContext: "false" }));
+    throws(() => loadConfig(p), (e) => e.message.includes("disable1mContext") && e.message.includes('"disable1mContext": false'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("disable1mContext must be a boolean: a number throws naming the key and the example", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ disable1mContext: 0 }));
+    throws(() => loadConfig(p), (e) => e.message.includes("disable1mContext") && e.message.includes('"disable1mContext": false'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -152,6 +175,7 @@ test("initConfig materialises every shipped key into the user file, keeps set va
     equal(on.provider.mode, "env");
     equal(on.dashboard.port, 7331);
     equal(on.swarm.always, false);            // shipped default now exists for swarm.always
+    equal(on.disable1mContext, true);          // shipped default now exists for disable1mContext
     deepEqual(on.provider.allowedRoots, []);
     on.provider.allowedRoots = ["C:/code"];
     on.timeoutMs = 5400000;

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, sep, isAbsolute } from "node:path";
 import { spawnSync } from "node:child_process";
 import { isClaudeModel } from "./models.mjs";
+import { deepMerge } from "./config.mjs";
 
 // Build the argv + env for one task dispatch. Pure — no process interaction.
 //
@@ -16,6 +17,13 @@ import { isClaudeModel } from "./models.mjs";
 // dispatch is interactive-supervised, so the manifest preview is the budget gate.
 export function buildDispatch(task, prompt, cfg) {
   const claudePath = cfg.claudePath || "claude";
+  // disable1mContext: false means the CONFIG default is the 1M window; a task's
+  // own `settings` still wins (deepMerge, task second) so a leaf can opt back
+  // out (or in) regardless of the operator's default.
+  const base = isClaudeModel(task.model) && cfg.disable1mContext === false
+    ? { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "0" } }
+    : null;
+  const settings = base || task.settings ? deepMerge(base || {}, task.settings || {}) : null;
   // stream-json lets the engine extract the final result text and per-turn
   // token usage from stdout; --verbose is mandatory with -p for this format.
   const claudeArgs = [
@@ -26,7 +34,7 @@ export function buildDispatch(task, prompt, cfg) {
     // A shell env var LOSES to the user's settings.json env block, and Claude Code
     // has no [1m] model alias — --settings is highest-precedence in the CLI's
     // settings chain, so it's the only route that overrides that block per-leaf.
-    ...(task.settings ? ["--settings", JSON.stringify(task.settings)] : []),
+    ...(settings ? ["--settings", JSON.stringify(settings)] : []),
     // interrogation path: continue an existing leaf session (`swarm ask`)
     ...(task.resume ? ["--resume", task.resume] : []),
     "--output-format", "stream-json", "--verbose",

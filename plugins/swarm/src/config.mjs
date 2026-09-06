@@ -34,8 +34,11 @@ export function deepMerge(base, override) {
 export function loadConfig(overridePath, env = process.env) {
   const defaults = JSON.parse(readFileSync(DEFAULTS_PATH, "utf8"));
   const userPath = overridePath || join(swarmHome(env), "config.json");
-  if (!existsSync(userPath)) return defaults;
-  return deepMerge(defaults, parseUser(userPath));
+  const cfg = existsSync(userPath) ? deepMerge(defaults, parseUser(userPath)) : defaults;
+  if (typeof cfg.disable1mContext !== "boolean") {
+    throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
+  }
+  return cfg;
 }
 
 // ---- the /swarm:swarm setup surface ---------------------------------------------
