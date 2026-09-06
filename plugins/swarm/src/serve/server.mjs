@@ -5,7 +5,7 @@ import http from "node:http";
 import { readFileSync, readdirSync, existsSync, statSync, watch as fsWatch } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readRun, listRuns } from "../runlog.mjs";
+import { readRun, listRuns, resultSuperseded } from "../runlog.mjs";
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
@@ -305,11 +305,16 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (seg.length === 4 && seg[2] === "leaves") {
       const file = resolve(dir, "results", `${seg[3]}.json`);
       if (!file.startsWith(dir + sep)) return notFound(res);
-      // A result file only exists once the leaf FINISHES, but mid-run is exactly when
-      // you want to see what it was asked. The run's manifest snapshot has the authored
-      // prompt, so serve that rather than 404-ing an in-flight leaf. Flagged `authored`
-      // because {{result:…}} placeholders are substituted at dispatch, not in the snapshot.
-      if (!existsSync(file)) {
+      // A result file appears when a leaf finishes — and STAYS when the run is resumed,
+      // so its presence says nothing about the attempt now running. Ask the engine
+      // instead: readRun's state is per-attempt (readRunLog clears on every run-start),
+      // and a leaf that has not settled in this attempt did not write what is on disk.
+      // Both cases serve the manifest's authored prompt, which is what you want to see
+      // mid-run anyway. Flagged `authored` because {{result:…}} placeholders are
+      // substituted at dispatch, not in the snapshot.
+      const leafState = readRun(dir, { now: now(), quietWarnMs, recentMs })?.tasks
+        .find((t) => t.id === seg[3])?.state;
+      if (!existsSync(file) || resultSuperseded(leafState)) {
         const prompt = authoredPrompt(dir, seg[3]);
         return prompt ? send(res, 200, { id: seg[3], prompt, authored: true }) : notFound(res);
       }

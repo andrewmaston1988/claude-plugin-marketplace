@@ -8,6 +8,31 @@ import { DIGEST_ID } from "./digest.mjs";
 
 const CLONE_RE = /^(.+)\[(\d+)\]$/;
 
+// Non-terminal, non-doomed: a leaf waiting out a backoff or model fallback. Lives here
+// rather than in the scheduler because it is state vocabulary, and two modules read it.
+export const ALIVE_STATES = new Set(["pending", "running", "retrying"]);
+
+// Does a `results/<id>.json` on disk belong to a PREVIOUS attempt? readRunLog clears
+// per-leaf state on every run-start, so `state` is always this attempt's — and a leaf
+// that has not settled in this attempt cannot have written the file sitting there.
+//
+// `undefined` — no row in this attempt's roster at all — is superseded by construction.
+// A forEach clone joins the roster ONLY through the log's `expand` event and is never in
+// manifest.tasks, so topology() cannot backfill it: an expansion that contracts on resume
+// (3 items, then 2) leaves `fix[2].json` on disk with nothing to match it.
+//
+// Asking "is it unsettled" rather than "is it settled" is deliberate. The settled
+// vocabulary includes compound states reached only through a variable (`failed:timeout`,
+// scheduler.mjs:1038), and a whitelist that missed one would HIDE a real result — the
+// worse failure of the two.
+//
+// Deliberately not an mtime comparison: a touch (restore, copy, AV scan) would mark a
+// finished result superseded permanently, which is what summarySuperseded's own comment
+// warns against and what the #240 review removed one level up.
+export function resultSuperseded(state) {
+  return state === undefined || ALIVE_STATES.has(state);
+}
+
 // Parse run.log text into per-task rows in roster order. `now` stands in for a
 // missing timestamp (pre-ts logs) and anchors quietMs.
 export function readRunLog(content, { now = Date.now() } = {}) {

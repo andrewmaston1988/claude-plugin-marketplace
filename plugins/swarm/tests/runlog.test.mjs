@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readRun, listRuns, topology, readRunLog, summarySuperseded } from "../src/runlog.mjs";
+import { readRun, listRuns, topology, readRunLog, summarySuperseded, resultSuperseded, ALIVE_STATES } from "../src/runlog.mjs";
 const require_runlog = () => ({ readRunLog });
 import { RUN_LOG, NOW, buildFixture } from "./fixtures/run-fixture.mjs";
 
@@ -415,4 +415,31 @@ test("summarySuperseded: null inputs never supersede", () => {
   assert.equal(summarySuperseded(100, null), false);
   assert.equal(summarySuperseded(100, 50), false, "started before finished — not superseded");
   assert.equal(summarySuperseded(50, 100), true, "started after finished — superseded");
+});
+
+// P1 — the predicate partitions the whole state vocabulary, so there is a case per
+// state rather than a spot check. A state added later fails this until someone decides
+// which side it belongs on, which is the point.
+test("P1: resultSuperseded is true for exactly the unsettled states", () => {
+  for (const s of ["pending", "running", "retrying"]) {
+    assert.equal(resultSuperseded(s), true, `${s} must supersede a result on disk`);
+  }
+  for (const s of ["ok", "skipped", "failed", "timeout", "quota", "rate-limited", "blocked"]) {
+    assert.equal(resultSuperseded(s), false, `${s} settled this attempt — its result stands`);
+  }
+  // No row in this attempt's roster at all. A forEach clone is minted by the log's
+  // `expand` event and is never in manifest.tasks, so a contracted expansion leaves the
+  // dropped clone's result on disk with nothing to match it — superseded by construction.
+  assert.equal(resultSuperseded(undefined), true);
+  // Compound states reach the log through a variable (scheduler.mjs:1038) and are settled.
+  assert.equal(resultSuperseded('failed:timeout'), false);
+});
+
+// P2 — a source-text tripwire for the duplication the plan exists to avoid. It catches a
+// copy-paste reintroduction and nothing subtler; not coverage.
+test("P2: ALIVE_STATES has one definition, and the scheduler imports it", () => {
+  const sched = readFileSync(new URL("../src/scheduler.mjs", import.meta.url), "utf8");
+  assert.ok(!/const\s+ALIVE_STATES\s*=/.test(sched), "scheduler must not redeclare ALIVE_STATES");
+  assert.ok(/import\s*\{[^}]*ALIVE_STATES[^}]*\}\s*from\s*"\.\/runlog\.mjs"/.test(sched), "scheduler must import it from runlog.mjs");
+  assert.ok(ALIVE_STATES instanceof Set && ALIVE_STATES.size === 3);
 });
