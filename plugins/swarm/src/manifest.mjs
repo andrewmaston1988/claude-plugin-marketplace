@@ -904,6 +904,7 @@ export function effectivePlanDoc(plan) {
     ...(plan.ref && { ref: plan.ref }),
     ...(plan.args && { args: plan.args, argsFingerprint: argsFingerprint(plan.args) }),
     resultsDir: plan.resultsDir,
+    cwd: plan.cwd,
     tasks: plan.tasks.map(strip),
     ...(plan.digest && { digest: plan.digest }),
   };
