@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readRun, listRuns, topology, readRunLog } from "../src/runlog.mjs";
+import { readRun, listRuns, topology, readRunLog, summarySuperseded } from "../src/runlog.mjs";
 const require_runlog = () => ({ readRunLog });
 import { RUN_LOG, NOW, buildFixture } from "./fixtures/run-fixture.mjs";
 
@@ -248,4 +248,157 @@ test("listRuns: newest first across projects, active only while run.log is fresh
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+// ---- superseded-summary rule (defect a) ----
+
+test("readRun/listRuns: a resumed run whose summary predates the resume is live, not finished (A1)", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
+  try {
+    const d = join(home, "runs", "C--code-a", "resumed-2");
+    mkdirSync(d, { recursive: true });
+    const first = '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":1111,"tasks":[{"id":"find-a","model":"m"}]}';
+    const firstOk = '{"ts":"2026-09-05T01:01:00Z","id":"find-a","state":"ok","durationMs":60000}';
+    const second = `{"ts":"2026-09-05T01:05:30Z","event":"run-start","pid":${process.pid},"tasks":[{"id":"find-a","model":"m"}]}`;
+    writeFileSync(join(d, "run.log"), [first, firstOk, second].join("\n"), "utf8");
+    writeFileSync(join(d, "summary.json"), JSON.stringify({ started: "2026-09-05T01:00:00Z", finished: "2026-09-05T01:05:00Z", tasks: [] }), "utf8");
+    // summary.json's mtime — the second run-start's ts is 30s after it
+    const summaryT = Date.parse("2026-09-05T01:05:00Z") / 1000;
+    utimesSync(join(d, "summary.json"), summaryT, summaryT);
+    // the resumed engine kept appending after the summary was written
+    const logT = Date.parse("2026-09-05T01:06:00Z") / 1000;
+    utimesSync(join(d, "run.log"), logT, logT);
+
+    const now = Date.parse("2026-09-05T01:10:00Z");
+    const run = readRun(d, { now });
+    assert.equal(run.finishedMs, null, "the resume's run-start is after the summary's finished ts");
+
+    const runs = listRuns(home, { now, _alive: (pid) => pid === process.pid });
+    assert.equal(runs.find((r) => r.name === "resumed-2").active, true);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("readRun/listRuns: an ordinary finished run stays finished (A2)", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
+  try {
+    const d = join(home, "runs", "C--code-a", "finished-1");
+    mkdirSync(d, { recursive: true });
+    const start = '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":2222,"tasks":[{"id":"find-a","model":"m"}]}';
+    const ok = '{"ts":"2026-09-05T01:01:00Z","id":"find-a","state":"ok","durationMs":60000}';
+    writeFileSync(join(d, "run.log"), [start, ok].join("\n"), "utf8");
+    writeFileSync(join(d, "summary.json"), JSON.stringify({ started: "2026-09-05T01:00:00Z", finished: "2026-09-05T01:01:05Z", tasks: [] }), "utf8");
+    const logT = Date.parse("2026-09-05T01:01:00Z") / 1000;
+    utimesSync(join(d, "run.log"), logT, logT);
+    // written after the last log append — the real order (scheduler.mjs)
+    const summaryT = Date.parse("2026-09-05T01:01:05Z") / 1000;
+    utimesSync(join(d, "summary.json"), summaryT, summaryT);
+
+    const now = Date.parse("2026-09-05T01:10:00Z");
+    assert.equal(readRun(d, { now }).finishedMs, Date.parse("2026-09-05T01:01:05Z"));
+    assert.equal(listRuns(home, { now }).find((r) => r.name === "finished-1").active, false);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("readRun/listRuns: a resume that finished is finished again, by the newer summary (A3)", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
+  try {
+    const d = join(home, "runs", "C--code-a", "resumed-finished-1");
+    mkdirSync(d, { recursive: true });
+    const first = '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":3001,"tasks":[{"id":"find-a","model":"m"}]}';
+    const firstOk = '{"ts":"2026-09-05T01:01:00Z","id":"find-a","state":"ok","durationMs":60000}';
+    const second = '{"ts":"2026-09-05T01:05:00Z","event":"run-start","pid":3002,"tasks":[{"id":"find-a","model":"m"}]}';
+    const secondOk = '{"ts":"2026-09-05T01:05:30Z","id":"find-a","state":"ok","durationMs":30000}';
+    writeFileSync(join(d, "run.log"), [first, firstOk, second, secondOk].join("\n"), "utf8");
+    // the rewritten summary, from the second engine's completed pass
+    writeFileSync(join(d, "summary.json"), JSON.stringify({ started: "2026-09-05T01:00:00Z", finished: "2026-09-05T01:06:00Z", tasks: [] }), "utf8");
+    const logT = Date.parse("2026-09-05T01:05:30Z") / 1000;
+    utimesSync(join(d, "run.log"), logT, logT);
+    const summaryT = Date.parse("2026-09-05T01:06:00Z") / 1000; // post-dates the second run-start
+    utimesSync(join(d, "summary.json"), summaryT, summaryT);
+
+    const now = Date.parse("2026-09-05T01:10:00Z");
+    assert.equal(readRun(d, { now }).finishedMs, Date.parse("2026-09-05T01:06:00Z"));
+    assert.equal(listRuns(home, { now }).find((r) => r.name === "resumed-finished-1").active, false);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("listRuns: the mtime gate skips reading run.log or summary.json entirely for a finished run (A4)", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
+  try {
+    const d = join(home, "runs", "C--code-a", "finished-2");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "run.log"), RUN_LOG, "utf8");
+    writeFileSync(join(d, "summary.json"), JSON.stringify({ finished: "2026-09-05T01:10:00Z" }), "utf8");
+    const logT = (NOW - 120_000) / 1000;
+    utimesSync(join(d, "run.log"), logT, logT);
+    const summaryT = (NOW - 60_000) / 1000; // newer than run.log
+    utimesSync(join(d, "summary.json"), summaryT, summaryT);
+
+    const reads = [];
+    const _readFile = (p, enc) => { reads.push(p); return readFileSync(p, enc); };
+    listRuns(home, { now: NOW, _readFile });
+    assert.deepEqual(reads, [], "the gate must short-circuit before any read");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("listRuns: lastRunStart is memoised on the log's mtime — a repeated sweep past the gate re-reads nothing (A5)", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
+  try {
+    const d = join(home, "runs", "C--code-a", "memo-2");
+    mkdirSync(d, { recursive: true });
+    const log = join(d, "run.log");
+    const summary = join(d, "summary.json");
+    // summary predates the log so the mtime gate always lets the comparison run
+    writeFileSync(summary, JSON.stringify({ finished: "2026-09-05T00:00:00Z" }), "utf8");
+    const summaryT = Date.parse("2026-09-05T00:00:00Z") / 1000;
+    utimesSync(summary, summaryT, summaryT);
+
+    const line = (pid) => `{"ts":"2026-09-05T00:30:00Z","event":"run-start","pid":${pid},"tasks":[{"id":"find-a","model":"m"}]}`;
+    const logT = Date.parse("2026-09-05T01:00:00Z") / 1000;
+    const seen = [];
+    const alive = (pid) => { seen.push(pid); return true; };
+
+    writeFileSync(log, line(4242), "utf8");
+    utimesSync(log, logT, logT);
+    listRuns(home, { now: NOW, _alive: alive });
+    assert.deepEqual(seen, [4242], "first sweep reads the log");
+
+    writeFileSync(log, line(9999), "utf8"); // same length, so the memo key (mtime+size) is unchanged
+    utimesSync(log, logT, logT); // same mtime as before
+    listRuns(home, { now: NOW, _alive: alive });
+    assert.deepEqual(seen, [4242, 4242], "second sweep must use the memo, not re-read the log");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("listRuns/readRun: a touched mtime with no new run-start does not supersede a finished run (A6)", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
+  try {
+    const d = join(home, "runs", "C--code-a", "touched-1");
+    mkdirSync(d, { recursive: true });
+    const start = '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":3333,"tasks":[{"id":"find-a","model":"m"}]}';
+    const ok = '{"ts":"2026-09-05T01:01:00Z","id":"find-a","state":"ok","durationMs":60000}';
+    writeFileSync(join(d, "run.log"), [start, ok].join("\n"), "utf8");
+    writeFileSync(join(d, "summary.json"), JSON.stringify({ finished: "2026-09-05T01:01:05Z" }), "utf8");
+    // The summary's own mtime is a backup-restore artifact and does NOT match its
+    // `finished` field — this is what defeats a first-draft implementation that
+    // compares against the file's mtime instead of the engine's own timestamp.
+    const staleMtimeT = Date.parse("2020-01-01T00:00:00Z") / 1000;
+    utimesSync(join(d, "summary.json"), staleMtimeT, staleMtimeT);
+
+    // An AV scan / restore also touches run.log's mtime forward, past the summary's,
+    // with NO new run-start appended — this defeats the stage-1 gate so stage 2 runs.
+    const touchedT = Date.parse("2026-09-05T02:00:00Z") / 1000;
+    utimesSync(join(d, "run.log"), touchedT, touchedT);
+
+    const now = Date.parse("2026-09-05T03:00:00Z");
+    assert.equal(readRun(d, { now }).finishedMs, Date.parse("2026-09-05T01:01:05Z"), "no new run-start → not superseded, despite the newer mtime");
+    assert.equal(listRuns(home, { now }).find((r) => r.name === "touched-1").active, false);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("summarySuperseded: null inputs never supersede", () => {
+  assert.equal(summarySuperseded(null, 100), false);
+  assert.equal(summarySuperseded(100, null), false);
+  assert.equal(summarySuperseded(100, 50), false, "started before finished — not superseded");
+  assert.equal(summarySuperseded(50, 100), true, "started after finished — superseded");
 });
