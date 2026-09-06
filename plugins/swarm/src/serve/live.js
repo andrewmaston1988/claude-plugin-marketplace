@@ -38,6 +38,24 @@
     return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
   }
 
+  // Group order: a project with a live run ranks by that run's newest startedMs —
+  // stable across polls, unlike sorting by mtimeMs (whichever engine last appended
+  // an event). Finished-only projects trail, ordered by their first row's mtimeMs.
+  function projectOrder(byProject) {
+    const newestLiveStart = (rows) => {
+      const live = rows.filter((r) => r.active);
+      return live.length ? Math.max(...live.map((r) => r.startedMs)) : null;
+    };
+    return [...byProject.keys()].sort((a, b) => {
+      const la = newestLiveStart(byProject.get(a));
+      const lb = newestLiveStart(byProject.get(b));
+      if (la != null && lb != null) return lb - la;
+      if (la != null) return -1;
+      if (lb != null) return 1;
+      return byProject.get(b)[0].mtimeMs - byProject.get(a)[0].mtimeMs;
+    });
+  }
+
   const runEnded = (run) => !!(run && (run.finishedMs || run.abortedMs || run.stoppedMs));
 
   // The runs list has no single run to end, so it always polls; a run/leaf view
@@ -64,5 +82,5 @@
     });
   }
 
-  window.swarmLive = { waveOpen, projectOpen, elapsedText, quietSecs, agoText, runEnded, shouldPoll, loadScript };
+  window.swarmLive = { waveOpen, projectOpen, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, loadScript };
 })();
