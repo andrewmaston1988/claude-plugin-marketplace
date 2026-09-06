@@ -61,6 +61,17 @@ Run `/swarm:swarm setup` in a session — it materialises every key into `~/.swa
 
 Other useful keys (defaults shown in `config.default.json`): `provider.url` (Anthropic-format endpoint, default `http://localhost:11434` for a direct ollama setup), `provider.mode` (`"env"` merges `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` into a plain `claude -p` call — the default; `"launch"` shells out via `launchCmd`), `concurrency` (a ceiling — a manifest may run narrower, never wider), `timeoutMs`, `worktreeBranchPrefix`, `modelDenylist` (case-insensitive substrings — matching models fail validation and never appear in the `models` roster; for taking a model out of circulation on quality grounds). Swarm never manages credentials — auth is your provider app's ambient sign-in.
 
+```json
+{
+  "provider": {
+    "cloud": { "ollama": { "enabled": false, "cookiePath": null } },
+    "usageStaleMs": 86400000
+  }
+}
+```
+
+`provider.cloud.ollama.enabled` arms ollama.com cloud-usage preflight — false by default, so a user who has never heard of it meets nothing. `cookiePath` overrides where the session cookie is stored (default `~/.swarm/ollama-cookie.json`, written by `ollama-usage --cookie`, never `config.json` — a cookie in a file that's read/printed/diffed constantly would end up in a transcript). `usageStaleMs` (default 24h) is how long a cached reading stays trusted before it's reported `stale` instead of its last percentage.
+
 Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama install recent enough to serve `/api/experimental/model-recommendations` (~v0.23+).
 
 ## Usage
@@ -72,6 +83,7 @@ node plugins/swarm/scripts/swarm.mjs validate <plan.json | name> [--args '<json>
 node plugins/swarm/scripts/swarm.mjs run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
 node plugins/swarm/scripts/swarm.mjs ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
 node plugins/swarm/scripts/swarm.mjs quota                # Anthropic utilization per limit window
+node plugins/swarm/scripts/swarm.mjs ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
 node plugins/swarm/scripts/swarm.mjs grade --init <resultsDir>   # write grades.json — one skeleton row per :cloud leaf
 node plugins/swarm/scripts/swarm.mjs grade --file <grades.json>  # validate the filled batch and append it to the score store
 node plugins/swarm/scripts/swarm.mjs perf [--aspect X] [--model Y] [--domain D]   # aspect x model table with sample counts
@@ -216,6 +228,15 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
 - **Quota preflight**: when a plan contains Claude leaves, the engine first queries Anthropic's usage endpoint with Claude Code's own local OAuth credentials (free, predictive — utilization % and reset times per window, cached `quotaCacheSecs`). Exhausted quota with undefended Claude leaves aborts *before* dispatch with the leaf list and reset time; ≥`quotaWarnPct` (80) warns and proceeds. Strictly best-effort — any endpoint failure and the run proceeds; mid-run classification is the backstop. Disable with `"quotaPreflight": false`; `quotaPatterns` extends message matching without a plugin update.
 
 `swarm quota` prints the same utilization table on demand — useful before choosing a model mix.
+
+**`swarm ollama-usage`** is the same idea for the `:cloud` side: a zero-dependency preflight against `ollama.com/settings` (no npm package, node:* only), independent of your provider app's own usage tooling. First run, hand it the browser session cookie: `swarm ollama-usage --cookie '<value>'` saves it to `provider.cloud.ollama.cookiePath` and fetches immediately; every later call reuses the saved cookie. Output is always two lines:
+
+```
+ollama session: 42% — resets 2026-09-06T18:00:00Z
+ollama weekly: 87% — resets 2026-09-08T00:00:00Z
+```
+
+Exit code is 1 when the weekly meter reads 100%, 0 otherwise — an expired or missing cookie falls back to the last cached reading (or, with no cache yet, two "no reading yet" lines and exit 0). Nothing here arms itself: `usageFromCache` — what the ultraswarm hook and the offer gate consult to prefer or steer away from `:cloud` — reads this cache only when `provider.cloud.ollama.enabled` is `true`, regardless of whether a cookie is saved.
 
 ## Model capability scores
 

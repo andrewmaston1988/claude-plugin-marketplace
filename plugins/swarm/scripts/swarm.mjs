@@ -23,6 +23,7 @@ const USAGE = `usage: swarm.mjs <command>
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)
+  ollama-usage [--cookie '<value>']   ollama.com :cloud weekly-allowance meter (exit 1 when exhausted)
   grade --init <resultsDir>  write grades.json — one skeleton row per model leaf (Claude tiers included), for you to fill in
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
@@ -92,6 +93,16 @@ function modelLine(m) {
 
 async function cmdModels(rest = []) {
   const cfg = getConfig();
+  // Catalogue stays the catalogue (discovery.mjs is pure) — the meter is
+  // annotated here, above the :cloud list, so it reads as a preflight rather
+  // than a per-model property.
+  const { usageFromCache } = await import("../src/ollama-usage.mjs");
+  const headroom = usageFromCache(cfg);
+  if (headroom.state === "exhausted") {
+    out(`⚠ :cloud weekly allowance exhausted (${headroom.weeklyPctUsed}%) — resets ${headroom.resetsAt}. These models will not launch.`);
+  } else if (headroom.state === "stale") {
+    out(`⚠ :cloud weekly allowance meter is stale (last read ${Math.floor(headroom.snapshotAgeMs / 3_600_000)}h ago) — run \`swarm ollama-usage\` to refresh.`);
+  }
   const showAll = rest.includes("--all");
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
   const discovered = await discoverModels(cfg);
@@ -660,9 +671,37 @@ async function main() {
         for (const l of q.limits) {
           const scope = l.scope ? ` (${l.scope})` : "";
           const sev = l.severity && l.severity !== "normal" ? ` [${l.severity}]` : "";
-          out(`${l.kind}${scope}: ${l.percent}%${l.resetsAt ? ` — resets ${l.resetsAt}` : ""}${sev}`);
+          out(`anthropic ${l.kind}${scope}: ${l.percent}%${l.resetsAt ? ` — resets ${l.resetsAt}` : ""}${sev}`);
         }
         return q.exhausted ? 1 : 0;
+      }
+      case "ollama-usage": {
+        const { fetchUsage, saveCookie, loadCookie, usageCachePath } = await import("../src/ollama-usage.mjs");
+        const cfg = getConfig();
+        const cachePath = usageCachePath();
+        const cookiePath = cfg?.provider?.cloud?.ollama?.cookiePath || join(swarmHome(), "ollama-cookie.json");
+        const cookieFlag = getFlag("cookie", rest);
+        if (cookieFlag !== undefined) saveCookie(cookiePath, cookieFlag);
+        const fetched = await fetchUsage({ cookie: loadCookie(cookiePath), cachePath });
+
+        let session, weekly;
+        if (fetched.ok) {
+          session = { pct: fetched.sessionPctUsed, resetsAt: fetched.sessionResetsAt };
+          weekly = { pct: fetched.weeklyPctUsed, resetsAt: fetched.weeklyResetsAt };
+        } else {
+          const { existsSync, readFileSync } = await import("node:fs");
+          if (!existsSync(cachePath)) {
+            out("ollama session: no reading yet — run with --cookie '<value>' first");
+            out("ollama weekly: no reading yet — run with --cookie '<value>' first");
+            return 0;
+          }
+          const cached = JSON.parse(readFileSync(cachePath, "utf8"));
+          session = { pct: cached.sessionPctUsed, resetsAt: cached.sessionResetsAt };
+          weekly = { pct: cached.weeklyPctUsed, resetsAt: cached.weeklyResetsAt };
+        }
+        out(`ollama session: ${session.pct}%${session.resetsAt ? ` — resets ${session.resetsAt}` : ""}`);
+        out(`ollama weekly: ${weekly.pct}%${weekly.resetsAt ? ` — resets ${weekly.resetsAt}` : ""}`);
+        return weekly.pct >= 100 ? 1 : 0;
       }
       default:
         err(USAGE);

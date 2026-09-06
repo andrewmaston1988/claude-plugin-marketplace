@@ -44,7 +44,9 @@ numbers are not on the page (§2), the decision was not made.
 **How aggressively to batch is the operator's call, not yours.** You present the numbers and a
 recommendation; the operator picks the point on the curve. The floor — everything inline, zero
 agents — is always one of the options. Under `swarm.always` (swarm skill → *Standing consent*)
-the recommendation is taken: state the numbers and the chosen point, do not ask.
+the recommendation is taken: the arithmetic is computed and recorded in the manifest's shape,
+not stated — this Iron Law keeps its force on the interactive path and stops applying where
+nobody is reading the text.
 
 ## 1. Instrument — read the onboarding cost, never estimate it
 
@@ -227,7 +229,8 @@ Present the numbers, lead with a recommendation, then let the operator choose:
 
 The two axes the question trades are **capability vs. risk** and **wall-clock vs. efficiency**.
 Name both, and always lead with a recommendation rather than a bare menu. Under `swarm.always`
-the recommendation is taken: state the numbers and the chosen point, do not ask.
+the recommendation is taken: the numbers and the chosen point are computed and recorded in the
+manifest's shape, not stated — the question is gone, not skipped.
 
 ## 10. Where this fires
 
