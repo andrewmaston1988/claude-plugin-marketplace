@@ -351,7 +351,15 @@
     shortProject = labelOf;
     const byProject = new Map();
     for (const r of runs) { const g = groupOf(r.project); if (!byProject.has(g)) byProject.set(g, []); byProject.get(g).push(r); }
-    for (const rows of byProject.values()) rows.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    // Live rows sort by startedMs (most recently dispatched on top, staying there);
+    // finished rows by mtimeMs as before. A plain mtime sort here is what floats
+    // whichever live run's engine last appended an event to the top on every poll.
+    for (const rows of byProject.values()) {
+      rows.sort((a, b) => {
+        if (a.active !== b.active) return a.active ? -1 : 1;
+        return a.active ? b.startedMs - a.startedMs : b.mtimeMs - a.mtimeMs;
+      });
+    }
     const projects = [...byProject.keys()].sort((a, b) => {
       const la = byProject.get(a).some((r) => r.active), lb = byProject.get(b).some((r) => r.active);
       if (la !== lb) return la ? -1 : 1;
