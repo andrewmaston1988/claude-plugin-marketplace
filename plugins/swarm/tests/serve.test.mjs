@@ -389,6 +389,72 @@ test("/perf.js: served as text/javascript, no-store, token-gated like everything
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+test("/live.js: served, and its body defines window.swarmLive (S1)", async () => {
+  const { home } = seedHome();
+  try {
+    await withServer({ home }, async ({ get }) => {
+      const r = await get("/live.js", { raw: true });
+      assert.equal(r.status, 200);
+      assert.match(r.body, /window\.swarmLive/);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("/live.js: token-gated — 401 without ?t= (S2)", async () => {
+  const { home } = seedHome();
+  try {
+    await withServer({ home, cfg: cfg({ token: "s3cret" }) }, async ({ get }) => {
+      assert.equal((await get("/live.js")).status, 401);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("/api/runs: carries clockMs and uiPollMs, defaulting to 1000/5000 and reflecting config (S3)", async () => {
+  const { home } = seedHome();
+  try {
+    await withServer({ home }, async ({ get }) => {
+      const r = await get("/api/runs");
+      assert.equal(r.body.clockMs, 1000);
+      assert.equal(r.body.uiPollMs, 5000);
+    });
+    await withServer({ home, cfg: cfg({ clockMs: 2000, uiPollMs: 9000 }) }, async ({ get }) => {
+      const r = await get("/api/runs");
+      assert.equal(r.body.clockMs, 2000);
+      assert.equal(r.body.uiPollMs, 9000);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("a superseded-summary run reads as live over HTTP — active on the list, finishedMs null on detail (S4)", async () => {
+  const { home } = seedHome();
+  try {
+    const d = join(home, "runs", "C--code-a", "resumed-2");
+    mkdirSync(d, { recursive: true });
+    const first = '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":1111,"tasks":[{"id":"find-a","model":"m"}]}';
+    const firstOk = '{"ts":"2026-09-05T01:01:00Z","id":"find-a","state":"ok","durationMs":60000}';
+    const second = `{"ts":"2026-09-05T01:05:30Z","event":"run-start","pid":${process.pid},"tasks":[{"id":"find-a","model":"m"}]}`;
+    writeFileSync(join(d, "run.log"), [first, firstOk, second].join("\n"), "utf8");
+    writeFileSync(join(d, "summary.json"), JSON.stringify({ started: "2026-09-05T01:00:00Z", finished: "2026-09-05T01:05:00Z", tasks: [] }), "utf8");
+    const summaryT = Date.parse("2026-09-05T01:05:00Z") / 1000;
+    utimesSync(join(d, "summary.json"), summaryT, summaryT);
+    const logT = Date.parse("2026-09-05T01:06:00Z") / 1000; // the resumed engine kept appending after the summary
+    utimesSync(join(d, "run.log"), logT, logT);
+
+    const now = Date.parse("2026-09-05T01:10:00Z");
+    await withServer({ home, now }, async ({ get }) => {
+      const list = await get("/api/runs");
+      const row = list.body.runs.find((r) => r.project === "C--code-a" && r.name === "resumed-2");
+      assert.ok(row, "the resumed run is on the list");
+      assert.equal(row.active, true);
+
+      const detail = await get("/api/runs/C--code-a/resumed-2");
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body.finishedMs, null, "readRun's payload carries no active field; finishedMs is what it has");
+      assert.equal(detail.body.active, undefined);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("perf: a model-filtered request carries the model's overall rank among every model in the domain", async () => {
   const { home } = seedHome();
   try {

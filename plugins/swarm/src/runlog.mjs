@@ -163,7 +163,8 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, recentMs 
   const manifest = readJson(join(dir, "manifest.json"));
   const { tasks, waves } = topology(logged, manifest);
   const summary = readJson(join(dir, "summary.json"));
-  const finishedMs = summary?.finished ? Date.parse(summary.finished) || null : null;
+  let finishedMs = summary?.finished ? Date.parse(summary.finished) || null : null;
+  if (summarySuperseded(finishedMs, startedMs)) finishedMs = null;
   const alive = _alive(enginePid);
   const mtimeMs = statSync(logPath).mtimeMs;
   // Aborted: the engine died (killed, crashed, machine slept) before writing a summary.
@@ -198,7 +199,14 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, recentMs 
 // line recorded the engine pid — that engine still alive. `aborted` = engine gone
 // with no summary. The pid is the LAST run-start's: a resume appends a new
 // run-start for the new engine, and the reaped one stays on line 1.
-export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _alive = engineAlive } = {}) {
+//
+// A summary.json is trusted as "finished" only past a two-stage check: a mtime
+// GATE (cheap, the common path — a summary at least as new as the log means the
+// log has not grown since it was written, so no read is needed at all), then, only
+// for a log that outgrew its summary, a COMPARISON of the engine's own timestamps
+// via summarySuperseded — never file mtimes, which a touch (restore, AV scan) can
+// bump with no new run-start behind it.
+export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _alive = engineAlive, _readFile = readFileSync } = {}) {
   const runsRoot = join(home, "runs");
   const out = [];
   let projects = [];
@@ -209,11 +217,29 @@ export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _aliv
     for (const name of runs) {
       const dir = join(runsRoot, project, name);
       const logPath = join(dir, "run.log");
-      let st;
-      try { st = statSync(logPath); } catch { continue; }
-      const mtimeMs = st.mtimeMs;
-      const finished = existsSync(join(dir, "summary.json"));
-      const alive = finished ? null : _alive(lastEnginePid(logPath, mtimeMs, st.size));
+      let logStat;
+      try { logStat = statSync(logPath); } catch { continue; }
+      const mtimeMs = logStat.mtimeMs;
+      const summaryPath = join(dir, "summary.json");
+      let summaryStat = null;
+      try { summaryStat = statSync(summaryPath); } catch { /* never finished */ }
+
+      const gatedFinished = summaryStat != null && mtimeMs <= summaryStat.mtimeMs;
+      let finished = gatedFinished;
+      let pid = null;
+      if (!gatedFinished) {
+        const started = lastRunStart(logPath, mtimeMs, logStat.size, _readFile);
+        pid = started.pid;
+        if (summaryStat) {
+          // Past the gate: the log grew after the summary was written, so a resume
+          // may have superseded it.
+          let summary = null;
+          try { summary = JSON.parse(_readFile(summaryPath, "utf8")); } catch { /* mid-write */ }
+          const finishedMs = summary?.finished ? Date.parse(summary.finished) || null : null;
+          finished = !summarySuperseded(finishedMs, started.startedMs);
+        }
+      }
+      const alive = finished ? null : _alive(pid);
       const aborted = !finished && alive === false;
       out.push({ dir, project, name, mtimeMs, active: !finished && !aborted && now - mtimeMs < recentMs, aborted });
     }
@@ -221,32 +247,50 @@ export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _aliv
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 
-// logPath -> { mtimeMs, pid }. The last run-start pid can only change when the log
-// is appended, so the mtime listRuns already stats is a sound cache key. Unbounded
-// by run count (entries are two fields); stale entries for deleted runs are inert.
-const pidCache = new Map();
+// logPath -> { mtimeMs, size, pid, startedMs }. The last run-start's pid/ts can only
+// change when the log is appended, so the mtime+size listRuns already has is a sound
+// cache key. Unbounded by run count (entries are four fields); stale entries for
+// deleted runs are inert.
+const runStartCache = new Map();
 
-// The engine pid from the LAST run-start line — the engine currently driving the
-// run. Only unfinished runs reach here (finished ones skip the liveness read), but
+// The engine pid and start ts from the LAST run-start line — the engine currently
+// driving the run, and the ts summarySuperseded compares against. Only reached past
+// the gate (an unfinished run, or one whose log outgrew its summary), but
 // "unfinished" accumulates: every aborted run that never wrote a summary stays in
 // the set forever. The dashboard polls listRuns, so an uncached read here is once
 // per tick per such run — 521 logs / 39MB on one real estate. Hence the memo; pass
 // mtimeMs to use it. A failed read is never memoised, so a transient error retries.
-function lastEnginePid(logPath, mtimeMs, size) {
-  const hit = pidCache.get(logPath);
+function lastRunStart(logPath, mtimeMs, size, readFile = readFileSync) {
+  const hit = runStartCache.get(logPath);
   // Keyed on mtime AND size: mtimeMs has millisecond resolution, so an append landing
-  // in the same tick as the cached stat would otherwise serve a stale pid — and a
-  // resume appends a run-start with a NEW pid, which is exactly the reaped-engine
+  // in the same tick as the cached stat would otherwise serve a stale entry — and a
+  // resume appends a run-start with a NEW pid/ts, which is exactly the reaped-engine
   // misjudgment 0a01433 fixed. A resume always grows the file, so size closes it.
-  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return hit.pid;
+  if (hit && hit.mtimeMs === mtimeMs && hit.size === size) return { pid: hit.pid, startedMs: hit.startedMs };
   let text;
-  try { text = readFileSync(logPath, "utf8"); } catch { return null; }
-  let pid = null;
-  const re = /"event":"run-start"[^\n]*?"pid":(\d+)/g;
-  for (let m = re.exec(text); m; m = re.exec(text)) pid = Number(m[1]);
-  // Bounded rather than pruned: entries are two numbers and are capped by run dirs the
+  try { text = readFile(logPath, "utf8"); } catch { return { pid: null, startedMs: null }; }
+  // Line-oriented, key-order independent: run.log is one JSON object per line, so
+  // the last line naming a run-start IS the last run-start, whatever order its keys
+  // are in — unlike a regex anchored on `"ts"` coming before `"event"`.
+  let last = { pid: null, startedMs: null };
+  for (const line of text.split("\n")) {
+    if (!line.includes('"event":"run-start"')) continue;
+    try {
+      const e = JSON.parse(line);
+      last = { pid: Number.isInteger(e.pid) ? e.pid : null, startedMs: Date.parse(e.ts) || null };
+    } catch { /* torn tail write mid-run */ }
+  }
+  // Bounded rather than pruned: entries are four fields and are capped by run dirs the
   // daemon has seen, but a daemon runs for weeks — clearing wholesale costs one sweep.
-  if (pidCache.size > 10_000) pidCache.clear();
-  if (mtimeMs !== undefined) pidCache.set(logPath, { mtimeMs, size, pid });
-  return pid;
+  if (runStartCache.size > 10_000) runStartCache.clear();
+  if (mtimeMs !== undefined) runStartCache.set(logPath, { mtimeMs, size, pid: last.pid, startedMs: last.startedMs });
+  return last;
+}
+
+// A summary written before the run was restarted describes a dead engine's pass,
+// not this one. Compared on the ENGINE'S OWN timestamps, never file mtimes: a touch
+// of summary.json (restore, copy, AV scan) would otherwise mark a finished run
+// superseded, permanently.
+export function summarySuperseded(summaryFinishedMs, lastRunStartMs) {
+  return summaryFinishedMs != null && lastRunStartMs != null && lastRunStartMs > summaryFinishedMs;
 }

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Claude Code statusline: the live swarm fleet, read from run dirs on disk.
 //
-// The harness renders whatever this prints as its status bar. Zero model cost:
-// file stats only. A run is LIVE when it has no summary.json / digest.md and its
-// run.log moved within the freshness window; a leaf is done when
-// results/<id>.json exists, running when only <id>.log does.
+// The harness renders whatever this prints as its status bar. A run is LIVE
+// when its run.log moved within the freshness window and readRun (the same
+// parser the dashboard uses) says it has no digest and no unsuperseded
+// summary; per-leaf state comes from run.tasks, not from results/ presence.
 //
 // Only runs THIS session launched are shown: the engine stamps the launching
 // CLAUDE_CODE_SESSION_ID as `launcher` on its run-start event, matched against
@@ -19,6 +19,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { tokenTotal } from "../src/stream.mjs";
 import { formatTokens } from "../src/results.mjs";
+import { readRun } from "../src/runlog.mjs";
 
 const FRESH_MS = 6 * 3600 * 1000;   // a run.log older than this is abandoned, not live
 const QUIET_FLAG_MS = 5 * 60 * 1000; // flag leaves silent longer than this
@@ -65,35 +66,24 @@ export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), s
     for (const run of listDir(join(runsRoot, cwdDir))) {
       const rd = join(runsRoot, cwdDir, run);
       const logM = mtime(join(rd, "run.log"));
-      // summary.json marks the run finished by any route — digested, failed at
-      // setup, blocked — so a corpse with a fresh run.log is not live.
-      if (existsSync(join(rd, "summary.json")) || existsSync(join(rd, "digest.md")) || logM === null) continue;
+      if (logM === null) continue;
       if (now - logM > FRESH_MS) continue;
-      let total = 0;
-      const model = new Map();
-      try {
-        const tasks = JSON.parse(readFileSync(join(rd, "manifest.json"), "utf8")).tasks;
-        total = tasks.length;
-        for (const t of tasks) model.set(t.id, String(t.model || "").replace(/:cloud$/, ""));
-      } catch { /* no manifest yet */ }
-      const res = join(rd, "results");
+      // Gate (same shape as listRuns' mtime gate): run.log has not grown since
+      // summary.json was written, so the run is finished — skip, no read.
+      const summaryM = mtime(join(rd, "summary.json"));
+      if (summaryM !== null && logM <= summaryM) continue;
+      const rr = readRun(rd, { now });
+      if (!rr || rr.finishedMs != null || rr.digestPath) continue;
+      const running = rr.tasks.filter((t) => t.state === "running" || t.state === "retrying").map((t) => t.id);
       let ok = 0, failed = 0, quiet = 0;
-      const running = [];
-      for (const f of listDir(res)) {
-        if (f.startsWith("__")) continue;
-        if (f.endsWith(".json")) {
-          // a result file is written for failures too; only ok:true counts
-          let r = null;
-          try { r = JSON.parse(readFileSync(join(res, f), "utf8")); } catch { /* mid-write */ }
-          if (r && r.ok === false) failed++; else ok++;
-        } else if (f.endsWith(".log")) {
-          const leaf = f.slice(0, -4);
-          if (!existsSync(join(res, leaf + ".json"))) {
-            running.push(leaf);
-            quiet = Math.max(quiet, now - (mtime(join(res, f)) ?? now));
-          }
-        }
+      const model = new Map();
+      for (const t of rr.tasks) {
+        model.set(t.id, String(t.model || "").replace(/:cloud$/, ""));
+        if (t.state === "ok" || t.state === "skipped") ok++;
+        else if (t.state === "failed" || t.state === "failed:timeout" || t.state === "blocked") failed++;
+        if ((t.state === "running" || t.state === "retrying") && t.quietMs != null) quiet = Math.max(quiet, t.quietMs);
       }
+      const total = rr.tasks.length;
       const { tokens, launcher } = runMeta(join(rd, "run.log"));
       out.push({ run, ok, failed, total, running, quiet, model, tokens, mine: mine(cwdDir, launcher) });
     }
