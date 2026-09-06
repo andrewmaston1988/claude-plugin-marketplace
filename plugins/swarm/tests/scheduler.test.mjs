@@ -2551,6 +2551,7 @@ test("spawn env marks the child as a swarm leaf, whatever the model or provider 
   try {
     const spawn = fakeSpawnFactory(() => ({ output: "ok" }));
     const io = makeIo(spawn);
+    io.env.SWARM_LEAF = "0"; // a caller claiming leaf-ness with the wrong value must lose to the engine
     // One Claude-tier leaf and one :cloud leaf. There is a single spawn site
     // (runTask), so this also covers `launch` mode — buildDispatch varies argv,
     // never the env merge.

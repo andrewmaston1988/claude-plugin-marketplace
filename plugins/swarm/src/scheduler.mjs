@@ -226,8 +226,9 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
         // SWARM_LEAF is the one marker a hook can trust to mean "this IS a leaf".
         // Unlike CORRELATION_ID it never yields to a caller's value: a parent's
         // correlation id legitimately flows through, but a parent claiming to be a
-        // leaf would arm foreground-guard's deny in an interactive session.
-        env: { ...(io.env || process.env), SWARM_LEAF: "1", CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`, ...env },
+        // leaf would arm foreground-guard's deny in an interactive session. It is
+        // spread LAST so neither the inherited env nor a dispatch env can unset it.
+        env: { ...(io.env || process.env), CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`, ...env, SWARM_LEAF: "1" },
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
