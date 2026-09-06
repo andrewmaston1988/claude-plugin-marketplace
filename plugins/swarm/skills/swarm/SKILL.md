@@ -247,9 +247,21 @@ a second manifest is almost never needed. Invoke it before drafting, alongside
 | Investigation | Read-only tools (the default), closed question, ≤10-bullet return contract |
 | Review | Prompt demands a JSON verdict; engine stores raw + parsed |
 | Generation | `outputDir`; no isolation field needed |
-| Implementation | `isolation: "worktree"` — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary |
+| Implementation | `isolation: "worktree"` — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the two required lines below |
 
 Write-capable tools (Edit/Write/Bash) without `isolation: "worktree"` get the leaf's cwd auto-redirected to a scratch dir — a leaf never writes in the real tree unless explicitly worktree-isolated.
+
+### Two lines every Bash-running leaf's prompt carries, verbatim
+
+A leaf that runs a suite, a build, or anything else measured in minutes gets both, in addition to its task:
+
+> Never call Bash with `run_in_background`, and never end your turn waiting for a background task. You are a headless session: there is no next turn, the notification never arrives, and your work is lost. For a command that takes minutes, pass `timeout: 600000` on the Bash call and wait for it.
+
+> Write files and commit as you go rather than holding everything to one long final turn.
+
+**Why the first line, when a hook exists.** `hooks/foreground-guard.mjs` denies an explicit `run_in_background` inside a leaf, but it cannot see the other route: a *foreground* call that exceeds its timeout is auto-backgrounded by the harness, with no `run_in_background` field for any hook to deny. The prompt is the only thing that closes that path — which is why the line names the 600000 ms ceiling rather than just forbidding backgrounding.
+
+**Why the second.** Six leaves died this way on 2026-09-01 and four more on 2026-09-06, each reporting `ok` with a dirty tree and nothing committed. Commit-as-you-go is what made the second batch recoverable rather than lost.
 
 ## Verification loop — multi-run composition
 

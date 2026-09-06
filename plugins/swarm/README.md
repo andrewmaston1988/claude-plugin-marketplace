@@ -22,6 +22,7 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Parallel fan-out — concurrency caps, dependency ordering, pipelining | ✅ | ✅ |
 | Per-agent model + effort selection | ✅ | ✅ |
 | Worktree isolation for write-capable agents | ✅ | ✅ |
+| Leaves run foreground-only — a headless session that yields its turn is over, so `run_in_background` is denied inside a leaf | ✅ `hooks/foreground-guard.mjs` | — |
 | Full headless Claude Code agents — complete tool roster | ✅ | ✅ |
 | Deterministic mid-run steps — fan out over a discovered list, gate, dedupe/count | ✅ `forEach`/`when`/`compute` | ✅ full JS |
 | Schema-validated output — corrective retry on mismatch | ✅ `returns` | ✅ `agent({schema})` |

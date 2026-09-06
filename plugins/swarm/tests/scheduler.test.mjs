@@ -2545,3 +2545,23 @@ test("IS3: integrate's missing-ref throw still fires for a ref absent for a reas
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("spawn env marks the child as a swarm leaf, whatever the model or provider mode", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "ok" }));
+    const io = makeIo(spawn);
+    // One Claude-tier leaf and one :cloud leaf. There is a single spawn site
+    // (runTask), so this also covers `launch` mode — buildDispatch varies argv,
+    // never the env merge.
+    const p = plan(dir, [task("claude-leaf", { model: "haiku" }), task("cloud-leaf", { model: "glm-5.3:cloud" })]);
+    await runPlan(p, { ...CFG, provider: { ...CFG.provider, allowedRoots: [dir] } }, io);
+    equal(spawn.calls.length, 2);
+    for (const c of spawn.calls) {
+      equal(c.opts.env.SWARM_LEAF, "1", `${c.args.join(" ")} must carry the leaf marker`);
+    }
+    // The marker is NOT the correlation id: that one yields to a caller's value,
+    // this one must always be set or the guard silently stops firing.
+    ok(spawn.calls.every((c) => c.opts.env.CORRELATION_ID));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
