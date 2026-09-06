@@ -75,6 +75,27 @@ test("runEnded/shouldPoll: each terminal field on its own, a run not yet fetched
   assert.equal(shouldPoll({ name: "runs" }, null, 0), true, "the estate view has no single run to end");
 });
 
+test("projectOrder: live projects rank by newest live startedMs, not mtime; finished-only projects trail, by mtime (L8)", () => {
+  const { projectOrder } = loadLive();
+  // p-old-mtime's live row started LATER than p-new-mtime's, but its mtime is older —
+  // must still lead, or the group order flaps on whichever engine last wrote an event.
+  const byProject = new Map([
+    ["p-new-mtime", [{ active: true, startedMs: 1000, mtimeMs: 9000 }]],
+    ["p-old-mtime", [{ active: true, startedMs: 2000, mtimeMs: 1000 }]],
+    ["p-finished-recent-mtime", [{ active: false, startedMs: 500, mtimeMs: 8000 }]],
+  ]);
+  // Array.from: projectOrder's array is built in live.js's vm realm, whose Array.prototype
+  // differs from this file's — deepEqual treats that as "not reference-equal" even with
+  // identical contents; normalize into the host realm before comparing.
+  assert.deepEqual(Array.from(projectOrder(byProject)), ["p-old-mtime", "p-new-mtime", "p-finished-recent-mtime"]);
+
+  const finishedOnly = new Map([
+    ["p-a", [{ active: false, mtimeMs: 1000 }]],
+    ["p-b", [{ active: false, mtimeMs: 2000 }]],
+  ]);
+  assert.deepEqual(Array.from(projectOrder(finishedOnly)), ["p-b", "p-a"]);
+});
+
 test("loadScript: resolves on load, rejects on error rather than swallowing it (L7)", async () => {
   // Pins the contract page.html's own bootstrap loader must satisfy — it cannot
   // depend on this copy for loading live.js itself (chicken-and-egg), but the
