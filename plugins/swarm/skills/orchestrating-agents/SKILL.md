@@ -98,8 +98,8 @@ as consent information — this block does not restate it.
 
 ## 3. Waves before batching — a different question, asked first
 
-Batching asks *which items share one agent*. Waving asks *which items may run at the same
-time at all*. Run the waving question **first**: it partitions the item set, and batching
+Grouping asks *which items share one agent*. Waving asks *which items may run at the same
+time at all*. Run the waving question **first**: it partitions the item set, and grouping
 then applies inside each partition. Merging across a dependency boundary is not a cheaper
 agent, it is a wrong one.
 
@@ -119,7 +119,7 @@ agent, it is a wrong one.
    whether the set is one long chain or several short chains converging — same edge count,
    completely different wave count. Six lines of ASCII, beside the arithmetic.
 5. **Cut waves along the ordering edges only**, then partition each wave again by model pin
-   (§4), then apply the batching arithmetic inside each partition. **The wave count is the
+   (§4), then apply the grouping arithmetic inside each partition. **The wave count is the
    longest chain, not the item count** — everything off that chain runs alongside it.
 6. **Name what each wave hands the next.** That hand-off (`[SHARED_CONTEXT]`) is the
    session's judgement step, and is why the waves are separate manifests.
@@ -186,7 +186,7 @@ a merge does not produce a slower agent, it produces a failed one with its last 
 unstarted.
 
 **Sizing the timeout is part of the arithmetic, not a manifest afterthought.** Three rules
-make deep batching survivable:
+make deep grouping survivable:
 
 - **Per-leaf, so sized per-leaf.** The default is **45 minutes per collapsed item** —
   `items × 45m + headroom`. A flat value copied across a manifest is sized for the
@@ -249,7 +249,7 @@ the manifest's shape, not stated — the question is gone, not skipped.
 ## 10. Where this fires
 
 Any fan-out, whatever dispatches it — the moment you are about to split a set of items across
-parallel agents. In this plugin it is the offer gate's batching question; wherever else a
+parallel agents. In this plugin it is the offer gate's grouping question; wherever else a
 consuming instruction points here, the same arithmetic runs first.
 
 ## 11. Rejected: a hook — recorded so it is not "fixed" later

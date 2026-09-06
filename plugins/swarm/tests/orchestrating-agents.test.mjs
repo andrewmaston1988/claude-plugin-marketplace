@@ -248,7 +248,7 @@ test("T16 — nothing under skills/ names onboarding-cost", () => {
 
 // ---- T17: no surviving "a merge saves an onboarding" reasoning ----
 
-const SAVES_ONBOARDING_RE = /sav(e|es|ed|ing)\s+(an|one)\s+(entire\s+|whole\s+|exactly\s+one\s+)?onboarding/i;
+const SAVES_ONBOARDING_RE = /sav(e|es|ed|ing)\s+(exactly\s+)?(an|one)\s+(entire\s+|whole\s+)?onboarding/i;
 const ONBOARDING_ARITHMETIC_RE = /onboarding\s+arithmetic/i;
 
 test("T17 — the two grouping skills carry no onboarding-saving phrasing or 'onboarding arithmetic'", () => {
