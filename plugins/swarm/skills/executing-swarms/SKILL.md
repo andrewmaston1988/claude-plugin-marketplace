@@ -39,13 +39,13 @@ build. You never choose a shape and fill it in.
 
 ## 1. Grouping — invoke `swarm:orchestrating-agents` first
 
-**Not optional, and not summarisable here.** That skill owns the onboarding arithmetic: a
-fan-out's dominant fixed cost is onboarding (system prompt, rule files, project instructions,
-tool schemas), re-paid at full rate by every agent with no cache credit across them, so
-**every merge of two items into one leaf saves an entire onboarding.**
+**Not optional, and not summarisable here.** That skill owns the three levers that decide
+grouping: wall-clock (the longest dependency path), blast radius (the largest single agent's
+items), and shared reading surface (the precondition for any merge).
 
-It produces the number the offer gate's third question carries. Drafting a leaf-per-item
-manifest without it is precisely the failure it was written to catch.
+It produces the wall-clock and blast figures the offer gate's third question carries.
+Drafting a leaf-per-item manifest without it is precisely the failure it was written to
+catch.
 
 ## 2. Frame the contract — before the manifest, not after
 

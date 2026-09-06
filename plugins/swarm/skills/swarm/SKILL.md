@@ -59,7 +59,7 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 
 ## MANDATORY first step — the offer gate
 
-**`swarm.always` is set → dispatch.** Invoke `swarm:orchestrating-agents` and `swarm:executing-swarms` and READ them — that reasoning is what makes the manifest defensible and is not optional. Then `models`, author, `validate`, dispatch. Emit nothing: no arithmetic block, no gate statement, no caveat paragraph. Ask nothing: the offer gate, the adversarial-review election, and every other call this discipline already settles are ANSWERED — presenting one back for approval is the defect. Everything a gate would have shown — leaf count, models, tokens, states — is already on the run's live frames, in `status`, and on the dashboard, after dispatch, where it costs nothing to ignore. The resume carve-out and the "no session-level directive is consent" rule below still bind.
+**`swarm.always` is set → dispatch.** Invoke `swarm:orchestrating-agents` and `swarm:executing-swarms` and READ them — that reasoning is what makes the manifest defensible and is not optional. Then `models`, author, `validate`, dispatch. Emit nothing: no grouping block, no gate statement, no caveat paragraph. Ask nothing: the offer gate, the adversarial-review election, and every other call this discipline already settles are ANSWERED — presenting one back for approval is the defect. Everything a gate would have shown — leaf count, models, tokens, states — is already on the run's live frames, in `status`, and on the dashboard, after dispatch, where it costs nothing to ignore. The resume carve-out and the "no session-level directive is consent" rule below still bind.
 
 **`swarm.always` is not set → the full gate, below.**
 
@@ -76,8 +76,8 @@ Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), dra
    > Options: **As drafted** / **Alternative-only — no Anthropic usage** / **Anthropic-only**.
    > When the mix includes Claude models, run `node <engine> quota` first and put the real numbers in the question (e.g. "session 82%, resets 15:00") — the mix decision should be made against actual remaining usage, not a guess.
    > When no `:cloud` model is launchable — `provider.allowedRoots` empty, the manifest's cwd outside every root, or discovery returning none — the mix is Anthropic-only by construction: state that in one line and do not ask it.
-3. > "Batching — <M> leaves as proposed, or a different point on the curve?"
-   > Options and numbers come from `swarm:orchestrating-agents`; do not re-derive them here.
+3. > "Grouping — <M> agents, long pole <k> × 45m, largest agent <b> items — as proposed, wider, or narrower?"
+   > The wall-clock and blast-radius numbers come from `swarm:orchestrating-agents`; do not re-derive them here.
 
 Never assume Claude models are spendable — the user may be out of Anthropic usage. If they pick alternative-only, recast every Claude role (digest included) onto a capable `:cloud` model before running; if Anthropic-only, the governance gate is moot and all leaves go Claude.
 

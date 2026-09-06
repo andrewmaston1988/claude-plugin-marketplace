@@ -29,7 +29,7 @@ export function standingBlock(mode) {
     'Standing mode is ON (swarm.always): the swarm skill is PRE-AUTHORISED. RUN IT.',
     'Invoke Skill(swarm); read orchestrating-agents and executing-swarms — that reasoning',
     'is what makes the manifest defensible. Then models, author, validate, dispatch.',
-    'Emit none of it: no arithmetic block, no gate statement, no caveat paragraph.',
+    'Emit none of it: no grouping block, no gate statement, no caveat paragraph.',
     'Ask none of it: the offer gate, adversarial review, and every other settled call are',
     'ANSWERED — presenting one back for approval is the defect.',
     'Solo only on conversational turns, a single bounded question, or a trivial edit.',
