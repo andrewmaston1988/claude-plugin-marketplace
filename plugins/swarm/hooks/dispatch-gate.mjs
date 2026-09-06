@@ -39,7 +39,11 @@ export function shapeMarkerPath(sessionId, home = SWARM_HOME) {
 }
 
 // `swarm.mjs run` — path may be quoted, either slash style, with flags after.
-const DISPATCH_RE = /swarm\.mjs["']?\s+run\b/;
+// Anchored on command position: the `node`/`node.exe` invocation must itself be
+// the command word — at the start, or right after `;`, `&&`, `||`, `|`, or `(` —
+// so the phrase quoted inside a `gh pr create --body` or `git commit -m` argument
+// (observed 2026-09-06) does not read as a dispatch.
+const DISPATCH_RE = /(?:^|;|&&|\|\||\||\()\s*(?:nohup\s+)?node(?:\.exe)?\s+["']?[^"'\s]*swarm\.mjs["']?\s+run\b/;
 
 // Shell decorations that steal the stream from the operator.
 const PIPE_RE = /\|/;

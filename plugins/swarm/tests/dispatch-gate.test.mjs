@@ -107,6 +107,29 @@ test("gate BLOCKS naming both grouping skills when both markers are missing", ()
   ok(/swarm:executing-swarms/.test(r.reason), r.reason);
 });
 
+// The phrase can appear anywhere in a Bash command that just happens to quote it —
+// a PR body, a commit message — without that being a dispatch. The gate must key on
+// the engine path being the command word, not on the phrase appearing anywhere.
+test("gate does NOT fire on the phrase embedded in an unrelated quoted argument", () => {
+  const bodyCmd = 'gh pr create --body "Tested: node swarm.mjs run manifest.json passed locally"';
+  const commitCmd = 'git commit -m "Fix: previously node swarm.mjs run bypassed the gate"';
+  equal(gateDispatch({ command: bodyCmd, runInBackground: true, markerExists: false }).block, false, bodyCmd);
+  equal(gateDispatch({ command: commitCmd, runInBackground: true, markerExists: false }).block, false, commitCmd);
+});
+
+// A real dispatch is still caught wherever it sits as the command word — at the
+// start, or after a separator.
+test("gate still fires when the engine path is the command word, at start or after a separator", () => {
+  const cases = [
+    "node C:/x/swarm.mjs run m.json",
+    "cd repo && node ./swarm.mjs run m.json",
+    "echo x; node swarm.mjs run m.json",
+  ];
+  for (const command of cases) {
+    equal(gateDispatch({ command, runInBackground: true, markerExists: false }).block, true, command);
+  }
+});
+
 // The path may be quoted, use either slash, or carry flags — the gate keys on the
 // engine + subcommand, not on a literal string.
 test("gate recognises the dispatch across quoting, slashes, and flags", () => {
