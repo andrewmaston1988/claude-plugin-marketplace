@@ -18,7 +18,7 @@ reading surface, not by how the plan happens to read.
 
 The question is inverted from how it looks at first glance. It is not "how many agents, and
 which items share one" — that is a compression question, and every answer to it merges. It
-is "how does this plan split" — the default is one agent per lane from §3a's partition of
+is "how does this plan split" — the default is one agent per lane from §2's partition of
 disjoint files; a merge is the exception, and it needs a shared reading surface (§5) to
 justify it.
 
@@ -41,11 +41,11 @@ NO FAN-OUT WITHOUT WALL-CLOCK, BLAST AND SURFACE IN VISIBLE TEXT FIRST
 **Violating the letter of this rule is violating the spirit of the rule.**
 
 Eyeballed the leaf count? Noted the numbers in thinking? That is not the arithmetic. If the
-three legs are not on the page (§2), the decision was not made.
+three legs are not on the page (§2a), the decision was not made.
 
 **No exceptions:**
 - Not "the plan already decomposed it" — decomposition is how the work reads, not how it
-  groups (§3a partitions it by files).
+  groups (§2 partitions it by files).
 - Not "it's obviously N leaves" — obvious is exactly what the arithmetic is cheap enough to
   prove.
 - Not "I'll note it in thinking" — thinking is not visible text.
@@ -57,7 +57,24 @@ the recommendation is taken: the arithmetic is computed and recorded in the mani
 not stated — this Iron Law keeps its force on the interactive path and stops applying where
 nobody is reading the text.
 
-## 2. The arithmetic — before the manifest
+## 2. Decompose before you group — divide and conquer is an instruction, not a hope
+
+Planning is outside this plugin's surface: a plan arrives as a numbered list, and a numbered
+list reads as a chain. Before the arithmetic block (§2a), this step is mandatory:
+
+1. **Read the plan's file set** — its Files Changed table, or the files its steps name.
+2. **Partition it into lanes by disjoint files.** A lane is a set of files no other lane
+   touches.
+3. **Order lanes only by real data dependencies** — a lane that reads what another lane
+   produces — never by step number. The plan's numbering is narrative, not a dependency
+   graph.
+4. **Every lane with no such dependency is a parallel agent.**
+
+A plan written as a chain is not a chain until its files say so. The block's `wall-clock:`
+(longest dependency path) and `blast:` (largest lane) are read off this partition, not off
+the plan's step count.
+
+## 2a. The arithmetic — before the manifest
 
 Write this block in visible text, filled in, before drafting anything:
 
@@ -67,6 +84,9 @@ blast:      largest single agent <b> items                = re-dispatched if it 
 axis:       merged on <shared reading surface | shared-file collision | model pin>
 timeout:    per leaf, that leaf's items × 45m + headroom
 ```
+
+Fill it from the lane partition, not the plan's step list: wall-clock is the longest
+dependency path across lanes, blast the largest lane.
 
 Three different objects, three different numbers: in a four-link chain, wall-clock is
 `4 × 45m`, blast is `1`, timeout is `45m + headroom` per leaf. `blast:` counts the agent's
@@ -110,23 +130,6 @@ check which kind it is: a conflict edge can be a wave cut; a silent-loss edge sh
 merge.
 
 *Evidence: a 14-item release's true critical path was five waves — but only after two wrong drafts, one inventing an edge no header asserted, the other missing one a later shared-file constraint created. Step 2 is a standing re-derivation for exactly that reason.*
-
-## 3a. Decompose before you group — divide and conquer is an instruction, not a hope
-
-Planning is outside this plugin's surface: a plan arrives as a numbered list, and a numbered
-list reads as a chain. Before the arithmetic block (§2), this step is mandatory:
-
-1. **Read the plan's file set** — its Files Changed table, or the files its steps name.
-2. **Partition it into lanes by disjoint files.** A lane is a set of files no other lane
-   touches.
-3. **Order lanes only by real data dependencies** — a lane that reads what another lane
-   produces — never by step number. The plan's numbering is narrative, not a dependency
-   graph.
-4. **Every lane with no such dependency is a parallel agent.**
-
-A plan written as a chain is not a chain until its files say so. The block's `wall-clock:`
-(longest dependency path) and `blast:` (largest lane) are read off this partition, not off
-the plan's step count.
 
 ## 4. Tier partitions inside a wave — a leaf carries one pin
 
@@ -260,9 +263,9 @@ replace this with a hook.
 
 | Excuse | Reality |
 |--------|---------|
-| "The plan lists steps 1-7, so one leaf does 1-7" | The steps are narrative. Partition by files (§3a); order only by real data dependencies. |
+| "The plan lists steps 1-7, so one leaf does 1-7" | The steps are narrative. Partition by files (§2); order only by real data dependencies. |
 | "These steps depend on each other" | Only if a later one reads what an earlier one writes. A shared file is a collision (merge or sequence); a shared *topic* is nothing. |
-| "The plan already decomposed it, so the leaf count is decided" | A plan's decomposition is how the work reads, not how it groups. Partition by files (§3a) and run the arithmetic. |
+| "The plan already decomposed it, so the leaf count is decided" | A plan's decomposition is how the work reads, not how it groups. Partition by files (§2) and run the arithmetic. |
 | "These items read different subsystems, merging saves nothing anyway" | Wrong direction — merging unrelated items saves nothing measurable and costs the run its parallelism and containment. Shared surface is the precondition (§5), not a bonus. |
 | "Batching risks a bigger blast radius, so keep them separate" | Not yours to pre-decide in either direction: the recommendation is one agent per lane, merged only on shared surface (§5); narrowing past that is the operator's Deep. |
 | "I'll just note the numbers in thinking" | The arithmetic must be *visible text*. Numbers not on the page mean the decision was not made. |
@@ -275,7 +278,7 @@ replace this with a hook.
 ## Red Flags - STOP
 
 - "I'll eyeball the leaf count / note it in thinking" — the arithmetic is visible text.
-- "The plan already decided the grouping" — the plan decomposed by steps; §3a decomposes by
+- "The plan already decided the grouping" — the plan decomposed by steps; §2 decomposes by
   files, and that decides the grouping.
 - "These share a topic, so they share a surface" — a topic is not a file. Merging without a
   named shared file or dependency is inventing an edge.

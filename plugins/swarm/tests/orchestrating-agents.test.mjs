@@ -52,11 +52,11 @@ function allSkillFiles(dir) {
   return out;
 }
 
-// Slice a `## <prefix>`-level section (heading line through the line before the
-// next `## ` heading) by prefix match, for numbered sub-sections like "## 3a".
-function sectionByPrefix(content, prefix) {
+// Slice a `## `-level section whose heading CONTAINS text, regardless of its
+// leading number — for a section the skill is free to renumber (T18).
+function sectionByHeadingContains(content, text) {
   const lines = content.split("\n");
-  const start = lines.findIndex((l) => l.trim().startsWith(prefix));
+  const start = lines.findIndex((l) => /^## /.test(l) && l.includes(text));
   if (start === -1) return "";
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
@@ -261,13 +261,14 @@ test("T17 — the two grouping skills carry no onboarding-saving phrasing or 'on
   }
 });
 
-// ---- T18: §3a decompose-by-files step is on the page ----
+// ---- T18: the decompose-by-files step is on the page, wherever it's numbered ----
 
-test("T18 — §3a exists and states partition / disjoint files / step number", () => {
+test("T18 — decompose section exists and states partition / disjoint files / step number / mandatory", () => {
   const content = read(NEW_SKILL);
-  const section = sectionByPrefix(content, "## 3a");
-  ok(section.length > 0, "§3a section present");
+  const section = sectionByHeadingContains(content, "Decompose before you group");
+  ok(section.length > 0, "decompose section present");
   ok(section.includes("partition"), "mentions partition");
   ok(section.includes("disjoint files"), "mentions disjoint files");
   ok(section.includes("step number"), "mentions step number");
+  ok(/mandatory/i.test(section), "states the step is mandatory");
 });
