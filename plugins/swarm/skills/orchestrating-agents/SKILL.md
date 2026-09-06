@@ -260,7 +260,7 @@ replace this with a hook.
 | "These steps depend on each other" | Only if a later one reads what an earlier one writes. A shared file is a collision (merge or sequence); a shared *topic* is nothing. |
 | "The plan already decomposed it, so the leaf count is decided" | A plan's decomposition is how the work reads, not how it groups. Partition by files (§3a) and run the arithmetic. |
 | "These items read different subsystems, merging saves nothing anyway" | Wrong direction — merging unrelated items saves nothing measurable and costs the run its parallelism and containment. Shared surface is the precondition (§5), not a bonus. |
-| "Batching risks a bigger blast radius, so keep them separate" | That trade is the operator's, presented at the gate — not yours to pre-decide by staying wide. |
+| "Batching risks a bigger blast radius, so keep them separate" | Not yours to pre-decide in either direction: the recommendation is one agent per lane, merged only on shared surface (§5); narrowing past that is the operator's Deep. |
 | "I'll just note the numbers in thinking" | The arithmetic must be *visible text*. Numbers not on the page mean the decision was not made. |
 | "These two can't run concurrently, so they need separate waves" | Only an *ordering* edge cuts a wave. A *collision* edge merges — they serialise in one agent and the constraint dissolves. |
 | "The timeout is a manifest field, I'll set it when I write the JSON" | It is a row in the arithmetic, sized per-leaf from the depth just proposed, decided before the manifest. |
