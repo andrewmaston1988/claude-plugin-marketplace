@@ -28,7 +28,7 @@ const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch", "from"]);
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
-  "returns", "verifyCitations", "manifest", "integrate",
+  "returns", "verifyCitations", "manifest", "integrate", "settings",
 ]);
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
@@ -261,6 +261,10 @@ function validateTaskShapes(rawTasks, errors, label) {
     }
     if (t.timeoutMs !== undefined && (!Number.isInteger(t.timeoutMs) || t.timeoutMs < 1)) {
       errors.push(`${l}: timeoutMs must be a positive integer`);
+    }
+    // Goes red on a string/array/null: `--settings` takes a JSON object and anything else would reach the CLI as a file path that does not exist.
+    if (t.settings !== undefined && (!t.settings || typeof t.settings !== "object" || Array.isArray(t.settings))) {
+      errors.push(`${l}: settings must be a JSON object — e.g. "settings": {"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}}`);
     }
   }
 }
@@ -697,6 +701,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ...forEachBlock,
       ...(!isCompute && !isManifest && t.returns && typeof t.returns === "object" && !Array.isArray(t.returns) && { returns: t.returns }),
       ...(typeof t.verifyCitations === "boolean" && { verifyCitations: t.verifyCitations }),
+      ...(!isCompute && !isManifest && !isIntegrate && t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && { settings: t.settings }),
       ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),
     };
   });

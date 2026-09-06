@@ -86,6 +86,18 @@ test("launch mode applies only to non-Claude models", () => {
   deepEqual(d.env, {});
 });
 
+test("task.settings adds --settings <json> right after --allowedTools", () => {
+  const d = buildDispatch(task({ model: "sonnet", settings: { env: { X: "0" } } }), "p", CFG);
+  const i = d.argv.indexOf("--allowedTools");
+  deepEqual(d.argv.slice(i, i + 4), ["--allowedTools", "Read,Grep,Glob", "--settings", '{"env":{"X":"0"}}']);
+});
+
+test("no settings key: exact argv, no --settings", () => {
+  const d = buildDispatch(task(), "p", CFG);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "haiku", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  ok(!d.argv.includes("--settings"));
+});
+
 test("cfg.claudePath overrides the executable", () => {
   const d = buildDispatch(task(), "p", { ...CFG, claudePath: "X:/bin/claude.exe" });
   equal(d.argv[0], "X:/bin/claude.exe");

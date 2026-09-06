@@ -23,6 +23,10 @@ export function buildDispatch(task, prompt, cfg) {
     "--model", task.model,
     ...(task.effort ? ["--effort", task.effort] : []),
     "--allowedTools", task.allowedTools,
+    // A shell env var LOSES to the user's settings.json env block, and Claude Code
+    // has no [1m] model alias — --settings is highest-precedence in the CLI's
+    // settings chain, so it's the only route that overrides that block per-leaf.
+    ...(task.settings ? ["--settings", JSON.stringify(task.settings)] : []),
     // interrogation path: continue an existing leaf session (`swarm ask`)
     ...(task.resume ? ["--resume", task.resume] : []),
     "--output-format", "stream-json", "--verbose",
