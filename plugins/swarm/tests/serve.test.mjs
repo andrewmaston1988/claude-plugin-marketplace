@@ -473,3 +473,94 @@ test("perf: a model-filtered request carries the model's overall rank among ever
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+// ---------------------------------------------------------------------------
+// A resumed run. Two run-start lines; readRunLog clears per-leaf state on each,
+// so everything after the SECOND is the current attempt. Every leaf here has a
+// result file on disk written during the first attempt — the whole point is that
+// its presence says nothing about which attempt produced it.
+const RESUMED_LOG = [
+  '{"ts":"2026-09-05T00:50:00Z","event":"run-start","pid":null,"tasks":[{"id":"stale","model":"m"},{"id":"cached","model":"m"},{"id":"settled","model":"m"},{"id":"silent","model":"m"}]}',
+  '{"ts":"2026-09-05T00:51:00Z","id":"stale","state":"failed","durationMs":1000}',
+  '{"ts":"2026-09-05T00:51:00Z","id":"cached","state":"ok","durationMs":1000}',
+  '{"ts":"2026-09-05T00:51:00Z","id":"settled","state":"ok","durationMs":1000}',
+  '{"ts":"2026-09-05T00:51:00Z","id":"silent","state":"ok","durationMs":1000}',
+  // --- resume: everything above is a previous attempt ---
+  '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":null,"tasks":[{"id":"stale","model":"m"},{"id":"cached","model":"m"},{"id":"settled","model":"m"},{"id":"silent","model":"m"}]}',
+  '{"ts":"2026-09-05T01:00:01Z","id":"stale","state":"running"}',
+  // `cached` is what a resume writes for a leaf it did not re-run — scheduler.mjs record(t, "skipped", …)
+  '{"ts":"2026-09-05T01:00:01Z","id":"cached","state":"skipped","durationMs":1000}',
+  '{"ts":"2026-09-05T01:00:01Z","id":"settled","state":"running"}',
+  '{"ts":"2026-09-05T01:02:00Z","id":"settled","state":"ok","durationMs":119000}',
+  // `silent` gets no event at all after the resume — readRunLog defaults it to pending
+].join("\n");
+
+const RESUMED_MANIFEST = {
+  tasks: [
+    { id: "stale", model: "m", prompt: "authored stale" },
+    { id: "cached", model: "m", prompt: "authored cached" },
+    { id: "settled", model: "m", prompt: "authored settled" },
+    { id: "silent", model: "m", prompt: "authored silent" },
+  ],
+};
+
+function seedResumed() {
+  const home = mkdtempSync(join(tmpdir(), "swarm-resumed-"));
+  const dir = join(home, "runs", "C--code-a", "resumed-1");
+  mkdirSync(join(dir, "results"), { recursive: true });
+  writeFileSync(join(dir, "run.log"), RESUMED_LOG, "utf8");
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(RESUMED_MANIFEST), "utf8");
+  // The real shape observed on disk for a leaf that died during worktree setup:
+  // no `prompt` key at all, because none was recorded before it failed.
+  writeFileSync(join(dir, "results", "stale.json"), JSON.stringify({ id: "stale", model: "m", ok: false, exit: 1, durationMs: 1000, output: "worktree setup failed: git worktree add failed" }), "utf8");
+  writeFileSync(join(dir, "results", "cached.json"), JSON.stringify({ id: "cached", model: "m", ok: true, output: "cached output", prompt: "p", tokens: { input: 1, output: 2 } }), "utf8");
+  writeFileSync(join(dir, "results", "settled.json"), JSON.stringify({ id: "settled", model: "m", ok: true, exit: 0, output: "fresh output", prompt: "p", tokens: { input: 1, output: 2 } }), "utf8");
+  writeFileSync(join(dir, "results", "silent.json"), JSON.stringify({ id: "silent", model: "m", ok: true, output: "previous attempt output", prompt: "p" }), "utf8");
+  return { home, dir };
+}
+
+test("R1/R2: an unsettled leaf's result is a previous attempt's — serve the authored prompt", async () => {
+  const { home } = seedResumed();
+  try {
+    await withServer({ home }, async ({ get }) => {
+      const r = await get("/api/runs/C--code-a/resumed-1/leaves/stale");
+      assert.equal(r.status, 200);
+      // R1 — the dead attempt must not reach the client at all
+      assert.equal(r.body.authored, true);
+      assert.equal(r.body.output, undefined, "stale output must not be served");
+      assert.equal(r.body.ok, undefined, "stale ok:false must not render a failure badge");
+      // R2 — that result carries no `prompt` key, so the prompt row can only come from the manifest
+      assert.equal(r.body.prompt, "authored stale");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("G4: a leaf with no events in the current attempt is unsettled, not finished", async () => {
+  const { home } = seedResumed();
+  try {
+    await withServer({ home }, async ({ get }) => {
+      const r = await get("/api/runs/C--code-a/resumed-1/leaves/silent");
+      assert.equal(r.body.authored, true, "readRunLog defaults an unmentioned leaf to pending");
+      assert.equal(r.body.output, undefined);
+      assert.equal(r.body.prompt, "authored silent");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("G1/G2: a settled leaf's result is served — including a resume-cached `skipped` one", async () => {
+  const { home } = seedResumed();
+  try {
+    await withServer({ home }, async ({ get }) => {
+      // G1 — settled in THIS attempt
+      const settled = await get("/api/runs/C--code-a/resumed-1/leaves/settled");
+      assert.equal(settled.body.authored, undefined);
+      assert.equal(settled.body.output, "fresh output");
+      assert.equal(settled.body.ok, true);
+      // G2 — every already-ok leaf on every resumed run takes this path; treating
+      // `skipped` as unsettled would blank the majority of a resumed run's results.
+      const cached = await get("/api/runs/C--code-a/resumed-1/leaves/cached");
+      assert.equal(cached.body.authored, undefined);
+      assert.equal(cached.body.output, "cached output");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});

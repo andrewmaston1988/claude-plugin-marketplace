@@ -25,12 +25,11 @@ import { validateValue } from "./schema.mjs";
 import { extractCitations, verifyCitations, citationErrorLines, annotateCitations } from "./citations.mjs";
 import { swarmHome } from "./config.mjs";
 import { removeCachedModel, ENTITLEMENT_RE } from "./discovery.mjs";
+import { ALIVE_STATES } from "./runlog.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const OK_STATES = new Set(["ok", "skipped"]);
-// Non-terminal, non-doomed: a leaf waiting out a backoff or model fallback.
-const ALIVE_STATES = new Set(["pending", "running", "retrying"]);
 const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 
 // Default io: real spawn (with Windows .cmd resolution), real fetch/clock,
