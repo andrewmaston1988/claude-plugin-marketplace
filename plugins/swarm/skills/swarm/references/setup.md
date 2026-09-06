@@ -122,6 +122,16 @@ pass per run. Off (the shipped default): no run asks, the tier guide routes mode
 Performance page is disabled. Worth turning on once the operator runs alternative models
 often enough for the numbers to mean something. Ask.
 
+### Stage 6b — the leaf context window (`disable1mContext`)
+
+Every Claude leaf can run at the standard 200k context window or the 1M window. Measured on
+one plan, byte-identical prompts, sonnet, list prices: the 1M window bought no quality
+difference and zero compactions but cost ~45% more ($83.39 vs $57.60) — it is a wall-clock
+lever, not a quality one. `true` (the shipped default) keeps every leaf at 200k; `false` gives
+every Claude leaf 1M by default. Either way, a task's own `settings` key always wins, so a
+manifest can opt one leaf in (or out) regardless of this default. Ask whether they want to pay
+more for fewer compactions and faster walls, or keep 200k as the default.
+
 ### Stage 7 — advanced, only on request
 
 Say once: "the remaining keys are tuning — timeouts, retries, concurrency, quota thresholds,
@@ -146,6 +156,7 @@ from the appendix. If no, close.
 | `provider.usageStaleMs` | `86400000` | How old a cached meter reading may be before `models`/`validate` treat it as unverified rather than current. |
 | `concurrency` | `4` | Ceiling on leaves alive at once (each is a full headless `claude` session). A manifest may run narrower, never wider — asking for more fails `validate`. A rate-limited leaf frees its slot while it backs off. |
 | `timeoutMs` | `3600000` | Per-leaf wall clock; past it the leaf is `timeout`, slot freed. |
+| `disable1mContext` | `true` | Stage 6b. `false` gives every Claude leaf the 1M context window by default (a wall-clock lever, ~+45% cost, same quality); a task's own `settings` always wins. |
 | `retry.rateLimited` / `retry.backoffMs` | `2` / `30000` | Retries after a rate-limit failure, exponential from the backoff; the slot frees while waiting. |
 | `retry.spawnError` | `1` | Retries when the leaf process fails to start. |
 | `resultInlineCap` | `4000` | Between leaves, during a run: when leaf B's prompt says `{{result:A}}`, the engine pastes A's output text into B's prompt before launching B — up to this many characters, then cuts (flagged on the leaf, in `run.log` and the closing block). `{{resultPath:A}}` pastes the file path instead, uncapped; verifiers must use that. Not the digest — the digest reads every result file from disk after the run. |

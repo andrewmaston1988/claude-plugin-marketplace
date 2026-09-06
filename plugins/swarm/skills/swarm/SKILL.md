@@ -215,7 +215,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 3600000,
-    "settings": {"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}},   // optional; per-leaf --settings override (beats the user settings.json env block)
+    "settings": {"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}},   // optional; per-leaf override of disable1mContext (beats the config default and the user settings.json env block)
     "after": ["scan-b"],                       // dependencies
     "forEach": { "from": "scan-b", "path": "sites", "maxItems": 30 },  // clone this leaf per array item — swarm:executing-swarms
     "when": { "from": "scan-b", "expr": "length(value) > 20" },        // run only if true; else completes as skipped

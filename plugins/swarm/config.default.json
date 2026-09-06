@@ -19,6 +19,7 @@
   },
   "concurrency": 4,
   "timeoutMs": 3600000,
+  "disable1mContext": true,
   "heartbeatSecs": 15,
   "quietWarnSecs": 60,
   "retry": {

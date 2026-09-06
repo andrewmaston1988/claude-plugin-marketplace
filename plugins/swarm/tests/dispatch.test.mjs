@@ -98,6 +98,35 @@ test("no settings key: exact argv, no --settings", () => {
   ok(!d.argv.includes("--settings"));
 });
 
+// ── disable1mContext (leaf context window) ──────────────────────────────────
+
+test("disable1mContext: false + Claude model injects --settings with the 1M env var right after --allowedTools", () => {
+  const cfg = { ...CFG, disable1mContext: false };
+  const d = buildDispatch(task({ model: "sonnet" }), "p", cfg);
+  const i = d.argv.indexOf("--allowedTools");
+  deepEqual(d.argv.slice(i, i + 4), ["--allowedTools", "Read,Grep,Glob", "--settings", '{"env":{"CLAUDE_CODE_DISABLE_1M_CONTEXT":"0"}}']);
+});
+
+test("disable1mContext: true + no task settings → no --settings (byte-identical to the shipped-default argv)", () => {
+  const cfg = { ...CFG, disable1mContext: true };
+  const d = buildDispatch(task({ model: "sonnet" }), "p", cfg);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "sonnet", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  ok(!d.argv.includes("--settings"));
+});
+
+test("task settings.env.CLAUDE_CODE_DISABLE_1M_CONTEXT wins over the config default; other task settings keys survive the merge", () => {
+  const cfg = { ...CFG, disable1mContext: false };
+  const d = buildDispatch(task({ model: "sonnet", settings: { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "1", OTHER: "x" } } }), "p", cfg);
+  const i = d.argv.indexOf("--settings");
+  deepEqual(JSON.parse(d.argv[i + 1]), { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "1", OTHER: "x" } });
+});
+
+test("disable1mContext: false on a non-Claude model injects nothing", () => {
+  const cfg = { ...CFG, disable1mContext: false };
+  const d = buildDispatch(task({ model: "minimax-m3:cloud" }), "p", cfg);
+  ok(!d.argv.includes("--settings"));
+});
+
 test("cfg.claudePath overrides the executable", () => {
   const d = buildDispatch(task(), "p", { ...CFG, claudePath: "X:/bin/claude.exe" });
   equal(d.argv[0], "X:/bin/claude.exe");
