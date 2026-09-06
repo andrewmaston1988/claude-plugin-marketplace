@@ -49,29 +49,32 @@ test("the hook never probes and reads no models cache — the block carries no m
   ok(!src.includes("models-cache"), "no models-cache read");
 });
 
-test("modeFor: U1 RED — an exhausted meter is reported as unavailable, :cloud still stated as preferred", async () => {
-  const cfg = { provider: { allowedRoots: ["C:/code"] } };
-  const mode = await modeFor({ cwd: "C:/code/x", config: cfg, headroom: { state: "exhausted", resetsAt: "2026-09-07T00:00:00Z" } });
-  ok(mode.includes("2026-09-07T00:00:00Z"), mode);
-  ok(mode.includes(":cloud"), mode);
-  ok(!/prefer Anthropic/i.test(mode) && mode !== MODE_ANTHROPIC, mode);
+const ALWAYS = { swarm: { always: true }, provider: { allowedRoots: ["C:/code"] } };
+const dec = (headroom) => decide({ event: "SessionStart", cwd: "C:/code/x", config: ALWAYS, headroom });
+
+test("decide: U1 RED — an exhausted meter names the reset, OUTSIDE the standing block", async () => {
+  const out = await dec({ state: "exhausted", resetsAt: "2026-09-07T00:00:00Z" });
+  ok(out.includes("2026-09-07T00:00:00Z"), out);
+  // The block is instruction and ends where it ends; the usage line follows it.
+  ok(out.startsWith(standingBlock(MODE_CLOUD) + "\n"), out);
+  ok(out.endsWith("</EXTREMELY_IMPORTANT>") === false, out);
 });
 
-test("modeFor: U2 false-positive guard — a healthy meter is byte-identical to today's string", async () => {
-  const cfg = { provider: { allowedRoots: ["C:/code"] } };
-  equal(await modeFor({ cwd: "C:/code/x", config: cfg, headroom: { state: "ok" } }), MODE_CLOUD);
+test("decide: U2 false-positive guard — a healthy meter emits the block and NOTHING else", async () => {
+  equal(await dec({ state: "ok" }), standingBlock(MODE_CLOUD));
 });
 
-test("modeFor: U3 governance still wins over a healthy meter", async () => {
-  equal(await modeFor({ cwd: "C:/codex/other", config: { provider: { allowedRoots: ["C:/code"] } }, headroom: { state: "ok" } }), MODE_ANTHROPIC);
-  equal(await modeFor({ cwd: "C:/code/x", config: { provider: { allowedRoots: [] } }, headroom: { state: "ok" } }), MODE_ANTHROPIC);
+test("modeFor: U3 governance decides the mode; the meter never touches it", async () => {
+  equal(await modeFor({ cwd: "C:/codex/other", config: { provider: { allowedRoots: ["C:/code"] } } }), MODE_ANTHROPIC);
+  equal(await modeFor({ cwd: "C:/code/x", config: { provider: { allowedRoots: [] } } }), MODE_ANTHROPIC);
+  // An exhausted meter is availability, not preference — the bracket is unmoved.
+  ok((await dec({ state: "exhausted", resetsAt: "x" })).includes(`Mode: ${MODE_CLOUD}`));
 });
 
-test("modeFor: U4 stale is its own mode, naming the snapshot age", async () => {
-  const cfg = { provider: { allowedRoots: ["C:/code"] } };
-  const mode = await modeFor({ cwd: "C:/code/x", config: cfg, headroom: { state: "stale", snapshotAgeMs: 5 * 3_600_000 } });
-  ok(/5h ago/.test(mode), mode);
-  ok(mode !== MODE_CLOUD && mode !== MODE_ANTHROPIC, mode);
+test("decide: U4 a stale meter names the snapshot age", async () => {
+  const out = await dec({ state: "stale", snapshotAgeMs: 5 * 3_600_000 });
+  ok(/unread for 5h/.test(out), out);
+  ok(out.startsWith(standingBlock(MODE_CLOUD) + "\n"), out);
 });
 
 test("modeFor/decide: U5 always-green guard — a missing headroom argument does not break the hook", async () => {

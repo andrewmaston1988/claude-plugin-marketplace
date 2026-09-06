@@ -12,15 +12,13 @@ const CONFIG = path.join(os.homedir(), '.swarm', 'config.json');
 export const MODE_CLOUD = '[:cloud tier preferred]';
 export const MODE_ANTHROPIC = '[Anthropic orchestration only]';
 
-// Both keep :cloud as the stated preference — an exhausted or stale meter is
-// unavailable or unverified, never a reason to prefer Anthropic instead.
-function modeExhausted(resetsAt) {
-  return `[:cloud preferred but UNAVAILABLE — weekly allowance exhausted, resets ${resetsAt}; seat Claude tiers for this run]`;
-}
-
-function modeStale(snapshotAgeMs) {
-  const hours = Math.floor(snapshotAgeMs / 3_600_000);
-  return `[:cloud tier preferred — meter unverified, last read ${hours}h ago]`;
+// One line, OUTSIDE the standing block: the mode bracket says which tier is
+// preferred and nothing else. Meter state is availability, not preference — an
+// exhausted or stale meter never makes Anthropic the preference.
+function headroomLine(headroom) {
+  if (headroom?.state === 'exhausted') return `ollama: weekly allowance exhausted, resets ${headroom.resetsAt}`;
+  if (headroom?.state === 'stale') return `ollama: usage unread for ${Math.floor(headroom.snapshotAgeMs / 3_600_000)}h`;
+  return null;
 }
 
 function readJSON(p) {
@@ -44,28 +42,27 @@ export function standingBlock(mode) {
 
 // cwd under any allowed root -> alternative models are launchable here. Lazy import:
 // manifest.mjs is the governance source of truth but heavy for a per-prompt hook.
-// `headroom` is injected (the caller reads the cache file) so this stays pure —
-// undefined behaves exactly as before headroom existed (an older caller, or a
-// read that failed, never breaks standing mode).
-export async function modeFor({ cwd, config, headroom }) {
+export async function modeFor({ cwd, config }) {
   const roots = config?.provider?.allowedRoots ?? [];
   if (!roots.length || !cwd) return MODE_ANTHROPIC;
   const { isUnderRoot } = await import('../src/manifest.mjs');
-  if (!roots.some((r) => isUnderRoot(cwd, r))) return MODE_ANTHROPIC;
-  if (headroom?.state === 'exhausted') return modeExhausted(headroom.resetsAt);
-  if (headroom?.state === 'stale') return modeStale(headroom.snapshotAgeMs);
-  return MODE_CLOUD;
+  return roots.some((r) => isUnderRoot(cwd, r)) ? MODE_CLOUD : MODE_ANTHROPIC;
 }
 
 // The keyword as a standalone word — `ultraswarm.mjs` in a prompt about this file is not an opt-in.
 const KEYWORD_RE = /(^|[^\w./-])ultraswarm(?![\w./-])/i;
 
 // Pure: which event, what prompt, what config/cwd/headroom -> standing block or null.
+// A headroom line, when there is one, follows the block rather than entering it —
+// availability is information, not instruction, and the block is instruction only.
 export async function decide({ event, prompt = '', cwd, config, headroom }) {
   const armed = event === 'SessionStart' ? config?.swarm?.always === true
     : event === 'UserPromptSubmit' ? KEYWORD_RE.test(prompt)
       : false;
-  return armed ? standingBlock(await modeFor({ cwd, config, headroom })) : null;
+  if (!armed) return null;
+  const line = headroomLine(headroom);
+  const block = standingBlock(await modeFor({ cwd, config }));
+  return line ? `${block}\n${line}` : block;
 }
 
 async function main() {

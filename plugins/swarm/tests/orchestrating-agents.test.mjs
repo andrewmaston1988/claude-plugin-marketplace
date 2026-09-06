@@ -216,15 +216,23 @@ test("T11 — tier partition defers to swarm's own tier guide with both asymmetr
   ok(!/:cloud/.test(prose), "no :cloud token in prose");
 });
 
-// ---- T15: standing consent lives inside the gate section, alongside the three stanzas ----
+// ---- T15: under swarm.always the gate is GONE, not restated more quietly ----
 
-test("T15 — gate section carries Standing consent under swarm.always, and states rather than asks", () => {
+test("T15 — the gate section branches to dispatch under swarm.always, emitting and asking nothing", () => {
   const gate = sectionSlice(read(SWARM_SKILL), "## MANDATORY first step — the offer gate");
   ok(/^### Standing consent/m.test(gate), "'### Standing consent' subsection present in the gate");
   ok(gate.includes("swarm.always"), "names the config key");
-  match(gate, /printed statement/i);
-  match(gate, /waives the question, never the ceremony/i);
-  // the skip is stated in the mix stanza itself, in both modes
+  // The branch must come BEFORE the gate's own text, or a reader meets the gate first.
+  ok(gate.indexOf("`swarm.always` is set") < gate.indexOf("THE GATE'S ANSWER"), "branch precedes the gate");
+  match(gate, /Emit nothing/);
+  match(gate, /Ask nothing/);
+  // The recital this replaced. Its return is the regression T15 exists to catch:
+  // a "statement in place of the question" is still a wall of text before every run.
+  ok(!/printed statement/i.test(gate), "no printed-statement recital");
+  ok(!/waives the question, never the ceremony/i.test(gate), "no ceremony-recital wording");
+  // Reading the two skills stays mandatory — dropping them is the opposite failure.
+  match(gate, /READ them/);
+  // the skip is stated in the mix stanza itself, for the non-standing path
   match(gate, /Anthropic-only by construction/);
   // orchestrating-agents and executing-swarms echo the same mode
   ok(read(NEW_SKILL).includes("swarm.always"), "orchestrating-agents knows the mode");
