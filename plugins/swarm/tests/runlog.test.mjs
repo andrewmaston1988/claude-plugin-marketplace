@@ -171,7 +171,7 @@ test("readRunLog: a line that parses to null is skipped, not dereferenced", () =
   assert.equal(r.tasks[0].state, "ok");
 });
 
-test("listRuns: newest first across projects, active only while run.log is fresh and no summary.json", () => {
+test("listRuns: live rows first, then finished/aborted rows newest-mtime first, active only while run.log is fresh and no summary.json", () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-runs-"));
   try {
     const mk = (proj, run, ageMs, { summary = false, log = true } = {}) => {
@@ -193,13 +193,43 @@ test("listRuns: newest first across projects, active only while run.log is fresh
     utimesSync(heartbeatPath(live), (NOW - 1000) / 1000, (NOW - 1000) / 1000);
 
     const runs = listRuns(home, { now: NOW, heartbeatMs: 15_000 });
-    assert.deepEqual(runs.map((r) => r.dir), [done, live, stale]);
-    assert.deepEqual(runs.map((r) => r.active), [false, true, false]);
-    assert.equal(runs[1].project, "C--code-a");
-    assert.equal(runs[1].name, "live-1");
+    assert.deepEqual(runs.map((r) => r.dir), [live, done, stale], "the live row leads; done and stale (both aborted — neither has a heartbeat) follow by mtime");
+    assert.deepEqual(runs.map((r) => r.active), [true, false, false]);
+    assert.equal(runs[0].project, "C--code-a");
+    assert.equal(runs[0].name, "live-1");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test("listRuns: live rows sort by start time descending, not by run.log mtime — a finished row always sorts below both (order stability)", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-runs-order-"));
+  try {
+    const mk = (proj, run, startIso, logMtimeMs) => {
+      const d = join(home, "runs", proj, run);
+      mkdirSync(d, { recursive: true });
+      const line = `{"ts":"${startIso}","event":"run-start","pid":1,"tasks":[{"id":"a","model":"m"}]}`;
+      writeFileSync(join(d, "run.log"), line, "utf8");
+      utimesSync(join(d, "run.log"), logMtimeMs / 1000, logMtimeMs / 1000);
+      touchHeartbeat(d, new Date(NOW - 1000).toISOString(), process.pid);
+      utimesSync(heartbeatPath(d), (NOW - 1000) / 1000, (NOW - 1000) / 1000);
+      return d;
+    };
+    // older-2 was dispatched first (earlier start) but its engine wrote to run.log
+    // most recently, so a plain mtime sort would float it above newer-1.
+    const olderStartedNewerMtime = mk("C--code-a", "older-2", "2026-09-05T00:00:00Z", NOW - 1000);
+    const newerStartedOlderMtime = mk("C--code-a", "newer-1", "2026-09-05T01:00:00Z", NOW - 60_000);
+    const finishedDir = join(home, "runs", "C--code-a", "finished-3");
+    mkdirSync(finishedDir, { recursive: true });
+    writeFileSync(join(finishedDir, "run.log"), RUN_LOG, "utf8");
+    writeFileSync(join(finishedDir, "summary.json"), JSON.stringify({ finished: "2026-09-05T01:09:00Z" }), "utf8");
+    const doneT = NOW / 1000; // newest mtime of all three — must still sort last
+    utimesSync(join(finishedDir, "run.log"), doneT, doneT);
+    utimesSync(join(finishedDir, "summary.json"), doneT, doneT);
+
+    const runs = listRuns(home, { now: NOW, heartbeatMs: 15_000 });
+    assert.deepEqual(runs.map((r) => r.name), ["newer-1", "older-2", "finished-3"], "started-later live row stays on top regardless of which log was last appended; the finished row sorts last despite the newest mtime");
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 // ---- superseded-summary rule (defect a) ----

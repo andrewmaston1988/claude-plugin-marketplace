@@ -225,10 +225,22 @@ export function listRuns(home, { now = Date.now(), heartbeatMs = 15_000, _readFi
       const { finishedMs, stoppedMs, abortedMs } = runLiveness(dir, { now, heartbeatMs, _readFile });
       const finished = finishedMs != null || stoppedMs != null;
       const aborted = abortedMs != null;
-      out.push({ dir, project, name, mtimeMs: logStat.mtimeMs, active: !finished && !aborted, aborted, stopped: stoppedMs != null });
+      const active = !finished && !aborted;
+      // Only live rows need startedMs for the sort below — reading it for a finished
+      // run would defeat the mtime gate that lets runLiveness skip run.log entirely.
+      const startedMs = active
+        ? (lastRunStart(logPath, logStat.mtimeMs, logStat.size, _readFile).startedMs ?? logStat.mtimeMs)
+        : null;
+      out.push({ dir, project, name, mtimeMs: logStat.mtimeMs, startedMs, active, aborted, stopped: stoppedMs != null });
     }
   }
-  return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  // Live rows first, most recently DISPATCHED on top and staying there — sorting by
+  // mtime instead would float whichever engine last appended an event, jumping rows
+  // on every poll. Finished/stopped/aborted rows follow, by mtime as before.
+  return out.sort((a, b) => {
+    if (a.active !== b.active) return a.active ? -1 : 1;
+    return a.active ? b.startedMs - a.startedMs : b.mtimeMs - a.mtimeMs;
+  });
 }
 
 // The one liveness rule every reader shares. A run is:
