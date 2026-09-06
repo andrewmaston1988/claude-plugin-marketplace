@@ -12,6 +12,8 @@ function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cli-"));
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 test("validate: bad manifest exits 1 with readable errors", () => {
   const dir = tmp();
   try {
@@ -149,6 +151,107 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
     ok(!existsSync(shimLog3), "no shim calls expected on fully-resumed run");
     ok(r3.stdout.includes("[skipped]"), r3.stdout);
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stop: refuses on a finished run, naming the state", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+    }));
+    const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "done" };
+    const r1 = runCli(["run", manifest], { cwd: dir, env });
+    equal(r1.status, 0, r1.stderr);
+    const resultsDir = join(dir, "out");
+
+    const r2 = runCli(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: env.SWARM_HOME } });
+    equal(r2.status, 1, r2.stdout + r2.stderr);
+    ok(r2.stderr.includes("nothing to stop"), r2.stderr);
+    ok(r2.stderr.includes("finished"), r2.stderr);
+    ok(!existsSync(join(resultsDir, "stop")), "must not write a stop file against a finished run");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stop: dead engine (stale heartbeat, no summary) — records run-stop and marks non-terminal leaves failed:stopped, touching no process", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.1 }));
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    const lines = [
+      JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "a", model: "haiku" }, { id: "b", model: "haiku" }] }),
+      JSON.stringify({ ts: new Date().toISOString(), id: "a", state: "running" }),
+    ];
+    writeFileSync(join(resultsDir, "run.log"), lines.join("\n") + "\n");
+
+    const r = runCli(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(r.stdout.includes("failed:stopped"), r.stdout);
+
+    const logLines = readFileSync(join(resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const stopEvent = logLines.find((l) => l.event === "run-stop");
+    ok(stopEvent, "run-stop event must be appended");
+    equal(stopEvent.reason, "dead-engine");
+
+    const summary = JSON.parse(readFileSync(join(resultsDir, "summary.json"), "utf8"));
+    equal(summary.stopped, true);
+    equal(summary.stopReason, "dead-engine");
+    deepEqual(summary.tasks.map((t) => t.state).sort(), ["failed:stopped", "failed:stopped"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("stop: live engine via the claude shim writes the stop file, run exits 1, resume re-dispatches the failed:stopped leaf", async () => {
+  const dir = tmp();
+  let runPromise;
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.5 }));
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "slow", prompt: "x", model: "haiku" }],
+    }));
+    const resultsDir = join(dir, "out");
+
+    runPromise = runCliAsync(["run", manifest], {
+      cwd: dir,
+      env: { SWARM_HOME: home, SWARM_SHIM_SLEEP_MS: "2000" },
+    });
+
+    const deadline = Date.now() + 10000;
+    while (!existsSync(join(resultsDir, "heartbeat")) && Date.now() < deadline) await sleep(20);
+    ok(existsSync(join(resultsDir, "heartbeat")), "engine must have started ticking before stop is issued");
+
+    const stopResult = runCli(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(stopResult.status, 0, stopResult.stdout + stopResult.stderr);
+    ok(stopResult.stdout.includes("stopped"), stopResult.stdout);
+
+    const r1 = await runPromise;
+    equal(r1.status, 1, r1.stdout + r1.stderr);
+    const summary1 = JSON.parse(readFileSync(join(resultsDir, "summary.json"), "utf8"));
+    equal(summary1.stopped, true);
+    equal(summary1.tasks.find((t) => t.id === "slow").state, "failed:stopped");
+
+    // resume: the stopped leaf is non-terminal, so it re-dispatches (never skipped)
+    const shimLog2 = join(dir, "shim2.log");
+    const r2 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog2, SWARM_SHIM_OUTPUT: "done" } });
+    equal(r2.status, 0, r2.stdout + r2.stderr);
+    equal(readFileSync(shimLog2, "utf8").trim().split("\n").length, 1);
+  } finally {
+    // The child `run` process holds `dir` as its cwd until the shim's sleep
+    // elapses and it exits — an rmSync while it's still alive EPERMs on Windows.
+    await runPromise?.catch(() => {});
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeDigestMd, appendRunLog, formatTokens, renderRoster, renderStatus, formatClosing,
+  heartbeatPath, stopPath, touchHeartbeat, readHeartbeat,
 } from "../src/results.mjs";
 
 function tmp() {
@@ -222,6 +223,37 @@ test("renderRoster: non-ok terminal states carry a state tag; zero tokens omits 
   match(block, /↷ {2}e .*\[skipped\]/);
   ok(block.includes("2 failed · 1 rate-limited · 1 blocked · 1 skipped"), block);
   ok(!block.includes("tokens"), "footer must omit tokens when none were counted");
+});
+
+test("renderRoster: failed:stopped renders as ✗ [failed:stopped] and tallies as failed, never ok", () => {
+  const tasks = [
+    { id: "a", model: "haiku", state: "failed:stopped", durationMs: 1000 },
+    { id: "b", model: "haiku", state: "ok", durationMs: 500 },
+  ];
+  const block = renderRoster({ title: "t", tasks, now: NOW, startedMs: NOW - 5000 });
+  match(block, /✗ {2}a .*\[failed:stopped\]/);
+  ok(block.includes("1 ok · 1 failed"), block);
+  ok(!/2 ok/.test(block), `a stopped leaf must never count as ok:\n${block}`);
+});
+
+test("heartbeatPath / stopPath / touchHeartbeat / readHeartbeat: the control-file contract", () => {
+  const dir = tmp();
+  try {
+    initResultsDir(dir);
+    equal(heartbeatPath(dir), join(dir, "heartbeat"));
+    equal(stopPath(dir), join(dir, "stop"));
+    equal(readHeartbeat(dir), null, "no heartbeat file yet");
+    touchHeartbeat(dir, "2026-09-06T00:00:00.000Z", 4242);
+    ok(existsSync(heartbeatPath(dir)));
+    const hb = readHeartbeat(dir);
+    ok(hb && hb.mtimeMs > 0, "readHeartbeat must report the file's own mtime");
+    equal(hb.pid, 4242);
+    // a second touch overwrites in place — same file, fresh contents
+    touchHeartbeat(dir, "2026-09-06T00:00:05.000Z", 4242);
+    equal(readFileSync(heartbeatPath(dir), "utf8"), "2026-09-06T00:00:05.000Z 4242\n");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("renderStatus: rebuilds the roster from run.log with live tokens and elapsed", async () => {

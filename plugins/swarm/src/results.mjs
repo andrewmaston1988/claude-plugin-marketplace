@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal } from "./stream.mjs";
@@ -118,6 +118,33 @@ export function appendRunLog(dir, obj) {
   appendFileSync(join(dir, "run.log"), JSON.stringify(obj) + "\n");
 }
 
+// ── liveness control files ────────────────────────────────────────────────────
+// heartbeat: one line, ISO timestamp + pid, overwritten whole on every tick — a
+// torn write costs one tick, and the file's own mtime IS the liveness signal, so
+// tmp+rename (which would also bump mtime, just later) buys nothing here.
+// stop: presence alone is the signal — `swarm stop` creates it, the engine
+// notices it on its next heartbeat tick and never deletes it (the record of a
+// deliberate stop must outlive the run).
+export function heartbeatPath(dir) {
+  return join(dir, "heartbeat");
+}
+
+export function stopPath(dir) {
+  return join(dir, "stop");
+}
+
+export function touchHeartbeat(dir, iso, pid) {
+  writeFileSync(heartbeatPath(dir), `${iso} ${pid}\n`);
+}
+
+export function readHeartbeat(dir) {
+  const p = heartbeatPath(dir);
+  if (!existsSync(p)) return null;
+  const line = readFileSync(p, "utf8").trim();
+  const [, pidStr] = line.split(" ");
+  return { mtimeMs: statSync(p).mtimeMs, pid: Number(pidStr) };
+}
+
 // ── stdout contract ───────────────────────────────────────────────────────────
 // The run repaints a full roster snapshot (header, one row per task, counts
 // footer) on every state change and on a heartbeat, then a closing block:
@@ -127,6 +154,7 @@ const GLYPHS = {
   ok: "✓",
   failed: "✗",
   "failed:timeout": "✗",
+  "failed:stopped": "✗",
   "rate-limited": "⧖",
   quota: "⏳",
   retrying: "↻",
@@ -138,7 +166,7 @@ const GLYPHS = {
 
 // States whose rows carry an explicit [state] tag; ok/running/pending read
 // from the glyph alone.
-const TAGGED = new Set(["failed", "failed:timeout", "rate-limited", "quota", "blocked", "skipped"]);
+const TAGGED = new Set(["failed", "failed:timeout", "failed:stopped", "rate-limited", "quota", "blocked", "skipped"]);
 
 const FOOTER_ORDER = ["ok", "failed", "rate-limited", "quota", "blocked", "skipped", "running", "retrying", "pending"];
 
@@ -161,7 +189,7 @@ function fmtElapsed(ms) {
 // watched, then the ones that went wrong, and only then the settled majority.
 const ROW_PRIORITY = [
   "running", "retrying", "rate-limited", "quota",
-  "failed", "failed:timeout", "blocked",
+  "failed", "failed:timeout", "failed:stopped", "blocked",
   "ok", "skipped", "pending",
 ];
 const rank = (state) => {
@@ -244,7 +272,7 @@ export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLin
   const tally = (rows) => {
     const c = {};
     for (const t of rows) {
-      const key = t.state === "failed:timeout" ? "failed" : t.state;
+      const key = (t.state === "failed:timeout" || t.state === "failed:stopped") ? "failed" : t.state;
       c[key] = (c[key] || 0) + 1;
     }
     return c;

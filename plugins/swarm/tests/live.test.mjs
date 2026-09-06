@@ -63,10 +63,10 @@ test("agoText: the existing ago() thresholds preserved exactly — 59s/61s/3601s
 
 test("runEnded/shouldPoll: each terminal field on its own, a run not yet fetched, and the runs-list always polls (L6)", () => {
   const { runEnded, shouldPoll } = loadLive();
-  const open = { finishedMs: null, abortedMs: null, staleMs: null };
+  const open = { finishedMs: null, abortedMs: null, stoppedMs: null };
   assert.equal(runEnded(open), false);
   assert.equal(shouldPoll({ name: "run" }, open, 0), true);
-  for (const field of ["finishedMs", "abortedMs", "staleMs"]) {
+  for (const field of ["finishedMs", "abortedMs", "stoppedMs"]) {
     const ended = { ...open, [field]: 123 };
     assert.equal(runEnded(ended), true, field);
     assert.equal(shouldPoll({ name: "run" }, ended, 0), false, field);

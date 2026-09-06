@@ -6,8 +6,9 @@ import { tmpdir } from "node:os";
 import http from "node:http";
 import { createServer, safeSegment } from "../src/serve/server.mjs";
 import { RUN_LOG, NOW, buildFixture } from "./fixtures/run-fixture.mjs";
+import { touchHeartbeat, heartbeatPath } from "../src/results.mjs";
 
-const cfg = (over = {}) => ({ quietWarnSecs: 60, dashboard: { port: 0, bind: "127.0.0.1", token: null, recentMs: 30 * 60_000, ...over } });
+const cfg = (over = {}) => ({ quietWarnSecs: 60, dashboard: { port: 0, bind: "127.0.0.1", token: null, ...over } });
 
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), "swarm-serve-"));
@@ -26,6 +27,8 @@ function seedHome() {
   // hour earlier — otherwise the finished fixture carries the real clock and sorts first.
   const t = (NOW - 5000) / 1000;
   utimesSync(join(live, "run.log"), t, t);
+  touchHeartbeat(live, new Date(NOW - 5000).toISOString(), process.pid);
+  utimesSync(heartbeatPath(live), t, t);
   const td = (NOW - 3600_000) / 1000;
   utimesSync(join(done, "run.log"), td, td);
   return { home, live, done };
@@ -264,6 +267,8 @@ test("events: the poll picks up a NEW run when no watcher fires — a dead handl
       buildFixture(fresh);
       const t = (NOW - 1000) / 1000;
       utimesSync(join(fresh, "run.log"), t, t);
+      touchHeartbeat(fresh, new Date(NOW - 1000).toISOString(), process.pid);
+      utimesSync(heartbeatPath(fresh), t, t);
       await new Promise((r) => setTimeout(r, 160));
       req.destroy();
       const runsEvents = frames.join("").split("\n\n").filter((f) => /^event: runs$/m.test(f));
@@ -283,6 +288,8 @@ test("events: a root change refreshes watchers so a new run gets watched", async
       buildFixture(fresh);
       const t = (NOW - 1000) / 1000;
       utimesSync(join(fresh, "run.log"), t, t);
+      touchHeartbeat(fresh, new Date(NOW - 1000).toISOString(), process.pid);
+      utimesSync(heartbeatPath(fresh), t, t);
       const root = watchers.find((w) => w.path === join(home, "runs"));
       assert.ok(root, "runs root watched");
       // fs.watch is not recursive: a new run under an EXISTING project is only seen
@@ -439,6 +446,8 @@ test("a superseded-summary run reads as live over HTTP — active on the list, f
     utimesSync(join(d, "summary.json"), summaryT, summaryT);
     const logT = Date.parse("2026-09-05T01:06:00Z") / 1000; // the resumed engine kept appending after the summary
     utimesSync(join(d, "run.log"), logT, logT);
+    touchHeartbeat(d, "2026-09-05T01:09:30Z", process.pid);
+    utimesSync(heartbeatPath(d), Date.parse("2026-09-05T01:09:30Z") / 1000, Date.parse("2026-09-05T01:09:30Z") / 1000);
 
     const now = Date.parse("2026-09-05T01:10:00Z");
     await withServer({ home, now }, async ({ get }) => {

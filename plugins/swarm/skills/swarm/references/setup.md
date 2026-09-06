@@ -79,7 +79,7 @@ combined options if the operator is brisk, or one each if not:
 - `bind` — `0.0.0.0` is reachable on the LAN and Tailscale; `127.0.0.1` is this machine only.
 - `token` — when set, every request needs `?t=<token>`; bookmark the URL with it. Offer to
   generate one; never invent one silently.
-`port` and `recentMs` are advanced (Stage 7).
+`port` is advanced (Stage 7).
 
 Starting it: `node <engine> serve --daemon` (or `serve` to stay in the foreground), and
 `serve stop` to end it. To bring it back at login, `node <engine> serve install-autostart`
@@ -156,11 +156,10 @@ from the appendix. If no, close.
 | `quotaWarnPct` | `80` | Warn once when the worst window is at or past this percent. |
 | `quotaCacheSecs` | `300` | How long one usage read is reused. |
 | `quotaPatterns` | four strings | Output substrings that classify a failed leaf as quota-hit. |
-| `heartbeatSecs` | `15` | The roster is the boxed table the engine prints while a run is live — one row per leaf: state glyph, id, model, elapsed, work tokens, last tool call. It repaints on every leaf event and, so timers and token counts keep moving between events, every this-many seconds. Cosmetic cadence for the operator's watch terminal; leaves are unaffected. |
+| `heartbeatSecs` | `15` | Two jobs on one number. The roster is the boxed table the engine prints while a run is live — one row per leaf: state glyph, id, model, elapsed, work tokens, last tool call. It repaints on every leaf event and, so timers and token counts keep moving between events, every this-many seconds — paint cadence for the operator's watch terminal. It is also the engine's liveness signal: it paints a heartbeat file on the same cadence, and `runLiveness`/`status`/`stop` treat a heartbeat older than 3x this value as a dead engine. Raising it slows the roster AND widens the window before a wedged engine is declared dead. |
 | `quietWarnSecs` | `60` | A running leaf that has emitted no event (no tool call, no token update) for this long gets `⚠ quiet Ns` in the roster, the statusline and the dashboard. The stall signal — token counts are not. Raise it for models that think in long silent turns. |
 | `dashboard.enabled` / `bind` / `token` | `true` / `0.0.0.0` / `null` | Stage 3. |
 | `dashboard.port` | `7331` | Listen port; also the firewall rule's port. |
-| `dashboard.recentMs` | `1800000` | A run with no live engine and no event in this window lists as stale; the statusline glyph uses the same window. |
 | `dashboard.livenessPollMs` | `10000` | How often the server re-checks which runs are live and tells connected browsers. Two things produce no filesystem event and are only ever caught by this clock: a run finishing (its `summary.json` lands in a path nothing watches) and an engine dying. It also rebuilds file watchers, so one that silently stops delivering recovers instead of leaving the page deaf until a manual refresh. Ticks only while a dashboard is actually open — nothing runs with no client connected. Lower it for a snappier list at the cost of more directory scans. |
 | `swarm.always` | `false` | Stage 2. |
 | `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |

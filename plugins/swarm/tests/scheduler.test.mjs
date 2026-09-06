@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure } from "../src/scheduler.mjs";
-import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd } from "../src/results.mjs";
+import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
 
@@ -983,6 +983,78 @@ test("heartbeat repaints the roster with climbing elapsed while a leaf runs", as
     await runPlan(p, { ...CFG, heartbeatSecs: 0.05 }, io);
     const runningPaints = io.snapshots.filter((s) => s.includes("◐")).length;
     ok(runningPaints >= 2, `expected ≥2 running snapshots, got ${runningPaints}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("classifyFailure: a stopped leaf reads failed:stopped even when it also timed out", () => {
+  equal(classifyFailure({ timedOut: true, output: "", stopped: true }), "failed:stopped");
+  equal(classifyFailure({ timedOut: false, output: "", stopped: false }), "failed");
+});
+
+test("liveness: heartbeat file is touched on every tick, including while a leaf sits in backoff", async () => {
+  const dir = tmp();
+  try {
+    let calls = 0;
+    const spawn = fakeSpawnFactory(() => (++calls === 1 ? { exit: 1, output: "429 rate limit" } : { output: "recovered" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("leaf")]);
+    const seen = new Set();
+    const poll = setInterval(() => {
+      const hb = readHeartbeat(p.resultsDir);
+      if (hb) seen.add(hb.mtimeMs);
+    }, 15);
+    try {
+      await runPlan(p, { ...CFG, heartbeatSecs: 0.05, retry: { backoffMs: 150, rateLimited: 2 } }, io);
+    } finally {
+      clearInterval(poll);
+    }
+    ok(seen.size >= 2, `expected the heartbeat file touched more than once (incl. during backoff), saw ${seen.size} distinct mtimes`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("liveness: a stop file kills every tracked child, writes the summary exactly once, marks leaves failed:stopped", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ delayMs: 10000, output: "x" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { timeoutMs: 60000 }), task("b", { timeoutMs: 60000 })]);
+    let writeSummaryCalls = 0;
+    const _writeSummary = (resultsDir, summary) => { writeSummaryCalls++; return writeSummary(resultsDir, summary); };
+    const runPromise = runPlan(p, { ...CFG, heartbeatSecs: 0.05, concurrency: 2 }, io, { _writeSummary });
+    // resultsDir is created synchronously before runPlan's first await — safe to write here
+    writeFileSync(stopPath(p.resultsDir), "");
+    const r = await runPromise;
+
+    equal(r.summary.stopped, true);
+    ok(r.summary.stopReason, "summary must name why the run stopped");
+    equal(r.summary.tasks.find((t) => t.id === "a").state, "failed:stopped");
+    equal(r.summary.tasks.find((t) => t.id === "b").state, "failed:stopped");
+    equal(writeSummaryCalls, 1, "exactly one summary write for the whole run, stop included");
+
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    ok(logLines.some((l) => l.event === "run-stop"), "run-stop must be appended to run.log");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("liveness: SIGINT routes through requestStop and stops the run", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ delayMs: 10000, output: "x" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("leaf", { timeoutMs: 60000 })]);
+    const before = process.listenerCount("SIGINT");
+    const runPromise = runPlan(p, { ...CFG, heartbeatSecs: 0.05 }, io);
+    process.emit("SIGINT");
+    const r = await runPromise;
+    equal(r.summary.stopped, true);
+    equal(r.summary.tasks[0].state, "failed:stopped");
+    equal(process.listenerCount("SIGINT"), before, "the run must remove its SIGINT handler on exit");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

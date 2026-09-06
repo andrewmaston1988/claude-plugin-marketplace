@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // swarm CLI — thin argv layer over src/. Subcommands: models | validate | run.
 // stdout carries status lines + paths only, never raw task output.
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, ValidationError } from "../src/manifest.mjs";
@@ -10,7 +10,9 @@ import { discoverModels, writeModelsCache, visibleModels, probeTopModels } from 
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, renderStatus, readResult, listLeaves } from "../src/results.mjs";
+import { formatClosing, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
+import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
+import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim } from "../src/ui.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
@@ -20,6 +22,7 @@ const USAGE = `usage: swarm.mjs <command>
   run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
+  stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)
@@ -261,7 +264,65 @@ async function cmdRun(rest) {
   }
   // A digest failure alone never blocks result availability — the run is done;
   // the session falls back to summary.json + selective raw reads.
+  if (r.summary.stopped) return 1;
   return 0;
+}
+
+// Dead engine: no live process to signal, so nothing is killed. The run-stop
+// event + summary are the only record — read straight from disk (readRun),
+// mirroring the shape runPlan itself writes so every reader treats the two
+// the same way.
+function recordDeadEngineStop(dir) {
+  appendRunLog(dir, { ts: new Date().toISOString(), event: "run-stop", reason: "dead-engine" });
+  const run = readRun(dir);
+  const tasks = run.tasks.map((t) => ({
+    id: t.id,
+    model: t.model,
+    state: ALIVE_STATES.has(t.state) ? "failed:stopped" : t.state,
+    durationMs: t.durationMs ?? null,
+    tokens: t.tokens ?? null,
+    resultPath: resultPath(dir, t.id),
+  }));
+  const summary = {
+    started: run.startedMs ? new Date(run.startedMs).toISOString() : new Date().toISOString(),
+    finished: new Date().toISOString(),
+    stopped: true,
+    stopReason: "dead-engine",
+    tasks,
+    blocked: run.tasks.filter((t) => t.state === "blocked").map((t) => t.id),
+    worktreesKept: false,
+    totalTokens: tasks.reduce((acc, t) => addTokens(acc, t.tokens || emptyTokens()), emptyTokens()),
+  };
+  writeSummary(dir, summary);
+  const stopped = tasks.filter((t) => t.state === "failed:stopped").map((t) => t.id);
+  out(`swarm: ${dir} — engine appears dead (stale heartbeat, no summary). Recorded run-stop; no process touched.`);
+  out(`marked failed:stopped: ${stopped.length ? stopped.join(", ") : "(none — every leaf had already settled)"}`);
+  return 0;
+}
+
+async function cmdStop(rest) {
+  const dir = resolve(rest[0]);
+  const cfg = getConfig();
+  const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
+  const live = runLiveness(dir, { heartbeatMs });
+  if (live.finishedMs != null) { err(`swarm: ${dir} already finished — nothing to stop.`); return 1; }
+  if (live.stoppedMs != null) { err(`swarm: ${dir} already stopped — nothing to stop.`); return 1; }
+  if (live.abortedMs != null) return recordDeadEngineStop(dir);
+
+  const { writeFileSync } = await import("node:fs");
+  writeFileSync(stopPath(dir), "");
+  const pollMs = heartbeatMs / 2;
+  const deadline = Date.now() + heartbeatMs * 2;
+  while (Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollMs));
+    const l = runLiveness(dir, { heartbeatMs });
+    if (l.finishedMs != null || l.stoppedMs != null) {
+      out(`swarm: ${dir} stopped.`);
+      return 0;
+    }
+  }
+  err(`swarm: engine did not respond within ${Math.round((heartbeatMs * 2) / 1000)}s — if it is wedged, end its process and run stop again to record it.`);
+  return 1;
 }
 
 function getFlag(name, args) {
@@ -569,6 +630,10 @@ async function main() {
       case "run": {
         if (!rest[0]) { err(USAGE); return 1; }
         return await cmdRun(rest);
+      }
+      case "stop": {
+        if (!rest[0]) { err(USAGE); return 1; }
+        return await cmdStop(rest);
       }
       case "serve":
         return await cmdServe(rest);

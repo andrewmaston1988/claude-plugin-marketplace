@@ -5,6 +5,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { DIGEST_ID } from "./digest.mjs";
+import { readHeartbeat } from "./results.mjs";
 
 const CLONE_RE = /^(.+)\[(\d+)\]$/;
 
@@ -111,12 +112,6 @@ export function readRunLog(content, { now = Date.now() } = {}) {
   return { startedMs, enginePid, tasks };
 }
 
-// Is the engine that wrote this run still alive? Unknown pid → assume yes (old logs).
-export function engineAlive(pid, _kill = process.kill) {
-  if (pid == null) return null;
-  try { _kill(pid, 0); return true; } catch { return false; }
-}
-
 // Graph annotations from the manifest snapshot: after / kind / parent / depth,
 // plus the wave grouping. Rows the log never mentioned (agentless nodes, a leaf
 // that never started) are appended as pending so the graph is whole.
@@ -180,23 +175,14 @@ function readJson(path) {
 }
 
 // -> null when the dir has no run.log (not started, or not a run dir).
-export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, recentMs = 30 * 60_000, _alive = engineAlive } = {}) {
+export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, heartbeatMs = 15_000 } = {}) {
   dir = resolve(dir);
   const logPath = join(dir, "run.log");
   if (!existsSync(logPath)) return null;
   const { startedMs, enginePid, tasks: logged } = readRunLog(readFileSync(logPath, "utf8"), { now });
   const manifest = readJson(join(dir, "manifest.json"));
   const { tasks, waves } = topology(logged, manifest);
-  const summary = readJson(join(dir, "summary.json"));
-  let finishedMs = summary?.finished ? Date.parse(summary.finished) || null : null;
-  if (summarySuperseded(finishedMs, startedMs)) finishedMs = null;
-  const alive = _alive(enginePid);
-  const mtimeMs = statSync(logPath).mtimeMs;
-  // Aborted: the engine died (killed, crashed, machine slept) before writing a summary.
-  // Stale: no pid on record (an older engine) and nothing written for recentMs — the
-  // same recency rule listRuns applies, so the run view and the list agree.
-  const abortedMs = !finishedMs && alive === false ? mtimeMs : null;
-  const staleMs = !finishedMs && alive === null && now - mtimeMs >= recentMs ? mtimeMs : null;
+  const { finishedMs, stoppedMs, abortedMs } = runLiveness(dir, { now, heartbeatMs });
   const byState = {};
   for (const t of tasks) byState[t.state] = (byState[t.state] || 0) + 1;
   const optional = (name) => (existsSync(join(dir, name)) ? join(dir, name) : null);
@@ -206,8 +192,8 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, recentMs 
     project: basename(dirname(dir)),
     startedMs,
     finishedMs,
+    stoppedMs,
     abortedMs,
-    staleMs,
     enginePid,
     quietWarnMs,
     tasks,
@@ -220,18 +206,10 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, recentMs 
 }
 
 // Every run dir under <home>/runs/<project>/<run>/, newest run.log first.
-// `active` = not summarised, written within recentMs, and — when the run-start
-// line recorded the engine pid — that engine still alive. `aborted` = engine gone
-// with no summary. The pid is the LAST run-start's: a resume appends a new
-// run-start for the new engine, and the reaped one stays on line 1.
-//
-// A summary.json is trusted as "finished" only past a two-stage check: a mtime
-// GATE (cheap, the common path — a summary at least as new as the log means the
-// log has not grown since it was written, so no read is needed at all), then, only
-// for a log that outgrew its summary, a COMPARISON of the engine's own timestamps
-// via summarySuperseded — never file mtimes, which a touch (restore, AV scan) can
-// bump with no new run-start behind it.
-export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _alive = engineAlive, _readFile = readFileSync } = {}) {
+// `active` = runLiveness reports neither a terminal summary nor a stale heartbeat.
+// `aborted` = the engine went quiet (or never wrote a heartbeat at all) with no
+// summary. `stopped` = a deliberate `swarm stop`, distinct from a plain finish.
+export function listRuns(home, { now = Date.now(), heartbeatMs = 15_000, _readFile = readFileSync } = {}) {
   const runsRoot = join(home, "runs");
   const out = [];
   let projects = [];
@@ -244,32 +222,59 @@ export function listRuns(home, { now = Date.now(), recentMs = 30 * 60_000, _aliv
       const logPath = join(dir, "run.log");
       let logStat;
       try { logStat = statSync(logPath); } catch { continue; }
-      const mtimeMs = logStat.mtimeMs;
-      const summaryPath = join(dir, "summary.json");
-      let summaryStat = null;
-      try { summaryStat = statSync(summaryPath); } catch { /* never finished */ }
-
-      const gatedFinished = summaryStat != null && mtimeMs <= summaryStat.mtimeMs;
-      let finished = gatedFinished;
-      let pid = null;
-      if (!gatedFinished) {
-        const started = lastRunStart(logPath, mtimeMs, logStat.size, _readFile);
-        pid = started.pid;
-        if (summaryStat) {
-          // Past the gate: the log grew after the summary was written, so a resume
-          // may have superseded it.
-          let summary = null;
-          try { summary = JSON.parse(_readFile(summaryPath, "utf8")); } catch { /* mid-write */ }
-          const finishedMs = summary?.finished ? Date.parse(summary.finished) || null : null;
-          finished = !summarySuperseded(finishedMs, started.startedMs);
-        }
-      }
-      const alive = finished ? null : _alive(pid);
-      const aborted = !finished && alive === false;
-      out.push({ dir, project, name, mtimeMs, active: !finished && !aborted && now - mtimeMs < recentMs, aborted });
+      const { finishedMs, stoppedMs, abortedMs } = runLiveness(dir, { now, heartbeatMs, _readFile });
+      const finished = finishedMs != null || stoppedMs != null;
+      const aborted = abortedMs != null;
+      out.push({ dir, project, name, mtimeMs: logStat.mtimeMs, active: !finished && !aborted, aborted, stopped: stoppedMs != null });
     }
   }
   return out.sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+// The one liveness rule every reader shares. A run is:
+//   - `stoppedMs`  — a terminal summary with `stopped: true` (checked before finished,
+//                    so a stop is never mistaken for a plain finish)
+//   - `finishedMs` — a terminal, non-stopped summary
+//   - alive        — no trusted summary, and the heartbeat file is younger than
+//                    `heartbeatMs * 3`
+//   - `abortedMs`  — none of the above: the heartbeat (or, for a pre-heartbeat run,
+//                    run.log itself) went quiet with no terminal record
+// A recorded engine pid is NEVER consulted — that pid-reuse guess is the defect
+// this predicate replaces. The mtime gate + memoised lastRunStart preserve
+// listRuns' per-poll cost: a finished run's summary is trusted without touching
+// run.log at all.
+export function runLiveness(dir, { now = Date.now(), heartbeatMs = 15_000, _readFile = readFileSync } = {}) {
+  dir = resolve(dir);
+  const logPath = join(dir, "run.log");
+  const summaryPath = join(dir, "summary.json");
+  let logStat;
+  try { logStat = statSync(logPath); } catch { return { finishedMs: null, stoppedMs: null, abortedMs: null }; }
+  let summaryStat = null;
+  try { summaryStat = statSync(summaryPath); } catch { /* never finished */ }
+
+  let summary = null;
+  if (summaryStat) {
+    const gatedFinished = logStat.mtimeMs <= summaryStat.mtimeMs;
+    if (gatedFinished) {
+      summary = readJson(summaryPath);
+    } else {
+      // The log grew after the summary was written: a resume may have superseded it.
+      const started = lastRunStart(logPath, logStat.mtimeMs, logStat.size, _readFile);
+      let candidate = null;
+      try { candidate = JSON.parse(_readFile(summaryPath, "utf8")); } catch { /* mid-write */ }
+      const finishedMs = candidate?.finished ? Date.parse(candidate.finished) || null : null;
+      if (!summarySuperseded(finishedMs, started.startedMs)) summary = candidate;
+    }
+  }
+  if (summary?.finished) {
+    const finishedMs = Date.parse(summary.finished) || null;
+    return summary.stopped
+      ? { finishedMs: null, stoppedMs: finishedMs, abortedMs: null }
+      : { finishedMs, stoppedMs: null, abortedMs: null };
+  }
+  const hb = readHeartbeat(dir);
+  if (hb && now - hb.mtimeMs < heartbeatMs * 3) return { finishedMs: null, stoppedMs: null, abortedMs: null };
+  return { finishedMs: null, stoppedMs: null, abortedMs: hb ? hb.mtimeMs : logStat.mtimeMs };
 }
 
 // logPath -> { mtimeMs, size, pid, startedMs }. The last run-start's pid/ts can only

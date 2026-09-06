@@ -9,16 +9,16 @@ import { homedir } from "node:os";
 import { tokenTotal } from "../src/stream.mjs";
 import { formatTokens } from "../src/results.mjs";
 import { readRunLog, listRuns } from "../src/runlog.mjs";
-import { loadConfig } from "../src/config.mjs";
 
 function swarmHome() {
   return process.env.SWARM_HOME || join(homedir(), ".swarm");
 }
 
-// Newest run.log under <home>/runs/<encoded-cwd>/<run>/ by mtime.
+// Newest run.log under <home>/runs/<encoded-cwd>/<run>/ by mtime, whatever its
+// liveness — the caller decides whether a finished/aborted run still prints.
 export function newestRunLog(home = swarmHome()) {
-  const [best] = listRuns(home, { recentMs: Infinity });
-  return best ? { path: join(best.dir, "run.log"), mtimeMs: best.mtimeMs } : null;
+  const [best] = listRuns(home);
+  return best ? { path: join(best.dir, "run.log"), mtimeMs: best.mtimeMs, active: best.active } : null;
 }
 
 export function glyphFromLog(content) {
@@ -46,9 +46,8 @@ export function glyphFromLog(content) {
 import { pathToFileURL } from "node:url";
 if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
   try {
-    const recentMs = loadConfig().dashboard?.recentMs ?? 30 * 60 * 1000;
     const best = newestRunLog();
-    if (best && Date.now() - best.mtimeMs < recentMs) {
+    if (best && best.active) {
       process.stdout.write(glyphFromLog(readFileSync(best.path, "utf8")));
     }
   } catch { /* statusline must never error */ }
