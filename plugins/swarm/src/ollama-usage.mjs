@@ -138,14 +138,21 @@ export function readUsage(cacheText, { now = Date.now(), staleMs = DEFAULT_STALE
   }
 
   const resetsAt = cached.weeklyResetsAt ?? null;
+  // Session rides along on every reading. The VERDICT stays weekly-driven — a
+  // full session bar clears in hours, a full week does not — but a caller
+  // deciding "can I dispatch right now" needs to see both, and the fetch has
+  // always cached both.
+  const session = typeof cached.sessionPctUsed === "number"
+    ? { sessionPctUsed: cached.sessionPctUsed, sessionResetsAt: cached.sessionResetsAt ?? null }
+    : {};
   const snapshotAgeMs = now - cached.fetchedAt;
   if (snapshotAgeMs >= staleMs) {
-    return { state: "stale", snapshotAgeMs, weeklyPctUsed: cached.weeklyPctUsed, resetsAt };
+    return { state: "stale", snapshotAgeMs, weeklyPctUsed: cached.weeklyPctUsed, resetsAt, ...session };
   }
   if (cached.weeklyPctUsed >= 100) {
-    return { state: "exhausted", weeklyPctUsed: cached.weeklyPctUsed, resetsAt };
+    return { state: "exhausted", weeklyPctUsed: cached.weeklyPctUsed, resetsAt, ...session };
   }
-  return { state: "ok", weeklyPctUsed: cached.weeklyPctUsed, resetsAt };
+  return { state: "ok", weeklyPctUsed: cached.weeklyPctUsed, resetsAt, ...session };
 }
 
 // The file read + the "is this provider even enabled" check. Never throws.

@@ -241,3 +241,22 @@ test("initConfig: P7 — materialises provider.cloud.ollama DISABLED, real leave
 test("SETTINGS_URL is the ollama settings page", () => {
   equal(SETTINGS_URL, "https://ollama.com/settings");
 });
+
+// H8 — session rides along on every reading. RED before this: readUsage parsed
+// session into the cache and then dropped it, so no caller could ever see the
+// bar that blocks dispatch RIGHT NOW.
+test("readUsage: H8 carries session alongside weekly, in every state", () => {
+  const now = 2_000_000_000_000;
+  const base = {
+    sessionPctUsed: 100, sessionResetsAt: "2026-09-06T12:00:00Z",
+    weeklyPctUsed: 40, weeklyResetsAt: "2026-09-12T08:00:00Z",
+  };
+  const ok = readUsage(JSON.stringify({ ...base, fetchedAt: now - 1000 }), { now });
+  equal(ok.state, "ok", "a full session bar does not change the weekly verdict");
+  equal(ok.sessionPctUsed, 100);
+  equal(ok.sessionResetsAt, "2026-09-06T12:00:00Z");
+
+  const stale = readUsage(JSON.stringify({ ...base, fetchedAt: now - 90_000_000 }), { now });
+  equal(stale.state, "stale");
+  equal(stale.sessionPctUsed, 100, "session survives the stale branch too");
+});

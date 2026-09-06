@@ -657,23 +657,40 @@ async function main() {
       case "perf":
         return await cmdPerf(rest);
       case "quota": {
+        // Anthropic is fetched (its credential renews itself); every cloud
+        // provider is read from cache, because its cookie needs a human and
+        // `quota` must not stall on one. Both print through usageLines, so the
+        // subcommand and the standing-mode hook can never word this differently.
         const { checkQuota } = await import("../src/quota.mjs");
+        const { normalizeAnthropic, normalizeOllama, usageLines, notableLines } = await import("../src/usage.mjs");
+        const cfg = getConfig();
         const q = await checkQuota({
-          cfg: getConfig(),
+          cfg,
           fetch: (...a) => globalThis.fetch(...a),
           cachePath: join(swarmHome(), "quota-cache.json"),
           ...(process.env.SWARM_CREDENTIALS && { credentialsPath: process.env.SWARM_CREDENTIALS }),
         });
-        if (!q) {
-          out("quota: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
-          return 0;
+        const usages = [];
+        if (q) usages.push(normalizeAnthropic(q));
+        else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
+
+        if (cfg?.provider?.cloud?.ollama?.enabled === true) {
+          const { usageFromCache } = await import("../src/ollama-usage.mjs");
+          const reading = usageFromCache(cfg);
+          if (reading.state === "unknown") out("ollama: no reading yet — run `swarm ollama-usage --cookie '<value>'`");
+          else usages.push(normalizeOllama(reading));
         }
-        for (const l of q.limits) {
-          const scope = l.scope ? ` (${l.scope})` : "";
-          const sev = l.severity && l.severity !== "normal" ? ` [${l.severity}]` : "";
-          out(`anthropic ${l.kind}${scope}: ${l.percent}%${l.resetsAt ? ` — resets ${l.resetsAt}` : ""}${sev}`);
+
+        for (const line of usageLines(usages)) out(line);
+        // Anthropic severity is its own vocabulary and has no cross-provider
+        // equivalent, so it stays an Anthropic-only annotation.
+        for (const l of q?.limits || []) {
+          if (l.severity && l.severity !== "normal") out(`anthropic ${l.kind}: [${l.severity}]`);
         }
-        return q.exhausted ? 1 : 0;
+        for (const line of notableLines(usages)) out(line);
+        // Exit code keeps its documented meaning: Anthropic exhausted. A cloud
+        // provider's state is reported, never conflated with it.
+        return q?.exhausted ? 1 : 0;
       }
       case "ollama-usage": {
         const { fetchUsage, saveCookie, loadCookie, usageCachePath } = await import("../src/ollama-usage.mjs");
@@ -684,24 +701,29 @@ async function main() {
         if (cookieFlag !== undefined) saveCookie(cookiePath, cookieFlag);
         const fetched = await fetchUsage({ cookie: loadCookie(cookiePath), cachePath });
 
-        let session, weekly;
-        if (fetched.ok) {
-          session = { pct: fetched.sessionPctUsed, resetsAt: fetched.sessionResetsAt };
-          weekly = { pct: fetched.weeklyPctUsed, resetsAt: fetched.weeklyResetsAt };
-        } else {
-          const { existsSync, readFileSync } = await import("node:fs");
-          if (!existsSync(cachePath)) {
-            out("ollama session: no reading yet — run with --cookie '<value>' first");
-            out("ollama weekly: no reading yet — run with --cookie '<value>' first");
-            return 0;
-          }
-          const cached = JSON.parse(readFileSync(cachePath, "utf8"));
-          session = { pct: cached.sessionPctUsed, resetsAt: cached.sessionResetsAt };
-          weekly = { pct: cached.weeklyPctUsed, resetsAt: cached.weeklyResetsAt };
+        // This subcommand's job is the FETCH and the cookie; the printing is
+        // usage.mjs's, same as `quota`'s, so the two can never word a reading
+        // differently.
+        const { normalizeOllama, usageLines, notableLines } = await import("../src/usage.mjs");
+        const { readUsage } = await import("../src/ollama-usage.mjs");
+        const { readFileSync } = await import("node:fs");
+        // A successful fetch has just written the cache, so classify BOTH paths
+        // by reading it back: one classifier, so a fresh 100% and a cached 100%
+        // can never disagree about being exhausted.
+        let reading;
+        try {
+          reading = readUsage(readFileSync(cachePath, "utf8"), { staleMs: cfg?.provider?.usageStaleMs });
+        } catch {
+          reading = { state: "unknown" };
         }
-        out(`ollama session: ${session.pct}%${session.resetsAt ? ` — resets ${session.resetsAt}` : ""}`);
-        out(`ollama weekly: ${weekly.pct}%${weekly.resetsAt ? ` — resets ${weekly.resetsAt}` : ""}`);
-        return weekly.pct >= 100 ? 1 : 0;
+        if (reading.state === "unknown") {
+          out(`ollama: no reading yet${fetched.ok ? "" : ` (${fetched.reason})`} — run with --cookie '<value>' first`);
+          return 0;
+        }
+        const usage = normalizeOllama(reading);
+        for (const line of usageLines([usage])) out(line);
+        for (const line of notableLines([usage])) out(line);
+        return usage.state === "exhausted" ? 1 : 0;
       }
       default:
         err(USAGE);

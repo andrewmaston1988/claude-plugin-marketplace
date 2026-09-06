@@ -227,16 +227,22 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
 - **Quota is a first-class state** (`⏳`), distinct from rate limits: Anthropic usage exhaustion is temporal (hours), so instead of retrying, the run parses the reset time into the result and closing block, and the first Claude leaf to hit the wall pre-emptively marks every still-pending undefended Claude leaf `quota` — one failure, one lesson, no wasted dispatches. Re-running after reset skips all `ok` work.
 - **Quota preflight**: when a plan contains Claude leaves, the engine first queries Anthropic's usage endpoint with Claude Code's own local OAuth credentials (free, predictive — utilization % and reset times per window, cached `quotaCacheSecs`). Exhausted quota with undefended Claude leaves aborts *before* dispatch with the leaf list and reset time; ≥`quotaWarnPct` (80) warns and proceeds. Strictly best-effort — any endpoint failure and the run proceeds; mid-run classification is the backstop. Disable with `"quotaPreflight": false`; `quotaPatterns` extends message matching without a plugin update.
 
-`swarm quota` prints the same utilization table on demand — useful before choosing a model mix.
-
-**`swarm ollama-usage`** is the same idea for the `:cloud` side: a zero-dependency preflight against `ollama.com/settings` (no npm package, node:* only), independent of your provider app's own usage tooling. First run, hand it the browser session cookie: `swarm ollama-usage --cookie '<value>'` saves it to `provider.cloud.ollama.cookiePath` and fetches immediately; every later call reuses the saved cookie. Output is always two lines:
+`swarm quota` answers one question for **every** provider at once — *can I dispatch right now, and on what?* — one session and one weekly line each, provider-named:
 
 ```
-ollama session: 42% — resets 2026-09-06T18:00:00Z
+anthropic session: 42% — resets 2026-09-06T18:00:00Z
+anthropic weekly_all: 71% — resets 2026-09-12T00:00:00Z
+ollama session: 12% — resets 2026-09-06T12:00:00Z
 ollama weekly: 87% — resets 2026-09-08T00:00:00Z
 ```
 
-Exit code is 1 when the weekly meter reads 100%, 0 otherwise — an expired or missing cookie falls back to the last cached reading (or, with no cache yet, two "no reading yet" lines and exit 0). Nothing here arms itself: `usageFromCache` — what the ultraswarm hook and the offer gate consult to prefer or steer away from `:cloud` — reads this cache only when `provider.cloud.ollama.enabled` is `true`, regardless of whether a cookie is saved.
+Anthropic is fetched (its credential renews itself); a cloud provider is read from cache, because its cookie needs a human and `quota` must not stall on one. The exit code keeps its meaning — 1 when **Anthropic** is exhausted — and a cloud provider's state is reported beside it, never conflated with it.
+
+**`swarm ollama-usage`** owns the `:cloud` side's *fetch* and cookie: a zero-dependency preflight against `ollama.com/settings` (no npm package, node:* only), independent of your provider app's own usage tooling. First run, hand it the browser session cookie: `swarm ollama-usage --cookie '<value>'` saves it to `provider.cloud.ollama.cookiePath` and fetches immediately; every later call reuses the saved cookie. It prints the same two lines `quota` does, exits 1 when the weekly meter reads 100%, and falls back to the last cached reading when the cookie is expired or missing (with no cache at all: one "no reading yet" line and exit 0).
+
+Both commands print through `src/usage.mjs`, which is also what the ultraswarm hook consults — so a reading is worded identically wherever it surfaces, and adding a second cloud provider is one reader rather than another command. Nothing here arms itself: a provider is read only when `provider.cloud.<name>.enabled` is `true`, regardless of whether a cookie is saved.
+
+A provider that cannot take work now also gets one line beside the standing-mode block — exhausted, a snapshot too old to trust, or a full session bar. A healthy provider says nothing.
 
 ## Model capability scores
 

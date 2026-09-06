@@ -6,20 +6,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { notableLines } from '../src/usage.mjs';
 
 const CONFIG = path.join(os.homedir(), '.swarm', 'config.json');
 
 export const MODE_CLOUD = '[:cloud tier preferred]';
 export const MODE_ANTHROPIC = '[Anthropic orchestration only]';
 
-// One line, OUTSIDE the standing block: the mode bracket says which tier is
-// preferred and nothing else. Meter state is availability, not preference — an
-// exhausted or stale meter never makes Anthropic the preference.
-function headroomLine(headroom) {
-  if (headroom?.state === 'exhausted') return `ollama: weekly allowance exhausted, resets ${headroom.resetsAt}`;
-  if (headroom?.state === 'stale') return `ollama: usage unread for ${Math.floor(headroom.snapshotAgeMs / 3_600_000)}h`;
-  return null;
-}
+// Headroom lines print OUTSIDE the standing block: the mode bracket says which
+// tier is preferred and nothing else. Meter state is availability, not
+// preference — an exhausted or stale meter never makes Anthropic the preference.
+// Wording and provider coverage belong to src/usage.mjs, so the hook and `quota`
+// cannot drift.
 
 function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
@@ -52,17 +50,17 @@ export async function modeFor({ cwd, config }) {
 // The keyword as a standalone word — `ultraswarm.mjs` in a prompt about this file is not an opt-in.
 const KEYWORD_RE = /(^|[^\w./-])ultraswarm(?![\w./-])/i;
 
-// Pure: which event, what prompt, what config/cwd/headroom -> standing block or null.
-// A headroom line, when there is one, follows the block rather than entering it —
-// availability is information, not instruction, and the block is instruction only.
-export async function decide({ event, prompt = '', cwd, config, headroom }) {
+// Pure: which event, what prompt, what config/cwd/usage -> standing block or null.
+// `usage` is readCachedUsage()'s array; the caller reads it, so this stays pure
+// and an absent argument behaves exactly as before usage existed.
+export async function decide({ event, prompt = '', cwd, config, usage = [] }) {
   const armed = event === 'SessionStart' ? config?.swarm?.always === true
     : event === 'UserPromptSubmit' ? KEYWORD_RE.test(prompt)
       : false;
   if (!armed) return null;
-  const line = headroomLine(headroom);
   const block = standingBlock(await modeFor({ cwd, config }));
-  return line ? `${block}\n${line}` : block;
+  const lines = notableLines(usage);
+  return lines.length ? `${block}\n${lines.join('\n')}` : block;
 }
 
 async function main() {
@@ -76,13 +74,13 @@ async function main() {
 
   const event = String(payload.hook_event_name || '');
   const config = readJSON(CONFIG);
-  const { usageFromCache } = await import('../src/ollama-usage.mjs');
+  const { readCachedUsage } = await import('../src/usage.mjs');
   const ctx = await decide({
     event,
     prompt: String(payload.prompt || ''),
     cwd: payload.cwd || process.cwd(),
     config,
-    headroom: usageFromCache(config),
+    usage: await readCachedUsage(config),
   });
   if (!ctx) process.exit(0);
 
