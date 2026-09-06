@@ -2,15 +2,15 @@
 // PreToolUse hook, no matcher: run a project-owned guard script before every tool
 // call inside a swarm leaf, and deny the call when the guard says no.
 //
-// Why this exists (2026-09-06): three primordial worktrees each compiled rapier
-// from cold in one night (cam-impl-1 5.3 GB, bio-impl-1 5.0 GB, scs-impl-1 3.0 GB —
-// 13.3 GB of target/ dirs) despite the manifest prose saying "lanes run only
-// `cargo test -p <crate>`". Commit charge peaked at 55 GB on a 32 GB box and the
-// harness killed every engine earlier the same night. Prose in a leaf's prompt is
-// not enforcement; this hook is. The project's own policy script (e.g. deny any
-// `cargo` invocation) is wired per-repo via `~/.swarm/config.json` `leafGuards.<root>`
-// and reaches this hook as `SWARM_LEAF_GUARD` in the spawn env (src/scheduler.mjs),
-// set only for the leaf whose `originalCwd` matched that root.
+// Why this exists: `allowedTools` scopes tool NAMES, not what a tool is asked to
+// do, and prompt prose ("only run the narrow test command") is not enforcement.
+// Observed: three parallel leaves each cold-compiled a multi-GB dependency tree
+// in their own worktrees despite prose forbidding it — tens of GB of build output
+// and a commit-charge peak that got every engine on the machine killed. A repo's
+// own policy script, wired per-root via `~/.swarm/config.json` `leafGuards.<root>`,
+// reaches this hook as `SWARM_LEAF_GUARD` in the spawn env (src/scheduler.mjs),
+// set only for a leaf whose `originalCwd` matched that root — the repo decides
+// what its leaves may not do, once, instead of every manifest author.
 //
 // Fail-CLOSED, unlike `foreground-guard.mjs`'s fail-open. That guard's failure mode
 // is a lost leaf (annoying, cheap to retry); this guard's failure mode of failing

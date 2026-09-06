@@ -23,7 +23,7 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Per-agent model + effort selection | ✅ | ✅ |
 | Worktree isolation for write-capable agents | ✅ | ✅ |
 | Leaves run foreground-only — a headless session that yields its turn is over, so `run_in_background` is denied inside a leaf | ✅ `hooks/foreground-guard.mjs` | — |
-| Per-repo PreToolUse guard — a project script denies tool calls inside leaves | ✅ `hooks/leaf-guard.mjs` | — |
+| Per-repo PreToolUse hook — a repo-owned script sees every tool call inside its leaves and can deny it | ✅ `hooks/leaf-guard.mjs` | — |
 | Full headless Claude Code agents — complete tool roster | ✅ | ✅ |
 | Deterministic mid-run steps — fan out over a discovered list, gate, dedupe/count | ✅ `forEach`/`when`/`compute` | ✅ full JS |
 | Schema-validated output — corrective retry on mismatch | ✅ `returns` | ✅ `agent({schema})` |
@@ -76,28 +76,35 @@ Other useful keys (defaults shown in `config.default.json`): `provider.url` (Ant
 
 ### Per-repo leaf guard (`leafGuards`)
 
-A swarm leaf is a full headless Claude Code session — `allowedTools` scopes tool names, not
-commands, and prompt prose ("only run `cargo test -p <crate>`") is not enforcement. `leafGuards`
-in `~/.swarm/config.json` gives a project one mechanical place to deny specific tool calls
-inside its own leaves:
+A leaf is a full headless Claude Code session, and `allowedTools` scopes tool *names*, not what
+a tool is asked to do. `leafGuards` wires a **repo-owned PreToolUse hook** into every leaf that
+runs under that repo — one config line, one script the repo keeps and tests:
 
 ```json
-{ "leafGuards": { "C:/code/primordial": "python scripts/swarm_leaf_guard.py" } }
+{ "leafGuards": { "/path/to/repo": "python scripts/leaf_guard.py" } }
 ```
 
-— primordial's own guard, which denies every `cargo` invocation so a lane can no longer
-cold-compile a multi-GB dependency tree in each of several worktrees at once. Keys are absolute
-project roots (case-insensitive on Windows, longest match wins for nested roots); the value is a
-shell command run from the leaf's cwd. `hooks/leaf-guard.mjs` fires as a no-matcher `PreToolUse`
-hook for every task whose `originalCwd` falls under a configured root, piping the tool-call
-payload (`tool_name`, `tool_input`, …) to the command on stdin. Exit 2 denies the call with the
-command's stderr as the reason; **any other outcome — a different exit code, a timeout, a spawn
-error — also denies**, naming the failure, because a guard that fails open silently is the same
-disk-filling incident this exists to stop. A distinct guard is probed once at `validate`
-(`{"tool_name":"Bash","tool_input":{"command":"true"}}`) so a broken script is caught before any
-leaf dispatches, not at its first tool call. A task opts out with `"leafGuard": false` in the
-manifest — the only accepted value — for the one leaf (typically a serial build tail) that must
-keep running the thing the guard would otherwise deny.
+Before every tool call in a guarded leaf the engine's hook runs that command from the leaf's
+cwd with the PreToolUse payload on stdin — `tool_name`, `tool_input` (a Bash `command`, an
+Edit/Write `file_path`, a Read path, …), the same JSON any PreToolUse hook receives. **Exit 0
+allows the call; exit 2 denies it, and whatever the script wrote to stderr is the reason the
+leaf sees.** Anything else — another exit code, a timeout, a spawn failure — also denies,
+naming the failure: the guard fails closed, because a policy that silently stops applying is
+worse than one that loudly blocks.
+
+What a repo can do with it is whatever a PreToolUse hook can do, decided by the repo rather
+than by every manifest author: refuse build or test commands in lanes so only a serial tail
+compiles; fence writes to a directory or a file pattern; block network-touching commands, package
+installs, or `git push`; require a header marker on every edit under a given directory; keep
+a leaf from reading a secrets path. The script sees the full payload, so any rule expressible over
+it is one `if` away.
+
+Mechanics: keys are absolute repo roots (longest match wins for nested roots; case-insensitive
+on Windows); a leaf under no root runs unguarded; interactive sessions never see the hook. Each
+distinct guard is probed once at `validate` with a harmless Bash payload, so a script that
+cannot run fails the manifest before any leaf spends. A task opts out with `"leafGuard": false`
+— the only accepted value — for a leaf that must be allowed the thing the guard denies (the one
+build tail, say); nothing in a task's `env` or `settings.env` can forge or clear the guard.
 
 Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama install recent enough to serve `/api/experimental/model-recommendations` (~v0.23+).
 
