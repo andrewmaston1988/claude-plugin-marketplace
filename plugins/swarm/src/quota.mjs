@@ -16,9 +16,14 @@ export const DEFAULT_QUOTA_PATTERNS = [
 
 export const DEFAULT_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 
+// "…reached your <weekly|session> usage limit, add extra usage: ollama.com/settings" —
+// keyed on the suffix so a later meter needs no edit. Deliberately NOT in `quotaPatterns`:
+// that list is the operator's to narrow, and `config init` never adds to an already-set key.
+const PROVIDER_QUOTA_PATTERNS = ["usage limit, add extra usage"];
+
 export function matchQuota(text, patterns = DEFAULT_QUOTA_PATTERNS) {
   const t = String(text || "").toLowerCase();
-  return patterns.some((p) => t.includes(p.toLowerCase()));
+  return [...patterns, ...PROVIDER_QUOTA_PATTERNS].some((p) => t.includes(p.toLowerCase()));
 }
 
 // "…limit reached|1751210400" -> ISO; "…will reset at 3pm (X)." -> "3pm (X)";

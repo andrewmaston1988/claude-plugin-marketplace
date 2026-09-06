@@ -155,6 +155,25 @@ test("classifyFailure matrix", () => {
   equal(classifyFailure({ timedOut: false, output: "You've hit your limit; rate limit? no — resets at 3pm" }), "quota");
 });
 
+// Verbatim from land-two-plans-1/results/review-turn.log, 2026-09-06. The 429 makes
+// RATE_LIMIT_RE match, so an unrecognised body is retried — 2 swarm retries on top of
+// the CLI's own 10 — against a meter that cannot clear for hours.
+const OLLAMA_WEEKLY_429 = "API Error: Request rejected (429) · you (andrewmaston1988) have reached your weekly usage limit, add extra usage: https://ollama.com/settings (ref: 71c45403-11cd-42ad-822e-817dffb9d3e2)";
+const OLLAMA_SESSION_429 = "API Error: Request rejected (429) · you (someone) have reached your session usage limit, add extra usage: https://ollama.com/settings";
+
+test("classifyFailure: an ollama meter 429 is quota, not rate-limited", () => {
+  equal(classifyFailure({ timedOut: false, output: OLLAMA_WEEKLY_429 }), "quota");
+  equal(classifyFailure({ timedOut: false, output: OLLAMA_SESSION_429 }), "quota");
+});
+
+test("classifyFailure: ollama detection survives an overridden quotaPatterns", () => {
+  // quotaPatterns is the Anthropic-tunable list. A user who narrows it for their own
+  // account must not silently lose provider detection — which is also what reaches an
+  // install whose config.json already holds the old four patterns, since `config init`
+  // never overwrites a value that is already set.
+  equal(classifyFailure({ timedOut: false, output: OLLAMA_WEEKLY_429 }, ["something else"]), "quota");
+});
+
 test("retry: rate-limited leaf retries with backoff and succeeds; dependents unharmed", async () => {
   const dir = tmp();
   try {
