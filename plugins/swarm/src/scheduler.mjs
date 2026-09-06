@@ -11,7 +11,7 @@ import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from 
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
-  renderProvenance,
+  renderProvenance, touchHeartbeat, stopPath,
 } from "./results.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
@@ -92,7 +92,8 @@ export function substituteItems(prompt, item, index) {
 // message can mention both; exhaustion is temporal — hours — while rate limits
 // clear in seconds and are worth in-run retries). The only error-classification
 // logic in the engine.
-export function classifyFailure({ timedOut, output }, quotaPatterns = DEFAULT_QUOTA_PATTERNS) {
+export function classifyFailure({ timedOut, output, stopped }, quotaPatterns = DEFAULT_QUOTA_PATTERNS) {
+  if (stopped) return "failed:stopped";
   if (timedOut) return "failed:timeout";
   if (matchQuota(output, quotaPatterns)) return "quota";
   if (RATE_LIMIT_RE.test(output || "")) return "rate-limited";
@@ -208,7 +209,7 @@ async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
 }
 
 // Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
-export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity } = {}) {
+export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, onChild } = {}) {
   return new Promise((resolve) => {
     const { argv, env } = buildDispatch(task, prompt, cfg);
     const started = io.now();
@@ -239,6 +240,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
       else done();
       return;
     }
+    onChild?.(child);
     let raw = "";
     let timedOut = false;
     let settled = false;
@@ -325,7 +327,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
 
 // Execute the plan's dependency graph under the concurrency cap.
 // Returns { summary, summaryPath, digestPath, digestFailed, worktreesKept }.
-export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false } = {}) {
+export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, _writeSummary = writeSummary } = {}) {
   const worktree = io.worktree || defaultWorktree;
   const tasks = [...plan.tasks];
   if (plan.digest) tasks.push(buildDigestTask(plan));
@@ -334,77 +336,112 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // the outcomes it produced, so the corpus can answer "what was asked".
   writeManifestSnapshot(plan.resultsDir, effectivePlanDoc(plan));
 
+  const children = new Map(); // id -> live child process, for requestStop to kill
+  let wake = () => {};        // resolves the loop's idle wait when a retry re-arms
+  let stopRequested = false;
+  let stopReason = null;
+  // Cooperative stop: a control file, not a pid-kill — Windows TerminateProcess
+  // runs no handler, so an external kill can never route through this, and a
+  // pid the OS has since reused must never be mistaken for this run's engine.
+  // Idempotent: the first caller (stop file or a signal) wins. Registered before
+  // any await below so a signal during the health/quota preflight is caught too.
+  const requestStop = (reason) => {
+    if (stopRequested) return;
+    stopRequested = true;
+    stopReason = reason;
+    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), event: "run-stop", reason });
+    for (const child of children.values()) {
+      try { child.kill(); } catch { /* already gone */ }
+    }
+    wake();
+  };
+  const onSignal = (sig) => () => requestStop(`signal:${sig}`);
+  const sigintHandler = onSignal("SIGINT");
+  const sigtermHandler = onSignal("SIGTERM");
+  process.once("SIGINT", sigintHandler);
+  process.once("SIGTERM", sigtermHandler);
+
   // Health check, once per run, only when any open-model task exists: any
   // response from the provider endpoint counts as up; fail the run fast with
   // a clear message when it is unreachable.
   // Preflights must see composed leaves too — a manifest node's children are
   // known statically even though they splice in at run time.
   const leafView = tasks.flatMap((t) => (t.childPlan ? t.childPlan.tasks : [t]));
-  if (leafView.some((t) => !isAgentless(t) && t.model !== "manifest" && !isClaudeModel(t.model))) {
-    try {
-      await io.fetch(cfg.provider.url);
-    } catch (e) {
-      throw new Error(
-        `provider endpoint ${cfg.provider.url} is unreachable (${e.message}) — ` +
-        `open-model tasks cannot dispatch. Is the provider running?`
-      );
-    }
-  }
-
-  // Quota preflight, once per run, only when any Claude-model task exists.
-  // Best-effort (endpoint failure -> proceed silently; the mid-run 'quota'
-  // classification is the backstop). Exhausted quota with undefended Claude
-  // leaves aborts BEFORE dispatch — a run that would deterministically fail
-  // should fail in one second with the reset time, not after four minutes.
-  const claudeTasks = leafView.filter((t) => !isAgentless(t) && isClaudeModel(t.model));
-  if (claudeTasks.length && cfg.quotaPreflight !== false) {
-    const env = io.env || process.env;
-    const q = await checkQuota({
-      cfg,
-      fetch: io.fetch,
-      now: io.now,
-      cachePath: join(swarmHome(env), "quota-cache.json"),
-      ...(env.SWARM_CREDENTIALS && { credentialsPath: env.SWARM_CREDENTIALS }),
-    });
-    // A scoped limit grounds only the model it names — never the whole roster.
-    // Match on the family token, because the two sides are written differently:
-    // a leaf says "sonnet" or "claude-sonnet-5"; the endpoint may say "Sonnet"
-    // OR "Claude Sonnet 4.5". A bare substring test in one direction misses the
-    // multi-word form and would let an exhausted Sonnet bucket dispatch Sonnet.
-    const FAMILY_RE = /(fable|opus|sonnet|haiku)/i;
-    const familyOf = (s) => (String(s || "").match(FAMILY_RE)?.[1] || "").toLowerCase();
-    const blockedScope = (model) =>
-      (q?.exhaustedScopes || []).find((s) => {
-        const mf = familyOf(model), sf = familyOf(s.scope);
-        if (mf && sf) return mf === sf;
-        // Scope names a model we don't recognise: fall back to a two-way substring
-        // test so an unclassifiable exhausted bucket still grounds a leaf naming it.
-        const m = String(model).toLowerCase(), sc = String(s.scope || "").toLowerCase();
-        return Boolean(sc) && (m.includes(sc) || sc.includes(m));
-      });
-    if (q?.exhausted || q?.exhaustedScopes?.length) {
-      const doomed = claudeTasks.filter(
-        (t) => !t.fallbackModel && (q.exhausted || blockedScope(t.model))
-      );
-      if (doomed.length) {
-        const hit = q.exhausted ? q.worst : blockedScope(doomed[0].model);
-        const what = q.exhausted
-          ? `${hit.kind} at ${hit.percent}%`
-          : `the ${hit.scope}-scoped limit is at ${hit.percent}%`;
+  // Both preflights can throw to abort the run before dispatch — caught here
+  // just to remove the signal handlers first; the leaked-listener bug (a later
+  // test's process.emit("SIGINT") firing this run's stale handler) is worse
+  // than the throw itself, since it corrupts unrelated tests.
+  try {
+    if (leafView.some((t) => !isAgentless(t) && t.model !== "manifest" && !isClaudeModel(t.model))) {
+      try {
+        await io.fetch(cfg.provider.url);
+      } catch (e) {
         throw new Error(
-          `Anthropic usage exhausted (${what}` +
-          `${hit.resetsAt ? `, resets ${hit.resetsAt}` : ""}) — ` +
-          `${doomed.length} Claude leaf(s) cannot dispatch: ${doomed.map((t) => t.id).join(", ")}. ` +
-          `Recast to :cloud models, add fallbackModel, or re-run after reset.`
+          `provider endpoint ${cfg.provider.url} is unreachable (${e.message}) — ` +
+          `open-model tasks cannot dispatch. Is the provider running?`
         );
       }
     }
-    if (q && !q.exhausted && q.worst.percent >= (cfg.quotaWarnPct ?? 80)) {
-      io.stdout(
-        `⚠ Anthropic usage at ${q.worst.percent}% (${q.worst.kind}` +
-        `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — Claude leaves may hit quota mid-run`
-      );
+
+    // Quota preflight, once per run, only when any Claude-model task exists.
+    // Best-effort (endpoint failure -> proceed silently; the mid-run 'quota'
+    // classification is the backstop). Exhausted quota with undefended Claude
+    // leaves aborts BEFORE dispatch — a run that would deterministically fail
+    // should fail in one second with the reset time, not after four minutes.
+    const claudeTasks = leafView.filter((t) => !isAgentless(t) && isClaudeModel(t.model));
+    if (claudeTasks.length && cfg.quotaPreflight !== false) {
+      const env = io.env || process.env;
+      const q = await checkQuota({
+        cfg,
+        fetch: io.fetch,
+        now: io.now,
+        cachePath: join(swarmHome(env), "quota-cache.json"),
+        ...(env.SWARM_CREDENTIALS && { credentialsPath: env.SWARM_CREDENTIALS }),
+      });
+      // A scoped limit grounds only the model it names — never the whole roster.
+      // Match on the family token, because the two sides are written differently:
+      // a leaf says "sonnet" or "claude-sonnet-5"; the endpoint may say "Sonnet"
+      // OR "Claude Sonnet 4.5". A bare substring test in one direction misses the
+      // multi-word form and would let an exhausted Sonnet bucket dispatch Sonnet.
+      const FAMILY_RE = /(fable|opus|sonnet|haiku)/i;
+      const familyOf = (s) => (String(s || "").match(FAMILY_RE)?.[1] || "").toLowerCase();
+      const blockedScope = (model) =>
+        (q?.exhaustedScopes || []).find((s) => {
+          const mf = familyOf(model), sf = familyOf(s.scope);
+          if (mf && sf) return mf === sf;
+          // Scope names a model we don't recognise: fall back to a two-way substring
+          // test so an unclassifiable exhausted bucket still grounds a leaf naming it.
+          const m = String(model).toLowerCase(), sc = String(s.scope || "").toLowerCase();
+          return Boolean(sc) && (m.includes(sc) || sc.includes(m));
+        });
+      if (q?.exhausted || q?.exhaustedScopes?.length) {
+        const doomed = claudeTasks.filter(
+          (t) => !t.fallbackModel && (q.exhausted || blockedScope(t.model))
+        );
+        if (doomed.length) {
+          const hit = q.exhausted ? q.worst : blockedScope(doomed[0].model);
+          const what = q.exhausted
+            ? `${hit.kind} at ${hit.percent}%`
+            : `the ${hit.scope}-scoped limit is at ${hit.percent}%`;
+          throw new Error(
+            `Anthropic usage exhausted (${what}` +
+            `${hit.resetsAt ? `, resets ${hit.resetsAt}` : ""}) — ` +
+            `${doomed.length} Claude leaf(s) cannot dispatch: ${doomed.map((t) => t.id).join(", ")}. ` +
+            `Recast to :cloud models, add fallbackModel, or re-run after reset.`
+          );
+        }
+      }
+      if (q && !q.exhausted && q.worst.percent >= (cfg.quotaWarnPct ?? 80)) {
+        io.stdout(
+          `⚠ Anthropic usage at ${q.worst.percent}% (${q.worst.kind}` +
+          `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — Claude leaves may hit quota mid-run`
+        );
+      }
     }
+  } catch (e) {
+    process.off("SIGINT", sigintHandler);
+    process.off("SIGTERM", sigtermHandler);
+    throw e;
   }
 
   // The approval-surface estimate (computed by the CLI) echoes at run start so
@@ -434,7 +471,6 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   const attempts = new Map();     // id -> retries consumed on the current model
   const usedFallback = new Set(); // ids already switched to their fallbackModel
   let retryWaiting = 0;           // leaves sleeping out a backoff
-  let wake = () => {};            // resolves the loop's idle wait when a retry re-arms
   const worktreesKept = [];
   let digestPath = null;
   let digestFailed = false;
@@ -531,6 +567,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
   // throttled roster repaint. Activity log lines are rate-limited per leaf —
   // a busy leaf calls tools far faster than a watcher needs.
   const streamHooks = (task) => ({
+    onChild: (child) => children.set(task.id, child),
     onTokens: (totals) => {
       tokensMap.set(task.id, totals);
       lastEventAt.set(task.id, io.now());
@@ -604,12 +641,19 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     }
   }
 
-  const running = new Map(); // id -> promise resolving to task id
+  const running = new Map();  // id -> promise resolving to task id
 
-  // Heartbeat: repaint while anything runs so elapsed and live tokens tick
-  // even between state changes. unref'd — never holds the process open.
+  // Heartbeat: touch the liveness file every tick — even while every leaf is
+  // parked in backoff, since a reader must never mistake a resting engine for
+  // a dead one — and repaint while anything runs so elapsed and live tokens
+  // tick even between state changes. unref'd — never holds the process open.
   const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
-  const heartbeat = setInterval(() => { if (running.size > 0) paint(); }, heartbeatMs);
+  touchHeartbeat(plan.resultsDir, started, process.pid);
+  const heartbeat = setInterval(() => {
+    touchHeartbeat(plan.resultsDir, new Date().toISOString(), process.pid);
+    if (!stopRequested && existsSync(stopPath(plan.resultsDir))) requestStop("stop-file");
+    if (running.size > 0) paint();
+  }, heartbeatMs);
   if (heartbeat.unref) heartbeat.unref();
 
   const depsSatisfied = (t) => t.after.every((d) => OK_STATES.has(state.get(d)));
@@ -963,7 +1007,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       // token count) in the raw stream would misread them as transient.
       const st = r.ok ? "ok"
         : r.schemaErrors ? "failed"
-        : classifyFailure({ timedOut: r.timedOut, output: r.raw }, cfg.quotaPatterns);
+        : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: stopRequested }, cfg.quotaPatterns);
       if (st === "quota") {
         const resetsAt = parseQuotaReset(r.raw);
         if (resetsAt) result.quotaResetsAt = resetsAt;
@@ -1070,7 +1114,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         }
       }
       return task.id;
-    })().finally(() => running.delete(task.id));
+    })().finally(() => { running.delete(task.id); children.delete(task.id); });
     running.set(task.id, promise);
   };
 
@@ -1092,21 +1136,23 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     // without occupying a slot — after any of them, re-drive the whole cycle so
     // tasks earlier in the array unlock in the same pass.
     let progressed = false;
-    for (const t of tasks) {
-      if (running.size >= plan.concurrency) break;
-      if (state.get(t.id) !== "pending" || !depsSatisfied(t)) continue;
-      if (!passesWhen(t)) { progressed = true; continue; }
-      if (t.forEach) { expandForEach(t); progressed = true; continue; }
-      if (t.childPlan) { expandManifest(t); progressed = true; continue; }
-      if (t.aggregate) { runAggregate(t); progressed = true; continue; }
-      if (t.aggregateManifest) { runManifestAggregate(t); progressed = true; continue; }
-      if (t.compute) { runCompute(t); progressed = true; continue; }
-      if (t.integrate) { runIntegrate(t); progressed = true; continue; }
-      launch(t);
+    if (!stopRequested) {
+      for (const t of tasks) {
+        if (running.size >= plan.concurrency) break;
+        if (state.get(t.id) !== "pending" || !depsSatisfied(t)) continue;
+        if (!passesWhen(t)) { progressed = true; continue; }
+        if (t.forEach) { expandForEach(t); progressed = true; continue; }
+        if (t.childPlan) { expandManifest(t); progressed = true; continue; }
+        if (t.aggregate) { runAggregate(t); progressed = true; continue; }
+        if (t.aggregateManifest) { runManifestAggregate(t); progressed = true; continue; }
+        if (t.compute) { runCompute(t); progressed = true; continue; }
+        if (t.integrate) { runIntegrate(t); progressed = true; continue; }
+        launch(t);
+      }
     }
     if (progressed) continue;
 
-    if (running.size === 0 && retryWaiting === 0) break;
+    if (running.size === 0 && (retryWaiting === 0 || stopRequested)) break;
     if (running.size > 0) {
       await Promise.race(running.values());
       // running is keyed by id and released on settlement; state is the truth about
@@ -1127,11 +1173,23 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       wake = () => {};
     }
   }
+  // A leaf that never got a slot (still pending) or was mid-backoff never runs
+  // classifyFailure's stopped branch — say so here, or a stopped run leaves it
+  // reading "pending" forever, indistinguishable from a run that just hasn't
+  // started it yet.
+  if (stopRequested) {
+    for (const t of tasks) {
+      if (state.get(t.id) === "pending" || state.get(t.id) === "retrying") record(t, "failed:stopped", 0);
+    }
+  }
   clearInterval(heartbeat);
+  process.off("SIGINT", sigintHandler);
+  process.off("SIGTERM", sigtermHandler);
 
   const summary = {
     started,
     finished: new Date().toISOString(),
+    ...(stopRequested && { stopped: true, stopReason }),
     tasks: tasks.map((t) => ({
       id: t.id,
       // model + costUsd feed the estimate corpus (src/estimate.mjs loadCorpus)
@@ -1150,7 +1208,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
     ...(plan.estimate !== undefined && { estimate: plan.estimate }),
     ...(costWarnFired && { costWarnFired: true }),
   };
-  const summaryPath = writeSummary(plan.resultsDir, summary);
+  const summaryPath = _writeSummary(plan.resultsDir, summary);
 
   // Report mode: the leaf wrote the body AND its own title; the engine APPENDS a
   // one-line Run footnote (+ loud coverage lines). This is the first point where
