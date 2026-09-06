@@ -23,7 +23,9 @@ disjoint files; a merge is the exception, and it needs a shared reading surface 
 justify it.
 
 **Core principle:** grouping is decided by wall-clock, blast radius and shared reading
-surface — the three legs, on the page, before any agent is spawned.
+surface — the three legs, on the page, before any agent is spawned. The recommendation is
+wide at the default window — one agent per lane, merged only on shared surface; narrower is
+the operator's override, and a bigger window is a wall-clock purchase.
 
 *Measured once (2026-09-06, one plan, three shapes — the worked example below): under the
 default window eight leaves and a four-link chain cost the same — what a leaf pays to start,
@@ -222,7 +224,9 @@ costs least rather than where it was. Ask, in order:
 
 ## 9. The gate question — four options, the floor always present
 
-Present the numbers, lead with a recommendation, then let the operator choose:
+Present the numbers, lead with a recommendation, then let the operator choose. The
+recommendation is wide at the default window — one agent per lane, merged only on shared
+surface; narrower is the operator's override, and a bigger window is a wall-clock purchase.
 
 | Option | What it costs |
 |--------|--------------|
