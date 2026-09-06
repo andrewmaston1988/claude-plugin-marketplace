@@ -427,10 +427,12 @@ test("P1: resultSuperseded is true for exactly the unsettled states", () => {
   for (const s of ["ok", "skipped", "failed", "timeout", "quota", "rate-limited", "blocked"]) {
     assert.equal(resultSuperseded(s), false, `${s} settled this attempt — its result stands`);
   }
-  // A leaf the log never mentions reaches the endpoint as undefined rather than
-  // "pending" only if topology is bypassed; treat it as settled-unknown, never as a
-  // reason to hide a result that is genuinely there.
-  assert.equal(resultSuperseded(undefined), false);
+  // No row in this attempt's roster at all. A forEach clone is minted by the log's
+  // `expand` event and is never in manifest.tasks, so a contracted expansion leaves the
+  // dropped clone's result on disk with nothing to match it — superseded by construction.
+  assert.equal(resultSuperseded(undefined), true);
+  // Compound states reach the log through a variable (scheduler.mjs:1038) and are settled.
+  assert.equal(resultSuperseded('failed:timeout'), false);
 });
 
 // P2 — a source-text tripwire for the duplication the plan exists to avoid. It catches a

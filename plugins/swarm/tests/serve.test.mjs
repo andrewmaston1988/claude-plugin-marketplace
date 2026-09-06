@@ -564,3 +564,42 @@ test("G1/G2: a settled leaf's result is served — including a resume-cached `sk
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+// A forEach expansion that CONTRACTS on resume: attempt 1 minted three clones, attempt 2
+// minted two. Clones are never in manifest.tasks — they join the roster only via the
+// `expand` event — so topology() cannot backfill a row for the dropped one, and its state
+// reads back as undefined rather than any roster state.
+const CONTRACTED_LOG = [
+  '{"ts":"2026-09-05T00:50:00Z","event":"run-start","pid":null,"tasks":[{"id":"fix","model":"m"}]}',
+  '{"ts":"2026-09-05T00:50:01Z","event":"expand","id":"fix","model":"m","clones":3}',
+  '{"ts":"2026-09-05T00:51:00Z","id":"fix[0]","state":"ok","durationMs":1000}',
+  '{"ts":"2026-09-05T00:51:00Z","id":"fix[1]","state":"ok","durationMs":1000}',
+  '{"ts":"2026-09-05T00:51:00Z","id":"fix[2]","state":"ok","durationMs":1000}',
+  // --- resume: the upstream now yields two items, so only two clones are minted ---
+  '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":null,"tasks":[{"id":"fix","model":"m"}]}',
+  '{"ts":"2026-09-05T01:00:01Z","event":"expand","id":"fix","model":"m","clones":2}',
+  '{"ts":"2026-09-05T01:00:02Z","id":"fix[0]","state":"ok","durationMs":1000}',
+  '{"ts":"2026-09-05T01:00:02Z","id":"fix[1]","state":"running"}',
+].join("\n");
+
+test("D1: a clone dropped by a contracted expansion has no roster row — its result is a previous attempt's", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-contracted-"));
+  const dir = join(home, "runs", "C--code-a", "contracted-1");
+  mkdirSync(join(dir, "results"), { recursive: true });
+  writeFileSync(join(dir, "run.log"), CONTRACTED_LOG, "utf8");
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify({ tasks: [{ id: "fix", model: "m", prompt: "authored fix", forEach: { from: "src", path: "", maxItems: 10 } }] }), "utf8");
+  writeFileSync(join(dir, "results", "fix[2].json"), JSON.stringify({ id: "fix[2]", model: "m", ok: true, output: "attempt-1 output", prompt: "p" }), "utf8");
+  writeFileSync(join(dir, "results", "fix[0].json"), JSON.stringify({ id: "fix[0]", model: "m", ok: true, output: "current output", prompt: "p" }), "utf8");
+  try {
+    await withServer({ home }, async ({ get }) => {
+      const dropped = await get("/api/runs/C--code-a/contracted-1/leaves/fix%5B2%5D");
+      assert.equal(dropped.body.authored, true, "no row in this attempt's roster ⇒ the file is a previous attempt's");
+      assert.equal(dropped.body.output, undefined, "attempt-1 output must not be served as current");
+      assert.equal(dropped.body.prompt, "authored fix", "the clone falls back to its parent's authored prompt");
+      // The guard: a clone that DID run this attempt is unaffected.
+      const kept = await get("/api/runs/C--code-a/contracted-1/leaves/fix%5B0%5D");
+      assert.equal(kept.body.authored, undefined);
+      assert.equal(kept.body.output, "current output");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
