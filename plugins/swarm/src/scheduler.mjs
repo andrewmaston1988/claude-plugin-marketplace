@@ -223,7 +223,11 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity }
         // reaches the leaf's first turn — a model that follows it literally
         // burns the leaf (mistral-large-3, twice, 2026-08-27). A caller's own
         // CORRELATION_ID wins so a pipeline-launched swarm keeps its id.
-        env: { ...(io.env || process.env), CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`, ...env },
+        // SWARM_LEAF is the one marker a hook can trust to mean "this IS a leaf".
+        // Unlike CORRELATION_ID it never yields to a caller's value: a parent's
+        // correlation id legitimately flows through, but a parent claiming to be a
+        // leaf would arm foreground-guard's deny in an interactive session.
+        env: { ...(io.env || process.env), SWARM_LEAF: "1", CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`, ...env },
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
