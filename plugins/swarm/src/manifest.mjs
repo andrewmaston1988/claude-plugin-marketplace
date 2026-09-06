@@ -1,4 +1,5 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
+import { spawnSync as nodeSpawnSync } from "node:child_process";
 import { resolve, join, basename, dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
@@ -28,7 +29,7 @@ const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch", "from"]);
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
-  "returns", "verifyCitations", "manifest", "integrate", "settings",
+  "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
 ]);
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
@@ -55,6 +56,47 @@ export function isUnderRoot(dir, root) {
   const d = normalizeForCompare(dir);
   const r = normalizeForCompare(root);
   return d === r || d.startsWith(r + sep);
+}
+
+// The leaf guard governing a task's cwd, or undefined if none applies —
+// longest matching root wins, same case/separator rules as isUnderRoot.
+export function guardFor(originalCwd, cfg) {
+  const leafGuards = cfg?.leafGuards;
+  if (!leafGuards || typeof leafGuards !== "object") return undefined;
+  let best;
+  for (const [root, command] of Object.entries(leafGuards)) {
+    if (!isUnderRoot(originalCwd, root)) continue;
+    if (!best || normalizeForCompare(root).length > normalizeForCompare(best.root).length) {
+      best = { root, command };
+    }
+  }
+  return best;
+}
+
+function defaultManifestIo() {
+  return {
+    spawnSync: (command, opts) => nodeSpawnSync(command, { shell: true, encoding: "utf8", ...opts }),
+    stdout: (line) => console.log(line),
+  };
+}
+
+// A guard is probed once per distinct root+command, from the first task that
+// resolves it — a broken guard must fail validation before any leaf spawns.
+function probeGuard(guard, originalCwd, l, io, probedGuards, errors) {
+  const key = `${guard.root}|${guard.command}`;
+  if (probedGuards.has(key)) return;
+  probedGuards.add(key);
+  const result = io.spawnSync(guard.command, {
+    cwd: originalCwd,
+    input: JSON.stringify({ tool_name: "Bash", tool_input: { command: "true" } }),
+  });
+  const status = result.status ?? 0;
+  if (status !== 0) {
+    errors.push(
+      `${l}: leaf guard for root '${guard.root}' ('${guard.command}') failed validation ` +
+      `(exit ${status}): ${(result.stderr || "").toString().trim()}`
+    );
+  }
 }
 
 // ── args parameterization ({{args.<key>}}) ────────────────────────────────────
@@ -265,6 +307,11 @@ function validateTaskShapes(rawTasks, errors, label) {
     // Goes red on a string/array/null: `--settings` takes a JSON object and anything else would reach the CLI as a file path that does not exist.
     if (t.settings !== undefined && (!t.settings || typeof t.settings !== "object" || Array.isArray(t.settings))) {
       errors.push(`${l}: settings must be a JSON object — e.g. "settings": {"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}}`);
+    }
+    // leafGuard is otherwise engine-computed (from ~/.swarm/config.json's
+    // leafGuards) — the only thing an author may write here is opting out.
+    if (t.leafGuard !== undefined && t.leafGuard !== false) {
+      errors.push(`${l}: leafGuard only accepts false — e.g. "leafGuard": false to opt this task out of the engine's leaf guard`);
     }
   }
 }
@@ -628,7 +675,7 @@ function checkHeadroom(model, l, headroom, errors, warnings) {
   }
 }
 
-function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings }) {
+function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings, io = defaultManifestIo(), probedGuards = new Set() }) {
   const governanceCheck = (model, effCwd, l) => checkGovernance(model, effCwd, l, cfg, errors);
 
   return rawTasks.map((t) => {
@@ -651,6 +698,20 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
           governanceCheck(t.fallbackModel, originalCwd, `${l} fallback`);
           checkDenylist(t.fallbackModel, `${l} fallback`, cfg, errors);
         }
+      }
+    }
+    // compute/manifest/integrate spawn no leaf, so no guard applies. An opted-out
+    // task only gets the "off" line when a guard would otherwise have applied —
+    // opting out of nothing is not worth reporting.
+    let guard;
+    if (!isCompute && !isManifest && !isIntegrate) {
+      const resolved = guardFor(originalCwd, cfg);
+      if (t.leafGuard === false) {
+        if (resolved) io.stdout(`leaf guard: off (task opt-out)`);
+      } else if (resolved) {
+        guard = resolved;
+        probeGuard(guard, originalCwd, l, io, probedGuards, errors);
+        io.stdout(`leaf guard: ${guard.root} → ${guard.command}`);
       }
     }
     let effCwd = originalCwd;
@@ -703,6 +764,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ...(typeof t.verifyCitations === "boolean" && { verifyCitations: t.verifyCitations }),
       ...(!isCompute && !isManifest && !isIntegrate && t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && { settings: t.settings }),
       ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),
+      ...(guard && { leafGuard: guard }),
     };
   });
 }
@@ -713,7 +775,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
 // into the run by the scheduler. The child inherits the parent run's cwd and
 // resultsDir; it may not steer the run itself.
 
-function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry } = {}) {
+function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, io, probedGuards } = {}) {
   const nodeLabel = `task '${node.id}'`;
   // A registry-resolved parent references its children relative to itself — a
   // saved manifest must work from any cwd. Plain-path parents keep cwd
@@ -753,7 +815,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, label,
+    cwd, resultsDir, cfg, errors, label, io, probedGuards,
     defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   return { tasks };
@@ -766,10 +828,12 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
 // `fromRegistry` (child manifest paths then resolve against the parent's dir),
 // and `ref` (the pre-resolution registry name, recorded on the plan for the
 // run dir snapshot).
-export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref } = {}) {
+export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, io } = {}) {
   const errors = [];
   const warnings = [];
   const headroom = usageFromCache(cfg);
+  const resolvedIo = { ...defaultManifestIo(), ...io };
+  const probedGuards = new Set();
   if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
     throw new ValidationError([`args must be a JSON object — e.g. {"base":"master"} (got ${JSON.stringify(args)})`]);
   }
@@ -832,7 +896,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const childPlans = new Map();
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
-      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry });
+      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, io: resolvedIo, probedGuards });
       if (child) childPlans.set(t.id, child);
     }
   }
@@ -846,7 +910,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   }
 
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, label, childPlans, headroom, warnings,
+    cwd, resultsDir, cfg, errors, label, childPlans, headroom, warnings, io: resolvedIo, probedGuards,
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
 
