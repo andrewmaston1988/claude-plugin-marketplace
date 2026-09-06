@@ -172,7 +172,8 @@ shared reading surface already found; once merged, it stops being a sequencing c
 
 ## 6. Wall-clock, blast radius and coherence — the decision itself
 
-The three bounds that decide grouping directly:
+Shared surface (§5) decides whether a merge is legal; these three bound how far a legal merge
+goes:
 
 - **Wall-clock** — items inside an agent run serially; the deepest agent is the long pole.
 - **Blast radius** — a failed agent costs every item inside it on re-dispatch.
