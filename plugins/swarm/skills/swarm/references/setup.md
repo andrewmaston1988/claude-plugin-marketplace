@@ -132,27 +132,27 @@ every Claude leaf 1M by default. Either way, a task's own `settings` key always 
 manifest can opt one leaf in (or out) regardless of this default. Ask whether they want to pay
 more for fewer compactions and faster walls, or keep 200k as the default.
 
-### Stage 6c — the leaf guard (`leafGuards`)
+### Stage 6c — the leaf guard (`projects`)
 
-`leafGuards` lets a repo ship its own PreToolUse hook for the leaves that run under it: a
+`projects` lets a repo ship its own PreToolUse hook for the leaves that run under it: a
 command the repo owns, run before every tool call in such a leaf with the PreToolUse payload on
 stdin. Exit 0 allows, exit 2 denies with the script's stderr as the reason; any other outcome
 also denies, naming the failure (fail-closed — a guard that silently stops applying is worse
 than one that blocks). Each distinct guard is probed once at `validate`, so a broken script
 fails the manifest before anything spends.
 
-One line per repo root:
+One entry per repo, named and matched by that repo's directory name:
 
 ```json
-{ "leafGuards": { "/path/to/repo": "python scripts/leaf_guard.py" } }
+{ "projects": [{ "name": "myrepo", "hooks": { "preToolUse": "python scripts/leaf_guard.py" } }] }
 ```
 
 Uses are whatever a PreToolUse hook can express over the payload — keep builds out of lanes,
 fence writes to a directory, block installs or pushes, require a marker on edits to certain
-files. Keys are absolute roots (longest match wins, case-insensitive on Windows); a task opts
-out with `"leafGuard": false`, the only accepted value. Ask whether the operator has, or wants,
-a guard script for any repo they run leaves in; if not, leave `leafGuards` empty — nothing
-fires and every leaf runs as before.
+files. `name` is matched against the basename of the task's repo root (case-insensitive on
+Windows); a task opts out with `"leafGuard": false`, the only accepted value. Ask whether the
+operator has, or wants, a guard script for any repo they run leaves in; if not, leave `projects`
+empty — nothing fires and every leaf runs as before.
 
 ### Stage 7 — advanced, only on request
 
@@ -197,7 +197,7 @@ from the appendix. If no, close.
 | `swarm.always` | `false` | Stage 2. |
 | `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |
 | `grading.enabled` | `false` | Stage 6. |
-| `leafGuards` | `{}` | Stage 6c. Absolute repo root → command: the repo's own PreToolUse hook for leaves under that root; payload on stdin, exit 0 allows, exit 2 denies with stderr, anything else denies (fail-closed); probed once at `validate`; `"leafGuard": false` opts a task out. |
+| `projects` | `[]` | Stage 6c. Array of `{ name, hooks: { preToolUse } }`: the repo's own PreToolUse hook for leaves whose repo root basename matches `name`; payload on stdin, exit 0 allows, exit 2 denies with stderr, anything else denies (fail-closed); probed once at `validate`; `"leafGuard": false` opts a task out. |
 
 ## Common mistakes
 

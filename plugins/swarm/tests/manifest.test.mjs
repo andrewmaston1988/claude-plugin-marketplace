@@ -100,7 +100,7 @@ test("settings must be a JSON object", () => {
 test("settings.env cannot forge or clear the leaf guard vars", () => {
   const dir = tmp();
   try {
-    for (const key of ["SWARM_LEAF", "SWARM_LEAF_GUARD", "SWARM_LEAF_GUARD_ROOT"]) {
+    for (const key of ["SWARM_LEAF", "SWARM_LEAF_GUARD", "SWARM_LEAF_GUARD_PROJECT"]) {
       const p = writeManifest(dir, { tasks: [claudeTask({ settings: { env: { [key]: "" } } })] });
       const errs = errorsOf(() => loadManifest(p, CFG, dir));
       ok(errs.some((e) => e.includes("settings.env") && e.includes(key)), `${key}: ${errs.join("\n")}`);
@@ -818,19 +818,40 @@ test("isUnderRoot: boundary-aware, separator-tolerant", () => {
   equal(isUnderRoot(root.replaceAll(sep, "/") + "/sub", root), true);
 });
 
-test("guardFor: no leafGuards -> undefined; cwd under a root -> its command; nested roots -> the longest; Windows case-insensitive", () => {
-  const root = join(tmpdir(), "guardroot");
-  const nested = join(root, "nested");
-  equal(guardFor(root, {}), undefined);
-  equal(guardFor(join(root, "other"), { leafGuards: {} }), undefined);
-  equal(guardFor(join(tmpdir(), "elsewhere"), { leafGuards: { [root]: "cmd-a" } }), undefined);
-  deepEqual(guardFor(join(root, "x"), { leafGuards: { [root]: "cmd-a" } }), { root, command: "cmd-a" });
+// io.repoToplevel stub: pretends `cwd` sits inside a repo whose root is `top`,
+// or returns null (git failed) so guardFor falls back to basename(cwd).
+function ioWithToplevel(top) {
+  return { repoToplevel: () => top };
+}
+const ioNoGit = { repoToplevel: () => null };
+
+test("guardFor: no projects -> undefined; matching repo name -> its command; unknown name -> undefined; Windows case-insensitive", () => {
+  const repo = join(tmpdir(), "myrepo");
+  const nested = join(repo, "sub");
+  const elsewhere = join(tmpdir(), "elsewhere");
+  equal(guardFor(repo, {}, ioNoGit), undefined);
+  equal(guardFor(repo, { projects: [] }, ioNoGit), undefined);
+  equal(guardFor(elsewhere, { projects: [{ name: "myrepo", hooks: { preToolUse: "cmd-a" } }] }, ioNoGit), undefined);
+  // io.repoToplevel resolves the leaf's repo root; the project name matches its basename
   deepEqual(
-    guardFor(join(nested, "y"), { leafGuards: { [root]: "cmd-a", [nested]: "cmd-b" } }),
-    { root: nested, command: "cmd-b" },
+    guardFor(nested, { projects: [{ name: "myrepo", hooks: { preToolUse: "cmd-a" } }] }, ioWithToplevel(repo)),
+    { name: "myrepo", command: "cmd-a" },
+  );
+  // git fails -> falls back to the basename of originalCwd itself
+  deepEqual(
+    guardFor(repo, { projects: [{ name: "myrepo", hooks: { preToolUse: "cmd-a" } }] }, ioNoGit),
+    { name: "myrepo", command: "cmd-a" },
+  );
+  // a project with no preToolUse yields no guard
+  equal(
+    guardFor(repo, { projects: [{ name: "myrepo", hooks: {} }] }, ioNoGit),
+    undefined,
   );
   if (process.platform === "win32") {
-    deepEqual(guardFor(join(root.toUpperCase(), "z"), { leafGuards: { [root]: "cmd-a" } }), { root, command: "cmd-a" });
+    deepEqual(
+      guardFor(join(tmpdir(), "MYREPO"), { projects: [{ name: "myrepo", hooks: { preToolUse: "cmd-a" } }] }, ioNoGit),
+      { name: "myrepo", command: "cmd-a" },
+    );
   }
 });
 
@@ -1498,20 +1519,23 @@ test("agentless nodes reject outputDir; from/integrate reject a forEach source",
 });
 
 // ── leaf guards (swarm-leaf-guard-no-cargo) ────────────────────────────────────
-// A stub io skips the real spawnSync — the probe/print machinery is under test,
-// not any actual guard command.
+// A stub io skips the real spawnSync/git — the probe/print/match machinery is
+// under test, not any actual guard command or repo. repoToplevel defaults to
+// null (git fails) so guardFor falls back to basename(cwd) — every test dir
+// here is a bare tmpdir, never a real git repo.
 function stubIo(over = {}) {
-  return { spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, ...over };
+  return { spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, repoToplevel: () => null, ...over };
 }
 
-test("normalizeTasks: a task under a leafGuards root carries leafGuard; false opts out; any other value errors", () => {
+test("normalizeTasks: a task under a projects entry matching its repo name carries leafGuard; false opts out; any other value errors", () => {
   const dir = tmp();
+  const name = basename(dir);
   try {
-    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, leafGuards: { [dir]: "guard-cmd" } };
+    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, projects: [{ name, hooks: { preToolUse: "guard-cmd" } }] };
 
     const on = writeManifest(dir, { tasks: [claudeTask({ cwd: "." })] }, "on.json");
     const planOn = loadManifest(on, cfg, dir, { io: stubIo() });
-    deepEqual(planOn.tasks[0].leafGuard, { root: dir, command: "guard-cmd" });
+    deepEqual(planOn.tasks[0].leafGuard, { name, command: "guard-cmd" });
 
     const off = writeManifest(dir, { tasks: [claudeTask({ cwd: ".", leafGuard: false })] }, "off.json");
     const planOff = loadManifest(off, cfg, dir, { io: stubIo() });
@@ -1527,10 +1551,38 @@ test("normalizeTasks: a task under a leafGuards root carries leafGuard; false op
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("compute, manifest and integrate nodes never carry a leafGuard even under a guarded root", () => {
+test("normalizeTasks: the repo name is resolved via io.repoToplevel (git seam), not the task's cwd path", () => {
   const dir = tmp();
   try {
-    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, leafGuards: { [dir]: "guard-cmd" } };
+    // repoToplevel reports a DIFFERENT path than dir; the project name must
+    // match that reported repo's basename, not dir's own basename.
+    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, projects: [{ name: "reported-repo", hooks: { preToolUse: "guard-cmd" } }] };
+    const p = writeManifest(dir, { tasks: [claudeTask({ cwd: "." })] });
+    const plan = loadManifest(p, cfg, dir, { io: stubIo({ repoToplevel: () => join(dir, "..", "reported-repo") }) });
+    deepEqual(plan.tasks[0].leafGuard, { name: "reported-repo", command: "guard-cmd" });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("normalizeTasks: project name match is case-insensitive on Windows", () => {
+  const dir = tmp();
+  const name = basename(dir);
+  try {
+    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, projects: [{ name: name.toUpperCase(), hooks: { preToolUse: "guard-cmd" } }] };
+    const p = writeManifest(dir, { tasks: [claudeTask({ cwd: "." })] });
+    const plan = loadManifest(p, cfg, dir, { io: stubIo() });
+    if (process.platform === "win32") {
+      deepEqual(plan.tasks[0].leafGuard, { name: name.toUpperCase(), command: "guard-cmd" });
+    } else {
+      equal(plan.tasks[0].leafGuard, undefined);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("compute, manifest and integrate nodes never carry a leafGuard even under a guarded project", () => {
+  const dir = tmp();
+  const name = basename(dir);
+  try {
+    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, projects: [{ name, hooks: { preToolUse: "guard-cmd" } }] };
     writeFileSync(join(dir, "child.json"), JSON.stringify({ tasks: [claudeTask({ id: "leaf", cwd: "." })] }));
     const p = writeManifest(dir, { tasks: [
       claudeTask({ id: "x", allowedTools: "Read,Edit", isolation: "worktree" }),
@@ -1544,15 +1596,16 @@ test("compute, manifest and integrate nodes never carry a leafGuard even under a
     equal(plan.tasks.find((t) => t.id === "join").leafGuard, undefined);
     equal(plan.tasks.find((t) => t.id === "sub").leafGuard, undefined, "the manifest node itself is agentless");
     // the child's own leaf tasks are real spawned leaves — they still inherit
-    // the guard for whatever root their (inherited) cwd falls under
-    deepEqual(plan.tasks.find((t) => t.id === "sub").childPlan.tasks[0].leafGuard, { root: dir, command: "guard-cmd" });
+    // the guard for whatever project their (inherited) cwd resolves to
+    deepEqual(plan.tasks.find((t) => t.id === "sub").childPlan.tasks[0].leafGuard, { name, command: "guard-cmd" });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("leaf guard validate probe: a non-zero exit fails validation naming root, command, exit code and stderr; runs once per distinct guard", () => {
+test("leaf guard validate probe: a non-zero exit fails validation naming the project, command, exit code and stderr; runs once per distinct guard", () => {
   const dir = tmp();
+  const name = basename(dir);
   try {
-    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, leafGuards: { [dir]: "broken-guard" } };
+    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, projects: [{ name, hooks: { preToolUse: "broken-guard" } }] };
     const calls = [];
     const io = stubIo({
       spawnSync: (command, opts) => {
@@ -1565,15 +1618,16 @@ test("leaf guard validate probe: a non-zero exit fails validation naming root, c
       claudeTask({ id: "b", cwd: "." }),
     ] });
     const errs = errorsOf(() => loadManifest(p, cfg, dir, { io }));
-    ok(errs.some((e) => e.includes(dir) && e.includes("broken-guard") && e.includes("3") && e.includes("guard blew up")));
+    ok(errs.some((e) => e.includes(name) && e.includes("broken-guard") && e.includes("3") && e.includes("guard blew up")));
     equal(calls.length, 1, "the probe runs once per distinct guard, not per task");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("leaf guard: a passing probe prints one line per guarded task and an opt-out line for a task that declines it", () => {
   const dir = tmp();
+  const name = basename(dir);
   try {
-    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, leafGuards: { [dir]: "guard-cmd" } };
+    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, projects: [{ name, hooks: { preToolUse: "guard-cmd" } }] };
     const lines = [];
     const io = stubIo({ stdout: (line) => lines.push(line) });
     const p = writeManifest(dir, { tasks: [
@@ -1581,7 +1635,7 @@ test("leaf guard: a passing probe prints one line per guarded task and an opt-ou
       claudeTask({ id: "b", cwd: ".", leafGuard: false }),
     ] });
     loadManifest(p, cfg, dir, { io });
-    ok(lines.includes(`leaf guard: ${dir} → guard-cmd`));
+    ok(lines.includes(`leaf guard: ${name} → guard-cmd`));
     ok(lines.includes("leaf guard: off (task opt-out)"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

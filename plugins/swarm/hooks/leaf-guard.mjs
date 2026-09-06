@@ -7,10 +7,11 @@
 // Observed: three parallel leaves each cold-compiled a multi-GB dependency tree
 // in their own worktrees despite prose forbidding it — tens of GB of build output
 // and a commit-charge peak that got every engine on the machine killed. A repo's
-// own policy script, wired per-root via `~/.swarm/config.json` `leafGuards.<root>`,
+// own policy script, wired per-project via `~/.swarm/config.json` `projects[].hooks.preToolUse`,
 // reaches this hook as `SWARM_LEAF_GUARD` in the spawn env (src/scheduler.mjs),
-// set only for a leaf whose `originalCwd` matched that root — the repo decides
-// what its leaves may not do, once, instead of every manifest author.
+// set only for a leaf whose repo name (from `originalCwd`) matched that project's
+// `name` — the repo decides what its leaves may not do, once, instead of every
+// manifest author.
 //
 // Fail-CLOSED, unlike `foreground-guard.mjs`'s fail-open. That guard's failure mode
 // is a lost leaf (annoying, cheap to retry); this guard's failure mode of failing

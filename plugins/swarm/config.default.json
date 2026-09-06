@@ -20,7 +20,7 @@
   "concurrency": 4,
   "timeoutMs": 3600000,
   "disable1mContext": true,
-  "leafGuards": {},
+  "projects": [],
   "heartbeatSecs": 15,
   "quietWarnSecs": 60,
   "retry": {

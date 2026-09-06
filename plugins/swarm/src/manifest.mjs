@@ -40,7 +40,7 @@ const MANIFEST_BANNED_KEYS = [
 // The scheduler spreads these last so a task's own `env` can't override them;
 // `--settings`' env block is a second, higher-precedence path to the same
 // leaf process and must be closed the same way.
-const LEAF_GUARD_ENV_KEYS = ["SWARM_LEAF", "SWARM_LEAF_GUARD", "SWARM_LEAF_GUARD_ROOT"];
+const LEAF_GUARD_ENV_KEYS = ["SWARM_LEAF", "SWARM_LEAF_GUARD", "SWARM_LEAF_GUARD_PROJECT"];
 
 export function hasWriteTools(allowedTools) {
   return String(allowedTools || "")
@@ -62,32 +62,47 @@ export function isUnderRoot(dir, root) {
   return d === r || d.startsWith(r + sep);
 }
 
-// The leaf guard governing a task's cwd, or undefined if none applies —
-// longest matching root wins, same case/separator rules as isUnderRoot.
-export function guardFor(originalCwd, cfg) {
-  const leafGuards = cfg?.leafGuards;
-  if (!leafGuards || typeof leafGuards !== "object") return undefined;
-  let best;
-  for (const [root, command] of Object.entries(leafGuards)) {
-    if (!isUnderRoot(originalCwd, root)) continue;
-    if (!best || normalizeForCompare(root).length > normalizeForCompare(best.root).length) {
-      best = { root, command };
-    }
-  }
-  return best;
+function namesEqual(a, b) {
+  return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
+}
+
+// `git rev-parse --show-toplevel` from the task's cwd, or null when git fails
+// (not a repo, git missing) — the real implementation behind io.repoToplevel.
+function realRepoToplevel(cwd) {
+  const result = nodeSpawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
+  if (result.status !== 0 || !result.stdout) return null;
+  return result.stdout.trim();
+}
+
+// The leaf guard governing a task's cwd, or undefined if none applies. The
+// task matches the project whose name equals the basename of its repo root
+// (via the injectable io.repoToplevel seam so tests need no real git),
+// falling back to the basename of originalCwd itself when git fails —
+// case-insensitive on Windows, same as isUnderRoot.
+export function guardFor(originalCwd, cfg, io = defaultManifestIo()) {
+  const projects = cfg?.projects;
+  if (!Array.isArray(projects) || !projects.length) return undefined;
+  const toplevel = io.repoToplevel(originalCwd);
+  const name = basename(toplevel || originalCwd);
+  const project = projects.find((p) => namesEqual(p.name, name));
+  if (!project) return undefined;
+  const command = project.hooks?.preToolUse;
+  if (!command) return undefined;
+  return { name: project.name, command };
 }
 
 function defaultManifestIo() {
   return {
     spawnSync: (command, opts) => nodeSpawnSync(command, { shell: true, encoding: "utf8", ...opts }),
     stdout: (line) => console.log(line),
+    repoToplevel: realRepoToplevel,
   };
 }
 
-// A guard is probed once per distinct root+command, from the first task that
+// A guard is probed once per distinct name+command, from the first task that
 // resolves it — a broken guard must fail validation before any leaf spawns.
 function probeGuard(guard, originalCwd, l, io, probedGuards, errors) {
-  const key = `${guard.root}|${guard.command}`;
+  const key = `${guard.name}|${guard.command}`;
   if (probedGuards.has(key)) return;
   probedGuards.add(key);
   const result = io.spawnSync(guard.command, {
@@ -97,7 +112,7 @@ function probeGuard(guard, originalCwd, l, io, probedGuards, errors) {
   const status = result.status ?? 0;
   if (status !== 0) {
     errors.push(
-      `${l}: leaf guard for root '${guard.root}' ('${guard.command}') failed validation ` +
+      `${l}: leaf guard for project '${guard.name}' ('${guard.command}') failed validation ` +
       `(exit ${status}): ${(result.stderr || "").toString().trim()}`
     );
   }
@@ -323,7 +338,7 @@ function validateTaskShapes(rawTasks, errors, label) {
       }
     }
     // leafGuard is otherwise engine-computed (from ~/.swarm/config.json's
-    // leafGuards) — the only thing an author may write here is opting out.
+    // projects) — the only thing an author may write here is opting out.
     if (t.leafGuard !== undefined && t.leafGuard !== false) {
       errors.push(`${l}: leafGuard only accepts false — e.g. "leafGuard": false to opt this task out of the engine's leaf guard`);
     }
@@ -719,13 +734,13 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     // opting out of nothing is not worth reporting.
     let guard;
     if (!isCompute && !isManifest && !isIntegrate) {
-      const resolved = guardFor(originalCwd, cfg);
+      const resolved = guardFor(originalCwd, cfg, io);
       if (t.leafGuard === false) {
         if (resolved) io.stdout(`leaf guard: off (task opt-out)`);
       } else if (resolved) {
         guard = resolved;
         probeGuard(guard, originalCwd, l, io, probedGuards, errors);
-        io.stdout(`leaf guard: ${guard.root} → ${guard.command}`);
+        io.stdout(`leaf guard: ${guard.name} → ${guard.command}`);
       }
     }
     let effCwd = originalCwd;

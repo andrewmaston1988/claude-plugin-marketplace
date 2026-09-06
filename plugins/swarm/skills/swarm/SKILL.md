@@ -220,7 +220,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 3600000,
     "settings": {"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}},   // optional; per-leaf override of disable1mContext (beats the config default and the user settings.json env block)
-    "leafGuard": false,                        // optional; the only accepted value — opts this task out of the project's leafGuards entry (~/.swarm/config.json)
+    "leafGuard": false,                        // optional; the only accepted value — opts this task out of its matching projects[].hooks.preToolUse entry (~/.swarm/config.json)
     "after": ["scan-b"],                       // dependencies
     "forEach": { "from": "scan-b", "path": "sites", "maxItems": 30 },  // clone this leaf per array item — swarm:executing-swarms
     "when": { "from": "scan-b", "expr": "length(value) > 20" },        // run only if true; else completes as skipped

@@ -19,6 +19,39 @@ function isPlainObject(v) {
   return v !== null && typeof v === "object" && !Array.isArray(v);
 }
 
+const KNOWN_PROJECT_HOOK_KEYS = new Set(["preToolUse"]);
+const PROJECTS_EXAMPLE = '"projects": [{"name": "myrepo", "hooks": {"preToolUse": "cmd"}}]';
+
+// Each entry: name (required, non-empty, unique) + hooks (required object;
+// only preToolUse recognised today — the shape is reserved for later hook
+// events, so an unknown key is a hard error naming the known ones).
+function validateProjects(projects) {
+  if (!Array.isArray(projects)) {
+    throw new Error(`projects must be an array — e.g. ${PROJECTS_EXAMPLE} in ~/.swarm/config.json`);
+  }
+  const seen = new Set();
+  projects.forEach((p, i) => {
+    if (!isPlainObject(p) || typeof p.name !== "string" || !p.name) {
+      throw new Error(`projects[${i}].name must be a non-empty string — e.g. ${PROJECTS_EXAMPLE}`);
+    }
+    if (seen.has(p.name)) {
+      throw new Error(`projects[${i}].name '${p.name}' is a duplicate — project names must be unique`);
+    }
+    seen.add(p.name);
+    if (!isPlainObject(p.hooks)) {
+      throw new Error(`projects[${i}].hooks must be an object — e.g. ${PROJECTS_EXAMPLE}`);
+    }
+    for (const k of Object.keys(p.hooks)) {
+      if (!KNOWN_PROJECT_HOOK_KEYS.has(k)) {
+        throw new Error(`projects[${i}].hooks has unknown key '${k}' — known keys: ${[...KNOWN_PROJECT_HOOK_KEYS].join(", ")}`);
+      }
+    }
+    if (p.hooks.preToolUse !== undefined && typeof p.hooks.preToolUse !== "string") {
+      throw new Error(`projects[${i}].hooks.preToolUse must be a command string — e.g. ${PROJECTS_EXAMPLE}`);
+    }
+  });
+}
+
 // Deep merge: override wins; objects merge recursively; arrays and scalars replace.
 export function deepMerge(base, override) {
   const out = { ...base };
@@ -38,9 +71,7 @@ export function loadConfig(overridePath, env = process.env) {
   if (typeof cfg.disable1mContext !== "boolean") {
     throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
   }
-  if (!isPlainObject(cfg.leafGuards) || Object.values(cfg.leafGuards).some((v) => typeof v !== "string")) {
-    throw new Error('leafGuards must be an object mapping root paths to guard commands — e.g. "leafGuards": {"C:/code": "cmd"} in ~/.swarm/config.json');
-  }
+  validateProjects(cfg.projects);
   return cfg;
 }
 

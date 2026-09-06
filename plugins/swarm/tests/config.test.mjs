@@ -26,29 +26,76 @@ test("loadConfig returns shipped defaults when user config is missing", () => {
     equal(cfg.resultInlineCap, 4000);
     equal(cfg.worktreeBranchPrefix, "swarm/");
     equal(cfg.disable1mContext, true);
-    deepEqual(cfg.leafGuards, {});
+    deepEqual(cfg.projects, []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("leafGuards must be an object: a string throws naming the key and the example", () => {
+test("projects must be an array: an object throws naming the key and the example", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
-    writeFileSync(p, JSON.stringify({ leafGuards: "nope" }));
-    throws(() => loadConfig(p), (e) => e.message.includes("leafGuards") && e.message.includes('"leafGuards": {"C:/code": "cmd"}'));
+    writeFileSync(p, JSON.stringify({ projects: { "C:/code": "cmd" } }));
+    throws(() => loadConfig(p), (e) => e.message.includes("projects") && e.message.includes('"hooks": {"preToolUse": "cmd"}'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("leafGuards values must be strings: a number throws naming the key and the example", () => {
+test("projects entry must have a non-empty string name: throws naming the index and the field", () => {
   const dir = tmp();
   try {
     const p = join(dir, "config.json");
-    writeFileSync(p, JSON.stringify({ leafGuards: { "C:/code": 1 } }));
-    throws(() => loadConfig(p), (e) => e.message.includes("leafGuards") && e.message.includes('"leafGuards": {"C:/code": "cmd"}'));
+    writeFileSync(p, JSON.stringify({ projects: [{ hooks: { preToolUse: "cmd" } }] }));
+    throws(() => loadConfig(p), (e) => e.message.includes("projects[0].name") && e.message.includes('"hooks": {"preToolUse": "cmd"}'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("projects entry hooks must be an object: throws naming the index and the field", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ projects: [{ name: "myrepo", hooks: "cmd" }] }));
+    throws(() => loadConfig(p), (e) => e.message.includes("projects[0].hooks") && e.message.includes('"hooks": {"preToolUse": "cmd"}'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("projects entry hooks rejects an unknown key, naming preToolUse as known", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ projects: [{ name: "myrepo", hooks: { postToolUse: "cmd" } }] }));
+    throws(() => loadConfig(p), (e) => e.message.includes("projects[0].hooks") && e.message.includes("postToolUse") && e.message.includes("preToolUse"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("projects entry hooks.preToolUse must be a string: a number throws naming the index and the field", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ projects: [{ name: "myrepo", hooks: { preToolUse: 1 } }] }));
+    throws(() => loadConfig(p), (e) => e.message.includes("projects[0].hooks.preToolUse") && e.message.includes('"hooks": {"preToolUse": "cmd"}'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("projects rejects two entries with the same name", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ projects: [
+      { name: "myrepo", hooks: { preToolUse: "cmd-a" } },
+      { name: "myrepo", hooks: { preToolUse: "cmd-b" } },
+    ] }));
+    throws(() => loadConfig(p), (e) => e.message.includes("projects[1]") && e.message.includes("duplicate") && e.message.includes("myrepo"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -199,7 +246,7 @@ test("initConfig materialises every shipped key into the user file, keeps set va
     equal(on.dashboard.port, 7331);
     equal(on.swarm.always, false);            // shipped default now exists for swarm.always
     equal(on.disable1mContext, true);          // shipped default now exists for disable1mContext
-    deepEqual(on.leafGuards, {});              // shipped default now exists for leafGuards
+    deepEqual(on.projects, []);                // shipped default now exists for projects
     deepEqual(on.provider.allowedRoots, []);
     on.provider.allowedRoots = ["C:/code"];
     on.timeoutMs = 5400000;

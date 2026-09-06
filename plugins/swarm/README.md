@@ -74,14 +74,14 @@ Other useful keys (defaults shown in `config.default.json`): `provider.url` (Ant
 
 `provider.cloud.ollama.enabled` arms ollama.com cloud-usage preflight — false by default, so a user who has never heard of it meets nothing. `cookiePath` overrides where the session cookie is stored (default `~/.swarm/ollama-cookie.json`, written by `ollama-usage --cookie`, never `config.json` — a cookie in a file that's read/printed/diffed constantly would end up in a transcript). `usageStaleMs` (default 24h) is how long a cached reading stays trusted before it's reported `stale` instead of its last percentage.
 
-### Per-repo leaf guard (`leafGuards`)
+### Per-repo leaf guard (`projects`)
 
 A leaf is a full headless Claude Code session, and `allowedTools` scopes tool *names*, not what
-a tool is asked to do. `leafGuards` wires a **repo-owned PreToolUse hook** into every leaf that
-runs under that repo — one config line, one script the repo keeps and tests:
+a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every leaf that
+runs under that repo — one config entry, one script the repo keeps and tests:
 
 ```json
-{ "leafGuards": { "/path/to/repo": "python scripts/leaf_guard.py" } }
+{ "projects": [{ "name": "myrepo", "hooks": { "preToolUse": "python scripts/leaf_guard.py" } }] }
 ```
 
 Before every tool call in a guarded leaf the engine's hook runs that command from the leaf's
@@ -99,12 +99,14 @@ installs, or `git push`; require a header marker on every edit under a given dir
 a leaf from reading a secrets path. The script sees the full payload, so any rule expressible over
 it is one `if` away.
 
-Mechanics: keys are absolute repo roots (longest match wins for nested roots; case-insensitive
-on Windows); a leaf under no root runs unguarded; interactive sessions never see the hook. Each
-distinct guard is probed once at `validate` with a harmless Bash payload, so a script that
-cannot run fails the manifest before any leaf spends. A task opts out with `"leafGuard": false`
-— the only accepted value — for a leaf that must be allowed the thing the guard denies (the one
-build tail, say); nothing in a task's `env` or `settings.env` can forge or clear the guard.
+Mechanics: each entry's `name` is matched against the basename of the task's repo root (`git
+rev-parse --show-toplevel`, falling back to the task's cwd if that fails; case-insensitive on
+Windows); a leaf whose repo name matches no entry, or whose entry has no `hooks.preToolUse`,
+runs unguarded; interactive sessions never see the hook. Each distinct guard is probed once at
+`validate` with a harmless Bash payload, so a script that cannot run fails the manifest before
+any leaf spends. A task opts out with `"leafGuard": false` — the only accepted value — for a
+leaf that must be allowed the thing the guard denies (the one build tail, say); nothing in a
+task's `env` or `settings.env` can forge or clear the guard.
 
 Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama install recent enough to serve `/api/experimental/model-recommendations` (~v0.23+).
 
