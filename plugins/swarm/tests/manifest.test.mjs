@@ -97,6 +97,24 @@ test("settings must be a JSON object", () => {
   }
 });
 
+test("settings.env cannot forge or clear the leaf guard vars", () => {
+  const dir = tmp();
+  try {
+    for (const key of ["SWARM_LEAF", "SWARM_LEAF_GUARD", "SWARM_LEAF_GUARD_ROOT"]) {
+      const p = writeManifest(dir, { tasks: [claudeTask({ settings: { env: { [key]: "" } } })] });
+      const errs = errorsOf(() => loadManifest(p, CFG, dir));
+      ok(errs.some((e) => e.includes("settings.env") && e.includes(key)), `${key}: ${errs.join("\n")}`);
+    }
+
+    // an unrelated key survives untouched
+    const ok1 = writeManifest(dir, { tasks: [claudeTask({ settings: { env: { OTHER: "x" } } })] }, "ok.json");
+    const plan = loadManifest(ok1, CFG, dir);
+    deepEqual(plan.tasks[0].settings, { env: { OTHER: "x" } });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("duplicate ids rejected", () => {
   const dir = tmp();
   try {

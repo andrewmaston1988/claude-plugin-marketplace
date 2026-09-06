@@ -37,6 +37,10 @@ const MANIFEST_BANNED_KEYS = [
   "prompt", "model", "compute", "returns", "isolation", "allowedTools",
   "outputDir", "effort", "fallbackModel",
 ];
+// The scheduler spreads these last so a task's own `env` can't override them;
+// `--settings`' env block is a second, higher-precedence path to the same
+// leaf process and must be closed the same way.
+const LEAF_GUARD_ENV_KEYS = ["SWARM_LEAF", "SWARM_LEAF_GUARD", "SWARM_LEAF_GUARD_ROOT"];
 
 export function hasWriteTools(allowedTools) {
   return String(allowedTools || "")
@@ -307,6 +311,16 @@ function validateTaskShapes(rawTasks, errors, label) {
     // Goes red on a string/array/null: `--settings` takes a JSON object and anything else would reach the CLI as a file path that does not exist.
     if (t.settings !== undefined && (!t.settings || typeof t.settings !== "object" || Array.isArray(t.settings))) {
       errors.push(`${l}: settings must be a JSON object — e.g. "settings": {"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}}`);
+    } else if (t.settings?.env && typeof t.settings.env === "object" && !Array.isArray(t.settings.env)) {
+      // `--settings` is highest-precedence in the CLI's own settings chain — a task
+      // could otherwise clear or forge the guard vars inside its own leaf session,
+      // defeating the engine's env spread (the same vector proven for
+      // CLAUDE_CODE_DISABLE_1M_CONTEXT in dispatch.test.mjs).
+      for (const key of LEAF_GUARD_ENV_KEYS) {
+        if (Object.hasOwn(t.settings.env, key)) {
+          errors.push(`${l}: settings.env may not set '${key}' — it is engine-controlled; use "leafGuard": false to opt out instead`);
+        }
+      }
     }
     // leafGuard is otherwise engine-computed (from ~/.swarm/config.json's
     // leafGuards) — the only thing an author may write here is opting out.
