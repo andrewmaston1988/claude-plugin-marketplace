@@ -205,15 +205,15 @@
   // stateColor onto the page's four tones (magenta→bad, dim→pend).
   // (i) skipped reads as done, matching countsHtml/barHtml/stateOfGroup, which already
   // bucket it with ok — only this map used to disagree with the aggregates above it.
-  const GLYPH = { ok: "✓", skipped: "✓", failed: "✗", "failed:timeout": "✗", blocked: "⊘", "rate-limited": "⧖", quota: "⏳", retrying: "↻", running: "◐", pending: "·", aborted: "✕" };
-  const CLASS = { ok: "ok", skipped: "ok", failed: "bad", "failed:timeout": "bad", blocked: "bad", "rate-limited": "warn", quota: "warn", retrying: "warn", running: "run", pending: "pend", aborted: "pend" };
+  const GLYPH = { ok: "✓", skipped: "✓", failed: "✗", "failed:timeout": "✗", "failed:stopped": "✗", blocked: "⊘", "rate-limited": "⧖", quota: "⏳", retrying: "↻", running: "◐", pending: "·", aborted: "✕" };
+  const CLASS = { ok: "ok", skipped: "ok", failed: "bad", "failed:timeout": "bad", "failed:stopped": "bad", blocked: "bad", "rate-limited": "warn", quota: "warn", retrying: "warn", running: "run", pending: "pend", aborted: "pend" };
   // States a leaf can still leave on its own. A run whose engine is gone (aborted)
-  // or silent past recentMs (stale) has none, whatever the log last said: those
+  // or stopped (stoppedMs) has none, whatever the log last said: those
   // leaves show as aborted and nothing spins.
   const LIVE = new Set(["running", "retrying", "pending", "rate-limited", "quota"]);
   const abortCounts = (byState) => { const out = {}; for (const [s, n] of Object.entries(byState)) { const k = LIVE.has(s) ? "aborted" : s; out[k] = (out[k] || 0) + n; } return out; };
   function endRun(run) {
-    if (run.finishedMs || !(run.abortedMs || run.staleMs)) return run;
+    if (run.finishedMs || !(run.abortedMs || run.stoppedMs)) return run;
     run.tasks = run.tasks.map((t) => (LIVE.has(t.state) ? { ...t, state: "aborted" } : t));
     run.totals.byState = abortCounts(run.totals.byState);
     return run;
@@ -254,15 +254,15 @@
   let shortProject = (p) => p;
   const countsHtml = (byState) => {
     const n = (...ks) => ks.reduce((a, k) => a + (byState[k] || 0), 0);
-    const parts = [["ok", n("ok", "skipped"), "✓"], ["run", n("running", "retrying"), "◐"], ["warn", n("rate-limited") + n("quota"), "⧖"], ["bad", n("failed", "failed:timeout", "blocked"), "✗"], ["pend", n("pending"), "·"], ["pend", n("aborted"), "✕"]];
+    const parts = [["ok", n("ok", "skipped"), "✓"], ["run", n("running", "retrying"), "◐"], ["warn", n("rate-limited") + n("quota"), "⧖"], ["bad", n("failed", "failed:timeout", "failed:stopped", "blocked"), "✗"], ["pend", n("pending"), "·"], ["pend", n("aborted"), "✕"]];
     return `<span class="counts">${parts.filter(([, v]) => v).map(([c, v, g]) => `<span class="c-${c}">${v}${g}</span>`).join("")}</span>`;
   };
   const barHtml = (byState, total) => {
     const seg = (ks, color) => { const v = ks.reduce((a, k) => a + (byState[k] || 0), 0); return v ? `<span style="flex:${v};background:${color}"></span>` : ""; };
-    const done = ["ok", "skipped", "failed", "failed:timeout", "blocked", "running", "retrying", "rate-limited", "quota"].reduce((a, k) => a + (byState[k] || 0), 0);
-    return `<div class="bar">${seg(["ok", "skipped"], "var(--ok)")}${seg(["failed", "failed:timeout", "blocked"], "var(--bad)")}${seg(["running", "retrying"], "var(--accent)")}${seg(["rate-limited", "quota"], "var(--warn)")}<span style="flex:${Math.max(0, total - done)};background:transparent"></span></div>`;
+    const done = ["ok", "skipped", "failed", "failed:timeout", "failed:stopped", "blocked", "running", "retrying", "rate-limited", "quota"].reduce((a, k) => a + (byState[k] || 0), 0);
+    return `<div class="bar">${seg(["ok", "skipped"], "var(--ok)")}${seg(["failed", "failed:timeout", "failed:stopped", "blocked"], "var(--bad)")}${seg(["running", "retrying"], "var(--accent)")}${seg(["rate-limited", "quota"], "var(--warn)")}<span style="flex:${Math.max(0, total - done)};background:transparent"></span></div>`;
   };
-  const runState = (r) => { const b = r.byState || {}; if (b.failed || b["failed:timeout"] || b.blocked) return "bad"; if (b.running || b.retrying) return "run"; if (b["rate-limited"] || b.quota) return "warn"; if (r.active) return "run"; return "ok"; };
+  const runState = (r) => { const b = r.byState || {}; if (r.stopped) return "bad"; if (b.failed || b["failed:timeout"] || b["failed:stopped"] || b.blocked) return "bad"; if (b.running || b.retrying) return "run"; if (b["rate-limited"] || b.quota) return "warn"; if (r.active) return "run"; return "ok"; };
   const dot = (c, ring) => `<svg class="rail" viewBox="0 0 56 56" width="56" height="56" preserveAspectRatio="none"><path d="M12 0v56" stroke="var(--rule)" stroke-width="2"/><circle cx="12" cy="28" r="5" fill="${COLOR[c]}"/>${ring ? '<circle class="ring" cx="12" cy="28" r="9"/>' : ""}</svg>`;
 
   const api = async (p) => { const r = await fetch(q(p), { cache: "no-store" }); if (!r.ok) throw new Error(`${r.status} ${p}`); return r.json(); };
@@ -391,9 +391,9 @@
     if (done) {
       // No summary.json and gone quiet past the recency window: the engine never
       // closed it (killed, crashed, machine slept). Say so rather than "done".
-      const stale = !r.finishedMs;
-      const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
-      return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
+      const stale = !r.finishedMs && !r.stopped;
+      const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
+      return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
     }
     return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(st, st === "run")}<div class="body"><div class="head"><span class="name">${esc(r.name)}</span><span class="meta">${elapsed}</span></div><div class="sub">${countsHtml(r.byState)}<span class="meta">${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</span></div>${barHtml(r.byState, r.leaves)}</div></li>`;
   }
@@ -582,7 +582,7 @@
   // Header markup is pure — rerender() calls it on every clock tick without a fetch,
   // so the elapsed/ago text moves without a network round trip.
   function runHeaderHtml(run, now) {
-    const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.abortedMs ? `aborted · engine gone · ${ago(run.abortedMs)}` : run.staleMs ? `stale · last event ${ago(run.staleMs)}` : run.startedMs ? fmtDur(now - run.startedMs) : "";
+    const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.abortedMs ? `aborted · engine gone · ${ago(run.abortedMs)}` : run.stoppedMs ? `stopped · ${ago(run.stoppedMs)}` : run.startedMs ? fmtDur(now - run.startedMs) : "";
     return `${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>${menuBtn}`;
   }
 

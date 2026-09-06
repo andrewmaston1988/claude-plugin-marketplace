@@ -2,9 +2,9 @@
 // Claude Code statusline: the live swarm fleet, read from run dirs on disk.
 //
 // The harness renders whatever this prints as its status bar. A run is LIVE
-// when its run.log moved within the freshness window and readRun (the same
-// parser the dashboard uses) says it has no digest and no unsuperseded
-// summary; per-leaf state comes from run.tasks, not from results/ presence.
+// when runLiveness (the same predicate the dashboard and readRun use) reports
+// no terminal summary and a heartbeat younger than heartbeatMs * 3; per-leaf
+// state comes from run.tasks, not from results/ presence.
 //
 // Only runs THIS session launched are shown: the engine stamps the launching
 // CLAUDE_CODE_SESSION_ID as `launcher` on its run-start event, matched against
@@ -14,14 +14,13 @@
 // Wired via settings.json through the self-resolving shim `swarm statusline
 // install` writes — never at this file's plugin-cache path, which changes on
 // every plugin update.
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { tokenTotal } from "../src/stream.mjs";
 import { formatTokens } from "../src/results.mjs";
-import { readRun } from "../src/runlog.mjs";
+import { readRun, runLiveness } from "../src/runlog.mjs";
 
-const FRESH_MS = 6 * 3600 * 1000;   // a run.log older than this is abandoned, not live
 const QUIET_FLAG_MS = 5 * 60 * 1000; // flag leaves silent longer than this
 
 // One pass over run.log: work-token total (same arithmetic as `swarm status`:
@@ -52,7 +51,6 @@ function sessionInfo() {
 }
 const encodeCwd = (p) => String(p).replace(/[\\/:]/g, "-"); // same rule as the runs dir
 
-const mtime = (p) => { try { return statSync(p).mtimeMs; } catch { return null; } };
 const listDir = (p) => { try { return readdirSync(p); } catch { return []; } };
 
 export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), session = sessionInfo() } = {}) {
@@ -65,22 +63,18 @@ export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), s
   for (const cwdDir of listDir(runsRoot)) {
     for (const run of listDir(join(runsRoot, cwdDir))) {
       const rd = join(runsRoot, cwdDir, run);
-      const logM = mtime(join(rd, "run.log"));
-      if (logM === null) continue;
-      if (now - logM > FRESH_MS) continue;
-      // Gate (same shape as listRuns' mtime gate): run.log has not grown since
-      // summary.json was written, so the run is finished — skip, no read.
-      const summaryM = mtime(join(rd, "summary.json"));
-      if (summaryM !== null && logM <= summaryM) continue;
+      const { finishedMs, stoppedMs, abortedMs } = runLiveness(rd, { now });
+      if (finishedMs != null || stoppedMs != null || abortedMs != null) continue; // resolved — no read
       const rr = readRun(rd, { now });
-      if (!rr || rr.finishedMs != null || rr.digestPath) continue;
+      if (!rr || rr.digestPath) continue;
       const running = rr.tasks.filter((t) => t.state === "running" || t.state === "retrying").map((t) => t.id);
       let ok = 0, failed = 0, quiet = 0;
       const model = new Map();
       for (const t of rr.tasks) {
         model.set(t.id, String(t.model || "").replace(/:cloud$/, ""));
         if (t.state === "ok" || t.state === "skipped") ok++;
-        else if (t.state === "failed" || t.state === "failed:timeout" || t.state === "blocked") failed++;
+        // "failed:timeout" and a stopped-mid-run leaf both count as failed here.
+        else if (t.state === "failed" || t.state === "failed:timeout" || t.state === "failed:stopped" || t.state === "blocked") failed++;
         if ((t.state === "running" || t.state === "retrying") && t.quietMs != null) quiet = Math.max(quiet, t.quietMs);
       }
       const total = rr.tasks.length;

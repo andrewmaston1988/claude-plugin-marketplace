@@ -38,7 +38,7 @@
     return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`;
   }
 
-  const runEnded = (run) => !!(run && (run.finishedMs || run.abortedMs || run.staleMs));
+  const runEnded = (run) => !!(run && (run.finishedMs || run.abortedMs || run.stoppedMs));
 
   // The runs list has no single run to end, so it always polls; a run/leaf view
   // polls only while its run is still open, and never for a run not yet fetched.

@@ -155,15 +155,15 @@ test("initConfig materialises every shipped key into the user file, keeps set va
     deepEqual(on.provider.allowedRoots, []);
     on.provider.allowedRoots = ["C:/code"];
     on.timeoutMs = 5400000;
-    delete on.dashboard.recentMs;             // simulate a key added by a later plugin version
+    delete on.dashboard.livenessPollMs;       // simulate a key added by a later plugin version
     writeFileSync(p, JSON.stringify(on));
     const r2 = initConfig(p);
     equal(r2.created, false);
-    deepEqual(r2.added, ["dashboard.recentMs"]);
+    deepEqual(r2.added, ["dashboard.livenessPollMs"]);
     const after = JSON.parse(readFileSync(p, "utf8"));
     deepEqual(after.provider.allowedRoots, ["C:/code"]);
     equal(after.timeoutMs, 5400000);
-    equal(after.dashboard.recentMs, 1800000);
+    equal(after.dashboard.livenessPollMs, 10000);
     const r3 = initConfig(p);
     deepEqual(r3.added, []);
     equal(readdirSync(join(dir, "home")).some((f) => f.endsWith(".tmp")), false, "no tmp left behind");

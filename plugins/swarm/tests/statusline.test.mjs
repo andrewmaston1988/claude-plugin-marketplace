@@ -4,6 +4,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync, mkdtempSync, utimesSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { glyphFromLog, newestRunLog } from "../statusline/swarm-glyph.mjs";
+import { touchHeartbeat, heartbeatPath } from "../src/results.mjs";
 
 const LOG = [
   '{"event":"run-start","tasks":[{"id":"a","model":"haiku"},{"id":"b","model":"haiku"},{"id":"c","model":"haiku"},{"id":"d","model":"haiku"},{"id":"e","model":"haiku"}]}',
@@ -54,6 +55,23 @@ test("newestRunLog: picks the most recent run.log across projects", () => {
   }
 });
 
+test("newestRunLog: active reflects the run's heartbeat, not just being newest — no heartbeat at all is never active", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-glyph-active-"));
+  try {
+    const d = join(home, "runs", "proj-a", "run-1");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "run.log"), "x", "utf8");
+    const best = newestRunLog(home);
+    assert.equal(best.active, false, "a run that never wrote a heartbeat is never active");
+
+    touchHeartbeat(d, new Date().toISOString(), process.pid);
+    const fresh = newestRunLog(home);
+    assert.equal(fresh.active, true, "a fresh heartbeat makes the newest run active");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // ---- the fleet bar (swarm-statusline.mjs): session-scoped live runs ----
 import { render as renderFleet, liveRuns } from "../statusline/swarm-statusline.mjs";
 
@@ -77,6 +95,9 @@ function fleetHome({ now, quietMs = 0, finished = false, launcher = "sess-1" }) 
   if (finished) {
     writeFileSync(join(rd, "summary.json"), JSON.stringify({ finished: new Date(now).toISOString() }));
     utimesSync(join(rd, "summary.json"), logT + 1, logT + 1);
+  } else {
+    touchHeartbeat(rd, new Date(now).toISOString(), 1);
+    utimesSync(heartbeatPath(rd), logT, logT);
   }
   return home;
 }
@@ -124,6 +145,8 @@ function blockedOrRunningHome({ now, state }) {
   writeFileSync(join(rd, "results", "sites.log"), "stale");
   const logT = now / 1000;
   utimesSync(join(rd, "run.log"), logT, logT);
+  touchHeartbeat(rd, new Date(now).toISOString(), 1);
+  utimesSync(heartbeatPath(rd), logT, logT);
   return home;
 }
 
@@ -168,6 +191,9 @@ test("fleet bar: a superseded-summary run is still live on the bar (F3)", () => 
     const start2 = JSON.stringify({ ts: t1.toISOString(), event: "run-start", pid: process.pid, launcher: "sess-1", tasks: [{ id: "x", model: "m" }] });
     writeFileSync(join(rd, "run.log"), readFileSync(join(rd, "run.log"), "utf8") + start2 + "\n");
     utimesSync(join(rd, "run.log"), now / 1000, now / 1000); // fresh — past the summary, defeats the gate
+    // the resumed engine (this test's own pid) is still ticking
+    touchHeartbeat(rd, new Date(now).toISOString(), process.pid);
+    utimesSync(heartbeatPath(rd), now / 1000, now / 1000);
 
     const runs = liveRuns({ home, now, session: { session_id: "sess-1" } });
     assert.ok(runs.find((r) => r.run === "region-lanes-1"), "the resumed run must still be reported live");
@@ -197,6 +223,8 @@ test("fleet bar: counts come from run.log state, not results/ file presence (F4)
     writeFileSync(join(rd, "results", "d.json"), JSON.stringify({ id: "d", ok: false }));
     writeFileSync(join(rd, "results", "zzz.json"), JSON.stringify({ id: "zzz", ok: true }));
     utimesSync(join(rd, "run.log"), now / 1000, now / 1000);
+    touchHeartbeat(rd, new Date(now).toISOString(), 1);
+    utimesSync(heartbeatPath(rd), now / 1000, now / 1000);
 
     const run = liveRuns({ home, now, session: { session_id: "sess-1" } }).find((r) => r.run === "mixed-1");
     assert.equal(run.ok, 2, "ok + skipped");

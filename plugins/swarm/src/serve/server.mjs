@@ -57,7 +57,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
-  const recentMs = dash.recentMs ?? 30 * 60_000;
+  const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
   const pollMs = _pollMs ?? dash.livenessPollMs ?? 10_000;
 
   // Resolve a run dir from validated segments and prove it sits under the root.
@@ -102,7 +102,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       if (projectWatchers.has(dir)) continue;
       try { projectWatchers.set(dir, _watch(dir, onRootOrProject)); } catch (e) { log(`watch ${dir}: ${e.message}`); }
     }
-    const active = new Map(listRuns(home, { now: now(), recentMs }).filter((r) => r.active).map((r) => [r.dir, r]));
+    const active = new Map(listRuns(home, { now: now(), heartbeatMs }).filter((r) => r.active).map((r) => [r.dir, r]));
     for (const [dir, w] of runWatchers) if (!active.has(dir)) { try { w.close(); } catch {} runWatchers.delete(dir); }
     for (const [dir, run] of active) {
       if (runWatchers.has(dir)) continue;
@@ -190,23 +190,23 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const routes = {
     "/api/runs": (res) => {
       const seen = new Map();
-      const picked = listRuns(home, { now: now(), recentMs }).filter((r) => {
+      const picked = listRuns(home, { now: now(), heartbeatMs }).filter((r) => {
         if (r.active) return true;
         const n = seen.get(r.project) || 0;
         seen.set(r.project, n + 1);
         return n < FINISHED_PER_PROJECT;
       });
       const rows = picked.map((r) => {
-        const run = readRun(r.dir, { now: now(), quietWarnMs, recentMs });
+        const run = readRun(r.dir, { now: now(), quietWarnMs, heartbeatMs });
         return {
-          project: r.project, name: r.name, active: r.active, aborted: r.aborted, mtimeMs: r.mtimeMs,
+          project: r.project, name: r.name, active: r.active, aborted: r.aborted, stopped: r.stopped, mtimeMs: r.mtimeMs,
           startedMs: run?.startedMs ?? null, finishedMs: run?.finishedMs ?? null,
           byState: run?.totals.byState ?? {}, leaves: run?.tasks.length ?? 0, waves: run?.waves.length ?? 0,
           tokens: run ? run.tasks.reduce((n, t) => n + (t.tokens ? (t.tokens.input || 0) + (t.tokens.output || 0) + (t.tokens.cacheCreation || 0) : 0), 0) : 0,
           hasDigest: !!(run?.digestPath || run?.reportPath),
         };
       });
-      send(res, 200, { runs: rows, recentMs, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, grading });
+      send(res, 200, { runs: rows, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, grading });
     },
   };
 
@@ -294,7 +294,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (!dir) return notFound(res);
 
     if (seg.length === 2) {
-      const run = readRun(dir, { now: now(), quietWarnMs, recentMs });
+      const run = readRun(dir, { now: now(), quietWarnMs, heartbeatMs });
       return run ? send(res, 200, run) : notFound(res);
     }
     if (seg.length === 3 && seg[2] === "digest") {
@@ -312,7 +312,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       // Both cases serve the manifest's authored prompt, which is what you want to see
       // mid-run anyway. Flagged `authored` because {{result:…}} placeholders are
       // substituted at dispatch, not in the snapshot.
-      const leafState = readRun(dir, { now: now(), quietWarnMs, recentMs })?.tasks
+      const leafState = readRun(dir, { now: now(), quietWarnMs, heartbeatMs })?.tasks
         .find((t) => t.id === seg[3])?.state;
       if (!existsSync(file) || resultSuperseded(leafState)) {
         const prompt = authoredPrompt(dir, seg[3]);

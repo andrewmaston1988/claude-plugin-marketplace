@@ -1,11 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, utimesSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readRun, listRuns, topology, readRunLog, summarySuperseded, resultSuperseded, ALIVE_STATES } from "../src/runlog.mjs";
+import { readRun, listRuns, topology, readRunLog, summarySuperseded, resultSuperseded, runLiveness, ALIVE_STATES } from "../src/runlog.mjs";
 const require_runlog = () => ({ readRunLog });
 import { RUN_LOG, NOW, buildFixture } from "./fixtures/run-fixture.mjs";
+import { touchHeartbeat, heartbeatPath } from "../src/results.mjs";
 
 // The manifest snapshot the engine writes at dispatch (effectivePlanDoc shape):
 // two finders → a forEach fixer → a child manifest → digest block.
@@ -128,7 +129,7 @@ test("readRun without a manifest.json still returns tasks, with empty edges and 
   }, { manifest: null });
 });
 
-test("listRuns: a run whose recorded engine pid is dead is aborted, not active; no pid falls back to recency", () => {
+test("listRuns/readRun: liveness comes from the heartbeat file's own age, never a recorded pid — no heartbeat at all reads aborted immediately, never a recency grace period", () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-runs-pid-"));
   try {
     const mk = (name, firstLine) => {
@@ -139,78 +140,26 @@ test("listRuns: a run whose recorded engine pid is dead is aborted, not active; 
       utimesSync(join(d, "run.log"), t, t);
       return d;
     };
-    mk("dead-1", '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":4242,"tasks":[{"id":"find-a","model":"m"}]}');
-    mk("live-1", '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":4343,"tasks":[{"id":"find-a","model":"m"}]}');
+    const dead = mk("dead-1", '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":4242,"tasks":[{"id":"find-a","model":"m"}]}');
+    const live = mk("live-1", '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":4343,"tasks":[{"id":"find-a","model":"m"}]}');
     mk("nopid-1", '{"ts":"2026-09-05T01:00:00Z","event":"run-start","tasks":[{"id":"find-a","model":"m"}]}');
-    const alive = (pid) => (pid == null ? null : pid === 4343);
-    const runs = listRuns(home, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
+    // dead-1's engine is gone — its heartbeat stopped 60s ago. live-1's engine is
+    // still ticking. nopid-1 never wrote a heartbeat at all (a pre-heartbeat run).
+    touchHeartbeat(dead, new Date(NOW - 60_000).toISOString(), 4242);
+    utimesSync(heartbeatPath(dead), (NOW - 60_000) / 1000, (NOW - 60_000) / 1000);
+    touchHeartbeat(live, new Date(NOW - 1000).toISOString(), 4343);
+    utimesSync(heartbeatPath(live), (NOW - 1000) / 1000, (NOW - 1000) / 1000);
+
+    const runs = listRuns(home, { now: NOW, heartbeatMs: 15_000 });
     const by = Object.fromEntries(runs.map((r) => [r.name, r]));
     assert.equal(by["dead-1"].active, false); assert.equal(by["dead-1"].aborted, true);
     assert.equal(by["live-1"].active, true); assert.equal(by["live-1"].aborted, false);
-    assert.equal(by["nopid-1"].active, true, "no pid recorded → recency rule");
-    assert.equal(readRun(by["dead-1"].dir, { now: NOW }).enginePid, 4242);
+    assert.equal(by["nopid-1"].active, false, "no heartbeat at all reads aborted — never a recency fallback");
+    assert.equal(by["nopid-1"].aborted, true);
+    assert.equal(readRun(dead, { now: NOW }).enginePid, 4242, "the recorded pid is still read for display — just never consulted for liveness");
     // The run view reads readRun, not listRuns: it must reach the same verdicts.
-    const dead = readRun(by["dead-1"].dir, { now: NOW, _alive: alive });
-    assert.ok(dead.abortedMs, "dead pid → abortedMs"); assert.equal(dead.staleMs, null);
-    const live = readRun(by["live-1"].dir, { now: NOW, _alive: alive });
-    assert.equal(live.abortedMs, null); assert.equal(live.staleMs, null);
-    const fresh = readRun(by["nopid-1"].dir, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
-    assert.equal(fresh.abortedMs, null); assert.equal(fresh.staleMs, null, "no pid, written 60s ago → still live");
-    const stale = readRun(by["nopid-1"].dir, { now: NOW, recentMs: 30_000, _alive: alive });
-    assert.equal(stale.abortedMs, null); assert.ok(stale.staleMs, "no pid, quiet past recentMs → staleMs");
-  } finally { rmSync(home, { recursive: true, force: true }); }
-});
-
-test("listRuns: a resumed run is live by its LAST run-start pid, not the reaped engine's at the head", () => {
-  // A resume appends a second run-start (the new engine) to the same run.log; the
-  // first engine (killed, crashed, reaped) is still on line 1. Reading only the head
-  // marked every resumed run aborted and dropped it from the dashboard's live band.
-  const home = mkdtempSync(join(tmpdir(), "swarm-runs-resume-"));
-  try {
-    const d = join(home, "runs", "C--code-a", "resumed-1");
-    mkdirSync(d, { recursive: true });
-    const body = RUN_LOG.split("\n").slice(1).join("\n");
-    const first = '{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":4242,"tasks":[{"id":"find-a","model":"m"}]}';
-    const again = '{"ts":"2026-09-05T02:00:00Z","event":"run-start","pid":4343,"tasks":[{"id":"find-a","model":"m"}]}';
-    // Enough events between the two headers that the second is well past the first 4 KiB.
-    const filler = Array.from({ length: 80 }, (_, i) => `{"ts":"2026-09-05T01:0${i % 10}:00Z","id":"find-a","event":"activity","activity":"Read file-${i}"}`).join("\n");
-    writeFileSync(join(d, "run.log"), [first, body, filler, again, body].join("\n"), "utf8");
-    const t = (NOW - 60_000) / 1000;
-    utimesSync(join(d, "run.log"), t, t);
-    const alive = (pid) => (pid == null ? null : pid === 4343);
-    const [run] = listRuns(home, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
-    assert.equal(run.aborted, false, "the reaped first engine must not mark the resumed run aborted");
-    assert.equal(run.active, true, "the resumed engine is alive and the log is fresh");
-  } finally { rmSync(home, { recursive: true, force: true }); }
-});
-
-test("listRuns: the engine pid is memoised on the log's mtime — a repeated sweep re-reads nothing", () => {
-  // The dashboard polls listRuns. Uncached, every tick re-reads every summary-less
-  // run.log in full — 521 logs / 39 MB on one real estate, six times a minute for as
-  // long as a tab is open. Proof the memo holds, without exposing internals: rewrite
-  // the log with a DIFFERENT pid but restore its mtime. A re-reading implementation
-  // reports the new pid; a memoising one still reports the old.
-  const home = mkdtempSync(join(tmpdir(), "swarm-runs-pidmemo-"));
-  try {
-    const d = join(home, "runs", "C--code-a", "memo-1");
-    mkdirSync(d, { recursive: true });
-    const body = RUN_LOG.split("\n").slice(1).join("\n");
-    const withPid = (pid) =>
-      [`{"ts":"2026-09-05T01:00:00Z","event":"run-start","pid":${pid},"tasks":[{"id":"find-a","model":"m"}]}`, body].join("\n");
-    const log = join(d, "run.log");
-    const t = (NOW - 60_000) / 1000;
-    const seen = [];
-    const alive = (pid) => { seen.push(pid); return true; };
-
-    writeFileSync(log, withPid(4242), "utf8");
-    utimesSync(log, t, t);
-    listRuns(home, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
-    assert.deepEqual(seen, [4242], "first sweep reads the log");
-
-    writeFileSync(log, withPid(9999), "utf8");
-    utimesSync(log, t, t); // same mtime as before — the memo must win over the new bytes
-    listRuns(home, { now: NOW, recentMs: 30 * 60_000, _alive: alive });
-    assert.deepEqual(seen, [4242, 4242], "second sweep must use the memo, not re-read the log");
+    assert.ok(readRun(dead, { now: NOW }).abortedMs, "stale heartbeat → abortedMs");
+    assert.equal(readRun(live, { now: NOW }).abortedMs, null);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
@@ -239,8 +188,11 @@ test("listRuns: newest first across projects, active only while run.log is fresh
     const done = mk("C--code-b", "done-1", 30_000, { summary: true });
     mkdirSync(join(home, "runs", "C--code-b", "not-a-run"), { recursive: true });
     writeFileSync(join(home, "runs", "stray.txt"), "x", "utf8");
+    // live-1's engine is still ticking; stale-1 and done-1 have no heartbeat at all.
+    touchHeartbeat(live, new Date(NOW - 1000).toISOString(), process.pid);
+    utimesSync(heartbeatPath(live), (NOW - 1000) / 1000, (NOW - 1000) / 1000);
 
-    const runs = listRuns(home, { now: NOW, recentMs: 30 * 60_000 });
+    const runs = listRuns(home, { now: NOW, heartbeatMs: 15_000 });
     assert.deepEqual(runs.map((r) => r.dir), [done, live, stale]);
     assert.deepEqual(runs.map((r) => r.active), [false, true, false]);
     assert.equal(runs[1].project, "C--code-a");
@@ -268,12 +220,15 @@ test("readRun/listRuns: a resumed run whose summary predates the resume is live,
     // the resumed engine kept appending after the summary was written
     const logT = Date.parse("2026-09-05T01:06:00Z") / 1000;
     utimesSync(join(d, "run.log"), logT, logT);
-
     const now = Date.parse("2026-09-05T01:10:00Z");
+    // the resumed engine's heartbeat is still fresh at `now`
+    touchHeartbeat(d, new Date(now - 1000).toISOString(), process.pid);
+    utimesSync(heartbeatPath(d), (now - 1000) / 1000, (now - 1000) / 1000);
+
     const run = readRun(d, { now });
     assert.equal(run.finishedMs, null, "the resume's run-start is after the summary's finished ts");
 
-    const runs = listRuns(home, { now, _alive: (pid) => pid === process.pid });
+    const runs = listRuns(home, { now });
     assert.equal(runs.find((r) => r.name === "resumed-2").active, true);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
@@ -364,18 +319,18 @@ test("listRuns: lastRunStart is memoised on the log's mtime — a repeated sweep
 
     const line = (pid) => `{"ts":"2026-09-05T00:30:00Z","event":"run-start","pid":${pid},"tasks":[{"id":"find-a","model":"m"}]}`;
     const logT = Date.parse("2026-09-05T01:00:00Z") / 1000;
-    const seen = [];
-    const alive = (pid) => { seen.push(pid); return true; };
+    const reads = [];
+    const _readFile = (p, enc) => { if (p === log) reads.push(p); return readFileSync(p, enc); };
 
     writeFileSync(log, line(4242), "utf8");
     utimesSync(log, logT, logT);
-    listRuns(home, { now: NOW, _alive: alive });
-    assert.deepEqual(seen, [4242], "first sweep reads the log");
+    listRuns(home, { now: NOW, _readFile });
+    assert.deepEqual(reads, [log], "first sweep reads the log");
 
     writeFileSync(log, line(9999), "utf8"); // same length, so the memo key (mtime+size) is unchanged
     utimesSync(log, logT, logT); // same mtime as before
-    listRuns(home, { now: NOW, _alive: alive });
-    assert.deepEqual(seen, [4242, 4242], "second sweep must use the memo, not re-read the log");
+    listRuns(home, { now: NOW, _readFile });
+    assert.deepEqual(reads, [log], "second sweep must use the memo, not re-read the log");
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
@@ -407,6 +362,103 @@ test("listRuns/readRun: a touched mtime with no new run-start does not supersede
     const now = Date.parse("2026-09-05T03:00:00Z");
     assert.equal(readRun(d, { now }).finishedMs, Date.parse("2026-09-05T01:01:05Z"), "no new run-start → not superseded, despite the newer mtime");
     assert.equal(listRuns(home, { now }).find((r) => r.name === "touched-1").active, false);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// ---- runLiveness (heartbeat-owned liveness, replaces engineAlive/recentMs/staleMs) ----
+
+test("runLiveness: a fresh heartbeat and no summary reads alive (all three ms fields null)", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-liveness-"));
+  try {
+    const d = join(home, "runs", "proj", "alive-1");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "run.log"), RUN_LOG, "utf8");
+    const now = Date.now();
+    touchHeartbeat(d, new Date(now - 1000).toISOString(), process.pid);
+    const r = runLiveness(d, { now, heartbeatMs: 15_000 });
+    assert.equal(r.finishedMs, null);
+    assert.equal(r.stoppedMs, null);
+    assert.equal(r.abortedMs, null);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// The pid-reuse defect: a heartbeat's own age is the only signal. A recorded pid
+// that some OTHER process now happens to hold (a Windows TerminateProcess'd engine
+// whose pid a churning cargo build reissued) must never read alive again.
+test("runLiveness: a stale heartbeat reads aborted at the heartbeat's mtime, even recording THIS process's own live pid (pid-reuse pin)", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-liveness-"));
+  try {
+    const d = join(home, "runs", "proj", "aborted-1");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "run.log"), RUN_LOG, "utf8");
+    const now = Date.now();
+    const staleAt = now - 60_000;
+    touchHeartbeat(d, new Date(staleAt).toISOString(), process.pid);
+    utimesSync(heartbeatPath(d), staleAt / 1000, staleAt / 1000);
+    const r = runLiveness(d, { now, heartbeatMs: 15_000 }); // 3x = 45s window; 60s old is stale
+    assert.equal(r.finishedMs, null);
+    assert.equal(r.stoppedMs, null);
+    assert.ok(r.abortedMs, "a stale heartbeat must read aborted regardless of the recorded pid's own liveness");
+    assert.equal(r.abortedMs, statSync(heartbeatPath(d)).mtimeMs);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("runLiveness: a summary with stopped:true resolves to stoppedMs, never finishedMs — even with a fresh heartbeat", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-liveness-"));
+  try {
+    const d = join(home, "runs", "proj", "stopped-1");
+    mkdirSync(d, { recursive: true });
+    const start = '{"ts":"2026-09-05T01:00:00Z","event":"run-start","tasks":[{"id":"a","model":"m"}]}';
+    writeFileSync(join(d, "run.log"), start, "utf8");
+    const finishedIso = "2026-09-05T01:05:00Z";
+    writeFileSync(join(d, "summary.json"), JSON.stringify({ started: "2026-09-05T01:00:00Z", finished: finishedIso, stopped: true, tasks: [] }), "utf8");
+    const logT = Date.parse("2026-09-05T01:05:00Z") / 1000;
+    utimesSync(join(d, "run.log"), logT, logT);
+    const summaryT = logT;
+    utimesSync(join(d, "summary.json"), summaryT, summaryT);
+    touchHeartbeat(d, new Date(Date.now() - 1000).toISOString(), process.pid); // fresh — must not win over a stopped summary
+    const now = Date.parse("2026-09-05T02:00:00Z");
+    const r = runLiveness(d, { now, heartbeatMs: 15_000 });
+    assert.equal(r.finishedMs, null, "a stopped run must never resolve to finishedMs");
+    assert.equal(r.stoppedMs, Date.parse(finishedIso));
+    assert.equal(r.abortedMs, null);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("runLiveness: a plain summary resolves to finishedMs regardless of heartbeat age", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-liveness-"));
+  try {
+    const d = join(home, "runs", "proj", "finished-1");
+    mkdirSync(d, { recursive: true });
+    const start = '{"ts":"2026-09-05T01:00:00Z","event":"run-start","tasks":[{"id":"a","model":"m"}]}';
+    writeFileSync(join(d, "run.log"), start, "utf8");
+    const finishedIso = "2026-09-05T01:05:00Z";
+    writeFileSync(join(d, "summary.json"), JSON.stringify({ started: "2026-09-05T01:00:00Z", finished: finishedIso, tasks: [] }), "utf8");
+    const logT = Date.parse("2026-09-05T01:05:00Z") / 1000;
+    utimesSync(join(d, "run.log"), logT, logT);
+    utimesSync(join(d, "summary.json"), logT, logT);
+    // no heartbeat file at all — an old, pre-heartbeat run
+    const now = Date.parse("2026-09-06T01:00:00Z");
+    const r = runLiveness(d, { now, heartbeatMs: 15_000 });
+    assert.equal(r.finishedMs, Date.parse(finishedIso));
+    assert.equal(r.stoppedMs, null);
+    assert.equal(r.abortedMs, null);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("runLiveness: no heartbeat file and no summary (a pre-change run) reads aborted at run.log's mtime", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-liveness-"));
+  try {
+    const d = join(home, "runs", "proj", "prechange-1");
+    mkdirSync(d, { recursive: true });
+    writeFileSync(join(d, "run.log"), RUN_LOG, "utf8");
+    const logT = Date.parse("2026-09-05T01:00:00Z") / 1000;
+    utimesSync(join(d, "run.log"), logT, logT);
+    const now = Date.parse("2026-09-06T01:00:00Z");
+    const r = runLiveness(d, { now, heartbeatMs: 15_000 });
+    assert.equal(r.finishedMs, null);
+    assert.equal(r.stoppedMs, null);
+    assert.equal(r.abortedMs, statSync(join(d, "run.log")).mtimeMs);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
