@@ -4,14 +4,15 @@ description: >-
   Use before drafting any swarm manifest — deciding what shape the dependency graph takes,
   and what each task must wait for. Triggers — "what shape should this run be", "one manifest
   or two", "does this need a second wave", "phased chain", "fan out then integrate". SKIP for:
-  how many agents and which items share one — that is swarm:orchestrating-agents.
+  how a plan splits into agents (one per lane; merges only on shared surface) — that is
+  swarm:orchestrating-agents.
 ---
 
 # Executing swarms — deciding the shape before anything spends
 
-`swarm:orchestrating-agents` answers *which agents, and how many*. This skill answers *what
-shape the graph takes* — what each task must wait for. Both precede drafting; neither
-restates the other.
+`swarm:orchestrating-agents` decides how a plan splits into agents (one per lane; merges only
+on shared surface). This skill answers *what shape the graph takes* — what each task must
+wait for. Both precede drafting; neither restates the other.
 
 Work through it in order. Every step produces a value the manifest carries or the gate
 consumes.

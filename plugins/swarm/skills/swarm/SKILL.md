@@ -63,7 +63,9 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 
 **`swarm.always` is not set → the full gate, below.**
 
-**Before you draft the manifest, invoke `swarm:orchestrating-agents`.** It decides how many leaves and which items share one, and it produces the numbers the gate's third question carries. Drafting a leaf-per-item manifest without it is the failure that skill exists to catch. It does not restate the gate and the gate does not restate it. **Invoke `swarm:executing-swarms` in the same breath** — it decides what shape the graph takes and what each task waits for, which is the other half of a manifest you could defend line by line; the two answer different questions and neither summarises the other.
+**Before you draft the manifest, invoke `swarm:orchestrating-agents`.** It decides how a plan
+splits into agents (one per lane; merges only on shared surface), and it produces the numbers
+the gate's third question carries. Drafting a leaf-per-item manifest without it is the failure that skill exists to catch. It does not restate the gate and the gate does not restate it. **Invoke `swarm:executing-swarms` in the same breath** — it decides what shape the graph takes and what each task waits for, which is the other half of a manifest you could defend line by line; the two answer different questions and neither summarises the other.
 
 **THE GATE'S ANSWER IS THE ONLY CONSENT TO SPEND. NO ANSWER IS NO.** Violating the letter of this rule is violating its spirit.
 
