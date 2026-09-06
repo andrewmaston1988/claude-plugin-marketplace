@@ -132,6 +132,35 @@ every Claude leaf 1M by default. Either way, a task's own `settings` key always 
 manifest can opt one leaf in (or out) regardless of this default. Ask whether they want to pay
 more for fewer compactions and faster walls, or keep 200k as the default.
 
+### Stage 6c — the leaf guard (`leafGuards`)
+
+A swarm leaf is a full headless Claude Code session; nothing scopes what it may run beyond
+`allowedTools` (tool names, not commands) and prompt prose — a leaf told "only run `cargo test
+-p <crate>`" can still cold-compile a 5 GB dependency tree three times over in three worktrees.
+`leafGuards` gives a project one mechanical place to say which tool calls a leaf under its root
+may never make: a command the project owns, run by a PreToolUse hook before every tool call
+inside a leaf whose `originalCwd` is under that root. The hook pipes the tool-call payload to
+the command on stdin; exit 2 denies the call with the command's stderr as the reason. **Any
+other outcome — non-zero/non-2 exit, timeout, spawn error — also denies**, naming the failure:
+fail-closed, not fail-open, because a guard that silently allows is the 50 GB overrun again,
+and a leaf denied on every call ends loud and fast instead. A distinct guard is probed once at
+`validate` (`{"tool_name":"Bash","tool_input":{"command":"true"}}`) so a broken script is caught
+before anything spends, not at the first tool call of a live leaf.
+
+One config line per project root:
+
+```json
+{ "leafGuards": { "C:/code/primordial": "python scripts/swarm_leaf_guard.py" } }
+```
+
+— the example is primordial's own guard, which denies every `cargo` invocation in its lanes.
+Keys are absolute roots (case-insensitive on Windows, like `allowedRoots`); a task under a
+nested root gets the longest match. A task opts out with `"leafGuard": false` in the manifest —
+the only accepted value, and the only way to turn a project's guard off for that one leaf (the
+serial tail that still needs to build sets it). Ask whether the operator has, or wants, a
+per-repo guard script; if not, leave `leafGuards` empty — nothing fires and every leaf runs as
+before.
+
 ### Stage 7 — advanced, only on request
 
 Say once: "the remaining keys are tuning — timeouts, retries, concurrency, quota thresholds,
@@ -175,6 +204,7 @@ from the appendix. If no, close.
 | `swarm.always` | `false` | Stage 2. |
 | `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |
 | `grading.enabled` | `false` | Stage 6. |
+| `leafGuards` | `{}` | Stage 6c. Absolute root → shell command; probed at `validate`, run before every tool call in a leaf under that root; exit 2 denies with stderr, any other outcome denies fail-closed. |
 
 ## Common mistakes
 
