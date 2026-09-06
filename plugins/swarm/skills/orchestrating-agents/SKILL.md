@@ -88,11 +88,13 @@ timeout:    per leaf, that leaf's items × 45m + headroom
 Fill it from the lane partition, not the plan's step list: wall-clock is the longest
 dependency path across lanes, blast the largest lane.
 
-Three different objects, three different numbers: in a four-link chain, wall-clock is
-`4 × 45m`, blast is `1`, timeout is `45m + headroom` per leaf. `blast:` counts the agent's
-items, not what commit-as-you-go might salvage; dependents that stall are a wave question
-(§3), not blast. The offer gate's question 1 already carries the token comparison for running
-this in-session, as consent information — this block does not restate it.
+Three different objects, three different numbers: in a four-link chain whose links are
+single items: wall-clock 4 × 45m, blast 1, timeout 45m + headroom per leaf; when the links
+are whole phases (the worked example), blast is the largest phase's items and each leaf's
+timeout is that phase's items × 45m + headroom. `blast:` counts the agent's items, not what
+commit-as-you-go might salvage; dependents that stall are a wave question (§3), not blast.
+The offer gate's question 1 already carries the token comparison for running this in-session,
+as consent information — this block does not restate it.
 
 ## 3. Waves before batching — a different question, asked first
 
