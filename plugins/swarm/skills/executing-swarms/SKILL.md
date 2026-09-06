@@ -329,9 +329,9 @@ restated here, because a second copy of a consent rule is a copy that rots:
 - **Validate** — `swarm validate <manifest.json>`. Fix what it names and re-validate; its
   errors name the field, the fix, and an example. Never carry an unvalidated manifest to the gate.
 - **The offer gate** — `swarm:swarm` → *MANDATORY first step*. Its answer — or, under
-  `swarm.always`, its printed statement — is the only consent to spend, and it owns the
-  both-sides cost wording. This skill supplies the graph the gate
-  previews; it grants nothing.
+  `swarm.always`, the standing consent already given — is the only consent to spend; nothing
+  is printed or stated to re-earn it. This skill supplies the graph the gate previews (or, under
+  standing mode, the manifest's shape records); it grants nothing.
 
 ## Rationalisations — rejected
 

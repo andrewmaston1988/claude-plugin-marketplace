@@ -3,6 +3,7 @@ import { resolve, join, basename, dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
+import { usageFromCache } from "./ollama-usage.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
 import { validateSchemaShape } from "./schema.mjs";
 
@@ -600,7 +601,30 @@ function checkGovernance(model, effCwd, l, cfg, errors) {
   }
 }
 
-function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans }) {
+// Weekly-allowance headroom gate for `:cloud` seats. Sits beside the
+// governance rejection — reported after it, since a cwd that isn't even
+// allowed to dispatch open models is the more fundamental rejection.
+// FAILS on `exhausted` (the leaf would only park in `quota`); WARNS on
+// `stale` (the reading might no longer be true, but isn't proven false);
+// does nothing on `unknown`/`ok`.
+function checkHeadroom(model, l, headroom, errors, warnings) {
+  if (isClaudeModel(model)) return;
+  if (headroom?.state === "exhausted") {
+    errors.push(
+      `${l}: seats ':cloud' model '${model}', but the weekly allowance is exhausted ` +
+      `(${headroom.weeklyPctUsed}%, resets ${headroom.resetsAt}) — every :cloud leaf will park in ` +
+      `\`quota\`. Recast these leaves onto Claude tiers, or re-run after the reset.`
+    );
+  } else if (headroom?.state === "stale" && warnings) {
+    const hours = Math.floor(headroom.snapshotAgeMs / 3_600_000);
+    warnings.push(
+      `${l}: seats ':cloud' model '${model}', but the weekly-allowance meter was last read ` +
+      `${hours}h ago — run \`swarm ollama-usage\` to refresh it before trusting this run.`
+    );
+  }
+}
+
+function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings }) {
   const governanceCheck = (model, effCwd, l) => checkGovernance(model, effCwd, l, cfg, errors);
 
   return rawTasks.map((t) => {
@@ -614,6 +638,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     if (!isCompute && !isManifest && !isIntegrate) {
       governanceCheck(t.model, originalCwd, l);
       checkDenylist(t.model, l, cfg, errors);
+      checkHeadroom(t.model, l, headroom, errors, warnings);
       if (t.fallbackModel !== undefined) {
         if (typeof t.fallbackModel !== "string" || !t.fallbackModel) {
           errors.push(`${l}: fallbackModel must be a model name string`);
@@ -738,6 +763,8 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
 // run dir snapshot).
 export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref } = {}) {
   const errors = [];
+  const warnings = [];
+  const headroom = usageFromCache(cfg);
   if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {
     throw new ValidationError([`args must be a JSON object — e.g. {"base":"master"} (got ${JSON.stringify(args)})`]);
   }
@@ -814,7 +841,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   }
 
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, label, childPlans,
+    cwd, resultsDir, cfg, errors, label, childPlans, headroom, warnings,
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
 
@@ -849,6 +876,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     goal: raw.goal || "",
     ...(args && Object.keys(args).length && { args }),
     ...(ref && { ref }),
+    ...(warnings.length && { warnings }),
   };
 }
 

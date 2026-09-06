@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { runCli, runCliAsync } from "./helpers/cli.mjs";
+import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cli-"));
@@ -346,6 +347,157 @@ test("quota: prints per-window utilization from the usage endpoint", async () =>
     server.close();
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── headroom (:cloud weekly-allowance preflight): ollama-usage, quota prefix, models, swarm.always ──
+
+test("ollama-usage: C0 prints exactly two provider-named lines from a healthy cache, nothing else", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
+      sessionPctUsed: 12, sessionResetsAt: "2026-09-06T18:00:00Z",
+      weeklyPctUsed: 40, weeklyResetsAt: "2026-09-07T00:00:00Z",
+      fetchedAt: Date.now(),
+    }));
+    const r = runCli(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    deepEqual(r.stdout.trim().split("\n"), [
+      "ollama session: 12% — resets 2026-09-06T18:00:00Z",
+      "ollama weekly: 40% — resets 2026-09-07T00:00:00Z",
+    ]);
+    ok(!/cost|\$|request/i.test(r.stdout), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("quota: C0b every line is prefixed anthropic, not claude", async () => {
+  const dir = tmp();
+  const server = createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    res.end(JSON.stringify({
+      limits: [
+        { kind: "session", percent: 5, severity: "normal", resets_at: "2026-09-06T18:00:00Z" },
+        { kind: "weekly_all", percent: 10, severity: "normal", resets_at: "2026-09-07T00:00:00Z" },
+        { kind: "weekly_scoped", percent: 3, severity: "normal", resets_at: "2026-09-07T00:00:00Z", scope: { model: { display_name: "Fable" } } },
+      ],
+    }));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({ quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` }));
+    const creds = join(home, "creds.json");
+    writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
+    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds } });
+    equal(r.status, 0, r.stderr + r.stdout);
+    const lines = r.stdout.trim().split("\n");
+    equal(lines.length, 3, r.stdout);
+    for (const l of lines) ok(l.startsWith("anthropic "), l);
+    ok(!/\bclaude\b/i.test(r.stdout), r.stdout);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function modelsStubServer() {
+  return createServer((req, res) => {
+    res.writeHead(200, { "content-type": "application/json" });
+    if (req.url === "/api/experimental/model-recommendations") {
+      res.end(JSON.stringify({
+        recommendations: [{ model: "glm-5.2:cloud", description: "Frontier open model", context_length: 1000000 }],
+      }));
+    } else {
+      res.end("{}");
+    }
+  });
+}
+
+test("models: C1 an exhausted meter is named above the :cloud list", async () => {
+  const dir = tmp();
+  const server = modelsStubServer();
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({
+      provider: {
+        url: `http://127.0.0.1:${server.address().port}`,
+        catalogUrl: `http://127.0.0.1:${server.address().port}`,
+        cloud: { ollama: { enabled: true } },
+      },
+    }));
+    writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
+      weeklyPctUsed: 100, weeklyResetsAt: "2026-09-07T00:00:00Z", fetchedAt: Date.now(),
+    }));
+    const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    ok(r.stdout.includes("exhausted"), r.stdout);
+    ok(r.stdout.includes("100%"), r.stdout);
+    ok(r.stdout.includes("2026-09-07T00:00:00Z"), r.stdout);
+    const warnAt = r.stdout.indexOf("exhausted");
+    const cloudAt = r.stdout.indexOf("glm-5.2:cloud");
+    ok(warnAt >= 0 && cloudAt >= 0 && warnAt < cloudAt, r.stdout);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("models: C2 false-positive guard — a healthy meter changes nothing", async () => {
+  const dir = tmp();
+  const server = modelsStubServer();
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({
+      provider: {
+        url: `http://127.0.0.1:${server.address().port}`,
+        catalogUrl: `http://127.0.0.1:${server.address().port}`,
+        cloud: { ollama: { enabled: true } },
+      },
+    }));
+    writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
+      weeklyPctUsed: 40, weeklyResetsAt: "2026-09-07T00:00:00Z", fetchedAt: Date.now(),
+    }));
+    const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    ok(r.stdout.includes("glm-5.2:cloud — Frontier open model (size unreported, 1.0M ctx)"), r.stdout);
+    ok(!/exhausted|stale|⚠/.test(r.stdout), r.stdout);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare dispatch exits 0", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({ swarm: { always: true } }));
+    const manifest = join(dir, "m.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "one", prompt: "look", model: "haiku" }],
+    }));
+    const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
+    equal(r.status, 0, r.stderr + r.stdout);
+    ok(!/gate|batching|mix summary/i.test(r.stdout), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("standing mode: C5 decide() is null outside swarm.always — config absent and explicitly false", async () => {
+  const cwd = "C:/code/x";
+  equal(await hookDecide({ event: "SessionStart", cwd, config: undefined }), null);
+  equal(await hookDecide({ event: "SessionStart", cwd, config: { swarm: { always: false }, provider: { allowedRoots: ["C:/code"] } } }), null);
 });
 
 test("unknown command and missing args exit 1 with usage", () => {

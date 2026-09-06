@@ -336,6 +336,120 @@ test("governance: non-Claude digest model outside roots rejected", () => {
   }
 });
 
+// ── headroom (:cloud weekly-allowance preflight) ──────────────────────────────
+
+// Writes ~/.swarm/ollama-usage.json under a scratch SWARM_HOME so
+// usageFromCache(cfg) reads a controlled reading, then restores the env var.
+function withHeadroom(dir, { weeklyPctUsed, ageMs = 0 } = {}, fn) {
+  const home = join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
+    weeklyPctUsed,
+    weeklyResetsAt: "2026-09-07T00:00:00Z",
+    fetchedAt: Date.now() - ageMs,
+  }));
+  const prevHome = process.env.SWARM_HOME;
+  process.env.SWARM_HOME = home;
+  try {
+    return fn();
+  } finally {
+    if (prevHome === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prevHome;
+  }
+}
+
+test("headroom: M1 exhausted meter rejects a :cloud seat, naming task, model, pct, reset, recast", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 100 }, () => {
+      const errs = errorsOf(() => loadManifest(p, cfg, dir));
+      ok(errs.some((e) =>
+        e.includes("find-diag") && e.includes("glm-5.3:cloud") && e.includes("100")
+        && e.includes("2026-09-07T00:00:00Z") && /recast/i.test(e)
+      ), errs.join("|"));
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M2 false-positive guard — Claude-only manifests are untouched by an exhausted meter", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ model: "sonnet" }), claudeTask({ id: "b", model: "haiku" })] });
+    const cfg = { ...CFG, provider: { allowedRoots: [], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 100 }, () => {
+      const plan = loadManifest(p, cfg, dir);
+      equal(plan.tasks.length, 2);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M3 false-positive guard — a healthy meter passes with no new output", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 42 }, () => {
+      const plan = loadManifest(p, cfg, dir);
+      equal(plan.tasks[0].model, "glm-5.3:cloud");
+      equal(plan.warnings, undefined);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M4 no configured cookie (unknown) does not fail a manifest", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    // cloud.ollama.enabled left off entirely -> usageFromCache is "unknown" with no cache file needed.
+    const cfg = { ...CFG, provider: { allowedRoots: [dir] } };
+    const plan = loadManifest(p, cfg, dir);
+    equal(plan.tasks[0].model, "glm-5.3:cloud");
+    equal(plan.warnings, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M5 stale warns (naming snapshot age and the refresh command), does not fail", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 42, ageMs: 86_400_000 + 3_600_000 }, () => {
+      const plan = loadManifest(p, cfg, dir);
+      equal(plan.tasks[0].model, "glm-5.3:cloud");
+      ok(plan.warnings?.some((w) => w.includes("find-diag") && /\d+h ago/.test(w) && w.includes("ollama-usage")), JSON.stringify(plan.warnings));
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M7 governance is reported before the headroom rejection", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    // allowedRoots empty -> cwd is outside every allowed root
+    const cfg = { ...CFG, provider: { allowedRoots: [], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 100 }, () => {
+      const errs = errorsOf(() => loadManifest(p, cfg, dir));
+      const govIdx = errs.findIndex((e) => e.includes("data governance"));
+      const headroomIdx = errs.findIndex((e) => e.includes("weekly allowance is exhausted"));
+      ok(govIdx !== -1 && headroomIdx !== -1, errs.join("|"));
+      ok(govIdx < headroomIdx, `expected governance before headroom, got: ${errs.join("|")}`);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── write-implies-isolation ───────────────────────────────────────────────────
 
 test("write tools without isolation redirect cwd to scratch dir under resultsDir", () => {

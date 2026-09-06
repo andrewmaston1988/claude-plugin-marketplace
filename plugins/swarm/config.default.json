@@ -8,7 +8,14 @@
     "allowedRoots": [],
     "url": "http://localhost:11434",
     "catalogUrl": "https://ollama.com",
-    "authToken": "ollama"
+    "authToken": "ollama",
+    "cloud": {
+      "ollama": {
+        "enabled": false,
+        "cookiePath": null
+      }
+    },
+    "usageStaleMs": 86400000
   },
   "concurrency": 4,
   "timeoutMs": 3600000,
