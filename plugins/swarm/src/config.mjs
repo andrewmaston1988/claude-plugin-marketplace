@@ -38,6 +38,9 @@ export function loadConfig(overridePath, env = process.env) {
   if (typeof cfg.disable1mContext !== "boolean") {
     throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
   }
+  if (!isPlainObject(cfg.leafGuards) || Object.values(cfg.leafGuards).some((v) => typeof v !== "string")) {
+    throw new Error('leafGuards must be an object mapping root paths to guard commands — e.g. "leafGuards": {"C:/code": "cmd"} in ~/.swarm/config.json');
+  }
   return cfg;
 }
 
@@ -70,7 +73,9 @@ function leafKeys(obj, prefix = "") {
   const out = [];
   for (const [k, v] of Object.entries(obj)) {
     const key = prefix ? `${prefix}.${k}` : k;
-    if (isPlainObject(v)) out.push(...leafKeys(v, key)); else out.push(key);
+    // An empty object (e.g. leafGuards: {}) is a leaf too — recursing into it
+    // yields nothing, so initConfig would never materialise the shipped key.
+    if (isPlainObject(v) && Object.keys(v).length) out.push(...leafKeys(v, key)); else out.push(key);
   }
   return out;
 }

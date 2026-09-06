@@ -26,6 +26,29 @@ test("loadConfig returns shipped defaults when user config is missing", () => {
     equal(cfg.resultInlineCap, 4000);
     equal(cfg.worktreeBranchPrefix, "swarm/");
     equal(cfg.disable1mContext, true);
+    deepEqual(cfg.leafGuards, {});
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("leafGuards must be an object: a string throws naming the key and the example", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ leafGuards: "nope" }));
+    throws(() => loadConfig(p), (e) => e.message.includes("leafGuards") && e.message.includes('"leafGuards": {"C:/code": "cmd"}'));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("leafGuards values must be strings: a number throws naming the key and the example", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ leafGuards: { "C:/code": 1 } }));
+    throws(() => loadConfig(p), (e) => e.message.includes("leafGuards") && e.message.includes('"leafGuards": {"C:/code": "cmd"}'));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -176,6 +199,7 @@ test("initConfig materialises every shipped key into the user file, keeps set va
     equal(on.dashboard.port, 7331);
     equal(on.swarm.always, false);            // shipped default now exists for swarm.always
     equal(on.disable1mContext, true);          // shipped default now exists for disable1mContext
+    deepEqual(on.leafGuards, {});              // shipped default now exists for leafGuards
     deepEqual(on.provider.allowedRoots, []);
     on.provider.allowedRoots = ["C:/code"];
     on.timeoutMs = 5400000;
