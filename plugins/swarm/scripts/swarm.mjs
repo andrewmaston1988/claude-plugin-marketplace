@@ -236,6 +236,8 @@ async function cmdRun(rest) {
     truncations: r.summary.truncations,
     refutations: r.summary.refutations,
     estimate: plan.estimate,
+    resultsDir: plan.resultsDir,
+    engine: fileURLToPath(import.meta.url),
     // Grading is opt-in (grading.enabled): off, the closing block never asks and
     // the skill's grade step is skipped; `grade`/`perf` still work when called.
     gradeable: cfg.grading?.enabled === true ? {
