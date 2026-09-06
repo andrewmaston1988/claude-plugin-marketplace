@@ -236,7 +236,7 @@ surface; narrower is the operator's override, and a bigger window is a wall-cloc
 | **Zero-leaf** — fresh session, cheapest capable model, everything inline | no agents; quality risk, stated explicitly |
 | **Deep** — merge past the surface precondition to the blast/wall-clock limit | the operator's call, never the recommendation; a failure costs many items; long serial pole |
 | **Moderate** — merge shared-surface clusters, isolate the risky items | balanced blast radius and wall-clock |
-| **Per-item** — one agent per item | maximum isolation and parallelism; largest blast-radius floor |
+| **Per-item** — one agent per item | maximum isolation and parallelism; smallest blast radius (one item each); most agents to supervise |
 
 The two axes the question trades are **capability vs. risk** and **wall-clock vs. efficiency**.
 Name both, and always lead with a recommendation rather than a bare menu. Under `swarm.always`
