@@ -2,8 +2,9 @@
 name: orchestrating-agents
 description: >-
   Use before dispatching any fan-out — authoring a manifest, or splitting a set of items
-  across parallel agents. Decides how many agents and which items share one, by what each
-  one costs to onboard. Triggers — "fan this out", "how many leaves", "can we share more",
+  across parallel agents. Decides how a plan splits into parallel agents, one per lane of
+  disjoint files, merged only on shared reading surface, and sizes each by wall-clock and
+  blast radius. Triggers — "fan this out", "how many leaves", "can we share more",
   "batch these items", "one agent per file". SKIP for: a single bounded task — there is
   nothing to group.
 ---
@@ -12,82 +13,93 @@ description: >-
 
 ## Overview
 
-How many agents a fan-out spawns, and which items share one — decided by what each agent
-costs to onboard, not by how the plan happens to read.
+How a plan splits into parallel agents — decided by wall-clock, blast radius and shared
+reading surface, not by how the plan happens to read.
 
-A fan-out's dominant fixed cost is **onboarding**: the system prompt, every rule file, the
-project instructions, and the tool schemas, re-paid at full rate by every agent with no
-cache credit across them. **Every merge of two items into one agent saves one entire
-onboarding.** Nothing else in the rule set decides grouping — model selection, engine
-routing, and spend-consent each stop short of it — so it falls through unless this skill
-forces it.
+The question is inverted from how it looks at first glance. It is not "how many agents, and
+which items share one" — that is a compression question, and every answer to it merges. It
+is "how does this plan split" — the default is one agent per lane from §2's partition of
+disjoint files; a merge is the exception, and it needs a shared reading surface (§5) to
+justify it.
 
-**Core principle:** every merge saves one whole onboarding, and the arithmetic proving where
-that stops paying must be on the page before any agent is spawned.
+**Core principle:** grouping is decided by wall-clock, blast radius and shared reading
+surface — the three legs, on the page, before any agent is spawned. The recommendation is
+wide at the default window — one agent per lane, merged only on shared surface; narrower is
+the operator's override, and a bigger window is a wall-clock purchase.
 
-**Violating the letter of this rule is violating the spirit of the rule.**
+*Measured once (2026-09-06, one plan, three shapes — the worked example below): under the
+default window eight leaves and a four-link chain cost the same — what a leaf pays to start,
+a chain pays back re-reading after compaction. Tokens do not decide grouping and nothing here
+computes them.*
 
 ## The Iron Law
 
 ```
-NO FAN-OUT WITHOUT THE ONBOARDING ARITHMETIC IN VISIBLE TEXT FIRST
+NO FAN-OUT WITHOUT WALL-CLOCK, BLAST AND SURFACE IN VISIBLE TEXT FIRST
 ```
 
+**Violating the letter of this rule is violating the spirit of the rule.**
+
 Eyeballed the leaf count? Noted the numbers in thinking? That is not the arithmetic. If the
-numbers are not on the page (§2), the decision was not made.
+three legs are not on the page (§2a), the decision was not made.
 
 **No exceptions:**
-- Not "the plan already decomposed it" — decomposition is how the work reads, not how it groups.
-- Not "it's obviously N leaves" — obvious is exactly what the arithmetic is cheap enough to prove.
+- Not "the plan already decomposed it" — decomposition is how the work reads, not how it
+  groups (§2 partitions it by files).
+- Not "it's obviously N leaves" — obvious is exactly what the arithmetic is cheap enough to
+  prove.
 - Not "I'll note it in thinking" — thinking is not visible text.
 
 **How aggressively to batch is the operator's call, not yours.** You present the numbers and a
-recommendation; the operator picks the point on the curve. The floor — everything inline, zero
+recommendation; the operator picks the width. The floor — everything inline, zero
 agents — is always one of the options. Under `swarm.always` (swarm skill → *Standing consent*)
 the recommendation is taken: the arithmetic is computed and recorded in the manifest's shape,
 not stated — this Iron Law keeps its force on the interactive path and stops applying where
 nobody is reading the text.
 
-## 1. Instrument — read the onboarding cost, never estimate it
+## 2. Decompose before you group — divide and conquer is an instruction, not a hope
 
-Run the shipped reader; resolve it as `<this skill's base directory>/scripts/onboarding-cost.mjs`:
+Planning is outside this plugin's surface: a plan arrives as a numbered list, and a numbered
+list reads as a chain. Before the arithmetic block (§2a), this step is mandatory:
 
-```
-node <base>/scripts/onboarding-cost.mjs
-```
+1. **Read the plan's file set** — its Files Changed table, or the files its steps name.
+2. **Partition it into lanes by disjoint files.** A lane is a set of files no other lane
+   touches.
+3. **Order lanes only by real data dependencies** — a lane that reads what another lane
+   produces — never by step number. The plan's numbering is narrative, not a dependency
+   graph.
+4. **Every lane with no such dependency is a parallel agent.**
 
-It self-locates this session's transcript and prints the onboarding figure — the first
-assistant turn's `input_tokens + cache_creation_input_tokens`, which is exactly the prefix a
-fresh agent re-pays — with the model, its context window, and the date read. State that
-number **with its date** in the arithmetic block. It drifts upward as the rule set grows, and
-the drift always biases toward *too many agents*.
+A plan written as a chain is not a chain until its files say so. The block's `wall-clock:`
+(longest dependency path) and `blast:` (largest lane) are read off this partition, not off
+the plan's step count.
 
-If no transcript is readable the reader returns a dated `~40k` fallback flagged
-`source: fallback`. **Surface that word out loud** — a floor to reason from, never a silent
-default. This section documents the invocation; the arithmetic of the read lives in the
-script, not here.
-
-## 2. The mandatory arithmetic — before the manifest
+## 2a. The arithmetic — before the manifest
 
 Write this block in visible text, filled in, before drafting anything:
 
 ```
-fan-out:   N agents × <onboarding>              = X
-inline:    <scope you would read yourself>      = Y
-batched:   M agents × <onboarding>              = Z     ← the proposal
-zero-leaf: 1 × <onboarding>                     = W     ← the floor
-axis:      merged on <shared reading surface | shared-file collision | model pin>
-timeout:   deepest agent <k> items × 45m + headroom = T ← the hard bound
+wall-clock: longest path <k> serial items × 45m          = the run's long pole
+blast:      largest single agent <b> items                = re-dispatched if it fails
+axis:       merged on <shared reading surface | shared-file collision | model pin>
+timeout:    per leaf, that leaf's items × 45m + headroom
 ```
 
-Every row earns its place: `inline` and `zero-leaf` are the two floors a proposal is judged
-against; `axis` names *why* each merge is legal; `timeout` (below) turns the deepest agent's
-depth from a feeling into a number.
+Fill it from the lane partition, not the plan's step list: wall-clock is the longest
+dependency path across lanes, blast the largest lane.
+
+Three different objects, three different numbers: in a four-link chain whose links are
+single items: wall-clock 4 × 45m, blast 1, timeout 45m + headroom per leaf; when the links
+are whole phases (the worked example), blast is the largest phase's items and each leaf's
+timeout is that phase's items × 45m + headroom. `blast:` counts the agent's items, not what
+commit-as-you-go might salvage; dependents that stall are a wave question (§3), not blast.
+The offer gate's question 1 already carries the token comparison for running this in-session,
+as consent information — this block does not restate it.
 
 ## 3. Waves before batching — a different question, asked first
 
-Batching asks *which items share one agent*. Waving asks *which items may run at the same
-time at all*. Run the waving question **first**: it partitions the item set, and batching
+Grouping asks *which items share one agent*. Waving asks *which items may run at the same
+time at all*. Run the waving question **first**: it partitions the item set, and grouping
 then applies inside each partition. Merging across a dependency boundary is not a cheaper
 agent, it is a wrong one.
 
@@ -107,7 +119,7 @@ agent, it is a wrong one.
    whether the set is one long chain or several short chains converging — same edge count,
    completely different wave count. Six lines of ASCII, beside the arithmetic.
 5. **Cut waves along the ordering edges only**, then partition each wave again by model pin
-   (§4), then apply the batching arithmetic inside each partition. **The wave count is the
+   (§4), then apply the grouping arithmetic inside each partition. **The wave count is the
    longest chain, not the item count** — everything off that chain runs alongside it.
 6. **Name what each wave hands the next.** That hand-off (`[SHARED_CONTEXT]`) is the
    session's judgement step, and is why the waves are separate manifests.
@@ -135,46 +147,46 @@ restate the tier guide here.
 
 Merging across a tier boundary is not free, and the two directions are not symmetrical:
 
-- **Upward** — a cheaper item on a dearer agent — is arithmetic and *can pay*: you save one
-  onboarding but run that item's whole workload at the higher rate, and the saved onboarding
-  is itself priced higher. It pays when the item is small relative to onboarding and loses
-  when it is large. That comparison is the `axis:` line's justification, not a shrug.
+- **Upward** — a cheaper item on a dearer agent — is legal only on shared surface (§5): the
+  merged item runs its whole workload at the dearer rate, and that is what the `axis:` line
+  justifies, not a shrug.
 - **Downward** — a dearer item on a cheaper agent — is **never the session's call**. The pin
   came from a capability judgement; a batching decision that quietly relaxes it has changed
   what the operator approved. This is a prohibition, not a trade.
 - **Effort is part of the pin.** Medium and max effort on one model share a model but not a
-  cost, and a merged agent runs entirely at the higher one — same arithmetic, smaller
+  cost, and a merged agent runs entirely at the higher one — same asymmetry, smaller
   magnitude. The standing rule is to escalate within a tier before jumping tiers, so effort
   boundaries are the ones you meet most often.
 - **A consent-gated top-tier pin is merge-hostile for a second reason.** Where every such pin
   needs the operator's explicit yes, merging a cheaper item into it silently widens the scope
   of that yes. Consent for one item is not consent for its neighbours.
 
-*Evidence: on one wave the leaf count came entirely from the pin column — two items with no dependency edge between them still needed their own leaf, forced apart by a pin their neighbours didn't share. The worked example at the end shows this merge cut.*
+*Evidence: on one wave the leaf count came entirely from the pin column — two items with no dependency edge between them still needed their own leaf, forced apart by a pin their neighbours didn't share.*
 
-## 5. Merge rule + ordering heuristic
+## 5. Merge rule — shared reading surface is the precondition
 
-Every merge saves exactly one onboarding, **whether or not the merged items read the same
-subsystem**. Shared reading surface is not what makes a merge pay — it is what makes a merge
-pay *twice* (one onboarding **plus** one duplicated read) and what keeps the agent coherent.
-So shared surface is an **ordering heuristic** for which merges to make first, never a
-precondition for merging. And a collision edge, once merged, is not a sequencing constraint
-any more — merging dissolves it.
+A merge is legal only on shared reading surface: the coherence it buys and the duplicated
+read it saves. Items without a shared reading surface split — a split costs nothing
+measurable and buys parallel wall-clock and containment. A collision edge (§3) is exactly a
+shared reading surface already found; once merged, it stops being a sequencing constraint.
 
-## 6. The four bounds on merge depth
+## 6. Wall-clock, blast radius and coherence — the decision itself
 
-The only things that stop merging; none of them overlap:
+Shared surface (§5) decides whether a merge is legal; these three bound how far a legal merge
+goes:
 
-- **Blast radius** — a failed agent costs every item inside it on re-dispatch.
 - **Wall-clock** — items inside an agent run serially; the deepest agent is the long pole.
+- **Blast radius** — a failed agent costs every item inside it on re-dispatch.
 - **Coherence** — one agent juggling many unrelated items degrades, and its own context
   fills.
-- **The timeout** — the **hard** bound. The other three degrade gracefully; this one
-  truncates. A merge that pushes an agent's serial work past its timeout does not produce a
-  slower agent, it produces a failed one with its last item unstarted.
+
+**The timeout is wall-clock's hard edge; the other two are independent.** Wall-clock, blast
+and coherence all degrade gracefully as an agent grows; the timeout does not — pushed past it,
+a merge does not produce a slower agent, it produces a failed one with its last item
+unstarted.
 
 **Sizing the timeout is part of the arithmetic, not a manifest afterthought.** Three rules
-make deep batching survivable:
+make deep grouping survivable:
 
 - **Per-leaf, so sized per-leaf.** The default is **45 minutes per collapsed item** —
   `items × 45m + headroom`. A flat value copied across a manifest is sized for the
@@ -200,13 +212,13 @@ costs least rather than where it was. Ask, in order:
 
 1. **Does anything downstream need it before its consumer's wave?** If not, it need not go in
    the next wave at all.
-2. **Which later agent already reads its files?** Re-homing there buys a real shared reading
-   surface — one onboarding *plus* one duplicated read — where the nearest wave buys only the
-   onboarding.
+2. **Which later agent already reads its files?** Re-homing there is a merge with shared
+   surface (§5) — legal, and it saves the duplicated read; the nearest wave has no such
+   surface, so placing it there is a split — a new agent, not a merge.
 3. **What does that do to the receiving agent's depth?** Re-homing spends its timeout budget;
    a third item on an already-deep agent is a merge decision, not a free move.
 
-*Evidence:* an undelivered item's reflex home was the next wave, but re-homing it two waves later — into a leaf already reading both its files, with no consumer waiting until then — bought the duplicated read on top of the onboarding, turning a two-item collision into one serialised agent. Shared surface beat urgency.
+*Evidence:* an undelivered item's reflex home was the next wave, but re-homing it two waves later — into a leaf already reading both its files, with no consumer waiting until then — bought the duplicated read, turning a two-item collision into one serialised agent. Shared surface beat urgency.
 
 ## 8. Two corollaries
 
@@ -218,24 +230,26 @@ costs least rather than where it was. Ask, in order:
 
 ## 9. The gate question — four options, the floor always present
 
-Present the numbers, lead with a recommendation, then let the operator choose:
+Present the numbers, lead with a recommendation, then let the operator choose. The
+recommendation is wide at the default window — one agent per lane, merged only on shared
+surface; narrower is the operator's override, and a bigger window is a wall-clock purchase.
 
-| Option | Cost profile |
+| Option | What it costs |
 |--------|--------------|
-| **Zero-leaf** — fresh session, cheapest capable model, everything inline | 1 × onboarding total; quality risk, stated explicitly |
-| **Deep** — fewest agents blast radius allows | near-floor tokens; a failure costs many items; long serial pole |
-| **Moderate** — merge shared-surface clusters, isolate the risky items | middle of the curve |
-| **Per-item** — one agent per item | maximum isolation and parallelism; N × onboarding |
+| **Zero-leaf** — fresh session, cheapest capable model, everything inline | no agents; quality risk, stated explicitly |
+| **Deep** — merge past the surface precondition to the blast/wall-clock limit | the operator's call, never the recommendation; a failure costs many items; long serial pole |
+| **Moderate** — merge shared-surface clusters, isolate the risky items | balanced blast radius and wall-clock |
+| **Per-item** — one agent per item | maximum isolation and parallelism; smallest blast radius (one item each); most agents to supervise |
 
-The two axes the question trades are **capability vs. risk** and **wall-clock vs. efficiency**.
+The two axes the question trades are **capability vs. risk** and **wall-clock vs. coherence**.
 Name both, and always lead with a recommendation rather than a bare menu. Under `swarm.always`
-the recommendation is taken: the numbers and the chosen point are computed and recorded in the
-manifest's shape, not stated — the question is gone, not skipped.
+the recommendation is taken: the three legs and the chosen point are computed and recorded in
+the manifest's shape, not stated — the question is gone, not skipped.
 
 ## 10. Where this fires
 
 Any fan-out, whatever dispatches it — the moment you are about to split a set of items across
-parallel agents. In this plugin it is the offer gate's batching question; wherever else a
+parallel agents. In this plugin it is the offer gate's grouping question; wherever else a
 consuming instruction points here, the same arithmetic runs first.
 
 ## 11. Rejected: a hook — recorded so it is not "fixed" later
@@ -252,9 +266,11 @@ replace this with a hook.
 
 | Excuse | Reality |
 |--------|---------|
-| "The plan already decomposed it, so the leaf count is decided" | A plan's decomposition is how the work reads, not how it should be grouped. Run the arithmetic. |
-| "These items read different subsystems, merging saves nothing" | Wrong — every merge saves one onboarding regardless. Shared surface makes it pay *twice*, it is not the precondition. |
-| "Batching risks a bigger blast radius, so keep them separate" | That trade is the operator's, presented at the gate — not yours to pre-decide by staying wide. |
+| "The plan lists steps 1-7, so one leaf does 1-7" | The steps are narrative. Partition by files (§2); order only by real data dependencies. |
+| "These steps depend on each other" | Only if a later one reads what an earlier one writes. A shared file is a collision (merge or sequence); a shared *topic* is nothing. |
+| "The plan already decomposed it, so the leaf count is decided" | A plan's decomposition is how the work reads, not how it groups. Partition by files (§2) and run the arithmetic. |
+| "These items read different subsystems, merging saves nothing anyway" | Wrong direction — merging unrelated items saves nothing measurable and costs the run its parallelism and containment. Shared surface is the precondition (§5), not a bonus. |
+| "Batching risks a bigger blast radius, so keep them separate" | Not yours to pre-decide in either direction: the recommendation is one agent per lane, merged only on shared surface (§5); narrowing past that is the operator's Deep. |
 | "I'll just note the numbers in thinking" | The arithmetic must be *visible text*. Numbers not on the page mean the decision was not made. |
 | "These two can't run concurrently, so they need separate waves" | Only an *ordering* edge cuts a wave. A *collision* edge merges — they serialise in one agent and the constraint dissolves. |
 | "The timeout is a manifest field, I'll set it when I write the JSON" | It is a row in the arithmetic, sized per-leaf from the depth just proposed, decided before the manifest. |
@@ -265,27 +281,32 @@ replace this with a hook.
 ## Red Flags - STOP
 
 - "I'll eyeball the leaf count / note it in thinking" — the arithmetic is visible text.
-- "The plan already decided the grouping" — the plan decomposed; grouping is this decision.
-- "They read different subsystems so merging is pointless" — every merge saves an onboarding.
+- "The plan already decided the grouping" — the plan decomposed by steps; §2 decomposes by
+  files, and that decides the grouping.
+- "These share a topic, so they share a surface" — a topic is not a file. Merging without a
+  named shared file or dependency is inventing an edge.
 - "Different files, so separate waves" — collision edges merge; only ordering edges cut.
 - "I'll set the timeout later in the JSON" — it is sized per-item at session start.
 - "This item's small, run it on the cheaper agent" — that is merging down; refuse it.
 - about to decide the leaf count yourself instead of presenting options to the operator.
+- about to merge two items with no shared reading surface "to save a leaf" — a split costs
+  nothing measurable; the merge does.
 
-## Worked example — the real regroup
+## Worked example — the water-light bake-off
 
 ```
-scout 0.9.6 wave 1, 2026-07-25:
-  drafted straight from the roadmap:  6 × ~40k = ~1.02M
-  regrouped, same 8 items, no scope removed, no model downgraded:
-                                      3 × ~40k = ~526.6k   (49% reduction)
-  the three merges: {1,2,5,6} Sonnet·medium/high · {7,8} on shared surface (max effort)
-                    · {4,12} Haiku·high — the Haiku leaf forced by the pin, not the graph.
-  what stopped further merging: leaf coherence and the tier boundary.
-  counter-example: a 4-item leaf then took a FLAT 2h timeout (its 2-item sibling's value)
-                   and truncated at 3 of 4 — every other bound satisfied. The 45m-per-item
-                   rule would have given it 3h.
+water-light, 2026-09-06, one plan, byte-identical leaf prompts, three shapes:
+
+  wide, default window:         8 leaves        cost 1.0×   ~5h    blast ≤ 4 items
+  narrow chain, default window: 4-link chain     cost 1.0×   6h+    blast = a whole phase
+                                                                     (23 compactions; one
+                                                                     false STOP carried
+                                                                     through every stage)
+  same chain, 1M window:        4-link chain     cost 1.45×  ~4h    0 compactions
+
+  counter-example: a 4-item agent on a flat 2h timeout (its 2-item sibling's value) hit the
+  wall with one item unstarted. The 45-minute-per-item rule would have given it 3h.
 ```
 
-The six was never challenged by any rule; it was challenged by the operator noticing. Making
-that arithmetic compulsory is the whole point of this skill.
+Wide, at the default window, is the lean: width buys the clock and the containment for the
+same tokens; the bigger window buys the clock alone, at 1.45×.

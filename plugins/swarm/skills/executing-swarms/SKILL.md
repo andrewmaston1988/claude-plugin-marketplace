@@ -4,14 +4,15 @@ description: >-
   Use before drafting any swarm manifest — deciding what shape the dependency graph takes,
   and what each task must wait for. Triggers — "what shape should this run be", "one manifest
   or two", "does this need a second wave", "phased chain", "fan out then integrate". SKIP for:
-  how many agents and which items share one — that is swarm:orchestrating-agents.
+  how a plan splits into agents (one per lane; merges only on shared surface) — that is
+  swarm:orchestrating-agents.
 ---
 
 # Executing swarms — deciding the shape before anything spends
 
-`swarm:orchestrating-agents` answers *which agents, and how many*. This skill answers *what
-shape the graph takes* — what each task must wait for. Both precede drafting; neither
-restates the other.
+`swarm:orchestrating-agents` decides how a plan splits into agents (one per lane; merges only
+on shared surface). This skill answers *what shape the graph takes* — what each task must
+wait for. Both precede drafting; neither restates the other.
 
 Work through it in order. Every step produces a value the manifest carries or the gate
 consumes.
@@ -39,13 +40,13 @@ build. You never choose a shape and fill it in.
 
 ## 1. Grouping — invoke `swarm:orchestrating-agents` first
 
-**Not optional, and not summarisable here.** That skill owns the onboarding arithmetic: a
-fan-out's dominant fixed cost is onboarding (system prompt, rule files, project instructions,
-tool schemas), re-paid at full rate by every agent with no cache credit across them, so
-**every merge of two items into one leaf saves an entire onboarding.**
+**Not optional, and not summarisable here.** That skill owns the three levers that decide
+grouping: wall-clock (the longest dependency path), blast radius (the largest single agent's
+items), and shared reading surface (the precondition for any merge).
 
-It produces the number the offer gate's third question carries. Drafting a leaf-per-item
-manifest without it is precisely the failure it was written to catch.
+It produces the wall-clock and blast figures the offer gate's third question carries.
+Drafting a leaf-per-item manifest without it is precisely the failure it was written to
+catch.
 
 ## 2. Frame the contract — before the manifest, not after
 
