@@ -23,6 +23,7 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Per-agent model + effort selection | ✅ | ✅ |
 | Worktree isolation for write-capable agents | ✅ | ✅ |
 | Leaves run foreground-only — a headless session that yields its turn is over, so `run_in_background` is denied inside a leaf | ✅ `hooks/foreground-guard.mjs` | — |
+| Per-repo PreToolUse hook — a repo-owned script sees every tool call inside its leaves and can deny it | ✅ `hooks/leaf-guard.mjs` | — |
 | Full headless Claude Code agents — complete tool roster | ✅ | ✅ |
 | Deterministic mid-run steps — fan out over a discovered list, gate, dedupe/count | ✅ `forEach`/`when`/`compute` | ✅ full JS |
 | Schema-validated output — corrective retry on mismatch | ✅ `returns` | ✅ `agent({schema})` |
@@ -72,6 +73,40 @@ Other useful keys (defaults shown in `config.default.json`): `provider.url` (Ant
 ```
 
 `provider.cloud.ollama.enabled` arms ollama.com cloud-usage preflight — false by default, so a user who has never heard of it meets nothing. `cookiePath` overrides where the session cookie is stored (default `~/.swarm/ollama-cookie.json`, written by `ollama-usage --cookie`, never `config.json` — a cookie in a file that's read/printed/diffed constantly would end up in a transcript). `usageStaleMs` (default 24h) is how long a cached reading stays trusted before it's reported `stale` instead of its last percentage.
+
+### Per-repo leaf guard (`projects`)
+
+A leaf is a full headless Claude Code session, and `allowedTools` scopes tool *names*, not what
+a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every leaf that
+runs under that repo — one config entry, one script the repo keeps and tests:
+
+```json
+{ "projects": [{ "name": "myrepo", "hooks": { "preToolUse": "python scripts/leaf_guard.py" } }] }
+```
+
+Before every tool call in a guarded leaf the engine's hook runs that command from the leaf's
+cwd with the PreToolUse payload on stdin — `tool_name`, `tool_input` (a Bash `command`, an
+Edit/Write `file_path`, a Read path, …), the same JSON any PreToolUse hook receives. **Exit 0
+allows the call; exit 2 denies it, and whatever the script wrote to stderr is the reason the
+leaf sees.** Anything else — another exit code, a timeout, a spawn failure — also denies,
+naming the failure: the guard fails closed, because a policy that silently stops applying is
+worse than one that loudly blocks.
+
+What a repo can do with it is whatever a PreToolUse hook can do, decided by the repo rather
+than by every manifest author: refuse build or test commands in lanes so only a serial tail
+compiles; fence writes to a directory or a file pattern; block network-touching commands, package
+installs, or `git push`; require a header marker on every edit under a given directory; keep
+a leaf from reading a secrets path. The script sees the full payload, so any rule expressible over
+it is one `if` away.
+
+Mechanics: each entry's `name` is matched against the basename of the task's repo root (`git
+rev-parse --show-toplevel`, falling back to the task's cwd if that fails; case-insensitive on
+Windows); a leaf whose repo name matches no entry, or whose entry has no `hooks.preToolUse`,
+runs unguarded; interactive sessions never see the hook. Each distinct guard is probed once at
+`validate` with a harmless Bash payload, so a script that cannot run fails the manifest before
+any leaf spends. A task opts out with `"leafGuard": false` — the only accepted value — for a
+leaf that must be allowed the thing the guard denies (the one build tail, say); nothing in a
+task's `env` or `settings.env` can forge or clear the guard.
 
 Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama install recent enough to serve `/api/experimental/model-recommendations` (~v0.23+).
 

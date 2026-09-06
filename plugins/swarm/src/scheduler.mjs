@@ -229,7 +229,16 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
         // correlation id legitimately flows through, but a parent claiming to be a
         // leaf would arm foreground-guard's deny in an interactive session. It is
         // spread LAST so neither the inherited env nor a dispatch env can unset it.
-        env: { ...(io.env || process.env), CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`, ...env, SWARM_LEAF: "1" },
+        // SWARM_LEAF_GUARD/_PROJECT are the engine's own resolution of task.leafGuard
+        // (set by manifest.mjs's guardFor, never by the task's own env) — same
+        // reasoning as SWARM_LEAF: a task cannot forge or unset its own guard.
+        env: {
+          ...(io.env || process.env),
+          CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`,
+          ...env,
+          SWARM_LEAF: "1",
+          ...(task.leafGuard && { SWARM_LEAF_GUARD: task.leafGuard.command, SWARM_LEAF_GUARD_PROJECT: task.leafGuard.name }),
+        },
         windowsHide: true,
         stdio: ["ignore", "pipe", "pipe"],
       });
