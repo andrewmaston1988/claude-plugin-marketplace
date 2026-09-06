@@ -315,6 +315,89 @@ test("collect keeps a worktree whose changes were committed", () => {
   }
 });
 
+test("collect keeps the branch of an unchanged integrate-source, but still removes the worktree", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const task = { id: "src", originalCwd: repo };
+    const wt = prepareIsolation(task, CFG, resultsDir);
+    const c = collect(task, CFG, wt, { isIntegrateSource: true });
+    equal(c.kept, false, "the worktree still counts as swept");
+    equal(c.branchKept, true, "the branch survives — a later integrate needs the ref, not its contents");
+    ok(!existsSync(wt.path), "worktree dir is removed; nothing merges a directory");
+    ok(git(["branch", "--list", "swarm/src"], repo).includes("swarm/src"), "branch must survive");
+  } finally {
+    cleanup(resultsDir, repo);
+  }
+});
+
+// Without this guard the fix degenerates into "stop reaping": every no-change
+// leaf in every run would leave an empty branch behind.
+test("collect sweeps an unchanged NON-source completely — branch and all", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const task = { id: "nonsrc", originalCwd: repo };
+    const wt = prepareIsolation(task, CFG, resultsDir);
+    const c = collect(task, CFG, wt, { isIntegrateSource: false });
+    equal(c.kept, false);
+    equal(c.branchKept, false, "not named by any integrate — nothing protects the ref");
+    ok(!existsSync(wt.path));
+    equal(git(["branch", "--list", "swarm/nonsrc"], repo), "", "branch must still be deleted");
+  } finally {
+    cleanup(resultsDir, repo);
+  }
+});
+
+test("collect keeps a changed integrate-source exactly as before — isIntegrateSource is inert on the changed path", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const task = { id: "changed-src", originalCwd: repo };
+    const wt = prepareIsolation(task, CFG, resultsDir);
+    writeFileSync(join(wt.path, "new.txt"), "work\n");
+    const c = collect(task, CFG, wt, { isIntegrateSource: true });
+    equal(c.kept, true);
+    ok(existsSync(wt.path), "changed worktree stays");
+    ok(git(["branch", "--list", "swarm/changed-src"], repo).includes("swarm/changed-src"));
+    ok(c.diffstat.includes("new.txt"), c.diffstat);
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", join(resultsDir, "wt-changed-src")], { cwd: repo, windowsHide: true });
+    cleanup(resultsDir, repo);
+  }
+});
+
+// Pins that the fix only moved the `branch -D` line: the two pre-existing
+// guards (isChainFollower, carriesWork) still keep worktree AND branch, and
+// isIntegrateSource: false does not weaken them.
+test("isChainFollower and carriesWork guards still keep worktree and branch, unaffected by isIntegrateSource", () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
+    const wt1 = prepareIsolation(p1, CFG, resultsDir);
+    writeFileSync(join(wt1.path, "phase1.txt"), "phase 1 work\n");
+    commitAll(wt1.path, "phase 1");
+    const p2 = { id: "p2", worktreeName: "feat", originalCwd: repo, cwd: repo };
+    const wt2 = prepareIsolation(p2, CFG, resultsDir);
+    const cFollower = collect(p2, CFG, wt2, { isChainFollower: true, isIntegrateSource: false });
+    equal(cFollower.kept, true, "isChainFollower still protects the shared tree");
+    ok(git(["branch", "--list", "swarm/feat"], repo).includes("swarm/feat"));
+
+    const up = prepareIsolation({ id: "helper2", originalCwd: repo, worktreeName: "helper2" }, CFG, resultsDir);
+    writeFileSync(join(up.path, "helper.txt"), "helper\n");
+    commitAll(up.path, "helper");
+    const down = prepareIsolation(
+      { id: "noop2", originalCwd: repo, worktreeName: "noop2", baseRef: "swarm/helper2" }, CFG, resultsDir);
+    const cCarries = collect({ id: "noop2" }, CFG, down, { isChainFollower: false, isIntegrateSource: false });
+    equal(cCarries.kept, true, "carriesWork still protects a from-based tree's inherited commits");
+    ok(git(["branch", "--list", "swarm/noop2"], repo).includes("swarm/noop2"));
+  } finally {
+    dropWorktree(repo, join(resultsDir, "wt-feat"));
+    cleanup(resultsDir, repo);
+  }
+});
+
 test("scheduler resume: a failed isolated leaf re-enters its kept worktree AND resumes its session", async () => {
   const repo = initRepo();
   const dir = mkdtempSync(join(tmpdir(), "swarm-wt-resume-"));

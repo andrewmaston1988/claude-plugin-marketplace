@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn as nodeSpawn } from "node:child_process";
+import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
@@ -2210,5 +2210,153 @@ test("non-Claude leaf keeps its manifest model; no modelAlias", async () => {
     equal(res.modelAlias, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// region-lanes-1's join, reduced: a real git repo so a leaf's branch can
+// genuinely carry nothing, and integrate's merge can genuinely be a no-op.
+function gitInRepo(args, cwd) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
+  return (r.stdout || "").trim();
+}
+
+function initGitRepo() {
+  const repo = mkdtempSync(join(tmpdir(), "swarm-sched-repo-"));
+  spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo, windowsHide: true });
+  writeFileSync(join(repo, "a.txt"), "hello\n");
+  spawnSync("git", ["add", "."], { cwd: repo, windowsHide: true });
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], { cwd: repo, windowsHide: true });
+  return repo;
+}
+
+function commitAllInRepo(cwd, msg) {
+  spawnSync("git", ["add", "."], { cwd, windowsHide: true });
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+    "commit", "-q", "-m", msg], { cwd, windowsHide: true });
+}
+
+function integrateLeaf(id, over) {
+  return {
+    id, prompt: "p", model: "haiku", allowedTools: "Read,Edit,Bash",
+    timeoutMs: 5000, after: [], ...over,
+  };
+}
+
+test("S1: integrate over a committed leaf and a no-change leaf completes", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      if (cwd.endsWith("wt-feat")) {
+        writeFileSync(join(cwd, "base.txt"), "base\n");
+        commitAllInRepo(cwd, "base");
+      } else if (cwd.endsWith("wt-committer")) {
+        writeFileSync(join(cwd, "committer.txt"), "committer work\n");
+        commitAllInRepo(cwd, "committer work");
+      }
+      // wt-nochange: touch nothing — a leaf that legitimately changed nothing.
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        integrateLeaf("helper", { cwd: repo, originalCwd: repo, isolation: { worktree: "feat" }, worktreeName: "feat" }),
+        integrateLeaf("committer", { cwd: repo, originalCwd: repo, after: ["helper"],
+          isolation: { worktree: "committer", from: "helper" }, worktreeName: "committer", from: "helper" }),
+        integrateLeaf("nochange", { cwd: repo, originalCwd: repo, after: ["helper"],
+          isolation: { worktree: "nochange", from: "helper" }, worktreeName: "nochange", from: "helper" }),
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["committer", "nochange"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["committer", "nochange"] } },
+      ],
+    };
+    await runPlan(p, CFG, io);
+
+    const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
+    equal(res.ok, true, "the integrate completes despite one source changing nothing");
+    deepEqual(res.outputJson.merged, ["swarm/committer", "swarm/nochange"]);
+    ok(existsSync(join(p.resultsDir, "wt-feat", "committer.txt")),
+      "the committing leaf's change lands in the target tree");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("S2: a no-change leaf that no integrate names is still swept", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      if (cwd.endsWith("wt-feat")) {
+        writeFileSync(join(cwd, "base.txt"), "base\n");
+        commitAllInRepo(cwd, "base");
+      } else if (cwd.endsWith("wt-committer")) {
+        writeFileSync(join(cwd, "committer.txt"), "committer work\n");
+        commitAllInRepo(cwd, "committer work");
+      }
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        integrateLeaf("helper", { cwd: repo, originalCwd: repo, isolation: { worktree: "feat" }, worktreeName: "feat" }),
+        integrateLeaf("committer", { cwd: repo, originalCwd: repo, after: ["helper"],
+          isolation: { worktree: "committer", from: "helper" }, worktreeName: "committer", from: "helper" }),
+        integrateLeaf("nochange", { cwd: repo, originalCwd: repo, after: ["helper"],
+          isolation: { worktree: "nochange", from: "helper" }, worktreeName: "nochange", from: "helper" }),
+        // Only "committer" is named — "nochange" is not a source of anything.
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["committer", "nochange"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["committer"] } },
+      ],
+    };
+    await runPlan(p, CFG, io);
+
+    equal(gitInRepo(["branch", "--list", "swarm/nochange"], repo), "",
+      "a no-change leaf that no integrate names must still be reaped, branch and all");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("S3: integrate's missing-ref throw still fires for a ref absent for a reason other than the sweep", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      if (cwd.endsWith("wt-feat")) {
+        writeFileSync(join(cwd, "base.txt"), "base\n");
+        commitAllInRepo(cwd, "base");
+      }
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        integrateLeaf("helper", { cwd: repo, originalCwd: repo, isolation: { worktree: "feat" }, worktreeName: "feat" }),
+        // "ghost" names no task in this plan, so its branch was never created —
+        // a ref missing for a reason the sweep did not cause, which the throw
+        // at worktree.mjs's integrate() must still catch.
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["helper"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["ghost"] } },
+      ],
+    };
+    await runPlan(p, CFG, io);
+
+    const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
+    equal(res.ok, false, "a ref missing for an unrelated reason must still fail the node");
+    ok(/cannot merge/.test(res.output), `expected the original throw message, got: ${res.output}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
   }
 });
