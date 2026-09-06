@@ -1,14 +1,8 @@
 import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import {
-  onboardingCost,
-  encodeProjectDir,
-  contextWindowFor,
-} from "../skills/orchestrating-agents/scripts/onboarding-cost.mjs";
 
 // ---- structural-test helpers (T1–T11) ----
 
@@ -46,68 +40,30 @@ function skillMarkdownFiles(dir) {
   return out;
 }
 
-// Build a temp <projectsRoot>/<encoded-cwd>/ dir and drop `jsonl` in it as the
-// session transcript. Returns { projectsRoot, cwd }.
-function fixtureProject(cwd, jsonl) {
-  const projectsRoot = mkdtempSync(join(tmpdir(), "swarm-onboard-"));
-  const dir = join(projectsRoot, encodeProjectDir(cwd));
-  mkdirSync(dir, { recursive: true });
-  if (jsonl != null) writeFileSync(join(dir, "session.jsonl"), jsonl);
-  return { projectsRoot, cwd };
+// Every file under plugins/swarm/skills/, any extension — T16 needs to catch a
+// deleted script's filename, not just markdown prose.
+function allSkillFiles(dir) {
+  const out = [];
+  for (const name of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, name.name);
+    if (name.isDirectory()) out.push(...allSkillFiles(p));
+    else out.push(p);
+  }
+  return out;
 }
 
-// One assistant turn with a usage object, as Claude Code writes it.
-function turn(model, usage) {
-  return JSON.stringify({ type: "assistant", message: { role: "assistant", model, usage } });
+// Slice a `## <prefix>`-level section (heading line through the line before the
+// next `## ` heading) by prefix match, for numbered sub-sections like "## 3a".
+function sectionByPrefix(content, prefix) {
+  const lines = content.split("\n");
+  const start = lines.findIndex((l) => l.trim().startsWith(prefix));
+  if (start === -1) return "";
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) { end = i; break; }
+  }
+  return lines.slice(start, end).join("\n");
 }
-
-// ---- T12 ----
-
-test("T12a — reads first assistant turn's input_tokens + cache_creation", () => {
-  const cwd = "C:\\code\\demo-project";
-  // Head turn: 1200 + 38800 = 40000. A later turn with different numbers must be ignored.
-  const jsonl = [
-    JSON.stringify({ type: "user", message: { role: "user", content: "hi" } }),
-    turn("claude-sonnet-4-5", { input_tokens: 1200, cache_creation_input_tokens: 38800, cache_read_input_tokens: 500000, output_tokens: 10 }),
-    turn("claude-sonnet-4-5", { input_tokens: 999999, cache_creation_input_tokens: 999999 }),
-  ].join("\n");
-  const { projectsRoot } = fixtureProject(cwd, jsonl);
-
-  const r = onboardingCost({ cwd, projectsRoot, now: new Date("2026-07-26T00:00:00Z") });
-  equal(r.onboardingTokens, 40000, "sum of first turn's input + cache_creation, cache_read excluded");
-  equal(r.source, "transcript");
-  equal(r.model, "claude-sonnet-4-5");
-  equal(r.contextWindow, 200000);
-});
-
-test("T12b — no transcript falls back to the dated ~40k constant", () => {
-  const { projectsRoot, cwd } = fixtureProject("C:\\code\\empty-project", null);
-  const r = onboardingCost({ cwd, projectsRoot, now: new Date("2026-07-26T00:00:00Z") });
-  equal(r.source, "fallback");
-  equal(r.onboardingTokens, 40000);
-  equal(r.model, null);
-  equal(r.contextWindow, 200000);
-});
-
-test("T12c — model to window map", () => {
-  const cwd = "C:\\code\\opus-project";
-  const jsonl = turn("claude-opus-4-8", { input_tokens: 1000, cache_creation_input_tokens: 60000 });
-  const { projectsRoot } = fixtureProject(cwd, jsonl);
-  const r = onboardingCost({ cwd, projectsRoot });
-  equal(r.contextWindow, 1000000, "opus maps to 1M");
-
-  equal(contextWindowFor("claude-opus-4-8"), 1000000);
-  equal(contextWindowFor("claude-fable-5"), 1000000);
-  equal(contextWindowFor("claude-sonnet-4-5"), 200000);
-  equal(contextWindowFor("claude-haiku-4-5"), 200000);
-  equal(contextWindowFor("glm-5.2:cloud"), 200000, "unknown model defaults to 200k");
-  equal(contextWindowFor(null), 200000);
-});
-
-test("T12d — encodeProjectDir rewrites \\ / : to -", () => {
-  equal(encodeProjectDir("C:\\code\\claude-plugin-marketplace"), "C--code-claude-plugin-marketplace");
-  ok(!/[\\/:]/.test(encodeProjectDir("C:/a/b:c")));
-});
 
 // ---- T1: the skill exists and parses ----
 
@@ -141,12 +97,19 @@ test("T3 — gate carries THREE questions, no surviving TWO", () => {
   equal(stanzas.length, 3, "exactly three numbered question stanzas");
 });
 
-// ---- T4: arithmetic template complete ----
+// ---- T4: §2 block carries the three-legged labels, not the onboarding ones ----
 
-test("T4 — arithmetic template carries all six labels", () => {
+test("T4 — §2 block carries wall-clock/blast/axis/timeout", () => {
   const content = read(NEW_SKILL);
-  for (const label of ["fan-out:", "inline:", "batched:", "zero-leaf:", "axis:", "timeout:"]) {
+  for (const label of ["wall-clock:", "blast:", "axis:", "timeout:"]) {
     ok(content.includes(label), `arithmetic label ${label} present`);
+  }
+});
+
+test("T4 — §2 block drops the old onboarding-arithmetic labels", () => {
+  const content = read(NEW_SKILL);
+  for (const label of ["fan-out:", "batched:", "zero-leaf:", "inline:"]) {
+    ok(!content.includes(label), `old label ${label} must be gone`);
   }
 });
 
@@ -161,10 +124,10 @@ test("T5 — gate question table offers all four named options", () => {
 
 // ---- T6: SSOT — the arithmetic label lives in exactly one file ----
 
-test("T6 — zero-leaf: label appears in exactly one skill file, the new skill", () => {
+test("T6 — wall-clock: label appears in exactly one skill file, the new skill", () => {
   const files = skillMarkdownFiles(SKILLS_DIR);
-  const hits = files.filter((p) => read(p).includes("zero-leaf:"));
-  equal(hits.length, 1, `expected 1 file with 'zero-leaf:' label, got ${hits.length}: ${hits.join(", ")}`);
+  const hits = files.filter((p) => read(p).includes("wall-clock:"));
+  equal(hits.length, 1, `expected 1 file with 'wall-clock:' label, got ${hits.length}: ${hits.join(", ")}`);
   ok(hits[0].replace(/\\/g, "/").endsWith("orchestrating-agents/SKILL.md"), "the one file is the new skill");
 });
 
@@ -268,4 +231,43 @@ test("T14 — resume carve-out states --resume, no re-onboard, and ok-leaves-ski
   match(gate, /--resume/, "names the underlying `claude --resume <sessionId>` mechanism");
   match(gate, /re-?onboard/i, "states the no-re-onboarding invariant");
   match(gate, /never re-run|skipped, never|already-?`?ok`?[^\n]*skipped/i, "states already-ok leaves are not re-run");
+});
+
+// ---- T16: the deleted onboarding-cost script leaves no trace under skills/ ----
+
+test("T16 — nothing under skills/ names onboarding-cost", () => {
+  const files = allSkillFiles(SKILLS_DIR);
+  for (const p of files) {
+    const norm = p.replace(/\\/g, "/");
+    ok(!norm.includes("onboarding-cost"), `path ${norm} must not name onboarding-cost`);
+    if (/\.(md|mjs)$/.test(norm)) {
+      ok(!read(p).includes("onboarding-cost"), `${norm} must not reference onboarding-cost`);
+    }
+  }
+});
+
+// ---- T17: no surviving "a merge saves an onboarding" reasoning ----
+
+const SAVES_ONBOARDING_RE = /sav(e|es|ed|ing)\s+(an|one)\s+(entire\s+|whole\s+|exactly\s+one\s+)?onboarding/i;
+const ONBOARDING_ARITHMETIC_RE = /onboarding\s+arithmetic/i;
+
+test("T17 — the two grouping skills carry no onboarding-saving phrasing or 'onboarding arithmetic'", () => {
+  const files = [NEW_SKILL, join(SKILLS_DIR, "executing-swarms", "SKILL.md")];
+  for (const p of files) {
+    const content = read(p);
+    const norm = p.replace(/\\/g, "/");
+    ok(!SAVES_ONBOARDING_RE.test(content), `${norm} must not say a merge saves an onboarding`);
+    ok(!ONBOARDING_ARITHMETIC_RE.test(content), `${norm} must not name "onboarding arithmetic"`);
+  }
+});
+
+// ---- T18: §3a decompose-by-files step is on the page ----
+
+test("T18 — §3a exists and states partition / disjoint files / step number", () => {
+  const content = read(NEW_SKILL);
+  const section = sectionByPrefix(content, "## 3a");
+  ok(section.length > 0, "§3a section present");
+  ok(section.includes("partition"), "mentions partition");
+  ok(section.includes("disjoint files"), "mentions disjoint files");
+  ok(section.includes("step number"), "mentions step number");
 });
