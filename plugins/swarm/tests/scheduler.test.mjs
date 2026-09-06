@@ -2212,3 +2212,169 @@ test("non-Claude leaf keeps its manifest model; no modelAlias", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- engine-slot-leak-and-from, Lane A: the `running` map slot leak ---
+// See plans/engine-slot-leak-and-from.md and its test-plan companion.
+//
+// S1/S3 share one reproduction: a leaf whose IIFE resolves a value other than
+// the id it was launched under — the class `running.delete(finished)` cannot
+// handle. `io.notify` is the only lawful in-scope seam that fires inside the
+// launch IIFE (after `record()`'s real bookkeeping, before the final
+// `return task.id`), so the hook corrupts `task.id` for that one read, then
+// reverts it via queueMicrotask — enqueued before the promise's `.finally()`
+// reaction, so it always wins the race to run first. That makes the two
+// mechanisms diverge exactly the way the fix intends: the OLD code captures
+// the corrupted value into the promise's resolution (permanent, immune to
+// the later revert); the NEW code reads `task.id` fresh inside `.finally()`,
+// after the revert has already run, and sees the real id.
+//
+// costWarnTokens is tuned so the cost-warn block — the only place `io.notify`
+// fires — trips on "b"'s completion specifically: projectRun refuses to
+// project before 2 completions, so "b" is arranged to be the 2nd leaf done.
+function buildStrandPlan(dir) {
+  const ids = ["a", "b", "c", "d", "e", "f"];
+  const tasks = Object.fromEntries(ids.map((id) => [id, task(id)]));
+  const delays = { a: 5, b: 20, c: 300, d: 300, e: 300, f: 300 };
+  const usage = { input_tokens: 1000, output_tokens: 0 };
+  const spawn = fakeSpawnFactory((call) => {
+    const id = promptOf(call).slice(3); // "do x" -> "x"
+    return { output: streamOut(`leaf ${id}`, `s-${id}`, usage), delayMs: delays[id] };
+  });
+  let strandFired = false;
+  let sampler = null;
+  let postStrandMax = 0;
+  const io = makeIo(spawn, {
+    notify: () => {
+      if (strandFired) return;
+      strandFired = true;
+      const real = tasks.b.id;
+      tasks.b.id = "b-phantom";
+      queueMicrotask(() => { tasks.b.id = real; });
+      sampler = setInterval(() => { postStrandMax = Math.max(postStrandMax, spawn.gauge.active); }, 3);
+    },
+  });
+  const p = plan(dir, ids.map((id) => tasks[id]));
+  return { p, io, stop: () => { if (sampler) clearInterval(sampler); }, postStrandMax: () => postStrandMax };
+}
+
+test("S1: a stranded slot must not permanently narrow the run", { timeout: 5000 }, async () => {
+  const dir = tmp();
+  try {
+    const { p, io, stop, postStrandMax } = buildStrandPlan(dir);
+    const r = await runPlan(p, { ...CFG, costWarnTokens: 5000 }, io);
+    stop();
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    for (const id of ["a", "b", "c", "d", "e", "f"]) ok(states[id], `task ${id} never reached a terminal state`);
+    equal(postStrandMax(), 4, `peak concurrency after the strand was ${postStrandMax()}, want 4`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("S2: an ordinary healthy run emits no slot-leak events", async () => {
+  const dir = tmp();
+  try {
+    let flakyCalls = 0;
+    const spawn = fakeSpawnFactory((call) => {
+      const p = promptOf(call);
+      if (p === "do flaky") { flakyCalls++; return flakyCalls < 2 ? { exit: 1, output: "429 rate limit" } : { output: "recovered" }; }
+      if (p === "do src") return { output: '{"sites":[1]}' };
+      return { output: "ok" };
+    });
+    const io = makeIo(spawn);
+    const p = plan(dir, [
+      task("a"), task("b"), task("flaky"),
+      task("src"),
+      task("gate", { after: ["src"], when: { from: "src", expr: "length(value.sites) > 2" } }),
+      task("child", { after: ["gate", "flaky"] }),
+    ], { concurrency: 4 });
+    const r = await runPlan(p, { ...CFG, retry: { rateLimited: 2, backoffMs: 10 } }, io);
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.gate, "skipped");
+    equal(states.flaky, "ok");
+    equal(states.child, "ok");
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    equal(logLines.filter((l) => l.event === "slot-leak").length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// S3 (instrument names the stranded ids) was verified RED against the buildStrandPlan
+// repro before the .finally() fix landed: run.log showed
+// {"event":"slot-leak","held":4,"live":3,"stranded":["b"]}. Not pinned as a standing test —
+// the fix closes this exact leak class (see S1), so no repro can make it fire post-fix
+// without reintroducing the bug it guards against.
+test("S4: a parked retry frees its slot for another pending task", async () => {
+  const dir = tmp();
+  try {
+    let flakyCalls = 0;
+    const spawn = fakeSpawnFactory((call) => {
+      const p = promptOf(call);
+      if (p === "do flaky") { flakyCalls++; return flakyCalls < 2 ? { exit: 1, output: "429 rate limit" } : { output: "recovered" }; }
+      return { output: "b done" };
+    });
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("flaky"), task("b")], { concurrency: 1 });
+    const r = await runPlan(p, { ...CFG, retry: { rateLimited: 2, backoffMs: 30 } }, io);
+    const order = spawn.calls.map(promptOf);
+    deepEqual(order, ["do flaky", "do b", "do flaky"]); // b launches while flaky is parked
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.flaky, "ok");
+    equal(states.b, "ok");
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    equal(logLines.filter((l) => l.event === "slot-leak").length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("S5: a when-skipped task occupies no concurrency slot", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: '{"sites":[1]}', delayMs: 15 }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [
+      task("src"),
+      task("gate", { after: ["src"], when: { from: "src", expr: "length(value.sites) > 2" } }),
+      task("x"), task("y"),
+    ], { concurrency: 2 });
+    const r = await runPlan(p, CFG, io);
+    ok(spawn.gauge.max >= 2, `peak width was ${spawn.gauge.max}, want >= 2 despite the gated skip`);
+    const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(states.gate, "skipped");
+    equal(states.x, "ok");
+    equal(states.y, "ok");
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    equal(logLines.filter((l) => l.event === "slot-leak").length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("S6: concurrency width recovers to the ceiling across waves", async () => {
+  const dir = tmp();
+  try {
+    const ids = ["a", "b", "c", "d", "e", "f", "g", "h"];
+    const spawn = fakeSpawnFactory(() => ({ delayMs: 15 }));
+    const io = makeIo(spawn);
+    const p = plan(dir, ids.map((id) => task(id)), { concurrency: 4 });
+    // Split samples by the 5th spawn call (the first admission of the second
+    // wave) rather than a wall-clock threshold — process/test-harness
+    // start-up jitter makes an absolute time cutoff unreliable.
+    const samples1 = [];
+    const samples2 = [];
+    let wave2 = false;
+    const sampler = setInterval(() => {
+      if (!wave2 && spawn.calls.length >= 5) wave2 = true;
+      (wave2 ? samples2 : samples1).push(spawn.gauge.active);
+    }, 2);
+    await runPlan(p, CFG, io);
+    clearInterval(sampler);
+    equal(spawn.calls.length, 8);
+    equal(Math.max(0, ...samples1), 4, "first wave never reached the ceiling");
+    equal(Math.max(0, ...samples2), 4, "second wave never reached the ceiling — width ratcheted down");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

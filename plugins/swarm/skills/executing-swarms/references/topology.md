@@ -14,8 +14,27 @@ prompt reads.
 ## A private tree branches from repo HEAD unless you say otherwise
 
 `"from": "<task id>"` bases it on that task's branch instead, so the leaf starts with the code
-it depends on. The named task must be a declared dependency, worktree-isolated, and able to
-WRITE — `validate` says so if not.
+it depends on. `validate` rejects a source that can end without ever committing — a branch that
+was never created cannot be based on. `isolation.from` must name a task that:
+
+- **is a declared dependency** — in this leaf's `after`, so its branch is guaranteed to exist by
+  the time this leaf starts;
+- **has an `isolation` block** — a task with none runs in the shared checkout, never gets a
+  worktree, and so never gets a branch;
+- **is not `when`-gated** — a false gate skips the task before its worktree is created, so the
+  branch may never exist; and
+- **holds write tools** — see "A task only owns a branch if it COMMITS" below; the same
+  reasoning `integrate.from` uses applies here.
+
+**A `skipped` source is the live failure this guard catches.** A skipped task never runs its
+body, so even one with an `isolation` block leaves no branch behind if its gate — or an
+upstream failure — skipped it. Before this guard existed, tasks naming a skipped source as
+`from` did not fail at `validate`: `prepareIsolation` resolved `baseRef` however its fallback
+happened to work out, and leaves reported success built on the wrong code. The run-time
+backstop closes the gap `validate` cannot: if `baseRef` is ever handed to `prepareIsolation` and
+does not resolve — the source's branch never existed, or existed and was later cleaned up — it
+throws instead of falling back, and the leaf fails loudly rather than quietly building on the
+wrong base.
 
 ## `from` names a TASK that commits, not the STAGE this leaf follows
 

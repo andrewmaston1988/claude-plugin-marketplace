@@ -1059,7 +1059,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
         }
       }
       return task.id;
-    })();
+    })().finally(() => running.delete(task.id));
     running.set(task.id, promise);
   };
 
@@ -1097,8 +1097,18 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
     if (running.size === 0 && retryWaiting === 0) break;
     if (running.size > 0) {
-      const finished = await Promise.race(running.values());
-      running.delete(finished);
+      await Promise.race(running.values());
+      // running is keyed by id and released on settlement; state is the truth about
+      // what is alive. They can only disagree if a slot was stranded — which silently
+      // narrows every later pass, so say so rather than degrading quietly.
+      const live = [...running.keys()].filter((id) => ALIVE_STATES.has(state.get(id)));
+      if (live.length !== running.size) {
+        appendRunLog(plan.resultsDir, {
+          ts: new Date().toISOString(), event: "slot-leak",
+          held: running.size, live: live.length,
+          stranded: [...running.keys()].filter((id) => !ALIVE_STATES.has(state.get(id))),
+        });
+      }
     } else {
       // nothing running, but leaves are sleeping out a backoff — idle until
       // the next retry timer re-arms one as pending
