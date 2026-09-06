@@ -206,6 +206,8 @@ test("fleet bar: counts come from run.log state, not results/ file presence (F4)
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+// GUARD, not a RED case: exercises the pre-existing mine()/launcher filter, which
+// this change does not touch. Pinned because the rewrite happens around it.
 test("fleet bar: no live run of this session renders an empty string, not idle (F5)", () => {
   const now = Date.now();
   const home = fleetHome({ now });

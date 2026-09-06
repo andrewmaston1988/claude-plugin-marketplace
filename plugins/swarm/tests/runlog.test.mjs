@@ -278,6 +278,9 @@ test("readRun/listRuns: a resumed run whose summary predates the resume is live,
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+// GUARD, not a RED case: passes on master too, and must. The estate holds 500+
+// finished runs; a supersede rule that flipped them to live would be as wrong as
+// the bug. Verified 2026-09-06 against master and against both mutants below.
 test("readRun/listRuns: an ordinary finished run stays finished (A2)", () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
   try {
@@ -299,6 +302,8 @@ test("readRun/listRuns: an ordinary finished run stays finished (A2)", () => {
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+// GUARD, not a RED case: passes on master too. Pins that a resume which DID finish
+// is reported finished, so the fix cannot over-trigger on any resumed run.
 test("readRun/listRuns: a resume that finished is finished again, by the newer summary (A3)", () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
   try {
@@ -322,6 +327,10 @@ test("readRun/listRuns: a resume that finished is finished again, by the newer s
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+// Discriminates against GATE REMOVAL, not against master (master has no gate, and
+// ignores the injected _readFile entirely). Verified RED 2026-09-06 by forcing
+// `gatedFinished = false`: fails on "the gate must short-circuit before any read".
+// This is the only guard on the 500-run-per-poll-tick cost regression.
 test("listRuns: the mtime gate skips reading run.log or summary.json entirely for a finished run (A4)", () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
   try {
@@ -370,6 +379,11 @@ test("listRuns: lastRunStart is memoised on the log's mtime — a repeated sweep
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+// Discriminates against the REJECTED mtime design, not against master — master has
+// no supersede logic at all, so no fixture can make it fail here. Verified RED
+// 2026-09-06 by comparing lastRunStart against summary.json's mtime instead of its
+// `finished` field: this is the ONLY test that catches that implementation (A1 passes
+// against it). The fixture makes mtime and `finished` disagree on purpose.
 test("listRuns/readRun: a touched mtime with no new run-start does not supersede a finished run (A6)", () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-supersede-"));
   try {
