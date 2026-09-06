@@ -15,6 +15,7 @@ import { coverage, reliability, leaders } from "./perf-views.mjs";
 
 const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
 const PERF_JS = fileURLToPath(new URL("./perf.js", import.meta.url));
+const LIVE_JS = fileURLToPath(new URL("./live.js", import.meta.url));
 const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
 // The estate view: every live run, plus the newest few finished PER PROJECT — a
 // global newest-N let one busy project crowd the others off the list entirely.
@@ -205,7 +206,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
           hasDigest: !!(run?.digestPath || run?.reportPath),
         };
       });
-      send(res, 200, { runs: rows, recentMs, grading });
+      send(res, 200, { runs: rows, recentMs, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, grading });
     },
   };
 
@@ -276,6 +277,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (p === "/perf.js") {
       if (!existsSync(PERF_JS)) return notFound(res);
       return send(res, 200, readFileSync(PERF_JS, "utf8"), "text/javascript; charset=utf-8");
+    }
+    if (p === "/live.js") {
+      if (!existsSync(LIVE_JS)) return notFound(res);
+      return send(res, 200, readFileSync(LIVE_JS, "utf8"), "text/javascript; charset=utf-8");
     }
     if (p === "/api/perf") return perf(res, url);
     if (routes[p]) return routes[p](res);
