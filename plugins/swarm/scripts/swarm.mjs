@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // swarm CLI — thin argv layer over src/. Subcommands: models | validate | run.
 // stdout carries status lines + paths only, never raw task output.
-import { join, resolve, dirname } from "node:path";
+import { join, resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, ValidationError } from "../src/manifest.mjs";
@@ -10,10 +10,10 @@ import { discoverModels, writeModelsCache, visibleModels, probeTopModels } from 
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
+import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { defaultBranch } from "../src/worktree.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune } from "../src/prune.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim } from "../src/ui.mjs";
 
@@ -273,11 +273,32 @@ async function cmdRun(rest) {
   return 0;
 }
 
+// A worktree-registry read behind an injected git — the closure production
+// code and tests both build over the raw spawnSync.
+function makeGit(spawnSync) {
+  return (args, cwd) => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 60000 });
+    return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+  };
+}
+
+// Once every kept worktree is gone there is nothing left to ask for the repo —
+// manifest.json's cwd (the invoking process's cwd at dispatch) is the only
+// surviving record of it.
+function repoFromManifest(fs, dir) {
+  try {
+    const m = JSON.parse(fs.readFileSync(join(dir, "manifest.json"), "utf8"));
+    return typeof m.cwd === "string" ? m.cwd : null;
+  } catch {
+    return null;
+  }
+}
+
 // Dead engine: no live process to signal, so nothing is killed. The run-stop
 // event + summary are the only record — read straight from disk (readRun),
 // mirroring the shape runPlan itself writes so every reader treats the two
 // the same way.
-function recordDeadEngineStop(dir) {
+async function recordDeadEngineStop(dir) {
   appendRunLog(dir, { ts: new Date().toISOString(), event: "run-stop", reason: "dead-engine" });
   const run = readRun(dir);
   const tasks = run.tasks.map((t) => ({
@@ -288,6 +309,14 @@ function recordDeadEngineStop(dir) {
     tokens: t.tokens ?? null,
     resultPath: resultPath(dir, t.id),
   }));
+
+  const fs = await import("node:fs");
+  const { spawnSync } = await import("node:child_process");
+  const repo = repoFromManifest(fs, dir);
+  const worktreesKept = repo && fs.existsSync(repo)
+    ? registeredUnder(makeGit(spawnSync), repo, dir).map((r) => ({ name: basename(r.path), branch: r.branch, path: r.path }))
+    : [];
+
   const summary = {
     started: run.startedMs ? new Date(run.startedMs).toISOString() : new Date().toISOString(),
     finished: new Date().toISOString(),
@@ -295,13 +324,16 @@ function recordDeadEngineStop(dir) {
     stopReason: "dead-engine",
     tasks,
     blocked: run.tasks.filter((t) => t.state === "blocked").map((t) => t.id),
-    worktreesKept: false,
+    worktreesKept,
     totalTokens: tasks.reduce((acc, t) => addTokens(acc, t.tokens || emptyTokens()), emptyTokens()),
   };
   writeSummary(dir, summary);
   const stopped = tasks.filter((t) => t.state === "failed:stopped").map((t) => t.id);
   out(`swarm: ${dir} — engine appears dead (stale heartbeat, no summary). Recorded run-stop; no process touched.`);
   out(`marked failed:stopped: ${stopped.length ? stopped.join(", ") : "(none — every leaf had already settled)"}`);
+  if (worktreesKept.length) {
+    out(formatKeptWorktrees(worktreesKept, { resultsDir: dir, engine: fileURLToPath(import.meta.url) }));
+  }
   return 0;
 }
 
@@ -312,7 +344,7 @@ async function cmdStop(rest) {
   const live = runLiveness(dir, { heartbeatMs });
   if (live.finishedMs != null) { err(`swarm: ${dir} already finished — nothing to stop.`); return 1; }
   if (live.stoppedMs != null) { err(`swarm: ${dir} already stopped — nothing to stop.`); return 1; }
-  if (live.abortedMs != null) return recordDeadEngineStop(dir);
+  if (live.abortedMs != null) return await recordDeadEngineStop(dir);
 
   const { writeFileSync } = await import("node:fs");
   writeFileSync(stopPath(dir), "");
@@ -354,23 +386,21 @@ async function cmdPrune(rest) {
   const { spawnSync } = await import("node:child_process");
   const summary = JSON.parse(fs.readFileSync(join(dir, "summary.json"), "utf8"));
   const worktreesKept = Array.isArray(summary.worktreesKept) ? summary.worktreesKept : [];
-  if (!worktreesKept.length) {
-    out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
-    return 0;
-  }
 
-  const repo = worktreesKept.map((wt) => repoOfWorktree(spawnSync, wt.path)).find(Boolean);
+  const repo = worktreesKept.map((wt) => repoOfWorktree(spawnSync, wt.path)).find(Boolean)
+    || repoFromManifest(fs, dir);
   if (!repo) {
-    err(`swarm: could not resolve the repo for any kept worktree in ${dir} — every tree already gone?`);
+    err(`swarm: could not resolve the repo for ${dir} — no kept worktree survives and manifest.json has no cwd.`);
     return 1;
   }
   const base = defaultBranch(repo);
-  const git = (args, cwd) => {
-    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 60000 });
-    return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
-  };
+  const git = makeGit(spawnSync);
 
   const { rows } = planPrune({ live: false, repo, base, resultsDir: dir, worktreesKept }, git, fs);
+  if (!rows.length) {
+    out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
+    return 0;
+  }
   out(formatPrune(rows, { dryRun }));
   if (!dryRun) executePrune(rows, git, fs);
   return 0;

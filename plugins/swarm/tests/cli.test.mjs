@@ -372,6 +372,68 @@ test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothin
   }
 });
 
+test("prune --dry-run: a dead-engine-stopped run with no kept worktree still finds an orphan via manifest.json's cwd", () => {
+  const repo = initPruneRepo();
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir);
+    writeFileSync(join(wt.path, "work.txt"), "x\n");
+    commitAll(wt.path, "work");
+    spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
+
+    writeFinishedRun(resultsDir, false);
+
+    const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(r.stdout.includes(wt.path), r.stdout);
+    ok(r.stdout.includes("merged"), r.stdout);
+    ok(existsSync(wt.path), "dry-run must not remove the worktree");
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("stop: dead engine discovers a real orphaned worktree via manifest cwd, records it, and prints the prune hint", () => {
+  const repo = initPruneRepo();
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.1 }));
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir);
+
+    const lines = [
+      JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }),
+      JSON.stringify({ ts: new Date().toISOString(), id: "impl", state: "running" }),
+    ];
+    writeFileSync(join(resultsDir, "run.log"), lines.join("\n") + "\n");
+
+    const r = runCli(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(r.stdout.includes("failed:stopped"), r.stdout);
+    ok(r.stdout.includes(wt.path), r.stdout);
+    ok(r.stdout.includes("prune when done"), r.stdout);
+
+    const summary = JSON.parse(readFileSync(join(resultsDir, "summary.json"), "utf8"));
+    ok(Array.isArray(summary.worktreesKept), "worktreesKept must be a real array, not hardcoded false");
+    equal(summary.worktreesKept.length, 1);
+    equal(summary.worktreesKept[0].path, wt.path);
+    equal(summary.worktreesKept[0].branch, "swarm/impl");
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // A session had to GUESS the resultsDir and published an invented path
 // (".../p5-review-2", which has never existed) as the operator's watch target.
 // The engine knows the answer — it must print it, up front, absolutely.

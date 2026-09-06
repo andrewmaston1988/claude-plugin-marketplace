@@ -57,7 +57,7 @@ function buildRow(path, branch, repo, base, git, fs) {
 // `git worktree list --porcelain` parsed with the injected git, mirroring
 // worktree.mjs's listRegistered — duplicated rather than imported because that
 // one is bound to the real spawnSync git and this seam must stay scriptable.
-function registeredUnder(git, repo, resultsDir) {
+export function registeredUnder(git, repo, resultsDir) {
   const r = git(["worktree", "list", "--porcelain"], repo);
   if (r.status !== 0) return [];
   const prefix = resolve(resultsDir) + sep;
