@@ -49,6 +49,23 @@ test("plan: a squash-landed branch (cherry all '-') reads as merged", () => {
   equal(rows[0].state, "merged");
 });
 
+test("plan: a branch with zero cherry lines (same tip as base) reads as merged, matching isMerged", () => {
+  const git = (args) => {
+    if (args[0] === "merge-base") return { status: 1, stdout: "", stderr: "" };
+    if (args[0] === "cherry") return { status: 0, stdout: "", stderr: "" };
+    if (args[0] === "status") return { status: 0, stdout: "", stderr: "" };
+    return { status: 1, stdout: "", stderr: "" };
+  };
+  const fs = {
+    existsSync: (p) => p === "/repo" || p === "/results/wt-same",
+    readdirSync: (p) => (p === "/results/wt-same" ? [{ name: "a.txt", isDirectory: () => false }] : []),
+    statSync: () => ({ size: 10 }),
+  };
+  const run = { repo: "/repo", base: "main", resultsDir: "/results", worktreesKept: [{ branch: "swarm/same", path: "/results/wt-same" }] };
+  const { rows } = plan(run, git, fs);
+  equal(rows[0].state, "merged");
+});
+
 test("plan: a branch 2 commits ahead reads as unlanded, with the count", () => {
   const git = (args) => {
     if (args[0] === "merge-base") return { status: 1, stdout: "", stderr: "" };

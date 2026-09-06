@@ -36,7 +36,7 @@ function landingState(git, repo, branch, base) {
   if (cherry.status === 0) {
     const lines = cherry.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const ahead = lines.filter((l) => l.startsWith("+")).length;
-    if (lines.length && ahead === 0) return "merged";
+    if (ahead === 0) return "merged";
     return `unlanded (${ahead} commit${ahead === 1 ? "" : "s"} ahead)`;
   }
   return "unlanded (unknown commits ahead)";
