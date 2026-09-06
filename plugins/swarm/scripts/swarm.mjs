@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // swarm CLI — thin argv layer over src/. Subcommands: models | validate | run.
 // stdout carries status lines + paths only, never raw task output.
-import { join, resolve } from "node:path";
+import { join, resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, ValidationError } from "../src/manifest.mjs";
@@ -12,6 +12,8 @@ import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/esti
 import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
+import { defaultBranch } from "../src/worktree.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim } from "../src/ui.mjs";
 
@@ -23,6 +25,7 @@ const USAGE = `usage: swarm.mjs <command>
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
+  prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)
@@ -325,6 +328,52 @@ async function cmdStop(rest) {
   }
   err(`swarm: engine did not respond within ${Math.round((heartbeatMs * 2) / 1000)}s — if it is wedged, end its process and run stop again to record it.`);
   return 1;
+}
+
+// A worktree's own `.git` file names its repo's common dir — no need for the
+// run record to carry `repo` at all, so long as at least one kept tree is
+// still on disk to ask.
+function repoOfWorktree(spawnSync, worktreePath) {
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: worktreePath, encoding: "utf8", windowsHide: true });
+  if (r.status !== 0) return null;
+  return dirname(resolve(worktreePath, (r.stdout || "").trim()));
+}
+
+async function cmdPrune(rest) {
+  const dir = resolve(rest[0]);
+  const dryRun = rest.includes("--dry-run");
+  const cfg = getConfig();
+  const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
+  const live = runLiveness(dir, { heartbeatMs });
+  if (live.finishedMs == null && live.stoppedMs == null && live.abortedMs == null) {
+    err(`swarm: ${dir} live — swarm stop it first`);
+    return 1;
+  }
+
+  const fs = await import("node:fs");
+  const { spawnSync } = await import("node:child_process");
+  const summary = JSON.parse(fs.readFileSync(join(dir, "summary.json"), "utf8"));
+  const worktreesKept = Array.isArray(summary.worktreesKept) ? summary.worktreesKept : [];
+  if (!worktreesKept.length) {
+    out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
+    return 0;
+  }
+
+  const repo = worktreesKept.map((wt) => repoOfWorktree(spawnSync, wt.path)).find(Boolean);
+  if (!repo) {
+    err(`swarm: could not resolve the repo for any kept worktree in ${dir} — every tree already gone?`);
+    return 1;
+  }
+  const base = defaultBranch(repo);
+  const git = (args, cwd) => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 60000 });
+    return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+  };
+
+  const { rows } = planPrune({ live: false, repo, base, resultsDir: dir, worktreesKept }, git, fs);
+  out(formatPrune(rows, { dryRun }));
+  if (!dryRun) executePrune(rows, git, fs);
+  return 0;
 }
 
 function getFlag(name, args) {
@@ -636,6 +685,10 @@ async function main() {
       case "stop": {
         if (!rest[0]) { err(USAGE); return 1; }
         return await cmdStop(rest);
+      }
+      case "prune": {
+        if (!rest[0]) { err(USAGE); return 1; }
+        return await cmdPrune(rest);
       }
       case "serve":
         return await cmdServe(rest);

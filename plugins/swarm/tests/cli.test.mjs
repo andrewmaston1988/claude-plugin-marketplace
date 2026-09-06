@@ -7,12 +7,48 @@ import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { runCli, runCliAsync } from "./helpers/cli.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
+import { prepareIsolation } from "../src/worktree.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cli-"));
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// A real tiny repo + a real worktree, on `master` so worktree.mjs's
+// defaultBranch fallback (no origin remote → "master") resolves it without
+// needing a remote fixture.
+function gitOut(args, cwd) {
+  return (spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true }).stdout || "").trim();
+}
+
+function commitAll(cwd, msg) {
+  spawnSync("git", ["add", "."], { cwd, windowsHide: true });
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", msg], { cwd, windowsHide: true });
+}
+
+function initPruneRepo() {
+  const repo = mkdtempSync(join(tmpdir(), "swarm-cli-repo-"));
+  spawnSync("git", ["init", "-q", "-b", "master"], { cwd: repo, windowsHide: true });
+  writeFileSync(join(repo, "a.txt"), "hello\n");
+  commitAll(repo, "init");
+  return repo;
+}
+
+// A run record finished BEFORE the summary was written (so run.log's mtime
+// never outgrows summary.json's) — the exact ordering runLiveness trusts.
+function writeFinishedRun(resultsDir, worktreesKept) {
+  mkdirSync(resultsDir, { recursive: true });
+  writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }) + "\n");
+  writeFileSync(join(resultsDir, "summary.json"), JSON.stringify({
+    started: new Date().toISOString(),
+    finished: new Date().toISOString(),
+    tasks: [{ id: "impl", model: "haiku", state: "ok" }],
+    blocked: [],
+    worktreesKept,
+    totalTokens: null,
+  }));
+}
 
 test("validate: bad manifest exits 1 with readable errors", () => {
   const dir = tmp();
@@ -253,6 +289,86 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
     // elapses and it exits — an rmSync while it's still alive EPERMs on Windows.
     await runPromise?.catch(() => {});
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("prune --dry-run: a finished run with a merged kept worktree prints the table and removes nothing", () => {
+  const repo = initPruneRepo();
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir);
+    writeFileSync(join(wt.path, "work.txt"), "x\n");
+    commitAll(wt.path, "work");
+    spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
+
+    writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: wt.path }]);
+
+    const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(r.stdout.includes(wt.path), r.stdout);
+    ok(r.stdout.includes("merged"), r.stdout);
+    ok(/would free/.test(r.stdout), r.stdout);
+
+    ok(existsSync(wt.path), "dry-run must not remove the worktree");
+    ok(gitOut(["branch", "--list", "swarm/impl"], repo), "dry-run must not remove the branch");
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("prune: removes the worktree and branch, prints freed, leaves the run record untouched", () => {
+  const repo = initPruneRepo();
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir);
+    writeFileSync(join(wt.path, "work.txt"), "x\n");
+    commitAll(wt.path, "work");
+    spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
+
+    writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: wt.path }]);
+    const runLog = readFileSync(join(resultsDir, "run.log"), "utf8");
+    const summary = readFileSync(join(resultsDir, "summary.json"), "utf8");
+
+    const r = runCli(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(/freed [\d.]+ GB across 1 worktree/.test(r.stdout), r.stdout);
+
+    ok(!existsSync(wt.path), "the worktree directory must be gone");
+    equal(gitOut(["branch", "--list", "swarm/impl"], repo), "", "the branch must be gone");
+    equal(readFileSync(join(resultsDir, "run.log"), "utf8"), runLog, "run.log must survive prune");
+    equal(readFileSync(join(resultsDir, "summary.json"), "utf8"), summary, "summary.json must survive prune");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothing removed", () => {
+  const repo = initPruneRepo();
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir);
+    writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }) + "\n");
+    writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 1234\n`);
+
+    const r = runCli(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes("live — swarm stop it first"), r.stderr);
+
+    ok(existsSync(wt.path), "a live run's worktree must not be touched");
+    ok(gitOut(["branch", "--list", "swarm/impl"], repo), "a live run's branch must not be touched");
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
   }
 });
 
