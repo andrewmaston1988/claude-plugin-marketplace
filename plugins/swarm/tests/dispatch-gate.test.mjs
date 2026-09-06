@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { gateDispatch } from "../hooks/dispatch-gate.mjs";
-import { shouldAck } from "../hooks/skill-ack.mjs";
+import { gateDispatch, markerPath, groupingMarkerPath, shapeMarkerPath } from "../hooks/dispatch-gate.mjs";
+import { shouldAck, ackTargets } from "../hooks/skill-ack.mjs";
 
 // A session that never invokes the swarm skill is bound by nothing in it. The
 // observed vector is a raw `swarm.mjs run …` copied into a STATE handover and
@@ -50,7 +50,7 @@ test("gate BLOCKS a decorated dispatch and names the offence", () => {
     [`${RUN} | grep ok`, /pipe/i],
   ];
   for (const [command, re] of cases) {
-    const r = gateDispatch({ command, runInBackground: true, markerExists: true });
+    const r = gateDispatch({ command, runInBackground: true, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: true });
     equal(r.block, true, `must block: ${command}`);
     ok(re.test(r.reason), `reason must name the offence for "${command}": ${r.reason}`);
   }
@@ -58,14 +58,14 @@ test("gate BLOCKS a decorated dispatch and names the offence", () => {
 
 // A foreground dispatch buries the live frames in a tool result — same harm as a pipe.
 test("gate BLOCKS a foreground dispatch even with a marker", () => {
-  const r = gateDispatch({ command: RUN, runInBackground: false, markerExists: true });
+  const r = gateDispatch({ command: RUN, runInBackground: false, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: true });
   equal(r.block, true);
   ok(/run_in_background/.test(r.reason), r.reason);
 });
 
 // The happy path must actually pass, or the gate is just a wall.
-test("gate PASSES a bare backgrounded dispatch with a marker, and consumes the marker", () => {
-  const r = gateDispatch({ command: RUN, runInBackground: true, markerExists: true });
+test("gate PASSES a bare backgrounded dispatch with all three markers, and consumes only the swarm marker", () => {
+  const r = gateDispatch({ command: RUN, runInBackground: true, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: true });
   equal(r.block, false);
   equal(r.consumeMarker, true, "one skill invocation authorises one dispatch");
 });
@@ -74,14 +74,37 @@ test("gate PASSES a bare backgrounded dispatch with a marker, and consumes the m
 // blocked pipe would silently disarm the next (correct) attempt.
 test("a blocked dispatch never consumes the marker", () => {
   for (const args of [
-    { command: `${RUN} | tail -5`, runInBackground: true, markerExists: true },
-    { command: RUN, runInBackground: false, markerExists: true },
-    { command: RUN, runInBackground: true, markerExists: false },
+    { command: `${RUN} | tail -5`, runInBackground: true, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: true },
+    { command: RUN, runInBackground: false, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: true },
+    { command: RUN, runInBackground: true, markerExists: false, groupingMarkerExists: true, shapeMarkerExists: true },
   ]) {
     const r = gateDispatch(args);
     equal(r.block, true);
     ok(!r.consumeMarker, `blocked dispatch must not consume the marker: ${args.command}`);
   }
+});
+
+// The grouping skills are reading, not consent — the swarm marker guards spend,
+// these guard whether the manifest was shaped by the plan's files or its narrative.
+test("gate BLOCKS with the swarm marker present but the grouping marker missing, naming orchestrating-agents", () => {
+  const r = gateDispatch({ command: RUN, runInBackground: true, markerExists: true, groupingMarkerExists: false, shapeMarkerExists: true });
+  equal(r.block, true);
+  ok(/swarm:orchestrating-agents/.test(r.reason), r.reason);
+  ok(!/swarm:executing-swarms/.test(r.reason), r.reason);
+});
+
+test("gate BLOCKS with the swarm marker present but the shape marker missing, naming executing-swarms", () => {
+  const r = gateDispatch({ command: RUN, runInBackground: true, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: false });
+  equal(r.block, true);
+  ok(/swarm:executing-swarms/.test(r.reason), r.reason);
+  ok(!/swarm:orchestrating-agents/.test(r.reason), r.reason);
+});
+
+test("gate BLOCKS naming both grouping skills when both markers are missing", () => {
+  const r = gateDispatch({ command: RUN, runInBackground: true, markerExists: true, groupingMarkerExists: false, shapeMarkerExists: false });
+  equal(r.block, true);
+  ok(/swarm:orchestrating-agents/.test(r.reason), r.reason);
+  ok(/swarm:executing-swarms/.test(r.reason), r.reason);
 });
 
 // The path may be quoted, use either slash, or carry flags — the gate keys on the
@@ -115,4 +138,27 @@ test("marker is NOT written for another skill or another tool", () => {
   equal(shouldAck({ tool_name: "Bash", tool_input: { command: "node swarm.mjs run x" } }), false);
   equal(shouldAck({}), false);
   equal(shouldAck({ tool_name: "Skill", tool_input: {} }), false);
+});
+
+// ackTargets is the marker-writing half of the three-marker contract: the swarm
+// skill still arms the dispatch marker, and the two grouping skills each arm
+// their own — namespaced or bare, same acceptance as the swarm skill.
+test("ackTargets maps the six spellings to the right marker paths", () => {
+  const sid = "sess-1";
+  const base = { session_id: sid, tool_name: "Skill" };
+  equal(ackTargets({ ...base, tool_input: { skill: "swarm:swarm" } })[0], markerPath(sid));
+  equal(ackTargets({ ...base, tool_input: { skill: "swarm" } })[0], markerPath(sid));
+  equal(ackTargets({ ...base, tool_input: { skill: "swarm:orchestrating-agents" } })[0], groupingMarkerPath(sid));
+  equal(ackTargets({ ...base, tool_input: { skill: "orchestrating-agents" } })[0], groupingMarkerPath(sid));
+  equal(ackTargets({ ...base, tool_input: { skill: "swarm:executing-swarms" } })[0], shapeMarkerPath(sid));
+  equal(ackTargets({ ...base, tool_input: { skill: "executing-swarms" } })[0], shapeMarkerPath(sid));
+});
+
+test("ackTargets returns nothing for another skill, another tool, or a missing session", () => {
+  const sid = "sess-1";
+  equal(ackTargets({ session_id: sid, tool_name: "Skill", tool_input: { skill: "commit" } }).length, 0);
+  equal(ackTargets({ session_id: sid, tool_name: "Bash", tool_input: { command: "node swarm.mjs run x" } }).length, 0);
+  equal(ackTargets({}).length, 0);
+  equal(ackTargets({ session_id: sid, tool_name: "Skill", tool_input: {} }).length, 0);
+  equal(ackTargets({ tool_name: "Skill", tool_input: { skill: "swarm" } }).length, 0);
 });
