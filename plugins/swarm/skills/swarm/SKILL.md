@@ -67,6 +67,8 @@ Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm
 splits into agents (one per lane; merges only on shared surface), and it produces the numbers
 the gate's third question carries. Drafting a leaf-per-item manifest without it is the failure that skill exists to catch. It does not restate the gate and the gate does not restate it. **Invoke `swarm:executing-swarms` in the same breath** — it decides what shape the graph takes and what each task waits for, which is the other half of a manifest you could defend line by line; the two answer different questions and neither summarises the other.
 
+This is not just prose: the dispatch gate denies a `run` unless `swarm:swarm`, `swarm:orchestrating-agents` and `swarm:executing-swarms` were each invoked this session — the swarm skill per dispatch, the other two once per session.
+
 **THE GATE'S ANSWER IS THE ONLY CONSENT TO SPEND. NO ANSWER IS NO.** Violating the letter of this rule is violating its spirit.
 
 Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), draft the manifest and put it through ONE AskUserQuestion call carrying THREE questions:

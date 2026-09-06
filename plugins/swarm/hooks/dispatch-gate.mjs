@@ -9,9 +9,17 @@
 //
 // So the gate keys on the command, which every path through the bypass has in common:
 // dispatching the engine requires the skill to have been invoked this session (its
-// offer gate is the user's only consent to spend), and requires the dispatch to be
-// bare and backgrounded (a pipe or redirect buffers the stream, and the live frames
-// are the operator's only view of a run that may spend millions of tokens).
+// offer gate is the user's only consent to spend), requires both grouping skills to
+// have been invoked this session (`orchestrating-agents` decides the split,
+// `executing-swarms` decides the shape — a manifest authored without them is shaped
+// by the plan's narrative, not by its files), and requires the dispatch to be bare
+// and backgrounded (a pipe or redirect buffers the stream, and the live frames are
+// the operator's only view of a run that may spend millions of tokens).
+//
+// Three markers, two lifetimes: the swarm marker is consumed per dispatch (each
+// dispatch is a fresh spend and must re-meet the offer gate); the grouping markers
+// are not (reading is not consent — once read, the reasoning applies to every
+// manifest the session goes on to author).
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -20,6 +28,14 @@ const SWARM_HOME = process.env.SWARM_HOME || path.join(os.homedir(), ".swarm");
 
 export function markerPath(sessionId, home = SWARM_HOME) {
   return path.join(home, `.skill-ack-${sessionId}`);
+}
+
+export function groupingMarkerPath(sessionId, home = SWARM_HOME) {
+  return path.join(home, `.grouping-ack-${sessionId}`);
+}
+
+export function shapeMarkerPath(sessionId, home = SWARM_HOME) {
+  return path.join(home, `.shape-ack-${sessionId}`);
 }
 
 // `swarm.mjs run` — path may be quoted, either slash style, with flags after.
@@ -34,16 +50,29 @@ const TRAILING_AMP_RE = /&\s*$/;
 const SKILL_HINT =
   'Invoke Skill(swarm:swarm) first — it carries the offer gate (the user must approve the manifest and model mix BEFORE anything spends) and the dispatch rules. The skill was not invoked in this session. If you inherited this command from a handover or a previous session, that is exactly the case this gate exists for: the command came without the rules that govern it.';
 
+const GROUPING_WHY =
+  "a manifest authored without them is shaped by the plan's narrative, not by its files";
+
 const BARE_HINT =
   'Dispatch the engine BARE via Bash with run_in_background: true — no pipe, no redirect, no nohup, no trailing &. The live progress frames are the operator\'s only view of a run that may spend millions of tokens, and a decorated dispatch buffers them into nothing. "Keeping the tool result tidy" is already solved by run_in_background: the frames never enter the transcript.';
 
 // Pure decision, so the harness is not needed to test it.
-export function gateDispatch({ command, runInBackground, markerExists }) {
+export function gateDispatch({ command, runInBackground, markerExists, groupingMarkerExists, shapeMarkerExists }) {
   const cmd = String(command || "");
   if (!DISPATCH_RE.test(cmd)) return { block: false };
 
   if (!markerExists) {
     return { block: true, reason: `A swarm run requires the swarm skill. ${SKILL_HINT}` };
+  }
+
+  const missingGrouping = [];
+  if (!groupingMarkerExists) missingGrouping.push("swarm:orchestrating-agents");
+  if (!shapeMarkerExists) missingGrouping.push("swarm:executing-swarms");
+  if (missingGrouping.length) {
+    return {
+      block: true,
+      reason: `A swarm run requires ${missingGrouping.join(" and ")} to have been invoked this session. ${GROUPING_WHY}.`,
+    };
   }
 
   const offences = [];
@@ -87,6 +116,8 @@ async function main() {
     command: input.command,
     runInBackground: input.run_in_background === true,
     markerExists: fs.existsSync(marker),
+    groupingMarkerExists: fs.existsSync(groupingMarkerPath(sessionId)),
+    shapeMarkerExists: fs.existsSync(shapeMarkerPath(sessionId)),
   });
 
   if (decision.block) {
