@@ -2638,3 +2638,42 @@ test("spawn env marks the child as a swarm leaf, whatever the model or provider 
     ok(spawn.calls.every((c) => c.opts.env.CORRELATION_ID));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("spawn env carries SWARM_LEAF_GUARD/_ROOT for a task with a leafGuard", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "ok" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("guarded", { leafGuard: { root: dir, command: "guard-cmd" } })]);
+    await runPlan(p, { ...CFG, provider: { ...CFG.provider, allowedRoots: [dir] } }, io);
+    equal(spawn.calls.length, 1);
+    equal(spawn.calls[0].opts.env.SWARM_LEAF_GUARD, "guard-cmd");
+    equal(spawn.calls[0].opts.env.SWARM_LEAF_GUARD_ROOT, dir);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("the inherited/dispatch env cannot forge or override SWARM_LEAF_GUARD/_ROOT", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "ok" }));
+    const io = makeIo(spawn);
+    io.env.SWARM_LEAF_GUARD = "forged";
+    io.env.SWARM_LEAF_GUARD_ROOT = "C:/forged";
+    const p = plan(dir, [task("guarded", { leafGuard: { root: dir, command: "guard-cmd" } })]);
+    await runPlan(p, { ...CFG, provider: { ...CFG.provider, allowedRoots: [dir] } }, io);
+    equal(spawn.calls[0].opts.env.SWARM_LEAF_GUARD, "guard-cmd");
+    equal(spawn.calls[0].opts.env.SWARM_LEAF_GUARD_ROOT, dir);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a task without a leafGuard spawns with neither SWARM_LEAF_GUARD nor _ROOT set", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "ok" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("unguarded")]);
+    await runPlan(p, { ...CFG, provider: { ...CFG.provider, allowedRoots: [dir] } }, io);
+    equal(spawn.calls[0].opts.env.SWARM_LEAF_GUARD, undefined);
+    equal(spawn.calls[0].opts.env.SWARM_LEAF_GUARD_ROOT, undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
