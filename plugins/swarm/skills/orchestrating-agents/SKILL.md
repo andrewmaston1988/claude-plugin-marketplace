@@ -51,7 +51,7 @@ three legs are not on the page (§2a), the decision was not made.
 - Not "I'll note it in thinking" — thinking is not visible text.
 
 **How aggressively to batch is the operator's call, not yours.** You present the numbers and a
-recommendation; the operator picks the point on the curve. The floor — everything inline, zero
+recommendation; the operator picks the width. The floor — everything inline, zero
 agents — is always one of the options. Under `swarm.always` (swarm skill → *Standing consent*)
 the recommendation is taken: the arithmetic is computed and recorded in the manifest's shape,
 not stated — this Iron Law keeps its force on the interactive path and stops applying where
@@ -240,7 +240,7 @@ surface; narrower is the operator's override, and a bigger window is a wall-cloc
 | **Moderate** — merge shared-surface clusters, isolate the risky items | balanced blast radius and wall-clock |
 | **Per-item** — one agent per item | maximum isolation and parallelism; smallest blast radius (one item each); most agents to supervise |
 
-The two axes the question trades are **capability vs. risk** and **wall-clock vs. efficiency**.
+The two axes the question trades are **capability vs. risk** and **wall-clock vs. coherence**.
 Name both, and always lead with a recommendation rather than a bare menu. Under `swarm.always`
 the recommendation is taken: the three legs and the chosen point are computed and recorded in
 the manifest's shape, not stated — the question is gone, not skipped.
