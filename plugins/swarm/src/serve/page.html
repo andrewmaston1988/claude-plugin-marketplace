@@ -203,13 +203,14 @@
   const enc = encodeURIComponent;
   // Same glyphs as the CLI roster (src/results.mjs GLYPHS); colours map the CLI's
   // stateColor onto the page's four tones (magenta→bad, dim→pend).
-  const GLYPH = { ok: "✓", skipped: "↷", failed: "✗", "failed:timeout": "✗", blocked: "⊘", "rate-limited": "⧖", quota: "⏳", retrying: "↻", running: "◐", pending: "·", aborted: "✕" };
-  const CLASS = { ok: "ok", skipped: "pend", failed: "bad", "failed:timeout": "bad", blocked: "bad", "rate-limited": "warn", quota: "warn", retrying: "warn", running: "run", pending: "pend", aborted: "pend" };
+  // (i) skipped reads as done, matching countsHtml/barHtml/stateOfGroup, which already
+  // bucket it with ok — only this map used to disagree with the aggregates above it.
+  const GLYPH = { ok: "✓", skipped: "✓", failed: "✗", "failed:timeout": "✗", blocked: "⊘", "rate-limited": "⧖", quota: "⏳", retrying: "↻", running: "◐", pending: "·", aborted: "✕" };
+  const CLASS = { ok: "ok", skipped: "ok", failed: "bad", "failed:timeout": "bad", blocked: "bad", "rate-limited": "warn", quota: "warn", retrying: "warn", running: "run", pending: "pend", aborted: "pend" };
   // States a leaf can still leave on its own. A run whose engine is gone (aborted)
   // or silent past recentMs (stale) has none, whatever the log last said: those
   // leaves show as aborted and nothing spins.
   const LIVE = new Set(["running", "retrying", "pending", "rate-limited", "quota"]);
-  const runEnded = (run) => !!(run.finishedMs || run.abortedMs || run.staleMs);
   const abortCounts = (byState) => { const out = {}; for (const [s, n] of Object.entries(byState)) { const k = LIVE.has(s) ? "aborted" : s; out[k] = (out[k] || 0) + n; } return out; };
   function endRun(run) {
     if (run.finishedMs || !(run.abortedMs || run.staleMs)) return run;
@@ -222,7 +223,9 @@
 
   const fmtTok = (n) => !n ? "—" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? Math.round(n / 1e3) + "k" : String(n);
   const fmtDur = (ms) => { if (ms == null) return "—"; const s = Math.max(0, Math.round(ms / 1000)); const m = Math.floor(s / 60); return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, "0")}` : `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
-  const ago = (ms) => { const s = Math.round((Date.now() - ms) / 1000); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.round(s / 60)} min ago` : s < 86400 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} d ago`; };
+  // ago()/elapsed/quiet rules live once, in live.js, behind window.swarmLive — pinned
+  // by tests/live.test.mjs so the page and the test share the same copy.
+  const ago = (ms) => window.swarmLive.agoText(ms, Date.now());
   const tokTotal = (t) => t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
   // Runs are keyed by their encoded cwd. A worktree (`<root>-.worktrees-<repo>-<branch>`,
   // `<repo>-.claude-worktrees-<branch>`) belongs to its repo, and the label is the key
@@ -310,10 +313,13 @@
   }
 
   // ── views ──────────────────────────────────────────────────────────────
-  const view = { name: "runs", project: null, run: null, leaf: null };
-  const ui = { openWaves: new Set(), closedWaves: new Set(), openGroups: new Set(), allClones: new Set(), closedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false };
+  const view = { name: "runs", project: null, run: null, leaf: null, node: null };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false };
   let lastList = null;
   const seenActive = new Map();
+  // Pre-first-fetch fallback: the config.default.json literals. Overwritten by the
+  // /api/runs payload's own clockMs/uiPollMs once the first fetch lands.
+  const tickCfg = { clockMs: 1000, uiPollMs: 5000 };
 
   function setHeader(html, home) { hdr.className = home ? "home" : ""; setHtml(hdr, html); }
   const backBtn = (href) => `<a class="btn" href="${href}" aria-label="back"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9aa0b1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>`;
@@ -324,6 +330,18 @@
   async function renderRuns() {
     const data = await api("/api/runs");
     lastList = data;
+    if (data.clockMs) tickCfg.clockMs = data.clockMs;
+    if (data.uiPollMs) tickCfg.uiPollMs = data.uiPollMs;
+    // Celebrate on a fetched active→inactive transition only — never from a clock
+    // tick, which re-renders the same fetched data and would otherwise re-fire it.
+    for (const r of data.runs) {
+      const was = seenActive.get(r.project + "/" + r.name);
+      if (was === true && !r.active) celebrate(r.name);
+      seenActive.set(r.project + "/" + r.name, r.active);
+    }
+    renderRunsHtml(data);
+  }
+  function renderRunsHtml(data) {
     $("#menu .nav a[href='#/perf']").classList.toggle("off", !data.grading);
     const runs = data.runs;
     const active = runs.filter((r) => r.active);
@@ -351,29 +369,24 @@
       for (const r of live) html += runRow(r);
       html += "</ul>";
     }
-    // Finished stacks open by default; tapping a project header folds it away so the
-    // live band stays in reach on a long estate.
+    // (d) A project's finished stack is collapsed unless manually opened — opt-in,
+    // the inversion of a wave's opt-out — so a long estate's live band stays in reach.
     for (const p of projects) {
       const rest = byProject.get(p).filter((r) => !r.active);
       if (!rest.length) continue;
-      const open = !ui.closedProjects.has(p);
+      const open = window.swarmLive.projectOpen(p, ui.openProjects);
       html += `<div class="section dim tap" data-key="ps:${esc(p)}" data-project="${esc(p)}"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length} finished</small>${chev(open)}</div>`;
       if (open) { html += `<ul data-key="pl:${esc(p)}">`; for (const r of rest) html += runRow(r, true); html += "</ul>"; }
     }
     if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
     setHtml(main, html);
-    for (const r of runs) {
-      const was = seenActive.get(r.project + "/" + r.name);
-      if (was === true && !r.active) celebrate(r.name);
-      seenActive.set(r.project + "/" + r.name, r.active);
-    }
   }
   function runRow(r, done) {
     // Navigation is a data-href picked up by one delegated listener — never an inline
     // onclick, whose quoted string a run or leaf name could break out of.
     const href = `#/run/${enc(r.project)}/${enc(r.name)}`;
     const key = esc(`${r.project}/${r.name}`);
-    const elapsed = r.finishedMs ? fmtDur(r.finishedMs - r.startedMs) : r.startedMs ? fmtDur(Date.now() - r.startedMs) : "—";
+    const elapsed = r.finishedMs ? fmtDur(r.finishedMs - r.startedMs) : r.startedMs ? window.swarmLive.elapsedText({ state: "running", startedMs: r.startedMs }, Date.now()) : "—";
     const st = runState(r);
     if (done) {
       // No summary.json and gone quiet past the recency window: the engine never
@@ -386,14 +399,17 @@
   }
 
   // ── run view: rows + rail ──────────────────────────────────────────────
-  function buildRows(run) {
-    const byId = new Map(run.tasks.map((t) => [t.id, t]));
+  // `tasks`/`waves` is the graph to draw — the whole run for the run screen, a
+  // manifest node's own subgraph for the node screen (h) — never read off a `run`
+  // object directly, so both callers share this one shape.
+  function buildRows(tasks, waves) {
+    const byId = new Map(tasks.map((t) => [t.id, t]));
     const rows = [];
-    run.waves.forEach((ids, w) => {
-      const tasks = ids.map((id) => byId.get(id)).filter(Boolean);
+    waves.forEach((ids, w) => {
+      const wtasks = ids.map((id) => byId.get(id)).filter(Boolean);
       const parents = new Map();
       const singles = [];
-      for (const t of tasks) {
+      for (const t of wtasks) {
         if ((t.kind === "clone" || t.kind === "child") && byId.has(t.parent)) {
           if (!parents.has(t.parent)) parents.set(t.parent, []);
           parents.get(t.parent).push(t);
@@ -401,27 +417,23 @@
       }
       const members = [];
       for (const t of singles) {
-        if (parents.has(t.id)) members.push({ type: "group", id: t.id, task: t, kids: parents.get(t.id) });
+        // (h) split by kind: a forEach parent's clones expand inline (no accordion);
+        // a manifest parent becomes a single navigable row — its members render only
+        // on the node screen (#/run/<p>/<n>/node/<id>), never inline here.
+        if (parents.has(t.id)) members.push({ type: t.kind === "manifest" ? "node" : "group", id: t.id, task: t, kids: parents.get(t.id) });
         else members.push({ type: "task", id: t.id, task: t });
       }
       for (const [pid, kids] of parents) if (!byId.has(pid) || !singles.find((s) => s.id === pid)) for (const k of kids) members.push({ type: "task", id: k.id, task: k });
-      const big = members.length > 8; // eight is the widest wave the operator runs; wider collapses to the strip
-      // A wave that has entirely finished folds to its strip so the live wave is not
-      // pushed under the fold by a stack of done rows; tapping reopens it.
-      const settled = tasks.length > 0 && tasks.every((t) => !LIVE.has(t.state));
-      const open = ui.openWaves.has(w) || (!big && !settled && !ui.closedWaves.has(w));
-      rows.push({ type: "wave", wave: w, members, open, tasks });
+      // (c) open unless manually closed — no big/settled override collapsing a wave.
+      const open = window.swarmLive.waveOpen(w, ui.closedWaves);
+      rows.push({ type: "wave", wave: w, members, open, tasks: wtasks });
       if (open) {
         for (const m of members) {
           if (m.type === "group") {
-            const gOpen = ui.openGroups.has(m.id);
-            rows.push({ type: "group", wave: w, id: m.id, task: m.task, kids: m.kids, open: gOpen });
-            if (gOpen) {
-              const all = ui.allClones.has(m.id);
-              const shown = all ? m.kids : m.kids.filter((k) => k.state === "running" || k.state === "retrying" || k.state === "rate-limited" || k.state === "failed");
-              for (const k of shown) rows.push({ type: "task", wave: w, id: k.id, task: k, nested: true });
-              if (!all && shown.length < m.kids.length) rows.push({ type: "more", wave: w, id: m.id, hidden: m.kids.length - shown.length });
-            }
+            rows.push({ type: "group", wave: w, id: m.id, task: m.task, kids: m.kids });
+            for (const k of m.kids) rows.push({ type: "task", wave: w, id: k.id, task: k, nested: true });
+          } else if (m.type === "node") {
+            rows.push({ type: "node", wave: w, id: m.id, task: m.task, kids: m.kids });
           } else rows.push({ type: "task", wave: w, id: m.id, task: m.task });
         }
       }
@@ -436,18 +448,24 @@
   };
   const byStateOf = (tasks) => tasks.reduce((b, t) => (b[t.state] = (b[t.state] || 0) + 1, b), {});
 
-  function renderRunHtml(run) {
-    const rows = buildRows(run);
+  // `run` carries run-level metadata (finishedMs/digestPath/quietWarnMs/project/name);
+  // `tasks`/`waves` is the graph to draw, which the node screen (h) passes as its own
+  // subgraph rather than run.tasks/run.waves — the one parameter this needs to be
+  // reusable for both screens.
+  function renderRunHtml(run, tasks, waves) {
+    const now = Date.now();
+    const rows = buildRows(tasks, waves);
     const quietWarn = run.quietWarnMs || 60000;
     let html = "";
     const finished = !!run.finishedMs;
     if (finished && (run.digestPath || run.reportPath)) {
-      const b = run.totals.byState;
+      const b = byStateOf(tasks);
       const dhref = `#/run/${enc(run.project)}/${enc(run.name)}/digest`;
-      html += `<div class="digest tap" role="link" data-key="digest" data-href="${esc(dhref)}"><span class="g">✓</span><div class="txt"><b>Digest</b><span class="meta">${run.tasks.length} leaves · ${countsHtml(b)}${run.reportPath ? " · report" : ""}</span></div><svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4fc98a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>`;
+      html += `<div class="digest tap" role="link" data-key="digest" data-href="${esc(dhref)}"><span class="g">✓</span><div class="txt"><b>Digest</b><span class="meta">${tasks.length} leaves · ${countsHtml(b)}${run.reportPath ? " · report" : ""}</span></div><svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4fc98a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>`;
     }
-    const total = run.tasks.reduce((n, t) => n + tokTotal(t.tokens), 0);
-    html += `<div class="totals">${countsHtml(run.totals.byState)}<span class="meta">${fmtTok(total)}</span>${barHtml(run.totals.byState, run.tasks.length)}</div>`;
+    const totalsByState = byStateOf(tasks);
+    const total = tasks.reduce((n, t) => n + tokTotal(t.tokens), 0);
+    html += `<div class="totals">${countsHtml(totalsByState)}<span class="meta">${fmtTok(total)}</span>${barHtml(totalsByState, tasks.length)}</div>`;
     html += `<div class="graph"><svg class="overlay" id="rail" data-keep></svg><ul id="rows">`;
     for (const r of rows) {
       if (r.type === "wave") {
@@ -465,19 +483,25 @@
         continue;
       }
       if (r.type === "group") {
-        const t = r.task, st = stateOfGroup([t, ...r.kids]);
-        const kind = t.kind === "forEach" ? `forEach ×${r.kids.length}` : `manifest · ${r.kids.length} inside`;
-        html += `<li class="row leaf tap" data-node="${esc(t.id)}" data-group="${esc(t.id)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· ${kind}</span></span>${stripHtml(r.kids, t.kind === "manifest")}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(t.model || "")} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chev(r.open)}</div></li>`;
+        // (h) a forEach parent is a wave whose members happened to be created at
+        // runtime — a label, not an accordion: no chevron, no toggle, kids always follow.
+        const t = r.task;
+        html += `<li class="row" data-node="${esc(t.id)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· forEach ×${r.kids.length}</span></span>${stripHtml(r.kids)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(t.model || "")} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div></div></li>`;
         continue;
       }
-      if (r.type === "more") {
-        html += `<li class="row" data-more="${esc(r.id)}"><div class="rail"></div><div class="body tap" style="align-items:center;justify-content:center;padding:6px 0;color:var(--faint);font-size:12px">+ ${r.hidden} more, not running · tap to show all</div></li>`;
+      if (r.type === "node") {
+        // (h) a nested manifest is a graph of its own — a navigable row to its own
+        // screen, never flattened inline; its dot strip is the row's own summary.
+        const t = r.task;
+        const href = `#/run/${enc(run.project)}/${enc(run.name)}/node/${enc(t.id)}`;
+        html += `<li class="row leaf tap" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(t.model || "")} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       const t = r.task;
-      const quiet = t.state === "running" && t.quietMs != null && t.quietMs > quietWarn;
-      const right = t.state === "running" ? `${fmtDur(Date.now() - (t.startedMs || Date.now()))}` : t.durationMs != null ? fmtDur(t.durationMs) : t.state;
-      const sub = quiet ? `quiet ${Math.round(t.quietMs / 1000)}s · ${esc(t.model)}` : t.state === "running" && t.activity ? `${esc(t.model)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(t.model || "");
+      const quietSecs = window.swarmLive.quietSecs(t, now);
+      const quiet = quietSecs != null && quietSecs * 1000 > quietWarn;
+      const right = window.swarmLive.elapsedText(t, now) ?? t.state;
+      const sub = quiet ? `quiet ${quietSecs}s · ${esc(t.model)}` : t.state === "running" && t.activity ? `${esc(t.model)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(t.model || "");
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
       html += `<li class="row leaf tap${quiet ? " quiet" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.nested ? "&nbsp;&nbsp;" : ""}${esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
@@ -487,10 +511,10 @@
 
   // Draw the rail as ONE overlay: node centres measured from the rows, so lanes
   // and fan-in curves meet at every row boundary regardless of row height.
-  function drawRail(run, rows) {
+  function drawRail(tasks, rows) {
     const svg = $("#rail"), list = $("#rows");
     if (!svg || !list) return;
-    const byId = new Map(run.tasks.map((t) => [t.id, t]));
+    const byId = new Map(tasks.map((t) => [t.id, t]));
     // Lane assignment first, so the rail can be sized before anything is measured:
     // rows re-measure after the width changes, since the text column reflows.
     const rowMeta = new Map(rows.map((r, i) => [i, r]));
@@ -498,7 +522,7 @@
     let laneCounter = 0, currentWave = -1, maxLane = 0;
     const MAX_LANES = 8;
     rows.forEach((r, i) => {
-      if (!r || r.type === "more" || (r.type === "wave" && r.open)) return;
+      if (!r || (r.type === "wave" && r.open)) return;
       if (r.wave !== currentWave) { currentWave = r.wave; laneCounter = 0; }
       const lane = r.nested ? 1 : laneCounter++;
       laneFor.set(i, lane);
@@ -524,7 +548,7 @@
       const x = LANE_X0 + Math.min(lane, MAX_LANES - 1) * LANE_W;
       let key, c, ring = false, ids;
       if (r.type === "wave") { key = `wave:${r.wave}`; ids = r.tasks.map((t) => t.id); c = stateOfGroup(r.tasks); ring = c === "run"; }
-      else if (r.type === "group") { key = r.id; ids = [r.id, ...r.kids.map((k) => k.id)]; c = stateOfGroup([r.task, ...r.kids]); ring = c === "run"; }
+      else if (r.type === "group" || r.type === "node") { key = r.id; ids = [r.id, ...r.kids.map((k) => k.id)]; c = stateOfGroup([r.task, ...r.kids]); ring = c === "run"; }
       else { key = r.id; ids = [r.id]; c = cls(r.task.state); ring = r.task.state === "running" || r.task.state === "retrying"; }
       nodes.set(key, { x, y, c, ring, ids, after: [...new Set(ids.flatMap((id) => byId.get(id)?.after || []))] });
       for (const id of ids) laneOf.set(id, key);
@@ -555,27 +579,81 @@
     setSvg(svg, out);
   }
 
+  // Header markup is pure — rerender() calls it on every clock tick without a fetch,
+  // so the elapsed/ago text moves without a network round trip.
+  function runHeaderHtml(run, now) {
+    const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.abortedMs ? `aborted · engine gone · ${ago(run.abortedMs)}` : run.staleMs ? `stale · last event ${ago(run.staleMs)}` : run.startedMs ? fmtDur(now - run.startedMs) : "";
+    return `${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>${menuBtn}`;
+  }
+
   let currentRun = null;
   async function renderRun(project, name) {
     const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
     currentRun = run;
-    const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.abortedMs ? `aborted · engine gone · ${ago(run.abortedMs)}` : run.staleMs ? `stale · last event ${ago(run.staleMs)}` : run.startedMs ? fmtDur(Date.now() - run.startedMs) : "";
-    setHeader(`${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>${menuBtn}`);
-    const { html, rows } = renderRunHtml(run);
+    setHeader(runHeaderHtml(run, Date.now()));
+    const { html, rows } = renderRunHtml(run, run.tasks, run.waves);
     setHtml(main, html);
-    drawRail(run, rows);
+    drawRail(run.tasks, rows);
   }
-  // Toggles are handled by the delegated listener on main; a rerender just morphs.
-  function rerender() { if (view.name === "run" && currentRun) { const { html, rows } = renderRunHtml(currentRun); setHtml(main, html); drawRail(currentRun, rows); } }
 
+  // A manifest node's own screen: the same graph renderer, fed the task's own
+  // children plus itself, re-waved by each task's already-computed depth rather
+  // than a route-side recomputation — topology() in runlog.mjs owns that math once.
+  function nodeSubgraph(run, id) {
+    const tasks = run.tasks.filter((t) => t.id === id || t.parent === id);
+    const depths = [...new Set(tasks.map((t) => t.depth ?? 0))].sort((a, b) => a - b);
+    const waves = depths.map((d) => tasks.filter((t) => (t.depth ?? 0) === d).map((t) => t.id));
+    return { tasks, waves };
+  }
+
+  async function renderNode(project, name, id) {
+    const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
+    currentRun = run;
+    const { tasks, waves } = nodeSubgraph(run, id);
+    setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(id)}</b><small>${esc(shortProject(project))} · ${esc(name)} · ${tasks.length} node${tasks.length === 1 ? "" : "s"}</small></div>${menuBtn}`);
+    const { html, rows } = renderRunHtml(run, tasks, waves);
+    setHtml(main, html);
+    drawRail(tasks, rows);
+  }
+
+  // Toggles are handled by the delegated listener on main; a rerender just morphs —
+  // view-aware so the clock tick and the poll both land on whichever screen is open.
+  function rerender() {
+    const now = Date.now();
+    if (view.name === "runs" && lastList) { renderRunsHtml(lastList); return; }
+    if (view.name === "run" && currentRun) {
+      setHeader(runHeaderHtml(currentRun, now));
+      const { html, rows } = renderRunHtml(currentRun, currentRun.tasks, currentRun.waves);
+      setHtml(main, html);
+      drawRail(currentRun.tasks, rows);
+      return;
+    }
+    if (view.name === "node" && currentRun && view.node) {
+      const { tasks, waves } = nodeSubgraph(currentRun, view.node);
+      const { html, rows } = renderRunHtml(currentRun, tasks, waves);
+      setHtml(main, html);
+      drawRail(tasks, rows);
+      return;
+    }
+    if (view.name === "leaf" && currentRun) renderLeafHtml(currentRun, currentLeaf, view.leaf);
+  }
+
+  let currentLeaf;
   async function renderLeaf(project, name, id) {
     const [run, leaf] = await Promise.all([api(`/api/runs/${enc(project)}/${enc(name)}`), api(`/api/runs/${enc(project)}/${enc(name)}/leaves/${enc(id)}`).catch(() => null)]);
     currentRun = run;
+    currentLeaf = leaf;
+    renderLeafHtml(run, leaf, id);
+  }
+
+  function renderLeafHtml(run, leaf, id) {
+    const now = Date.now();
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
     const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
-    setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`);
-    const quiet = t.state === "running" && t.quietMs > (run.quietWarnMs || 60000);
-    let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip">${esc(t.model)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${Math.round(t.quietMs / 1000)}s</span>` : ""}</div>`;
+    setHeader(`${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`);
+    const quietSecsVal = window.swarmLive.quietSecs(t, now);
+    const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
+    let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip">${esc(t.model)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${quietSecsVal}s</span>` : ""}</div>`;
     // What the leaf was actually asked, collapsed by default. Same section+chevron idiom
     // as every other toggle on the page, so the whole row is the target. Omitted entirely
     // for agentless compute/integrate nodes, which carry no prompt.
@@ -584,7 +662,7 @@
       if (ui.promptOpen) html += `<div class="block"><pre class="out">${esc(leaf.prompt)}</pre></div>`;
     }
     html += `<div class="block"><label>graph</label><div class="meta"><span class="faint">after</span> ${t.after?.length ? t.after.map(esc).join(", ") : "— (nothing upstream)"}</div><div class="meta"><span class="faint">feeds</span> ${feeds.length ? feeds.map(esc).join(", ") : "—"}</div></div>`;
-    const elapsed = t.state === "running" ? fmtDur(Date.now() - (t.startedMs || Date.now())) : fmtDur(t.durationMs);
+    const elapsed = window.swarmLive.elapsedText(t, now) ?? fmtDur(t.durationMs);
     html += `<div class="kv"><div><label>${t.state === "running" ? "elapsed" : "duration"}</label><span>${elapsed}</span></div><div><label>turns</label><span>${leaf?.numTurns ?? "—"}</span></div><div><label>last event</label><span>${t.lastEventMs ? ago(t.lastEventMs) : "—"}</span></div></div>`;
     const tk = t.tokens || leaf?.tokens;
     if (tk) {
@@ -760,20 +838,23 @@
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
     try {
       if (seg[0] === "perf") {
-        view.name = "perf"; view.project = view.run = view.leaf = null;
+        view.name = "perf"; view.project = view.run = view.leaf = view.node = null;
         await renderPerf(seg[1] || null, seg[2] || null);
       } else if (seg[0] === "run" && seg.length >= 3) {
-        view.name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : "run"; view.project = seg[1]; view.run = seg[2]; view.leaf = seg[4] || null;
+        view.name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "node" ? "node" : "run";
+        view.project = seg[1]; view.run = seg[2]; view.leaf = view.name === "leaf" ? seg[4] || null : null; view.node = view.name === "node" ? seg[4] || null : null;
         if (view.name === "leaf") await renderLeaf(seg[1], seg[2], seg[4]);
         else if (view.name === "digest") await renderDigest(seg[1], seg[2]);
+        else if (view.name === "node") await renderNode(seg[1], seg[2], seg[4]);
         else await renderRun(seg[1], seg[2]);
-      } else { view.name = "runs"; view.project = view.run = view.leaf = null; await renderRuns(); }
+      } else { view.name = "runs"; view.project = view.run = view.leaf = view.node = null; await renderRuns(); }
     } catch (e) {
       setHtml(main, `<div class="empty">${esc(e.message)}</div>`);
     }
   }
-  // One delegated click handler for everything in main: navigation rows, the wave
-  // and group toggles, the "show all clones" row. Survives morphing, no rebinding.
+  // One delegated click handler for everything in main: navigation rows and the
+  // wave toggle. forEach groups and manifest nodes no longer accordion — (h) split
+  // them by kind instead: a group's kids are always inline, a node is a plain nav row.
   main.addEventListener("change", (e) => {
     const t = e.target;
     if (!(t instanceof HTMLSelectElement)) return;
@@ -781,22 +862,21 @@
     if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; route(); }
   });
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-group], [data-more], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output]");
+    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output]");
     if (!t || !main.contains(t)) return;
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; route(); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; route(); return; }
     if (t.dataset.pretty) { ui.pretty = !ui.pretty; route(); return; }
     if (t.dataset.domain != null) { ui.perfDomain = t.dataset.domain || null; route(); return; }
-    if (t.dataset.project) { const p = t.dataset.project; ui.closedProjects.has(p) ? ui.closedProjects.delete(p) : ui.closedProjects.add(p); route(); return; }
+    // (d) opt-in: a project's finished stack starts closed, ui.openProjects records who was opened.
+    if (t.dataset.project) { const p = t.dataset.project; ui.openProjects.has(p) ? ui.openProjects.delete(p) : ui.openProjects.add(p); route(); return; }
     if (t.dataset.href) { location.hash = t.dataset.href; return; }
     if (t.dataset.wave != null) {
       const w = Number(t.dataset.wave);
       const isOpen = t.classList.contains("wave-label");
-      if (isOpen) { ui.openWaves.delete(w); ui.closedWaves.add(w); } else { ui.closedWaves.delete(w); ui.openWaves.add(w); }
+      if (isOpen) ui.closedWaves.add(w); else ui.closedWaves.delete(w);
       rerender(); return;
     }
-    if (t.dataset.group) { const g = t.dataset.group; ui.openGroups.has(g) ? ui.openGroups.delete(g) : ui.openGroups.add(g); rerender(); return; }
-    if (t.dataset.more) { ui.allClones.add(t.dataset.more); rerender(); }
   });
   window.addEventListener("hashchange", route);
   hdr.addEventListener("click", (e) => { if (e.target.closest("#menu-open")) $("#menu").classList.add("open"); });
@@ -818,27 +898,47 @@
     es.addEventListener("runs", () => { if (view.name === "runs") route(); });
     es.onerror = () => { /* EventSource reconnects on its own */ };
   }
-  // Running rows tick without a server event — a refetch, so a run that went quiet
-  // is noticed (nothing writes run.log when the engine dies).
-  setInterval(() => { if (view.name === "run" && currentRun && !runEnded(currentRun)) route(); }, 15000);
   window.addEventListener("resize", () => { if (view.name === "run" && currentRun) rerender(); });
 
-  // perf.js is a served static, loaded lazily and once — its src carries the
-  // token via the same q() every fetch uses. Awaited only by the three new
-  // Performance kinds; runs/leaf views never touch it.
-  let perfJsReady;
-  function loadPerfJs() {
-    if (!perfJsReady) perfJsReady = new Promise((resolve) => {
+  // One cached promise per path — script tags are loaded once and reused. This is
+  // its own copy of live.js's loadScript, not a call through window.swarmLive: the
+  // very first call here loads live.js itself, so it cannot depend on that global
+  // existing yet (the chicken-and-egg live.js's own comment calls out). Same
+  // reject-on-error contract as the copy pinned by tests/live.test.mjs's L7.
+  const scriptPromises = new Map();
+  function loadScript(path) {
+    if (!scriptPromises.has(path)) scriptPromises.set(path, new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = q("/perf.js");
-      s.onload = s.onerror = () => resolve();
+      s.src = path;
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error(`failed to load ${path}`));
       document.head.appendChild(s);
-    });
-    return perfJsReady;
+    }));
+    return scriptPromises.get(path);
+  }
+  // perf.js is loaded lazily, awaited only by the three new Performance kinds —
+  // runs/leaf/node views never touch it, and its own onerror is swallowed on
+  // purpose: a missing perf.js degrades that one screen, it does not sink boot.
+  function loadPerfJs() {
+    return loadScript(q("/perf.js")).catch(() => {});
   }
 
-  route();
-  connect();
+  // tickCfg starts at the config.default.json literals (declared with the other
+  // module state above) and is overwritten by the /api/runs payload's own
+  // clockMs/uiPollMs once the first fetch lands — see renderRuns().
+  function startTimers() {
+    setInterval(rerender, tickCfg.clockMs);
+    // Running rows still need a refetch to notice a run that went quiet server-side
+    // (nothing writes run.log when the engine dies) — shouldPoll gates that refetch
+    // to views with something to poll, so a finished run stops hitting the network.
+    setInterval(() => { if (window.swarmLive.shouldPoll(view, currentRun, Date.now())) route(); }, tickCfg.uiPollMs);
+  }
+
+  // live.js is a hard dependency of buildRows/renderRunHtml — unlike perf.js, a
+  // failed load must not route into a TypeError; it renders the empty panel instead.
+  loadScript("/live.js").then(() => { route(); connect(); startTimers(); }).catch((e) => {
+    setHtml(main, `<div class="empty">${esc(e.message)}</div>`);
+  });
 })();
 </script>
 </body>
