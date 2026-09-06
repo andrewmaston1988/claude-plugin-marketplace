@@ -60,6 +60,16 @@ but still commits nothing. **Judge by what the task DOES, not by its tool list.*
 exists to report rather than to change code, it is never a `from` target — and a consolidator
 that only reads result files needs no worktree at all.
 
+**An `integrate.from` source is the exception, and needs no care from you.** A leaf you told
+"leave it untouched and report it" is allowed to change nothing and still be merged: its branch
+survives the sweep even carrying nothing, because a merge needs the REF, not its contents —
+`git merge` on an empty branch reports `Already up to date`. So a survey wave where only some
+leaves find work to do is a legitimate shape, and the integrate over all of them completes.
+
+Note the asymmetry with `isolation.from` above: `from` needs the source's *commits*, so a
+source that commits nothing genuinely has nothing to offer. `integrate.from` needs only the
+ref. Same word, different requirement.
+
 ## Sibling trees do not see each other
 
 Two private trees each carry their common ancestor's work but not each other's. Fold them back

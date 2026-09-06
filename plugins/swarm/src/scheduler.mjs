@@ -453,6 +453,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
       src ? { ...src, worktreeName: nameOf(src) ?? src.id } : { id: srcId }, cfg);
   };
 
+  // Tasks any integrate node names: their branches must survive the sweep even
+  // when empty, because the merge needs the ref, not its contents.
+  const integrateSources = new Set(tasks.flatMap((t) => t.integrate?.from ?? []));
+
   const groupMembers = new Map();   // name -> [task ids, in manifest order]
   const groupFinal = new Map();
   const groupFirst = new Map();
@@ -971,7 +975,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false }
 
       if (wt && groupFinal.get(wtName) === task.id) {
         const isChainFollower = (groupMembers.get(wtName)?.length ?? 1) > 1;
-        const collected = worktree.collect(task, cfg, wt, { isChainFollower });
+        const collected = worktree.collect(task, cfg, wt, {
+          isChainFollower,
+          isIntegrateSource: integrateSources.has(task.id),
+        });
         result.worktree = collected;
         if (collected.kept) worktreesKept.push({
           name: wt.name ?? wtName, branch: collected.branch,

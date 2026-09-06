@@ -109,7 +109,12 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
 // also gets `wt.reused: true` on re-entry, but it has no predecessor commits to
 // protect — an unchanged solo resend must still be swept, same as before chains
 // existed.
-export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
+// `isIntegrateSource`: true when some `integrate` node names this task's
+// branch. The worktree directory still goes — nothing merges a directory —
+// but the branch survives even carrying nothing, because the merge needs the
+// REF, not its contents: `git merge` on an empty branch reports "Already up
+// to date".
+export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSource = false } = {}) {
   const status = git(["status", "--porcelain"], wt.path);
   const headNow = git(["rev-parse", "HEAD"], wt.path);
   const changed = status.stdout !== "" || (headNow.status === 0 && headNow.stdout !== wt.head);
@@ -125,8 +130,8 @@ export function collect(task, cfg, wt, { isChainFollower = false } = {}) {
 
   if (!changed && !(wt.reused && isChainFollower) && !carriesWork) {
     git(["worktree", "remove", "--force", wt.path], wt.repo);
-    git(["branch", "-D", wt.branch], wt.repo);
-    return { kept: false, branch: wt.branch, path: wt.path };
+    if (!isIntegrateSource) git(["branch", "-D", wt.branch], wt.repo);
+    return { kept: false, branchKept: isIntegrateSource, branch: wt.branch, path: wt.path };
   }
 
   // Diff against the start HEAD covers both committed and uncommitted changes.
