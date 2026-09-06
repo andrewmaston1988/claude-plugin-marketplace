@@ -23,6 +23,7 @@ const USAGE = `usage: swarm.mjs <command>
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)
+  ollama-usage [--cookie '<value>']   ollama.com :cloud weekly-allowance meter (exit 1 when exhausted)
   grade --init <resultsDir>  write grades.json — one skeleton row per model leaf (Claude tiers included), for you to fill in
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
@@ -92,6 +93,16 @@ function modelLine(m) {
 
 async function cmdModels(rest = []) {
   const cfg = getConfig();
+  // Catalogue stays the catalogue (discovery.mjs is pure) — the meter is
+  // annotated here, above the :cloud list, so it reads as a preflight rather
+  // than a per-model property.
+  const { usageFromCache } = await import("../src/ollama-usage.mjs");
+  const headroom = usageFromCache(cfg);
+  if (headroom.state === "exhausted") {
+    out(`⚠ :cloud weekly allowance exhausted (${headroom.weeklyPctUsed}%) — resets ${headroom.resetsAt}. These models will not launch.`);
+  } else if (headroom.state === "stale") {
+    out(`⚠ :cloud weekly allowance meter is stale (last read ${Math.floor(headroom.snapshotAgeMs / 3_600_000)}h ago) — run \`swarm ollama-usage\` to refresh.`);
+  }
   const showAll = rest.includes("--all");
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
   const discovered = await discoverModels(cfg);
@@ -646,23 +657,73 @@ async function main() {
       case "perf":
         return await cmdPerf(rest);
       case "quota": {
+        // Anthropic is fetched (its credential renews itself); every cloud
+        // provider is read from cache, because its cookie needs a human and
+        // `quota` must not stall on one. Both print through usageLines, so the
+        // subcommand and the standing-mode hook can never word this differently.
         const { checkQuota } = await import("../src/quota.mjs");
+        const { normalizeAnthropic, normalizeOllama, usageLines, notableLines } = await import("../src/usage.mjs");
+        const cfg = getConfig();
         const q = await checkQuota({
-          cfg: getConfig(),
+          cfg,
           fetch: (...a) => globalThis.fetch(...a),
           cachePath: join(swarmHome(), "quota-cache.json"),
           ...(process.env.SWARM_CREDENTIALS && { credentialsPath: process.env.SWARM_CREDENTIALS }),
         });
-        if (!q) {
-          out("quota: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
+        const usages = [];
+        if (q) usages.push(normalizeAnthropic(q));
+        else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
+
+        if (cfg?.provider?.cloud?.ollama?.enabled === true) {
+          const { usageFromCache } = await import("../src/ollama-usage.mjs");
+          const reading = usageFromCache(cfg);
+          if (reading.state === "unknown") out("ollama: no reading yet — run `swarm ollama-usage --cookie '<value>'`");
+          else usages.push(normalizeOllama(reading));
+        }
+
+        for (const line of usageLines(usages)) out(line);
+        // Anthropic severity is its own vocabulary and has no cross-provider
+        // equivalent, so it stays an Anthropic-only annotation.
+        for (const l of q?.limits || []) {
+          if (l.severity && l.severity !== "normal") out(`anthropic ${l.kind}: [${l.severity}]`);
+        }
+        for (const line of notableLines(usages)) out(line);
+        // Exit code keeps its documented meaning: Anthropic exhausted. A cloud
+        // provider's state is reported, never conflated with it.
+        return q?.exhausted ? 1 : 0;
+      }
+      case "ollama-usage": {
+        const { fetchUsage, saveCookie, loadCookie, usageCachePath } = await import("../src/ollama-usage.mjs");
+        const cfg = getConfig();
+        const cachePath = usageCachePath();
+        const cookiePath = cfg?.provider?.cloud?.ollama?.cookiePath || join(swarmHome(), "ollama-cookie.json");
+        const cookieFlag = getFlag("cookie", rest);
+        if (cookieFlag !== undefined) saveCookie(cookiePath, cookieFlag);
+        const fetched = await fetchUsage({ cookie: loadCookie(cookiePath), cachePath });
+
+        // This subcommand's job is the FETCH and the cookie; the printing is
+        // usage.mjs's, same as `quota`'s, so the two can never word a reading
+        // differently.
+        const { normalizeOllama, usageLines, notableLines } = await import("../src/usage.mjs");
+        const { readUsage } = await import("../src/ollama-usage.mjs");
+        const { readFileSync } = await import("node:fs");
+        // A successful fetch has just written the cache, so classify BOTH paths
+        // by reading it back: one classifier, so a fresh 100% and a cached 100%
+        // can never disagree about being exhausted.
+        let reading;
+        try {
+          reading = readUsage(readFileSync(cachePath, "utf8"), { staleMs: cfg?.provider?.usageStaleMs });
+        } catch {
+          reading = { state: "unknown" };
+        }
+        if (reading.state === "unknown") {
+          out(`ollama: no reading yet${fetched.ok ? "" : ` (${fetched.reason})`} — run with --cookie '<value>' first`);
           return 0;
         }
-        for (const l of q.limits) {
-          const scope = l.scope ? ` (${l.scope})` : "";
-          const sev = l.severity && l.severity !== "normal" ? ` [${l.severity}]` : "";
-          out(`${l.kind}${scope}: ${l.percent}%${l.resetsAt ? ` — resets ${l.resetsAt}` : ""}${sev}`);
-        }
-        return q.exhausted ? 1 : 0;
+        const usage = normalizeOllama(reading);
+        for (const line of usageLines([usage])) out(line);
+        for (const line of notableLines([usage])) out(line);
+        return usage.state === "exhausted" ? 1 : 0;
       }
       default:
         err(USAGE);

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { prepareIsolation, collect, integrate } from "../src/worktree.mjs";
 import { runPlan } from "../src/scheduler.mjs";
+import { loadManifest, ValidationError } from "../src/manifest.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 
 const CFG = {
@@ -572,6 +573,23 @@ test("isolation.branch names the branch independently of the tree", () => {
   } finally { cleanup(repo, results); }
 });
 
+test("W1: an unresolvable baseRef throws rather than falling back to repo HEAD", () => {
+  const repo = initRepo();
+  const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  try {
+    // region-lanes-1: a-surface ended skipped, so swarm/a-surface never existed,
+    // yet two readers' worktrees were silently created at repo HEAD instead and
+    // reported success on the wrong base. This must throw, not degrade.
+    let threw = null;
+    try {
+      prepareIsolation({ id: "x", originalCwd: repo, baseRef: "swarm/does-not-exist" }, CFG, results);
+    } catch (e) { threw = e; }
+    ok(threw, "must refuse rather than silently basing on repo HEAD");
+    ok(/swarm\/does-not-exist/.test(threw.message), `message should name the missing ref: ${threw?.message}`);
+    ok(!existsSync(join(results, "wt-x")), "no worktree must be left behind on failure");
+  } finally { cleanup(repo, results); }
+});
+
 test("isolation.from bases a private tree on a dependency's branch tip", () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
@@ -825,5 +843,41 @@ test("groupFinal is the task nothing else in the group depends on, even across o
     ok(feat, "the feat tree is kept");
     ok(/cleanup/.test(feat.diffstat || ""),
       `collection must happen after cleanup, not after helper — diffstat: ${feat.diffstat}`);
+  } finally { cleanup(repo, dir); }
+});
+
+// I1 — the two defects meet: a when-gated source named by isolation.from. This
+// is the exact region-lanes-1 shape (a-surface ended skipped; readers named it
+// via from). It must be caught at validate; and even if that check were
+// bypassed, the run-time backstop must still refuse rather than silently
+// basing on repo HEAD.
+test("I1: a when-gated isolation.from source is rejected at validate, and the run-time backstop refuses it too", () => {
+  const repo = initRepo();
+  const dir = mkdtempSync(join(tmpdir(), "swarm-wt-i1-"));
+  try {
+    const manifestPath = join(dir, "plan.json");
+    writeFileSync(manifestPath, JSON.stringify({
+      tasks: [
+        { id: "probe", prompt: "…return JSON", model: "haiku" },
+        { id: "a-surface", prompt: "survey", model: "haiku", after: ["probe"],
+          when: { from: "probe", expr: "length(value) > 0" }, isolation: { worktree: "a-surface" } },
+        { id: "reader", prompt: "read", model: "haiku", after: ["a-surface"],
+          isolation: { worktree: "reader", from: "a-surface" } },
+      ],
+    }));
+
+    let threw = null;
+    try { loadManifest(manifestPath, CFG, dir); } catch (e) { threw = e; }
+    ok(threw instanceof ValidationError, "validate must reject a when-gated isolation.from source");
+    ok(threw.errors.some((e) => /is when-gated/.test(e)));
+
+    // Bypass path: a-surface's gate evaluated false, so it was skipped and
+    // swarm/a-surface never came to exist — exactly the live symptom.
+    let bypassed = null;
+    try {
+      prepareIsolation({ id: "reader", originalCwd: repo, worktreeName: "reader", baseRef: "swarm/a-surface" }, CFG, dir);
+    } catch (e) { bypassed = e; }
+    ok(bypassed, "even if validate were bypassed, an unresolvable base must fail loudly, not silently use repo HEAD");
+    ok(/swarm\/a-surface/.test(bypassed.message));
   } finally { cleanup(repo, dir); }
 });

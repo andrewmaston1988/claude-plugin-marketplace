@@ -336,6 +336,120 @@ test("governance: non-Claude digest model outside roots rejected", () => {
   }
 });
 
+// ── headroom (:cloud weekly-allowance preflight) ──────────────────────────────
+
+// Writes ~/.swarm/ollama-usage.json under a scratch SWARM_HOME so
+// usageFromCache(cfg) reads a controlled reading, then restores the env var.
+function withHeadroom(dir, { weeklyPctUsed, ageMs = 0 } = {}, fn) {
+  const home = join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
+    weeklyPctUsed,
+    weeklyResetsAt: "2026-09-07T00:00:00Z",
+    fetchedAt: Date.now() - ageMs,
+  }));
+  const prevHome = process.env.SWARM_HOME;
+  process.env.SWARM_HOME = home;
+  try {
+    return fn();
+  } finally {
+    if (prevHome === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prevHome;
+  }
+}
+
+test("headroom: M1 exhausted meter rejects a :cloud seat, naming task, model, pct, reset, recast", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 100 }, () => {
+      const errs = errorsOf(() => loadManifest(p, cfg, dir));
+      ok(errs.some((e) =>
+        e.includes("find-diag") && e.includes("glm-5.3:cloud") && e.includes("100")
+        && e.includes("2026-09-07T00:00:00Z") && /recast/i.test(e)
+      ), errs.join("|"));
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M2 false-positive guard — Claude-only manifests are untouched by an exhausted meter", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ model: "sonnet" }), claudeTask({ id: "b", model: "haiku" })] });
+    const cfg = { ...CFG, provider: { allowedRoots: [], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 100 }, () => {
+      const plan = loadManifest(p, cfg, dir);
+      equal(plan.tasks.length, 2);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M3 false-positive guard — a healthy meter passes with no new output", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 42 }, () => {
+      const plan = loadManifest(p, cfg, dir);
+      equal(plan.tasks[0].model, "glm-5.3:cloud");
+      equal(plan.warnings, undefined);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M4 no configured cookie (unknown) does not fail a manifest", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    // cloud.ollama.enabled left off entirely -> usageFromCache is "unknown" with no cache file needed.
+    const cfg = { ...CFG, provider: { allowedRoots: [dir] } };
+    const plan = loadManifest(p, cfg, dir);
+    equal(plan.tasks[0].model, "glm-5.3:cloud");
+    equal(plan.warnings, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M5 stale warns (naming snapshot age and the refresh command), does not fail", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 42, ageMs: 86_400_000 + 3_600_000 }, () => {
+      const plan = loadManifest(p, cfg, dir);
+      equal(plan.tasks[0].model, "glm-5.3:cloud");
+      ok(plan.warnings?.some((w) => w.includes("find-diag") && /\d+h ago/.test(w) && w.includes("ollama-usage")), JSON.stringify(plan.warnings));
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("headroom: M7 governance is reported before the headroom rejection", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    // allowedRoots empty -> cwd is outside every allowed root
+    const cfg = { ...CFG, provider: { allowedRoots: [], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 100 }, () => {
+      const errs = errorsOf(() => loadManifest(p, cfg, dir));
+      const govIdx = errs.findIndex((e) => e.includes("data governance"));
+      const headroomIdx = errs.findIndex((e) => e.includes("weekly allowance is exhausted"));
+      ok(govIdx !== -1 && headroomIdx !== -1, errs.join("|"));
+      ok(govIdx < headroomIdx, `expected governance before headroom, got: ${errs.join("|")}`);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── write-implies-isolation ───────────────────────────────────────────────────
 
 test("write tools without isolation redirect cwd to scratch dir under resultsDir", () => {
@@ -1142,7 +1256,11 @@ test("isolation object rejects unknown keys — a typo must never be silently ig
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("isolation.from must name a declared, worktree-isolated dependency", () => {
+// M1-M6 below are deliberately separate cases (not sub-checks of one test) so a
+// partial implementation of the isolation.from guard fails visibly rather than
+// passing on one message that happens to match.
+
+test("M1: isolation.from rejects a source absent from after", () => {
   const dir = tmp();
   try {
     const notDep = writeManifest(dir, { tasks: [
@@ -1151,31 +1269,28 @@ test("isolation.from must name a declared, worktree-isolated dependency", () => 
     ] }, "notdep.json");
     ok(errorsOf(() => loadManifest(notDep, CFG, dir))
       .some((e) => /must be a declared dependency/.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
+test("M2: isolation.from rejects a source with no isolation block", () => {
+  const dir = tmp();
+  try {
     const noTree = writeManifest(dir, { tasks: [
       claudeTask({ id: "survey" }),
       claudeTask({ id: "x", after: ["survey"], isolation: { worktree: "x", from: "survey" } }),
     ] }, "notree.json");
     ok(errorsOf(() => loadManifest(noTree, CFG, dir))
       .some((e) => /no worktree, so it has no branch/.test(e)));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
-    const noWrite = writeManifest(dir, { tasks: [
-      claudeTask({ id: "review", allowedTools: "Read,Grep,Glob", isolation: { worktree: "brief" } }),
-      claudeTask({ id: "x", after: ["review"], isolation: { worktree: "x", from: "review" } }),
-    ] }, "nowrite.json");
-    ok(errorsOf(() => loadManifest(noWrite, CFG, dir))
-      .some((e) => /has no write tools, so it commits nothing/.test(e)),
-      "a read-only source commits nothing, so its branch never exists");
-
-    const good = writeManifest(dir, { tasks: [
-      claudeTask({ id: "helper", allowedTools: "Read,Edit", isolation: { worktree: "feat" } }),
-      claudeTask({ id: "x", after: ["helper"], isolation: { worktree: "x", from: "helper" } }),
-    ] }, "good.json");
-    const plan = loadManifest(good, CFG, dir);
-    equal(plan.tasks.find((t) => t.id === "x").from, "helper");
-
+test("M3: isolation.from rejects a when-gated source", () => {
+  const dir = tmp();
+  try {
     // A when-gated source may be skipped at runtime, and a skipped task never
     // reaches prepareIsolation — so its branch is conditional, not guaranteed.
+    // This is the live region-lanes-1 case: a-surface ended skipped and
+    // swarm/a-surface never existed.
     const gated = writeManifest(dir, { tasks: [
       claudeTask({ id: "probe", prompt: "…return JSON" }),
       claudeTask({ id: "helper", after: ["probe"], allowedTools: "Read,Edit",
@@ -1185,6 +1300,31 @@ test("isolation.from must name a declared, worktree-isolated dependency", () => 
     ok(errorsOf(() => loadManifest(gated, CFG, dir))
       .some((e) => /is when-gated/.test(e)),
       "a conditional source owns no branch when its gate is false");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("M4: isolation.from rejects a source with no write tools", () => {
+  const dir = tmp();
+  try {
+    const noWrite = writeManifest(dir, { tasks: [
+      claudeTask({ id: "review", allowedTools: "Read,Grep,Glob", isolation: { worktree: "brief" } }),
+      claudeTask({ id: "x", after: ["review"], isolation: { worktree: "x", from: "review" } }),
+    ] }, "nowrite.json");
+    ok(errorsOf(() => loadManifest(noWrite, CFG, dir))
+      .some((e) => /has no write tools, so it commits nothing/.test(e)),
+      "a read-only source commits nothing, so its branch never exists");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("M5: false-positive guard — a valid isolation.from still passes", () => {
+  const dir = tmp();
+  try {
+    const good = writeManifest(dir, { tasks: [
+      claudeTask({ id: "helper", allowedTools: "Read,Edit", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "x", after: ["helper"], isolation: { worktree: "x", from: "helper" } }),
+    ] }, "good.json");
+    const plan = loadManifest(good, CFG, dir);
+    equal(plan.tasks.find((t) => t.id === "x").from, "helper");
 
     // Bash-only commits via `git commit` — must not trip the write-tools check.
     const bashOnly = writeManifest(dir, { tasks: [
@@ -1192,6 +1332,24 @@ test("isolation.from must name a declared, worktree-isolated dependency", () => 
       claudeTask({ id: "x", after: ["helper"], isolation: { worktree: "x", from: "helper" } }),
     ] }, "bashonly.json");
     equal(loadManifest(bashOnly, CFG, dir).tasks.find((t) => t.id === "x").from, "helper");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("M6: ordering — a from both absent from after and read-only reports only the after failure", () => {
+  const dir = tmp();
+  try {
+    // 'helper' is never listed in x's after AND holds no write tools. The after
+    // check is the more fundamental failure (it means the id isn't even a safe
+    // dependency edge) and must short-circuit before the write-tools check runs
+    // — matching the order integrate.from already uses for its three rejections.
+    const both = writeManifest(dir, { tasks: [
+      claudeTask({ id: "helper", allowedTools: "Read,Grep,Glob", isolation: { worktree: "feat" } }),
+      claudeTask({ id: "x", isolation: { worktree: "x", from: "helper" } }),
+    ] }, "both.json");
+    const errs = errorsOf(() => loadManifest(both, CFG, dir));
+    ok(errs.some((e) => /must be a declared dependency/.test(e)));
+    ok(!errs.some((e) => /has no write tools/.test(e)),
+      "the write-tools check must not run once the more fundamental after-check has failed");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

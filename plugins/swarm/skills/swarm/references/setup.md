@@ -38,14 +38,37 @@ operator's data agreement may cover Anthropic only. Empty means Claude-only — 
 works, the cheap tier never arms. Ask which roots, if any, are cleared to leave. Do not
 suggest a root; the operator names it.
 
+### Stage 1b — enable a cloud provider (`provider.cloud.*`)
+
+`:cloud` leaves (ollama) have no availability signal unless swarm can read the account's own
+usage meter — otherwise a dead weekly allowance looks identical to a healthy one until a
+dispatch wastes it. Today there is exactly one cloud provider, ollama; say so, don't imply
+others exist. One `AskUserQuestion`, `multiSelect: true`, options built from the known
+providers (`ollama`). **Leaving it unticked is a real, common answer** — swarm still works,
+Claude-only, with no meter to maintain.
+
+For each ticked provider (ollama today):
+1. Explain how to get the token: browser devtools → Network tab → any request to
+   `ollama.com` → copy the `Cookie` request header.
+2. Hand over `node <engine> ollama-usage --cookie '<value>'` for them to run themselves — it
+   writes the cookie to `cookiePath` and immediately prints the current meter as confirmation
+   it worked.
+3. **Never ask the operator to paste the token into this conversation** for you to write into
+   a file — `--cookie` is the only path, so the credential never enters the transcript.
+4. Set `provider.cloud.ollama.enabled: true` in the config with the `Edit` tool. The meter is
+   inert until this flag is on, even once a cookie is saved — an operator who ticks the
+   provider but whose `--cookie` run fails should still see it correctly report "no reading
+   yet" rather than silently doing nothing.
+
 ### Stage 2 — standing consent (`swarm.always`)
 
 Every fan-out normally stops at an offer gate: a question showing the manifest, the model
-mix and the cost before anything spends. `true` waives that question — the gate prints the
-same facts and dispatches — while the rest of the ceremony (orchestrating-agents,
-executing-swarms, `models`, `validate`) still runs. Ask whether they want to keep answering
-the question or trust the ceremony. Mention `swarm.workflowNudge` only if they ask about
-Workflow: it is the one-time "consider swarm" reminder on an armed machine.
+mix and the cost before anything spends. `true` is standing consent to skip that question —
+reading orchestrating-agents and executing-swarms, running `models` and `validate` all stay
+mandatory, but nothing is printed or narrated before dispatch: the session runs it. Ask
+whether they want to keep answering the question or trust the ceremony. Mention
+`swarm.workflowNudge` only if they ask about Workflow: it is the one-time "consider swarm"
+reminder on an armed machine.
 
 ### Stage 3 — the phone dashboard (`dashboard.*`)
 
@@ -118,6 +141,9 @@ from the appendix. If no, close.
 | `provider.cloudSuffix` | `:cloud` | Which model names count as cloud tier. |
 | `provider.authToken` | `ollama` | Sent as the API key in `env` mode. Placeholder, not a secret. |
 | `provider.name` | `ollama` | Label only. |
+| `provider.cloud.ollama.enabled` | `false` | Stage 1b. Gates the whole meter: off, `models`/`validate`/`modeFor` never read the cache and the feature is invisible. |
+| `provider.cloud.ollama.cookiePath` | `null` | Stage 1b. Where `ollama-usage --cookie` writes the browser token; falls back to `~/.swarm/ollama-cookie.json` when unset. Never `config.json` itself. |
+| `provider.usageStaleMs` | `86400000` | How old a cached meter reading may be before `models`/`validate` treat it as unverified rather than current. |
 | `concurrency` | `4` | Ceiling on leaves alive at once (each is a full headless `claude` session). A manifest may run narrower, never wider — asking for more fails `validate`. A rate-limited leaf frees its slot while it backs off. |
 | `timeoutMs` | `3600000` | Per-leaf wall clock; past it the leaf is `timeout`, slot freed. |
 | `retry.rateLimited` / `retry.backoffMs` | `2` / `30000` | Retries after a rate-limit failure, exponential from the backoff; the slot frees while waiting. |

@@ -14,8 +14,27 @@ prompt reads.
 ## A private tree branches from repo HEAD unless you say otherwise
 
 `"from": "<task id>"` bases it on that task's branch instead, so the leaf starts with the code
-it depends on. The named task must be a declared dependency, worktree-isolated, and able to
-WRITE — `validate` says so if not.
+it depends on. `validate` rejects a source that can end without ever committing — a branch that
+was never created cannot be based on. `isolation.from` must name a task that:
+
+- **is a declared dependency** — in this leaf's `after`, so its branch is guaranteed to exist by
+  the time this leaf starts;
+- **has an `isolation` block** — a task with none runs in the shared checkout, never gets a
+  worktree, and so never gets a branch;
+- **is not `when`-gated** — a false gate skips the task before its worktree is created, so the
+  branch may never exist; and
+- **holds write tools** — see "A task only owns a branch if it COMMITS" below; the same
+  reasoning `integrate.from` uses applies here.
+
+**A `skipped` source is the live failure this guard catches.** A skipped task never runs its
+body, so even one with an `isolation` block leaves no branch behind if its gate — or an
+upstream failure — skipped it. Before this guard existed, tasks naming a skipped source as
+`from` did not fail at `validate`: `prepareIsolation` resolved `baseRef` however its fallback
+happened to work out, and leaves reported success built on the wrong code. The run-time
+backstop closes the gap `validate` cannot: if `baseRef` is ever handed to `prepareIsolation` and
+does not resolve — the source's branch never existed, or existed and was later cleaned up — it
+throws instead of falling back, and the leaf fails loudly rather than quietly building on the
+wrong base.
 
 ## `from` names a TASK that commits, not the STAGE this leaf follows
 
@@ -40,6 +59,16 @@ all. It cannot catch a reviewer holding `Bash` to run a test suite: that reads a
 but still commits nothing. **Judge by what the task DOES, not by its tool list.** If a task
 exists to report rather than to change code, it is never a `from` target — and a consolidator
 that only reads result files needs no worktree at all.
+
+**An `integrate.from` source is the exception, and needs no care from you.** A leaf you told
+"leave it untouched and report it" is allowed to change nothing and still be merged: its branch
+survives the sweep even carrying nothing, because a merge needs the REF, not its contents —
+`git merge` on an empty branch reports `Already up to date`. So a survey wave where only some
+leaves find work to do is a legitimate shape, and the integrate over all of them completes.
+
+Note the asymmetry with `isolation.from` above: `from` needs the source's *commits*, so a
+source that commits nothing genuinely has nothing to offer. `integrate.from` needs only the
+ref. Same word, different requirement.
 
 ## Sibling trees do not see each other
 
