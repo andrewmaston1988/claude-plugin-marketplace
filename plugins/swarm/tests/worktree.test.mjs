@@ -356,6 +356,7 @@ test("collect keeps a changed integrate-source exactly as before — isIntegrate
     const task = { id: "changed-src", originalCwd: repo };
     const wt = prepareIsolation(task, CFG, resultsDir);
     writeFileSync(join(wt.path, "new.txt"), "work\n");
+    commitAll(wt.path, "leaf work");
     const c = collect(task, CFG, wt, { isIntegrateSource: true });
     equal(c.kept, true);
     ok(existsSync(wt.path), "changed worktree stays");
@@ -384,16 +385,22 @@ test("isChainFollower and carriesWork guards still keep worktree and branch, una
     equal(cFollower.kept, true, "isChainFollower still protects the shared tree");
     ok(git(["branch", "--list", "swarm/feat"], repo).includes("swarm/feat"));
 
-    const up = prepareIsolation({ id: "helper2", originalCwd: repo, worktreeName: "helper2" }, CFG, resultsDir);
-    writeFileSync(join(up.path, "helper.txt"), "helper\n");
-    commitAll(up.path, "helper");
-    const down = prepareIsolation(
-      { id: "noop2", originalCwd: repo, worktreeName: "noop2", baseRef: "swarm/helper2" }, CFG, resultsDir);
-    const cCarries = collect({ id: "noop2" }, CFG, down, { isChainFollower: false, isIntegrateSource: false });
-    equal(cCarries.kept, true, "carriesWork still protects a from-based tree's inherited commits");
-    ok(git(["branch", "--list", "swarm/noop2"], repo).includes("swarm/noop2"));
+    // carriesWork on its own, with isChainFollower deliberately OFF: a reused
+    // tree whose branch already holds an earlier phase's commits, and whose leaf
+    // then changed nothing. `changed` is false and the chain guard is off, so
+    // only unlandedCount stands between `swarm/carry` and `branch -D`.
+    const c1 = { id: "c1", worktreeName: "carry", originalCwd: repo, cwd: repo };
+    const wtc1 = prepareIsolation(c1, CFG, resultsDir);
+    writeFileSync(join(wtc1.path, "carried.txt"), "earlier phase\n");
+    commitAll(wtc1.path, "earlier phase");
+    const c2 = { id: "c2", worktreeName: "carry", originalCwd: repo, cwd: repo };
+    const wtc2 = prepareIsolation(c2, CFG, resultsDir);
+    const cCarries = collect(c2, CFG, wtc2, { isChainFollower: false, isIntegrateSource: false });
+    equal(cCarries.kept, true, "carriesWork protects commits not landed on repo HEAD");
+    ok(git(["branch", "--list", "swarm/carry"], repo).includes("swarm/carry"));
   } finally {
     dropWorktree(repo, join(resultsDir, "wt-feat"));
+    dropWorktree(repo, join(resultsDir, "wt-carry"));
     cleanup(resultsDir, repo);
   }
 });
