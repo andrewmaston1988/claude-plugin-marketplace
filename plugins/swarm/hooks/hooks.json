@@ -7,6 +7,7 @@
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraswarm.mjs\"" } ] }
     ],
     "PreToolUse": [
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/leaf-guard.mjs\"" } ] },
       { "matcher": "Workflow", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/workflow-nudge.mjs\"" } ] },
       { "matcher": "Bash", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/dispatch-gate.mjs\"" }, { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/foreground-guard.mjs\"" } ] }
     ],
