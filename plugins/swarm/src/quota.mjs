@@ -16,9 +16,17 @@ export const DEFAULT_QUOTA_PATTERNS = [
 
 export const DEFAULT_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 
+// Ollama's exhaustion body, whatever meter names itself: "…have reached your <meter>
+// usage limit, add extra usage: https://ollama.com/settings". Keyed on the suffix, so a
+// meter ollama adds later needs no edit here. NOT in `quotaPatterns` — that list is the
+// operator's Anthropic-tunable one, and an install whose config.json already holds it
+// never receives an addition (`config init` only fills ABSENT keys). Provider detection
+// must not depend on a list the user may narrow, so it is checked unconditionally.
+const PROVIDER_QUOTA_PATTERNS = ["usage limit, add extra usage"];
+
 export function matchQuota(text, patterns = DEFAULT_QUOTA_PATTERNS) {
   const t = String(text || "").toLowerCase();
-  return patterns.some((p) => t.includes(p.toLowerCase()));
+  return [...patterns, ...PROVIDER_QUOTA_PATTERNS].some((p) => t.includes(p.toLowerCase()));
 }
 
 // "…limit reached|1751210400" -> ISO; "…will reset at 3pm (X)." -> "3pm (X)";
