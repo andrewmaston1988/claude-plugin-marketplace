@@ -59,6 +59,10 @@ Claude tiers reject unsupported levels; `swarm.mjs validate` checks the pairing 
 | `sonnet` | `low`, `medium`, `high`, `max` | no `xhigh` |
 | `opus` / `fable` | `low`, `medium`, `high`, `xhigh`, `max` | full scale |
 
+## Context window
+
+The 1M context window (`disable1mContext: false` in config, or a task's `settings` override) is a wall-clock lever, not a quality one — measured ~+45% cost for the same output, same quality. Shipped default is off (200k).
+
 ## Approval
 
 There is no Opus gate and no per-model approval in swarm: the manifest preview in the offer gate is the single confirmation artefact — the user sees every leaf, model, and effort before anything runs. If the user swaps a model in review, that's the decision; don't argue.
