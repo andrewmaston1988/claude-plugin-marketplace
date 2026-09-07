@@ -526,3 +526,24 @@ test("formatClosing names every link of a shared chain, and only a chain", () =>
   ] });
   ok(!solo.includes("→"), solo);
 });
+
+test("formatClosing prints the prune hint once worktrees are kept and resultsDir/engine are known", () => {
+  const withHint = formatClosing({
+    summaryPath: "S/summary.json",
+    worktreesKept: [{ name: "impl", branch: "swarm/impl", path: "R/wt-impl" }],
+    resultsDir: "R",
+    engine: "E/swarm.mjs",
+  });
+  ok(withHint.includes("prune when done: node E/swarm.mjs prune R"), withHint);
+
+  // no resultsDir/engine (older call sites, e.g. cmdStop) — no hint, no crash
+  const noHint = formatClosing({
+    summaryPath: "S/summary.json",
+    worktreesKept: [{ name: "impl", branch: "swarm/impl", path: "R/wt-impl" }],
+  });
+  ok(!noHint.includes("prune when done"), noHint);
+
+  // no worktrees kept — no hint even with resultsDir/engine present
+  const nothingKept = formatClosing({ summaryPath: "S/summary.json", resultsDir: "R", engine: "E/swarm.mjs" });
+  ok(!nothingKept.includes("prune when done"), nothingKept);
+});

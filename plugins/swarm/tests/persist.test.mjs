@@ -66,6 +66,17 @@ test("effectivePlanDoc: resolved strip shape — set fields kept, empties omitte
   }
 });
 
+test("effectivePlanDoc: records the run's cwd — prune's repo-resolution fallback when no worktree survives to ask", () => {
+  const dir = tmp();
+  try {
+    const plan = loadPlan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku" }] });
+    const doc = effectivePlanDoc(plan);
+    equal(doc.cwd, dir);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("effectivePlanDoc: records args, argsFingerprint, and registry ref; all absent for a bare-path run", () => {
   const dir = tmp();
   try {

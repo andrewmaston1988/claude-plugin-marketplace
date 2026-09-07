@@ -881,3 +881,4 @@ test("I1: a when-gated isolation.from source is rejected at validate, and the ru
     ok(/swarm\/a-surface/.test(bypassed.message));
   } finally { cleanup(repo, dir); }
 });
+

@@ -368,7 +368,26 @@ export function renderProvenance({ tasks = [], truncations = [] }) {
   return lines.join("\n") + "\n";
 }
 
-export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate, gradeable }) {
+// Shared by formatClosing (a finished run) and recordDeadEngineStop's own stop
+// summary (scripts/swarm.mjs) — both name the worktrees a run left behind and,
+// when they know where to point, the exact prune command to reclaim them.
+// Only when the caller knows both resultsDir and engine: a bare discovery with
+// neither would print "node undefined prune undefined", worse than no line.
+export function formatKeptWorktrees(worktreesKept, { resultsDir, engine } = {}) {
+  const lines = [bold("worktrees kept:")];
+  for (const wt of worktreesKept) {
+    // A shared chain's branch carries several leaves' commits — name them, so
+    // the session merging it knows whose work is on there.
+    const chain = wt.taskIds?.length > 1 ? ` ${dim(`(${wt.taskIds.join(" → ")})`)}` : "";
+    lines.push(`  ${bold(wt.name)}: ${magenta(wt.branch)} at ${wt.path}${chain}`);
+  }
+  if (resultsDir && engine) {
+    lines.push(dim(`prune when done: node ${engine} prune ${resultsDir}`));
+  }
+  return lines.join("\n");
+}
+
+export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate, gradeable, resultsDir, engine }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -406,13 +425,7 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
     lines.push(line);
   }
   if (worktreesKept.length) {
-    lines.push(bold("worktrees kept:"));
-    for (const wt of worktreesKept) {
-      // A shared chain's branch carries several leaves' commits — name them, so
-      // the session merging it knows whose work is on there.
-      const chain = wt.taskIds?.length > 1 ? ` ${dim(`(${wt.taskIds.join(" → ")})`)}` : "";
-      lines.push(`  ${bold(wt.name)}: ${magenta(wt.branch)} at ${wt.path}${chain}`);
-    }
+    lines.push(formatKeptWorktrees(worktreesKept, { resultsDir, engine }));
   }
   // LAST, and printed by the engine — not left to the session's memory. Which
   // model to use for what is otherwise decided by remembered incidents, and the
