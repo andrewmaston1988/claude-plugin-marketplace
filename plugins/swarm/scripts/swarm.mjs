@@ -371,8 +371,16 @@ function repoOfWorktree(spawnSync, worktreePath) {
 }
 
 async function cmdPrune(rest) {
-  const dir = resolve(rest[0]);
+  // The dir is the first non-flag arg, so `prune --dry-run <dir>` and
+  // `prune <dir> --dry-run` mean the same thing.
+  const target = rest.find((a) => !a.startsWith("--"));
+  if (!target) { err(USAGE); return 1; }
+  const dir = resolve(target);
   const dryRun = rest.includes("--dry-run");
+  const fs = await import("node:fs");
+  // runLiveness reads "no run.log, no summary, no heartbeat" as a live run with
+  // nothing written yet — for prune that is a typo'd path, not something to refuse.
+  if (!fs.existsSync(join(dir, "run.log"))) { err(`swarm: no run at ${dir} (no run.log)`); return 1; }
   const cfg = getConfig();
   const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
   const live = runLiveness(dir, { heartbeatMs });
@@ -381,7 +389,6 @@ async function cmdPrune(rest) {
     return 1;
   }
 
-  const fs = await import("node:fs");
   const { spawnSync } = await import("node:child_process");
   const summary = JSON.parse(fs.readFileSync(join(dir, "summary.json"), "utf8"));
   const worktreesKept = Array.isArray(summary.worktreesKept) ? summary.worktreesKept : [];
@@ -715,7 +722,6 @@ async function main() {
         return await cmdStop(rest);
       }
       case "prune": {
-        if (!rest[0]) { err(USAGE); return 1; }
         return await cmdPrune(rest);
       }
       case "serve":
