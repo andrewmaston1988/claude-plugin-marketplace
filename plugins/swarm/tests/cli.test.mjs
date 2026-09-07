@@ -347,6 +347,22 @@ test("prune: removes the worktree and branch, prints freed, leaves the run recor
   }
 });
 
+test("prune: the flag may come first, and a dir with no run.log is an error, not a live run", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-prune-args-"));
+  try {
+    mkdirSync(join(dir, "home"), { recursive: true });
+    const missing = join(dir, "home", "runs", "C--proj", "does-not-exist");
+    const r = runCli(["prune", "--dry-run", missing], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(/no run at/.test(r.stderr), r.stderr);
+    ok(!/live/.test(r.stderr), r.stderr);
+    // the flag itself must never be taken as the dir
+    ok(!/--dry-run/.test(r.stderr), r.stderr);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothing removed", () => {
   const repo = initPruneRepo();
   const dir = tmp();
