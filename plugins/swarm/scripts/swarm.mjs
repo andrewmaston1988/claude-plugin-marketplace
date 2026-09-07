@@ -12,7 +12,6 @@ import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/esti
 import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
-import { defaultBranch } from "../src/worktree.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim } from "../src/ui.mjs";
@@ -393,10 +392,9 @@ async function cmdPrune(rest) {
     err(`swarm: could not resolve the repo for ${dir} — no kept worktree survives and manifest.json has no cwd.`);
     return 1;
   }
-  const base = defaultBranch(repo);
   const git = makeGit(spawnSync);
 
-  const { rows } = planPrune({ live: false, repo, base, resultsDir: dir, worktreesKept }, git, fs);
+  const { rows } = planPrune({ live: false, repo, resultsDir: dir, worktreesKept }, git, fs);
   if (!rows.length) {
     out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
     return 0;

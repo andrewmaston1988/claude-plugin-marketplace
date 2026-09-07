@@ -12,92 +12,16 @@ test("plan: a live run short-circuits before any git call", () => {
   equal(gitCalled, false, "git must never be consulted when the run is live");
 });
 
-test("plan: a kept tree whose branch is an ancestor of the default branch reads as merged", () => {
-  const git = (args) => {
-    if (args[0] === "merge-base") return { status: 0, stdout: "", stderr: "" };
-    if (args[0] === "status") return { status: 0, stdout: "", stderr: "" };
-    return { status: 1, stdout: "", stderr: "" };
-  };
+test("plan: a kept tree becomes a row with path, branch, measured bytes and repo", () => {
+  const git = () => ({ status: 1, stdout: "", stderr: "" });
   const fs = {
     existsSync: (p) => p === "/repo" || p === "/results/wt-impl",
     readdirSync: (p) => (p === "/results/wt-impl" ? [{ name: "a.txt", isDirectory: () => false }] : []),
     statSync: () => ({ size: 1024 }),
   };
-  const run = { repo: "/repo", base: "main", resultsDir: "/results", worktreesKept: [{ branch: "swarm/impl", path: "/results/wt-impl" }] };
+  const run = { repo: "/repo", resultsDir: "/results", worktreesKept: [{ branch: "swarm/impl", path: "/results/wt-impl" }] };
   const { rows } = plan(run, git, fs);
-  equal(rows.length, 1);
-  equal(rows[0].state, "merged");
-  equal(rows[0].branch, "swarm/impl");
-  equal(rows[0].path, "/results/wt-impl");
-  equal(rows[0].bytes, 1024);
-});
-
-test("plan: a squash-landed branch (cherry all '-') reads as merged", () => {
-  const git = (args) => {
-    if (args[0] === "merge-base") return { status: 1, stdout: "", stderr: "" };
-    if (args[0] === "cherry") return { status: 0, stdout: "- aaa111\n- bbb222", stderr: "" };
-    if (args[0] === "status") return { status: 0, stdout: "", stderr: "" };
-    return { status: 1, stdout: "", stderr: "" };
-  };
-  const fs = {
-    existsSync: (p) => p === "/repo" || p === "/results/wt-sq",
-    readdirSync: (p) => (p === "/results/wt-sq" ? [{ name: "a.txt", isDirectory: () => false }] : []),
-    statSync: () => ({ size: 100 }),
-  };
-  const run = { repo: "/repo", base: "main", resultsDir: "/results", worktreesKept: [{ branch: "swarm/sq", path: "/results/wt-sq" }] };
-  const { rows } = plan(run, git, fs);
-  equal(rows[0].state, "merged");
-});
-
-test("plan: a branch with zero cherry lines (same tip as base) reads as merged, matching isMerged", () => {
-  const git = (args) => {
-    if (args[0] === "merge-base") return { status: 1, stdout: "", stderr: "" };
-    if (args[0] === "cherry") return { status: 0, stdout: "", stderr: "" };
-    if (args[0] === "status") return { status: 0, stdout: "", stderr: "" };
-    return { status: 1, stdout: "", stderr: "" };
-  };
-  const fs = {
-    existsSync: (p) => p === "/repo" || p === "/results/wt-same",
-    readdirSync: (p) => (p === "/results/wt-same" ? [{ name: "a.txt", isDirectory: () => false }] : []),
-    statSync: () => ({ size: 10 }),
-  };
-  const run = { repo: "/repo", base: "main", resultsDir: "/results", worktreesKept: [{ branch: "swarm/same", path: "/results/wt-same" }] };
-  const { rows } = plan(run, git, fs);
-  equal(rows[0].state, "merged");
-});
-
-test("plan: a branch 2 commits ahead reads as unlanded, with the count", () => {
-  const git = (args) => {
-    if (args[0] === "merge-base") return { status: 1, stdout: "", stderr: "" };
-    if (args[0] === "cherry") return { status: 0, stdout: "+ ccc333\n+ ddd444", stderr: "" };
-    if (args[0] === "status") return { status: 0, stdout: "", stderr: "" };
-    return { status: 1, stdout: "", stderr: "" };
-  };
-  const fs = {
-    existsSync: (p) => p === "/repo" || p === "/results/wt-ahead",
-    readdirSync: (p) => (p === "/results/wt-ahead" ? [{ name: "a.txt", isDirectory: () => false }] : []),
-    statSync: () => ({ size: 50 }),
-  };
-  const run = { repo: "/repo", base: "main", resultsDir: "/results", worktreesKept: [{ branch: "swarm/ahead", path: "/results/wt-ahead" }] };
-  const { rows } = plan(run, git, fs);
-  equal(rows[0].state, "unlanded (2 commits ahead)");
-});
-
-test("plan: non-empty porcelain status reads as dirty regardless of landing state", () => {
-  const git = (args) => {
-    if (args[0] === "status") return { status: 0, stdout: " M file.txt", stderr: "" };
-    if (args[0] === "merge-base") return { status: 1, stdout: "", stderr: "" };
-    if (args[0] === "cherry") return { status: 0, stdout: "+ ccc333", stderr: "" };
-    return { status: 1, stdout: "", stderr: "" };
-  };
-  const fs = {
-    existsSync: (p) => p === "/repo" || p === "/results/wt-d",
-    readdirSync: (p) => (p === "/results/wt-d" ? [{ name: "file.txt", isDirectory: () => false }] : []),
-    statSync: () => ({ size: 42 }),
-  };
-  const run = { repo: "/repo", base: "main", resultsDir: "/results", worktreesKept: [{ branch: "swarm/d", path: "/results/wt-d" }] };
-  const { rows } = plan(run, git, fs);
-  equal(rows[0].state, "dirty");
+  deepEqual(rows, [{ path: "/results/wt-impl", branch: "swarm/impl", bytes: 1024, repo: "/repo" }]);
 });
 
 test("plan: a tree registered in git under resultsDir but absent from worktreesKept is still found", () => {
@@ -117,24 +41,24 @@ test("plan: a tree registered in git under resultsDir but absent from worktreesK
         stderr: "",
       };
     }
-    if (args[0] === "merge-base") return { status: 0, stdout: "", stderr: "" };
-    if (args[0] === "status") return { status: 0, stdout: "", stderr: "" };
     return { status: 1, stdout: "", stderr: "" };
   };
+  const orphanPath = resolve("/results/wt-orphan");
   const fs = {
-    existsSync: (p) => p === "/repo" || p === "/results/wt-orphan",
-    readdirSync: (p) => (p === "/results/wt-orphan" ? [{ name: "x.txt", isDirectory: () => false }] : []),
+    existsSync: (p) => p === "/repo" || p === orphanPath,
+    readdirSync: (p) => (p === orphanPath ? [{ name: "x.txt", isDirectory: () => false }] : []),
     statSync: () => ({ size: 7 }),
   };
-  const run = { repo: "/repo", base: "main", resultsDir: "/results", worktreesKept: [] };
+  const run = { repo: "/repo", resultsDir: "/results", worktreesKept: [] };
   const { rows } = plan(run, git, fs);
   equal(rows.length, 1);
-  equal(rows[0].path, resolve("/results/wt-orphan"));
+  equal(rows[0].path, orphanPath);
   equal(rows[0].branch, "swarm/orphan");
-  equal(rows[0].state, "merged");
+  equal(rows[0].bytes, 7);
+  equal(rows[0].repo, "/repo");
 });
 
-test("plan: a kept tree whose repo no longer exists reads as repo missing, untouched by git", () => {
+test("plan: a repo that no longer exists is never asked for its orphaned worktrees", () => {
   const calls = [];
   const git = (args, cwd) => { calls.push({ args, cwd }); return { status: 1, stdout: "", stderr: "" }; };
   const fs = {
@@ -142,21 +66,20 @@ test("plan: a kept tree whose repo no longer exists reads as repo missing, untou
     readdirSync: (p) => (p === "/results/wt-gone" ? [{ name: "a.txt", isDirectory: () => false }] : []),
     statSync: () => ({ size: 512 }),
   };
-  const run = { repo: "/gone-repo", base: "main", resultsDir: "/results", worktreesKept: [{ branch: "swarm/gone", path: "/results/wt-gone" }] };
+  const run = { repo: "/gone-repo", resultsDir: "/results", worktreesKept: [{ branch: "swarm/gone", path: "/results/wt-gone" }] };
   const { rows } = plan(run, git, fs);
-  equal(rows.length, 1);
-  equal(rows[0].state, "repo missing");
-  ok(!calls.some((c) => c.cwd === "/gone-repo"), "must not run git against a repo that doesn't exist");
+  deepEqual(rows, [{ path: "/results/wt-gone", branch: "swarm/gone", bytes: 512, repo: "/gone-repo" }]);
+  equal(calls.length, 0, "must not run git against a repo that doesn't exist");
 });
 
 test("execute: worktree remove --force then branch -D, in that order; a repo-missing row is rm -rf'd with no git at all", () => {
   const calls = [];
   const git = (args, cwd) => { calls.push({ args, cwd }); return { status: 0, stdout: "", stderr: "" }; };
   const rmCalls = [];
-  const fs = { rmSync: (p, opts) => rmCalls.push({ p, opts }) };
+  const fs = { existsSync: (p) => p !== "/gone", rmSync: (p, opts) => rmCalls.push({ p, opts }) };
   const rows = [
-    { path: "/r/wt-a", branch: "swarm/a", bytes: 10, state: "merged", repo: "/repo" },
-    { path: "/r/wt-gone", branch: "swarm/gone", bytes: 5, state: "repo missing", repo: "/gone" },
+    { path: "/r/wt-a", branch: "swarm/a", bytes: 10, repo: "/repo" },
+    { path: "/r/wt-gone", branch: "swarm/gone", bytes: 5, repo: "/gone" },
   ];
   execute(rows, git, fs);
   deepEqual(calls, [
@@ -167,16 +90,33 @@ test("execute: worktree remove --force then branch -D, in that order; a repo-mis
   equal(rmCalls[0].p, "/r/wt-gone");
 });
 
-test("formatPrune: one line per row with size + state, then the freed/would-free closing line", () => {
+test("execute never rm's anything outside the rows it was given — run.log, summary.json, results/, digest.md, report.md, manifest.json survive", () => {
+  const git = () => ({ status: 0, stdout: "", stderr: "" });
+  const rmCalls = [];
+  const fs = {
+    existsSync: (p) => p !== "/gone",
+    rmSync: (p) => rmCalls.push(p),
+  };
   const rows = [
-    { path: "/r/wt-a", branch: "swarm/a", bytes: 1073741824, state: "merged", repo: "/repo" },
-    { path: "/r/wt-b", branch: "swarm/b", bytes: 536870912, state: "dirty", repo: "/repo" },
+    { path: "/run/wt-a", branch: "swarm/a", bytes: 10, repo: "/repo" },
+    { path: "/run/wt-gone", branch: "swarm/gone", bytes: 5, repo: "/gone" },
+  ];
+  execute(rows, git, fs);
+  deepEqual(rmCalls, ["/run/wt-gone"], "rmSync must be called only for the repo-missing row's own worktree path");
+  const forbidden = ["/run/run.log", "/run/summary.json", "/run/results", "/run/digest.md", "/run/report.md", "/run/manifest.json"];
+  for (const f of forbidden) ok(!rmCalls.includes(f), `execute must never rm ${f}`);
+});
+
+test("formatPrune: one line per row with size, then the freed/would-free closing line", () => {
+  const rows = [
+    { path: "/r/wt-a", branch: "swarm/a", bytes: 1073741824, repo: "/repo" },
+    { path: "/r/wt-b", branch: "swarm/b", bytes: 536870912, repo: "/repo" },
   ];
   const real = formatPrune(rows, { dryRun: false });
   ok(real.includes("/r/wt-a"), real);
-  ok(real.includes("merged"), real);
+  ok(real.includes("swarm/a"), real);
   ok(real.includes("/r/wt-b"), real);
-  ok(real.includes("dirty"), real);
+  ok(real.includes("swarm/b"), real);
   ok(/freed 1\.50 GB across 2 worktrees/.test(real), real);
 
   const dry = formatPrune(rows, { dryRun: true });

@@ -1,10 +1,10 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { prepareIsolation, collect, integrate, defaultBranch, isMerged, listRegistered } from "../src/worktree.mjs";
+import { prepareIsolation, collect, integrate } from "../src/worktree.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { loadManifest, ValidationError } from "../src/manifest.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
@@ -882,89 +882,3 @@ test("I1: a when-gated isolation.from source is rejected at validate, and the ru
   } finally { cleanup(repo, dir); }
 });
 
-test("defaultBranch resolves origin/HEAD when a remote exists", () => {
-  const repo = initRepo();
-  const bare = mkdtempSync(join(tmpdir(), "swarm-wt-bare-"));
-  try {
-    spawnSync("git", ["init", "-q", "--bare", "-b", "trunk", bare], { windowsHide: true });
-    spawnSync("git", ["remote", "add", "origin", bare], { cwd: repo, windowsHide: true });
-    // repo's local default is "main"; point origin/HEAD at a differently-named branch
-    // to prove the function reads origin/HEAD, not the local checkout.
-    spawnSync("git", ["push", "-q", "origin", "main:trunk"], { cwd: repo, windowsHide: true });
-    spawnSync("git", ["remote", "set-head", "origin", "trunk"], { cwd: repo, windowsHide: true });
-    equal(defaultBranch(repo), "trunk");
-  } finally { cleanup(repo, bare); }
-});
-
-test("defaultBranch falls back to master when there is no origin at all", () => {
-  const repo = initRepo();
-  try {
-    equal(defaultBranch(repo), "master");
-  } finally { cleanup(repo); }
-});
-
-test("defaultBranch is memoised — a later remote change is not picked up on a second call", () => {
-  const repo = initRepo();
-  const bare = mkdtempSync(join(tmpdir(), "swarm-wt-bare2-"));
-  try {
-    spawnSync("git", ["init", "-q", "--bare", "-b", "trunk", bare], { windowsHide: true });
-    spawnSync("git", ["remote", "add", "origin", bare], { cwd: repo, windowsHide: true });
-    spawnSync("git", ["push", "-q", "origin", "main:trunk"], { cwd: repo, windowsHide: true });
-    spawnSync("git", ["remote", "set-head", "origin", "trunk"], { cwd: repo, windowsHide: true });
-    equal(defaultBranch(repo), "trunk", "first call resolves origin/HEAD");
-
-    // Remove the remote entirely — an unmemoised call would now fall back to "master".
-    spawnSync("git", ["remote", "remove", "origin"], { cwd: repo, windowsHide: true });
-    equal(defaultBranch(repo), "trunk", "second call must still return the cached value");
-  } finally { cleanup(repo, bare); }
-});
-
-test("isMerged: true when branch is an ancestor of base", () => {
-  const repo = initRepo();
-  const results = mkdtempSync(join(tmpdir(), "swarm-wt-im-"));
-  try {
-    const wt = prepareIsolation({ id: "anc", originalCwd: repo, worktreeName: "anc" }, CFG, results);
-    // branch created at repo HEAD with no further commits — a pure ancestor
-    ok(isMerged("swarm/anc", "main", repo));
-  } finally { dropWorktree(repo, join(results, "wt-anc")); cleanup(repo, results); }
-});
-
-test("isMerged: true when the branch was squash-merged — every cherry line is '-'", () => {
-  const repo = initRepo();
-  const results = mkdtempSync(join(tmpdir(), "swarm-wt-im2-"));
-  try {
-    const wt = prepareIsolation({ id: "sq", originalCwd: repo, worktreeName: "sq" }, CFG, results);
-    writeFileSync(join(wt.path, "sq.txt"), "squashed work\n");
-    commitAll(wt.path, "sq work");
-    dropWorktree(repo, wt.path);
-    spawnSync("git", ["merge", "--squash", "swarm/sq"], { cwd: repo, windowsHide: true });
-    commitAll(repo, "squashed sq");
-    ok(isMerged("swarm/sq", "main", repo), "squash-landed content reads as merged via cherry");
-  } finally { cleanup(repo, results); }
-});
-
-test("isMerged: false when the branch carries a commit not on base", () => {
-  const repo = initRepo();
-  const results = mkdtempSync(join(tmpdir(), "swarm-wt-im3-"));
-  try {
-    const wt = prepareIsolation({ id: "ahead", originalCwd: repo, worktreeName: "ahead" }, CFG, results);
-    writeFileSync(join(wt.path, "ahead.txt"), "unlanded work\n");
-    commitAll(wt.path, "ahead work");
-    ok(!isMerged("swarm/ahead", "main", repo), "an unlanded commit must never read as merged");
-  } finally { dropWorktree(repo, join(results, "wt-ahead")); cleanup(repo, results); }
-});
-
-test("listRegistered parses `worktree list --porcelain` into { path, branch, head }", () => {
-  const repo = initRepo();
-  const results = mkdtempSync(join(tmpdir(), "swarm-wt-lr-"));
-  try {
-    const wt = prepareIsolation({ id: "reg", originalCwd: repo, worktreeName: "reg" }, CFG, results);
-    const rows = listRegistered(repo);
-    const main = rows.find((r) => resolve(r.path) === resolve(repo));
-    ok(main, "the main checkout itself is a registered worktree");
-    const tree = rows.find((r) => resolve(r.path) === resolve(wt.path));
-    ok(tree, `expected ${wt.path} among ${JSON.stringify(rows)}`);
-    equal(tree.branch, "swarm/reg");
-    ok(tree.head, "head sha must be captured");
-  } finally { dropWorktree(repo, join(results, "wt-reg")); cleanup(repo, results); }
-});

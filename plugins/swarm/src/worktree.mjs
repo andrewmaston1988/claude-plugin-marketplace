@@ -18,60 +18,6 @@ function unlandedCount(base, branch, repo) {
   return c.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length;
 }
 
-// repo -> its default branch name, resolved once per process: origin/HEAD's
-// target, else origin/main, else master. Memoised because prune calls this
-// once per run while classifying every tree, and it is the same answer every
-// time — a later remote change mid-process is not a case this needs to track.
-const defaultBranchCache = new Map();
-
-export function defaultBranch(repo) {
-  const key = resolve(repo);
-  if (defaultBranchCache.has(key)) return defaultBranchCache.get(key);
-  let branch = "master";
-  const head = git(["symbolic-ref", "--short", "refs/remotes/origin/HEAD"], repo);
-  if (head.status === 0 && head.stdout) {
-    branch = head.stdout.replace(/^origin\//, "");
-  } else if (git(["show-ref", "--verify", "--quiet", "refs/remotes/origin/main"], repo).status === 0) {
-    branch = "main";
-  }
-  defaultBranchCache.set(key, branch);
-  return branch;
-}
-
-// True when `branch` carries nothing base does not already have: an ancestor
-// (fast-forward landing), or every commit's PATCH already applied to base (the
-// squash-merge landing path — same comparison as unlandedCount, restated as a
-// yes/no since prune only prints the state, never gates on it).
-export function isMerged(branch, base, repo) {
-  if (git(["merge-base", "--is-ancestor", branch, base], repo).status === 0) return true;
-  const cherry = git(["cherry", base, branch], repo);
-  if (cherry.status !== 0) return false;
-  const lines = cherry.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
-  return lines.every((l) => l.startsWith("-"));
-}
-
-// `git worktree list --porcelain` parsed into one row per tree — the set prune
-// unions against summary.json.worktreesKept to find trees the summary no
-// longer mentions (a resumed run rewrote it).
-export function listRegistered(repo) {
-  const r = git(["worktree", "list", "--porcelain"], repo);
-  if (r.status !== 0) return [];
-  const rows = [];
-  let cur = null;
-  for (const line of r.stdout.split("\n")) {
-    if (line.startsWith("worktree ")) {
-      if (cur) rows.push(cur);
-      cur = { path: resolve(line.slice("worktree ".length).trim()), branch: null, head: null };
-    } else if (cur && line.startsWith("HEAD ")) {
-      cur.head = line.slice("HEAD ".length).trim();
-    } else if (cur && line.startsWith("branch ")) {
-      cur.branch = line.slice("branch ".length).trim().replace(/^refs\/heads\//, "");
-    }
-  }
-  if (cur) rows.push(cur);
-  return rows;
-}
-
 // The one rule for a task's branch name: an explicit `isolation.branch` wins,
 // else the worktree name under the configured prefix. Exported so the scheduler
 // resolves `from` / `integrate` sources the same way prepareIsolation creates

@@ -15,9 +15,7 @@ function tmp() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// A real tiny repo + a real worktree, on `master` so worktree.mjs's
-// defaultBranch fallback (no origin remote → "master") resolves it without
-// needing a remote fixture.
+// A real tiny repo + a real worktree, used to exercise prune end-to-end.
 function gitOut(args, cwd) {
   return (spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true }).stdout || "").trim();
 }
@@ -292,7 +290,7 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
   }
 });
 
-test("prune --dry-run: a finished run with a merged kept worktree prints the table and removes nothing", () => {
+test("prune --dry-run: a finished run with a kept worktree prints the table and removes nothing", () => {
   const repo = initPruneRepo();
   const dir = tmp();
   try {
@@ -308,7 +306,7 @@ test("prune --dry-run: a finished run with a merged kept worktree prints the tab
     const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), r.stdout);
-    ok(r.stdout.includes("merged"), r.stdout);
+    ok(r.stdout.includes("swarm/impl"), r.stdout);
     ok(/would free/.test(r.stdout), r.stdout);
 
     ok(existsSync(wt.path), "dry-run must not remove the worktree");
@@ -389,7 +387,7 @@ test("prune --dry-run: a dead-engine-stopped run with no kept worktree still fin
     const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes(wt.path), r.stdout);
-    ok(r.stdout.includes("merged"), r.stdout);
+    ok(r.stdout.includes("swarm/impl"), r.stdout);
     ok(existsSync(wt.path), "dry-run must not remove the worktree");
   } finally {
     spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
