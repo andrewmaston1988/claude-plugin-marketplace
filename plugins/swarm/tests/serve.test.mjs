@@ -135,6 +135,104 @@ test("runs list is per project: a busy project cannot crowd a quiet one off the 
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+// ── per-group finished cap ──────────────────────────────────────────────────
+// The cap counts DISPLAY GROUPS — a repo plus its worktree keys are one group —
+// and finishedTotals must report what exists on disk, not what was sent.
+function seedFinished(home, project, name, ageHours) {
+  const d = join(home, "runs", project, name);
+  buildFixture(d);
+  writeFileSync(join(d, "summary.json"), JSON.stringify({ started: "2026-09-05T00:00:00Z", finished: "2026-09-05T00:30:00Z", tasks: [] }), "utf8");
+  const t = (NOW - ageHours * 3600_000) / 1000;
+  utimesSync(join(d, "run.log"), t, t);
+}
+
+function seedActive(home, project, name) {
+  const d = join(home, "runs", project, name);
+  buildFixture(d);
+  const t = (NOW - 5000) / 1000;
+  utimesSync(join(d, "run.log"), t, t);
+  touchHeartbeat(d, new Date(NOW - 5000).toISOString(), process.pid);
+  utimesSync(heartbeatPath(d), t, t);
+}
+
+// One display group spread over three raw keys: the plain repo plus two worktrees.
+function seedFooGroup(home) {
+  for (let i = 0; i < 5; i++) seedFinished(home, "C--code-foo", `fin-${i}`, i + 1);
+  for (let i = 0; i < 3; i++) seedFinished(home, "C--code-.worktrees-foo-branch-a", `wt-a-${i}`, 10 + i);
+  for (let i = 0; i < 3; i++) seedFinished(home, "C--code-.worktrees-foo-branch-b", `wt-b-${i}`, 20 + i);
+}
+
+test("the finished cap counts groups, not raw keys: 3 rows across foo + its two worktree keys", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-group-"));
+  try {
+    seedFooGroup(home);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const { body } = await get("/api/runs");
+      const finished = body.runs.filter((r) => !r.active);
+      assert.equal(finished.length, 3, `per-group cap keeps 3 finished rows total, got ${finished.length}`);
+      assert.ok(finished.every((r) => r.group === "C--code-foo"), "every kept row is grouped under the repo, not its worktree key");
+      // A cap that kept the newest three of the first key it happened to see would pass
+      // the count and still be wrong — the kept rows must be newest across ALL keys.
+      assert.deepEqual(finished.map((r) => r.mtimeMs), [1, 2, 3].map((h) => NOW - h * 3600_000), "the kept three are the three newest across all three keys");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("active runs are never capped, wherever they sit in the group", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-live-"));
+  try {
+    seedFooGroup(home);
+    for (const p of ["C--code-foo", "C--code-.worktrees-foo-branch-a", "C--code-.worktrees-foo-branch-b"]) {
+      seedActive(home, p, "live-a");
+      seedActive(home, p, "live-b");
+    }
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const { body } = await get("/api/runs");
+      const active = body.runs.filter((r) => r.active);
+      assert.equal(active.length, 6, "all six active runs appear — the cap applies to finished rows only");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("finishedTotals reports what exists on disk, not what was sent", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-total-"));
+  try {
+    seedFooGroup(home);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const { body } = await get("/api/runs");
+      assert.equal(body.finishedTotals["C--code-foo"], 11, "11 finished runs on disk, 3 rows sent");
+      assert.equal(body.finishedTotals["C--code-.worktrees-foo-branch-a"], undefined, "totals are keyed by display group, not raw worktree key");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("groupLabel is derived over every raw key — a fully-finished sibling still anchors the common prefix", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-prefix-"));
+  try {
+    seedActive(home, "C--code-alpha", "live-1");
+    for (let i = 0; i < 5; i++) seedFinished(home, "C--code-beta", `fin-${i}`, i + 1);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const { body } = await get("/api/runs");
+      const alpha = body.runs.find((r) => r.project === "C--code-alpha");
+      assert.equal(alpha.groupLabel, "alpha", "the common prefix is C--code- only while both C--code-* keys are in the derivation");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("the single-run payload carries groupLabel so a deep-linked header shows the short name", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-deep-"));
+  try {
+    seedFinished(home, "C--code-foo", "fin-0", 1);
+    seedFinished(home, "C--code-.worktrees-foo-branch-a", "wt-a-0", 2);
+    seedFinished(home, "C--code-bar", "fin-0", 3);
+    await withServer({ home }, async ({ get }) => {
+      const run = await get("/api/runs/C--code-.worktrees-foo-branch-a/wt-a-0");
+      assert.equal(run.status, 200);
+      assert.equal(run.body.groupLabel, "foo", "a worktree key's label is its repo's, not the raw key");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("path safety: every traversal shape is a 404 and never leaves the runs root", async () => {
   const { home } = seedHome();
   writeFileSync(join(home, "outside.json"), "{\"leak\":true}", "utf8");
