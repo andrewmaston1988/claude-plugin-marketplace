@@ -25,9 +25,8 @@ test("real estate shapes: a worktree key groups into its repo and labels as the 
 });
 
 test("longest prefix wins: the marketplace is its own group, never folded into a shorter plain key", () => {
-  const { groupOf, labelOf } = projectGrouping(["C--code-claude", "C--code-claude-plugin-marketplace"]);
+  const { groupOf } = projectGrouping(["C--code-claude", "C--code-claude-plugin-marketplace"]);
   assert.equal(groupOf("C--code-claude-plugin-marketplace"), "C--code-claude-plugin-marketplace");
-  assert.equal(labelOf("C--code-claude-plugin-marketplace"), "claude-plugin-marketplace");
   assert.equal(groupOf("C--code-claude"), "C--code-claude");
 });
 

@@ -227,31 +227,10 @@
   // by tests/live.test.mjs so the page and the test share the same copy.
   const ago = (ms) => window.swarmLive.agoText(ms, Date.now());
   const tokTotal = (t) => t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
-  // Runs are keyed by their encoded cwd. A worktree (`<root>-.worktrees-<repo>-<branch>`,
-  // `<repo>-.claude-worktrees-<branch>`) belongs to its repo, and the label is the key
-  // with the prefix every plain repo shares stripped — nothing machine-specific is assumed.
-  const projectGrouping = (keys) => {
-    const plain = keys.filter((k) => !/\.(claude-)?worktrees|\.swarm/.test(k));
-    const norm = (k) => k.replace(/-\.(claude-)?worktrees-/g, "-").replace(/-\.swarm[^-]*/g, "");
-    // The shared prefix is taken over drive-rooted keys only (`C--code-…`); a key that
-    // IS the prefix (runs dispatched from the root itself) labels as its last segment.
-    const rooted = plain.filter((k) => /^[A-Za-z]--/.test(k));
-    let cp = rooted[0] || "";
-    for (const k of rooted) { let i = 0; while (i < cp.length && i < k.length && cp[i] === k[i]) i++; cp = cp.slice(0, i); }
-    cp = rooted.includes(cp) ? cp + "-" : cp.slice(0, cp.lastIndexOf("-") + 1);
-    const groupOf = (k) => {
-      const n = norm(k);
-      let best = null;
-      for (const p of plain) if ((n === p || n.startsWith(p + "-")) && (!best || p.length > best.length)) best = p;
-      return best || k;
-    };
-    const labelOf = (g) => {
-      const l = g.startsWith(cp) ? g.slice(cp.length) : g;
-      return l || g.split("-").filter(Boolean).slice(-1)[0] || g;
-    };
-    return { groupOf, labelOf };
-  };
-  let shortProject = (p) => p;
+  // The server groups runs (grouping.mjs) and labels every row; the page only draws.
+  // shortProject falls back to the raw key so an old payload still renders.
+  const groupLabels = new Map();
+  const shortProject = (p) => groupLabels.get(p) || p;
   const countsHtml = (byState) => {
     const n = (...ks) => ks.reduce((a, k) => a + (byState[k] || 0), 0);
     const parts = [["ok", n("ok", "skipped"), "✓"], ["run", n("running", "retrying"), "◐"], ["warn", n("rate-limited") + n("quota"), "⧖"], ["bad", n("failed", "failed:timeout", "failed:stopped", "blocked"), "✗"], ["pend", n("pending"), "·"], ["pend", n("aborted"), "✕"]];
@@ -348,10 +327,9 @@
     // Every project gets a section — the estate view — projects with a live run first,
     // ranked by that run's newest startedMs (see live.js projectOrder — stable across
     // polls, unlike mtimeMs); inside a section live rows lead, finished follow.
-    const { groupOf, labelOf } = projectGrouping([...new Set(runs.map((r) => r.project))]);
-    shortProject = labelOf;
+    for (const r of runs) { groupLabels.set(r.project, r.groupLabel || r.project); if (r.group) groupLabels.set(r.group, r.groupLabel || r.group); }
     const byProject = new Map();
-    for (const r of runs) { const g = groupOf(r.project); if (!byProject.has(g)) byProject.set(g, []); byProject.get(g).push(r); }
+    for (const r of runs) { const g = r.group || r.project; if (!byProject.has(g)) byProject.set(g, []); byProject.get(g).push(r); }
     // Live rows sort by startedMs (most recently dispatched on top, staying there);
     // finished rows by mtimeMs as before.
     for (const rows of byProject.values()) {
@@ -379,7 +357,8 @@
       const rest = byProject.get(p).filter((r) => !r.active);
       if (!rest.length) continue;
       const open = window.swarmLive.projectOpen(p, ui.openProjects);
-      html += `<div class="section dim tap" data-key="ps:${esc(p)}" data-project="${esc(p)}"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length} finished</small>${chev(open)}</div>`;
+      const total = (data.finishedTotals || {})[p] ?? rest.length;
+      html += `<div class="section dim tap" data-key="ps:${esc(p)}" data-project="${esc(p)}"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length}${total > rest.length ? ` of ${total}` : ""} finished</small>${chev(open)}</div>`;
       if (open) { html += `<ul data-key="pl:${esc(p)}">`; for (const r of rest) html += runRow(r, true); html += "</ul>"; }
     }
     if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
@@ -587,7 +566,7 @@
   // so the elapsed/ago text moves without a network round trip.
   function runHeaderHtml(run, now) {
     const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.abortedMs ? `aborted · engine gone · ${ago(run.abortedMs)}` : run.stoppedMs ? `stopped · ${ago(run.stoppedMs)}` : run.startedMs ? fmtDur(now - run.startedMs) : "";
-    return `${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>${menuBtn}`;
+    return `${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>${menuBtn}`;
   }
 
   let currentRun = null;
@@ -614,7 +593,7 @@
     const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
     currentRun = run;
     const { tasks, waves } = nodeSubgraph(run, id);
-    setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(id)}</b><small>${esc(shortProject(project))} · ${esc(name)} · ${tasks.length} node${tasks.length === 1 ? "" : "s"}</small></div>${menuBtn}`);
+    setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(id)}</b><small>${esc(run.groupLabel || shortProject(project))} · ${esc(name)} · ${tasks.length} node${tasks.length === 1 ? "" : "s"}</small></div>${menuBtn}`);
     const { html, rows } = renderRunHtml(run, tasks, waves);
     setHtml(main, html);
     drawRail(tasks, rows);
@@ -654,7 +633,7 @@
     const now = Date.now();
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
     const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
-    setHeader(`${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`);
+    setHeader(`${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`);
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
     let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip">${esc(t.model)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${quietSecsVal}s</span>` : ""}</div>`;
