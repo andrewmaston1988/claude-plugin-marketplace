@@ -256,3 +256,28 @@ export function ensureShim({ home, resolverSrc, copyFile = copyFileSync }) {
   copyFile(resolverSrc, dst);
   return dst;
 }
+// Poll until a signalled process is actually gone. `serve restart` must not
+// start a replacement while the old daemon still holds the port — that race is
+// what leaves zero daemons listening once the old one finally exits.
+export async function waitForExit(pid, {
+  isAlive: alive = isAlive, deadlineMs = 10000, pollMs = 100,
+  sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = Date.now,
+} = {}) {
+  const deadline = now() + deadlineMs;
+  for (;;) {
+    if (!alive(pid)) return { exited: true };
+    if (now() >= deadline) return { exited: false, reason: `pid ${pid} still alive after ${deadlineMs}ms` };
+    await sleep(pollMs);
+  }
+}
+
+// What `serve restart` may do, given what the signalled daemon did. Separated
+// from the verb because the dangerous case is unreachable through the CLI in a
+// test: a daemon that ignores the signal must leave us starting NOTHING and
+// clearing NOTHING — a record cleared out from under a live daemon is a daemon
+// `serve stop` can never reach again.
+export function restartPlan({ record, wasAlive, exited }) {
+  if (!record?.pid || !wasAlive) return { act: "start", clearRecord: true, reason: "not running" };
+  if (!exited) return { act: "abort", clearRecord: false, reason: "the old daemon did not exit — it is still serving" };
+  return { act: "start", clearRecord: true, reason: "stopped" };
+}

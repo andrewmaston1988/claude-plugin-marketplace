@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, launcherPath,
   pidPath, resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, ensureShim,
+  waitForExit, restartPlan,
 } from "../src/serve/daemon.mjs";
 import { createLogger } from "../src/serve/log.mjs";
 
@@ -268,4 +269,50 @@ test("autostart: install writes the launcher once (idempotent), uninstall remove
     assert.equal(uninstallAutostart({ startupDir: dir }).removed, false);
     assert.equal(installAutostart({ startupDir: null, nodePath: "n", enginePath: "e" }).installed, false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+// --- serve restart: never start a replacement while the old daemon lives ---
+// The defect these guard (found in code review, 2026-09-09): restart signalled
+// the old daemon, cleared its pid record immediately, and started a replacement
+// without waiting. If the old process still held the port the replacement could
+// not bind, its own record was cleared too, and once the old process finally
+// exited ZERO daemons were listening — with the old one recordless in between,
+// so `serve stop` could not reach it.
+
+test("restartPlan: a daemon that ignores the signal aborts the restart and keeps its record", () => {
+  const p = restartPlan({ record: { pid: 42 }, wasAlive: true, exited: false });
+  assert.equal(p.act, "abort");
+  assert.equal(p.clearRecord, false); // the live daemon must stay reachable by `serve stop`
+});
+
+test("restartPlan: a daemon that exits clears the record and starts the replacement", () => {
+  const p = restartPlan({ record: { pid: 42 }, wasAlive: true, exited: true });
+  assert.equal(p.act, "start");
+  assert.equal(p.clearRecord, true);
+});
+
+test("restartPlan: no live daemon starts and clears the stale record", () => {
+  assert.deepEqual(
+    { act: "start", clear: restartPlan({ record: { pid: 42 }, wasAlive: false, exited: true }).clearRecord },
+    { act: "start", clear: true },
+  );
+  assert.equal(restartPlan({ record: null, wasAlive: false, exited: true }).act, "start");
+});
+
+test("waitForExit: returns exited once the process is gone, not before", async () => {
+  let calls = 0;
+  const r = await waitForExit(7, {
+    isAlive: () => ++calls < 3, // alive for two polls, then gone
+    sleep: async () => {}, now: () => 0, deadlineMs: 1000,
+  });
+  assert.equal(r.exited, true);
+  assert.equal(calls, 3);
+});
+
+test("waitForExit: a process that never dies reports not-exited rather than hanging", async () => {
+  let t = 0;
+  const r = await waitForExit(7, {
+    isAlive: () => true, sleep: async () => { t += 100; }, now: () => t, deadlineMs: 300,
+  });
+  assert.equal(r.exited, false);
+  assert.match(r.reason, /still alive/);
 });

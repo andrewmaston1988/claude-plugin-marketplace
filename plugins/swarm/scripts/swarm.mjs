@@ -609,7 +609,7 @@ async function cmdPerf(rest) {
 // copy and records its pid (written by the parent, per the plugin daemon rule).
 async function cmdServe(rest) {
   const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir, pidPath,
-    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort } = await import("../src/serve/daemon.mjs");
+    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort, waitForExit, restartPlan } = await import("../src/serve/daemon.mjs");
   const home = swarmHome();
   const cfg = getConfig();
   const port = cfg.dashboard?.port ?? 7331;
@@ -724,11 +724,23 @@ async function cmdServe(rest) {
   if (verb === "restart") {
     const rec = readPid(home);
     const pid = rec?.pid;
-    if (pid && isAlive(pid)) {
+    const wasAlive = Boolean(pid && isAlive(pid));
+    // Wait for the signalled daemon to ACTUALLY exit before starting anything.
+    // Starting while it still holds the port loses the bind, and clearing its
+    // record while it is alive leaves a daemon `serve stop` can never reach.
+    let exited = true;
+    if (wasAlive) {
       try { process.kill(pid); } catch (e) { err(`dashboard: could not stop pid ${pid}: ${e.message}`); exitSoon(1); return 1; }
-      out(`dashboard: stopped pid ${pid}`);
-    } else out("dashboard: not running — starting");
-    clearPid(home);
+      ({ exited } = await waitForExit(pid, { isAlive }));
+    }
+    const plan = restartPlan({ record: rec, wasAlive, exited });
+    if (plan.act === "abort") {
+      err(`dashboard: restart aborted — ${plan.reason} (pid ${pid}); nothing was stopped or started`);
+      exitSoon(1); return 1;
+    }
+    if (wasAlive) out(`dashboard: stopped pid ${pid}`);
+    else out("dashboard: not running — starting");
+    if (plan.clearRecord) clearPid(home);
     const started = await startDetached();
     if (!started.ok) { err(`dashboard: ${started.reason}`); exitSoon(1); return 1; }
     const w = await waitForDaemon({ read: () => readPid(home), isAlive, excludePid: pid ?? null, deadlineMs: 15000 });
