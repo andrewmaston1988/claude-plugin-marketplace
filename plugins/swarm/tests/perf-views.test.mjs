@@ -201,3 +201,81 @@ test("cost: custom bands re-map the band column", () => {
   equal(spread.find((s) => s.model === "m-dear").band, 3, "4.4× is over the second edge");
   equal(spread.find((s) => s.model === "m-thin").band, 3, "3× is over the second edge too");
 });
+
+// ── best / worst value cards ──────────────────────────────────────────────
+// The two verdicts the cost screen puts on cards. Every fixture below pins
+// EVERY model's multiplier, because a ratio derivation must be able to
+// disagree with the rule — see the row-4 test.
+const g4 = (leaf, model, s) => graded({ leaf, model, grades: { adherence: s, handoff: s, truthfulness: s, depth: s } });
+const many = (model, s, n = 6) => Array.from({ length: n }, (_, i) => g4(`${model}${i}`, model, s));
+
+test("best: the highest-quality FRONTIER member — never an unmeasured model that outscores it", () => {
+  // The onFrontier filter's real bite is UNMEASURED models, not dominated ones:
+  // the top-wtd model can never be dominated (domination needs someone strictly
+  // better), so among priced models the filter is a no-op. An unpriced model,
+  // though, sits in `points` with onFrontier false and can top the wtd column —
+  // and naming it "best value" would price something the history never priced.
+  const rows = [...many("v-mid", 8), ...many("v-low", 4), ...many("v-unpriced", 9)];
+  const costs = [
+    costRow("v-mid", 1), costRow("v-low", 3),
+    costRow("v-unpriced", null, { ptsPerReq: null, requests: 150, measuredRequests: 0, weeks: 1, measuredWeeks: 0 }),
+  ];
+  const { best, points } = costView(rows, costs);
+  equal(points.find((p) => p.model === "v-unpriced").wtd > best.wtd, true, "fixture precondition: the unpriced model outscores the pick");
+  equal(best.model, "v-mid", "best must come from the frontier, not the top of the whole list");
+  equal(best.onFrontier, true);
+});
+
+test("best: ties break on the cheaper model, then the name", () => {
+  const rows = [...many("t-a", 8), ...many("t-b", 8)];
+  const { best } = costView(rows, [costRow("t-a", 3), costRow("t-b", 1)]);
+  equal(best.model, "t-b", "equal quality — the cheaper wins");
+});
+
+test("worst: the DEAREST dominated model, naming its dominator", () => {
+  // w-dearest-frontier is dearer than every dominated model, so a derivation
+  // that drops the dominatedBy filter picks it and this row goes red.
+  const rows = [...many("w-cheap", 9), ...many("w-mid", 5), ...many("w-bad", 4), ...many("w-dearest-frontier", 10)];
+  const costs = [costRow("w-cheap", 1), costRow("w-mid", 3), costRow("w-bad", 6), costRow("w-dearest-frontier", 9)];
+  const { worst } = costView(rows, costs);
+  equal(worst.model, "w-bad", "the dearest model something beats on both axes");
+  equal(worst.dominatedBy, "w-cheap", "and it names the model that beat it");
+});
+
+test("best/worst are null — never a fabricated pick — when no candidate qualifies", () => {
+  // (a) everything on the frontier → nothing is dominated
+  const onlyFrontier = costView([...many("n-a", 9), ...many("n-b", 5)], [costRow("n-a", 4), costRow("n-b", 1)]);
+  equal(onlyFrontier.worst, null, "no dominated model means no worst — not the cheapest, not points[0]");
+  ok(onlyFrontier.best, "…while best still resolves");
+  // (b) graded models exist but none is priced → no frontier participant
+  const unpriced = costView([...many("u-a", 9)], [costRow("u-a", null, { ptsPerReq: null, requests: 150, measuredRequests: 0, weeks: 1, measuredWeeks: 0 })]);
+  ok(unpriced.points.length > 0, "points is non-empty…");
+  equal(unpriced.best, null, "…but an unmeasured model is not a frontier member");
+  equal(unpriced.worst, null);
+  // (c) no cost history at all
+  const none = costView([...many("z-a", 9)], []);
+  equal(none.best, null);
+  equal(none.worst, null);
+});
+
+test("best is NOT a quality-per-cost ratio — the rule and the ratio disagree here", () => {
+  // Neither dominates the other: 9.5@12x is better but dearer, 3.0@0.6x cheaper
+  // but worse. So frontier() keeps both. ratio: 3.0/0.6 = 5.0 beats 9.5/12 = 0.79,
+  // so a ratio derivation picks r-cheap and this row fails.
+  const rows = [...many("r-good", 9.5), ...many("r-cheap", 3)];
+  const { best, points } = costView(rows, [costRow("r-good", 12), costRow("r-cheap", 0.6)]);
+  ok(points.find((p) => p.model === "r-good").onFrontier, "fixture precondition: both are on the frontier");
+  ok(points.find((p) => p.model === "r-cheap").onFrontier, "fixture precondition: both are on the frontier");
+  equal(best.model, "r-good", "domination, not a ratio — scores.mjs rejects collapsing the two axes");
+});
+
+test("worst: at equal cost the WORSE model wins the card — lower wtd, not higher", () => {
+  // Untested until the code review flagged the gap and read the tie-break the
+  // wrong way round. Lower quality at the same price IS the worse value, so the
+  // sort is ascending on wtd; this pins the direction against a future "fix".
+  const rows = [...many("k-top", 9), ...many("k-better", 5), ...many("k-worse", 3)];
+  const costs = [costRow("k-top", 1), costRow("k-better", 4), costRow("k-worse", 4)];
+  const { worst } = costView(rows, costs);
+  equal(worst.model, "k-worse", "equal multiplier — the lower-quality model is the worse value");
+  equal(worst.dominatedBy, "k-top");
+});

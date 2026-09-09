@@ -78,5 +78,17 @@ export function costView(rows, costRows, { domain, bands = DEFAULT_COST_BANDS } 
       thin: r.measuredRequests < THIN_REQUESTS,
     }))
     .sort((a, z) => (a.mult ?? Infinity) - (z.mult ?? Infinity) || a.model.localeCompare(z.model));
-  return { points, spread, bands };
+  // The two verdicts worth a card, decided here so the page never re-derives
+  // them. Neither is a quality-per-cost ratio — scores.mjs's frontier() rejects
+  // that outright, and domination is the only comparison it makes. So `best` is
+  // the highest-quality model nothing beats on BOTH axes, and `worst` the
+  // dearest model something does. frontier() only ever sets onFrontier or
+  // dominatedBy on a participant, so both carry a wtd and a multiplier by
+  // construction; the filters below are still explicit, because a `best` picked
+  // from all points would silently become "highest wtd overall".
+  const best = points.filter((p) => p.onFrontier)
+    .sort((a, z) => z.wtd - a.wtd || a.multiplier - z.multiplier || a.model.localeCompare(z.model))[0] ?? null;
+  const worst = points.filter((p) => p.dominatedBy != null)
+    .sort((a, z) => z.multiplier - a.multiplier || a.wtd - z.wtd || a.model.localeCompare(z.model))[0] ?? null;
+  return { points, spread, bands, best, worst };
 }

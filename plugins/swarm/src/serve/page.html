@@ -114,13 +114,16 @@
   .rank .bar span { background:var(--accent); }
   .rank .bar.prov span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
   .rank .meta .tag { color:var(--faint); }
-  .chip.on { color:var(--ink); background:var(--accent-soft); border:1px solid var(--accent); }
   .chip[data-href], .chip[data-domain] { cursor:pointer; }
   .foot { padding:10px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
-  /* perf view switcher: five pills, one column each, centred — never a ragged wrap */
-  .chips.views { display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; }
-  .chips.views .chip { justify-content:center; }
+  /* perf view switcher: one responsive SVG, same idiom as .cov svg.covgrid.
+     Five labels cannot fit five equal CSS columns on a phone, and this page has
+     no media queries — scaling a fixed coordinate space is how it fits a screen.
+     The indicator moves by transform, never by animating x/width (D9). */
+  .seg { padding:12px 16px 0; }
+  .seg svg { width:100%; height:auto; display:block; }
+  .seg .seg-ind { fill:var(--accent-soft); stroke:var(--accent); stroke-width:1; transition:transform .2s cubic-bezier(.4,0,.2,1); }
   /* aspect + domain pickers: the lists are too long for pills on a phone */
   .selrow { display:flex; gap:8px; padding:8px 16px 0; }
   /* model dashboard: four stat tiles, compressed aspect bars, widget headers that can hold a picker */
@@ -147,19 +150,16 @@
   /* coverage grid: one responsive SVG, labels inside it, scaled to the screen */
   .cov { padding:0 12px 16px; }
   .cov svg.covgrid { width:100%; height:auto; display:block; }
-  /* cost view: frontier scatter + log spread, same responsive-SVG idiom.
-     States, not series: frontier is the accent, dominated recedes, thin is
-     hollow with a dashed state-coloured stroke, unmeasured is a void. */
+  /* cost screen: two verdict cards, then a ranked list. States, not series —
+     a hatched bar is thin evidence, an unmeasured row draws no bar at all and
+     sits below a divider, never a 0-width bar that would read as free. */
   .cost { padding:0 12px 16px; }
-  .cost svg { width:100%; height:auto; display:block; }
-  .cost .fr { fill:var(--accent); }
-  .cost .dom { fill:var(--muted); opacity:.55; }
-  .cost .thin { fill:var(--surface); stroke-dasharray:2 2; stroke-width:1.2; }
-  .cost .fr.thin { stroke:var(--accent); }
-  .cost .dom.thin { stroke:var(--muted); }
-  .cost .unm { fill:var(--surface); stroke:var(--faint); stroke-dasharray:2 2; stroke-width:1.2; }
-  .dot-thin { background:var(--surface); box-shadow:inset 0 0 0 1.2px var(--accent); }
-  .dot-unm { background:var(--surface); box-shadow:inset 0 0 0 1.2px var(--faint); }
+  .costcards span { white-space:normal; }
+  .costcards small { font-size:11px; color:var(--muted); }
+  .arow.costrow { grid-template-columns:96px 1fr 64px; row-gap:0; }
+  .arow.costrow .costverdict { grid-column:1 / -1; font-size:10px; color:var(--faint); margin:-2px 0 4px; }
+  .arow.costrow.unmfirst { border-top:1px solid var(--rule); padding-top:6px; }
+  .arow.costrow.unm .alabel, .arow.costrow.unm .aval { color:var(--faint); }
   /* the cost badge rides the rank row's value side, never the name */
   .valside { display:flex; align-items:center; gap:5px; }
   .cbadge { font-size:11px; flex:none; }
@@ -785,6 +785,52 @@
     return bits.join(" · ");
   };
   const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders", "cost"]);
+  const PERF_VIEWS = [
+    { label: "rank", href: "#/perf", kind: null },
+    { label: "coverage", href: "#/perf/coverage", kind: "coverage" },
+    { label: "reliability", href: "#/perf/reliability", kind: "reliability" },
+    { label: "leaders", href: "#/perf/leaders", kind: "leaders" },
+    { label: "cost", href: "#/perf/cost", kind: "cost" },
+  ];
+  // Pinned so the rendered size is checkable at design time rather than a shrug:
+  // the five labels above give a 334.8-unit viewBox. The SVG scales to .seg's
+  // content box, not the viewport, and .seg carries 16px side padding — so at a
+  // 390px screen the labels render ~11.8px, not the 12.8px the raw viewport
+  // ratio suggests. CH is set near the font's advance on purpose —
+  // overshooting only makes a pill roomier, while undershooting collides a label
+  // with its neighbour across a 6-unit gap.
+  const SEG = { FS: 11, CH: 6.2, PAD: 10, GAP: 6, H: 26 };
+  // The switcher lives here, not in perf.js: perf.js is loaded by loadPerfJs()
+  // on the four new views and the model page only, while this renders above them
+  // on every perf route including rank and aspect. Keeping it in the always-loaded
+  // layer means there is no branch left to forget.
+  function segSwitcher(views, activeIndex) {
+    let x = 0;
+    const pills = views.map((v) => {
+      const w = v.label.length * SEG.CH + SEG.PAD * 2;
+      const box = { label: v.label, href: v.href, x, w };
+      x += w + SEG.GAP;
+      return box;
+    });
+    const W = Math.max(0, x - SEG.GAP);
+    const act = pills[activeIndex];
+    const n = (v) => Number(v.toFixed(1));
+    // translate(), not an x/width transition: morph() reuses this node across
+    // renders so a transform animates, while an attribute-driven x transition is
+    // not reliably animatable in mobile Safari. Width therefore snaps.
+    const ind = act ? `<rect class="seg-ind" x="0" y="0" width="${n(act.w)}" height="${SEG.H}" rx="${SEG.H / 2}" transform="translate(${n(act.x)},0)"/>` : "";
+    const items = pills.map((p, i) => {
+      // The hit target is a transparent rect, not the text: a <text> element's
+      // hit area is its painted glyphs, which is not a thumb target. The text
+      // above it is pointer-transparent so taps fall through to this rect.
+      const hit = `<rect x="${n(p.x)}" y="0" width="${n(p.w)}" height="${SEG.H}" rx="${SEG.H / 2}" fill="transparent" pointer-events="all" data-href="${esc(p.href)}" style="cursor:pointer"/>`;
+      // Explicit fill — unstyled SVG text renders black on --ground.
+      const fill = i === activeIndex ? "var(--ink)" : "var(--muted)";
+      const label = `<text class="seg-label${i === activeIndex ? " on" : ""}" x="${n(p.x + p.w / 2)}" y="${n(SEG.H / 2 + SEG.FS * 0.35)}" text-anchor="middle" font-size="${SEG.FS}" fill="${fill}" pointer-events="none">${esc(p.label)}</text>`;
+      return hit + label;
+    }).join("");
+    return `<div class="seg"><svg viewBox="0 0 ${n(W)} ${SEG.H}" preserveAspectRatio="xMinYMin meet">${ind}${items}</svg></div>`;
+  }
   async function buildPerf(kind, which) {
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
     const domain = ui.perfDomain;
@@ -800,13 +846,14 @@
       };
     }
     const header = `${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}${model && p.rank ? ` ${["🏆", "🥈", "🥉"][p.rank.position - 1] || `<span class="tag">#${p.rank.position}</span>`}` : ""}</b><small>${p.rows} graded leaves · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`;
-    const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
     const sel = (attr, opts, current) => `<select class="sel" ${attr}>${opts.map(([v, label]) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
     const domainSel = () => p.domains.length > 1 ? sel('data-domain-select', [["", "all domains"], ...p.domains.map((d) => [d, d])], domain || "") : "";
     let html = "";
     if (!model) {
-      // View switcher: the existing ranking view plus the four new ones.
-      html += `<div class="chips views">${chip("rank", "#/perf", !NEW_PERF_KINDS.has(kind))}${chip("coverage", "#/perf/coverage", kind === "coverage")}${chip("reliability", "#/perf/reliability", kind === "reliability")}${chip("leaders", "#/perf/leaders", kind === "leaders")}${chip("cost", "#/perf/cost", kind === "cost")}</div>`;
+      // View switcher: the existing ranking view plus the four new ones. `rank`
+      // also covers the aspect screens, which are a ranking under a filter.
+      const active = Math.max(0, PERF_VIEWS.findIndex((v) => (v.kind === null ? !NEW_PERF_KINDS.has(kind) : v.kind === kind)));
+      html += segSwitcher(PERF_VIEWS, active);
     }
     if (NEW_PERF_KINDS.has(kind)) {
       if (p.domains.length > 1) html += `<div class="selrow">${domainSel()}</div>`;
@@ -814,12 +861,12 @@
       // The one DOM touch a build makes: a cached script load (appends once, reused
       // after), never a screen paint — nothing shows until commitView lands the markup.
       await loadPerfJs();
-      const h = { esc, enc, fmtScore, chip };
+      const h = { esc, enc, fmtScore };
       html += kind === "coverage" ? window.perfViews.coverageGrid(p.views.coverage, h)
         : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
         : kind === "leaders" ? window.perfViews.leadersList(p.views.leaders, h)
-        : window.perfViews.costPlots(p.views.cost, h);
-      if (kind === "cost") html += `<div class="foot">cost is a model's meter weight — the multiplier against the cheapest measured model, banked week over week. A hollow mark is thin evidence: under 200 measured requests. Bands are config (<code>provider.cloud.ollama.costBands</code>).</div>`;
+        : window.perfViews.costScreen(p.views.cost, h);
+      if (kind === "cost") html += `<div class="foot">cost is a model's meter weight — the multiplier against the cheapest measured model, banked week over week. A hatched bar is thin evidence: under 200 measured requests. Bands are config (<code>provider.cloud.ollama.costBands</code>).</div>`;
       return { header, html };
     }
     {
@@ -837,7 +884,7 @@
     if (model) {
       // One model as a dashboard: tiles, compressed aspect bars, its coverage row, its reliability bar.
       await loadPerfJs();
-      const h = { esc, enc, fmtScore, chip };
+      const h = { esc, enc, fmtScore };
       const cov = p.views.coverage;
       html += window.perfViews.modelDashboard({
         model, overall: p.overall[0] || null, rank: p.rank || null, domain, domainSelect: domainSel(),
