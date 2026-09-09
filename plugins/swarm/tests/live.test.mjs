@@ -112,3 +112,31 @@ test("loadScript: resolves on load, rejects on error rather than swallowing it (
   created.onerror();
   await assert.rejects(err);
 });
+
+test("routeGuard: only the exact-latest sequence commits — anything older, or ahead of the counter, discards (L9)", () => {
+  const { routeGuard } = loadLive();
+  assert.equal(routeGuard(1, 1), true, "the newest sequence commits");
+  assert.equal(routeGuard(1, 2), false, "an older sequence discards");
+  assert.equal(routeGuard(2, 2), true, "the new latest commits once the counter advanced");
+  assert.equal(routeGuard(2, 3), false, "a sequence equal to a superseded latest discards after a further increment");
+  assert.equal(routeGuard(0, 0), true, "the first boot commits");
+  assert.equal(routeGuard(3, 2), false, "a sequence the counter never issued discards — `>=` here is the off-by-one that lets stale builds through");
+});
+
+test("coalesce: a burst of requests arms one scheduled run, and the latch resets after it fires (L10)", () => {
+  const { coalesce } = loadLive();
+  const scheduled = [];
+  const request = coalesce((fn) => scheduled.push(fn));
+  let ran = 0;
+  request(() => ran++);
+  request(() => ran++);
+  request(() => ran++);
+  assert.equal(scheduled.length, 1, "three requests, one scheduled run");
+  assert.equal(ran, 0, "nothing runs until the scheduler fires");
+  scheduled.pop()();
+  assert.equal(ran, 1, "exactly one route ran");
+  request(() => ran++);
+  assert.equal(scheduled.length, 1, "the latch reset — a later burst schedules again");
+  scheduled.pop()();
+  assert.equal(ran, 2);
+});

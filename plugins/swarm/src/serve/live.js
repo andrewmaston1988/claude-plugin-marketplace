@@ -66,6 +66,27 @@
     return !runEnded(run);
   }
 
+  // A build commits only while it is still the newest route — the generation
+  // token's whole predicate, extracted so tests pin it off the page. `latest`
+  // is what the page's counter says NOW; anything but exact equality discards,
+  // including a sequence equal to a superseded latest.
+  function routeGuard(seq, latest) {
+    return seq === latest;
+  }
+
+  // Collapse a burst of route requests into one per scheduled tick: the first
+  // caller arms the latch, the rest join it. The scheduled fn re-reads the
+  // hash when it runs, so a coalesced request can never miss a navigation that
+  // landed in between.
+  function coalesce(schedule) {
+    let armed = false;
+    return (fn) => {
+      if (armed) return;
+      armed = true;
+      schedule(() => { armed = false; fn(); });
+    };
+  }
+
   // The one DOM-touching export here, and the exception to "no DOM access" above:
   // page.html's boot sequence needs a script loader before live.js itself is
   // guaranteed loaded, so it cannot depend on this copy for THAT first load — but
@@ -82,5 +103,5 @@
     });
   }
 
-  window.swarmLive = { waveOpen, projectOpen, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, loadScript };
+  window.swarmLive = { waveOpen, projectOpen, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, coalesce, loadScript };
 })();
