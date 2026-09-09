@@ -7,6 +7,7 @@ import http from "node:http";
 import { createServer, safeSegment } from "../src/serve/server.mjs";
 import { RUN_LOG, NOW, buildFixture } from "./fixtures/run-fixture.mjs";
 import { touchHeartbeat, heartbeatPath } from "../src/results.mjs";
+import { listRuns as realListRuns, projectKeys as realProjectKeys } from "../src/runlog.mjs";
 
 const cfg = (over = {}) => ({ quietWarnSecs: 60, dashboard: { port: 0, bind: "127.0.0.1", token: null, ...over } });
 
@@ -40,7 +41,7 @@ async function withServer(opts, fn) {
   const _watch = (path, listener) => { const w = { path, listener, closed: false, close() { this.closed = true; } }; watchers.push(w); return w; };
   // _pollMs defaults slow: only the poll tests opt into a fast tick, so no other
   // test's frame counting can be perturbed by a liveness broadcast landing mid-window.
-  const server = createServer({ home, cfg: opts.cfg || cfg(), now: () => opts.now ?? NOW, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30, _pollMs: opts.pollMs ?? 60_000 });
+  const server = createServer({ home, cfg: opts.cfg || cfg(), now: () => opts.now ?? NOW, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30, _pollMs: opts.pollMs ?? 60_000, ...(opts.seams || {}) });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const port = server.address().port;
   const get = (path, { raw = false } = {}) => new Promise((resolve, reject) => {
@@ -51,7 +52,7 @@ async function withServer(opts, fn) {
       res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: raw ? body : tryJson(body) }));
     }).on("error", reject);
   });
-  try { return await fn({ get, port, watchers, server }); } finally { server.closeAllConnections(); await new Promise((r) => server.close(r)); }
+  try { return await fn({ get, port, watchers, server, home }); } finally { server.closeAllConnections(); await new Promise((r) => server.close(r)); }
 }
 const tryJson = (s) => { try { return JSON.parse(s); } catch { return s; } };
 
@@ -708,6 +709,29 @@ test("D1: a clone dropped by a contracted expansion has no roster row — its re
       const kept = await get("/api/runs/C--code-a/contracted-1/leaves/fix%5B0%5D");
       assert.equal(kept.body.authored, undefined);
       assert.equal(kept.body.output, "current output");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// The single-run payload once called listRuns just to derive one group label  a
+// full estate scan (stat + liveness per run) on every run/node/leaf fetch, including
+// the 5 s poll, where it had been O(1). Counting the calls is the only assertion that
+// bites: the payload shape is identical either way.
+test("single-run payload derives its label from project keys, never a full estate scan", async () => {
+  const { home } = seedHome();
+  let listRunsCalls = 0, keyCalls = 0;
+  const seams = {
+    _listRuns: (...a) => { listRunsCalls++; return realListRuns(...a); },
+    _projectKeys: (...a) => { keyCalls++; return realProjectKeys(...a); },
+  };
+  try {
+    await withServer({ home, seams }, async ({ get }) => {
+      listRunsCalls = 0; keyCalls = 0;               // ignore anything the boot did
+      const r = await get("/api/runs/C--code-a/live-1");
+      assert.equal(r.status, 200);
+      assert.equal(r.body.groupLabel, "a");          // still labelled correctly
+      assert.equal(listRunsCalls, 0);                // RED before the fix: this was 1
+      assert.equal(keyCalls, 1);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

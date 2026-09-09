@@ -293,7 +293,11 @@ test("Test 6: setHtml/setHeader/setSvg are called only from the commit layer", (
   const script = src.match(/<script>([\s\S]*)<\/script>/)[1];
   const code = stripStringsAndComments(script);
   const lines = code.split("\n");
-  const decl = /^(\s*)(async\s+)?function\s+([A-Za-z_$][\w$]*)/;
+  // Both forms reset attribution: a `function NAME` declaration AND a top-level
+  // `const NAME = (...) =>` arrow. Matching only the former was a blind spot: an
+  // arrow paint helper written textually after commitView inherited its name and
+  // passed while violating the invariant (code review, 2026-09-09).
+  const decl = /^(\s*)(?:(async\s+)?function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\()/;
   // The function a line sits in: the last `function NAME(` declaration at or
   // above it. (page.html declares functions at IIFE top level only; inner
   // helpers are const arrows, which do not reset the attribution.) A token in
@@ -301,7 +305,7 @@ test("Test 6: setHtml/setHeader/setSvg are called only from the commit layer", (
   // both — so this matches call position, not the token's mere presence.
   const enclosing = new Array(lines.length);
   let cur = null;
-  lines.forEach((l, i) => { const m = l.match(decl); if (m) cur = m[3]; enclosing[i] = cur; });
+  lines.forEach((l, i) => { const m = l.match(decl); if (m) cur = m[3] || m[4]; enclosing[i] = cur; });
   const ALLOWED = { setHtml: ["setHeader", "commitView", "rerender"], setHeader: ["commitView", "rerender"], setSvg: ["drawRail"] };
   for (const [name, allowed] of Object.entries(ALLOWED)) {
     const re = new RegExp(`\\b${name}\\s*\\(`, "g");

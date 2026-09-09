@@ -843,6 +843,10 @@
   // route (routeGuard, in live.js): a superseded build holds no paint primitive and
   // no state to write, so there is nothing a future edit could forget to guard.
   let routeSeq = 0;
+  // live.js loads after this IIFE evaluates, but hashchange is already wired, so
+  // the guard needs a bare fallback. Without it the catch below threw its own
+  // TypeError and nothing painted at all.
+  const guardOk = (seq, cur) => (window.swarmLive ? window.swarmLive.routeGuard(seq, cur) : seq === cur);
   // The view the newest in-flight route is building. SSE and the poll consult it, so
   // a refresh is never dropped just because its target screen has not committed yet.
   let pendingView = null;
@@ -886,10 +890,10 @@
     pendingView = v;
     try {
       const next = await buildFor(v);
-      if (!window.swarmLive.routeGuard(seq, routeSeq)) return;
+      if (!guardOk(seq, routeSeq)) return;
       commitView({ ...next, view: v });
     } catch (e) {
-      if (!window.swarmLive.routeGuard(seq, routeSeq)) return;
+      if (!guardOk(seq, routeSeq)) return;
       // No header in the description: an error panel overlays the current screen,
       // and the header already describes it.
       commitView({ view: v, html: `<div class="empty">${esc(e.message)}</div>` });
@@ -987,6 +991,10 @@
   // Test seam for tests/page-route.test.mjs: the vm harness has no browser, so the
   // page hands it the two functions it must drive and its committed state to read —
   // the same pattern as window.swarmLive.
+  // Test seam, not a public surface: page-route.test.mjs drives route()/commitView
+
+  // through this. Nothing in the page may read it.
+
   window.__swarmPage = {
     route, rerender,
     snapshot: () => ({ view: { ...view }, lastList, currentRun, currentLeaf, seenActive, groupLabels: Object.fromEntries(groupLabels), tickCfg: { ...tickCfg }, routeSeq, pendingView }),

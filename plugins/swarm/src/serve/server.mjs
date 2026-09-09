@@ -5,7 +5,7 @@ import http from "node:http";
 import { readFileSync, readdirSync, existsSync, statSync, watch as fsWatch } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readRun, listRuns, resultSuperseded } from "../runlog.mjs";
+import { readRun, listRuns, projectKeys, resultSuperseded } from "../runlog.mjs";
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
@@ -55,7 +55,7 @@ const MANIFEST = {
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs }) {
+export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _listRuns = listRuns, _projectKeys = projectKeys }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
@@ -105,7 +105,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       if (projectWatchers.has(dir)) continue;
       try { projectWatchers.set(dir, _watch(dir, onRootOrProject)); } catch (e) { log(`watch ${dir}: ${e.message}`); }
     }
-    const active = new Map(listRuns(home, { now: now(), heartbeatMs }).filter((r) => r.active).map((r) => [r.dir, r]));
+    const active = new Map(_listRuns(home, { now: now(), heartbeatMs }).filter((r) => r.active).map((r) => [r.dir, r]));
     for (const [dir, w] of runWatchers) if (!active.has(dir)) { try { w.close(); } catch {} runWatchers.delete(dir); }
     for (const [dir, run] of active) {
       if (runWatchers.has(dir)) continue;
@@ -192,7 +192,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
 
   const routes = {
     "/api/runs": (res) => {
-      const all = listRuns(home, { now: now(), heartbeatMs });
+      const all = _listRuns(home, { now: now(), heartbeatMs });
       // Groups derive from EVERY raw key — worktree keys and fully-finished repos
       // included, before any filtering — or the common-prefix derivation shifts
       // with whatever happened to survive the cap.
@@ -310,7 +310,9 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       if (!run) return notFound(res);
       // The deep-linked header needs the short project name: the same grouping rule
       // the runs list caps by, over the same full raw key set.
-      const { groupOf, labelOf } = projectGrouping([...new Set(listRuns(home, { now: now(), heartbeatMs }).map((r) => r.project))]);
+      // projectKeys, never listRuns: the label needs the raw key SET, and a full
+      // estate scan here ran on every run/node/leaf fetch including the 5 s poll.
+      const { groupOf, labelOf } = projectGrouping(_projectKeys(home));
       return send(res, 200, { ...run, groupLabel: labelOf(groupOf(run.project)) });
     }
     if (seg.length === 3 && seg[2] === "digest") {
