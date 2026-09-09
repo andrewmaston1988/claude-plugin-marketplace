@@ -67,12 +67,21 @@ Other useful keys (defaults shown in `config.default.json`): `provider.url` (Ant
 {
   "provider": {
     "cloud": { "ollama": { "enabled": false, "cookiePath": null } },
-    "usageStaleMs": 86400000
+    "usageTimeoutMs": 5000
   }
 }
 ```
 
-`provider.cloud.ollama.enabled` arms ollama.com cloud-usage preflight — false by default, so a user who has never heard of it meets nothing. `cookiePath` overrides where the session cookie is stored (default `~/.swarm/ollama-cookie.json`, written by `ollama-usage --cookie`, never `config.json` — a cookie in a file that's read/printed/diffed constantly would end up in a transcript). `usageStaleMs` (default 24h) is how long a cached reading stays trusted before it's reported `stale` instead of its last percentage.
+`provider.cloud.ollama.enabled` arms ollama.com cloud-usage preflight — false by default, so a user who has never heard of it meets nothing. `cookiePath` overrides where the session cookie is stored (default `~/.swarm/ollama-cookie.json`, written by `ollama-usage --cookie`, never `config.json` — a cookie in a file that's read/printed/diffed constantly would end up in a transcript). `usageTimeoutMs` (default 5000) bounds the usage fetch; a hung ollama.com times out into the cached reading instead of wedging `validate`.
+
+**Provenance: every figure says where it came from.** A `swarm` command that can fetch does — `validate`, `run`, `models`, `ollama-usage` — memoised to one request per process. When the live fetch fails (an expired cookie is the ordinary case), the last cached figure is still shown, but never bare: every render prefixes
+
+```
+/!\ Cookie Expired — figures below are cached.  last seen: 2026-09-07T14:49Z
+    Refresh: swarm ollama-usage --cookie '<value>'   (writes ~/.swarm/ollama-cookie.json)
+```
+
+`/!\ Network Error`, `/!\ Fetch Timed Out`, `/!\ Page Unreadable` and `/!\ No Cookie` are the other forms. `last seen` is an absolute UTC timestamp — compare it yourself against the `resets` dates the figures carry; no relative age is printed. `validate` fails on a `live` exhausted reading only; a cached 100% warns with the banner, because it may describe a window that has since reset. `provider.cloud.ollama.settingsUrl` overrides the fetch URL (test hook, like `quotaUsageUrl`).
 
 ### Per-repo leaf guard (`projects`)
 

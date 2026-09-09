@@ -15,7 +15,7 @@
         "cookiePath": null
       }
     },
-    "usageStaleMs": 86400000
+    "usageTimeoutMs": 5000
   },
   "concurrency": 4,
   "timeoutMs": 3600000,

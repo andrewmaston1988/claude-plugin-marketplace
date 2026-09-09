@@ -49,7 +49,12 @@ Claude-only, with no meter to maintain.
 
 For each ticked provider (ollama today):
 1. Explain how to get the token: browser devtools → Network tab → any request to
-   `ollama.com` → copy the `Cookie` request header.
+   `ollama.com` → copy the `Cookie` request header. The cookie is a live credential: it
+   expires when the browser session does, and expiry is what the meter reports as
+   `/!\ Cookie Expired` — a refresh means re-copying a fresh header, not a config change.
+   Say also that the swarm store is separate from the operator-side `~/.ollama-usage`
+   skill's own cookie: refreshing one does not refresh the other, and the banner names
+   the exact file it is talking about.
 2. Hand over `node <engine> ollama-usage --cookie '<value>'` for them to run themselves — it
    writes the cookie to `cookiePath` and immediately prints the current meter as confirmation
    it worked.
@@ -175,7 +180,8 @@ from the appendix. If no, close.
 | `provider.name` | `ollama` | Label only. |
 | `provider.cloud.ollama.enabled` | `false` | Stage 1b. Gates the whole meter: off, `models`/`validate`/`modeFor` never read the cache and the feature is invisible. |
 | `provider.cloud.ollama.cookiePath` | `null` | Stage 1b. Where `ollama-usage --cookie` writes the browser token; falls back to `~/.swarm/ollama-cookie.json` when unset. Never `config.json` itself. |
-| `provider.usageStaleMs` | `86400000` | How old a cached meter reading may be before `models`/`validate` treat it as unverified rather than current. |
+| `provider.cloud.ollama.settingsUrl` | `https://ollama.com/settings` | Where the usage fetch reads the meter; a test hook like `quotaUsageUrl`. |
+| `provider.usageTimeoutMs` | `5000` | Bound on the usage fetch; a hung ollama.com times out into the cached reading (banner: `/!\ Fetch Timed Out`) instead of wedging `validate`. |
 | `concurrency` | `4` | Ceiling on leaves alive at once (each is a full headless `claude` session). A manifest may run narrower, never wider — asking for more fails `validate`. A rate-limited leaf frees its slot while it backs off. |
 | `timeoutMs` | `3600000` | Per-leaf wall clock; past it the leaf is `timeout`, slot freed. |
 | `disable1mContext` | `true` | Stage 6b. `false` gives every Claude leaf the 1M context window by default (a wall-clock lever, ~+45% cost, same quality); a task's own `settings` always wins. |
