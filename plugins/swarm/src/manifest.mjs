@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
+import { provenanceBanner } from "./usage.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
 import { validateSchemaShape } from "./schema.mjs";
 
@@ -684,22 +685,24 @@ function checkGovernance(model, effCwd, l, cfg, errors) {
 // Weekly-allowance headroom gate for `:cloud` seats. Sits beside the
 // governance rejection — reported after it, since a cwd that isn't even
 // allowed to dispatch open models is the more fundamental rejection.
-// FAILS on `exhausted` (the leaf would only park in `quota`); WARNS on
-// `stale` (the reading might no longer be true, but isn't proven false);
-// does nothing on `unknown`/`ok`.
+// FAILS only on a LIVE `exhausted` — the leaf would only park in `quota`, and
+// a cached 100% may describe a window that has since reset. Any other
+// non-live reading (cached, none) WARNS with the banner text: the figure
+// still shows, but no reader mistakes it for a fetch that just happened.
+// Nothing on `unknown` without provenance (the provider is off).
 function checkHeadroom(model, l, headroom, errors, warnings) {
   if (isClaudeModel(model)) return;
-  if (headroom?.state === "exhausted") {
+  if (headroom?.state === "exhausted" && headroom?.provenance === "live") {
     errors.push(
       `${l}: seats ':cloud' model '${model}', but the weekly allowance is exhausted ` +
       `(${headroom.weeklyPctUsed}%, resets ${headroom.resetsAt}) — every :cloud leaf will park in ` +
       `\`quota\`. Recast these leaves onto Claude tiers, or re-run after the reset.`
     );
-  } else if (headroom?.state === "stale" && warnings) {
-    const hours = Math.floor(headroom.snapshotAgeMs / 3_600_000);
+  } else if (headroom?.provenance && headroom.provenance !== "live" && warnings) {
+    const banner = provenanceBanner(headroom);
     warnings.push(
-      `${l}: seats ':cloud' model '${model}', but the weekly-allowance meter was last read ` +
-      `${hours}h ago — run \`swarm ollama-usage\` to refresh it before trusting this run.`
+      `${l}: seats ':cloud' model '${model}', but the weekly-allowance figure is not live — ` +
+      (banner.length ? banner.join(" ") : "run `swarm ollama-usage` to refresh it before trusting this run.")
     );
   }
 }
@@ -855,12 +858,14 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
 // default task cwd and the base for relative paths. Options: `args` (the
 // --args object, substituted as {{args.<key>}} before validation),
 // `fromRegistry` (child manifest paths then resolve against the parent's dir),
-// and `ref` (the pre-resolution registry name, recorded on the plan for the
-// run dir snapshot).
-export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, io } = {}) {
+// `ref` (the pre-resolution registry name, recorded on the plan for the
+// run dir snapshot), and `headroom` (an ALREADY-COMPUTED ollama reading —
+// `await getUsage(cfg)` — so callers that can fetch inject it and tests can
+// inject a fake; the default is the cache-only usageFromCache, which never
+// touches the network, so validation stays offline unless the caller fetches).
+export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, io, headroom = usageFromCache(cfg) } = {}) {
   const errors = [];
   const warnings = [];
-  const headroom = usageFromCache(cfg);
   const resolvedIo = { ...defaultManifestIo(), ...io };
   const probedGuards = new Set();
   if (args !== undefined && (args === null || typeof args !== "object" || Array.isArray(args))) {

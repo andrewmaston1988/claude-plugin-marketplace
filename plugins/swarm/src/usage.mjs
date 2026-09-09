@@ -37,7 +37,8 @@ export function normalizeAnthropic(parsed) {
   };
 }
 
-// Pure over `readUsage`'s output.
+// Pure over `readUsage`'s output. Provenance fields ride through so the
+// banner can be worded from the SAME shape every consumer holds.
 export function normalizeOllama(reading) {
   if (!reading || reading.state === "unknown") return none("ollama");
   const limits = [];
@@ -51,17 +52,20 @@ export function normalizeOllama(reading) {
     provider: "ollama",
     state: reading.state,
     limits,
-    ...(reading.snapshotAgeMs !== undefined && { snapshotAgeMs: reading.snapshotAgeMs }),
+    ...(reading.provenance !== undefined && { provenance: reading.provenance }),
+    ...(reading.reason != null && { reason: reading.reason }),
+    ...(reading.lastSeen != null && { lastSeen: reading.lastSeen }),
+    ...(reading.cookiePath != null && { cookiePath: reading.cookiePath }),
   };
 }
 
 // Anthropic's cache is a TTL cache the CLI refills on demand, so an EXPIRED one
-// is `unknown`, never `stale`: the next `quota` call refreshes it unprompted and
-// a staleness warning would be noise the reader can do nothing about. Ollama is
-// the opposite — its credential is a browser cookie a human pastes in, so an old
-// snapshot ages into `stale` and SAYS SO. That asymmetry is real; flattening it
-// would either spam a warning Anthropic fixes silently, or bury one only the
-// operator can fix.
+// is `unknown`, never bannered: the next `quota` call refreshes it unprompted
+// and a warning here would be noise the reader can do nothing about. Ollama is
+// the opposite — its credential is a browser cookie a human pastes in — which is
+// why only ollama's readings carry provenance and the /!\ banner. That
+// asymmetry is real; flattening it would either spam a warning Anthropic fixes
+// silently, or bury one only the operator can fix.
 function readAnthropicCache(cfg, now, cachePath) {
   let cached;
   try {
@@ -103,20 +107,46 @@ export function usageLines(usages) {
   return lines;
 }
 
+// The one place the provenance banner is worded. A reading that was NOT
+// fetched by this process must be marked before any figure renders from it:
+// `/!\` is deliberately not the house style — the advisory line this replaces
+// (`usage unread for 33h`) was lost exactly because it looked like every
+// other line. Returns [] for `live` and for readings with no provenance at
+// all (Anthropic never gains one — its TTL cache self-heals — so its
+// rendering is untouched), and for a `cached` reading with no recorded
+// failure reason (the hook's plain cache read; the figure may be fresh from
+// a successful fetch).
+const REASON_TITLES = {
+  "no-cookie": "No Cookie",
+  "expired-cookie": "Cookie Expired",
+  "network-error": "Network Error",
+  timeout: "Fetch Timed Out",
+  unparseable: "Page Unreadable",
+};
+
+export function provenanceBanner(usage) {
+  if (!usage?.provenance || usage.provenance === "live" || !usage.reason) return [];
+  const title = REASON_TITLES[usage.reason] ?? "Usage Unread";
+  const refresh = `    Refresh: swarm ollama-usage --cookie '<value>'${usage.cookiePath ? `   (writes ${usage.cookiePath})` : ""}`;
+  if (usage.provenance === "cached") {
+    const lastSeen = usage.lastSeen ? `  last seen: ${new Date(usage.lastSeen).toISOString()}` : "";
+    return [`/!\\ ${title} — figures below are cached.${lastSeen}`, refresh];
+  }
+  return [`/!\\ ${title} — no cached reading available.`, refresh];
+}
+
 // What a session needs told WITHOUT being asked: a provider that cannot take
-// work now, or a reading too old to trust. A healthy provider says nothing — the
+// work now, or a figure whose provenance is not this process's own fetch. A
+// healthy — or live-fetched — provider adds nothing beyond its figures; the
 // standing block is instruction, and unprompted noise beside it trains the
 // reader to skip the whole thing.
 export function notableLines(usages) {
   const lines = [];
   for (const u of usages) {
+    lines.push(...provenanceBanner(u));
     if (u.state === "exhausted") {
       const weekly = u.limits.find((l) => l.kind === "weekly");
       lines.push(`${u.provider}: weekly allowance exhausted${weekly?.resetsAt ? `, resets ${weekly.resetsAt}` : ""}`);
-      continue;
-    }
-    if (u.state === "stale") {
-      lines.push(`${u.provider}: usage unread for ${Math.floor((u.snapshotAgeMs ?? 0) / 3_600_000)}h`);
       continue;
     }
     // A full session bar blocks dispatch RIGHT NOW even while the weekly verdict

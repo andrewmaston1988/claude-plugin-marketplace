@@ -96,17 +96,23 @@ function modelLine(m) {
   return `${line} (${[size, ...(m.contextLength > 0 ? [fmtCtx(m.contextLength)] : [])].join(", ")})`;
 }
 
+// The single ollama usage entry point for the CLI — getUsage memoises per
+// process, so validate/run/models share one fetch however many seats.
+async function usageHeadroom(cfg) {
+  return (await import("../src/ollama-usage.mjs")).getUsage(cfg);
+}
+
 async function cmdModels(rest = []) {
   const cfg = getConfig();
   // Catalogue stays the catalogue (discovery.mjs is pure) — the meter is
   // annotated here, above the :cloud list, so it reads as a preflight rather
-  // than a per-model property.
-  const { usageFromCache } = await import("../src/ollama-usage.mjs");
-  const headroom = usageFromCache(cfg);
+  // than a per-model property. The banner replaces the old stale line: a
+  // reading that was not fetched now is marked, or not shown at all.
+  const { provenanceBanner } = await import("../src/usage.mjs");
+  const headroom = await usageHeadroom(cfg);
+  for (const line of provenanceBanner(headroom)) out(line);
   if (headroom.state === "exhausted") {
     out(`⚠ :cloud weekly allowance exhausted (${headroom.weeklyPctUsed}%) — resets ${headroom.resetsAt}. These models will not launch.`);
-  } else if (headroom.state === "stale") {
-    out(`⚠ :cloud weekly allowance meter is stale (last read ${Math.floor(headroom.snapshotAgeMs / 3_600_000)}h ago) — run \`swarm ollama-usage\` to refresh.`);
   }
   const showAll = rest.includes("--all");
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
@@ -130,12 +136,12 @@ async function cmdModels(rest = []) {
   return 0;
 }
 
-function cmdValidate(rest) {
+async function cmdValidate(rest) {
   const cfg = getConfig();
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, ...(fromRegistry && { ref: rest[0] }) });
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), ...(fromRegistry && { ref: rest[0] }) });
   out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
   // The preview IS the approval: with forEach or composition in play, show the
   // worst-case leaf count the caps permit before anything runs.
@@ -186,7 +192,7 @@ async function cmdRun(rest) {
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, ...(fromRegistry && { ref: rest[0] }) });
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), ...(fromRegistry && { ref: rest[0] }) });
   // Fire-and-forget notification hook (e.g. "claude-slack notify --message {status}").
   // Mechanical plumbing only: substitute tokens, spawn detached, swallow errors.
   // Shared by the end-of-run status and the scheduler's single-shot cost warn.
@@ -711,7 +717,7 @@ async function main() {
       }
       case "validate": {
         if (!rest[0]) { err(USAGE); return 1; }
-        return cmdValidate(rest);
+        return await cmdValidate(rest);
       }
       case "run": {
         if (!rest[0]) { err(USAGE); return 1; }
@@ -847,37 +853,25 @@ async function main() {
         return q?.exhausted ? 1 : 0;
       }
       case "ollama-usage": {
-        const { fetchUsage, saveCookie, loadCookie, usageCachePath } = await import("../src/ollama-usage.mjs");
+        const { saveCookie, loadCookie, getUsage } = await import("../src/ollama-usage.mjs");
         const cfg = getConfig();
-        const cachePath = usageCachePath();
         const cookiePath = cfg?.provider?.cloud?.ollama?.cookiePath || join(swarmHome(), "ollama-cookie.json");
         const cookieFlag = getFlag("cookie", rest);
         if (cookieFlag !== undefined) saveCookie(cookiePath, cookieFlag);
-        const fetched = await fetchUsage({ cookie: loadCookie(cookiePath), cachePath });
 
         // This subcommand's job is the FETCH and the cookie; the printing is
         // usage.mjs's, same as `quota`'s, so the two can never word a reading
-        // differently.
-        const { normalizeOllama, usageLines, notableLines } = await import("../src/usage.mjs");
-        const { readUsage } = await import("../src/ollama-usage.mjs");
-        const { readFileSync } = await import("node:fs");
-        // A successful fetch has just written the cache, so classify BOTH paths
-        // by reading it back: one classifier, so a fresh 100% and a cached 100%
-        // can never disagree about being exhausted.
-        let reading;
-        try {
-          reading = readUsage(readFileSync(cachePath, "utf8"), { staleMs: cfg?.provider?.usageStaleMs });
-        } catch {
-          reading = { state: "unknown" };
-        }
-        if (reading.state === "unknown") {
-          out(`ollama: no reading yet${fetched.ok ? "" : ` (${fetched.reason})`} — run with --cookie '<value>' first`);
-          return 0;
-        }
+        // differently. getUsage carries the provenance; gate: false because
+        // fetching is this subcommand's job even before ollama is enabled.
+        const { normalizeOllama, usageLines, notableLines, provenanceBanner } = await import("../src/usage.mjs");
+        const reading = await getUsage(cfg, { gate: false });
         const usage = normalizeOllama(reading);
+        for (const line of provenanceBanner(usage)) out(line);
         for (const line of usageLines([usage])) out(line);
         for (const line of notableLines([usage])) out(line);
-        return usage.state === "exhausted" ? 1 : 0;
+        // Exit 1 means an exhausted reading, and only a LIVE one — unreadable
+        // is not exhausted; a cached 100% may describe a window that reset.
+        return reading.provenance === "live" && usage.state === "exhausted" ? 1 : 0;
       }
       default:
         err(USAGE);
