@@ -76,22 +76,33 @@ test("modeFor: U3 governance decides the mode; the meter never touches it", asyn
   ok((await dec({ ...OLLAMA, state: "exhausted", weeklyPctUsed: 100 })).includes(`Mode: ${MODE_CLOUD}`));
 });
 
-test("decide: U4 a stale provider names the snapshot age", async () => {
-  const out = await dec({ ...OLLAMA, state: "stale", snapshotAgeMs: 5 * 3_600_000 });
-  ok(/unread for 5h/.test(out), out);
-  ok(out.startsWith(standingBlock(MODE_CLOUD) + "\n"), out);
+// U4 — provenance replaces the age classification: a reading that was NOT
+// fetched this process says so, with the banner text and its fix; a LIVE one
+// says nothing.
+test("decide: U4 a cached provider carries its banner, the standing block unchanged; a live one is silent", async () => {
+  const cached = await dec({
+    ...OLLAMA, provenance: "cached", reason: "expired-cookie",
+    lastSeen: Date.parse("2026-09-08T14:49:00Z"), cookiePath: "cp",
+  });
+  ok(cached.includes("/!\\ Cookie Expired"), cached);
+  ok(cached.includes(`last seen: ${new Date(Date.parse("2026-09-08T14:49:00Z")).toISOString()}`), "absolute UTC last-seen, not an age");
+  ok(cached.startsWith(standingBlock(MODE_CLOUD) + "\n"), cached);
+
+  const live = await dec({ ...OLLAMA, provenance: "live" });
+  ok(!live.includes("/!\\"), `a live reading prints no banner: ${live}`);
+  equal(live, standingBlock(MODE_CLOUD), "no banner means no extra lines at all");
 });
 
-test("decide: U6 every notable provider gets its own line", async () => {
+test("decide: U6 every notable provider gets its own lines", async () => {
   const out = await decide({
     event: "SessionStart", cwd: "C:/code/x", config: ALWAYS,
     usage: [
       normalizeAnthropic({ limits: [{ kind: "weekly", percent: 100, resetsAt: "A" }], exhausted: true }),
-      normalizeOllama({ ...OLLAMA, state: "stale", snapshotAgeMs: 3_600_000 }),
+      normalizeOllama({ ...OLLAMA, provenance: "cached", reason: "expired-cookie" }),
     ],
   });
   ok(/anthropic: weekly allowance exhausted/.test(out), out);
-  ok(/ollama: usage unread for 1h/.test(out), out);
+  ok(out.includes("/!\\ Cookie Expired"), "the ollama banner rides on its own lines");
 });
 
 test("modeFor/decide: U5 always-green guard — a missing headroom argument does not break the hook", async () => {

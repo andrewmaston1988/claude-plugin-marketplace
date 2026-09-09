@@ -69,16 +69,48 @@ test("notableLines: G6 a healthy provider says NOTHING", () => {
   deepEqual(notableLines([normalizeAnthropic(ANTHROPIC), normalizeOllama(OLLAMA_OK)]), []);
 });
 
-test("notableLines: G7 exhausted, stale and a full session bar each get one line", () => {
+test("notableLines: G7 exhaustion and a full session bar each get one line", () => {
   const exhausted = notableLines([normalizeOllama({ ...OLLAMA_OK, state: "exhausted", weeklyPctUsed: 100 })]);
   ok(exhausted[0].startsWith("ollama: weekly allowance exhausted"), exhausted[0]);
-
-  const stale = notableLines([normalizeOllama({ ...OLLAMA_OK, state: "stale", snapshotAgeMs: 5 * 3_600_000 })]);
-  equal(stale[0], "ollama: usage unread for 5h");
 
   // Weekly healthy, session full: blocked NOW, and only this line says so.
   const session = notableLines([normalizeOllama({ ...OLLAMA_OK, sessionPctUsed: 100 })]);
   ok(session[0].startsWith("ollama: session limit reached"), session[0]);
+});
+
+// Test 3 — the timestamp is absolute UTC, never an age. A "33h ago" reading is
+// what told nobody the figure was old; an ISO stamp lets the operator judge.
+test("notableLines: G7b the cached banner stamps last-seen in absolute UTC — the word 'ago' is gone", () => {
+  const lastSeen = Date.parse("2026-09-08T14:49:00Z");
+  const u = normalizeOllama({
+    ...OLLAMA_OK, provenance: "cached", reason: "expired-cookie",
+    lastSeen, cookiePath: join("home", "ollama-cookie.json"),
+  });
+  const lines = notableLines([u]);
+  const stamp = new Date(lastSeen).toISOString();
+  ok(lines.some((l) => l.includes(`last seen: ${stamp}`)), lines.join("\n"));
+  ok(!lines.some((l) => l.includes("ago")), `'ago' must never print: ${lines.join("\n")}`);
+  // the figures themselves keep their own absolute reset stamps
+  deepEqual(usageLines([u]).filter((l) => l.startsWith("ollama weekly")), ["ollama weekly: 83.8% — resets 2026-09-12T08:00:00Z"]);
+});
+
+// Test 4 — every failure reason names itself; a healthy cached reading is silent.
+test("notableLines: G7c each failure reason prints its own /!\\ title above a Refresh line", () => {
+  const cases = [
+    ["no-cookie", "No Cookie"],
+    ["expired-cookie", "Cookie Expired"],
+    ["network-error", "Network Error"],
+    ["timeout", "Fetch Timed Out"],
+    ["unparseable", "Page Unreadable"],
+  ];
+  for (const [reason, title] of cases) {
+    const u = normalizeOllama({ ...OLLAMA_OK, provenance: "cached", reason, cookiePath: "cp" });
+    const lines = notableLines([u]);
+    ok(lines[0].startsWith(`/!\\ ${title} — figures below are cached.`), `${reason}: ${lines.join(" | ")}`);
+    ok(lines.some((l) => l.includes("swarm ollama-usage --cookie")), `${reason} must name the fix: ${lines.join(" | ")}`);
+  }
+  // the same reading with NO recorded reason is healthy — exact-output callers stay quiet
+  deepEqual(notableLines([normalizeOllama({ ...OLLAMA_OK, provenance: "cached", reason: null })]), []);
 });
 
 test("notableLines: G8 anthropic exhaustion is reported the same way as a cloud provider's", () => {

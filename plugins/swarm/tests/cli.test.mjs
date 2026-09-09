@@ -688,24 +688,31 @@ test("ollama-usage: P0 an expired cookie prints /!\\ Cookie Expired above the fi
   }
 });
 
-test("ollama-usage: C0 prints exactly two provider-named lines from a healthy cache, nothing else", () => {
+// C0 — the subcommand fetches now (gate:false): a healthy run is LIVE, prints
+// the two figures and nothing else. The fetch is injected through settingsUrl.
+test("ollama-usage: C0 a live fetch prints exactly two provider-named lines, nothing else", async () => {
   const dir = tmp();
+  const server = createServer((req, res) => {
+    res.writeHead(200, { "content-type": "text/html" });
+    res.end(readFileSync(join(import.meta.dirname, "fixtures", "ollama-settings.html"), "utf8"));
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
-      sessionPctUsed: 12, sessionResetsAt: "2026-09-06T18:00:00Z",
-      weeklyPctUsed: 40, weeklyResetsAt: "2026-09-07T00:00:00Z",
-      fetchedAt: Date.now(),
+    writeFileSync(join(home, "config.json"), JSON.stringify({
+      provider: { cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } } },
     }));
-    const r = runCli(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home } });
-    equal(r.status, 0, r.stderr);
+    writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
+    const r = await runCliAsync(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr + r.stdout);
     deepEqual(r.stdout.trim().split("\n"), [
-      "ollama session: 12% — resets 2026-09-06T18:00:00Z",
-      "ollama weekly: 40% — resets 2026-09-07T00:00:00Z",
+      "ollama session: 12% — resets 2026-09-06T04:10:00.377393+00:00",
+      "ollama weekly: 83.8% — resets 2026-09-12T08:00:00.377418+00:00",
     ]);
     ok(!/cost|\$|request/i.test(r.stdout), r.stdout);
   } finally {
+    server.close();
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -741,8 +748,15 @@ test("quota: C0b every line is prefixed anthropic, not claude", async () => {
   }
 });
 
-function modelsStubServer() {
+// settingsUrl points `models`' meter fetch at this stub; null = the meter is
+// unconfigured and every /settings hit gets the catch-all "{}" JSON.
+function modelsStubServer(settingsHtml = null) {
   return createServer((req, res) => {
+    if (req.url === "/settings" && settingsHtml !== null) {
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end(settingsHtml);
+      return;
+    }
     res.writeHead(200, { "content-type": "application/json" });
     if (req.url === "/api/experimental/model-recommendations") {
       res.end(JSON.stringify({
@@ -754,9 +768,13 @@ function modelsStubServer() {
   });
 }
 
+// C1 reads the meter LIVE: the fixture's weekly figure bumped to 100.
+const EXHAUSTED_HTML = readFileSync(join(import.meta.dirname, "fixtures", "ollama-settings.html"), "utf8")
+  .replace("83.8% used", "100% used").replace("width:83.8%", "width:100%");
+
 test("models: C1 an exhausted meter is named above the :cloud list", async () => {
   const dir = tmp();
-  const server = modelsStubServer();
+  const server = modelsStubServer(EXHAUSTED_HTML);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const home = join(dir, "home");
@@ -765,17 +783,15 @@ test("models: C1 an exhausted meter is named above the :cloud list", async () =>
       provider: {
         url: `http://127.0.0.1:${server.address().port}`,
         catalogUrl: `http://127.0.0.1:${server.address().port}`,
-        cloud: { ollama: { enabled: true } },
+        cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } },
       },
     }));
-    writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
-      weeklyPctUsed: 100, weeklyResetsAt: "2026-09-07T00:00:00Z", fetchedAt: Date.now(),
-    }));
+    writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("exhausted"), r.stdout);
     ok(r.stdout.includes("100%"), r.stdout);
-    ok(r.stdout.includes("2026-09-07T00:00:00Z"), r.stdout);
+    ok(r.stdout.includes("2026-09-12T08:00:00.377418+00:00"), r.stdout);
     const warnAt = r.stdout.indexOf("exhausted");
     const cloudAt = r.stdout.indexOf("glm-5.2:cloud");
     ok(warnAt >= 0 && cloudAt >= 0 && warnAt < cloudAt, r.stdout);
@@ -787,7 +803,7 @@ test("models: C1 an exhausted meter is named above the :cloud list", async () =>
 
 test("models: C2 false-positive guard — a healthy meter changes nothing", async () => {
   const dir = tmp();
-  const server = modelsStubServer();
+  const server = modelsStubServer(readFileSync(join(import.meta.dirname, "fixtures", "ollama-settings.html"), "utf8"));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
     const home = join(dir, "home");
@@ -796,16 +812,14 @@ test("models: C2 false-positive guard — a healthy meter changes nothing", asyn
       provider: {
         url: `http://127.0.0.1:${server.address().port}`,
         catalogUrl: `http://127.0.0.1:${server.address().port}`,
-        cloud: { ollama: { enabled: true } },
+        cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } },
       },
     }));
-    writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
-      weeklyPctUsed: 40, weeklyResetsAt: "2026-09-07T00:00:00Z", fetchedAt: Date.now(),
-    }));
+    writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("glm-5.2:cloud — Frontier open model (size unreported, 1.0M ctx)"), r.stdout);
-    ok(!/exhausted|stale|⚠/.test(r.stdout), r.stdout);
+    ok(!/exhausted|⚠|\/!\\/.test(r.stdout), r.stdout);
   } finally {
     server.close();
     rmSync(dir, { recursive: true, force: true });
