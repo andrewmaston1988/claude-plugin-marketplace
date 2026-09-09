@@ -36,11 +36,17 @@ for it.
 
 ### Stage 0 — put `swarm` on PATH
 
-The `swarm` command is the only supported way to invoke the engine. If it is not already on PATH,
-run `swarm install` once — it writes `~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`, and
-`~/.local/bin/swarm.cmd`, and expects `~/.local/bin` to be on PATH. Re-running refreshes the
-resolver copy; it is idempotent and overwrites the same three paths. Once installed, every later
-stage uses `swarm <subcommand>`.
+The `swarm` command is the only supported way to invoke the engine. `swarm install` writes
+`~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`, and `~/.local/bin/swarm.cmd`, and expects
+`~/.local/bin` to be on PATH. Re-running refreshes the resolver copy; it is idempotent and
+overwrites the same three paths. Once installed, every later stage uses `swarm <subcommand>`.
+
+**If `swarm` is not on PATH yet** — the first-run case, and the one thing that cannot go through
+the command itself — invoke the engine directly, once. You already hold the authoritative
+location: this skill's base directory is printed to you at invocation. Go two levels up from it
+to the plugin root, then run the engine under `scripts/` with the single argument `install`.
+Never glob the plugin cache and never sort sha directories by name — that is the exact bug this
+whole command exists to remove, and it silently picks a stale build.
 
 ### Stage 1 — where alternative models may run (`provider.allowedRoots`)
 

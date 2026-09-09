@@ -121,12 +121,14 @@ Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama instal
 
 ## Install
 
-Put the `swarm` command on PATH once. The bootstrap invocation below is the only place this documentation names the engine path:
+Put the `swarm` command on PATH once. `swarm install` writes `~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`, and `~/.local/bin/swarm.cmd`; `~/.local/bin` must be on PATH. It is idempotent — re-run it after a plugin update to refresh the resolver copy.
+
+**Installed the plugin?** Run `/swarm:swarm setup` in a Claude Code session. Its Stage 0 installs the command for you, resolving the engine from the skill's own base directory — so you never construct a path, which is the whole point of this command existing.
+
+**Working in a clone of this marketplace?** The line below is the only place this documentation names the engine path, and it is relative to the repo root:
 
 <!-- swarm-bootstrap-exception: the only sanctioned engine-path instruction in the tree -->
 node plugins/swarm/scripts/swarm.mjs install
-
-`swarm install` writes `~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`, and `~/.local/bin/swarm.cmd`. `~/.local/bin` must be on PATH. Re-run it after any plugin update to refresh the resolver copy; it is idempotent and overwrites the same three paths.
 
 ## Usage
 
