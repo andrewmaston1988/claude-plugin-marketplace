@@ -1,0 +1,13 @@
+# Normalise every text file to LF in the index, and check it out as LF.
+#
+# Without this, `core.autocrlf=false` means whatever an editor or script happens
+# to write is what lands in a commit. That is how a Python rewrite silently
+# flipped two source files to CRLF, turning a 66-line diff into 2168 and
+# attributing every line of both files to that commit in `git blame`.
+* text=auto eol=lf
+
+# cmd.exe parsing is unreliable on LF-only batch files, so these stay CRLF.
+# `plugins/swarm/src/cli-shim.mjs` emits its .cmd wrapper with CRLF for the
+# same reason.
+*.cmd text eol=crlf
+*.bat text eol=crlf
