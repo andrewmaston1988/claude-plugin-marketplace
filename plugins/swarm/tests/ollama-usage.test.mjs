@@ -7,6 +7,8 @@ import {
   SETTINGS_URL, fetchUsage, parseUsage, readUsage, usageFromCache, usageCachePath,
   saveCookie, loadCookie, getUsage, resetUsageMemo, recordUsageError,
 } from "../src/ollama-usage.mjs";
+import { parseHtml } from "../src/minidom.mjs";
+import { usageHistoryPath, readSnapshots } from "../src/cost.mjs";
 import { initConfig } from "../src/config.mjs";
 
 const FIXTURE = readFileSync(join(import.meta.dirname, "fixtures", "ollama-settings.html"), "utf8");
@@ -121,7 +123,7 @@ test("parseUsage: P1 — a captured settings page parses to session+weekly only"
   equal(r.sessionResetsAt, "2026-09-06T04:10:00.377393+00:00");
   equal(r.weeklyPctUsed, 83.8);
   equal(r.weeklyResetsAt, "2026-09-12T08:00:00.377418+00:00");
-  deepEqual(Object.keys(r).sort(), ["sessionPctUsed", "sessionResetsAt", "weeklyPctUsed", "weeklyResetsAt"].sort());
+  deepEqual(Object.keys(r).sort(), ["sessionModels", "sessionPctUsed", "sessionResetsAt", "weeklyModels", "weeklyPctUsed", "weeklyResetsAt"].sort());
 });
 
 test("parseUsage: P2 — a missing anchor yields unknown, never a number", () => {
@@ -145,7 +147,14 @@ test("parseUsage: P3 — layout growth does not shift the answer", () => {
       '<span data-usage-segment data-model="minimax:cloud" data-requests="8" style="width:20%"></span>',
       '<span data-usage-segment data-model="minimax:cloud" data-requests="8" style="width:20%"></span>'.repeat(20)
     );
-  deepEqual(parseUsage(grown), parseUsage(FIXTURE));
+  // The grown page's 21 segment copies sum to 500% — the sum-to-100 guard
+  // rejects that bar as unmeasured, so weeklyModels differs from the fixture's
+  // BY DESIGN. What must not shift under layout growth is the four bar fields.
+  const { sessionModels: gs, weeklyModels: gw, ...grownBars } = parseUsage(grown);
+  const { sessionModels: fs, weeklyModels: fw, ...fixtureBars } = parseUsage(FIXTURE);
+  deepEqual(grownBars, fixtureBars);
+  deepEqual(gw, [], "the 500%-sum bar is not measured");
+  equal(fw.length, 2, "the intact fixture bar still is");
 });
 
 test("parseUsage: P4 — session and weekly are not confused for each other", () => {
@@ -154,6 +163,131 @@ test("parseUsage: P4 — session and weekly are not confused for each other", ()
   ok(r.sessionResetsAt !== r.weeklyResetsAt);
   equal(r.sessionPctUsed, 12);
   equal(r.weeklyPctUsed, 83.8);
+});
+
+// ---- S1-S3: per-model segments, scoped per bar --------------------------------
+// The weekly bar's segment list is what `swarm cost` derives multipliers from;
+// a segment attributed to the wrong bar poisons a model's cost for a week.
+
+test("parseUsage: S1 — the weekly bar's segments parse with model, requests and share", () => {
+  const r = parseUsage(FIXTURE);
+  deepEqual(r.sessionModels, [], "the session bar in this fixture carries no segments");
+  deepEqual(r.weeklyModels, [
+    { model: "glm-5.3:cloud", requests: 12, meterSharePct: 80 },
+    { model: "minimax:cloud", requests: 8, meterSharePct: 20 },
+  ]);
+});
+
+// The captured live page — the scoping assertion the plan names. The raw page
+// carries a 16th data-usage-segment occurrence inside an inline script; only a
+// tree-scoped parse leaves it out while keeping every real segment.
+test("parseUsage: S2 — a captured live page scopes 7 session / 8 weekly segments", () => {
+  const live = readFileSync(join(import.meta.dirname, "fixtures", "ollama-settings-live.html"), "utf8");
+  const r = parseUsage(live);
+  equal(r.sessionModels.length, 7);
+  equal(r.weeklyModels.length, 8);
+  for (const s of [...r.sessionModels, ...r.weeklyModels]) {
+    ok(typeof s.model === "string" && s.model, `model missing on ${JSON.stringify(s)}`);
+    ok(Number.isFinite(s.requests), `requests not numeric on ${JSON.stringify(s)}`);
+    ok(typeof s.meterSharePct === "number", `share missing on ${JSON.stringify(s)}`);
+  }
+  // document-wide there are 15 elements — 7+8 means no bar claimed another's
+  equal(parseHtml(live).querySelectorAll("[data-usage-segment]").length, 15);
+});
+
+test("parseUsage: S2b — wrapper-nested segments stay scoped to their own bar", () => {
+  const html = readFileSync(join(import.meta.dirname, "fixtures", "two-bars.html"), "utf8");
+  const r = parseUsage(html);
+  deepEqual(r.sessionModels.map((s) => s.model), ["a", "b", "c"]);
+  deepEqual(r.weeklyModels.map((s) => s.model), ["d", "e"]);
+  equal(r.sessionModels.find((s) => s.model === "b").requests, 3);
+  equal(r.sessionModels.find((s) => s.model === "b").meterSharePct, 30);
+});
+
+// Malformed segments are dropped BEFORE the sum check — the guard certifies
+// exactly the segments it returns, so junk must not poison a good bar.
+test("parseUsage: S3 — a segment missing model, requests or width is dropped, the rest still measure", () => {
+  const good = '<span data-usage-segment data-model="glm-5.3:cloud" data-requests="12" style="width:80%"></span>';
+  const grown = FIXTURE.replace(good,
+    '<span data-usage-segment data-requests="12" style="width:80%"></span>'          // no data-model
+    + '<span data-usage-segment data-model="junk:cloud" style="width:80%"></span>'   // no data-requests
+    + '<span data-usage-segment data-model="junk:cloud" data-requests="1" style="background:#f00"></span>' // no width
+    + good);
+  const r = parseUsage(grown);
+  deepEqual(r.weeklyModels, [
+    { model: "glm-5.3:cloud", requests: 12, meterSharePct: 80 },
+    { model: "minimax:cloud", requests: 8, meterSharePct: 20 },
+  ], "the three junk segments are gone; the two real ones still sum to 100 and measure");
+});
+
+// ---- 8a/8b: the sum-to-100 guard and history banking -------------------------
+
+// Test 8a — meterSharePct comes from presentational widths; if a bar's segments
+// don't sum to 100 the page has changed shape and the shares are NOT measured.
+// RED input: an implementation without the guard returns (and banks) the
+// 62%-sum bar as if it were measured.
+test("parseUsage: 8a — a bar whose widths don't sum to 100 yields [] segments; the reading still parses", () => {
+  const bad = FIXTURE.replace('style="width:80%"', 'style="width:42%"'); // 42 + 20 = 62
+  const r = parseUsage(bad);
+  equal(r.weeklyPctUsed, 83.8, "the bar's own percentage still parses — headroom is unaffected");
+  equal(r.sessionPctUsed, 12);
+  deepEqual(r.weeklyModels, [], "RED: widths summing to 62 were accepted as measured shares");
+
+  // presentation rounds to 0.1% per segment — the guard's tolerance is ±0.5
+  for (const w of [79.9, 80.1]) {
+    const variant = parseUsage(FIXTURE.replace('style="width:80%"', `style="width:${w}%"`));
+    equal(variant.weeklyModels.length, 2, `RED: ${w}+20 sums within ±0.5 of 100 — must be accepted`);
+  }
+});
+
+test("getUsage: 8a — a bad-sum bar banks no history line, and headroom still reads live", async () => {
+  resetUsageMemo();
+  const home = tempHome();
+  try {
+    saveCookie(join(home, "ollama-cookie.json"), "tok");
+    const bad = FIXTURE.replace('style="width:80%"', 'style="width:42%"');
+    const okFetch = async () => ({ status: 200, headers: { get: () => null }, text: async () => bad });
+    const r = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: okFetch, _now: () => FIFTY });
+    equal(r.provenance, "live");
+    equal(r.state, "ok", "headroom is unaffected by a rejected segment list");
+    equal(r.weeklyPctUsed, 83.8);
+    ok(!existsSync(usageHistoryPath({ SWARM_HOME: home })), "RED: a 62%-sum bar was banked as a measured week");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// Test 8b — every live fetch with measurable segments banks one snapshot for
+// `swarm cost`. Only LIVE readings bank: a cached fallback would re-stamp the
+// same week's shape and double-count it in the request-weighted mean.
+test("getUsage: 8b — a successful live fetch banks exactly one history line, shaped for `swarm cost`", async () => {
+  resetUsageMemo();
+  const home = tempHome();
+  try {
+    saveCookie(join(home, "ollama-cookie.json"), "tok");
+    const okFetch = async () => ({ status: 200, headers: { get: () => null }, text: async () => FIXTURE });
+    const r = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: okFetch, _now: () => FIFTY });
+    equal(r.provenance, "live");
+    const banked = readSnapshots(usageHistoryPath({ SWARM_HOME: home }));
+    equal(banked.length, 1, "one live fetch, one banked snapshot");
+    deepEqual(banked[0], {
+      fetchedAt: FIFTY,
+      weeklyPctUsed: 83.8,
+      weeklyResetsAt: "2026-09-12T08:00:00.377418+00:00",
+      weeklyModels: [
+        { model: "glm-5.3:cloud", requests: 12, meterSharePct: 80 },
+        { model: "minimax:cloud", requests: 8, meterSharePct: 20 },
+      ],
+    });
+
+    resetUsageMemo();
+    const redirectFetch = async () => ({ status: 303, headers: { get: () => "https://ollama.com/signin" }, text: async () => "" });
+    const cached = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: redirectFetch, _now: () => FIFTY });
+    equal(cached.provenance, "cached");
+    equal(readSnapshots(usageHistoryPath({ SWARM_HOME: home })).length, 1, "a cached fallback never banks");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 // ---- P5-P7: fetch, cookie, config ------------------------------------------

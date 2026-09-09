@@ -9,9 +9,11 @@ import { readRun, listRuns, projectKeys, resultSuperseded } from "../runlog.mjs"
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
+import { multipliers, costPerModel, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
+import { deriveCloudName } from "../discovery.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
-import { coverage, reliability, leaders } from "./perf-views.mjs";
+import { coverage, reliability, leaders, costView } from "./perf-views.mjs";
 import { projectGrouping } from "./grouping.mjs";
 
 const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
@@ -241,6 +243,20 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: readRows(scoresFile) };
     return scoreCache.rows;
   };
+  // The cost half, cached the same way: snapshots re-read when the history's
+  // mtime moves, the multiplier derivation (pure, cheap) on every request.
+  const costFile = usageHistoryPath({ ...process.env, SWARM_HOME: home });
+  let costCache = { mtimeMs: -1, snaps: [] };
+  const costRows = () => {
+    let mtimeMs = 0;
+    try { mtimeMs = statSync(costFile).mtimeMs; } catch { mtimeMs = 0; }
+    if (mtimeMs !== costCache.mtimeMs) costCache = { mtimeMs, snaps: readSnapshots(costFile) };
+    // The meter banks its own names; the score store carries the roster's
+    // cloud forms. Same mapping the CLI's cloudCostRows applies — never a
+    // second rule.
+    return multipliers(costPerModel(costCache.snaps))
+      .map((r) => ({ ...r, model: deriveCloudName(r.model) }));
+  };
   const rankOf = (cells, model) => {
     const ranked = cells.filter((c) => c.combined != null);
     const i = ranked.findIndex((c) => c.model === model);
@@ -255,6 +271,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const live = dedupe(rows);
     const domains = [...new Set(live.map((r) => r.domain).filter(Boolean))].sort();
     const report = aggregate(rows, { aspect, model, domain });
+    const bands = resolveBands(cfg.provider?.cloud?.ollama?.costBands);
     send(res, 200, {
       grading, path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
       aspects: ASPECTS, universals: UNIVERSAL, domains,
@@ -263,7 +280,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       // Drill-in: where this model sits among every model in the same domain filter.
       ...(model ? { rank: rankOf(overall(rows, { domain }).cells, model) } : {}),
       report: report.aspects,
-      views: { coverage: coverage(report), reliability: reliability(live), leaders: leaders(report) },
+      views: {
+        coverage: coverage(report), reliability: reliability(live), leaders: leaders(report),
+        cost: costView(rows, costRows(), { domain, bands }),
+      },
     });
   };
 

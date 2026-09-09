@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync } from "n
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, overall, scoresPath, shrink, fairPrior, PRIOR_WEIGHT,
+  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, overall, scoresPath, shrink, fairPrior, PRIOR_WEIGHT, frontier,
 } from "../src/scores.mjs";
 import { ASPECTS, OUTCOMES } from "../src/aspects.mjs";
 
@@ -425,4 +425,127 @@ test("overall: an outcomes-only model has combined null and sorts last", () => {
   const o = overall(rows, {});
   equal(o.cells.at(-1).model, "dead:cloud");
   equal(o.cells.at(-1).combined, null);
+});
+
+// ── frontier: domination, never a ratio ──────────────────────────────────────
+// Test 5's table: quality order A > D > B > C with multipliers A 4.4x, B 1.0x,
+// C 1.9x, D 20.3x — plus E, one graded leaf at a tiny 0.5x. Integer grades and
+// shrinkage move the exact wtd values off the plan's illustrative numbers, but
+// every relationship the table encodes holds exactly.
+
+const frontierLeaves = (model, g, n) =>
+  Array.from({ length: n }, (_, i) => graded({
+    resultsDir: `C:/runs/frontier-${model}-${i}`,
+    model,
+    grades: { adherence: g, handoff: g, truthfulness: g, depth: g },
+  }));
+
+test("frontier: 5 — the frontier is domination, not a ratio", () => {
+  const rows = [
+    ...frontierLeaves("a:cloud", 10, 5),
+    ...frontierLeaves("d:cloud", 9, 5),
+    ...frontierLeaves("b:cloud", 8, 5),
+    ...frontierLeaves("c:cloud", 7, 5),
+    ...frontierLeaves("e:cloud", 7, 1), // one graded leaf, tiny multiplier
+  ];
+  const costs = [
+    { model: "a:cloud", mult: 4.4 },
+    { model: "b:cloud", mult: 1.0 },
+    { model: "c:cloud", mult: 1.9 },
+    { model: "d:cloud", mult: 20.3 },
+    { model: "e:cloud", mult: 0.5 },
+  ];
+  const v = frontier(rows, costs, {});
+  // aggregate order: quality-desc. RED: a quality÷cost ratio heads the list
+  // with e (8.0 wtd / 0.5x) — the historical failure cost-table's SKILL.md
+  // records as "it once put a model with one graded leaf on top".
+  deepEqual(v.map((x) => x.model), ["a:cloud", "d:cloud", "b:cloud", "e:cloud", "c:cloud"],
+    "RED: the ratio ordering heads the list with the one-leaf cheap model");
+  const by = Object.fromEntries(v.map((x) => [x.model, x]));
+  ok(by["a:cloud"].onFrontier, "the best model is on the frontier even though it is not cheap");
+  ok(by["b:cloud"].onFrontier, "b stays on the frontier despite e being cheaper — e's quality (8.0) is below b's (8.1)");
+  ok(by["e:cloud"].onFrontier, "the cheapest model is on the frontier regardless of quality");
+  equal(by["c:cloud"].dominatedBy, "b:cloud", "c is both worse and dearer than b");
+  equal(by["d:cloud"].dominatedBy, "a:cloud",
+    "RED for both naive rules: d outscores b so cheapest-wins keeps it, and a ratio ranks it last while still listing it — only a, better AND cheaper, dominates it");
+  equal(by["d:cloud"].onFrontier, false);
+  equal(by["a:cloud"].band, 2, "4.4x sits in the 2..5 mid band");
+  equal(by["d:cloud"].band, 3);
+  equal(by["e:cloud"].band, 1);
+});
+
+// Test 6 — a Claude tier has quality but no multiplier: the history has never
+// priced it. Absence is not evidence in either direction — not 0 (free, and so
+// dominating everything) and not Infinity (dear, and so dominated by everything).
+test("frontier: 6 — Claude tiers are unmeasured, not dominated", () => {
+  const rows = [
+    ...frontierLeaves("sonnet", 9, 5),
+    ...frontierLeaves("a:cloud", 8, 5),
+    ...frontierLeaves("b:cloud", 7, 5),
+  ];
+  const costs = [
+    { model: "a:cloud", mult: 1.0 },
+    { model: "b:cloud", mult: 2.0 },
+  ]; // sonnet deliberately absent — nothing has measured it
+  const v = frontier(rows, costs, { aspect: "depth" });
+  equal(v[0].model, "sonnet", "unmeasured models stay listed, in quality order, marked —");
+  const by = Object.fromEntries(v.map((x) => [x.model, x]));
+  equal(by.sonnet.multiplier, null, "RED: a missing multiplier was fabricated as 0 — the tier read as free");
+  equal(by.sonnet.onFrontier, false, "RED: a missing multiplier read as Infinity put the tier on the frontier");
+  equal(by.sonnet.dominatedBy, null, "RED: a missing multiplier read as Infinity marked the tier dominated by everything");
+  ok(!v.some((x) => x.dominatedBy === "sonnet"), "RED: a missing multiplier read as 0 let the unmeasured tier dominate everything");
+  // the measured models' verdicts are exactly what they would be without sonnet
+  ok(by["a:cloud"].onFrontier);
+  equal(by["b:cloud"].dominatedBy, "a:cloud");
+});
+
+test("frontier: a single measured model is on the frontier", () => {
+  const v = frontier(frontierLeaves("solo:cloud", 8, 6), [{ model: "solo:cloud", mult: 1.9 }], { aspect: "depth" });
+  equal(v.length, 1);
+  ok(v[0].onFrontier);
+  equal(v[0].dominatedBy, null);
+  equal(v[0].multiplier, 1.9);
+  equal(v[0].band, 1);
+});
+
+// A measured-but-thin model carries mult: null from multipliers() — it is
+// unmeasured for the frontier too, never free.
+test("frontier: a thin model's null multiplier is unmeasured, not free", () => {
+  const rows = [...frontierLeaves("a:cloud", 8, 5), ...frontierLeaves("thin:cloud", 9, 5)];
+  const v = frontier(rows, [
+    { model: "a:cloud", mult: 1.0 },
+    { model: "thin:cloud", mult: null },
+  ], { aspect: "depth" });
+  const by = Object.fromEntries(v.map((x) => [x.model, x]));
+  equal(by["thin:cloud"].multiplier, null, "RED: the thin model's null multiplier was read as 0");
+  equal(by["thin:cloud"].onFrontier, false, "RED: fabricated-free thin model joined the frontier");
+  equal(by["thin:cloud"].dominatedBy, null);
+  ok(by["a:cloud"].onFrontier);
+});
+
+test("frontier: no measured multipliers at all — the frontier is empty, nothing crashes", () => {
+  const rows = [...frontierLeaves("a:cloud", 8, 5), ...frontierLeaves("b:cloud", 7, 5)];
+  for (const costs of [[], null]) {
+    const v = frontier(rows, costs, { aspect: "depth" });
+    equal(v.length, 2);
+    ok(!v.some((x) => x.onFrontier), "absence of measurement is not evidence of being free");
+    for (const x of v) {
+      equal(x.multiplier, null);
+      equal(x.dominatedBy, null);
+      equal(x.band, null);
+    }
+  }
+});
+
+test("frontier: pure — inputs untouched, equal output on repeat", () => {
+  const rows = [
+    ...frontierLeaves("a:cloud", 10, 5),
+    ...frontierLeaves("b:cloud", 7, 5),
+  ];
+  const costs = [{ model: "a:cloud", mult: 4.4 }, { model: "b:cloud", mult: 1.0 }];
+  const before = JSON.stringify({ rows, costs });
+  const first = frontier(rows, costs, {});
+  const second = frontier(rows, costs, {});
+  deepEqual(first, second);
+  equal(JSON.stringify({ rows, costs }), before, "the inputs were mutated");
 });

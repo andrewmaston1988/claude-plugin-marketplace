@@ -2,7 +2,8 @@ import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { aggregate, dedupe } from "../src/scores.mjs";
 import { OUTCOMES } from "../src/aspects.mjs";
-import { coverage, reliability, leaders } from "../src/serve/perf-views.mjs";
+import { coverage, reliability, leaders, costView } from "../src/serve/perf-views.mjs";
+import { DEFAULT_COST_BANDS } from "../src/cost.mjs";
 
 // Minimal valid row — mirrors scores.test.mjs's baseline shape so aggregate()
 // and dedupe() see exactly what the real store would hand them.
@@ -133,4 +134,70 @@ test("coverage: composite key does not collide when a model or aspect name conta
   const { cells } = coverage(report);
   equal(cells.find((c) => c.aspect === "a" && c.model === "b c").n, 3);
   equal(cells.find((c) => c.aspect === "a b" && c.model === "c").n, 9);
+});
+
+// ── cost ────────────────────────────────────────────────────────────────────
+
+// Multiplier rows as `multipliers(costPerModel(snaps))` emits them. `m-thin`
+// is measured but under the 200-request confidence bar (so it is NOT eligible
+// to be the floor); `m-unpriced` has no history at all (a Claude tier reads
+// the same). m-cheap carries six leaves so its weighted score survives
+// shrinkage and can dominate m-thin on both axes.
+const costRow = (model, mult, over = {}) => ({
+  model, mult,
+  ptsPerReq: mult == null ? null : mult * 0.025,
+  requests: 300, measuredRequests: 300, weeks: 1, measuredWeeks: 1,
+  ...over,
+});
+const costRowsFor = () => [
+  costRow("m-cheap", 1),
+  costRow("m-dear", 4.4),
+  costRow("m-thin", 3, { measuredRequests: 100, requests: 100 }),
+  costRow("m-unpriced", null, { ptsPerReq: null, requests: 150, measuredRequests: 0, weeks: 1, measuredWeeks: 0 }),
+];
+
+test("cost: points join the frontier's verdict — multiplier, band, domination, thin", () => {
+  const rows = [
+    ...Array.from({ length: 6 }, (_, i) => graded({ leaf: `a${i}`, model: "m-cheap", grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 } })),
+    ...Array.from({ length: 6 }, (_, i) => graded({ leaf: `b${i}`, model: "m-dear", grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 } })),
+    graded({ leaf: "c1", model: "m-thin", grades: { adherence: 3, handoff: 3, truthfulness: 3, depth: 3 } }),
+    graded({ leaf: "d1", model: "m-unpriced", grades: { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 } }),
+  ];
+  const { points, spread, bands } = costView(rows, costRowsFor());
+  deepEqual(bands, DEFAULT_COST_BANDS, "bands pass through by default");
+  const cheap = points.find((p) => p.model === "m-cheap");
+  const dear = points.find((p) => p.model === "m-dear");
+  const thin = points.find((p) => p.model === "m-thin");
+  const unpriced = points.find((p) => p.model === "m-unpriced");
+  ok(cheap.onFrontier, "the cheapest model cannot be dominated");
+  equal(cheap.band, 1, "1× lands in the first band");
+  equal(cheap.multiplier, 1);
+  ok(dear.onFrontier, "dearer but strictly better — nothing beats it on both axes");
+  equal(dear.band, 2, "4.4× is inside the default 2..5 band");
+  equal(thin.dominatedBy, "m-cheap", "strictly worse AND strictly dearer — the frontier's verdict joins in");
+  equal(thin.thin, true, "under 200 measured requests is flagged, so the mark can show it");
+  equal(unpriced.multiplier, null, "no history is unmeasured, not free");
+  equal(unpriced.band, null);
+  equal(unpriced.onFrontier, false, "unmeasured neither sits on nor is pushed off the frontier");
+  equal(unpriced.dominatedBy, null);
+});
+
+test("cost: spread is cheapest-first with unmeasured last, and every row carries its evidence", () => {
+  const { spread } = costView([], costRowsFor());
+  deepEqual(spread.map((s) => s.model), ["m-cheap", "m-thin", "m-dear", "m-unpriced"],
+    "multiplier order, not quality order — this is the cost axis alone");
+  const unpriced = spread[3];
+  equal(unpriced.mult, null);
+  equal(unpriced.band, null);
+  equal(unpriced.thin, true, "0 measured requests is thin");
+  ok(spread.every((s) => "requests" in s && "measuredRequests" in s && "weeks" in s && "measuredWeeks" in s),
+    "the evidence columns ride along so the page can label thin rows");
+});
+
+test("cost: custom bands re-map the band column", () => {
+  const { bands, spread } = costView([], costRowsFor(), { bands: [0.5, 2] });
+  deepEqual(bands, [0.5, 2], "config bands pass through");
+  equal(spread.find((s) => s.model === "m-cheap").band, 2, "1× is inside 0.5..2");
+  equal(spread.find((s) => s.model === "m-dear").band, 3, "4.4× is over the second edge");
+  equal(spread.find((s) => s.model === "m-thin").band, 3, "3× is over the second edge too");
 });
