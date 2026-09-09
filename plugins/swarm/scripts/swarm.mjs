@@ -609,7 +609,7 @@ async function cmdPerf(rest) {
 // copy and records its pid (written by the parent, per the plugin daemon rule).
 async function cmdServe(rest) {
   const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir, pidPath,
-    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim } = await import("../src/serve/daemon.mjs");
+    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort } = await import("../src/serve/daemon.mjs");
   const home = swarmHome();
   const cfg = getConfig();
   const port = cfg.dashboard?.port ?? 7331;
@@ -689,13 +689,15 @@ async function cmdServe(rest) {
     const { spawn } = await import("node:child_process");
     const { openSync, mkdirSync, writeFileSync, renameSync } = await import("node:fs");
     mkdirSync(home, { recursive: true });
-    const logPath = join(home, "dashboard.log");
+    // Raw stdio (crash stacks) — separate from dashboard.log, which the daemon
+    // itself owns as a structured, rotated event log.
+    const logPath = join(home, "dashboard-stdio.log");
     const logFd = openSync(logPath, "a");
     let child;
     try { child = spawn(process.execPath, [enginePath, "serve"], { detached: true, stdio: ["ignore", logFd, logFd], windowsHide: true }); }
     catch (e) { return { ok: false, reason: `could not spawn the daemon: ${e.message}` }; }
     child.unref();
-    if (!takeover) writePid(home, { pid: child.pid, port, version: installed?.version ?? null, startedMs: Date.now() });
+    if (!takeover) writePid(home, { pid: child.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() });
     if (process.platform === "win32" && cfg.dashboard?.tray !== false) {
       try {
         const { renderTrayIconPng } = await import("../src/serve/icon.mjs");
@@ -739,20 +741,42 @@ async function cmdServe(rest) {
   if (rest.includes("--daemon")) {
     const started = await startDetached();
     if (!started.ok) { err(`dashboard: ${started.reason}`); exitSoon(1); return 1; }
-    out(`dashboard: started pid ${started.pid} (log: ${started.logPath})`);
+    out(`dashboard: started pid ${started.pid} (events: ${join(home, "dashboard.log")}, stdio: ${started.logPath})`);
     for (const u of urlLines(port)) out(`  ${u}`);
     out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
     exitSoon(0); return 0;
   }
 
   const { createServer } = await import("../src/serve/server.mjs");
+  const { createLogger } = await import("../src/serve/log.mjs");
+  const { startUpdateWatch } = await import("../src/serve/update-watch.mjs");
   ensureShim({ home, resolverSrc: fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)) });
+  const dlog = createLogger({ logDir: home }).log;
   const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`) });
-  const record = { pid: process.pid, port, version: installed?.version ?? null, startedMs: Date.now() };
+  const bind = cfg.dashboard?.bind ?? "0.0.0.0";
+  // SSE streams never "finish", so they cannot count as in-flight for the
+  // handover drain — they are ended outright at handover and the browser
+  // reconnects to the replacement. Tracked from before the first listen so a
+  // handover never misses a stream.
+  const sockets = new Set();
+  server.on("connection", (s) => { sockets.add(s); s.on("close", () => sockets.delete(s)); });
+  const sse = new Set();
+  server.on("request", (req, res) => {
+    if ((req.headers.accept || "").includes("text/event-stream")) {
+      sse.add(res);
+      res.on("close", () => sse.delete(res));
+    }
+  });
+  const listenOnce = () => new Promise((resolve, reject) => {
+    const onErr = (e) => reject(e);
+    server.once("error", onErr);
+    server.listen(port, bind, () => { server.removeListener("error", onErr); resolve(); });
+  });
+  const record = { pid: process.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() };
   const prevRecord = readPid(home); // a live stale daemon we are taking over from, if any
   writePid(home, record); // before listen, per the daemon lifecycle rule; handed back below if listen fails
   try {
-    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, cfg.dashboard?.bind ?? "0.0.0.0", resolve); });
+    await listenOnce();
   } catch (e) {
     // A failed bind must not strand a live rival recordless — `serve stop` could
     // then never reach it. Hand the record back; clear only what was ours.
@@ -765,6 +789,44 @@ async function cmdServe(rest) {
   out(`dashboard: serving ~/.swarm/runs on port ${port}`);
   for (const u of urlLines(port)) out(`  ${u}`);
   out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
+
+  // Handover plumbing for the update watcher: release the port for the
+  // replacement, retake it when the replacement fails. Plain requests drain
+  // first; anything still holding the port after the grace window is cut.
+  const exitDaemon = (code) => { setTimeout(() => process.exit(code), 150); };
+  const prepare = async () => {
+    for (const res of sse) { try { res.end(); } catch {} }
+    sse.clear();
+    await new Promise((resolve) => {
+      const cut = setTimeout(() => { for (const s of sockets) { try { s.destroy(); } catch {} } }, 3000);
+      server.close(() => { clearTimeout(cut); resolve(); });
+    });
+  };
+  const retake = async () => {
+    try {
+      await listenOnce();
+    } catch (e) {
+      // Someone else holds the port. A live daemon on the record, or anything
+      // reachable there, is the dashboard being served — bow out. Only a dead
+      // port we cannot retake is a wedge, and a record still naming us must
+      // not linger pointing at a pid that gave up.
+      const cur = readPid(home);
+      if (cur?.pid && cur.pid !== process.pid && isAlive(cur.pid)) { exitDaemon(0); return; }
+      const p = await probePort(port, bind);
+      if (p.reachable) { exitDaemon(0); return; }
+      if (cur?.pid === process.pid) clearPid(home);
+      exitDaemon(1);
+      return;
+    }
+    writePid(home, { ...record, listening: true });
+  };
+  dlog("serve", { msg: `listening on ${bind}:${port}`, pid: record.pid, version: record.version });
+  startUpdateWatch({
+    registryPath: registryPath(), own: record, shimPath, home,
+    autoRestart: cfg.dashboard?.autoRestartOnUpdate !== false,
+    prepare, retake,
+    log: (msg) => dlog("update-watch", { msg }),
+  });
   const stop = () => { const cur = readPid(home); if (cur?.pid === process.pid) clearPid(home); server.close(); setTimeout(() => process.exit(0), 150); };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);

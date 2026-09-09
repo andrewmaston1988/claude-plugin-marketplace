@@ -48,7 +48,9 @@
     "token": null,
     "livenessPollMs": 10000,
     "clockMs": 1000,
-    "uiPollMs": 5000
+    "uiPollMs": 5000,
+    "autoRestartOnUpdate": true,
+    "tray": true
   },
   "swarm": {
     "always": false,

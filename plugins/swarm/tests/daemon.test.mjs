@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import {
   writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, launcherPath,
   pidPath, resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, ensureShim,
 } from "../src/serve/daemon.mjs";
+import { createLogger } from "../src/serve/log.mjs";
 
 const RESOLVER_SRC = fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url));
 const tmpHome = () => mkdtempSync(join(tmpdir(), "swarm-home-"));
@@ -210,6 +211,29 @@ test("ensureShim: copies the resolver to the stable path so every launch goes th
     assert.ok(existsSync(p));
     assert.equal(readFileSync(p, "utf8"), readFileSync(RESOLVER_SRC, "utf8"), "refreshed, not just created — a stale copy must not survive an update");
   } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("daemon log: line JSON round trip; the size cap rotates exactly once; logging never throws", () => {
+  const dir = tmpHome();
+  try {
+    const { log, path } = createLogger({ logDir: dir, maxBytes: 300 });
+    log("serve", { msg: "listening" });
+    log("serve", { msg: "a".repeat(200) });
+    const rec = JSON.parse(readFileSync(path, "utf8").trim().split("\n")[0]);
+    assert.equal(rec.event, "serve");
+    assert.equal(rec.msg, "listening");
+    assert.ok(rec.t, "each line carries a timestamp");
+    log("serve", { msg: "c" }); // total now over the cap → this write rotates first
+    assert.ok(existsSync(`${path}.1`), "one rotation: old content moves aside, it is not dropped or endlessly rotated");
+    assert.ok(readFileSync(`${path}.1`, "utf8").includes("listening"), "the rotated file holds the old lines");
+    assert.ok(readFileSync(path, "utf8").includes("\"msg\":\"c\""), "the live log starts fresh after the rotation");
+    assert.ok(!readFileSync(path, "utf8").includes("listening"));
+
+    // A logging failure must never take the daemon down: a directory sitting
+    // where the log file should be makes every append throw — silently.
+    mkdirSync(join(dir, "blocker"));
+    createLogger({ logDir: dir, file: "blocker" }).log("x");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("autostart: install writes the launcher once (idempotent), uninstall removes it; no Startup dir → declines", () => {
