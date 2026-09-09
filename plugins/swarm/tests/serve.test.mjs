@@ -485,11 +485,11 @@ test("perf: the cost view joins the banked history to the score store — multip
   try {
     const row = (leaf, model, grades, outcome = "completed") => JSON.stringify({ ts: "2026-09-05T00:00:00Z", resultsDir: "/r/x-1", leaf, model, effort: null, domain: "node", grades: { adherence: null, handoff: null, truthfulness: null, depth: null, discrimination: null, code: null, impl: null, search: null, web: null, vision: null, geometry: null, ...grades }, outcome, note: "", assessedBy: { session: "t" } });
     writeFileSync(join(home, "model-scores.jsonl"), [
-      row("a", "m-b", { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 }),
-      row("b", "m-b", { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 }),
-      row("c", "m-a", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 }),
-      row("d", "m-a", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 }),
-      row("e", "m-thin", { adherence: 5, handoff: 5, truthfulness: 5, depth: 5 }),
+      row("a", "m-b:cloud", { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 }),
+      row("b", "m-b:cloud", { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 }),
+      row("c", "m-a:cloud", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 }),
+      row("d", "m-a:cloud", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 }),
+      row("e", "m-thin:cloud", { adherence: 5, handoff: 5, truthfulness: 5, depth: 5 }),
       row("f", "sonnet", { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 }),
     ].join("\n") + "\n", "utf8");
     // One week's last reading: m-b is the floor (200 measured requests at
@@ -509,18 +509,18 @@ test("perf: the cost view joins the banked history to the score store — multip
       const cost = body.views.cost;
       assert.deepEqual(cost.bands, [2, 5], "default bands ride through");
       const byModel = new Map(cost.points.map((p) => [p.model, p]));
-      assert.equal(byModel.get("m-a").multiplier, 4);
-      assert.equal(byModel.get("m-a").band, 2);
-      assert.equal(byModel.get("m-b").multiplier, 1);
-      assert.equal(byModel.get("m-b").band, 1);
-      assert.ok(byModel.get("m-b").onFrontier, "the floor is never dominated");
-      assert.equal(byModel.get("m-thin").thin, true, "under 200 measured requests is flagged");
-      assert.ok(byModel.get("m-thin").multiplier < 1, "a sub-floor reading is real, not the floor");
+      assert.equal(byModel.get("m-a:cloud").multiplier, 4);
+      assert.equal(byModel.get("m-a:cloud").band, 2);
+      assert.equal(byModel.get("m-b:cloud").multiplier, 1);
+      assert.equal(byModel.get("m-b:cloud").band, 1);
+      assert.ok(byModel.get("m-b:cloud").onFrontier, "the floor is never dominated");
+      assert.equal(byModel.get("m-thin:cloud").thin, true, "under 200 measured requests is flagged");
+      assert.ok(byModel.get("m-thin:cloud").multiplier < 1, "a sub-floor reading is real, not the floor");
       const sonnet = byModel.get("sonnet");
       assert.equal(sonnet.multiplier, null, "a model with no history is unmeasured, not free");
       assert.equal(sonnet.band, null);
       assert.equal(sonnet.onFrontier, false);
-      assert.deepEqual(cost.spread.map((s) => s.model), ["m-thin", "m-b", "m-a"],
+      assert.deepEqual(cost.spread.map((s) => s.model), ["m-thin:cloud", "m-b:cloud", "m-a:cloud"],
         "cheapest-first over measured rows, sonnet absent (no history to price)");
       // The history's mtime moves: the next request re-reads it, like the score store.
       writeFileSync(join(home, "usage-history.jsonl"), JSON.stringify({
@@ -529,7 +529,7 @@ test("perf: the cost view joins the banked history to the score store — multip
       }) + "\n", "utf8");
       const t = (NOW + 60_000) / 1000; utimesSync(join(home, "usage-history.jsonl"), t, t);
       const fresh = (await get("/api/perf")).body.views.cost;
-      assert.ok(fresh.spread.some((s) => s.model === "m-new"), "a banked week lands on the next request");
+      assert.ok(fresh.spread.some((s) => s.model === "m-new:cloud"), "a banked week lands on the next request");
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
@@ -549,8 +549,50 @@ test("perf: costBands from config re-maps the band column server-side", async ()
       const { body } = await get("/api/perf");
       const cost = body.views.cost;
       assert.deepEqual(cost.bands, [3, 6], "config bands pass through");
-      assert.equal(cost.spread.find((s) => s.model === "m-b").band, 1, "1× is under the first edge");
-      assert.equal(cost.spread.find((s) => s.model === "m-a").band, 2, "4× is inside 3..6");
+      assert.equal(cost.spread.find((s) => s.model === "m-b:cloud").band, 1, "1× is under the first edge");
+      assert.equal(cost.spread.find((s) => s.model === "m-a:cloud").band, 2, "4× is inside 3..6");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// The meter banks its own names ("glm-5.3"), the score store carries the
+// roster's cloud forms ("glm-5.3:cloud") — the exact-name join only works if
+// the server maps banked meter names the way the CLI's cloudCostRows does.
+test("perf: the meter's own names join the score store's cloud names — banked meter names are mapped before the join", async () => {
+  const { home } = seedHome();
+  try {
+    const row = (leaf, model, grades, outcome = "completed") => JSON.stringify({ ts: "2026-09-05T00:00:00Z", resultsDir: "/r/x-1", leaf, model, effort: null, domain: "node", grades: { adherence: null, handoff: null, truthfulness: null, depth: null, discrimination: null, code: null, impl: null, search: null, web: null, vision: null, geometry: null, ...grades }, outcome, note: "", assessedBy: { session: "t" } });
+    writeFileSync(join(home, "model-scores.jsonl"), [
+      row("a", "m-b:cloud", { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 }),
+      row("b", "m-b:cloud", { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 }),
+      row("c", "m-a:cloud", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 }),
+      row("d", "m-a:cloud", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 }),
+      row("e", "m-c:cloud", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 }),
+      row("f", "m-c:cloud", { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 }),
+      row("g", "sonnet", { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 }),
+    ].join("\n") + "\n", "utf8");
+    // The meter banks bare tags; one row already arrives in cloud form — the
+    // mapping must pass a cloud name through untouched. Same arithmetic as the
+    // join test above: m-b is the floor, m-a and m-c read 4×.
+    writeFileSync(join(home, "usage-history.jsonl"), JSON.stringify({
+      weeklyPctUsed: 50,
+      weeklyModels: [
+        { model: "m-b", requests: 200, meterSharePct: 10 },
+        { model: "m-a", requests: 100, meterSharePct: 20 },
+        { model: "m-c:cloud", requests: 100, meterSharePct: 20 },
+      ],
+    }) + "\n", "utf8");
+    await withServer({ home, cfg: { ...cfg(), grading: { enabled: true } } }, async ({ get }) => {
+      const byModel = new Map((await get("/api/perf")).body.views.cost.points.map((p) => [p.model, p]));
+      assert.equal(byModel.get("m-a:cloud").multiplier, 4, "RED: the meter's bare m-a never joined m-a:cloud — every point read unmeasured");
+      assert.equal(byModel.get("m-c:cloud").multiplier, 4, "an already-cloud meter name passes through unmapped");
+      assert.equal(byModel.get("m-b:cloud").multiplier, 1);
+      assert.equal(byModel.get("m-b:cloud").band, 1);
+      assert.ok(byModel.get("m-b:cloud").onFrontier, "the floor is never dominated");
+      assert.equal(byModel.get("sonnet").multiplier, null, "no history is still unmeasured");
+      const cost = (await get("/api/perf")).body.views.cost;
+      assert.deepEqual(cost.spread.map((s) => s.model), ["m-b:cloud", "m-a:cloud", "m-c:cloud"],
+        "the spread carries the mapped names too — its links must land on real model pages");
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
