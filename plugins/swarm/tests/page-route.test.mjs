@@ -462,8 +462,8 @@ test("badges: run rows and leaf rows carry none — the screen a run is READ on 
   assert.ok(!P.screenText().includes("💲"), "no 💲 glyph anywhere on the leaf screen");
 });
 
-test("cost view: the fourth chip routes, the server's plots draw, and the foot names the config", async () => {
-  const P = loadPage({ perfViews: { costPlots: () => `<div class="cost">the two charts</div>` } });
+test("cost view: the fifth pill routes, the server's screen draws, and the foot names the config", async () => {
+  const P = loadPage({ perfViews: { costScreen: () => `<div class="cost">the cards and the list</div>` } });
   await P.flush();
   P.respondList(listData(listRow()));
   await P.flush();
@@ -472,8 +472,86 @@ test("cost view: the fourth chip routes, the server's plots draw, and the foot n
   await P.flush();
   P.respondPerf(perfPayload());
   await P.flush();
-  assert.ok(P.screenText().includes("the two charts"), "the perf.js widget rendered");
-  const on = chipHref(P.main, "#/perf/cost");
-  assert.ok(on && (on.getAttribute("class") || "").includes("on"), "the cost chip is the selected view");
+  assert.ok(P.screenText().includes("the cards and the list"), "the perf.js widget rendered");
+  assert.equal(activeSegLabel(P.main), "cost", "the cost pill is the selected view");
   assert.ok(P.screenText().includes("provider.cloud.ollama.costBands"), "the foot names the config key");
+});
+
+// ── the perf view switcher ────────────────────────────────────────────────
+// It lives in page.html (not perf.js), so this harness reaches it through the
+// real render path — which is also what makes the cold-load row below possible.
+const segTags = (el, tag) => allNodes(el).filter((n) => n.nodeType === 1 && n.tagName === tag);
+const segLabels = (el) => segTags(el, "TEXT").filter((n) => (n.getAttribute("class") || "").startsWith("seg-label"));
+const activeSegLabel = (el) => {
+  const on = segLabels(el).filter((n) => (n.getAttribute("class") || "").split(/\s+/).includes("on"));
+  assert.equal(on.length, 1, `exactly one pill must be active, found ${on.length}`);
+  return on[0].textContent;
+};
+const segHits = (el) => segTags(el, "RECT").filter((n) => n.getAttribute("data-href"));
+const indicator = (el) => segTags(el, "RECT").find((n) => (n.getAttribute("class") || "") === "seg-ind");
+
+const gotoPerf = async (P, hash) => {
+  P.location.hash = hash;
+  P.fireHashchange();
+  await P.flush();
+  P.respondPerf(perfPayload());
+  await P.flush();
+};
+
+test("switcher: one pill per view, exactly one active, and it matches the route", async () => {
+  const cases = [["#/perf", "rank"], ["#/perf/coverage", "coverage"], ["#/perf/reliability", "reliability"], ["#/perf/leaders", "leaders"], ["#/perf/cost", "cost"]];
+  for (const [hash, label] of cases) {
+    const P = loadPage({ perfViews: Object.fromEntries(["coverageGrid", "reliabilityBars", "leadersList", "costScreen"].map((k) => [k, () => "<div></div>"])) });
+    await P.flush();
+    P.respondList(listData(listRow()));
+    await P.flush();
+    await gotoPerf(P, hash);
+    assert.equal(segLabels(P.main).length, cases.length, `${hash}: one label per view — a dropped view still renders "correctly" otherwise`);
+    assert.equal(activeSegLabel(P.main), label, `${hash}: the active pill`);
+    const hit = segHits(P.main).find((r) => r.getAttribute("data-href") === hash);
+    assert.ok(hit, `${hash}: a transparent hit rect carries the route — a <text> hit area is glyphs only, not a thumb target`);
+  }
+});
+
+test("switcher: the indicator sits on the active pill, pills tile without overlapping, and nothing is drawn outside the canvas", async () => {
+  const geo = async (hash) => {
+    const P = loadPage({ perfViews: Object.fromEntries(["coverageGrid", "reliabilityBars", "leadersList", "costScreen"].map((k) => [k, () => "<div></div>"])) });
+    await P.flush();
+    P.respondList(listData(listRow()));
+    await P.flush();
+    await gotoPerf(P, hash);
+    const hits = segHits(P.main).map((r) => ({ x: Number(r.getAttribute("x")), w: Number(r.getAttribute("width")), href: r.getAttribute("data-href") }));
+    const ind = indicator(P.main);
+    const tx = Number(/translate\(([-\d.]+)/.exec(ind.getAttribute("transform"))[1]);
+    const svg = segTags(P.main, "SVG")[0];
+    const vbW = Number(svg.getAttribute("viewBox").split(" ")[2]);
+    return { hits, ind: { x: tx, w: Number(ind.getAttribute("width")) }, vbW };
+  };
+  const rank = await geo("#/perf");
+  const pill = (g, href) => g.hits.find((h) => h.href === href);
+  assert.deepEqual({ x: rank.ind.x, w: rank.ind.w }, { x: pill(rank, "#/perf").x, w: pill(rank, "#/perf").w }, "the indicator is the active pill's box");
+  for (let i = 1; i < rank.hits.length; i++) {
+    assert.ok(rank.hits[i].x >= rank.hits[i - 1].x + rank.hits[i - 1].w, `pill ${i} starts at or after pill ${i - 1} ends — no overlap`);
+  }
+  const last = rank.hits[rank.hits.length - 1];
+  assert.ok(rank.vbW >= last.x + last.w, "the viewBox covers the last pill — the one way a scaled layout can still clip");
+  // The moving part: an indicator rendered at a constant x looks right on the
+  // default view and wrong on every other one.
+  const cost = await geo("#/perf/cost");
+  assert.notEqual(cost.ind.x, rank.ind.x, "the indicator moves with the active view");
+  assert.deepEqual({ x: cost.ind.x, w: cost.ind.w }, { x: pill(cost, "#/perf/cost").x, w: pill(cost, "#/perf/cost").w }, "…onto the cost pill's box");
+});
+
+test("switcher: renders on a COLD #/perf load with window.perfViews never stubbed", async () => {
+  // The blocker this guards: perf.js is loaded by loadPerfJs() on the four new
+  // views and the model page only. A switcher built there would be undefined on
+  // the rank and aspect routes. The old seam ("perf.js is never loaded here;
+  // stub the contract") is exactly what hid that, so this row stubs nothing.
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  await gotoPerf(P, "#/perf");
+  assert.equal(segLabels(P.main).length, 5, "the switcher rendered without perf.js being loaded at all");
+  assert.equal(activeSegLabel(P.main), "rank");
 });
