@@ -194,6 +194,7 @@ from the appendix. If no, close.
 | `dashboard.enabled` / `bind` / `token` | `true` / `0.0.0.0` / `null` | Stage 3. |
 | `dashboard.port` | `7331` | Listen port; also the firewall rule's port. |
 | `dashboard.livenessPollMs` | `10000` | How often the server re-checks which runs are live and tells connected browsers. Two things produce no filesystem event and are only ever caught by this clock: a run finishing (its `summary.json` lands in a path nothing watches) and an engine dying. It also rebuilds file watchers, so one that silently stops delivering recovers instead of leaving the page deaf until a manual refresh. Ticks only while a dashboard is actually open — nothing runs with no client connected. Lower it for a snappier list at the cost of more directory scans. |
+| `dashboard.finishedPerProject` | `8` | How many finished runs each displayed project keeps on the runs list, newest first. A repo and its worktree keys are one group — the cap is per displayed project, not per run directory — and a truncated section header reads `N of M finished`. Raise it to keep more of a busy estate's history on screen. |
 | `swarm.always` | `false` | Stage 2. |
 | `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |
 | `grading.enabled` | `false` | Stage 6. |

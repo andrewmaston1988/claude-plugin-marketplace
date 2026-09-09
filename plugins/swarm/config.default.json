@@ -48,7 +48,8 @@
     "token": null,
     "livenessPollMs": 10000,
     "clockMs": 1000,
-    "uiPollMs": 5000
+    "uiPollMs": 5000,
+    "finishedPerProject": 8
   },
   "swarm": {
     "always": false,

@@ -5,20 +5,22 @@ import http from "node:http";
 import { readFileSync, readdirSync, existsSync, statSync, watch as fsWatch } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readRun, listRuns, resultSuperseded } from "../runlog.mjs";
+import { readRun, listRuns, projectKeys, resultSuperseded } from "../runlog.mjs";
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
 import { coverage, reliability, leaders } from "./perf-views.mjs";
+import { projectGrouping } from "./grouping.mjs";
 
 const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
 const PERF_JS = fileURLToPath(new URL("./perf.js", import.meta.url));
 const LIVE_JS = fileURLToPath(new URL("./live.js", import.meta.url));
 const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
-// The estate view: every live run, plus the newest few finished PER PROJECT — a
+// The estate view: every live run, plus the newest few finished PER DISPLAY GROUP — a
 // global newest-N let one busy project crowd the others off the list entirely.
+// dashboard.finishedPerProject overrides the default.
 const FINISHED_PER_PROJECT = 8;
 
 // A single path segment as the engine writes them (ids, encoded cwds, run names):
@@ -53,12 +55,13 @@ const MANIFEST = {
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs }) {
+export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _listRuns = listRuns, _projectKeys = projectKeys }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
   const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
   const pollMs = _pollMs ?? dash.livenessPollMs ?? 10_000;
+  const finishedPerProject = dash.finishedPerProject ?? FINISHED_PER_PROJECT;
 
   // Resolve a run dir from validated segments and prove it sits under the root.
   const runDir = (project, name) => {
@@ -102,7 +105,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       if (projectWatchers.has(dir)) continue;
       try { projectWatchers.set(dir, _watch(dir, onRootOrProject)); } catch (e) { log(`watch ${dir}: ${e.message}`); }
     }
-    const active = new Map(listRuns(home, { now: now(), heartbeatMs }).filter((r) => r.active).map((r) => [r.dir, r]));
+    const active = new Map(_listRuns(home, { now: now(), heartbeatMs }).filter((r) => r.active).map((r) => [r.dir, r]));
     for (const [dir, w] of runWatchers) if (!active.has(dir)) { try { w.close(); } catch {} runWatchers.delete(dir); }
     for (const [dir, run] of active) {
       if (runWatchers.has(dir)) continue;
@@ -189,24 +192,33 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
 
   const routes = {
     "/api/runs": (res) => {
+      const all = _listRuns(home, { now: now(), heartbeatMs });
+      // Groups derive from EVERY raw key — worktree keys and fully-finished repos
+      // included, before any filtering — or the common-prefix derivation shifts
+      // with whatever happened to survive the cap.
+      const { groupOf, labelOf } = projectGrouping([...new Set(all.map((r) => r.project))]);
+      const finishedTotals = {};
+      for (const r of all) if (!r.active) { const g = groupOf(r.project); finishedTotals[g] = (finishedTotals[g] || 0) + 1; }
       const seen = new Map();
-      const picked = listRuns(home, { now: now(), heartbeatMs }).filter((r) => {
+      const picked = all.filter((r) => {
         if (r.active) return true;
-        const n = seen.get(r.project) || 0;
-        seen.set(r.project, n + 1);
-        return n < FINISHED_PER_PROJECT;
+        const g = groupOf(r.project);
+        const n = seen.get(g) || 0;
+        seen.set(g, n + 1);
+        return n < finishedPerProject;
       });
       const rows = picked.map((r) => {
         const run = readRun(r.dir, { now: now(), quietWarnMs, heartbeatMs });
         return {
           project: r.project, name: r.name, active: r.active, aborted: r.aborted, stopped: r.stopped, mtimeMs: r.mtimeMs,
+          group: groupOf(r.project), groupLabel: labelOf(groupOf(r.project)),
           startedMs: run?.startedMs ?? null, finishedMs: run?.finishedMs ?? null,
           byState: run?.totals.byState ?? {}, leaves: run?.tasks.length ?? 0, waves: run?.waves.length ?? 0,
           tokens: run ? run.tasks.reduce((n, t) => n + (t.tokens ? (t.tokens.input || 0) + (t.tokens.output || 0) + (t.tokens.cacheCreation || 0) : 0), 0) : 0,
           hasDigest: !!(run?.digestPath || run?.reportPath),
         };
       });
-      send(res, 200, { runs: rows, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, grading });
+      send(res, 200, { runs: rows, finishedTotals, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, grading });
     },
   };
 
@@ -295,7 +307,13 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
 
     if (seg.length === 2) {
       const run = readRun(dir, { now: now(), quietWarnMs, heartbeatMs });
-      return run ? send(res, 200, run) : notFound(res);
+      if (!run) return notFound(res);
+      // The deep-linked header needs the short project name: the same grouping rule
+      // the runs list caps by, over the same full raw key set.
+      // projectKeys, never listRuns: the label needs the raw key SET, and a full
+      // estate scan here ran on every run/node/leaf fetch including the 5 s poll.
+      const { groupOf, labelOf } = projectGrouping(_projectKeys(home));
+      return send(res, 200, { ...run, groupLabel: labelOf(groupOf(run.project)) });
     }
     if (seg.length === 3 && seg[2] === "digest") {
       const md = ["report.md", "digest.md"].map((f) => join(dir, f)).find(existsSync);

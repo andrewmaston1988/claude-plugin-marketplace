@@ -7,6 +7,7 @@ import http from "node:http";
 import { createServer, safeSegment } from "../src/serve/server.mjs";
 import { RUN_LOG, NOW, buildFixture } from "./fixtures/run-fixture.mjs";
 import { touchHeartbeat, heartbeatPath } from "../src/results.mjs";
+import { listRuns as realListRuns, projectKeys as realProjectKeys } from "../src/runlog.mjs";
 
 const cfg = (over = {}) => ({ quietWarnSecs: 60, dashboard: { port: 0, bind: "127.0.0.1", token: null, ...over } });
 
@@ -40,7 +41,7 @@ async function withServer(opts, fn) {
   const _watch = (path, listener) => { const w = { path, listener, closed: false, close() { this.closed = true; } }; watchers.push(w); return w; };
   // _pollMs defaults slow: only the poll tests opt into a fast tick, so no other
   // test's frame counting can be perturbed by a liveness broadcast landing mid-window.
-  const server = createServer({ home, cfg: opts.cfg || cfg(), now: () => opts.now ?? NOW, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30, _pollMs: opts.pollMs ?? 60_000 });
+  const server = createServer({ home, cfg: opts.cfg || cfg(), now: () => opts.now ?? NOW, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30, _pollMs: opts.pollMs ?? 60_000, ...(opts.seams || {}) });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const port = server.address().port;
   const get = (path, { raw = false } = {}) => new Promise((resolve, reject) => {
@@ -51,7 +52,7 @@ async function withServer(opts, fn) {
       res.on("end", () => resolve({ status: res.statusCode, headers: res.headers, body: raw ? body : tryJson(body) }));
     }).on("error", reject);
   });
-  try { return await fn({ get, port, watchers, server }); } finally { server.closeAllConnections(); await new Promise((r) => server.close(r)); }
+  try { return await fn({ get, port, watchers, server, home }); } finally { server.closeAllConnections(); await new Promise((r) => server.close(r)); }
 }
 const tryJson = (s) => { try { return JSON.parse(s); } catch { return s; } };
 
@@ -131,6 +132,104 @@ test("runs list is per project: a busy project cannot crowd a quiet one off the 
       assert.equal(busy.length, 8, "capped per project");
       assert.ok(body.runs.some((r) => r.project === "C--code-b"), "the quiet project's finished run still listed");
       assert.ok(body.runs.some((r) => r.project === "C--code-a" && r.active), "live run always listed");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// ── per-group finished cap ──────────────────────────────────────────────────
+// The cap counts DISPLAY GROUPS — a repo plus its worktree keys are one group —
+// and finishedTotals must report what exists on disk, not what was sent.
+function seedFinished(home, project, name, ageHours) {
+  const d = join(home, "runs", project, name);
+  buildFixture(d);
+  writeFileSync(join(d, "summary.json"), JSON.stringify({ started: "2026-09-05T00:00:00Z", finished: "2026-09-05T00:30:00Z", tasks: [] }), "utf8");
+  const t = (NOW - ageHours * 3600_000) / 1000;
+  utimesSync(join(d, "run.log"), t, t);
+}
+
+function seedActive(home, project, name) {
+  const d = join(home, "runs", project, name);
+  buildFixture(d);
+  const t = (NOW - 5000) / 1000;
+  utimesSync(join(d, "run.log"), t, t);
+  touchHeartbeat(d, new Date(NOW - 5000).toISOString(), process.pid);
+  utimesSync(heartbeatPath(d), t, t);
+}
+
+// One display group spread over three raw keys: the plain repo plus two worktrees.
+function seedFooGroup(home) {
+  for (let i = 0; i < 5; i++) seedFinished(home, "C--code-foo", `fin-${i}`, i + 1);
+  for (let i = 0; i < 3; i++) seedFinished(home, "C--code-.worktrees-foo-branch-a", `wt-a-${i}`, 10 + i);
+  for (let i = 0; i < 3; i++) seedFinished(home, "C--code-.worktrees-foo-branch-b", `wt-b-${i}`, 20 + i);
+}
+
+test("the finished cap counts groups, not raw keys: 3 rows across foo + its two worktree keys", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-group-"));
+  try {
+    seedFooGroup(home);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const { body } = await get("/api/runs");
+      const finished = body.runs.filter((r) => !r.active);
+      assert.equal(finished.length, 3, `per-group cap keeps 3 finished rows total, got ${finished.length}`);
+      assert.ok(finished.every((r) => r.group === "C--code-foo"), "every kept row is grouped under the repo, not its worktree key");
+      // A cap that kept the newest three of the first key it happened to see would pass
+      // the count and still be wrong — the kept rows must be newest across ALL keys.
+      assert.deepEqual(finished.map((r) => r.mtimeMs), [1, 2, 3].map((h) => NOW - h * 3600_000), "the kept three are the three newest across all three keys");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("active runs are never capped, wherever they sit in the group", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-live-"));
+  try {
+    seedFooGroup(home);
+    for (const p of ["C--code-foo", "C--code-.worktrees-foo-branch-a", "C--code-.worktrees-foo-branch-b"]) {
+      seedActive(home, p, "live-a");
+      seedActive(home, p, "live-b");
+    }
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const { body } = await get("/api/runs");
+      const active = body.runs.filter((r) => r.active);
+      assert.equal(active.length, 6, "all six active runs appear — the cap applies to finished rows only");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("finishedTotals reports what exists on disk, not what was sent", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-total-"));
+  try {
+    seedFooGroup(home);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const { body } = await get("/api/runs");
+      assert.equal(body.finishedTotals["C--code-foo"], 11, "11 finished runs on disk, 3 rows sent");
+      assert.equal(body.finishedTotals["C--code-.worktrees-foo-branch-a"], undefined, "totals are keyed by display group, not raw worktree key");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("groupLabel is derived over every raw key — a fully-finished sibling still anchors the common prefix", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-prefix-"));
+  try {
+    seedActive(home, "C--code-alpha", "live-1");
+    for (let i = 0; i < 5; i++) seedFinished(home, "C--code-beta", `fin-${i}`, i + 1);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const { body } = await get("/api/runs");
+      const alpha = body.runs.find((r) => r.project === "C--code-alpha");
+      assert.equal(alpha.groupLabel, "alpha", "the common prefix is C--code- only while both C--code-* keys are in the derivation");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("the single-run payload carries groupLabel so a deep-linked header shows the short name", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-cap-deep-"));
+  try {
+    seedFinished(home, "C--code-foo", "fin-0", 1);
+    seedFinished(home, "C--code-.worktrees-foo-branch-a", "wt-a-0", 2);
+    seedFinished(home, "C--code-bar", "fin-0", 3);
+    await withServer({ home }, async ({ get }) => {
+      const run = await get("/api/runs/C--code-.worktrees-foo-branch-a/wt-a-0");
+      assert.equal(run.status, 200);
+      assert.equal(run.body.groupLabel, "foo", "a worktree key's label is its repo's, not the raw key");
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
@@ -610,6 +709,29 @@ test("D1: a clone dropped by a contracted expansion has no roster row — its re
       const kept = await get("/api/runs/C--code-a/contracted-1/leaves/fix%5B0%5D");
       assert.equal(kept.body.authored, undefined);
       assert.equal(kept.body.output, "current output");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// The single-run payload once called listRuns just to derive one group label  a
+// full estate scan (stat + liveness per run) on every run/node/leaf fetch, including
+// the 5 s poll, where it had been O(1). Counting the calls is the only assertion that
+// bites: the payload shape is identical either way.
+test("single-run payload derives its label from project keys, never a full estate scan", async () => {
+  const { home } = seedHome();
+  let listRunsCalls = 0, keyCalls = 0;
+  const seams = {
+    _listRuns: (...a) => { listRunsCalls++; return realListRuns(...a); },
+    _projectKeys: (...a) => { keyCalls++; return realProjectKeys(...a); },
+  };
+  try {
+    await withServer({ home, seams }, async ({ get }) => {
+      listRunsCalls = 0; keyCalls = 0;               // ignore anything the boot did
+      const r = await get("/api/runs/C--code-a/live-1");
+      assert.equal(r.status, 200);
+      assert.equal(r.body.groupLabel, "a");          // still labelled correctly
+      assert.equal(listRunsCalls, 0);                // RED before the fix: this was 1
+      assert.equal(keyCalls, 1);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

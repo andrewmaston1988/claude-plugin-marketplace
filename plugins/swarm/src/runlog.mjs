@@ -205,6 +205,13 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, heartbeat
   };
 }
 
+// The raw run-directory keys, and nothing else. Grouping needs the FULL key set
+// for its common-prefix derivation, but only the names  listRuns would stat and
+// liveness-check every run in the estate to hand back the same strings.
+export function projectKeys(home, { _readdir = readdirSync } = {}) {
+  try { return _readdir(join(home, "runs")); } catch { return []; }
+}
+
 // Every run dir under <home>/runs/<project>/<run>/, newest run.log first.
 // `active` = runLiveness reports neither a terminal summary nor a stale heartbeat.
 // `aborted` = the engine went quiet (or never wrote a heartbeat at all) with no

@@ -227,31 +227,11 @@
   // by tests/live.test.mjs so the page and the test share the same copy.
   const ago = (ms) => window.swarmLive.agoText(ms, Date.now());
   const tokTotal = (t) => t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
-  // Runs are keyed by their encoded cwd. A worktree (`<root>-.worktrees-<repo>-<branch>`,
-  // `<repo>-.claude-worktrees-<branch>`) belongs to its repo, and the label is the key
-  // with the prefix every plain repo shares stripped — nothing machine-specific is assumed.
-  const projectGrouping = (keys) => {
-    const plain = keys.filter((k) => !/\.(claude-)?worktrees|\.swarm/.test(k));
-    const norm = (k) => k.replace(/-\.(claude-)?worktrees-/g, "-").replace(/-\.swarm[^-]*/g, "");
-    // The shared prefix is taken over drive-rooted keys only (`C--code-…`); a key that
-    // IS the prefix (runs dispatched from the root itself) labels as its last segment.
-    const rooted = plain.filter((k) => /^[A-Za-z]--/.test(k));
-    let cp = rooted[0] || "";
-    for (const k of rooted) { let i = 0; while (i < cp.length && i < k.length && cp[i] === k[i]) i++; cp = cp.slice(0, i); }
-    cp = rooted.includes(cp) ? cp + "-" : cp.slice(0, cp.lastIndexOf("-") + 1);
-    const groupOf = (k) => {
-      const n = norm(k);
-      let best = null;
-      for (const p of plain) if ((n === p || n.startsWith(p + "-")) && (!best || p.length > best.length)) best = p;
-      return best || k;
-    };
-    const labelOf = (g) => {
-      const l = g.startsWith(cp) ? g.slice(cp.length) : g;
-      return l || g.split("-").filter(Boolean).slice(-1)[0] || g;
-    };
-    return { groupOf, labelOf };
-  };
-  let shortProject = (p) => p;
+  // The server groups runs (grouping.mjs) and labels every row; the page only draws.
+  // shortProject falls back to the raw key so an old payload still renders.
+  // `let`: a runs build computes the next label map as a value; commitView swaps it in.
+  let groupLabels = new Map();
+  const shortProject = (p) => groupLabels.get(p) || p;
   const countsHtml = (byState) => {
     const n = (...ks) => ks.reduce((a, k) => a + (byState[k] || 0), 0);
     const parts = [["ok", n("ok", "skipped"), "✓"], ["run", n("running", "retrying"), "◐"], ["warn", n("rate-limited") + n("quota"), "⧖"], ["bad", n("failed", "failed:timeout", "failed:stopped", "blocked"), "✗"], ["pend", n("pending"), "·"], ["pend", n("aborted"), "✕"]];
@@ -316,7 +296,9 @@
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
   const ui = { closedWaves: new Set(), openProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false };
   let lastList = null;
-  const seenActive = new Map();
+  // `let`: both swapped whole at commit (a build computes fresh copies as values),
+  // never mutated in place — a superseded build cannot leave a half-written mark.
+  let seenActive = new Map();
   // Pre-first-fetch fallback: the config.default.json literals. Overwritten by the
   // /api/runs payload's own clockMs/uiPollMs once the first fetch lands.
   const tickCfg = { clockMs: 1000, uiPollMs: 5000 };
@@ -327,31 +309,38 @@
   const chev = (open) => `<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7181" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${open ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"}"/></svg>`;
   const chevRight = `<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7181" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`;
 
-  async function renderRuns() {
+  async function buildRuns() {
     const data = await api("/api/runs");
-    lastList = data;
-    if (data.clockMs) tickCfg.clockMs = data.clockMs;
-    if (data.uiPollMs) tickCfg.uiPollMs = data.uiPollMs;
+    // Everything the commit needs, computed as values — a superseded scan writes none
+    // of it. tickCfg keeps its in-place shape (the timers are armed from it at boot).
+    const cfg = { clockMs: data.clockMs || tickCfg.clockMs, uiPollMs: data.uiPollMs || tickCfg.uiPollMs };
     // Celebrate on a fetched active→inactive transition only — never from a clock
     // tick, which re-renders the same fetched data and would otherwise re-fire it.
+    // The build names the finished runs; commitView fires the celebration.
+    const seen = new Map(seenActive);
+    const finished = [];
     for (const r of data.runs) {
-      const was = seenActive.get(r.project + "/" + r.name);
-      if (was === true && !r.active) celebrate(r.name);
-      seenActive.set(r.project + "/" + r.name, r.active);
+      const was = seen.get(r.project + "/" + r.name);
+      if (was === true && !r.active) finished.push(r.name);
+      seen.set(r.project + "/" + r.name, r.active);
     }
-    renderRunsHtml(data);
+    const { header, home, html, labels } = renderRunsHtml(data);
+    return { header, home, html, state: { lastList: data, tickCfg: cfg, seenActive: seen, groupLabels: labels, grading: data.grading, celebrate: finished } };
   }
   function renderRunsHtml(data) {
-    $("#menu .nav a[href='#/perf']").classList.toggle("off", !data.grading);
+    // Labels merge into a fresh map — a value the commit swaps in, never a write to
+    // the committed one. A local shortProject shadows the module arrow so this
+    // build's markup reads this build's labels, not the last committed set.
+    const labels = new Map(groupLabels);
+    const shortProject = (p) => labels.get(p) || p;
     const runs = data.runs;
     const active = runs.filter((r) => r.active);
     // Every project gets a section — the estate view — projects with a live run first,
     // ranked by that run's newest startedMs (see live.js projectOrder — stable across
     // polls, unlike mtimeMs); inside a section live rows lead, finished follow.
-    const { groupOf, labelOf } = projectGrouping([...new Set(runs.map((r) => r.project))]);
-    shortProject = labelOf;
+    for (const r of runs) { labels.set(r.project, r.groupLabel || r.project); if (r.group) labels.set(r.group, r.groupLabel || r.group); }
     const byProject = new Map();
-    for (const r of runs) { const g = groupOf(r.project); if (!byProject.has(g)) byProject.set(g, []); byProject.get(g).push(r); }
+    for (const r of runs) { const g = r.group || r.project; if (!byProject.has(g)) byProject.set(g, []); byProject.get(g).push(r); }
     // Live rows sort by startedMs (most recently dispatched on top, staying there);
     // finished rows by mtimeMs as before.
     for (const rows of byProject.values()) {
@@ -362,7 +351,7 @@
     }
     const projects = window.swarmLive.projectOrder(byProject);
     const tok = runs.reduce((n, r) => n + (r.tokens || 0), 0);
-    setHeader(`<div class="title" style="padding-left:12px"><b><span>swarm</span><small>${active.length} active · ${projects.length} project${projects.length === 1 ? "" : "s"} · ${fmtTok(tok)}</small></b></div>${menuBtn}`, true);
+    const header = `<div class="title" style="padding-left:12px"><b><span>swarm</span><small>${active.length} active · ${projects.length} project${projects.length === 1 ? "" : "s"} · ${fmtTok(tok)}</small></b></div>${menuBtn}`;
     let html = "";
     // Live band first: every running run, across all projects, on the first screen —
     // a busy project's finished stack must never hide another project's live run.
@@ -379,13 +368,15 @@
       const rest = byProject.get(p).filter((r) => !r.active);
       if (!rest.length) continue;
       const open = window.swarmLive.projectOpen(p, ui.openProjects);
-      html += `<div class="section dim tap" data-key="ps:${esc(p)}" data-project="${esc(p)}"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length} finished</small>${chev(open)}</div>`;
-      if (open) { html += `<ul data-key="pl:${esc(p)}">`; for (const r of rest) html += runRow(r, true); html += "</ul>"; }
+      const total = (data.finishedTotals || {})[p] ?? rest.length;
+      html += `<div class="section dim tap" data-key="ps:${esc(p)}" data-project="${esc(p)}"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length}${total > rest.length ? ` of ${total}` : ""} finished</small>${chev(open)}</div>`;
+      if (open) { html += `<ul data-key="pl:${esc(p)}">`; for (const r of rest) html += runRow(r, true, labels); html += "</ul>"; }
     }
     if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
-    setHtml(main, html);
+    return { header, home: true, html, labels };
   }
-  function runRow(r, done) {
+  function runRow(r, done, labels = groupLabels) {
+    const shortProject = (p) => labels.get(p) || p;
     // Navigation is a data-href picked up by one delegated listener — never an inline
     // onclick, whose quoted string a run or leaf name could break out of.
     const href = `#/run/${enc(r.project)}/${enc(r.name)}`;
@@ -587,17 +578,14 @@
   // so the elapsed/ago text moves without a network round trip.
   function runHeaderHtml(run, now) {
     const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.abortedMs ? `aborted · engine gone · ${ago(run.abortedMs)}` : run.stoppedMs ? `stopped · ${ago(run.stoppedMs)}` : run.startedMs ? fmtDur(now - run.startedMs) : "";
-    return `${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>${menuBtn}`;
+    return `${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>${menuBtn}`;
   }
 
   let currentRun = null;
-  async function renderRun(project, name) {
+  async function buildRun(project, name) {
     const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
-    currentRun = run;
-    setHeader(runHeaderHtml(run, Date.now()));
     const { html, rows } = renderRunHtml(run, run.tasks, run.waves);
-    setHtml(main, html);
-    drawRail(run.tasks, rows);
+    return { header: runHeaderHtml(run, Date.now()), html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
   }
 
   // A manifest node's own screen: the same graph renderer, fed the task's own
@@ -610,21 +598,31 @@
     return { tasks, waves };
   }
 
-  async function renderNode(project, name, id) {
+  async function buildNode(project, name, id) {
     const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
-    currentRun = run;
     const { tasks, waves } = nodeSubgraph(run, id);
-    setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(id)}</b><small>${esc(shortProject(project))} · ${esc(name)} · ${tasks.length} node${tasks.length === 1 ? "" : "s"}</small></div>${menuBtn}`);
     const { html, rows } = renderRunHtml(run, tasks, waves);
-    setHtml(main, html);
-    drawRail(tasks, rows);
+    return {
+      header: `${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(id)}</b><small>${esc(run.groupLabel || shortProject(project))} · ${esc(name)} · ${tasks.length} node${tasks.length === 1 ? "" : "s"}</small></div>${menuBtn}`,
+      html, state: { currentRun: run }, draw: () => drawRail(tasks, rows),
+    };
   }
 
   // Toggles are handled by the delegated listener on main; a rerender just morphs —
   // view-aware so the clock tick and the poll both land on whichever screen is open.
+  //
+  // The deliberate SECOND paint site (the first is commitView): the 1 s clock
+  // re-renders already-fetched data, fetch-free by construction. Safe only because
+  // every state it reads — view, lastList, currentRun, currentLeaf, ui — is assigned
+  // in commitView alone; a build that fetched here would make this a racing renderer.
   function rerender() {
     const now = Date.now();
-    if (view.name === "runs" && lastList) { renderRunsHtml(lastList); return; }
+    if (view.name === "runs" && lastList) {
+      const { header, home, html } = renderRunsHtml(lastList);
+      setHeader(header, home);
+      setHtml(main, html);
+      return;
+    }
     if (view.name === "run" && currentRun) {
       setHeader(runHeaderHtml(currentRun, now));
       const { html, rows } = renderRunHtml(currentRun, currentRun.tasks, currentRun.waves);
@@ -639,22 +637,25 @@
       drawRail(tasks, rows);
       return;
     }
-    if (view.name === "leaf" && currentRun) renderLeafHtml(currentRun, currentLeaf, view.leaf);
+    if (view.name === "leaf" && currentRun) {
+      const { header, html } = renderLeafHtml(currentRun, currentLeaf, view.leaf);
+      setHeader(header);
+      setHtml(main, html);
+    }
   }
 
   let currentLeaf;
-  async function renderLeaf(project, name, id) {
+  async function buildLeaf(project, name, id) {
     const [run, leaf] = await Promise.all([api(`/api/runs/${enc(project)}/${enc(name)}`), api(`/api/runs/${enc(project)}/${enc(name)}/leaves/${enc(id)}`).catch(() => null)]);
-    currentRun = run;
-    currentLeaf = leaf;
-    renderLeafHtml(run, leaf, id);
+    const { header, html } = renderLeafHtml(run, leaf, id);
+    return { header, html, state: { currentRun: run, currentLeaf: leaf } };
   }
 
   function renderLeafHtml(run, leaf, id) {
     const now = Date.now();
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
     const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
-    setHeader(`${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`);
+    const header = `${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`;
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
     let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip">${esc(t.model)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${quietSecsVal}s</span>` : ""}</div>`;
@@ -689,7 +690,7 @@
     html += `<div class="section tap" data-output="1"><span>output</span><span class="line"></span><small>${toggle}</small>${chev(ui.outputOpen)}</div>`;
     if (ui.outputOpen) html += `<div class="block">${leaf?.output ? (ui.pretty && canPretty ? outputHtml(leaf) : `<pre class="out">${esc(leaf.output)}</pre>`) : "<div class='faint'>—</div>"}</div>`;
     if (leaf?.citations) html += `<div class="block"><label>citations</label><div class="meta">checked ${leaf.citations.checked ?? 0} · drifted ${leaf.citations.drifted ?? 0} · refuted ${leaf.citations.refuted ?? 0}</div></div>`;
-    setHtml(main, html);
+    return { header, html };
   }
 
   // A leaf's output is usually JSON (the engine parses it into outputJson) — render
@@ -749,7 +750,7 @@
     return bits.join(" · ");
   };
   const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders"]);
-  async function renderPerf(kind, which) {
+  async function buildPerf(kind, which) {
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
     const domain = ui.perfDomain;
     const qs = new URLSearchParams();
@@ -758,11 +759,12 @@
     const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
     const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind : "performance";
     if (!p.grading) {
-      setHeader(`${backBtn("#/")}<div class="title"><b>performance</b><small>off</small></div>${menuBtn}`);
-      setHtml(main, `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`);
-      return;
+      return {
+        header: `${backBtn("#/")}<div class="title"><b>performance</b><small>off</small></div>${menuBtn}`,
+        html: `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`,
+      };
     }
-    setHeader(`${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}${model && p.rank ? ` ${["🏆", "🥈", "🥉"][p.rank.position - 1] || `<span class="tag">#${p.rank.position}</span>`}` : ""}</b><small>${p.rows} graded leaves · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`);
+    const header = `${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}${model && p.rank ? ` ${["🏆", "🥈", "🥉"][p.rank.position - 1] || `<span class="tag">#${p.rank.position}</span>`}` : ""}</b><small>${p.rows} graded leaves · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>${menuBtn}`;
     const chip = (label, href, on) => `<span class="chip${on ? " on" : ""}" data-href="${esc(href)}">${esc(label)}</span>`;
     const sel = (attr, opts, current) => `<select class="sel" ${attr}>${opts.map(([v, label]) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
     const domainSel = () => p.domains.length > 1 ? sel('data-domain-select', [["", "all domains"], ...p.domains.map((d) => [d, d])], domain || "") : "";
@@ -774,13 +776,14 @@
     if (NEW_PERF_KINDS.has(kind)) {
       if (p.domains.length > 1) html += `<div class="selrow">${domainSel()}</div>`;
       html += `<div style="height:12px"></div>`;
+      // The one DOM touch a build makes: a cached script load (appends once, reused
+      // after), never a screen paint — nothing shows until commitView lands the markup.
       await loadPerfJs();
       const h = { esc, enc, fmtScore, chip };
       html += kind === "coverage" ? window.perfViews.coverageGrid(p.views.coverage, h)
         : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
         : window.perfViews.leadersList(p.views.leaders, h);
-      setHtml(main, html);
-      return;
+      return { header, html };
     }
     {
       // Aspect picker (overall, the universals, then the capability columns) and
@@ -801,12 +804,7 @@
         coverage: { aspects: cov.aspects, models: cov.models.filter((m) => m === model), cells: cov.cells.filter((c) => c.model === model) },
         reliability: p.views.reliability.filter((r) => r.model === model),
       }, h);
-      setHtml(main, html);
-      return;
-      html += rankList(p.report.map((a) => {
-        const c = a.cells.find((x) => x.model === model) || { n: 0, mean: null, weighted: null, provisional: true, outcomes: {} };
-        return { key: `a:${a.aspect}`, href: `#/perf/aspect/${enc(a.aspect)}`, label: `${esc(a.aspect)}${a.universal ? ` <span class="tag faint">universal</span>` : ""}`, val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional };
-      }));
+      return { header, html };
     } else if (aspect) {
       const a = p.report.find((x) => x.aspect === aspect);
       if (!a || !a.cells.length) html += `<div class="empty">n=0 — nothing graded on ${esc(aspect)} yet. Absence is evidence.</div>`;
@@ -822,12 +820,14 @@
         html += `<div class="foot">overall = mean of the four universal weighted scores; capability aspects excluded — they are graded only where a leaf stressed them.</div>`;
       }
     }
-    setHtml(main, html);
+    return { header, html };
   }
 
-  async function renderDigest(project, name) {
-    setHeader(`${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(name)}</b><small>digest</small></div>${menuBtn}`);
-    setHtml(main, `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/digest`))}"></iframe>`);
+  function buildDigest(project, name) {
+    return {
+      header: `${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(name)}</b><small>digest</small></div>${menuBtn}`,
+      html: `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/digest`))}"></iframe>`,
+    };
   }
 
   function celebrate(name) {
@@ -837,25 +837,72 @@
   }
 
   // ── routing ─────────────────────────────────────────────────────────────
-  async function route() {
-    const h = location.hash.replace(/^#/, "") || "/";
+  // Every view builds blind — fetch, compute, return a description — and commitView
+  // is the only place a description becomes paint or state. route() stamps each
+  // build with a monotonic sequence and commits only while it is still the newest
+  // route (routeGuard, in live.js): a superseded build holds no paint primitive and
+  // no state to write, so there is nothing a future edit could forget to guard.
+  let routeSeq = 0;
+  // live.js loads after this IIFE evaluates, but hashchange is already wired, so
+  // the guard needs a bare fallback. Without it the catch below threw its own
+  // TypeError and nothing painted at all.
+  const guardOk = (seq, cur) => (window.swarmLive ? window.swarmLive.routeGuard(seq, cur) : seq === cur);
+  // The view the newest in-flight route is building. SSE and the poll consult it, so
+  // a refresh is never dropped just because its target screen has not committed yet.
+  let pendingView = null;
+  const viewOf = (hash) => {
+    const h = hash.replace(/^#/, "") || "/";
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
+    if (seg[0] === "perf") return { name: "perf", project: null, run: null, leaf: null, node: null, kind: seg[1] || null, which: seg[2] || null };
+    if (seg[0] === "run" && seg.length >= 3) {
+      const name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "node" ? "node" : "run";
+      return { name, project: seg[1], run: seg[2], leaf: name === "leaf" ? seg[4] || null : null, node: name === "node" ? seg[4] || null : null };
+    }
+    return { name: "runs", project: null, run: null, leaf: null, node: null };
+  };
+  function commitView(next) {
+    if (next.view) { Object.assign(view, next.view); pendingView = null; }
+    const s = next.state || {};
+    if ("lastList" in s) lastList = s.lastList;
+    if ("currentRun" in s) currentRun = s.currentRun;
+    if ("currentLeaf" in s) currentLeaf = s.currentLeaf;
+    if ("seenActive" in s) seenActive = s.seenActive;
+    if ("groupLabels" in s) groupLabels = s.groupLabels;
+    if ("tickCfg" in s) { tickCfg.clockMs = s.tickCfg.clockMs; tickCfg.uiPollMs = s.tickCfg.uiPollMs; }
+    if ("grading" in s) $("#menu .nav a[href='#/perf']").classList.toggle("off", !s.grading);
+    if (next.header !== undefined) setHeader(next.header, next.home);
+    setHtml(main, next.html);
+    next.draw?.();
+    // After the paint: setHeader resets hdr's className, which would wipe the flash.
+    for (const n of s.celebrate || []) celebrate(n);
+  }
+  async function buildFor(v) {
+    if (v.name === "perf") return buildPerf(v.kind, v.which);
+    if (v.name === "leaf") return buildLeaf(v.project, v.run, v.leaf);
+    if (v.name === "digest") return buildDigest(v.project, v.run);
+    if (v.name === "node") return buildNode(v.project, v.run, v.node);
+    if (v.name === "run") return buildRun(v.project, v.run);
+    return buildRuns();
+  }
+  async function route() {
+    const seq = ++routeSeq;
+    const v = viewOf(location.hash);
+    pendingView = v;
     try {
-      if (seg[0] === "perf") {
-        view.name = "perf"; view.project = view.run = view.leaf = view.node = null;
-        await renderPerf(seg[1] || null, seg[2] || null);
-      } else if (seg[0] === "run" && seg.length >= 3) {
-        view.name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "node" ? "node" : "run";
-        view.project = seg[1]; view.run = seg[2]; view.leaf = view.name === "leaf" ? seg[4] || null : null; view.node = view.name === "node" ? seg[4] || null : null;
-        if (view.name === "leaf") await renderLeaf(seg[1], seg[2], seg[4]);
-        else if (view.name === "digest") await renderDigest(seg[1], seg[2]);
-        else if (view.name === "node") await renderNode(seg[1], seg[2], seg[4]);
-        else await renderRun(seg[1], seg[2]);
-      } else { view.name = "runs"; view.project = view.run = view.leaf = view.node = null; await renderRuns(); }
+      const next = await buildFor(v);
+      if (!guardOk(seq, routeSeq)) return;
+      commitView({ ...next, view: v });
     } catch (e) {
-      setHtml(main, `<div class="empty">${esc(e.message)}</div>`);
+      if (!guardOk(seq, routeSeq)) return;
+      // No header in the description: an error panel overlays the current screen,
+      // and the header already describes it.
+      commitView({ view: v, html: `<div class="empty">${esc(e.message)}</div>` });
     }
   }
+  // Event-driven callers (SSE, the poll, the toggles) coalesce onto one route per
+  // microtask; hashchange calls route() directly — navigation never queues behind a
+  // latch. Identity until live.js loads, swapped at boot for window.swarmLive.coalesce.
+  let requestRoute = (fn) => fn();
   // One delegated click handler for everything in main: navigation rows and the
   // wave toggle. forEach groups and manifest nodes no longer accordion — (h) split
   // them by kind instead: a group's kids are always inline, a node is a plain nav row.
@@ -863,17 +910,17 @@
     const t = e.target;
     if (!(t instanceof HTMLSelectElement)) return;
     if (t.dataset.nav != null) { location.hash = t.value; return; }
-    if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; route(); }
+    if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; requestRoute(route); }
   });
   main.addEventListener("click", (e) => {
     const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output]");
     if (!t || !main.contains(t)) return;
-    if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; route(); return; }
-    if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; route(); return; }
-    if (t.dataset.pretty) { ui.pretty = !ui.pretty; route(); return; }
-    if (t.dataset.domain != null) { ui.perfDomain = t.dataset.domain || null; route(); return; }
+    if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
+    if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
+    if (t.dataset.pretty) { ui.pretty = !ui.pretty; requestRoute(route); return; }
+    if (t.dataset.domain != null) { ui.perfDomain = t.dataset.domain || null; requestRoute(route); return; }
     // (d) opt-in: a project's finished stack starts closed, ui.openProjects records who was opened.
-    if (t.dataset.project) { const p = t.dataset.project; ui.openProjects.has(p) ? ui.openProjects.delete(p) : ui.openProjects.add(p); route(); return; }
+    if (t.dataset.project) { const p = t.dataset.project; ui.openProjects.has(p) ? ui.openProjects.delete(p) : ui.openProjects.add(p); requestRoute(route); return; }
     if (t.dataset.href) { location.hash = t.dataset.href; return; }
     if (t.dataset.wave != null) {
       const w = Number(t.dataset.wave);
@@ -894,12 +941,15 @@
   let es;
   function connect() {
     es = new EventSource(q("/events"));
+    // pendingView as well as view: a refresh for a screen still being navigated to
+    // must not be dropped because its commit has not landed (and vice versa).
     es.addEventListener("run", (e) => {
       let d = {}; try { d = JSON.parse(e.data); } catch {}
-      if (view.name === "runs") route();
-      else if (view.project === d.project && view.run === d.name) route();
+      const v = pendingView || view;
+      if (v.name === "runs") requestRoute(route);
+      else if (v.project === d.project && v.run === d.name) requestRoute(route);
     });
-    es.addEventListener("runs", () => { if (view.name === "runs") route(); });
+    es.addEventListener("runs", () => { if ((pendingView || view).name === "runs") requestRoute(route); });
     es.onerror = () => { /* EventSource reconnects on its own */ };
   }
   window.addEventListener("resize", () => { if (view.name === "run" && currentRun) rerender(); });
@@ -929,19 +979,34 @@
 
   // tickCfg starts at the config.default.json literals (declared with the other
   // module state above) and is overwritten by the /api/runs payload's own
-  // clockMs/uiPollMs once the first fetch lands — see renderRuns().
+  // clockMs/uiPollMs once the first fetch lands — see buildRuns().
   function startTimers() {
     setInterval(rerender, tickCfg.clockMs);
     // Running rows still need a refetch to notice a run that went quiet server-side
     // (nothing writes run.log when the engine dies) — shouldPoll gates that refetch
     // to views with something to poll, so a finished run stops hitting the network.
-    setInterval(() => { if (window.swarmLive.shouldPoll(view, currentRun, Date.now())) route(); }, tickCfg.uiPollMs);
+    setInterval(() => { if (window.swarmLive.shouldPoll(pendingView || view, currentRun, Date.now())) requestRoute(route); }, tickCfg.uiPollMs);
   }
+
+  // Test seam for tests/page-route.test.mjs: the vm harness has no browser, so the
+  // page hands it the two functions it must drive and its committed state to read —
+  // the same pattern as window.swarmLive.
+  // Test seam, not a public surface: page-route.test.mjs drives route()/commitView
+
+  // through this. Nothing in the page may read it.
+
+  window.__swarmPage = {
+    route, rerender,
+    snapshot: () => ({ view: { ...view }, lastList, currentRun, currentLeaf, seenActive, groupLabels: Object.fromEntries(groupLabels), tickCfg: { ...tickCfg }, routeSeq, pendingView }),
+  };
 
   // live.js is a hard dependency of buildRows/renderRunHtml — unlike perf.js, a
   // failed load must not route into a TypeError; it renders the empty panel instead.
-  loadScript("/live.js").then(() => { route(); connect(); startTimers(); }).catch((e) => {
-    setHtml(main, `<div class="empty">${esc(e.message)}</div>`);
+  loadScript("/live.js").then(() => {
+    requestRoute = window.swarmLive.coalesce(queueMicrotask);
+    route(); connect(); startTimers();
+  }).catch((e) => {
+    commitView({ html: `<div class="empty">${esc(e.message)}</div>` });
   });
 })();
 </script>
