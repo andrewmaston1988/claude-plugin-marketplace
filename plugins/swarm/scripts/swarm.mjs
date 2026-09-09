@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
-import { discoverModels, writeModelsCache, visibleModels, probeTopModels } from "../src/discovery.mjs";
+import { discoverModels, writeModelsCache, visibleModels, probeTopModels, deriveCloudName } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
@@ -32,6 +32,7 @@ const USAGE = `usage: swarm.mjs <command>
   grade --init <resultsDir>  write grades.json — one skeleton row per model leaf (Claude tiers included), for you to fill in
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
+  cost                       per-model meter weight from the banked usage history (multiplier vs cheapest measured)
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
   serve restart | doctor | stop | status | install-autostart | uninstall-autostart
   config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it
@@ -102,6 +103,16 @@ async function usageHeadroom(cfg) {
   return (await import("../src/ollama-usage.mjs")).getUsage(cfg);
 }
 
+// The banked cost rows for joining against roster/score names. The history
+// banks the meter's own names (the page's `data-model`); deriveCloudName is the
+// same mapping discovery uses — never a second rule. Both reads are cheap and
+// a missing file reads as empty, so a fresh install is simply "unmeasured".
+async function cloudCostRows() {
+  const { readSnapshots, costPerModel, multipliers, usageHistoryPath } = await import("../src/cost.mjs");
+  return multipliers(costPerModel(readSnapshots(usageHistoryPath())))
+    .map((r) => ({ ...r, model: deriveCloudName(r.model) }));
+}
+
 async function cmdModels(rest = []) {
   const cfg = getConfig();
   // Catalogue stays the catalogue (discovery.mjs is pure) — the meter is
@@ -127,10 +138,18 @@ async function cmdModels(rest = []) {
   const visible = new Set(visibleModels(live, { isDenylisted }).map((m) => m.model));
   const offered = live.filter((m) => !isDenylisted(m.model));
   const shown = showAll ? offered : offered.filter((m) => visible.has(m.model));
+  const { readRows, scoresPath, frontier } = await import("../src/scores.mjs");
+  const costRows = await cloudCostRows();
+  const multOf = new Map(costRows.map((r) => [r.model, r.mult]));
+  const onFrontier = new Set(frontier(readRows(scoresPath()), costRows.map((r) => ({ model: r.model, mult: r.mult })), {})
+    .filter((e) => e.onFrontier).map((e) => e.model));
   for (const m of [...shown, ...CLAUDE_ALIASES.filter((a) => !isDenylisted(a.model))]) {
     const mark = showAll && m.supersededBy && !visible.has(m.model) ? ` [superseded by ${m.supersededBy}]` : "";
-    out(modelLine(m) + mark);
+    const mult = multOf.get(m.model);
+    const cost = mult == null ? "—" : onFrontier.has(m.model) ? `* ${mult.toFixed(1)}x` : `${mult.toFixed(1)}x`;
+    out(modelLine(m) + mark + `  ${cost}`);
   }
+  out(dim("* on the quality/cost frontier · N.Nx = meter weight vs the cheapest measured model (swarm cost) · — not yet measured"));
   const hidden = offered.length - shown.length;
   if (hidden) out(dim(`${hidden} superseded hidden — swarm models --all shows them`));
   return 0;
@@ -555,13 +574,22 @@ async function readManifestTasks(dir) {
 }
 
 async function cmdPerf(rest) {
-  const { readRows, aggregate, overall, dedupe, scoresPath, PRIOR_WEIGHT } = await import("../src/scores.mjs");
+  const { readRows, aggregate, overall, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
   const aspect = getFlag("aspect", rest);
   const model = getFlag("model", rest);
   const domain = getFlag("domain", rest);
   const path = scoresPath();
   const rows = readRows(path);
   const report = aggregate(rows, { aspect, model, domain });
+  const costs = await cloudCostRows();
+  // A model is dominated only when another is strictly better AND strictly
+  // cheaper; `*` marks the frontier. Unmeasured cost renders "—": blank would
+  // read as dominated when the truth is unknown.
+  const costCols = (f) => ({
+    cost: f && f.band != null ? "$".repeat(f.band) : "—",
+    frontier: f ? (f.onFrontier ? "*" : f.dominatedBy ? `dom ${f.dominatedBy}` : "—") : "—",
+  });
+  const LEGEND = "    cost $/$$/$$$ = meter weight band vs the cheapest measured model (swarm cost) · * on the quality/cost frontier · dom <model> = a better AND cheaper model exists · — not yet measured";
   const filters = Object.entries(report.filters).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" · ");
   // Lines and rows differ after a re-grade: the store is append-only and the
   // newest row per (resultsDir, leaf) wins, so say both rather than let the raw
@@ -575,16 +603,19 @@ async function cmdPerf(rest) {
     // One table: models ranked on the mean of the four universal weighted
     // scores; per-aspect columns beside it so the average cannot hide a hole.
     const o = overall(rows, { model, domain });
+    const byModel = new Map(frontier(rows, costs, { model, domain }).map((e) => [e.model, e]));
     const w = Math.max(5, ...o.cells.map((c) => c.model.length));
-    out(`    ${"model".padEnd(w)}    n  overall  ${o.universals.map((a) => a.slice(0, 5).padStart(5)).join("  ")}`);
+    out(`    ${"model".padEnd(w)}    n  overall  ${o.universals.map((a) => a.slice(0, 5).padStart(5)).join("  ")}  cost  frontier`);
     for (const c of o.cells) {
       const cols = o.universals.map((a) => (c.wtds[a] == null ? "—" : c.wtds[a].toFixed(2)).padStart(5)).join("  ");
+      const { cost, frontier: fm } = costCols(byModel.get(c.model));
       const flag = c.combined == null ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
       const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
       const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
-      out(`    ${c.model.padEnd(w)}  ${String(c.n).padStart(3)}  ${(c.combined == null ? "—" : c.combined.toFixed(2)).padStart(7)}  ${cols}${flag}${tail}`);
+      out(`    ${c.model.padEnd(w)}  ${String(c.n).padStart(3)}  ${(c.combined == null ? "—" : c.combined.toFixed(2)).padStart(7)}  ${cols}  ${cost.padEnd(4)}${fm}${flag}${tail}`);
     }
     out(dim("    overall = mean of the four universal weighted scores; capability aspects excluded"));
+    out(dim(LEGEND));
     return 0;
   }
   for (const a of report.aspects) {
@@ -595,19 +626,63 @@ async function cmdPerf(rest) {
       out(dim("    n=0 — no rows"));
       continue;
     }
+    const byModel = new Map(frontier(rows, costs, { aspect: a.aspect, model, domain }).map((e) => [e.model, e]));
     const w = Math.max(...a.cells.map((c) => c.model.length));
     for (const c of a.cells) {
       const mean = c.mean == null ? "—" : c.mean.toFixed(2);
       const wtd = c.weighted == null ? "—" : c.weighted.toFixed(2);
+      const { cost, frontier: fm } = costCols(byModel.get(c.model));
       const flag = c.n === 0 ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
       const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
       const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
-      out(`    ${c.model.padEnd(w)}  n=${String(c.n).padStart(3)}  mean ${mean.padStart(5)}  wtd ${wtd.padStart(5)}${flag}${tail}`);
+      out(`    ${c.model.padEnd(w)}  n=${String(c.n).padStart(3)}  mean ${mean.padStart(5)}  wtd ${wtd.padStart(5)}  cost ${cost.padEnd(3)}  ${fm}${flag}${tail}`);
     }
     // Both columns show, ranked on wtd: the raw mean is the evidence, the
     // weighted score is what it is worth given how much of it there is.
     if (a.prior != null) out(dim(`    prior ${a.prior.toFixed(2)} (mean of per-model means; k=${PRIOR_WEIGHT})`));
   }
+  out(dim(LEGEND));
+  return 0;
+}
+
+// swarm cost — the cost half of the seat decision, ported table-for-table from
+// the operator-side cost-table.mjs so the two can be read side by side. Model
+// names stay the meter's own (no :cloud mapping here): a row must be findable
+// on the page it came from.
+async function cmdCost() {
+  const { readSnapshots, costPerModel, multipliers, splitWeeks, usageHistoryPath, THIN_REQUESTS } = await import("../src/cost.mjs");
+  const path = usageHistoryPath();
+  const snaps = readSnapshots(path);
+  if (!snaps.length) {
+    out(`no cost history yet at ${path} — every live usage fetch banks one snapshot; a fresh install fills within a week`);
+    return 0;
+  }
+  const weeks = splitWeeks(snaps);
+  const rows = multipliers(costPerModel(snaps));
+  out(`cost table — ${rows.length} models over ${weeks.length} week${weeks.length === 1 ? "" : "s"} of ${snaps.length} snapshots (${path})`);
+  out(`multipliers are relative to the cheapest model with >=${THIN_REQUESTS} requests`);
+  out("");
+  const pad = (s, n) => String(s).padEnd(n);
+  const num = (s, n) => String(s).padStart(n);
+  out(pad("model", 26) + num("reqs", 7) + num("wks", 5) + num("pts/req", 10) + num("cost", 8) + "  notes");
+  for (const r of rows) {
+    const notes = [];
+    if (r.ptsPerReq == null) notes.push("share below the page's 0.1% resolution — not measurable");
+    else if (r.measuredRequests < THIN_REQUESTS) notes.push(`thin (${r.measuredRequests} req)`);
+    if (r.ptsPerReq != null && r.measuredRequests < r.requests) {
+      notes.push(`${r.requests - r.measuredRequests} of ${r.requests} req in weeks below resolution`);
+    }
+    out(
+      pad(r.model, 26) +
+      num(r.requests, 7) +
+      num(r.weeks, 5) +
+      num(r.ptsPerReq != null ? r.ptsPerReq.toFixed(5) : "—", 10) +
+      num(r.mult != null ? r.mult.toFixed(1) + "x" : "—", 8) +
+      (notes.length ? "  " + notes.join(", ") : "")
+    );
+  }
+  out("");
+  out("Read beside `swarm perf` — that owns quality, this owns cost.");
   return 0;
 }
 
@@ -973,6 +1048,8 @@ async function main() {
       }
       case "perf":
         return await cmdPerf(rest);
+      case "cost":
+        return await cmdCost();
       case "quota": {
         // Anthropic is fetched (its credential renews itself); every cloud
         // provider is read from cache, because its cookie needs a human and
