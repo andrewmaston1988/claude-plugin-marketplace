@@ -234,6 +234,82 @@ test("the single-run payload carries groupLabel so a deep-linked header shows th
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+// ── expand: opt-in per-group uncapping ─────────────────────────────────────
+// The failure mode is a fixture too small to tell capped from uncapped: every
+// fixture here carries more finished runs than the cap, in more than one project.
+function seedExpandFixture(home) {
+  for (let i = 0; i < 12; i++) seedFinished(home, "C--code-alpha", `fin-${i}`, i + 1);
+  for (let i = 0; i < 9; i++) seedFinished(home, "C--code-beta", `fin-${i}`, i + 1);
+}
+
+const finishedByGroup = (body) => {
+  const out = {};
+  for (const r of body.runs) if (!r.active) out[r.group] = (out[r.group] || 0) + 1;
+  return out;
+};
+
+test("expand: the named group returns uncapped, and only that group (T1)", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-expand-"));
+  try {
+    seedExpandFixture(home);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      assert.deepEqual(finishedByGroup((await get("/api/runs")).body), { "C--code-alpha": 3, "C--code-beta": 3 }, "no expand: both groups capped");
+      const counts = finishedByGroup((await get("/api/runs?expand=C--code-alpha")).body);
+      assert.equal(counts["C--code-alpha"], 12, "alpha uncapped: all 12 finished rows");
+      // Asserting only alpha's count would also pass an implementation that lifts
+      // the cap globally — beta is the half that catches it.
+      assert.equal(counts["C--code-beta"], 3, "beta still capped");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("expand: an expanded group never consumes another group's allowance (T2)", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-expand-allowance-"));
+  try {
+    seedExpandFixture(home);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const body = (await get("/api/runs?expand=C--code-alpha")).body;
+      // The expansion must actually have happened — against a handler that ignores
+      // `expand` entirely, beta's 3 passes while alpha is still capped.
+      assert.equal(body.runs.filter((r) => !r.active && r.group === "C--code-alpha").length, 12, "alpha uncapped");
+      const beta = body.runs.filter((r) => !r.active && r.group === "C--code-beta");
+      // Exact 3, never >= 1: an expanded row that still bumped a shared counter is
+      // the starvation the skip must prevent.
+      assert.equal(beta.length, 3, `beta keeps exactly its 3-row allowance, got ${beta.length}`);
+      assert.deepEqual(beta.map((r) => r.mtimeMs), [1, 2, 3].map((h) => NOW - h * 3600_000), "and they are beta's newest three, not a leftover slice");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("finishedTotals is untouched by expand — the header stays honest in both states (T3)", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-expand-totals-"));
+  try {
+    seedExpandFixture(home);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      const base = await get("/api/runs");
+      assert.equal(base.body.finishedTotals["C--code-alpha"], 12);
+      assert.equal(base.body.finishedTotals["C--code-beta"], 9);
+      const expanded = await get("/api/runs?expand=C--code-alpha");
+      assert.equal(expanded.body.finishedTotals["C--code-alpha"], 12, "the total counts the disk, not the rows sent");
+      assert.equal(expanded.body.finishedTotals["C--code-beta"], 9);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("expand: unknown, empty and malformed values are ignored, never fatal (T4)", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-expand-malformed-"));
+  try {
+    seedExpandFixture(home);
+    await withServer({ home, cfg: cfg({ finishedPerProject: 3 }) }, async ({ get }) => {
+      for (const suffix of ["?expand=does-not-exist", "?expand=", "?expand=../../etc"]) {
+        const r = await get(`/api/runs${suffix}`);
+        assert.equal(r.status, 200, suffix);
+        assert.deepEqual(finishedByGroup(r.body), { "C--code-alpha": 3, "C--code-beta": 3 }, `${suffix} returns the normal capped payload — the value must never reach a path join`);
+      }
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("path safety: every traversal shape is a 404 and never leaves the runs root", async () => {
   const { home } = seedHome();
   writeFileSync(join(home, "outside.json"), "{\"leak\":true}", "utf8");
