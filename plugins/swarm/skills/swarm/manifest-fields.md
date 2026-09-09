@@ -48,8 +48,8 @@ A task with `"manifest": "<path>"` runs that child manifest as one node — the 
 
 A recurring shape (standing audit, per-repo sweep, judge panel) is saved once and re-run by name with fresh parameters — never re-authored:
 
-- **Save by Write** — no save subcommand. Repo-shaped runs: `<cwd>/.swarm/manifests/<name>.json`; cross-repo shapes: `~/.swarm/manifests/<name>.json`. `node <engine> list` shows what is saved where.
-- **Invoke by name**: `run <name> --args '{"base":"master"}'` / `validate <name> …` — a ref without a path separator or `.json` suffix is a name. A name in both scopes fails loudly (disambiguate with a path); the engine always prints which file a name resolved to.
+- **Save by Write** — no save subcommand. Repo-shaped runs: `<cwd>/.swarm/manifests/<name>.json`; cross-repo shapes: `~/.swarm/manifests/<name>.json`. `swarm list` shows what is saved where.
+- **Invoke by name**: `swarm run <name> --args '{"base":"master"}'` / `swarm validate <name> …` — a ref without a path separator or `.json` suffix is a name. A name in both scopes fails loudly (disambiguate with a path); the engine always prints which file a name resolved to.
 - **`{{args.<key>}}`** in any prompt (parent, child, digest instructions) substitutes from `--args` at load, before validation — same vocabulary as `{{item}}`/`{{result:}}`. An unreferenced supplied key and an unsupplied placeholder both fail validation; nothing ever substitutes to empty. A child manifest referenced by a saved parent resolves relative to the parent's own directory.
 - Each distinct `--args` value gets its own default results dir (fingerprinted stem), so resume never crosses parameterizations.
 - Gate a named run on the `--resolved` preview — see the offer gate in `SKILL.md`.

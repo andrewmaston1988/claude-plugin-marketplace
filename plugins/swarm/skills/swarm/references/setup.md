@@ -15,7 +15,11 @@ for it.
 
 ## Procedure
 
-1. **Materialise**: `node <engine> config init`. Creates the file with every shipped key, or
+0. **Install**: `swarm install`. Writes `~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`,
+   and `~/.local/bin/swarm.cmd`; `~/.local/bin` must be on PATH. Skip if the command is already
+   available. Re-run after any plugin update to refresh the resolver copy; it is idempotent and
+   overwrites the same three paths.
+1. **Materialise**: `swarm config init`. Creates the file with every shipped key, or
    fills in keys a newer plugin version added; values already set are never touched. Say what
    it did in one line (created / added N / up to date).
 2. **Read** the file (`Read` on the printed path). You need the current values for every stage.
@@ -29,6 +33,14 @@ for it.
    daemon is running and a `dashboard.*` or `grading.*` key changed, offer to restart it.
 
 ## The stages
+
+### Stage 0 — put `swarm` on PATH
+
+The `swarm` command is the only supported way to invoke the engine. If it is not already on PATH,
+run `swarm install` once — it writes `~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`, and
+`~/.local/bin/swarm.cmd`, and expects `~/.local/bin` to be on PATH. Re-running refreshes the
+resolver copy; it is idempotent and overwrites the same three paths. Once installed, every later
+stage uses `swarm <subcommand>`.
 
 ### Stage 1 — where alternative models may run (`provider.allowedRoots`)
 
@@ -55,7 +67,7 @@ For each ticked provider (ollama today):
    Say also that the swarm store is separate from the operator-side `~/.ollama-usage`
    skill's own cookie: refreshing one does not refresh the other, and the banner names
    the exact file it is talking about.
-2. Hand over `node <engine> ollama-usage --cookie '<value>'` for them to run themselves — it
+2. Hand over `swarm ollama-usage --cookie '<value>'` for them to run themselves — it
    writes the cookie to `cookiePath` and immediately prints the current meter as confirmation
    it worked.
 3. **Never ask the operator to paste the token into this conversation** for you to write into
@@ -86,7 +98,7 @@ combined options if the operator is brisk, or one each if not:
   generate one; never invent one silently.
 `port` is advanced (Stage 7).
 
-Running it: `node <engine> serve --daemon` (or `serve` to stay in the foreground), and
+Running it: `swarm serve --daemon` (or `serve` to stay in the foreground), and
 `serve stop` to end it. `serve status` prints the pid, port, running version and start
 time; `serve restart` replaces a running daemon in one step. A running daemon also
 upgrades itself — when a plugin update moves the installed version it hands the port to
@@ -94,14 +106,14 @@ a replacement started through the shim and exits once that replacement is listen
 unless `dashboard.autoRestartOnUpdate: false` turns the handover into a report.
 
 For "back at login", **run the install and verify it — don't print the command and hope**:
-1. `node <engine> serve install-autostart` — writes a Startup launcher pointing at
+1. `swarm serve install-autostart` — writes a Startup launcher pointing at
    `~/.swarm/serve.mjs`, the same self-resolving shim the status bar uses, so it follows
    plugin updates instead of freezing on the sha-versioned cache dir the install happened
    to run from. `serve uninstall-autostart` removes it.
 2. Verify: read the launcher back and confirm its command names the shim, not a
    `plugins\cache` path. A launcher written before this shim existed is pinned to an old
    build and keeps starting it silently; re-running `install-autostart` repoints it.
-3. Smoke test: `node <engine> serve doctor` — five ✓/✗/⚠ lines (port reachable, pid
+3. Smoke test: `swarm serve doctor` — five ✓/✗/⚠ lines (port reachable, pid
    alive, autostart launcher, version current, firewall rule). Read them to the operator;
    a ✗ names its own fix, and ⚠ (the firewall rule is unreadable without elevation) is
    not a failure.
@@ -113,7 +125,7 @@ launched — done/total, a live symbol, the models seated on running leaves, wor
 yellow flag on a leaf quiet for over five minutes. Zero model cost. It cannot live in the
 swarm config: Claude Code reads `statusLine` from `~/.claude/settings.json` only. Ask
 whether they want it. On yes:
-1. `node <engine> statusline install` — writes `~/.swarm/statusline.mjs`, a shim that
+1. `swarm statusline install` — writes `~/.swarm/statusline.mjs`, a shim that
    resolves the installed plugin on every paint (so plugin updates never break the bar), and
    prints the exact `statusLine` block.
 2. Put that block into `~/.claude/settings.json` with the `Edit` tool, **in place** — never
