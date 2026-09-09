@@ -21,7 +21,7 @@ const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
 // The estate view: every live run, plus the newest few finished PER DISPLAY GROUP — a
 // global newest-N let one busy project crowd the others off the list entirely.
 // dashboard.finishedPerProject overrides the default.
-const FINISHED_PER_PROJECT = 8;
+const FINISHED_PER_PROJECT = 10;
 
 // A single path segment as the engine writes them (ids, encoded cwds, run names):
 // no separators, no dot-only names, nothing a URL decoder could turn into one.

@@ -129,7 +129,7 @@ test("runs list is per project: a busy project cannot crowd a quiet one off the 
     await withServer({ home }, async ({ get }) => {
       const { body } = await get("/api/runs");
       const busy = body.runs.filter((r) => r.project === "C--code-busy");
-      assert.equal(busy.length, 8, "capped per project");
+      assert.equal(busy.length, 10, "capped per project");
       assert.ok(body.runs.some((r) => r.project === "C--code-b"), "the quiet project's finished run still listed");
       assert.ok(body.runs.some((r) => r.project === "C--code-a" && r.active), "live run always listed");
     });

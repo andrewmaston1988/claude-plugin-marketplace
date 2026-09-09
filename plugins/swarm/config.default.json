@@ -49,7 +49,7 @@
     "livenessPollMs": 10000,
     "clockMs": 1000,
     "uiPollMs": 5000,
-    "finishedPerProject": 8,
+    "finishedPerProject": 10,
     "autoRestartOnUpdate": true,
     "tray": true
   },
