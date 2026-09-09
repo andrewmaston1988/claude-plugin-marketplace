@@ -89,7 +89,12 @@ export function blocksStart(record, installed, ownPid, alive) {
 // could then never reach it).
 export function bindFailureRecordAction({ current, prevRecord, ownPid, alive }) {
   if (current?.pid !== ownPid) return { act: "leave" };
-  if (prevRecord?.pid && prevRecord.pid !== ownPid && alive(prevRecord.pid)) return { act: "restore", record: prevRecord };
+  // `listening` is dropped on the way back: the rival held the port before we took
+  // it, and has not re-bound yet. Restoring the flag verbatim made status and the
+  // tray report a daemon listening while it was not (code review, 2026-09-09).
+  if (prevRecord?.pid && prevRecord.pid !== ownPid && alive(prevRecord.pid)) {
+    return { act: "restore", record: { ...prevRecord, listening: false } };
+  }
   return { act: "clear" };
 }
 

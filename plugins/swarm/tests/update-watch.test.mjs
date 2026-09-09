@@ -148,7 +148,9 @@ test("update watcher: a failed replacement leaves the old daemon up — retake, 
     s.watch.emit("change", REGISTRY_NAME);
     await s.timers.run();
     assert.equal(s.calls.prepare, 1, "the port was released for the attempt");
-    assert.ok(s.calls.retake >= 1, "the old daemon retakes the port and keeps serving");
+    // Exactly one: a bound (>= 1) is passed by a multi-retake implementation too,
+    // and a daemon thrashing the port is a defect this test should catch.
+    assert.equal(s.calls.retake, 1, "the old daemon retakes the port exactly once");
     assert.equal(s.calls.exit, 0, "a failed replacement must NOT exit the old daemon");
     assert.ok(s.calls.log.some((l) => /failed to start/.test(l)), "the failure is logged");
     assert.ok(!s.calls.order.includes("confirm"), "no confirm wait for a spawn that never happened");

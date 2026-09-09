@@ -743,7 +743,10 @@ async function cmdServe(rest) {
     if (plan.clearRecord) clearPid(home);
     const started = await startDetached();
     if (!started.ok) { err(`dashboard: ${started.reason}`); exitSoon(1); return 1; }
-    const w = await waitForDaemon({ read: () => readPid(home), isAlive, excludePid: pid ?? null, deadlineMs: 15000 });
+    // excludePid is null here, not the old pid: we waited for that process to exit
+    // and cleared its record, so any record now is the replacement. Excluding it
+    // meant an OS pid reuse reported a failed restart while the dashboard was up.
+    const w = await waitForDaemon({ read: () => readPid(home), isAlive, excludePid: null, deadlineMs: 15000 });
     if (!w.ok) { err(`dashboard: restart failed — ${w.reason}`); exitSoon(1); return 1; }
     out(`dashboard: restarted pid ${w.record.pid} (version ${w.record.version ?? "unknown"})`);
     for (const u of urlLines(port)) out(`  ${u}`);

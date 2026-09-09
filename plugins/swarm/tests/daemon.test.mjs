@@ -84,9 +84,12 @@ test("blocksStart: a live rival blocks start unless its version has moved; unkno
 });
 
 test("bindFailureRecordAction: a failed bind hands the record back to a live rival, clears only its own", () => {
-  const own = 7, rival = { pid: 4321, version: "v1" };
+  const own = 7, rival = { pid: 4321, version: "v1", listening: true };
   const action = (current, prev) => bindFailureRecordAction({ current, prevRecord: prev, ownPid: own, alive: (pid) => pid === 4321 });
-  assert.deepEqual(action({ pid: own }, rival), { act: "restore", record: rival },
+  // The rival gets its record back, but NOT as listening — it held the port before
+  // we took it and has not re-bound. Restoring the flag verbatim had status and the
+  // tray reporting a daemon listening while it was not.
+  assert.deepEqual(action({ pid: own }, rival), { act: "restore", record: { ...rival, listening: false } },
     "we displaced a live rival and lost the bind → its record must survive so serve stop can reach it");
   assert.deepEqual(action({ pid: own }, { pid: 99 }), { act: "clear" }, "no live rival → the record was ours to clear");
   assert.deepEqual(action({ pid: 4321 }, rival), { act: "leave" }, "ownership already moved on → touch nothing");
