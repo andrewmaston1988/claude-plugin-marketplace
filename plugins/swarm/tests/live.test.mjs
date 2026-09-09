@@ -8,6 +8,7 @@ import vm from "node:vm";
 // vm context the way the real page does (a `window` global and nothing else),
 // then assert against the contract it hangs off `window.swarmLive`.
 const LIVE_JS = fileURLToPath(new URL("../src/serve/live.js", import.meta.url));
+const PAGE_HTML = fileURLToPath(new URL("../src/serve/page.html", import.meta.url));
 
 function loadLive() {
   const context = { window: {} };
@@ -139,4 +140,60 @@ test("coalesce: a burst of requests arms one scheduled run, and the latch resets
   assert.equal(scheduled.length, 1, "the latch reset — a later burst schedules again");
   scheduled.pop()();
   assert.equal(ran, 2);
+});
+
+// ── show-all: the Show all N row and the expand query it drives ───────────
+
+test("showAllRow: only an open stack with hidden finished runs and not already expanded shows the row (T5)", () => {
+  const { showAllRow } = loadLive();
+  const cases = [
+    // open,  total, shown, already expanded → row?
+    [true, 303, 10, false, true, "open, truncated, not expanded"],
+    [true, 10, 10, false, false, "nothing hidden — a useless Show all 10"],
+    [true, 303, 303, true, false, "already showing all"],
+    [false, 303, 10, false, false, "stack is collapsed"],
+  ];
+  for (const [open, total, shown, expanded, want, why] of cases) {
+    const set = expanded ? new Set(["g"]) : new Set();
+    assert.equal(showAllRow("g", { open, total, shown, expanded: set }), want, why);
+  }
+});
+
+test("expandQuery: the expand params compose with q() — token and expand both land in the URL (T7)", () => {
+  const { expandQuery } = loadLive();
+  assert.equal(expandQuery(new Set()), "", "no expansion: the bare path, exactly as before");
+  const expanded = new Set(["C--code-alpha", "C--code-beta x"]);
+  // The page composes q(`/api/runs${expandQuery(ui.expandedProjects)}`) — expand is
+  // spliced into the path BEFORE q() appends the token, so both survive. A replica
+  // of page.html's q pins the composed shape; the page-side wiring is pinned below.
+  const TOKEN = "s3cret";
+  const q = (p) => `${p}${p.includes("?") ? "&" : "?"}t=${encodeURIComponent(TOKEN)}`;
+  const url = q(`/api/runs${expandQuery(expanded)}`);
+  assert.match(url, /expand=C--code-alpha/, "the token never crowds the expand params out");
+  assert.match(url, /expand=C--code-beta%20x/, "group names are encoded, never raw");
+  assert.match(url, /[?&]t=s3cret/, "the auth token rides along");
+});
+
+test("collapsing a project drops its expansion — the next fetch's query carries no expand for it (T6)", () => {
+  const { expandQuery } = loadLive();
+  // The page's own state machine: tapping Show all adds the group; the project
+  // toggle's collapse deletes it. Asserted on the QUERY the next fetch builds,
+  // never on what renders — the stale-expansion bug is invisible on screen.
+  const expanded = new Set(["C--code-alpha", "C--code-beta"]);
+  assert.match(expandQuery(expanded), /expand=C--code-alpha/, "expanded: the fetch asks for alpha uncapped");
+  expanded.delete("C--code-alpha"); // the collapse the project toggle performs
+  assert.doesNotMatch(expandQuery(expanded), /expand=C--code-alpha/, "collapsed: no expand for alpha on the next fetch — a stale expansion keeps a 300-row payload polling forever");
+  assert.match(expandQuery(expanded), /expand=C--code-beta/, "an untouched expansion survives another project's collapse");
+});
+
+// Source pins: the page-side wiring the pure functions cannot see. serve.test.mjs
+// already asserts on page.html's body, so reading the page is established practice.
+test("page wiring: the runs fetch splices expandQuery inside q()'s argument, and collapse drops the expansion (T6/T7)", () => {
+  const page = readFileSync(PAGE_HTML, "utf8");
+  // The composition must put expand INSIDE the path handed to q(), so the token
+  // survives — concatenating after q() mangles `?t=` into the token and 401s.
+  assert.match(page, /api\(`\/api\/runs\$\{[^}]*expandQuery/, "the runs fetch builds its path with expandQuery before q() sees it");
+  assert.doesNotMatch(page, /q\((["'`])\/api\/runs\1\)\s*\+/, "never concatenated after q() — that drops the token");
+  assert.doesNotMatch(page, /\+\s*[`"']\??expand=/, "never appended as a raw string anywhere");
+  assert.match(page, /openProjects\.delete\(p\)[^\n}]*expandedProjects\.delete\(p\)/, "the collapse branch drops the group's expansion");
 });

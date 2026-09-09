@@ -294,7 +294,7 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -310,7 +310,10 @@
   const chevRight = `<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7181" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`;
 
   async function buildRuns() {
-    const data = await api("/api/runs");
+    // expandQuery is spliced INSIDE the path api() hands to q(), so the expand
+    // params and the auth token both survive — concatenating after q() mangles
+    // the token and 401s the whole list.
+    const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
     // Everything the commit needs, computed as values — a superseded scan writes none
     // of it. tickCfg keeps its in-place shape (the timers are armed from it at boot).
     const cfg = { clockMs: data.clockMs || tickCfg.clockMs, uiPollMs: data.uiPollMs || tickCfg.uiPollMs };
@@ -370,7 +373,16 @@
       const open = window.swarmLive.projectOpen(p, ui.openProjects);
       const total = (data.finishedTotals || {})[p] ?? rest.length;
       html += `<div class="section dim tap" data-key="ps:${esc(p)}" data-project="${esc(p)}"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length}${total > rest.length ? ` of ${total}` : ""} finished</small>${chev(open)}</div>`;
-      if (open) { html += `<ul data-key="pl:${esc(p)}">`; for (const r of rest) html += runRow(r, true, labels); html += "</ul>"; }
+      if (open) {
+        html += `<ul data-key="pl:${esc(p)}">`;
+        for (const r of rest) html += runRow(r, true, labels);
+        // The row is the stack's last item, and only when the cap hid something
+        // (predicate in live.js). Tapping it records the group; the next fetch
+        // returns that group uncapped.
+        if (window.swarmLive.showAllRow(p, { open, total, shown: rest.length, expanded: ui.expandedProjects }))
+          html += `<li class="row tap" data-key="expand:${esc(p)}" data-expand="${esc(p)}"><div class="rail"></div><div class="body" style="flex-direction:row;align-items:center;justify-content:space-between;gap:8px"><span class="name" style="font-size:14px;color:var(--accent)">Show all ${total}</span>${chevRight}</div></li>`;
+        html += "</ul>";
+      }
     }
     if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
     return { header, home: true, html, labels };
@@ -913,14 +925,19 @@
     if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; requestRoute(route); }
   });
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output]");
+    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand]");
     if (!t || !main.contains(t)) return;
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
     if (t.dataset.pretty) { ui.pretty = !ui.pretty; requestRoute(route); return; }
     if (t.dataset.domain != null) { ui.perfDomain = t.dataset.domain || null; requestRoute(route); return; }
+    // Show all: record the group — the next /api/runs fetch carries it as expand=
+    // and the server returns it uncapped.
+    if (t.dataset.expand != null) { ui.expandedProjects.add(t.dataset.expand); requestRoute(route); return; }
     // (d) opt-in: a project's finished stack starts closed, ui.openProjects records who was opened.
-    if (t.dataset.project) { const p = t.dataset.project; ui.openProjects.has(p) ? ui.openProjects.delete(p) : ui.openProjects.add(p); requestRoute(route); return; }
+    // Collapsing also drops the expansion, so reopening starts capped again — a stale
+    // expansion could otherwise keep a 300-row payload on every poll.
+    if (t.dataset.project) { const p = t.dataset.project; if (ui.openProjects.has(p)) { ui.openProjects.delete(p); ui.expandedProjects.delete(p); } else ui.openProjects.add(p); requestRoute(route); return; }
     if (t.dataset.href) { location.hash = t.dataset.href; return; }
     if (t.dataset.wave != null) {
       const w = Number(t.dataset.wave);

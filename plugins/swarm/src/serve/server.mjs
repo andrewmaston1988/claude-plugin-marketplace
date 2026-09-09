@@ -21,7 +21,7 @@ const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
 // The estate view: every live run, plus the newest few finished PER DISPLAY GROUP — a
 // global newest-N let one busy project crowd the others off the list entirely.
 // dashboard.finishedPerProject overrides the default.
-const FINISHED_PER_PROJECT = 8;
+const FINISHED_PER_PROJECT = 10;
 
 // A single path segment as the engine writes them (ids, encoded cwds, run names):
 // no separators, no dot-only names, nothing a URL decoder could turn into one.
@@ -191,7 +191,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const grading = cfg.grading?.enabled === true;
 
   const routes = {
-    "/api/runs": (res) => {
+    "/api/runs": (res, url) => {
       const all = _listRuns(home, { now: now(), heartbeatMs });
       // Groups derive from EVERY raw key — worktree keys and fully-finished repos
       // included, before any filtering — or the common-prefix derivation shifts
@@ -199,10 +199,17 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       const { groupOf, labelOf } = projectGrouping([...new Set(all.map((r) => r.project))]);
       const finishedTotals = {};
       for (const r of all) if (!r.active) { const g = groupOf(r.project); finishedTotals[g] = (finishedTotals[g] || 0) + 1; }
+      // `expand` names display GROUPS the page wants uncapped (the Show-all rows).
+      // Unknown names match no group and are simply ignored — the value never
+      // reaches a path join, so a stale bookmark cannot fault the estate view.
+      const expanded = new Set(url.searchParams.getAll("expand"));
       const seen = new Map();
       const picked = all.filter((r) => {
         if (r.active) return true;
         const g = groupOf(r.project);
+        // Skip the counter entirely, not merely bypass the comparison: an expanded
+        // row must never consume another group's allowance.
+        if (expanded.has(g)) return true;
         const n = seen.get(g) || 0;
         seen.set(g, n + 1);
         return n < finishedPerProject;
@@ -295,7 +302,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       return send(res, 200, readFileSync(LIVE_JS, "utf8"), "text/javascript; charset=utf-8");
     }
     if (p === "/api/perf") return perf(res, url);
-    if (routes[p]) return routes[p](res);
+    if (routes[p]) return routes[p](res, url);
 
     // A trailing slash is what the URL parser leaves behind after collapsing an
     // encoded dot-segment (%2e%2e) — never a resource, so never served.

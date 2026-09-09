@@ -18,6 +18,19 @@
   // inversion of waveOpen: opt-in, not opt-out.
   const projectOpen = (project, openProjects) => openProjects.has(project);
 
+  // The Show-all row renders at the foot of an expanded stack only while it hides
+  // something and has not already been expanded — never under a complete or
+  // collapsed stack, where it would be a useless or dead control.
+  const showAllRow = (group, { open, total, shown, expanded }) => !!open && total > shown && !expanded.has(group);
+
+  // The `expand=` params the runs fetch carries for the groups the user expanded,
+  // spliced into the path BEFORE q() appends the token ("" or "?expand=g&…"), so
+  // the token and the params both survive — never concatenated on after q().
+  const expandQuery = (expanded) => {
+    const parts = [...(expanded || [])].map((g) => `expand=${encodeURIComponent(g)}`);
+    return parts.length ? `?${parts.join("&")}` : "";
+  };
+
   function elapsedText(task, now) {
     if (task.state === "running") return fmtDur(now - (task.startedMs || now));
     if (task.durationMs != null) return fmtDur(task.durationMs);
@@ -103,5 +116,5 @@
     });
   }
 
-  window.swarmLive = { waveOpen, projectOpen, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, coalesce, loadScript };
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, coalesce, loadScript };
 })();
