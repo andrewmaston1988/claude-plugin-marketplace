@@ -33,7 +33,7 @@ const USAGE = `usage: swarm.mjs <command>
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
-  serve stop | status | install-autostart | uninstall-autostart
+  serve restart | doctor | stop | status | install-autostart | uninstall-autostart
   config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it
   statusline install         write the self-resolving statusline shim to ~/.swarm/statusline.mjs and print the settings.json line`;
 
@@ -614,16 +614,22 @@ async function cmdPerf(rest) {
 // serve — the LAN dashboard. Foreground by default; --daemon forks a detached
 // copy and records its pid (written by the parent, per the plugin daemon rule).
 async function cmdServe(rest) {
-  const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir } = await import("../src/serve/daemon.mjs");
+  const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir, pidPath,
+    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort, waitForExit, restartPlan, drainAndClose } = await import("../src/serve/daemon.mjs");
   const home = swarmHome();
   const cfg = getConfig();
   const port = cfg.dashboard?.port ?? 7331;
   const enginePath = fileURLToPath(import.meta.url);
   const verb = rest[0] && !rest[0].startsWith("--") ? rest[0] : "start";
   const exitSoon = (code) => { setTimeout(() => process.exit(code), 150); };
+  const installed = resolveInstalled({ registry: registryPath() });
+  // The stable shim every restart/re-exec goes through — never this file, which
+  // sits in the sha-versioned plugin cache and moves on every update.
+  const shimPath = join(home, "serve.mjs");
 
   if (verb === "stop") {
-    const pid = readPid(home);
+    const rec = readPid(home);
+    const pid = rec?.pid;
     if (!pid || !isAlive(pid)) { out("dashboard: not running"); clearPid(home); exitSoon(0); return 0; }
     try { process.kill(pid); } catch (e) { err(`dashboard: could not stop pid ${pid}: ${e.message}`); exitSoon(1); return 1; }
     clearPid(home);
@@ -631,67 +637,218 @@ async function cmdServe(rest) {
     exitSoon(0); return 0;
   }
   if (verb === "status") {
-    const pid = readPid(home);
-    const alive = isAlive(pid);
-    out(alive ? `dashboard: running (pid ${pid})` : "dashboard: not running");
-    if (alive) for (const u of urlLines(port)) out(`  ${u}`);
-    exitSoon(alive ? 0 : 1); return alive ? 0 : 1;
+    const rec = readPid(home);
+    const alive = isAlive(rec?.pid);
+    const rep = statusReport({ record: rec, alive, installed, port, urls: alive ? urlLines(port) : [], startupDir: defaultStartupDir(), shimPath });
+    for (const line of rep.lines) out(line);
+    exitSoon(rep.exit); return rep.exit;
+  }
+  if (verb === "doctor") {
+    const rec = readPid(home);
+    const alive = isAlive(rec?.pid);
+    const checks = await doctorChecks({ record: rec, alive, installed, port, bind: cfg.dashboard?.bind ?? "0.0.0.0", startupDir: defaultStartupDir(), shimPath });
+    for (const c of checks) out(`${c.status === "pass" ? "✓" : c.status === "unknown" ? "⚠" : "✗"} ${c.name}: ${c.detail}`);
+    const code = doctorExit(checks);
+    if (code) out(`${checks.filter((c) => c.status === "fail").length} check(s) failed`);
+    else out("all checks passed");
+    exitSoon(code); return code;
   }
   if (verb === "install-autostart" || verb === "uninstall-autostart") {
     const startupDir = defaultStartupDir();
-    // Point the launcher at the resolver shim on a stable path, never at this file:
-    // enginePath is inside the sha-versioned plugin cache and moves on every update.
-    let shimPath = enginePath, shimArgs = ["serve", "--daemon"];
-    if (verb === "install-autostart") {
-      const { copyFileSync, mkdirSync } = await import("node:fs");
-      mkdirSync(home, { recursive: true });
-      shimPath = join(home, "serve.mjs");
-      copyFileSync(fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)), shimPath);
-      shimArgs = ["scripts/swarm.mjs", "serve", "--daemon"];
-    }
+    // Point the launcher at the resolver shim on a stable path, never at this
+    // file: enginePath is inside the sha-versioned plugin cache and moves on
+    // every update.
+    const shim = ensureShim({ home, resolverSrc: fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)) });
     const r = verb === "install-autostart"
-      ? installAutostart({ startupDir, nodePath: process.execPath, enginePath: shimPath, engineArgs: shimArgs })
+      ? installAutostart({ startupDir, nodePath: process.execPath, enginePath: shim, engineArgs: ["scripts/swarm.mjs", "serve", "--daemon"] })
       : uninstallAutostart({ startupDir });
-    if (!startupDir) out(`no Startup folder on this platform — add "${process.execPath}" "${shimPath}" ${shimArgs.join(" ")} to your login items by hand`);
+    if (!startupDir) out(`no Startup folder on this platform — add "${process.execPath}" "${shim}" scripts/swarm.mjs serve --daemon to your login items by hand`);
     else out(verb === "install-autostart" ? `autostart: ${r.changed ? "installed" : "already installed"} → ${r.path}` : `autostart: ${r.removed ? "removed" : "was not installed"}`);
     exitSoon(0); return 0;
   }
-  if (verb !== "start") { err(USAGE); return 1; }
+  if (verb !== "start" && verb !== "restart") { err(USAGE); return 1; }
 
-  // The off switch. stop/status/autostart verbs still work above, so a Startup
+  // The off switch — covers restart too, which would stop the daemon and start
+  // nothing. stop/status/doctor/autostart verbs still work above, so a Startup
   // launcher left installed becomes a no-op instead of needing uninstalling.
   if (cfg.dashboard?.enabled === false) { out("dashboard: disabled (dashboard.enabled=false in ~/.swarm/config.json)"); exitSoon(0); return 0; }
 
   // The --daemon parent records the child's pid before the child gets here, so a
-  // pid equal to our own is us, not a rival.
+  // pid equal to our own is us, not a rival. A live daemon with a moved-off
+  // version does NOT block start — starting is then a takeover of it.
   const running = readPid(home);
-  if (running && running !== process.pid && isAlive(running)) { out(`dashboard: already running (pid ${running})`); for (const u of urlLines(port)) out(`  ${u}`); exitSoon(0); return 0; }
+  const aliveRunning = isAlive(running?.pid);
+  const takeover = Boolean(running?.pid && running.pid !== process.pid && aliveRunning && isStale(running, installed));
+  if (blocksStart(running, installed, process.pid, aliveRunning)) {
+    out(`dashboard: already running (pid ${running.pid})`);
+    for (const u of urlLines(port)) out(`  ${u}`);
+    exitSoon(0); return 0;
+  }
+  if (takeover) out(`dashboard: taking over from stale pid ${running.pid} (running ${running.version} → installed ${installed?.version})`);
+
+  // The detached spawn shared by --daemon and restart. On a takeover the parent
+  // must NOT write the pid record: the live old daemon still owns it, and the
+  // child hands it back if it loses the bind. In the normal case the parent
+  // writes pre-fork so a second `serve --daemon` sees the child and short-circuits.
+  const startDetached = async () => {
+    ensureShim({ home, resolverSrc: fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)) });
+    const { spawn } = await import("node:child_process");
+    const { openSync, mkdirSync, writeFileSync, renameSync } = await import("node:fs");
+    mkdirSync(home, { recursive: true });
+    // Raw stdio (crash stacks) — separate from dashboard.log, which the daemon
+    // itself owns as a structured, rotated event log.
+    const logPath = join(home, "dashboard-stdio.log");
+    const logFd = openSync(logPath, "a");
+    let child;
+    try { child = spawn(process.execPath, [enginePath, "serve"], { detached: true, stdio: ["ignore", logFd, logFd], windowsHide: true }); }
+    catch (e) { return { ok: false, reason: `could not spawn the daemon: ${e.message}` }; }
+    child.unref();
+    if (!takeover) writePid(home, { pid: child.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() });
+    if (process.platform === "win32" && cfg.dashboard?.tray !== false) {
+      try {
+        const { renderTrayIconPng } = await import("../src/serve/icon.mjs");
+        const iconPath = join(home, "dashboard-icon.png");
+        writeFileSync(`${iconPath}.tmp`, renderTrayIconPng());
+        renameSync(`${iconPath}.tmp`, iconPath);
+        const trayScript = fileURLToPath(new URL("../src/serve/tray.ps1", import.meta.url));
+        // The tray needs a console — powershell.exe is a console-subsystem exe whose
+        // WinForms message loop dies without one, and `detached: true` strips it
+        // (DETACHED_PROCESS) — and it must outlive this short-lived parent: `cmd /c
+        // start` gives it a fresh hidden console AND breaks it out of our job. Same
+        // shape as slack-bridge claude-slack.mjs:245-270; its Task-Scheduler reason
+        // does not apply here (swarm autostarts from the Startup folder), but the
+        // console and breakaway halves both do.
+        const tray = spawn("cmd.exe", ["/c", "start", "", "/min", "powershell.exe", "-WindowStyle", "Hidden", "-NonInteractive",
+          "-File", trayScript, "-PidFile", pidPath(home), "-NodeExe", process.execPath, "-ShimPath", shimPath,
+          "-Port", String(port), "-IconPath", iconPath, "-Home", home], { detached: true, stdio: "ignore", windowsHide: true });
+        tray.unref();
+      } catch (e) { err(`dashboard: tray not started: ${e.message}`); }
+    }
+    return { ok: true, pid: child.pid, logPath };
+  };
+
+  if (verb === "restart") {
+    const rec = readPid(home);
+    const pid = rec?.pid;
+    const wasAlive = Boolean(pid && isAlive(pid));
+    // Wait for the signalled daemon to ACTUALLY exit before starting anything.
+    // Starting while it still holds the port loses the bind, and clearing its
+    // record while it is alive leaves a daemon `serve stop` can never reach.
+    let exited = true;
+    if (wasAlive) {
+      try { process.kill(pid); } catch (e) { err(`dashboard: could not stop pid ${pid}: ${e.message}`); exitSoon(1); return 1; }
+      ({ exited } = await waitForExit(pid, { isAlive }));
+    }
+    const plan = restartPlan({ record: rec, wasAlive, exited });
+    if (plan.act === "abort") {
+      err(`dashboard: restart aborted — ${plan.reason} (pid ${pid}); nothing was stopped or started`);
+      exitSoon(1); return 1;
+    }
+    if (wasAlive) out(`dashboard: stopped pid ${pid}`);
+    else out("dashboard: not running — starting");
+    if (plan.clearRecord) clearPid(home);
+    const started = await startDetached();
+    if (!started.ok) { err(`dashboard: ${started.reason}`); exitSoon(1); return 1; }
+    // excludePid is null here, not the old pid: we waited for that process to exit
+    // and cleared its record, so any record now is the replacement. Excluding it
+    // meant an OS pid reuse reported a failed restart while the dashboard was up.
+    const w = await waitForDaemon({ read: () => readPid(home), isAlive, excludePid: null, deadlineMs: 15000 });
+    if (!w.ok) { err(`dashboard: restart failed — ${w.reason}`); exitSoon(1); return 1; }
+    out(`dashboard: restarted pid ${w.record.pid} (version ${w.record.version ?? "unknown"})`);
+    for (const u of urlLines(port)) out(`  ${u}`);
+    exitSoon(0); return 0;
+  }
 
   if (rest.includes("--daemon")) {
-    const { spawn } = await import("node:child_process");
-    const { openSync, mkdirSync } = await import("node:fs");
-    mkdirSync(home, { recursive: true });
-    const logPath = join(home, "dashboard.log");
-    const logFd = openSync(logPath, "a");
-    const child = spawn(process.execPath, [enginePath, "serve"], { detached: true, stdio: ["ignore", logFd, logFd], windowsHide: true });
-    child.unref();
-    writePid(home, child.pid);
-    out(`dashboard: started pid ${child.pid} (log: ${logPath})`);
+    const started = await startDetached();
+    if (!started.ok) { err(`dashboard: ${started.reason}`); exitSoon(1); return 1; }
+    out(`dashboard: started pid ${started.pid} (events: ${join(home, "dashboard.log")}, stdio: ${started.logPath})`);
     for (const u of urlLines(port)) out(`  ${u}`);
     out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
     exitSoon(0); return 0;
   }
 
   const { createServer } = await import("../src/serve/server.mjs");
+  const { createLogger } = await import("../src/serve/log.mjs");
+  const { startUpdateWatch } = await import("../src/serve/update-watch.mjs");
+  ensureShim({ home, resolverSrc: fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)) });
+  const dlog = createLogger({ logDir: home }).log;
   const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`) });
-  writePid(home, process.pid); // before listen, per the daemon lifecycle rule; cleared again if listen fails
+  const bind = cfg.dashboard?.bind ?? "0.0.0.0";
+  // SSE streams never "finish", so they cannot count as in-flight for the
+  // handover drain — they are ended outright at handover and the browser
+  // reconnects to the replacement. Tracked from before the first listen so a
+  // handover never misses a stream.
+  const sockets = new Set();
+  server.on("connection", (s) => { sockets.add(s); s.on("close", () => sockets.delete(s)); });
+  const sse = new Set();
+  server.on("request", (req, res) => {
+    if ((req.headers.accept || "").includes("text/event-stream")) {
+      sse.add(res);
+      res.on("close", () => sse.delete(res));
+    }
+  });
+  const listenOnce = () => new Promise((resolve, reject) => {
+    const onErr = (e) => reject(e);
+    server.once("error", onErr);
+    server.listen(port, bind, () => { server.removeListener("error", onErr); resolve(); });
+  });
+  const record = { pid: process.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() };
+  const prevRecord = readPid(home); // a live stale daemon we are taking over from, if any
+  writePid(home, record); // before listen, per the daemon lifecycle rule; handed back below if listen fails
   try {
-    await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, cfg.dashboard?.bind ?? "0.0.0.0", resolve); });
-  } catch (e) { clearPid(home); throw e; }
+    await listenOnce();
+  } catch (e) {
+    // A failed bind must not strand a live rival recordless — `serve stop` could
+    // then never reach it. Hand the record back; clear only what was ours.
+    const act = bindFailureRecordAction({ current: readPid(home), prevRecord, ownPid: process.pid, alive: isAlive });
+    if (act.act === "restore") writePid(home, act.record);
+    else if (act.act === "clear") clearPid(home);
+    throw e;
+  }
+  writePid(home, { ...record, listening: true }); // the restart/handover protocol reads this
   out(`dashboard: serving ~/.swarm/runs on port ${port}`);
   for (const u of urlLines(port)) out(`  ${u}`);
   out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
-  const stop = () => { clearPid(home); server.close(); setTimeout(() => process.exit(0), 150); };
+
+  // Handover plumbing for the update watcher: release the port for the
+  // replacement, retake it when the replacement fails. Plain requests drain
+  // first; anything still holding the port after the grace window is cut.
+  const exitDaemon = (code) => { setTimeout(() => process.exit(code), 150); };
+  const prepare = async () => {
+    for (const res of sse) { try { res.end(); } catch {} }
+    sse.clear();
+    await drainAndClose({
+      close: (cb) => server.close(cb),
+      destroySockets: () => { for (const s of sockets) { try { s.destroy(); } catch {} } },
+    });
+  };
+  const retake = async () => {
+    try {
+      await listenOnce();
+    } catch (e) {
+      // Someone else holds the port. A live daemon on the record, or anything
+      // reachable there, is the dashboard being served — bow out. Only a dead
+      // port we cannot retake is a wedge, and a record still naming us must
+      // not linger pointing at a pid that gave up.
+      const cur = readPid(home);
+      if (cur?.pid && cur.pid !== process.pid && isAlive(cur.pid)) { exitDaemon(0); return; }
+      const p = await probePort(port, bind);
+      if (p.reachable) { exitDaemon(0); return; }
+      if (cur?.pid === process.pid) clearPid(home);
+      exitDaemon(1);
+      return;
+    }
+    writePid(home, { ...record, listening: true });
+  };
+  dlog("serve", { msg: `listening on ${bind}:${port}`, pid: record.pid, version: record.version });
+  startUpdateWatch({
+    registryPath: registryPath(), own: record, shimPath, home,
+    autoRestart: cfg.dashboard?.autoRestartOnUpdate !== false,
+    prepare, retake,
+    log: (msg) => dlog("update-watch", { msg }),
+  });
+  const stop = () => { const cur = readPid(home); if (cur?.pid === process.pid) clearPid(home); server.close(); setTimeout(() => process.exit(0), 150); };
   process.on("SIGINT", stop);
   process.on("SIGTERM", stop);
   await new Promise(() => {}); // serve until signalled

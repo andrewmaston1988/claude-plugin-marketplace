@@ -94,3 +94,8 @@ export function renderIconPng(size) {
 }
 
 export const ICON_SIZES = [180, 192, 512];
+
+// The Windows tray's size — reuses the same mark rather than shipping a second
+// asset. Written to ~/.swarm/dashboard-icon.png by `serve --daemon` for tray.ps1.
+export const TRAY_ICON_SIZE = 32;
+export const renderTrayIconPng = () => renderIconPng(TRAY_ICON_SIZE);

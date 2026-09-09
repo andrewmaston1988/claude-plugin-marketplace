@@ -86,13 +86,25 @@ combined options if the operator is brisk, or one each if not:
   generate one; never invent one silently.
 `port` is advanced (Stage 7).
 
-Starting it: `node <engine> serve --daemon` (or `serve` to stay in the foreground), and
-`serve stop` to end it. To bring it back at login, `node <engine> serve install-autostart`
-writes a Startup launcher pointing at `~/.swarm/serve.mjs` — the same self-resolving shim
-the status bar uses, so it follows plugin updates instead of freezing on the sha-versioned
-cache dir the install happened to run from. `serve uninstall-autostart` removes it. A
-launcher written before this shim existed is pinned to an old build and keeps starting it
-silently; re-run `install-autostart` once to repoint it.
+Running it: `node <engine> serve --daemon` (or `serve` to stay in the foreground), and
+`serve stop` to end it. `serve status` prints the pid, port, running version and start
+time; `serve restart` replaces a running daemon in one step. A running daemon also
+upgrades itself — when a plugin update moves the installed version it hands the port to
+a replacement started through the shim and exits once that replacement is listening,
+unless `dashboard.autoRestartOnUpdate: false` turns the handover into a report.
+
+For "back at login", **run the install and verify it — don't print the command and hope**:
+1. `node <engine> serve install-autostart` — writes a Startup launcher pointing at
+   `~/.swarm/serve.mjs`, the same self-resolving shim the status bar uses, so it follows
+   plugin updates instead of freezing on the sha-versioned cache dir the install happened
+   to run from. `serve uninstall-autostart` removes it.
+2. Verify: read the launcher back and confirm its command names the shim, not a
+   `plugins\cache` path. A launcher written before this shim existed is pinned to an old
+   build and keeps starting it silently; re-running `install-autostart` repoints it.
+3. Smoke test: `node <engine> serve doctor` — five ✓/✗/⚠ lines (port reachable, pid
+   alive, autostart launcher, version current, firewall rule). Read them to the operator;
+   a ✗ names its own fix, and ⚠ (the firewall rule is unreadable without elevation) is
+   not a failure.
 
 ### Stage 4 — the status bar (settings.json `statusLine`)
 
@@ -201,6 +213,8 @@ from the appendix. If no, close.
 | `dashboard.port` | `7331` | Listen port; also the firewall rule's port. |
 | `dashboard.livenessPollMs` | `10000` | How often the server re-checks which runs are live and tells connected browsers. Two things produce no filesystem event and are only ever caught by this clock: a run finishing (its `summary.json` lands in a path nothing watches) and an engine dying. It also rebuilds file watchers, so one that silently stops delivering recovers instead of leaving the page deaf until a manual refresh. Ticks only while a dashboard is actually open — nothing runs with no client connected. Lower it for a snappier list at the cost of more directory scans. |
 | `dashboard.finishedPerProject` | `8` | How many finished runs each displayed project keeps on the runs list, newest first. A repo and its worktree keys are one group — the cap is per displayed project, not per run directory — and a truncated section header reads `N of M finished`. Raise it to keep more of a busy estate's history on screen. |
+| `dashboard.autoRestartOnUpdate` | `true` | A running daemon hands the port to a shim-started replacement when the installed version moves; `false` reports the mismatch instead — `status` and `doctor` show the running version as stale, `serve restart` applies it by hand. |
+| `dashboard.tray` | `true` | Windows only: `serve --daemon` shows a tray icon (Open / Restart / Stop, running version) that polls the pid record, so it follows the daemon across restarts and re-execs; `false` spawns no tray. |
 | `swarm.always` | `false` | Stage 2. |
 | `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |
 | `grading.enabled` | `false` | Stage 6. |
