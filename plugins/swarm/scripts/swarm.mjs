@@ -36,7 +36,8 @@ const USAGE = `usage: swarm.mjs <command>
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
   serve restart | doctor | stop | status | install-autostart | uninstall-autostart
   config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it
-  statusline install         write the self-resolving statusline shim to ~/.swarm/statusline.mjs and print the settings.json line`;
+  statusline install         write the self-resolving statusline shim to ~/.swarm/statusline.mjs and print the settings.json line
+  install                    put swarm on PATH: bash + cmd wrappers and the resolver copy in ~/.local/bin (idempotent; never edits a shell profile)`;
 
 // Always-available Claude aliases, appended after discovered models.
 const CLAUDE_ALIASES = [
@@ -983,6 +984,30 @@ async function main() {
         out(`statusline: shim written to ${shim} — it resolves the installed plugin on every paint, so plugin updates never break it.`);
         out("Add to ~/.claude/settings.json (edit the file in place; a symlinked settings.json must not be replaced):");
         out(JSON.stringify({ statusLine: { type: "command", command: cmd } }, null, 2));
+        return 0;
+      }
+      case "install": {
+        // Self-resolving PATH command, mirroring ~/.local/bin/pipeline: a stable
+        // resolver copy beside the wrappers means a plugin sha bump never strands
+        // `swarm`. Idempotent — re-running overwrites, never appends.
+        const { mkdirSync, copyFileSync, writeFileSync, chmodSync, existsSync } = await import("node:fs");
+        const { homedir } = await import("node:os");
+        const { installPlan } = await import("../src/cli-shim.mjs");
+        const userBin = join(homedir(), ".local", "bin");
+        const plan = installPlan({
+          userBin,
+          nodePath: process.execPath,
+          resolverSrc: fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)),
+        });
+        mkdirSync(userBin, { recursive: true });
+        for (const e of plan) {
+          const existed = existsSync(e.path);
+          if (e.copyFrom) copyFileSync(e.copyFrom, e.path);
+          else writeFileSync(e.path, e.content, { mode: e.mode });
+          if (e.mode) chmodSync(e.path, e.mode); // writeFileSync applies mode on create only
+          out(`install: ${existed ? "refreshed" : "wrote"} ${e.path}`);
+        }
+        out("install: `swarm` now resolves the active plugin install on every run, so plugin updates never break it. Requires ~/.local/bin on PATH (this command never edits a shell profile).");
         return 0;
       }
       case "config": {

@@ -49,7 +49,7 @@ Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, g
 
 ## Setup
 
-Run `/swarm:swarm setup` in a session — it materialises every key into `~/.swarm/config.json` (`node plugins/swarm/scripts/swarm.mjs config init`), explains each one, and edits the ones you name. The shipped `config.default.json` is overwritten on every plugin update, so your own file is the only durable copy; re-run `config init` after an update to pick up new keys. The one key you must set to arm alternative models:
+Run `/swarm:swarm setup` in a session — it materialises every key into `~/.swarm/config.json` (`swarm config init`), explains each one, and edits the ones you name. The shipped `config.default.json` is overwritten on every plugin update, so your own file is the only durable copy; re-run `config init` after an update to pick up new keys. The one key you must set to arm alternative models:
 
 ```json
 {
@@ -119,19 +119,30 @@ task's `env` or `settings.env` can forge or clear the guard.
 
 Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama install recent enough to serve `/api/experimental/model-recommendations` (~v0.23+).
 
+## Install
+
+Put the `swarm` command on PATH once. `swarm install` writes `~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`, and `~/.local/bin/swarm.cmd`; `~/.local/bin` must be on PATH. It is idempotent — re-run it after a plugin update to refresh the resolver copy.
+
+**Installed the plugin?** Run `/swarm:swarm setup` in a Claude Code session. Its Stage 0 installs the command for you, resolving the engine from the skill's own base directory — so you never construct a path, which is the whole point of this command existing.
+
+**Working in a clone of this marketplace?** The line below is the only place this documentation names the engine path, and it is relative to the repo root:
+
+<!-- swarm-bootstrap-exception: the only sanctioned engine-path instruction in the tree -->
+node plugins/swarm/scripts/swarm.mjs install
+
 ## Usage
 
 ```bash
-node plugins/swarm/scripts/swarm.mjs models              # discover launchable :cloud models + Claude aliases — run first
-node plugins/swarm/scripts/swarm.mjs list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
-node plugins/swarm/scripts/swarm.mjs validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
-node plugins/swarm/scripts/swarm.mjs run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
-node plugins/swarm/scripts/swarm.mjs ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
-node plugins/swarm/scripts/swarm.mjs quota                # Anthropic utilization per limit window
-node plugins/swarm/scripts/swarm.mjs ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
-node plugins/swarm/scripts/swarm.mjs grade --init <resultsDir>   # write grades.json — one skeleton row per :cloud leaf
-node plugins/swarm/scripts/swarm.mjs grade --file <grades.json>  # validate the filled batch and append it to the score store
-node plugins/swarm/scripts/swarm.mjs perf [--aspect X] [--model Y] [--domain D]   # aspect x model table with sample counts
+swarm models              # discover launchable :cloud models + Claude aliases — run first
+swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
+swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
+swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
+swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
+swarm quota                # Anthropic utilization per limit window
+swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
+swarm grade --init <resultsDir>   # write grades.json — one skeleton row per :cloud leaf
+swarm grade --file <grades.json>  # validate the filled batch and append it to the score store
+swarm perf [--aspect X] [--model Y] [--domain D]   # aspect x model table with sample counts
 ```
 
 A bare name resolves through the manifest registry (`<cwd>/.swarm/manifests/<name>.json`, then `~/.swarm/manifests/`; the resolution is always announced). `--args` fills `{{args.*}}` placeholders — `validate --resolved` prints the fully substituted document as the approval preview, and each distinct args value gets its own fingerprinted results dir so resume never crosses parameterizations.
@@ -260,7 +271,7 @@ Stdout repaints a full **roster snapshot** on every task state change and on a h
 Every leaf's Claude Code session id is captured in its result JSON. `ask` resumes that session with a follow-up question — the leaf already holds its file reads and reasoning in context, so a drill-down costs one turn instead of a re-run:
 
 ```bash
-node plugins/swarm/scripts/swarm.mjs ask <resultsDir> census-edges "show the exact preload line you cited"
+swarm ask <resultsDir> census-edges "show the exact preload line you cited"
 ```
 
 The resume runs with the leaf's own model, cwd, and tool allowlist (a read-only leaf stays read-only). Q/A history appends to `results/<id>.ask.log`, and each follow-up continues the same conversation thread. `--model <m>` re-asks on a different model — subject to the same `allowedRoots` governance gate as dispatch. Leaves that ran in a since-removed worktree can't be resumed; `ask` says so rather than guessing.
@@ -298,10 +309,10 @@ Which model to use for what is otherwise decided by remembered incidents. `grade
 The agent that authored the manifest grades it — it is the only party that knows what each leaf was *asked* for, which the digest does not hold. Claude tiers produce no rows: their capability is not what is in question.
 
 ```bash
-node plugins/swarm/scripts/swarm.mjs grade --init <resultsDir>   # → <resultsDir>/grades.json, one row per :cloud leaf
+swarm grade --init <resultsDir>   # → <resultsDir>/grades.json, one row per :cloud leaf
 # fill in session, and per row: domain, outcome, note, grades
-node plugins/swarm/scripts/swarm.mjs grade --file <resultsDir>/grades.json
-node plugins/swarm/scripts/swarm.mjs perf --aspect search --domain godot
+swarm grade --file <resultsDir>/grades.json
+swarm perf --aspect search --domain godot
 ```
 
 **Ten aspects, graded 1-10.** Four are graded on every leaf; six only where the leaf stressed them, and stay `null` otherwise. They co-occur freely — a leaf that reads reference images and then designs geometry from them has no single primary act.
@@ -355,18 +366,18 @@ The menu also opens **Performance**: the model score store (`~/.swarm/model-scor
 Four view chips sit alongside rank: **coverage** (a model × aspect grid, cell shade + count showing evidence depth, hatched where n<5 and outlined where n=0), **reliability** (each model's outcome mix — completed, wrong, failed, timeout, session-died, not-capable — as a stacked bar with a legend), **leaders** (top 3 per aspect, the same weighted ranking capped and grouped), and **cost** — the frontier scatter (quality × multiplier on a log axis, frontier models accented, thin evidence hollow, unmeasured models in their own strip past a divider) beside the cost spread (cheapest-first, every value written as text). All four are computed server-side (`perf-views.mjs`) and drawn by a lazily-loaded `perf.js`. Every ranked row carries its cost badge, and the leaf page's model chip is a link to that model's breakdown.
 
 ```bash
-node plugins/swarm/scripts/swarm.mjs serve --daemon        # detached; pid record ~/.swarm/dashboard.pid, events ~/.swarm/dashboard.log
-node plugins/swarm/scripts/swarm.mjs serve                 # foreground
-node plugins/swarm/scripts/swarm.mjs serve status | stop | restart
-node plugins/swarm/scripts/swarm.mjs serve doctor          # ✓/✗/⚠ per check, exit 1 on any ✗
-node plugins/swarm/scripts/swarm.mjs serve install-autostart   # Startup-folder launcher (Windows); uninstall-autostart removes it
+swarm serve --daemon        # detached; pid record ~/.swarm/dashboard.pid, events ~/.swarm/dashboard.log
+swarm serve                 # foreground
+swarm serve status | stop | restart
+swarm serve doctor          # ✓/✗/⚠ per check, exit 1 on any ✗
+swarm serve install-autostart   # Startup-folder launcher (Windows); uninstall-autostart removes it
 ```
 
 On start it prints `http://<hostname>.local:<port>/` (phones resolve `.local` on the LAN without a static IP), every LAN IPv4, and the one-time elevated firewall rule for the port — printed, never run. Add to home screen from the phone browser: the page ships a web manifest and an `apple-touch-icon`; the icon PNGs it references are rendered by the server itself (`/icon-180.png`, `/icon-192.png`, `/icon-512.png`). On plain LAN HTTP there is no service worker (browsers require a secure context), so Android gets a bookmark-style icon and no install prompt; iOS "Add to Home Screen" opens it standalone.
 
 `serve status` prints the pid, port, running version and start time (and says `stale` when the installed version has moved past it). `serve restart` replaces a running daemon in one step — stop, wait, start — and exits non-zero if the new daemon does not come up. `serve doctor` is the smoke test: five ✓/✗/⚠ lines — port reachable, pid alive, autostart launcher points at the shim, version current, firewall rule — where a ✗ names its own fix, ⚠ means a check could not be read (the firewall rule needs elevation) and is not a failure, and any ✗ exits 1. On Windows `serve --daemon` also shows a tray icon — Open / Restart / Stop plus the running version — that polls the pid record, so it follows a restart or re-exec to the new daemon instead of pointing at a dead one; `dashboard.tray: false` spawns no tray.
 
-The daemon upgrades itself: a running daemon watches the plugin registry, and when a plugin update moves the installed version it releases the port, starts a replacement through `~/.swarm/serve.mjs` (the stable self-resolving shim — never the sha-versioned `plugins/cache` dir, which the update just moved), and exits only once that replacement is confirmed listening. A replacement that fails to start hands the port straight back and the old daemon keeps serving the old version, logged. `dashboard.autoRestartOnUpdate: false` turns the handover into a report — `status` and `doctor` show the running version as stale and `serve restart` applies it by hand. Events land in `~/.swarm/dashboard.log` as one JSON object per line, rotated once at 1 MB; the detached daemon's raw stdio goes to `~/.swarm/dashboard-stdio.log`.
+The daemon upgrades itself: a running daemon watches the plugin registry, and when a plugin update moves the installed version it releases the port, starts a replacement through `~/.swarm/serve.mjs` (the stable self-resolving shim — never the sha-versioned install directory, which the update just moved), and exits only once that replacement is confirmed listening. A replacement that fails to start hands the port straight back and the old daemon keeps serving the old version, logged. `dashboard.autoRestartOnUpdate: false` turns the handover into a report — `status` and `doctor` show the running version as stale and `serve restart` applies it by hand. Events land in `~/.swarm/dashboard.log` as one JSON object per line, rotated once at 1 MB; the detached daemon's raw stdio goes to `~/.swarm/dashboard-stdio.log`.
 
 Config keys under `dashboard` in `~/.swarm/config.json` (defaults in `config.default.json`): `enabled` (true; `false` makes `serve` and `serve --daemon` print "disabled" and exit 0, so an installed Startup launcher becomes a no-op — `stop`, `status` and the autostart verbs still work), `port` (7331), `bind` (`0.0.0.0`), `token` (when set, every request needs `?t=<token>` — bookmark the URL with it), `recentMs` (a run whose `run.log` is older than this and has no `summary.json` is listed as stale, not live; the statusline glyph uses the same window), `clockMs` (1000; the page's local re-render tick), `uiPollMs` (5000; the refetch floor while a run is still open), `finishedPerProject` (10; how many finished runs each displayed project keeps, newest first — a repo and its worktree keys count as one project, and the section header reads `N of M finished` when truncating; a project's full stack is reachable from the page's `Show all` row, which fetches that one group uncapped), `autoRestartOnUpdate` (true; a running daemon hands the port to a shim-started replacement when the installed version moves — false reports instead and `serve restart` applies it), `tray` (true; Windows `--daemon` shows the tray icon — false spawns none).
 
@@ -375,7 +386,7 @@ Config keys under `dashboard` in `~/.swarm/config.json` (defaults in `config.def
 The fleet bar — every live run this session launched, as `swarm ▮1 · sweep 3/8 ◐ glm-5.2,minimax-m3 1.2M · ⚠ sweep verify-b quiet 6m` — is `statusline/swarm-statusline.mjs`. Install it once:
 
 ```bash
-node plugins/swarm/scripts/swarm.mjs statusline install   # writes ~/.swarm/statusline.mjs, prints the settings.json block
+swarm statusline install   # writes ~/.swarm/statusline.mjs, prints the settings.json block
 ```
 
 `settings.json` points at the shim, never at the plugin's cache path: the shim looks up the installed plugin in `installed_plugins.json` on every paint, so plugin updates never break the bar. Only runs launched by the current session show (the engine stamps the launching session id on `run-start`); a manual run with no stdin shows every live run. `/swarm:swarm setup` offers this as one of its stages.
