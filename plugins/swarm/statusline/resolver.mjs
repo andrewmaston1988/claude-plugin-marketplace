@@ -45,4 +45,4 @@ if (!target || !existsSync(target)) {
   fail(`${PLUGIN_KEY} not installed or has no ${rel} — try /reload-plugins`);
 }
 const r = spawnSync(process.execPath, [target, ...passArgs], { stdio: "inherit", windowsHide: true });
-process.exit(r.status ?? 0);
+process.exit(r.status ?? (statuslineMode ? 0 : 1));
