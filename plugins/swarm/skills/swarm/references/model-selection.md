@@ -4,14 +4,14 @@ Every task in a swarm manifest pins a **model** and, optionally, an **effort**. 
 
 > Adapted from /deep's model-selection reference. Deep's Workflow/conductor dispatch split does not apply here — swarm dispatches every leaf via CLI, so per-task `effort` is always honoured. What carries over is the tier/effort reasoning, which is general.
 
-With grading enabled, `swarm.mjs perf` is the record and this guide covers only what it has not measured. Run `swarm.mjs models` first — it lists the `:cloud` models the account can launch right now, plus the always-available Claude aliases, each annotated with its meter weight and a `*` when it sits on the cost frontier.
+With grading enabled, `swarm perf` is the record and this guide covers only what it has not measured. Run `swarm models` first — it lists the `:cloud` models the account can launch right now, plus the always-available Claude aliases, each annotated with its meter weight and a `*` when it sits on the cost frontier.
 
 ## How to pick: read the frontier, never compute a ranking
 
 Quality and cost are two axes and **never collapse into one number**:
 
-- **`swarm.mjs perf`** owns quality — per-aspect weighted scores, and `--overall` the one combined ranking.
-- **`swarm.mjs cost`** owns cost — each measured model's meter weight relative to the cheapest well-measured model, derived from the history every live usage fetch banks.
+- **`swarm perf`** owns quality — per-aspect weighted scores, and `--overall` the one combined ranking.
+- **`swarm cost`** owns cost — each measured model's meter weight relative to the cheapest well-measured model, derived from the history every live usage fetch banks.
 - The **frontier** joins them: a model is on it when no other model is both higher-scoring *and* cheaper. In `perf`, `dom <model>` marks a dominated model — one that is better AND cheaper exists — and a dominated model is never worth seating. A model rendering `—` is **unmeasured, not free and not dominated**: the history has not priced it, and absence is not evidence in either direction.
 
 The seating rule is the method, not a list:
@@ -52,7 +52,7 @@ Swarm has no fixed roles: you invent the cast per manifest, so **derive each lea
 
 ### Per-tier supported effort levels
 
-Claude tiers reject unsupported levels; `swarm.mjs validate` checks the pairing at manifest load, not runtime.
+Claude tiers reject unsupported levels; `swarm validate` checks the pairing at manifest load, not runtime.
 
 | Tier | Supported levels | Notes |
 |---|---|---|
