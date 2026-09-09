@@ -45,4 +45,10 @@ if (!target || !existsSync(target)) {
   fail(`${PLUGIN_KEY} not installed or has no ${rel} — try /reload-plugins`);
 }
 const r = spawnSync(process.execPath, [target, ...passArgs], { stdio: "inherit", windowsHide: true });
+// A null status means the child died without one — killed by signal, or never
+// spawned. Statusline mode swallows that by contract; every other caller is a
+// CLI whose exit code is read, so say what happened and fail.
+if (r.status == null && !statuslineMode) {
+  process.stderr.write(`swarm resolver: ${rel} ended without an exit code${r.error ? ` (${r.error.message})` : r.signal ? ` (killed by ${r.signal})` : ""}\n`);
+}
 process.exit(r.status ?? (statuslineMode ? 0 : 1));

@@ -17,12 +17,16 @@ export function cmdWrapper(nodePath, resolverPath) {
   return `@echo off\r\n"${nodePath}" "${resolverPath}" bin/swarm.mjs %*\r\n`;
 }
 
-// The resolver copy first, then the wrappers that exec it.
-export function installPlan({ userBin, nodePath, resolverSrc }) {
+// The resolver copy first, then the wrappers that exec it. `platform` is a
+// parameter rather than a read of process.platform so this stays pure and both
+// branches are testable from either OS. The .cmd is win32-only — the reference
+// wizard gates it the same way, and on POSIX it is an unrunnable file.
+export function installPlan({ userBin, nodePath, resolverSrc, platform = process.platform }) {
   const resolverPath = join(userBin, "swarm-resolver.mjs");
-  return [
+  const plan = [
     { path: resolverPath, copyFrom: resolverSrc },
     { path: join(userBin, "swarm"), content: bashWrapper(nodePath, resolverPath), mode: 0o755 },
-    { path: join(userBin, "swarm.cmd"), content: cmdWrapper(nodePath, resolverPath) },
   ];
+  if (platform === "win32") plan.push({ path: join(userBin, "swarm.cmd"), content: cmdWrapper(nodePath, resolverPath) });
+  return plan;
 }

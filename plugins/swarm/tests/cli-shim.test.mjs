@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
@@ -106,11 +106,17 @@ test("row 5 (idempotence): a second install over the same dir leaves exactly the
     const second = runCli(["install"], { cwd: dir, env: fakeHomeEnv(join(dir, "home")) });
     assert.equal(second.status, 0, second.stderr);
     assert.deepEqual(snapshot(userBin), before, "re-running install must overwrite, never append or duplicate");
-    assert.equal(readdirSync(userBin).length, 3, "exactly three entries");
+    // Count against what installPlan actually plans for this platform, not a
+    // hardcoded 3 — the .cmd is win32-only, and a literal would both break on
+    // POSIX and stay green under an append mutation (entry count is unchanged
+    // by appending). The snapshot above is what catches append; this catches a
+    // plan that writes more or fewer files than it declared.
+    const planned = installPlan({ userBin, nodePath: "node", resolverSrc: RESOLVER_SRC }).length;
+    assert.equal(readdirSync(userBin).length, planned, `install must write exactly the ${planned} files it plans`);
     // the refresh must also be a real rewrite: the installed copy tracks the
     // current resolver source, not the one from the first install
     assert.ok(readFileSync(resolver).equals(readFileSync(RESOLVER_SRC)));
-    assert.ok(existsSync(bashShim) && existsSync(cmdShim));
+    assert.equal(existsSync(cmdShim), process.platform === "win32", ".cmd is written on win32 and nowhere else");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -209,4 +215,14 @@ test("row 8: statusline mode still exits 0 on failure after the D5 change", () =
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+// The .cmd wrapper is meaningless on POSIX — an unrunnable file in ~/.local/bin —
+// and the reference wizard gates it on win32 for the same reason. `platform` is a
+// parameter so both branches are exercised from either OS.
+test("installPlan writes the .cmd only on win32", () => {
+  const args = { userBin: "/tmp/bin", nodePath: "node", resolverSrc: RESOLVER_SRC };
+  const names = (p) => installPlan({ ...args, platform: p }).map((e) => basename(e.path)).sort();
+  assert.deepEqual(names("win32"), ["swarm", "swarm-resolver.mjs", "swarm.cmd"]);
+  assert.deepEqual(names("linux"), ["swarm", "swarm-resolver.mjs"]);
+  assert.deepEqual(names("darwin"), ["swarm", "swarm-resolver.mjs"]);
 });
