@@ -122,7 +122,7 @@ function parseHtml(markup, ids) {
 }
 
 // ── the page under test ──────────────────────────────────────────────────
-function loadPage() {
+function loadPage(opts = {}) {
   const src = readFileSync(PAGE, "utf8");
   const script = src.match(/<script>([\s\S]*)<\/script>/)[1];
 
@@ -157,6 +157,7 @@ function loadPage() {
 
   Object.assign(context, { window, document, location, fetch, DOMParser, EventSource, navigator: {},
     URLSearchParams, setInterval: () => 0, setTimeout: () => 0, queueMicrotask: (f) => Promise.resolve().then(f), console });
+  if (opts.perfViews) window.perfViews = opts.perfViews; // perf.js is never loaded here; stub the contract
   vm.createContext(context);
   vm.runInContext(script, context, { filename: "page.html" });
 
@@ -171,6 +172,8 @@ function loadPage() {
   };
   const isList = (u) => /^\/api\/runs(\?|$)/.test(u);
   const isRun = (u) => /^\/api\/runs\/[^/]+\/[^/?]+(\?|$)/.test(u);
+  const isPerf = (u) => u.startsWith("/api/perf");
+  const isLeaf = (u) => /^\/api\/runs\/[^/]+\/[^/]+\/leaves\//.test(u);
 
   return {
     location, hdr, main, flush,
@@ -181,6 +184,10 @@ function loadPage() {
     runFetches: () => fetchLog.filter(isRun),
     respondList: (data) => respond(isList, data),
     respondRun: (data) => respond(isRun, data),
+    respondPerf: (data) => respond(isPerf, data),
+    respondLeaf: (data) => respond(isLeaf, data),
+    respond: (pred, data) => respond(pred, data),
+    isPerf,
     mainText: () => main.textContent,
     // The screen the user sees is header + main together — the flicker wipes both.
     screenText: () => `${hdr.textContent}\n${main.textContent}`,
@@ -371,3 +378,102 @@ function stripStringsAndComments(js) {
   }
   return out;
 }
+
+// ── cost badges + the leaf chip ──────────────────────────────────────────
+// Badge placement is a hard rule: 💲 bands live ONLY on the perf pages and
+// the model detail view. Run and leaf rows read a run; they are never
+// compared, so a badge there is clutter. These tests fail if a later edit
+// scatters badges back onto them.
+
+const allNodes = (el, out = []) => { for (const n of el.childNodes || []) { out.push(n); allNodes(n, out); } return out; };
+const badgesIn = (el) => allNodes(el).filter((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes("cbadge"));
+const chipHref = (el, href) => allNodes(el).find((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes("chip") && n.getAttribute("data-href") === href);
+
+// A /api/perf payload with one measured model (4.4× → band 2 → 💲💲) and one
+// unmeasured tier (band null → the em dash, never a blank that reads as
+// dominated).
+const perfPayload = () => ({
+  grading: true, path: "x", lines: 2, rows: 2, priorWeight: 4,
+  aspects: [], universals: ["adherence", "handoff", "truthfulness", "depth"], domains: [],
+  filters: { aspect: null, model: null, domain: null },
+  overall: [
+    { model: "m-dear", combined: 7.9, n: 6, provisional: false, outcomes: { completed: 6 }, wtds: { adherence: 7.9, handoff: 7.9, truthfulness: 7.9, depth: 7.9 } },
+    { model: "sonnet", combined: 7.2, n: 2, provisional: true, outcomes: { completed: 2 }, wtds: { adherence: 7.2, handoff: 7.2, truthfulness: 7.2, depth: 7.2 } },
+  ],
+  report: [],
+  views: {
+    coverage: { aspects: [], models: [], cells: [] },
+    reliability: [],
+    leaders: [],
+    cost: {
+      bands: [2, 5],
+      points: [
+        { model: "m-dear", wtd: 7.9, n: 6, multiplier: 4.4, band: 2, onFrontier: true, dominatedBy: null, thin: false },
+        { model: "sonnet", wtd: 7.2, n: 2, multiplier: null, band: null, onFrontier: false, dominatedBy: null, thin: false },
+      ],
+      spread: [
+        { model: "m-dear", mult: 4.4, band: 2, requests: 300, measuredRequests: 300, weeks: 1, measuredWeeks: 1, thin: false },
+        { model: "sonnet", mult: null, band: null, requests: 150, measuredRequests: 0, weeks: 1, measuredWeeks: 0, thin: true },
+      ],
+    },
+  },
+});
+
+test("badges: the perf overall list carries the band badge and the unmeasured em dash", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.location.hash = "#/perf";
+  P.fireHashchange();
+  await P.flush();
+  P.respondPerf(perfPayload());
+  await P.flush();
+  const badges = badgesIn(P.main);
+  assert.equal(badges.length, 2, "one badge per ranked row");
+  assert.deepEqual(badges.map((b) => b.textContent), ["💲💲", "—"],
+    "measured reads its band (💲💲 at 4.4×), unmeasured reads —, never a blank");
+});
+
+test("badges: run rows and leaf rows carry none — the screen a run is READ on stays clean", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.location.hash = RUN_URL;
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun(targetRun());
+  await P.flush();
+  assert.ok(P.screenText().includes("TARGETRUN"), "the run screen painted");
+  assert.equal(badgesIn(P.main).length + badgesIn(P.hdr).length, 0, "no badge on the run screen");
+  assert.ok(!P.screenText().includes("💲"), "no 💲 glyph anywhere on the run screen");
+  // The leaf: the model chip is now a link, and it stays PLAIN TEXT — no badge rides it.
+  P.location.hash = "#/run/C--code-tgt/TARGETRUN/leaf/leaf-a";
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun(targetRun());
+  P.respondLeaf({ id: "leaf-a", model: "glm", ok: true, prompt: "secret prompt", output: "ten bullets" });
+  await P.flush();
+  const chip = chipHref(P.main, "#/perf/model/glm");
+  assert.ok(chip, "the leaf's model chip is clickable, navigating to that model's breakdown");
+  assert.equal(chip.textContent, "glm", "the chip stays plain text");
+  assert.equal(badgesIn(P.main).length + badgesIn(P.hdr).length, 0, "no badge on the leaf screen");
+  assert.ok(!P.screenText().includes("💲"), "no 💲 glyph anywhere on the leaf screen");
+});
+
+test("cost view: the fourth chip routes, the server's plots draw, and the foot names the config", async () => {
+  const P = loadPage({ perfViews: { costPlots: () => `<div class="cost">the two charts</div>` } });
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.location.hash = "#/perf/cost";
+  P.fireHashchange();
+  await P.flush();
+  P.respondPerf(perfPayload());
+  await P.flush();
+  assert.ok(P.screenText().includes("the two charts"), "the perf.js widget rendered");
+  const on = chipHref(P.main, "#/perf/cost");
+  assert.ok(on && (on.getAttribute("class") || "").includes("on"), "the cost chip is the selected view");
+  assert.ok(P.screenText().includes("provider.cloud.ollama.costBands"), "the foot names the config key");
+});

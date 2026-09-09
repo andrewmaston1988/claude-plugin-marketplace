@@ -596,8 +596,9 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
     ok(!r.stdout.includes("glm-5.1"), `superseded entry must be hidden by default: ${r.stdout}`);
     ok(r.stdout.includes("1 superseded hidden"), r.stdout);
     ok(r.stdout.includes("--all"), r.stdout);
-    // aliases keep the legacy no-parens format
-    ok(/^sonnet — Claude Sonnet — always available$/m.test(r.stdout), r.stdout);
+    // aliases keep the legacy no-parens format; the trailing — is the cost
+    // column (an unmeasured Claude tier renders "—", never blank)
+    ok(/^sonnet — Claude Sonnet — always available  —$/m.test(r.stdout), r.stdout);
     // probe fired on the refresh path, top-3-visible only — the hidden elder is not probed
     deepEqual(generateHits, ["glm-5.2:cloud"]);
     // cache keeps the full size-ordered roster and carries supersededBy

@@ -12,7 +12,8 @@
     "cloud": {
       "ollama": {
         "enabled": false,
-        "cookiePath": null
+        "cookiePath": null,
+        "costBands": [2, 5]
       }
     },
     "usageTimeoutMs": 5000

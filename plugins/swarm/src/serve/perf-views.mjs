@@ -1,6 +1,8 @@
-// Three read-models over scores.mjs's own aggregate/dedupe output, computed
+// Read-models over scores.mjs's own aggregate/dedupe output, computed
 // server-side so the page never re-derives a count it could get wrong.
 import { OUTCOMES } from "../aspects.mjs";
+import { frontier } from "../scores.mjs";
+import { band, resolveBands, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
 
 const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
 
@@ -49,4 +51,32 @@ export function leaders(report, k = 3) {
       .slice(0, k)
       .map((c) => ({ model: c.model, weighted: c.weighted, n: c.n, provisional: c.provisional })),
   }));
+}
+
+// The cost read-model: the frontier's points (quality joined to cost) and the
+// log cost spread (every costed model, cheapest first). `rows` are the raw
+// score rows — the frontier needs overall()'s combined ranking, not the
+// per-aspect report — and `costRows` are `multipliers(costPerModel(snaps))`.
+// Cost itself is domain-blind (a request costs what it costs); only the
+// quality half is filtered, so the join stays honest under a domain filter.
+// A model with no multiplier is UNMEASURED, not free: it stays in `points`
+// with `multiplier: null` so the page can draw it as a void, never a 0×.
+export function costView(rows, costRows, { domain, bands = DEFAULT_COST_BANDS } = {}) {
+  bands = resolveBands(bands, DEFAULT_COST_BANDS);
+  const costs = costRows.map(({ model, mult }) => ({ model, mult }));
+  const thinOf = new Map(costRows.map((r) => [r.model, r.measuredRequests < THIN_REQUESTS]));
+  const points = frontier(rows, costs, { domain, bands })
+    .filter((e) => e.wtd != null)
+    .map(({ model, wtd, n, multiplier, band: b, onFrontier, dominatedBy }) => ({
+      model, wtd, n, multiplier, band: b, onFrontier, dominatedBy, thin: thinOf.get(model) ?? false,
+    }));
+  const spread = costRows
+    .map((r) => ({
+      model: r.model, mult: r.mult, band: band(r.mult, bands),
+      requests: r.requests, measuredRequests: r.measuredRequests,
+      weeks: r.weeks, measuredWeeks: r.measuredWeeks,
+      thin: r.measuredRequests < THIN_REQUESTS,
+    }))
+    .sort((a, z) => (a.mult ?? Infinity) - (z.mult ?? Infinity) || a.model.localeCompare(z.model));
+  return { points, spread, bands };
 }

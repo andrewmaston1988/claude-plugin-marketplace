@@ -118,8 +118,8 @@
   .chip[data-href], .chip[data-domain] { cursor:pointer; }
   .foot { padding:10px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
-  /* perf view switcher: four pills, one column each, centred — never a ragged wrap */
-  .chips.views { display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; }
+  /* perf view switcher: five pills, one column each, centred — never a ragged wrap */
+  .chips.views { display:grid; grid-template-columns:repeat(5, 1fr); gap:6px; }
   .chips.views .chip { justify-content:center; }
   /* aspect + domain pickers: the lists are too long for pills on a phone */
   .selrow { display:flex; gap:8px; padding:8px 16px 0; }
@@ -147,6 +147,23 @@
   /* coverage grid: one responsive SVG, labels inside it, scaled to the screen */
   .cov { padding:0 12px 16px; }
   .cov svg.covgrid { width:100%; height:auto; display:block; }
+  /* cost view: frontier scatter + log spread, same responsive-SVG idiom.
+     States, not series: frontier is the accent, dominated recedes, thin is
+     hollow with a dashed state-coloured stroke, unmeasured is a void. */
+  .cost { padding:0 12px 16px; }
+  .cost svg { width:100%; height:auto; display:block; }
+  .cost .fr { fill:var(--accent); }
+  .cost .dom { fill:var(--muted); opacity:.55; }
+  .cost .thin { fill:var(--surface); stroke-dasharray:2 2; stroke-width:1.2; }
+  .cost .fr.thin { stroke:var(--accent); }
+  .cost .dom.thin { stroke:var(--muted); }
+  .cost .unm { fill:var(--surface); stroke:var(--faint); stroke-dasharray:2 2; stroke-width:1.2; }
+  .dot-thin { background:var(--surface); box-shadow:inset 0 0 0 1.2px var(--accent); }
+  .dot-unm { background:var(--surface); box-shadow:inset 0 0 0 1.2px var(--faint); }
+  /* the cost badge rides the rank row's value side, never the name */
+  .valside { display:flex; align-items:center; gap:5px; }
+  .cbadge { font-size:11px; flex:none; }
+  .cbadge.none { color:var(--faint); }
   /* leaders: podium marks after the name — trophy, silver, bronze; the winner's row is lifted */
   .rank .row.lead { background:var(--surface-2); }
   .rank .row.lead .name { color:var(--ink); font-weight:600; }
@@ -670,7 +687,7 @@
     const header = `${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`;
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
-    let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip">${esc(t.model)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${quietSecsVal}s</span>` : ""}</div>`;
+    let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${esc(t.model)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${quietSecsVal}s</span>` : ""}</div>`;
     // What the leaf was actually asked, collapsed by default. Same section+chevron idiom
     // as every other toggle on the page, so the whole row is the target. Omitted entirely
     // for agentless compute/integrate nodes, which carry no prompt.
@@ -748,7 +765,13 @@
   // Rows carry a label, a value, one meta line and a 0–10 bar; a provisional cell
   // (n<5) draws its bar dashed and says so, a cell with no grades shows only its
   // outcomes. Numbers are the server's (scores.mjs), never recomputed here.
-  const rankRow = ({ key, href, label, val, sub, frac, prov, none, place }) => `<li class="row tap${place ? ` p${place}${place === 1 ? " lead" : ""}` : ""}" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${label}</span><span class="val${none ? " none" : ""}">${val}</span></div><div class="meta">${sub}</div><div class="bar${prov ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div></div></li>`;
+  // The cost badge — 💲 by band, — unmeasured — belongs where models are
+  // COMPARED: the perf rank lists and the model's dashboard. Never on leaf or
+  // run rows: a run is being read, not compared, and badges there are clutter
+  // (operator's correction, 2026-09-09). An unmeasured tier shows —, never a
+  // blank that would read as dominated; absence is not evidence.
+  const modelBadge = (c) => c && c.band != null ? `<span class="cbadge">${"💲".repeat(c.band)}</span>` : `<span class="cbadge none">—</span>`;
+  const rankRow = ({ key, href, label, val, sub, frac, prov, none, place, badge }) => `<li class="row tap${place ? ` p${place}${place === 1 ? " lead" : ""}` : ""}" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${label}</span><span class="valside">${badge === undefined ? "" : modelBadge(badge)}<span class="val${none ? " none" : ""}">${val}</span></span></div><div class="meta">${sub}</div><div class="bar${prov ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div></div></li>`;
   // podium: the first three rows wear the medals (rank and per-aspect lists; never a model's own page)
   const rankList = (rows, { podium = false } = {}) => `<ul class="rank">${rows.map((r, i) => rankRow(podium && i < 3 ? { ...r, place: i + 1 } : r)).join("")}</ul>`;
   const badOutcomes = (o) => Object.entries(o || {}).filter(([k, v]) => v > 0 && k !== "completed").map(([k, v]) => `${k} ${v}`).join(", ");
@@ -761,7 +784,7 @@
     if (bad) bits.push(`<span class="c-bad">${esc(bad)}</span>`);
     return bits.join(" · ");
   };
-  const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders"]);
+  const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders", "cost"]);
   async function buildPerf(kind, which) {
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
     const domain = ui.perfDomain;
@@ -782,8 +805,8 @@
     const domainSel = () => p.domains.length > 1 ? sel('data-domain-select', [["", "all domains"], ...p.domains.map((d) => [d, d])], domain || "") : "";
     let html = "";
     if (!model) {
-      // View switcher: the existing ranking view plus the three new ones.
-      html += `<div class="chips views">${chip("rank", "#/perf", !NEW_PERF_KINDS.has(kind))}${chip("coverage", "#/perf/coverage", kind === "coverage")}${chip("reliability", "#/perf/reliability", kind === "reliability")}${chip("leaders", "#/perf/leaders", kind === "leaders")}</div>`;
+      // View switcher: the existing ranking view plus the four new ones.
+      html += `<div class="chips views">${chip("rank", "#/perf", !NEW_PERF_KINDS.has(kind))}${chip("coverage", "#/perf/coverage", kind === "coverage")}${chip("reliability", "#/perf/reliability", kind === "reliability")}${chip("leaders", "#/perf/leaders", kind === "leaders")}${chip("cost", "#/perf/cost", kind === "cost")}</div>`;
     }
     if (NEW_PERF_KINDS.has(kind)) {
       if (p.domains.length > 1) html += `<div class="selrow">${domainSel()}</div>`;
@@ -794,7 +817,9 @@
       const h = { esc, enc, fmtScore, chip };
       html += kind === "coverage" ? window.perfViews.coverageGrid(p.views.coverage, h)
         : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
-        : window.perfViews.leadersList(p.views.leaders, h);
+        : kind === "leaders" ? window.perfViews.leadersList(p.views.leaders, h)
+        : window.perfViews.costPlots(p.views.cost, h);
+      if (kind === "cost") html += `<div class="foot">cost is a model's meter weight — the multiplier against the cheapest measured model, banked week over week. A hollow mark is thin evidence: under 200 measured requests. Bands are config (<code>provider.cloud.ollama.costBands</code>).</div>`;
       return { header, html };
     }
     {
@@ -805,6 +830,10 @@
       if (row) html += `<div class="selrow">${row}</div>`;
     }
     html += `<div style="height:12px"></div>`;
+    // The badge's source: the server's cost points, plus the spread for a model
+    // priced but graded nowhere (its cost is real; its quality is simply not compared).
+    const costOf = new Map(p.views.cost.points.map((x) => [x.model, x]));
+    for (const s of p.views.cost.spread) if (!costOf.has(s.model)) costOf.set(s.model, { multiplier: s.mult, band: s.band, onFrontier: false, dominatedBy: null, thin: s.thin });
     if (model) {
       // One model as a dashboard: tiles, compressed aspect bars, its coverage row, its reliability bar.
       await loadPerfJs();
@@ -812,6 +841,7 @@
       const cov = p.views.coverage;
       html += window.perfViews.modelDashboard({
         model, overall: p.overall[0] || null, rank: p.rank || null, domain, domainSelect: domainSel(),
+        cost: costOf.get(model) || null,
         aspects: p.report.map((a) => ({ aspect: a.aspect, universal: a.universal, cell: a.cells.find((x) => x.model === model) || null })),
         coverage: { aspects: cov.aspects, models: cov.models.filter((m) => m === model), cells: cov.cells.filter((c) => c.model === model) },
         reliability: p.views.reliability.filter((r) => r.model === model),
@@ -821,14 +851,14 @@
       const a = p.report.find((x) => x.aspect === aspect);
       if (!a || !a.cells.length) html += `<div class="empty">n=0 — nothing graded on ${esc(aspect)} yet. Absence is evidence.</div>`;
       else {
-        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional })), { podium: true });
+        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional, badge: costOf.get(c.model) ?? null })), { podium: true });
         if (a.prior != null) html += `<div class="foot">ranked on the weighted score: the raw mean shrunk toward the prior ${a.prior.toFixed(2)} (mean of per-model means; k=${p.priorWeight}) — a thin cell is pulled most.${a.universal ? "" : " Capability aspect: graded only where a leaf stressed it."}</div>`;
       }
     } else {
       if (!p.overall.length) html += `<div class="empty">no graded leaves under ${esc(p.path)} yet.</div>`;
       else {
         const short = (a) => a.slice(0, 5);
-        html += rankList(p.overall.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.combined), none: c.combined == null, sub: cellSub(c, p.universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), frac: (c.combined ?? 0) / 10, prov: c.provisional })), { podium: true });
+        html += rankList(p.overall.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.combined), none: c.combined == null, sub: cellSub(c, p.universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), frac: (c.combined ?? 0) / 10, prov: c.provisional, badge: costOf.get(c.model) ?? null })), { podium: true });
         html += `<div class="foot">overall = mean of the four universal weighted scores; capability aspects excluded — they are graded only where a leaf stressed them.</div>`;
       }
     }

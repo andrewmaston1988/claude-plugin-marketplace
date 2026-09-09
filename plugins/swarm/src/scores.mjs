@@ -9,6 +9,7 @@ import { join, dirname } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { UNIVERSAL, ASPECTS, OUTCOMES, GRADED_OUTCOMES } from "./aspects.mjs";
 import { isCloudModel, isClaudeModel } from "./models.mjs";
+import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
 
 export function scoresPath(env = process.env) {
   return join(swarmHome(env), "model-scores.jsonl");
@@ -271,4 +272,43 @@ export function shrink(mean, n, prior, k = PRIOR_WEIGHT) {
   if (mean == null) return null;
   if (prior == null) return mean;
   return Number(((n * mean + k * prior) / (n + k)).toFixed(2));
+}
+
+// The domination frontier — quality against cost WITHOUT collapsing the two
+// into one ratio. A model is dominated iff another participant is strictly
+// better (higher wtd) AND strictly cheaper (lower multiplier); everyone else
+// is on the frontier. A ratio fails both directions at once: it lets one cheap
+// graded leaf outrank a well-evidenced model, and it silently ranks an
+// expensive model low without naming the cheaper model that beat it.
+// A model with no multiplier — a Claude tier the history has never priced, or
+// a measured-but-thin one — is UNMEASURED: neither on the frontier nor
+// dominated, and it dominates nothing. Missing is not 0 (free) and not
+// Infinity (dear); absence is not evidence in either direction.
+export function frontier(rows, costs, { aspect, model, domain, bands = DEFAULT_COST_BANDS } = {}) {
+  const multOf = new Map((costs || []).map((c) => [c.model, c.mult]));
+  const cells = aspect
+    ? aggregate(rows, { aspect, model, domain }).aspects[0].cells
+    : overall(rows, { model, domain }).cells;
+  // The aggregate's own order is the return order: quality-ranked, never
+  // re-ranked by cost — the frontier marks rows, it does not reorder them.
+  const entries = cells.map((c) => ({
+    model: c.model,
+    wtd: aspect ? c.weighted : c.combined,
+    n: c.n,
+    multiplier: null,
+    band: null,
+    onFrontier: false,
+    dominatedBy: null,
+  }));
+  const participants = entries.filter((e) => e.wtd != null && multOf.get(e.model) != null);
+  for (const e of participants) e.multiplier = multOf.get(e.model);
+  for (const e of participants) {
+    // The first dominator in aggregate order is the highest-quality one, so a
+    // dominated row names the best model that beat it, not just any.
+    const dominator = participants.find((p) => p !== e && p.wtd > e.wtd && p.multiplier < e.multiplier);
+    if (dominator) e.dominatedBy = dominator.model;
+    else e.onFrontier = true;
+  }
+  for (const e of participants) e.band = band(e.multiplier, bands);
+  return entries;
 }
