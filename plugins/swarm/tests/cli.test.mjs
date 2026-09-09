@@ -646,6 +646,48 @@ test("quota: prints per-window utilization from the usage endpoint", async () =>
 
 // ── headroom (:cloud weekly-allowance preflight): ollama-usage, quota prefix, models, swarm.always ──
 
+// P0 — the incident: a failed live fetch must never render its cached reading
+// bare. The banner must precede the first percentage line (index order, not
+// presence — a banner underneath the numbers is what the old `usage unread for
+// 33h` line already was). The fetch is pointed at a loopback stub via
+// provider.cloud.ollama.settingsUrl; no test reaches ollama.com.
+test("ollama-usage: P0 an expired cookie prints /!\\ Cookie Expired above the figures", async () => {
+  const dir = tmp();
+  const server = createServer((req, res) => {
+    res.writeHead(303, { location: "https://ollama.com/signin" });
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({
+      provider: { cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } } },
+    }));
+    writeFileSync(join(home, "ollama-cookie.json"), "expired-cookie\n");
+    writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
+      sessionPctUsed: 3, sessionResetsAt: "2026-09-07T14:49:00Z",
+      weeklyPctUsed: 8.1, weeklyResetsAt: "2026-09-12T08:00:00Z",
+      fetchedAt: Date.now() - 33 * 3_600_000,
+    }));
+    const r = await runCliAsync(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home } });
+    const out = r.stdout;
+    const bannerAt = out.indexOf("/!\\ Cookie Expired");
+    const firstPctLine = out.split("\n").find((l) => l.includes("%"));
+    const firstPctAt = firstPctLine === undefined ? -1 : out.indexOf(firstPctLine);
+    ok(bannerAt !== -1, `no banner in output:\n${out}`);
+    ok(firstPctAt !== -1, `no figures in output:\n${out}`);
+    ok(bannerAt < firstPctAt, `banner must precede the first percentage line:\n${out}`);
+    ok(out.includes(join(home, "ollama-cookie.json")), `banner must name the swarm cookie path:\n${out}`);
+    ok(out.includes("--cookie"), `banner must carry the refresh command:\n${out}`);
+    ok(out.includes("ollama weekly: 8.1%"), `cached figures are still shown:\n${out}`);
+    equal(r.status, 0, r.stderr + out);
+  } finally {
+    server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("ollama-usage: C0 prints exactly two provider-named lines from a healthy cache, nothing else", () => {
   const dir = tmp();
   try {
