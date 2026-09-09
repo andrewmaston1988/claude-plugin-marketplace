@@ -84,7 +84,7 @@ $script:itemRestart.Text = 'Restart'
 # responsive; the poll shows the new daemon as it comes up.
 $script:itemRestart.add_Click({
   Start-Process -FilePath $script:NodeExe -WindowStyle Hidden `
-    -ArgumentList ('"{0}" scripts/swarm.mjs serve restart' -f $script:ShimPath)
+    -ArgumentList @($script:ShimPath, 'scripts/swarm.mjs', 'serve', 'restart')
 })
 $menu.Items.Add($script:itemRestart) | Out-Null
 
@@ -92,7 +92,7 @@ $script:itemStop = New-Object System.Windows.Forms.ToolStripMenuItem
 $script:itemStop.Text = 'Stop'
 $script:itemStop.add_Click({
   Start-Process -FilePath $script:NodeExe -WindowStyle Hidden `
-    -ArgumentList ('"{0}" scripts/swarm.mjs serve stop' -f $script:ShimPath)
+    -ArgumentList @($script:ShimPath, 'scripts/swarm.mjs', 'serve', 'stop')
 })
 $menu.Items.Add($script:itemStop) | Out-Null
 

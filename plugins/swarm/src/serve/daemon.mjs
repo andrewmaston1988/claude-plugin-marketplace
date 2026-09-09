@@ -281,3 +281,23 @@ export function restartPlan({ record, wasAlive, exited }) {
   if (!exited) return { act: "abort", clearRecord: false, reason: "the old daemon did not exit — it is still serving" };
   return { act: "start", clearRecord: true, reason: "stopped" };
 }
+
+// Close a listening server for a handover, and ALWAYS settle. Sockets are
+// destroyed after `cutMs` so a lingering keep-alive cannot hold close() open;
+// `hardMs` is the backstop for a close() callback that never fires at all —
+// without it prepare() hangs and the daemon neither serves nor upgrades.
+export function drainAndClose({
+  close, destroySockets = () => {}, cutMs = 3000, hardMs = 6000,
+  setTimeout: setT = setTimeout, clearTimeout: clearT = clearTimeout,
+}) {
+  return new Promise((resolve) => {
+    let done = false;
+    // Declared before `settle` reads them: an injected timer that fires
+    // synchronously would otherwise hit the temporal dead zone.
+    let cut, hard;
+    const settle = (via) => { if (done) return; done = true; clearT(cut); clearT(hard); resolve({ via }); };
+    cut = setT(() => destroySockets(), cutMs);
+    hard = setT(() => settle("timeout"), hardMs);
+    close(() => settle("close"));
+  });
+}

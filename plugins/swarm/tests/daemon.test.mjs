@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import {
   writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, launcherPath,
   pidPath, resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, ensureShim,
-  waitForExit, restartPlan,
+  waitForExit, restartPlan, drainAndClose,
 } from "../src/serve/daemon.mjs";
 import { createLogger } from "../src/serve/log.mjs";
 
@@ -315,4 +315,53 @@ test("waitForExit: a process that never dies reports not-exited rather than hang
   });
   assert.equal(r.exited, false);
   assert.match(r.reason, /still alive/);
+});
+
+// --- handover drain: prepare() must always settle (code review, 2026-09-09) ---
+// The defect: the 3s cut destroyed sockets but never resolved the promise, so a
+// close() callback that never fired left the daemon neither serving nor upgrading.
+
+test("drainAndClose: settles via close() in the normal case", async () => {
+  const r = await drainAndClose({ close: (cb) => cb(), setTimeout: () => 0, clearTimeout: () => {} });
+  assert.equal(r.via, "close");
+});
+
+test("drainAndClose: destroys sockets at the cut, then still settles via close", async () => {
+  let destroyed = false;
+  const timers = [];
+  const r = await drainAndClose({
+    close: (cb) => setTimeout(cb, 0),
+    destroySockets: () => { destroyed = true; },
+    setTimeout: (fn, ms) => { if (ms === 3000) fn(); return timers.push(fn); },
+    clearTimeout: () => {},
+  });
+  assert.equal(destroyed, true);
+  assert.equal(r.via, "close");
+});
+
+test("drainAndClose: a close() that never calls back still settles on the hard backstop", async () => {
+  const r = await drainAndClose({
+    close: () => {},                       // never fires — the defect's input
+    setTimeout: (fn, ms) => { if (ms === 6000) fn(); return 0; },
+    clearTimeout: () => {},
+  });
+  assert.equal(r.via, "timeout");          // RED before the fix: this never resolves at all
+});
+
+// --- tray verbs: paths go in an argument ARRAY, never an interpolated string ---
+// The defect (code review, 2026-09-09): Restart and Stop built one -ArgumentList
+// string with the shim path formatted into it, so PowerShell handed the resolver
+// a malformed first argument and both verbs failed silently. The plan's own
+// Files Changed note says paths are named parameters, never interpolated.
+test("tray.ps1: every Start-Process -ArgumentList is an array, not a formatted string", () => {
+  const ps = readFileSync(fileURLToPath(new URL("../src/serve/tray.ps1", import.meta.url)), "utf8");
+  const args = [...ps.matchAll(/-ArgumentList\s+(.+)/g)].map((m) => m[1].trim());
+  assert.ok(args.length >= 2, `expected the Restart and Stop handlers, found ${args.length}`);
+  for (const a of args) {
+    // Named false positive: this matches the `-f` FORMAT OPERATOR specifically,
+    // not a `-File`/`-Force` style parameter, so an argument array whose members
+    // merely start with `-f` does not trip it.
+    assert.ok(!/\s-f\s/.test(a), `-ArgumentList must not format a path into a string: ${a}`);
+    assert.ok(a.startsWith("@(") || a.includes(","), `-ArgumentList must pass an array: ${a}`);
+  }
 });

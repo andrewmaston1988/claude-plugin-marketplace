@@ -609,7 +609,7 @@ async function cmdPerf(rest) {
 // copy and records its pid (written by the parent, per the plugin daemon rule).
 async function cmdServe(rest) {
   const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir, pidPath,
-    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort, waitForExit, restartPlan } = await import("../src/serve/daemon.mjs");
+    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort, waitForExit, restartPlan, drainAndClose } = await import("../src/serve/daemon.mjs");
   const home = swarmHome();
   const cfg = getConfig();
   const port = cfg.dashboard?.port ?? 7331;
@@ -809,9 +809,9 @@ async function cmdServe(rest) {
   const prepare = async () => {
     for (const res of sse) { try { res.end(); } catch {} }
     sse.clear();
-    await new Promise((resolve) => {
-      const cut = setTimeout(() => { for (const s of sockets) { try { s.destroy(); } catch {} } }, 3000);
-      server.close(() => { clearTimeout(cut); resolve(); });
+    await drainAndClose({
+      close: (cb) => server.close(cb),
+      destroySockets: () => { for (const s of sockets) { try { s.destroy(); } catch {} } },
     });
   };
   const retake = async () => {
