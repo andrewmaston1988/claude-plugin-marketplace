@@ -7,6 +7,8 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { swarmHome } from "./config.mjs";
+import { parseHtml } from "./minidom.mjs";
+import { appendSnapshot, usageHistoryPath } from "./cost.mjs";
 
 export const SETTINGS_URL = "https://ollama.com/settings"; // like quota.mjs's DEFAULT_USAGE_URL
 
@@ -63,10 +65,44 @@ function findNextDataTime(html, fromIndex) {
   return html.slice(valueStart, valueEnd);
 }
 
-// Pure over the fetched HTML. Two indexOf walks over bounded slices — no DOM,
-// no character-window heuristics (the upstream regex-over-text version broke
-// twice on layout growth doing exactly that). Any anchor missing => the whole
-// reading is unknown, never partial: a wrong meter reading is worse than none.
+// width: N% from a style attribute — the ONLY source of meterSharePct. A
+// segment without a presentational width carries no share information.
+function widthPct(style) {
+  const m = /(?:^|;)\s*width:\s*([\d.]+)%/.exec(style || "");
+  return m ? Number(m[1]) : null;
+}
+
+// The per-model segments of one usage bar, scoped to that bar's subtree — a
+// flat document-wide scan cannot tell which bar a segment belongs to once the
+// page nests them. Malformed segments (missing model, requests or width) are
+// dropped from the list.
+function barSegments(bar) {
+  return bar.querySelectorAll('[data-usage-segment]')
+    .map((el) => {
+      const req = el.getAttribute("data-requests");
+      return {
+        model: el.getAttribute("data-model"),
+        requests: req != null && req !== "" ? Number(req) : null,
+        meterSharePct: widthPct(el.getAttribute("style")),
+      };
+    })
+    .filter((s) => typeof s.model === "string" && s.model && Number.isFinite(s.requests) && s.meterSharePct != null);
+}
+
+// meterSharePct comes from presentational `style="width: N%"` attributes. The
+// page emits them summing to 100 per bar (± rounding); any other total means
+// the layout changed shape and the widths are not shares of anything — the
+// bar's segment list is rejected as unmeasured, never scaled to fit.
+export function segmentsSumTo100(models, tol = 0.5) {
+  if (!models?.length) return false;
+  const sum = models.reduce((acc, m) => acc + (m.meterSharePct ?? 0), 0);
+  return Math.abs(sum - 100) <= tol;
+}
+
+// Pure over the fetched HTML. The two bar reads are indexOf walks over bounded
+// slices (findLabelPct/findNextDataTime); only the per-model segment lists need
+// the element tree. Any anchor missing => the whole reading is unknown, never
+// partial: a wrong meter reading is worse than none.
 export function parseUsage(html) {
   const text = String(html || "");
   const session = findLabelPct(text, "Session usage");
@@ -77,11 +113,23 @@ export function parseUsage(html) {
   const weeklyResetsAt = findNextDataTime(text, weekly.labelEnd);
   if (!sessionResetsAt || !weeklyResetsAt) return { state: "unknown" };
 
+  const doc = parseHtml(text);
+  const bars = doc.querySelectorAll("[aria-label]");
+  const segmentsOf = (label) => {
+    const bar = bars.find((el) => (el.getAttribute("aria-label") || "").startsWith(label + " "));
+    if (!bar) return [];
+    const segs = barSegments(bar);
+    // a bar whose widths don't total 100 is a layout variant, not a measurement
+    return segmentsSumTo100(segs) ? segs : [];
+  };
+
   return {
     sessionPctUsed: session.pctUsed,
     sessionResetsAt,
     weeklyPctUsed: weekly.pctUsed,
     weeklyResetsAt,
+    sessionModels: segmentsOf("Session usage"),
+    weeklyModels: segmentsOf("Weekly usage"),
   };
 }
 
@@ -129,7 +177,10 @@ export async function fetchUsage({ cookie, cachePath, url = SETTINGS_URL, _fetch
   const reading = { ...parsed, fetchedAt: _now() };
   if (cachePath) {
     mkdirSync(dirname(cachePath), { recursive: true });
-    writeFileSync(cachePath, JSON.stringify(reading));
+    // The cache stays headroom-shaped: per-model segments are stripped, so the
+    // provenance path is byte-identical to before the fields existed.
+    const { sessionModels, weeklyModels, ...headroom } = reading;
+    writeFileSync(cachePath, JSON.stringify(headroom));
   }
   return { ok: true, ...reading };
 }
@@ -222,6 +273,20 @@ async function computeUsage(cfg, { env, _fetch, _now, gate }) {
   // through the same readUsage a cached reading goes through, so a fresh 100%
   // and a cached 100% can never disagree about being exhausted.
   if (fetched.ok) {
+    // Bank the week's snapshot for `swarm cost`. Deliberately from the fetch's
+    // RETURN (which carries the segments) — the cache on disk strips them.
+    // Best-effort: a failed history write must not fail a dispatch that has a
+    // perfectly good headroom reading.
+    try {
+      if (fetched.weeklyModels?.length) {
+        appendSnapshot({
+          fetchedAt: fetched.fetchedAt,
+          weeklyPctUsed: fetched.weeklyPctUsed,
+          weeklyResetsAt: fetched.weeklyResetsAt,
+          weeklyModels: fetched.weeklyModels,
+        }, usageHistoryPath(env));
+      }
+    } catch { /* headroom still valid */ }
     let text;
     try {
       text = readFileSync(cachePath, "utf8");
