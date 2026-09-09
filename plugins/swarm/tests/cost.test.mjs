@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   usageHistoryPath, appendSnapshot, readSnapshots, splitWeeks, costPerModel, multipliers, band,
+  resolveBands, DEFAULT_COST_BANDS,
 } from "../src/cost.mjs";
 
 function tmp() {
@@ -197,6 +198,22 @@ test("band: <2 → 1, 2..5 → 2, >5 → 3; unmeasured → null", () => {
   equal(band(1.5, [1, 3]), 2);
   equal(band(3, [1, 3]), 2);
   equal(band(3.5, [1, 3]), 3);
+});
+
+test("resolveBands: two positive finite numbers pass through; anything else falls back", () => {
+  deepEqual(resolveBands([3, 6]), [3, 6]);
+  deepEqual(resolveBands([0.5, 1.5]), [0.5, 1.5]);
+  deepEqual(resolveBands(undefined), DEFAULT_COST_BANDS);
+  deepEqual(resolveBands(null), DEFAULT_COST_BANDS);
+  deepEqual(resolveBands([]), DEFAULT_COST_BANDS);
+  deepEqual(resolveBands([2]), DEFAULT_COST_BANDS, "one edge is not a pair");
+  deepEqual(resolveBands([2, 5, 9]), DEFAULT_COST_BANDS);
+  deepEqual(resolveBands([5, 2]), [5, 2], "order is the caller's; a higher first edge is not auto-fixed");
+  deepEqual(resolveBands(["2", 5]), DEFAULT_COST_BANDS, "a string edge invents nothing");
+  deepEqual(resolveBands([0, 5]), DEFAULT_COST_BANDS, "0 is not a usable edge");
+  deepEqual(resolveBands([-1, 5]), DEFAULT_COST_BANDS);
+  deepEqual(resolveBands([2, Infinity]), DEFAULT_COST_BANDS);
+  deepEqual(resolveBands([2, 5], [1, 3]), [2, 5], "the fallback is the caller's, over the default");
 });
 
 test("derivation is pure: inputs untouched, equal output on repeat", () => {

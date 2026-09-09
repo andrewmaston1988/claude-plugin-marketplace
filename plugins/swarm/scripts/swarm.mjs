@@ -113,6 +113,13 @@ async function cloudCostRows() {
     .map((r) => ({ ...r, model: deriveCloudName(r.model) }));
 }
 
+// Band edges are config (`provider.cloud.ollama.costBands`), shared with the
+// dashboard's server — one source, never two.
+async function costBands() {
+  const { resolveBands } = await import("../src/cost.mjs");
+  return resolveBands(getConfig()?.provider?.cloud?.ollama?.costBands);
+}
+
 async function cmdModels(rest = []) {
   const cfg = getConfig();
   // Catalogue stays the catalogue (discovery.mjs is pure) — the meter is
@@ -141,7 +148,7 @@ async function cmdModels(rest = []) {
   const { readRows, scoresPath, frontier } = await import("../src/scores.mjs");
   const costRows = await cloudCostRows();
   const multOf = new Map(costRows.map((r) => [r.model, r.mult]));
-  const onFrontier = new Set(frontier(readRows(scoresPath()), costRows.map((r) => ({ model: r.model, mult: r.mult })), {})
+  const onFrontier = new Set(frontier(readRows(scoresPath()), costRows.map((r) => ({ model: r.model, mult: r.mult })), { bands: await costBands() })
     .filter((e) => e.onFrontier).map((e) => e.model));
   for (const m of [...shown, ...CLAUDE_ALIASES.filter((a) => !isDenylisted(a.model))]) {
     const mark = showAll && m.supersededBy && !visible.has(m.model) ? ` [superseded by ${m.supersededBy}]` : "";
@@ -582,6 +589,7 @@ async function cmdPerf(rest) {
   const rows = readRows(path);
   const report = aggregate(rows, { aspect, model, domain });
   const costs = await cloudCostRows();
+  const bands = await costBands();
   // A model is dominated only when another is strictly better AND strictly
   // cheaper; `*` marks the frontier. Unmeasured cost renders "—": blank would
   // read as dominated when the truth is unknown.
@@ -603,7 +611,7 @@ async function cmdPerf(rest) {
     // One table: models ranked on the mean of the four universal weighted
     // scores; per-aspect columns beside it so the average cannot hide a hole.
     const o = overall(rows, { model, domain });
-    const byModel = new Map(frontier(rows, costs, { model, domain }).map((e) => [e.model, e]));
+    const byModel = new Map(frontier(rows, costs, { model, domain, bands }).map((e) => [e.model, e]));
     const w = Math.max(5, ...o.cells.map((c) => c.model.length));
     out(`    ${"model".padEnd(w)}    n  overall  ${o.universals.map((a) => a.slice(0, 5).padStart(5)).join("  ")}  cost  frontier`);
     for (const c of o.cells) {
@@ -626,7 +634,7 @@ async function cmdPerf(rest) {
       out(dim("    n=0 — no rows"));
       continue;
     }
-    const byModel = new Map(frontier(rows, costs, { aspect: a.aspect, model, domain }).map((e) => [e.model, e]));
+    const byModel = new Map(frontier(rows, costs, { aspect: a.aspect, model, domain, bands }).map((e) => [e.model, e]));
     const w = Math.max(...a.cells.map((c) => c.model.length));
     for (const c of a.cells) {
       const mean = c.mean == null ? "—" : c.mean.toFixed(2);
