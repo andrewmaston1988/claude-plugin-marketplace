@@ -4,7 +4,7 @@
 import { join, resolve, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
-import { loadManifest, effectivePlanDoc, matchDenylist, ValidationError } from "../src/manifest.mjs";
+import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
 import { discoverModels, writeModelsCache, visibleModels, probeTopModels, deriveCloudName } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
@@ -163,6 +163,69 @@ async function cmdModels(rest = []) {
   return 0;
 }
 
+// Distinct seated models in manifest order, each with its leaf ids — the walk
+// leafCounts uses (agentless skipped, childPlan descended), ids instead of
+// counts. A forEach lane names its template id: the per-item instances do not
+// exist yet at validate time.
+function seatedModels(plan) {
+  const byModel = new Map();
+  const add = (model, leaf) => {
+    if (!model) return;
+    if (!byModel.has(model)) byModel.set(model, []);
+    byModel.get(model).push(leaf);
+  };
+  for (const t of plan.tasks) {
+    if (isAgentless(t)) continue;
+    if (t.childPlan) {
+      for (const c of t.childPlan.tasks) {
+        if (isAgentless(c)) continue;
+        add(c.model, c.id);
+      }
+      continue;
+    }
+    add(t.model, t.id);
+  }
+  if (plan.digest?.model) add(plan.digest.model, "__digest");
+  return [...byModel].map(([model, leaves]) => ({ model, leaves }));
+}
+
+// The launchable roster `swarm models` prints, from the cache it wrote —
+// never a fresh probe: validate must not gain a network call. No cache yet
+// means the aliases alone, which are always launchable.
+async function launchableRoster(cfg) {
+  const isDenylisted = (name) => !!matchDenylist(name, cfg);
+  let cached = [];
+  try {
+    const { readFileSync } = await import("node:fs");
+    const cache = JSON.parse(readFileSync(join(swarmHome(), "models-cache.json"), "utf8"));
+    cached = cache?.models || [];
+  } catch { /* no cache yet — the aliases are still launchable */ }
+  const visible = new Set(visibleModels(cached, { isDenylisted }).map((m) => m.model));
+  const offered = cached.filter((m) => !isDenylisted(m.model));
+  return [...offered.filter((m) => visible.has(m.model)), ...CLAUDE_ALIASES.filter((a) => !isDenylisted(a.model))];
+}
+
+// The seats block: the graded record for the manifest's seats, printed so the
+// seating decision is made in front of the evidence. Silent when grading is
+// off or the store is empty (a user who has never graded meets nothing), and
+// the store read is skipped entirely in both cases, not just the print.
+async function seatBlock(plan, cfg) {
+  if (cfg.grading?.enabled !== true) return [];
+  const models = seatedModels(plan);
+  if (!models.length) return [];
+  const { readRows, scoresPath } = await import("../src/scores.mjs");
+  const rows = readRows(scoresPath());
+  if (!rows.length) return [];
+  const { seatReport } = await import("../src/seats.mjs");
+  return seatReport({
+    models,
+    rows,
+    costRows: await cloudCostRows(),
+    roster: await launchableRoster(cfg),
+    bands: await costBands(),
+  });
+}
+
 async function cmdValidate(rest) {
   const cfg = getConfig();
   const args = parseArgsFlag(rest);
@@ -201,6 +264,7 @@ async function cmdValidate(rest) {
   }
   // The consent line: worst-case leaves × historical per-model medians.
   out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));
+  for (const line of await seatBlock(plan, cfg)) out(line);
   out(`resultsDir: ${plan.resultsDir}`);
   // The gate-preview contract for named/parameterized runs: print the fully
   // resolved document (args substituted, children expanded) LAST, so the whole

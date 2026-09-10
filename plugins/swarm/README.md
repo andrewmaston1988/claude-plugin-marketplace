@@ -342,6 +342,8 @@ Each row also snapshots the mechanical columns from the leaf's result (`ok`, `du
 
 **Reading `perf`.** Retrievable aggregated scores, per aspect × model. Every cell shows its sample count `n`, the raw `mean`, and a `wtd` score that cells rank on — the mean weighted for how much evidence stands behind it, so a single lucky leaf cannot head the table. `n < 5` is marked provisional, and an aspect with no rows prints at `n=0` rather than being omitted: absence is evidence.
 
+**`swarm validate` prints the record the seating is decided on.** With grading on, validate appends a `seats:` block between the estimate and the results dir: per seated model its leaf ids, `overall`/`impl`/`code` scores with their `n`, the cost band, and the frontier verdict; then one line for the launchable models it did not seat. A model with no graded row is `never graded` and an unknown cost is `cost unmeasured` — in words, never a number, because absence is not zero. The block states the record and never judges it: the seating rule deliberately gives an under-canon model the seat, so a warning would fire on correct seats and be ignored on real ones — `n<20` is the rule's own term and reads as the argument for the seat. Grading off, nothing seated, or an empty store, and the block does not print at all.
+
 ## Cost — the meter weight beside the score
 
 `swarm cost` reads a second store: `~/.swarm/usage-history.jsonl`, one JSON line per **live** usage fetch that carried measurable weekly segments (a cached reading banks nothing, so no duplicate snapshots). Each line holds the week's meter percentage and, per `:cloud` model, its cumulative `requests` and its share of the week's meter.
