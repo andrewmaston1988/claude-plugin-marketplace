@@ -461,7 +461,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   // run-start line lets `status` derive pending tasks (ids never seen since
   // the latest run-start are pending) and carries models for the roster view.
   // pid: lets a reader tell a killed engine (no summary, pid gone) from a live one.
-  appendRunLog(plan.resultsDir, { ts: started, event: "run-start", pid: process.pid, tasks: tasks.map((t) => ({ id: t.id, model: t.model })) });
+  // launcher: the dispatching session's CLAUDE_CODE_SESSION_ID — absent when the
+  // engine runs outside a session, so the run belongs to nobody rather than to
+  // whoever asks about it next. A resume appends a fresh run-start, re-stamping.
+  appendRunLog(plan.resultsDir, { ts: started, event: "run-start", pid: process.pid, ...(process.env.CLAUDE_CODE_SESSION_ID ? { launcher: process.env.CLAUDE_CODE_SESSION_ID } : {}), tasks: tasks.map((t) => ({ id: t.id, model: t.model })) });
   const runStartMs = io.now();
   const state = new Map(tasks.map((t) => [t.id, "pending"]));
   const durations = new Map();

@@ -306,6 +306,8 @@ A provider that cannot take work now also gets one line beside the standing-mode
 
 Which model to use for what is otherwise decided by remembered incidents. `grade` records what a run's `:cloud` leaves actually did; `perf` reads it back. Opt-in: `"grading": { "enabled": true }` in `~/.swarm/config.json` makes every run's closing block ask for grades; off (the default) nothing asks, `grade`/`perf` still answer by hand, and the dashboard greys its Performance page.
 
+When enabled, the nudge appears in three places: the engine's closing block on stdout, the footer of `digest.md`, and the session Stop hook listing any ungraded runs this session dispatched. The digest and Stop-hook backstops matter because every dispatch is backgrounded and the skill forbids reading raw stdout, so a session that only reads `digest.md` still sees it.
+
 The agent that authored the manifest grades it — it is the only party that knows what each leaf was *asked* for, which the digest does not hold. Claude tiers produce no rows: their capability is not what is in question.
 
 ```bash

@@ -137,6 +137,35 @@ export function readRows(path = scoresPath()) {
   return rows;
 }
 
+// The one key both sides of a graded-ness comparison go through: a store row's
+// resultsDir and a runs-tree walk path. Measured in the real store, 349 of 355
+// rows use forward slashes while a readdirSync+path.join walk on Windows yields
+// backslashes — raw-string membership marks nearly every graded run ungraded,
+// silently and permanently. Separators fold to "/", case folds (Windows paths
+// are case-insensitive), a trailing separator is stripped.
+// Returns null for what cannot identify a run — not a string, empty, or "."
+// (a real row in the store): such a key is skipped, never guessed at.
+export function canonicalRunKey(p) {
+  if (typeof p !== "string") return null;
+  const t = p.trim();
+  if (!t || t === ".") return null;
+  return t.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+}
+
+// Canonical keys of every resultsDir the store holds ANY row for. A dir is
+// graded whatever the outcome — a failed leaf's no-grades row is the correct
+// output for a dead leaf — and however many times it was re-graded (re-grading
+// appends a superseding row; any of them names the dir). Rows whose resultsDir
+// will not canonicalise contribute nothing.
+export function gradedRunKeys(rows) {
+  const keys = new Set();
+  for (const row of rows || []) {
+    const key = canonicalRunKey(row?.resultsDir);
+    if (key != null) keys.add(key);
+  }
+  return keys;
+}
+
 // Validate the WHOLE batch first and reject it entirely on any failure: the
 // store is append-only, so a bad row is permanent.
 export function appendRows(rows, path = scoresPath()) {

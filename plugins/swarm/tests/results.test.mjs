@@ -7,6 +7,7 @@ import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeDigestMd, appendRunLog, formatTokens, renderRoster, renderStatus, formatClosing,
   heartbeatPath, stopPath, touchHeartbeat, readHeartbeat,
+  gradeFooter,
 } from "../src/results.mjs";
 
 function tmp() {
@@ -546,4 +547,52 @@ test("formatClosing prints the prune hint once worktrees are kept and resultsDir
   // no worktrees kept — no hint even with resultsDir/engine present
   const nothingKept = formatClosing({ summaryPath: "S/summary.json", resultsDir: "R", engine: "E/swarm.mjs" });
   ok(!nothingKept.includes("prune when done"), nothingKept);
+});
+
+// Row 8: the grading nudge must reach both the closing block and digest.md from
+// one source. We mutate gradeFooter's inputs and assert both emitters change.
+// A same-string assertion passes when an emitter inlines an identical copy,
+// which is exactly the duplication this row exists to prevent.
+test("row 8: gradeFooter is the single source for both the closing block and digest.md", () => {
+  const dir = tmp();
+  try {
+    initResultsDir(dir);
+    const gradeable = { count: 3, resultsDir: dir, cli: "CUSTOM_CLI_MARKER" };
+    const expected = gradeFooter(gradeable);
+
+    const closing = formatClosing({ summaryPath: "S/summary.json", gradeable });
+    ok(closing.includes(expected), "formatClosing must include gradeFooter output");
+
+    const digestPath = writeDigestMd(dir, "# digest", gradeable);
+    const digest = readFileSync(digestPath, "utf8");
+    ok(digest.includes(expected), "digest.md must include gradeFooter output");
+
+    // Mutation: change the inputs and both emitters must reflect it.
+    const gradeable2 = { count: 1, resultsDir: `${dir}-other`, cli: "OTHER_CLI_MARKER" };
+    const expected2 = gradeFooter(gradeable2);
+    const closing2 = formatClosing({ summaryPath: "S/summary.json", gradeable: gradeable2 });
+    ok(closing2.includes(expected2), "formatClosing must reflect changed gradeFooter output");
+    const digestPath2 = writeDigestMd(dir, "# digest2", gradeable2);
+    const digest2 = readFileSync(digestPath2, "utf8");
+    ok(digest2.includes(expected2), "digest.md must reflect changed gradeFooter output");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Row 7 footer half: when grading is off the gradeable object is absent, so the
+// footer must stay out of both surfaces.
+test("row 7 footer half: grading off keeps footer out of closing block and digest.md", () => {
+  const dir = tmp();
+  try {
+    initResultsDir(dir);
+    const closing = formatClosing({ summaryPath: "S/summary.json" });
+    ok(!closing.includes("awaiting grading"), "closing block must not mention grading when gradeable is absent");
+
+    const digestPath = writeDigestMd(dir, "# digest");
+    const digest = readFileSync(digestPath, "utf8");
+    ok(!digest.includes("awaiting grading"), "digest.md must not mention grading when gradeable is absent");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
