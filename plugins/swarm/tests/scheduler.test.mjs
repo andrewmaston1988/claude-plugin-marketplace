@@ -73,6 +73,70 @@ test("fan-out: all tasks run, results + summary + run.log written", async () => 
   }
 });
 
+// ── launcher stamp ─────────────────────────────────────────────────────────────
+// The dispatching session's CLAUDE_CODE_SESSION_ID rides the run-start line so
+// the statusline's session filter and the Stop-hook grading nudge can attribute
+// runs. Env must be held for the whole awaited runPlan — restoring it before the
+// async body reaches the append would race the stamp.
+async function withSessionEnv(id, fn) {
+  const had = process.env.CLAUDE_CODE_SESSION_ID;
+  if (id === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+  else process.env.CLAUDE_CODE_SESSION_ID = id;
+  try {
+    return await fn();
+  } finally {
+    if (had === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = had;
+  }
+}
+
+function firstLogLine(resultsDir) {
+  return JSON.parse(readFileSync(join(resultsDir, "run.log"), "utf8").split("\n")[0]);
+}
+
+test("run-start carries the dispatching session id as launcher", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [task("a")]);
+    await withSessionEnv("abc", () => runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({ output: "x" })))));
+    const first = firstLogLine(p.resultsDir);
+    equal(first.event, "run-start");
+    equal(first.launcher, "abc");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("no CLAUDE_CODE_SESSION_ID -> no launcher: the run belongs to nobody", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [task("a")]);
+    await withSessionEnv(undefined, () => runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({ output: "x" })))));
+    const first = firstLogLine(p.resultsDir);
+    equal(first.event, "run-start");
+    ok(!("launcher" in first), `launcher must be absent, got ${JSON.stringify(first.launcher)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a resume re-stamps: the last run-start carries the resumer's session id", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [task("a")]);
+    const io = makeIo(fakeSpawnFactory(() => ({ output: "x" })));
+    await withSessionEnv("abc", () => runPlan(p, CFG, io));
+    await withSessionEnv("xyz", () => runPlan(p, CFG, io)); // same resultsDir — a resume
+    const starts = readFileSync(join(p.resultsDir, "run.log"), "utf8")
+      .trim().split("\n").map((l) => JSON.parse(l)).filter((e) => e.event === "run-start");
+    equal(starts.length, 2);
+    equal(starts[0].launcher, "abc");
+    equal(starts.at(-1).launcher, "xyz");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("chain order: a runs before b, b before c", async () => {
   const dir = tmp();
   try {
