@@ -45,6 +45,13 @@ export function readSnapshots(path) {
 
 export const THIN_REQUESTS = 200;
 export const DEFAULT_COST_BANDS = [2, 5];
+// How far below the best frontier quality a model may sit and still be the
+// "best value" pick. Arbitrary like the bands, and config for the same reason.
+// This is a THRESHOLD, not a ratio: scores.mjs refuses to collapse quality and
+// cost into one number, and a margin does not — a candidate must be undominated
+// AND near the top AND not thin, so a cheap fluke clears none of the bars the
+// ratio objection names.
+export const DEFAULT_VALUE_MARGIN = 0.5;
 
 // Split snapshots into weeks. Within a week a model's cumulative `requests`
 // only ever RISES, so a count falling between two consecutive snapshots proves
@@ -151,6 +158,10 @@ export function band(mult, bands = DEFAULT_COST_BANDS) {
 // The band boundaries are arbitrary numbers, so they are config
 // (`provider.cloud.ollama.costBands`), not constants. Anything malformed falls
 // back to the default rather than inventing an edge out of a string.
+export function resolveValueMargin(value, fallback = DEFAULT_VALUE_MARGIN) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
 export function resolveBands(value, fallback = DEFAULT_COST_BANDS) {
   return Array.isArray(value) && value.length === 2
     && value.every((n) => typeof n === "number" && Number.isFinite(n) && n > 0)

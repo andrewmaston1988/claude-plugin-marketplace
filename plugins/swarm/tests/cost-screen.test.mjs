@@ -107,3 +107,14 @@ test("a pick with no multiplier renders an em dash, never 0×", () => {
   assert.ok(!html.includes("0×"), "an unmeasured pick must never render as 0× — that reads as free");
   assert.ok(html.includes("—"), "it renders an em dash instead");
 });
+
+test("row 8: the best-value card names the margin it used", () => {
+  const { costScreen } = loadPerfViews();
+  const html = costScreen({
+    points: [point("a", 8.7, 1, { onFrontier: true })],
+    spread: [srow("a", 1)],
+    bands: [2, 5], valueMargin: 0.5,
+    best: point("a", 8.7, 1, { onFrontier: true }), worst: null,
+  }, H);
+  assert.ok(html.includes("within 0.5 of the best"), "a threshold the reader cannot see is one they must trust");
+});

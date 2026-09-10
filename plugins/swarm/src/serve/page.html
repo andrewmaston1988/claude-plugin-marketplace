@@ -123,6 +123,7 @@
      The indicator moves by transform, never by animating x/width (D9). */
   .seg { padding:12px 16px 0; }
   .seg svg { width:100%; height:auto; display:block; }
+  .seg .seg-rail { fill:var(--surface-2); stroke:var(--rule); stroke-width:1; }
   .seg .seg-ind { fill:var(--accent-soft); stroke:var(--accent); stroke-width:1; transition:transform .2s cubic-bezier(.4,0,.2,1); }
   /* aspect + domain pickers: the lists are too long for pills on a phone */
   .selrow { display:flex; gap:8px; padding:8px 16px 0; }
@@ -154,8 +155,13 @@
      a hatched bar is thin evidence, an unmeasured row draws no bar at all and
      sits below a divider, never a 0-width bar that would read as free. */
   .cost { padding:0 12px 16px; }
-  .costcards span { white-space:normal; }
-  .costcards small { font-size:11px; color:var(--muted); }
+  /* the two verdict cards: ringed for a card look, headers matching .section's
+     accent so the screen reads as one system rather than three label styles */
+  .kv.costcards { border-bottom:none; gap:10px; }
+  .costcards > div { border:1px solid var(--rule); border-radius:10px; padding:10px 12px; background:var(--surface); gap:4px; }
+  .costcards label { font-size:11px; letter-spacing:.16em; color:var(--accent); }
+  .costcards span { white-space:normal; font-size:15px; }
+  .costcards small { font-size:11px; color:var(--muted); line-height:1.35; }
   .arow.costrow { grid-template-columns:96px 1fr 64px; row-gap:0; }
   .arow.costrow .costverdict { grid-column:1 / -1; font-size:10px; color:var(--faint); margin:-2px 0 4px; }
   .arow.costrow.unmfirst { border-top:1px solid var(--rule); padding-top:6px; }
@@ -793,43 +799,51 @@
     { label: "cost", href: "#/perf/cost", kind: "cost" },
   ];
   // Pinned so the rendered size is checkable at design time rather than a shrug:
-  // the five labels above give a 334.8-unit viewBox. The SVG scales to .seg's
-  // content box, not the viewport, and .seg carries 16px side padding — so at a
-  // 390px screen the labels render ~11.8px, not the 12.8px the raw viewport
-  // ratio suggests. CH is set near the font's advance on purpose —
-  // overshooting only makes a pill roomier, while undershooting collides a label
-  // with its neighbour across a 6-unit gap.
-  const SEG = { FS: 11, CH: 6.2, PAD: 10, GAP: 6, H: 26 };
+  // the five labels give a 340.8-unit viewBox. The SVG scales to .seg's content
+  // box, not the viewport, and .seg carries 16px side padding — so at a 390px
+  // screen the labels render ~11.6px, not the 12.6px the raw viewport ratio
+  // suggests. CH is set near the font's advance on purpose — overshooting only
+  // makes a pill roomier, while undershooting collides a label with its
+  // neighbour across a 6-unit gap.
+  // INSET is the rail's own padding: the track is the full viewBox and the pills
+  // sit inside it, so the indicator never touches the rail's edge.
+  const SEG = { FS: 11, CH: 6.2, PAD: 10, GAP: 6, H: 26, INSET: 3 };
   // The switcher lives here, not in perf.js: perf.js is loaded by loadPerfJs()
   // on the four new views and the model page only, while this renders above them
   // on every perf route including rank and aspect. Keeping it in the always-loaded
   // layer means there is no branch left to forget.
   function segSwitcher(views, activeIndex) {
-    let x = 0;
+    const ph = SEG.H - SEG.INSET * 2; // pill height, inside the rail
+    let x = SEG.INSET;
     const pills = views.map((v) => {
       const w = v.label.length * SEG.CH + SEG.PAD * 2;
       const box = { label: v.label, href: v.href, x, w };
       x += w + SEG.GAP;
       return box;
     });
-    const W = Math.max(0, x - SEG.GAP);
+    const W = Math.max(0, x - SEG.GAP + SEG.INSET);
     const act = pills[activeIndex];
     const n = (v) => Number(v.toFixed(1));
+    // The rail: the track the pills sit in, so the control reads as one control
+    // rather than floating labels with a highlight behind them. Half-pixel inset
+    // so its 1-unit stroke lands on the grid instead of straddling it.
+    const rail = `<rect class="seg-rail" x="0.5" y="0.5" width="${n(W - 1)}" height="${SEG.H - 1}" rx="${(SEG.H - 1) / 2}"/>`;
     // translate(), not an x/width transition: morph() reuses this node across
     // renders so a transform animates, while an attribute-driven x transition is
     // not reliably animatable in mobile Safari. Width therefore snaps.
-    const ind = act ? `<rect class="seg-ind" x="0" y="0" width="${n(act.w)}" height="${SEG.H}" rx="${SEG.H / 2}" transform="translate(${n(act.x)},0)"/>` : "";
+    const ind = act ? `<rect class="seg-ind" x="0" y="${SEG.INSET}" width="${n(act.w)}" height="${ph}" rx="${ph / 2}" transform="translate(${n(act.x)},0)"/>` : "";
     const items = pills.map((p, i) => {
       // The hit target is a transparent rect, not the text: a <text> element's
-      // hit area is its painted glyphs, which is not a thumb target. The text
-      // above it is pointer-transparent so taps fall through to this rect.
+      // hit area is its painted glyphs, which is not a thumb target. It spans the
+      // full rail height rather than the pill's, so the thumb target is as big as
+      // the control allows. The text above it is pointer-transparent.
       const hit = `<rect x="${n(p.x)}" y="0" width="${n(p.w)}" height="${SEG.H}" rx="${SEG.H / 2}" fill="transparent" pointer-events="all" data-href="${esc(p.href)}" style="cursor:pointer"/>`;
       // Explicit fill — unstyled SVG text renders black on --ground.
       const fill = i === activeIndex ? "var(--ink)" : "var(--muted)";
       const label = `<text class="seg-label${i === activeIndex ? " on" : ""}" x="${n(p.x + p.w / 2)}" y="${n(SEG.H / 2 + SEG.FS * 0.35)}" text-anchor="middle" font-size="${SEG.FS}" fill="${fill}" pointer-events="none">${esc(p.label)}</text>`;
       return hit + label;
     }).join("");
-    return `<div class="seg"><svg viewBox="0 0 ${n(W)} ${SEG.H}" preserveAspectRatio="xMinYMin meet">${ind}${items}</svg></div>`;
+    return `<div class="seg"><svg viewBox="0 0 ${n(W)} ${SEG.H}" preserveAspectRatio="xMinYMin meet">${rail}${ind}${items}</svg></div>`;
   }
   async function buildPerf(kind, which) {
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;

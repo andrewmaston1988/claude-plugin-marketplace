@@ -272,6 +272,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const domains = [...new Set(live.map((r) => r.domain).filter(Boolean))].sort();
     const report = aggregate(rows, { aspect, model, domain });
     const bands = resolveBands(cfg.provider?.cloud?.ollama?.costBands);
+    const valueMargin = cfg.provider?.cloud?.ollama?.valueMargin;
     send(res, 200, {
       grading, path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
       aspects: ASPECTS, universals: UNIVERSAL, domains,
@@ -282,7 +283,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       report: report.aspects,
       views: {
         coverage: coverage(report), reliability: reliability(live), leaders: leaders(report),
-        cost: costView(rows, costRows(), { domain, bands }),
+        cost: costView(rows, costRows(), { domain, bands, valueMargin }),
       },
     });
   };

@@ -279,3 +279,61 @@ test("worst: at equal cost the WORSE model wins the card — lower wtd, not high
   equal(worst.model, "k-worse", "equal multiplier — the lower-quality model is the worse value");
   equal(worst.dominatedBy, "k-top");
 });
+
+// ── best value: the cheapest model still worth seating ────────────────────
+// The real shape from the store on 2026-09-10: glm-5.3 at 8.99 @ 4.2x and
+// glm-5.3-flash at 8.73 @ 1.0x, neither dominating the other. The operator's
+// verdict on the old rule: "0.25 is not worth 4x".
+const thinRow = (model, mult) => costRow(model, mult, { measuredRequests: 100, requests: 100 });
+
+test("best value: the CHEAPEST frontier member within the margin — not the highest-quality one", () => {
+  const rows = [...many("bv-top", 9), ...many("bv-flash", 8.74)];
+  const { best } = costView(rows, [costRow("bv-top", 4.2), costRow("bv-flash", 1)]);
+  equal(best.model, "bv-flash", "a 0.26 quality gap does not justify 4.2x the cost");
+});
+
+test("best value: cheap is not sufficient — a model below the margin is excluded", () => {
+  const rows = [...many("m-top", 9), ...many("m-far", 6)];
+  const { best } = costView(rows, [costRow("m-top", 4), costRow("m-far", 0.5)]);
+  equal(best.model, "m-top", "3.0 below the top is not 'still worth seating' at any price");
+});
+
+test("best value: a THIN model is excluded however cheap — the fluke the ratio objection names", () => {
+  // nemotron-3-ultra's real shape: 0.6x on 36 measured requests.
+  const rows = [...many("t-solid", 9), ...many("t-lucky", 8.9)];
+  const { best } = costView(rows, [costRow("t-solid", 4), thinRow("t-lucky", 0.6)]);
+  equal(best.model, "t-solid", "a lucky reading on too few requests cannot win on cheapness");
+});
+
+test("best value: topWtd comes from the CANDIDATES — a thin high scorer must not raise the bar", () => {
+  // h-thin tops the wtd column but is thin. If it set topWtd, h-cheap (8.6)
+  // would fall outside the margin and the pick would wrongly be h-mid.
+  const rows = [...many("h-thin", 9.9), ...many("h-mid", 8.8), ...many("h-cheap", 8.6)];
+  const { best } = costView(rows, [thinRow("h-thin", 3), costRow("h-mid", 4), costRow("h-cheap", 1)]);
+  equal(best.model, "h-cheap", "the bar is set by what could actually be picked");
+});
+
+test("best value: a dominated model is never picked, however cheap", () => {
+  const rows = [...many("d-good", 9), ...many("d-bad", 5)];
+  // d-bad is cheaper AND worse -> dominated by d-good, so it is off the frontier.
+  const { best, points } = costView(rows, [costRow("d-good", 1), costRow("d-bad", 4)]);
+  equal(points.find((p) => p.model === "d-bad").dominatedBy, "d-good", "fixture precondition");
+  equal(best.model, "d-good");
+});
+
+test("best value: the margin is configurable, and a malformed one falls back to the default", () => {
+  const rows = [...many("c-top", 9), ...many("c-flash", 8.74)];
+  const costs = [costRow("c-top", 4.2), costRow("c-flash", 1)];
+  equal(costView(rows, costs, { valueMargin: 0.1 }).best.model, "c-top", "a tight margin refuses the 0.26 gap");
+  equal(costView(rows, costs, { valueMargin: 0.5 }).best.model, "c-flash");
+  for (const bad of ["x", -1, null, undefined, NaN]) {
+    equal(costView(rows, costs, { valueMargin: bad }).best.model, "c-flash", `malformed ${String(bad)} falls back to the default`);
+  }
+  equal(costView(rows, costs, { valueMargin: 0.5 }).valueMargin, 0.5, "the resolved margin rides along so the card can name it");
+});
+
+test("best value: ties on multiplier break on the better model, then the name", () => {
+  const rows = [...many("q-a", 8.9), ...many("q-b", 8.7)];
+  const { best } = costView(rows, [costRow("q-a", 2), costRow("q-b", 2)]);
+  equal(best.model, "q-a", "same price — take the better one");
+});
