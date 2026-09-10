@@ -15,7 +15,7 @@ import { decideGradeNudge, ungradedRuns } from '../src/grade-nudge.mjs';
 
 // Once-per-session markers, keyed on the Stop payload's session_id — a sibling
 // of workflow-nudge's marker in the swarm home.
-const SEEN = 'grade-nudge-seen.json';
+const SEEN = '.grade-nudge-seen.json';
 
 function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
