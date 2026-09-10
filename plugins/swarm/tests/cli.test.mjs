@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSy
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
-import { runCli, runCliAsync } from "./helpers/cli.mjs";
+import { runCli, runCliAsync, CLI } from "./helpers/cli.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
 
@@ -82,6 +82,156 @@ test("validate: good manifest exits 0 and reports task count", () => {
     ok(r.stdout.includes("manifest OK: 1 task(s) + digest"), r.stdout);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The seats-block rows share a world: a graded store for two models, a models
+// cache, and a manifest seating one graded :cloud model and one never-graded
+// tier (+ digest). `store` picks a populated store (default), an empty file,
+// or none; `corpus` seeds run history so the estimate line reads "estimated ~".
+function seatsWorld({ enabled, store = "rows", corpus = false } = {}) {
+  const dir = tmp();
+  const home = join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "config.json"), JSON.stringify({
+    grading: { enabled },
+    provider: { allowedRoots: [tmpdir()] },
+  }));
+  const row = (leaf, model, grades) => JSON.stringify({
+    resultsDir: `C:/runs/${leaf}`, leaf, model, domain: "node", outcome: "completed",
+    grades, note: "", assessedBy: { session: "s1", date: "2026-09-10" },
+  });
+  if (store === "rows") {
+    writeFileSync(join(home, "model-scores.jsonl"), [
+      row("r1", "glm-5.2:cloud", { adherence: 8, handoff: 8, truthfulness: 8, depth: 8, impl: 7 }),
+      row("r2", "glm-5.2:cloud", { adherence: 9, handoff: 7, truthfulness: 8, depth: 8, code: 9 }),
+      row("r3", "glm-5.3-flash:cloud", { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 }),
+    ].join("\n") + "\n");
+  } else if (store === "empty") {
+    writeFileSync(join(home, "model-scores.jsonl"), "");
+  }
+  writeFileSync(join(home, "models-cache.json"), JSON.stringify({
+    updated: "2026-09-10T00:00:00Z",
+    models: [
+      { model: "glm-5.2:cloud", description: "graded" },
+      { model: "glm-5.3-flash:cloud", description: "unseated" },
+    ],
+  }));
+  if (corpus) {
+    const runDir = join(home, "runs", "some-proj", "old-1");
+    mkdirSync(runDir, { recursive: true });
+    writeFileSync(join(runDir, "summary.json"), JSON.stringify({
+      tasks: [{ id: "a", state: "ok", model: "haiku", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } }],
+    }));
+  }
+  const manifest = join(dir, "m.json");
+  writeFileSync(manifest, JSON.stringify({
+    tasks: [
+      { id: "lane", prompt: "x", model: "glm-5.2:cloud" },
+      { id: "audit", prompt: "y", model: "haiku" },
+    ],
+    digest: { model: "haiku" },
+  }));
+  return { dir, home, manifest };
+}
+
+// Row 7's byte contract: with the block silent, validate prints exactly its
+// three baseline lines and nothing else — no seats header, no trailing roster.
+const assertBaselineOutput = (r, label) => {
+  equal(r.status, 0, r.stderr);
+  const lines = r.stdout.trim().split("\n");
+  equal(lines.length, 3, `${label}: ${JSON.stringify(lines)}`);
+  equal(lines[0], "manifest OK: 2 task(s) + digest", label);
+  equal(lines[1], "estimate: none (no run history yet)", label);
+  ok(lines[2].startsWith("resultsDir: "), label);
+  ok(!r.stdout.includes("seats:"), label);
+};
+
+test("validate: grading.enabled false means no seats block, even with a full store (row 7a)", () => {
+  const w = seatsWorld({ enabled: false });
+  try {
+    assertBaselineOutput(runCli(["validate", w.manifest], { cwd: w.dir, env: { SWARM_HOME: w.home } }), "gate off");
+  } finally {
+    rmSync(w.dir, { recursive: true, force: true });
+  }
+});
+
+test("validate: grading on but an empty store stays silent, file or no file (row 7b)", () => {
+  for (const store of ["empty", "none"]) {
+    const w = seatsWorld({ enabled: true, store });
+    try {
+      assertBaselineOutput(runCli(["validate", w.manifest], { cwd: w.dir, env: { SWARM_HOME: w.home } }), `store=${store}`);
+    } finally {
+      rmSync(w.dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("validate: the seats block sits between the existing lines and never disturbs them; a bad manifest still fails (row 8)", () => {
+  const w = seatsWorld({ enabled: true, corpus: true });
+  try {
+    const r = runCli(["validate", w.manifest], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    equal(r.status, 0, r.stderr);
+    ok(r.stdout.includes("manifest OK: 2 task(s) + digest"), r.stdout);
+    ok(r.stdout.includes("estimated ~"), r.stdout);
+    ok(r.stdout.includes("resultsDir: "), r.stdout);
+    // the block's position is the contract: after the approval surface, before
+    // the ground truth a session copies.
+    const iManifest = r.stdout.indexOf("manifest OK:");
+    const iSeats = r.stdout.indexOf("seats:");
+    const iResults = r.stdout.indexOf("resultsDir:");
+    ok(iManifest >= 0 && iSeats > iManifest && iResults > iSeats, r.stdout);
+    // the CLI fed the seam: seated leaf ids, the never-graded digest seat, and
+    // the unseated roster model the store has a record for.
+    ok(r.stdout.includes("glm-5.2:cloud (lane) · overall"), r.stdout);
+    ok(r.stdout.includes("haiku (audit, __digest) · never graded"), r.stdout);
+    ok(r.stdout.includes("launchable, not seated: glm-5.3-flash:cloud n=1"), r.stdout);
+
+    // a bad manifest keeps its existing failure: the plan never loads, so the
+    // block cannot have printed, and the errors are the manifest's own.
+    const bad = join(w.dir, "bad.json");
+    writeFileSync(bad, JSON.stringify({
+      tasks: [
+        { id: "a", prompt: "x", model: "haiku" },
+        { id: "a", prompt: "y", model: "haiku" },
+      ],
+    }));
+    const b = runCli(["validate", bad], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    equal(b.status, 1);
+    ok(b.stderr.includes("duplicate id"), b.stderr);
+    ok(!b.stdout.includes("seats:"), b.stdout);
+  } finally {
+    rmSync(w.dir, { recursive: true, force: true });
+  }
+});
+
+test("validate: the store is read once for the block, and not at all while silent (row 9)", () => {
+  const register = new URL("./fixtures/store-read-register.mjs", import.meta.url).href;
+  const instrumented = (w) => spawnSync(process.execPath, ["--import", register, CLI, "validate", w.manifest], {
+    cwd: w.dir,
+    encoding: "utf8",
+    timeout: 60000,
+    windowsHide: true,
+    env: { ...process.env, SWARM_HOME: w.home },
+  });
+  const readCount = (r) => (r.stderr.match(/SWARM_STORE_READ/g) || []).length;
+
+  const populated = seatsWorld({ enabled: true });
+  try {
+    const r = instrumented(populated);
+    equal(r.status, 0, r.stderr);
+    equal(readCount(r), 1, `one read for a two-seat manifest:\n${r.stdout}`);
+  } finally {
+    rmSync(populated.dir, { recursive: true, force: true });
+  }
+  for (const w of [seatsWorld({ enabled: false }), seatsWorld({ enabled: true, store: "none" })]) {
+    try {
+      const r = instrumented(w);
+      equal(r.status, 0, r.stderr);
+      equal(readCount(r), 0, `silent means no read at all:\n${r.stdout}`);
+    } finally {
+      rmSync(w.dir, { recursive: true, force: true });
+    }
   }
 });
 
