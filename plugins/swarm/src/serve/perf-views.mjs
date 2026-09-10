@@ -2,7 +2,7 @@
 // server-side so the page never re-derives a count it could get wrong.
 import { OUTCOMES } from "../aspects.mjs";
 import { frontier } from "../scores.mjs";
-import { band, resolveBands, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
+import { band, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
 
 const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
 
@@ -61,8 +61,9 @@ export function leaders(report, k = 3) {
 // quality half is filtered, so the join stays honest under a domain filter.
 // A model with no multiplier is UNMEASURED, not free: it stays in `points`
 // with `multiplier: null` so the page can draw it as a void, never a 0×.
-export function costView(rows, costRows, { domain, bands = DEFAULT_COST_BANDS } = {}) {
+export function costView(rows, costRows, { domain, bands = DEFAULT_COST_BANDS, valueMargin } = {}) {
   bands = resolveBands(bands, DEFAULT_COST_BANDS);
+  const margin = resolveValueMargin(valueMargin);
   const costs = costRows.map(({ model, mult }) => ({ model, mult }));
   const thinOf = new Map(costRows.map((r) => [r.model, r.measuredRequests < THIN_REQUESTS]));
   const points = frontier(rows, costs, { domain, bands })
@@ -86,9 +87,17 @@ export function costView(rows, costRows, { domain, bands = DEFAULT_COST_BANDS } 
   // dominatedBy on a participant, so both carry a wtd and a multiplier by
   // construction; the filters below are still explicit, because a `best` picked
   // from all points would silently become "highest wtd overall".
-  const best = points.filter((p) => p.onFrontier)
-    .sort((a, z) => z.wtd - a.wtd || a.multiplier - z.multiplier || a.model.localeCompare(z.model))[0] ?? null;
+  // `best` answers "what would you actually seat", so it is the CHEAPEST model
+  // still worth seating — not the highest-quality one. Three bars, and a cheap
+  // fluke clears none of them: it must be undominated, within `margin` of the
+  // best candidate quality, and carry enough measured requests not to be thin.
+  // topWtd comes from the CANDIDATES, not all frontier members — otherwise a
+  // thin high scorer raises the bar and excludes the right pick.
+  const candidates = points.filter((p) => p.onFrontier && p.multiplier != null && !p.thin);
+  const topWtd = candidates.reduce((m, p) => (p.wtd > m ? p.wtd : m), -Infinity);
+  const best = candidates.filter((p) => p.wtd >= topWtd - margin)
+    .sort((a, z) => a.multiplier - z.multiplier || z.wtd - a.wtd || a.model.localeCompare(z.model))[0] ?? null;
   const worst = points.filter((p) => p.dominatedBy != null)
     .sort((a, z) => z.multiplier - a.multiplier || a.wtd - z.wtd || a.model.localeCompare(z.model))[0] ?? null;
-  return { points, spread, bands, best, worst };
+  return { points, spread, bands, valueMargin: margin, best, worst };
 }

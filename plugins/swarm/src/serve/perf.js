@@ -134,7 +134,7 @@
   // bands, verdicts and both card picks arrive from the server's costView().
   function costScreen(data, h) {
     const { esc, enc } = h;
-    const { points, spread, best, worst } = data;
+    const { points, spread, best, worst, valueMargin } = data;
     if (!points.length && !spread.length) return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
     // Null-safe: `costView` only ever picks frontier participants, which always
     // carry a multiplier — but this function is public on window.perfViews, so a
@@ -144,13 +144,17 @@
     const badge = (b) => b == null ? `<span class="cbadge none">—</span>` : `<span class="cbadge">${"💲".repeat(b)}</span>`;
     // A card with no pick shows an em dash AND why — a blank reads as a broken
     // render, and a 0× would read as free. Same rule as an unmeasured row.
-    const card = (label, pick, why) => {
+    const card = (label, pick, why, note) => {
+      // Name the rule under the pick: a threshold the reader cannot see is one
+      // they have to trust, and "why that model" is the question this card exists
+      // to answer.
+      const rule = pick && (pick.dominatedBy ? ` · beaten by ${esc(pick.dominatedBy)}` : note ? ` · ${esc(note)}` : "");
       const detail = pick
-        ? `${esc(fmtMult(pick.multiplier))} · wtd ${pick.wtd == null ? "—" : pick.wtd.toFixed(1)}${pick.dominatedBy ? ` · beaten by ${esc(pick.dominatedBy)}` : ""}`
+        ? `${esc(fmtMult(pick.multiplier))} · wtd ${pick.wtd == null ? "—" : pick.wtd.toFixed(1)}${rule}`
         : why;
       return `<div><label>${esc(label)}</label><span>${pick ? esc(pick.model) : "—"}</span><small>${detail}</small></div>`;
     };
-    const cards = `<div class="kv dash4 costcards">${card("best value", best, "nothing priced and graded yet")}${card("worst value", worst, "nothing is beaten on both axes")}</div>`;
+    const cards = `<div class="kv dash4 costcards">${card("best value", best, "nothing priced and graded yet", valueMargin == null ? "" : `within ${valueMargin} of the best`)}${card("worst value", worst, "nothing is beaten on both axes")}</div>`;
     // Log-scaled over the same 0.5×–20× domain the deleted plots used:
     // multipliers span decades, so a linear bar makes every cheap model a stub
     // and hides the 1×-vs-2× difference that actually decides a seat.

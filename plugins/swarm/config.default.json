@@ -13,7 +13,8 @@
       "ollama": {
         "enabled": false,
         "cookiePath": null,
-        "costBands": [2, 5]
+        "costBands": [2, 5],
+        "valueMargin": 0.5
       }
     },
     "usageTimeoutMs": 5000

@@ -489,6 +489,7 @@ const activeSegLabel = (el) => {
 };
 const segHits = (el) => segTags(el, "RECT").filter((n) => n.getAttribute("data-href"));
 const indicator = (el) => segTags(el, "RECT").find((n) => (n.getAttribute("class") || "") === "seg-ind");
+const rail = (el) => segTags(el, "RECT").find((n) => (n.getAttribute("class") || "") === "seg-rail");
 
 const gotoPerf = async (P, hash) => {
   P.location.hash = hash;
@@ -525,7 +526,9 @@ test("switcher: the indicator sits on the active pill, pills tile without overla
     const tx = Number(/translate\(([-\d.]+)/.exec(ind.getAttribute("transform"))[1]);
     const svg = segTags(P.main, "SVG")[0];
     const vbW = Number(svg.getAttribute("viewBox").split(" ")[2]);
-    return { hits, ind: { x: tx, w: Number(ind.getAttribute("width")) }, vbW };
+    const r = rail(P.main);
+    const railBox = r ? { x: Number(r.getAttribute("x")), w: Number(r.getAttribute("width")), h: Number(r.getAttribute("height")) } : null;
+    return { hits, ind: { x: tx, w: Number(ind.getAttribute("width")), h: Number(ind.getAttribute("height")) }, vbW, railBox };
   };
   const rank = await geo("#/perf");
   const pill = (g, href) => g.hits.find((h) => h.href === href);
@@ -535,6 +538,16 @@ test("switcher: the indicator sits on the active pill, pills tile without overla
   }
   const last = rank.hits[rank.hits.length - 1];
   assert.ok(rank.vbW >= last.x + last.w, "the viewBox covers the last pill — the one way a scaled layout can still clip");
+  // The rail is what makes this read as one control rather than floating labels
+  // with a highlight behind them. It shipped missing once; nothing caught it.
+  assert.ok(rank.railBox, "a rail rect is drawn");
+  const first = rank.hits[0];
+  assert.ok(first.x >= rank.railBox.x, "the first pill starts inside the rail, not on its edge");
+  assert.ok(last.x + last.w <= rank.railBox.x + rank.railBox.w, "and the last pill ends inside it");
+  // HEIGHT, not width: an indicator's width is one pill's and is always narrower
+  // than the track, so a width comparison passes even when the indicator fills
+  // the rail top-to-bottom and the track disappears behind it.
+  assert.ok(rank.ind.h < rank.railBox.h, `the indicator is inset within the rail (${rank.ind.h} < ${rank.railBox.h}), never the full track height`);
   // The moving part: an indicator rendered at a constant x looks right on the
   // default view and wrong on every other one.
   const cost = await geo("#/perf/cost");
