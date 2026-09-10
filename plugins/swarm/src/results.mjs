@@ -108,9 +108,13 @@ export function writeSummary(dir, obj) {
   return p;
 }
 
-export function writeDigestMd(dir, text) {
+export function writeDigestMd(dir, text, gradeable) {
   const p = join(dir, "digest.md");
-  writeFileSync(p, text.endsWith("\n") ? text : text + "\n");
+  let out = text.endsWith("\n") ? text : text + "\n";
+  if (gradeable?.count > 0) {
+    out += "\n" + gradeFooter(gradeable) + "\n";
+  }
+  writeFileSync(p, out);
   return p;
 }
 
@@ -387,6 +391,20 @@ export function formatKeptWorktrees(worktreesKept, { resultsDir, engine } = {}) 
   return lines.join("\n");
 }
 
+// One source for the grading nudge that appears in both the engine closing block
+// and the digest.md footer. `gradeable` is produced only when grading.enabled is
+// true, so callers do not need a separate gate.
+export function gradeFooter({ count, resultsDir, cli }) {
+  if (!count || count <= 0) return "";
+  return [
+    bold(`<IMPORTANT>${count} result${count === 1 ? "" : "s"} ${count === 1 ? "is" : "are"} awaiting grading — you MUST always complete this step.</IMPORTANT>`),
+    `  node ${cli} grade --init ${resultsDir}`,
+    dim("  Fill in every relevant capability and all universal aspects, then grade --file."),
+    dim("  This is the only record of how these models performed; skipping it loses the"),
+    dim("  run's evidence."),
+  ].join("\n");
+}
+
 export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate, gradeable, resultsDir, engine }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
@@ -432,11 +450,7 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
   // store only fills if something asks. A skill instruction is trust; this is
   // mechanical, and it fires whether or not the skill was ever read.
   if (gradeable?.count > 0) {
-    lines.push(bold(`<IMPORTANT>${gradeable.count} results are awaiting grading — you MUST always complete this step.</IMPORTANT>`));
-    lines.push(`  node ${gradeable.cli} grade --init ${gradeable.resultsDir}`);
-    lines.push(dim("  Fill in every relevant capability and all universal aspects, then grade --file."));
-    lines.push(dim("  This is the only record of how these models performed; skipping it loses the"));
-    lines.push(dim("  run's evidence."));
+    lines.push(gradeFooter(gradeable));
   }
   return lines.join("\n");
 }
