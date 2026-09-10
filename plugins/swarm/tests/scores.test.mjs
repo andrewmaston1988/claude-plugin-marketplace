@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync } from "n
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, overall, scoresPath, shrink, fairPrior, PRIOR_WEIGHT, frontier,
+  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, overall, scoresPath, shrink, fairPrior, PRIOR_WEIGHT, frontier, canonicalRunKey, gradedRunKeys,
 } from "../src/scores.mjs";
 import { ASPECTS, OUTCOMES } from "../src/aspects.mjs";
 
@@ -548,4 +548,41 @@ test("frontier: pure — inputs untouched, equal output on repeat", () => {
   const second = frontier(rows, costs, {});
   deepEqual(first, second);
   equal(JSON.stringify({ rows, costs }), before, "the inputs were mutated");
+});
+
+// ── canonicalRunKey / gradedRunKeys: graded-ness against a canonical key ──────
+// The blocker's guard. The store's rows and the runs-tree walk name the same
+// dirs in different spellings; graded-ness must survive the difference or
+// every graded run reads ungraded forever.
+
+test("canonicalRunKey: separator, case and trailing-separator differences fold to one key", () => {
+  equal(canonicalRunKey("C:\\Users\\a\\.swarm\\runs\\x-1"), canonicalRunKey("C:/Users/a/.swarm/runs/x-1"));
+  equal(canonicalRunKey("C:/Users/a/.SWARM/runs/X-1"), canonicalRunKey("c:/users/a/.swarm/runs/x-1"));
+  equal(canonicalRunKey("C:/Users/a/.swarm/runs/x-1/"), canonicalRunKey("C:/Users/a/.swarm/runs/x-1"));
+  equal(canonicalRunKey("C:/Users/a/.swarm/runs/x-1//"), canonicalRunKey("C:\\Users\\a\\.swarm\\runs\\x-1\\"));
+});
+
+test("gradedRunKeys: a forward-slash store row is found by a backslash walk path — raw comparison finds none of them", () => {
+  const storeRow = row({ resultsDir: "C:/Users/a/.swarm/runs/x-1" }); // forward slashes, as 349 of 355 real rows are
+  const walkPath = "C:\\Users\\a\\.swarm\\runs\\x-1";                 // what readdirSync + path.join yields on Windows
+  // The shipped design's failure, pinned: exact-string membership misses the row.
+  ok(!new Set([storeRow.resultsDir]).has(walkPath), "raw comparison somehow matched — the blocker is gone, revisit");
+  ok(gradedRunKeys([storeRow]).has(canonicalRunKey(walkPath)), "the canonical key must find the forward-slash row");
+});
+
+test("gradedRunKeys: a resultsDir that will not canonicalise is skipped, never matched to something", () => {
+  equal(canonicalRunKey("."), null);
+  equal(canonicalRunKey(""), null);
+  equal(canonicalRunKey(undefined), null);
+  equal(canonicalRunKey(42), null);
+  const keys = gradedRunKeys([row({ resultsDir: "." }), row({ resultsDir: "" }), row({ resultsDir: "C:/runs/real-1" })]);
+  deepEqual([...keys], [canonicalRunKey("C:/runs/real-1")]);
+});
+
+test("gradedRunKeys: a re-graded (superseded) dir still counts as graded — any row names the dir", () => {
+  const first = row({ resultsDir: "C:/runs/review-1", leaf: "a", grades: { adherence: 3, handoff: 3, truthfulness: 3, depth: 3 }, note: "poor" });
+  const second = row({ resultsDir: "C:/runs/review-1", leaf: "a" }); // the re-grade: same (dir, leaf) dedupe key
+  const keys = gradedRunKeys([first, second]);
+  equal(keys.size, 1);
+  ok(keys.has(canonicalRunKey("C:/runs/review-1")));
 });
