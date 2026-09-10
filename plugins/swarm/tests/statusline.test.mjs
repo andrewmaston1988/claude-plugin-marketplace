@@ -243,3 +243,61 @@ test("fleet bar: no live run of this session renders an empty string, not idle (
     assert.equal(renderFleet({ home, now, session: { session_id: "not-this-session" } }), "");
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
+
+// ---- row 10 of swarm-grading-nudge-test-plan: the stamp's producer side ------
+// The fixtures above hand-write run.log; this row runs the REAL scheduler with
+// CLAUDE_CODE_SESSION_ID set and reads the tree back through the fleet bar. The
+// session payload deliberately carries no cwd, so an unstamped run has no
+// launcher-match and no cwd-match — only the scheduler's stamp can attribute it.
+import { runPlan } from "../src/scheduler.mjs";
+import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
+
+const SCHED_CFG = {
+  provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },
+  concurrency: 4,
+  timeoutMs: 600000,
+  resultInlineCap: 4000,
+  worktreeBranchPrefix: "swarm/",
+};
+
+// Env must be held across the awaited runPlan — a sync finally would restore it
+// before the async body reaches the run-start append (same race the scheduler
+// suite's withSessionEnv guards).
+async function withSessionEnv(id, fn) {
+  const had = process.env.CLAUDE_CODE_SESSION_ID;
+  process.env.CLAUDE_CODE_SESSION_ID = id;
+  try { return await fn(); } finally {
+    if (had === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = had;
+  }
+}
+
+test("row 10: a run dispatched by the real scheduler is attributed to its session on the fleet bar", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-fleet-prod-"));
+  const scratch = mkdtempSync(join(tmpdir(), "swarm-fleet-prod-src-"));
+  try {
+    const rd = join(home, "runs", "C--code-x", "prod-1");
+    const p = {
+      cwd: scratch, resultsDir: rd, concurrency: 4, goal: "",
+      tasks: [{ id: "a", prompt: "do a", model: "haiku", allowedTools: "Read,Grep,Glob", cwd: tmpdir(), originalCwd: tmpdir(), scratchRedirect: false, timeoutMs: 5000, after: [] }],
+    };
+    await withSessionEnv("prod-sess", () => runPlan(p, SCHED_CFG, makeIo(fakeSpawnFactory(() => ({ output: "leaf done" })))));
+    // A completed run is by definition not live — remove the terminal summary and
+    // touch the heartbeat so the bar reads it. Liveness is simulated; the stamp
+    // under test is what the real producer wrote, so the row stays deterministic.
+    rmSync(join(rd, "summary.json"));
+    const now = Date.now();
+    touchHeartbeat(rd, new Date(now).toISOString(), process.pid);
+    utimesSync(heartbeatPath(rd), now / 1000, now / 1000);
+
+    const runs = liveRuns({ home, now, session: { session_id: "prod-sess" } });
+    const mine = runs.find((r) => r.run === "prod-1");
+    assert.ok(mine, "the walked run exists");
+    assert.equal(mine.mine, true, "the run-start the real scheduler wrote attributes the run to the dispatching session");
+    assert.notEqual(renderFleet({ home, now, session: { session_id: "prod-sess" } }), "");
+    assert.equal(renderFleet({ home, now, session: { session_id: "other" } }), "", "a session that did not dispatch it sees nothing");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
