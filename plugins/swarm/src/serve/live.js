@@ -116,5 +116,15 @@
     });
   }
 
-  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, coalesce, loadScript };
+  // The header's third figure: the disk total of runs, never the rendered set.
+  // `finishedTotals` is built by server.mjs from EVERY disk run (the `all` list,
+  // not the capped `picked`), so summing it gives the lifetime-per-disk total.
+  // Active runs are folded in here — the server-side map only holds finished.
+  const headerRunCount = (finishedTotals, active) => {
+    let n = active.length;
+    for (const k in finishedTotals) n += finishedTotals[k] | 0;
+    return n;
+  };
+
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, coalesce, loadScript, headerRunCount };
 })();

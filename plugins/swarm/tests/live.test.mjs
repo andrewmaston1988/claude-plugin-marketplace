@@ -188,6 +188,49 @@ test("collapsing a project drops its expansion — the next fetch's query carrie
 
 // Source pins: the page-side wiring the pure functions cannot see. serve.test.mjs
 // already asserts on page.html's body, so reading the page is established practice.
+// ── header run count: the third figure must equal the disk total, not the
+//    rendered set — same falling-number bug, one field over ─────────────────
+
+test("headerRunCount: the count does not fall when the per-group cap bites — disk total, not runs.length (H1)", () => {
+  const { headerRunCount } = loadLive();
+  // finishedTotals holds the disk total per group (server.mjs:202-203). The
+  // rendered `runs` array is the capped set (finishedPerProject=10 by default).
+  // A count from runs.length under-reports by exactly the size of the overflow.
+  const finishedTotals = { "p-big": 47, "p-small": 3 };
+  const active = [];
+  // What the page renders: 10 of the 47 finished in p-big, plus all 3 of p-small.
+  const renderedRuns = Array.from({ length: 10 }, (_, i) => ({ project: "p-big" })).concat(
+    Array.from({ length: 3 }, (_, i) => ({ project: "p-small" })),
+  );
+  const fromRuns = renderedRuns.length;
+  const fromDisk = headerRunCount(finishedTotals, active);
+  assert.equal(fromRuns, 13, "the rendered set is the capped 13 — that is the bug");
+  assert.equal(fromDisk, 50, "the honest total is the full 50 — what the header must show");
+  assert.notEqual(fromDisk, fromRuns, "the count must NOT match the rendered array length");
+});
+
+test("headerRunCount: active runs are added, not folded in — finishedTotals holds finished only (H2)", () => {
+  const { headerRunCount } = loadLive();
+  const finishedTotals = { "p": 2 };
+  const active = [{ project: "p" }];
+  assert.equal(headerRunCount(finishedTotals, active), 3, "two finished plus one active = 3");
+  assert.notEqual(headerRunCount(finishedTotals, []), 3, "using finishedTotals alone would have returned 2");
+});
+
+test("header: no token figure remains — the third figure is a run count, not fmtTok() (H3)", () => {
+  const page = readFileSync(PAGE_HTML, "utf8");
+  // The header is the `<div class="title"...>` block. Asserting on the full
+  // page would catch the run-row token totals at :428 — those have a referent
+  // (per-run tokens) and stay.
+  const headerMatch = page.match(/<div class="title"[^>]*>[\s\S]*?<\/div>/);
+  assert.ok(headerMatch, "the header block exists");
+  const header = headerMatch[0];
+  // Token rendering: the fmtTok helper emits suffixes like "1.2M", "456k", "789".
+  // The run count is a plain integer — no suffix at all.
+  assert.doesNotMatch(header, /fmtTok/, "fmtTok must not be called from the header");
+  assert.doesNotMatch(header, /\b\d+(?:\.\d+)?[Mk]\b/, "no M/k token suffix in the header");
+});
+
 test("page wiring: the runs fetch splices expandQuery inside q()'s argument, and collapse drops the expansion (T6/T7)", () => {
   const page = readFileSync(PAGE_HTML, "utf8");
   // The composition must put expand INSIDE the path handed to q(), so the token
