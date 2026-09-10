@@ -20,6 +20,31 @@ const nPart = (n) => `n=${n}${n < CANON_N ? " n<20" : ""}`;
 const colPart = (label, cell) =>
   cell && cell.n > 0 ? `${label} ${cell.weighted.toFixed(2)} ${nPart(cell.n)}` : `${label} unmeasured`;
 
+// A manifest seats a Claude tier by ALIAS ("sonnet"); the store records the id
+// the run resolved to ("claude-sonnet-5"). Exact-string lookup therefore reads
+// a model with hundreds of graded rows as never graded — the same inversion
+// row 3 guards against, one field over, and it would hand the exploration seat
+// to the best-measured model on the roster. Match on the family token, as the
+// quota preflight already does for the same alias/id split, and take the id
+// with the most rows: an alias means the tier's current model, which is the one
+// still being graded. Non-alias names never take this path.
+const CLAUDE_ALIAS_RE = /^(fable|opus|sonnet|haiku)$/i;
+
+// Returns the store's name for a seated model, or null when nothing matches.
+// The caller PRINTS what this resolved to — a silent resolution is a guess the
+// reader cannot check.
+export function resolveSeatModel(name, byModel) {
+  if (byModel.has(name)) return name;
+  if (!CLAUDE_ALIAS_RE.test(String(name || ""))) return null;
+  const family = String(name).toLowerCase();
+  let best = null;
+  for (const [model, entry] of byModel) {
+    if (!String(model).toLowerCase().includes(family)) continue;
+    if (!best || (entry.n || 0) > (byModel.get(best).n || 0)) best = model;
+  }
+  return best;
+}
+
 export function seatReport({ models = [], rows = [], costRows = [], roster = [], bands = DEFAULT_COST_BANDS } = {}) {
   if (!models.length || !rows.length) return [];
 
@@ -41,19 +66,21 @@ export function seatReport({ models = [], rows = [], costRows = [], roster = [],
   const lines = ["seats:"];
   const seated = new Set(models.map((m) => m.model));
   for (const { model, leaves } of models) {
-    const head = `  ${model} (${(leaves || []).join(", ")})`;
-    const entry = byModel.get(model);
+    const key = resolveSeatModel(model, byModel);
+    const shown = key && key !== model ? `${model} -> ${key}` : model;
+    const head = `  ${shown} (${(leaves || []).join(", ")})`;
+    const entry = key ? byModel.get(key) : null;
     // No graded row at all: the whole line is the fact, in words — no digits,
     // no dash, nothing that reads as a score.
     if (!entry || entry.wtd == null) {
-      lines.push(`${head} · never graded · ${costPart(model)}`);
+      lines.push(`${head} · never graded · ${costPart(key || model)}`);
       continue;
     }
     const parts = [
       `overall ${entry.wtd.toFixed(2)} ${nPart(entry.n)}`,
-      colPart("impl", implCells.get(model)),
-      colPart("code", codeCells.get(model)),
-      costPart(model),
+      colPart("impl", implCells.get(key)),
+      colPart("code", codeCells.get(key)),
+      costPart(key),
     ];
     if (entry.dominatedBy) parts.push(`dominated by ${entry.dominatedBy}`);
     else if (entry.onFrontier) parts.push("frontier");
@@ -63,7 +90,8 @@ export function seatReport({ models = [], rows = [], costRows = [], roster = [],
   const unseated = (roster || []).filter((m) => !seated.has(m.model));
   if (unseated.length) {
     const items = unseated.map((m) => {
-      const entry = byModel.get(m.model);
+      const key = resolveSeatModel(m.model, byModel);
+      const entry = key ? byModel.get(key) : null;
       return entry && entry.n > 0 ? `${m.model} ${nPart(entry.n)}` : `${m.model} never graded`;
     });
     lines.push(`  launchable, not seated: ${items.join(" · ")}`);

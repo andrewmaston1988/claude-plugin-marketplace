@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
-import { seatReport } from "../src/seats.mjs";
+import { seatReport, resolveSeatModel } from "../src/seats.mjs";
 import { overall, aggregate, frontier } from "../src/scores.mjs";
 
 // The same baseline store row scores.test.mjs builds — one field mutated per
@@ -191,4 +191,53 @@ test("seatReport: pure — inputs untouched, equal output on repeat", () => {
   const second = seatReport({ models, rows, costRows, roster });
   deepEqual(first, second);
   equal(JSON.stringify({ models, rows, costRows, roster }), before, "the inputs were mutated");
+});
+// A manifest seats a Claude tier by alias; the store records the resolved id.
+// Measured on the real store when this shipped: haiku/sonnet/opus all read
+// "never graded" against 91/462/43 actual rows — the row-3 inversion one field
+// over, and the one that would hand the exploration seat to the single
+// best-measured model on the roster.
+test("seatReport: a Claude alias finds its resolved id in the store, and says which", () => {
+  const rows = [
+    // Distinct leaf ids: the store dedupes on [resultsDir, leaf], so rows that
+    // share both collapse to one and the fixture would silently be n=1.
+    ...Array.from({ length: 30 }, (_, i) => graded({ model: "claude-sonnet-5", leaf: `s${i}` })),
+    ...Array.from({ length: 4 }, (_, i) => graded({ model: "claude-opus-4-8", leaf: `o${i}` })),
+    ...Array.from({ length: 9 }, (_, i) => graded({ model: "claude-opus-5", leaf: `p${i}` })),
+  ];
+  const out = seatReport({ models: [{ model: "sonnet", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");
+  const line = out.split("\n").find((l) => l.includes("sonnet"));
+  ok(!line.includes("never graded"), `alias must resolve, got: ${line}`);
+  ok(line.includes("n=30"), `must carry the store's real n, got: ${line}`);
+  ok(line.includes("sonnet -> claude-sonnet-5"), `must SHOW what it resolved to, got: ${line}`);
+});
+
+test("resolveSeatModel: an alias takes the id with the most rows; a non-alias never guesses", () => {
+  const byModel = new Map([
+    ["claude-opus-4-8", { n: 4 }],
+    ["claude-opus-5", { n: 9 }],
+    ["glm-5.3:cloud", { n: 70 }],
+  ]);
+  equal(resolveSeatModel("opus", byModel), "claude-opus-5", "the tier's current model is the one still being graded");
+  equal(resolveSeatModel("glm-5.3:cloud", byModel), "glm-5.3:cloud", "an exact match is used as-is");
+  equal(resolveSeatModel("fable", byModel), null, "an alias with no matching id resolves to nothing");
+  equal(resolveSeatModel("glm-5.4:cloud", byModel), null, "a non-alias never family-matches — only the four aliases take that path");
+});
+
+test("seatReport: an alias with genuinely no rows still reads never graded", () => {
+  const rows = [graded({ model: "claude-sonnet-5" })];
+  const out = seatReport({ models: [{ model: "fable", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");
+  ok(out.includes("never graded"), `unmeasured must stay unmeasured, got: ${out}`);
+  ok(!out.includes("->"), "nothing was resolved, so nothing is shown as resolved");
+});
+
+test("seatReport: the unseated roster resolves aliases too", () => {
+  const rows = Array.from({ length: 12 }, (_, i) => graded({ model: "claude-haiku-4-5-20251001", leaf: `h${i}` }));
+  const out = seatReport({
+    models: [{ model: "glm-5.3:cloud", leaves: ["a"] }],
+    rows: [...rows, graded({ model: "glm-5.3:cloud" })],
+    costRows: [],
+    roster: [{ model: "haiku" }],
+  }).join("\n");
+  ok(/haiku n=12 n<20/.test(out), `the unseated list must carry the alias's real n, got: ${out}`);
 });
