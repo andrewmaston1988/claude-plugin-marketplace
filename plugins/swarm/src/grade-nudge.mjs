@@ -40,7 +40,10 @@ export function lastRunStart(text) {
 // they leave the runs tree entirely. Each row is { dir, key, launcher };
 // launcher is null when the owning run-start carries no stamp, so the run
 // belongs to nobody rather than to whoever asks about it next.
-export function ungradedRuns({ env = process.env, home = swarmHome(env), graded = new Set() } = {}) {
+// _readFile is the injection seam the ordering test counts through — the only
+// way to prove the cheap predicates run first, since skipping a run and reading
+// its log then skipping it produce the same output.
+export function ungradedRuns({ env = process.env, home = swarmHome(env), graded = new Set(), _readFile = readFileSync } = {}) {
   const out = [];
   const runsRoot = join(home, "runs");
   let encodings = [];
@@ -50,17 +53,20 @@ export function ungradedRuns({ env = process.env, home = swarmHome(env), graded 
     try { names = readdirSync(join(runsRoot, enc)); } catch { continue; }
     for (const name of names) {
       const dir = join(runsRoot, enc, name);
-      let text;
-      try { text = readFileSync(join(dir, "run.log"), "utf8"); } catch { continue; } // not a run dir
-      const start = lastRunStart(text);
-      if (!start) continue;
+      // Cheapest predicates first: run.log is the expensive read (45.6MB across
+      // the estate, largest 2.2MB) and every stop pays for the whole walk, so a
+      // run already graded or with nothing to grade must never reach it.
+      const key = canonicalRunKey(dir);
+      if (key == null || graded.has(key)) continue;
       // Nothing to grade: no results/ dir, or no result file in it — agentless
       // nodes produce no row and skipped leaves write none.
       let files = [];
       try { files = readdirSync(join(dir, "results")); } catch { continue; }
       if (!files.some((f) => f.endsWith(".json"))) continue;
-      const key = canonicalRunKey(dir);
-      if (key == null || graded.has(key)) continue;
+      let text;
+      try { text = _readFile(join(dir, "run.log"), "utf8"); } catch { continue; } // not a run dir
+      const start = lastRunStart(text);
+      if (!start) continue;
       out.push({ dir, key, launcher: typeof start.launcher === "string" ? start.launcher : null });
     }
   }

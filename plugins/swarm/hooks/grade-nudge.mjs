@@ -39,24 +39,32 @@ async function main() {
 
   const home = swarmHome(process.env);
   const seenPath = path.join(home, SEEN);
-  // The store, read once — not per run, not per stop.
+  // The marker bounds the COST, not just the nagging: the hook process is fresh
+  // per stop, so a session that has already been nudged would otherwise re-read
+  // the store and re-walk the runs tree on every subsequent stop for nothing.
+  // decideGradeNudge checks it too — that copy keeps the pure decision honest
+  // under injected state; this one is what stops the work happening at all.
+  const seen = readJSON(seenPath);
+  if (seen?.[sessionId]) process.exit(0);
+
+  // The store, read once per stop, and only for a session still owed a nudge.
   const graded = gradedRunKeys(readRows(scoresPath(process.env)));
   const decision = decideGradeNudge({
     config,
     runs: ungradedRuns({ env: process.env, graded }),
     graded,
     sessionId,
-    seen: readJSON(seenPath),
+    seen,
   });
   if (!decision.block) process.exit(0);
 
   try {
-    const seen = readJSON(seenPath) || {};
-    seen[sessionId] = Date.now();
+    const next = { ...(seen || {}) };
+    next[sessionId] = Date.now();
     // Dead sessions' markers must not rot the file; a week outlives any session.
-    for (const [k, v] of Object.entries(seen)) if (Date.now() - v > 7 * 86_400_000) delete seen[k];
+    for (const [k, v] of Object.entries(next)) if (Date.now() - v > 7 * 86_400_000) delete next[k];
     fs.mkdirSync(home, { recursive: true });
-    fs.writeFileSync(seenPath, JSON.stringify(seen), 'utf8');
+    fs.writeFileSync(seenPath, JSON.stringify(next), 'utf8');
   } catch { /* marker failure must not break the nudge */ }
 
   process.stdout.write(JSON.stringify({ decision: 'block', reason: decision.reason }) + '\n');

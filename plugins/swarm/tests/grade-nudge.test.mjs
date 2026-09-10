@@ -4,8 +4,8 @@
 // spawns no hook binary in tests; decideGradeNudge is the seam.
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { decideGradeNudge, ungradedRuns, lastRunStart } from "../src/grade-nudge.mjs";
 import { gradedRunKeys } from "../src/scores.mjs";
@@ -174,4 +174,26 @@ test("lastRunStart: the last run-start wins over earlier ones and over torn line
   equal(lastRunStart(log).launcher, "xyz", "the torn run-start after it is skipped, the valid one before it is the last");
   equal(lastRunStart(""), null);
   equal(lastRunStart('{"event":"run-start","ts":"torn'), null, "a log whose only run-start is torn has no owner");
+});
+test("the walk never reads the run.log of a run it can skip on a cheap predicate", () => {
+  const home = tmp();
+  try {
+    // Every enabled stop pays for this whole walk, and run.log is the expensive
+    // read — 45.6MB across the real estate, largest 2.2MB. Output alone cannot
+    // prove the ordering: reading a log and then skipping the run leaves exactly
+    // the same result as never reading it. So count the reads.
+    const graded = new Set();
+    for (const name of ["graded-1", "graded-2"]) graded.add(runDir(home, { name, starts: [{ launcher: "me" }] }).replaceAll("\\", "/").toLowerCase());
+    runDir(home, { name: "nothing-to-grade-1", starts: [{ launcher: "me" }], noResults: true });
+    runDir(home, { name: "ungraded-1", starts: [{ launcher: "me" }] });
+
+    const read = [];
+    const runs = ungradedRuns({ home, graded, _readFile: (p, enc) => { read.push(p); return readFileSync(p, enc); } });
+
+    deepEqual(runs.map((r) => basename(r.dir)), ["ungraded-1"]);
+    equal(read.length, 1, "only the one run that survives the cheap predicates has its log read");
+    ok(read[0].includes("ungraded-1"), `the single read was ${read[0]}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
