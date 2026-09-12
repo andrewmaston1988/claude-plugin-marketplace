@@ -339,6 +339,29 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
   }
 });
 
+test("run: quota-blocked leaf -> re-run-after names the reset in the reader's own clock", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+    }));
+    const env = {
+      SWARM_HOME: join(dir, "home"),
+      SWARM_SHIM_EXIT: "1",
+      SWARM_SHIM_OUTPUT: "usage limit reached|1789200000",
+      TZ: "Europe/London",
+    };
+    const r = runCli(["run", manifest], { cwd: dir, env });
+    equal(r.status, 1);
+    ok(r.stdout.includes("quota: 1 leaf(s) blocked by Anthropic usage limits"), r.stdout);
+    ok(r.stdout.includes("re-run after Sat 12 Sep, 09:00"), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("stop: refuses on a finished run, naming the state", () => {
   const dir = tmp();
   try {
@@ -1177,11 +1200,11 @@ test("models: C1 an exhausted meter is named above the :cloud list", async () =>
       },
     }));
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
-    const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
+    const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("exhausted"), r.stdout);
     ok(r.stdout.includes("100%"), r.stdout);
-    ok(r.stdout.includes("2026-09-12T08:00:00.377418+00:00"), r.stdout);
+    ok(r.stdout.includes("Sat 12 Sep, 09:00"), r.stdout);
     const warnAt = r.stdout.indexOf("exhausted");
     const cloudAt = r.stdout.indexOf("glm-5.2:cloud");
     ok(warnAt >= 0 && cloudAt >= 0 && warnAt < cloudAt, r.stdout);

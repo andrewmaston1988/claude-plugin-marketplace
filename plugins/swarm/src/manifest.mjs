@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
-import { provenanceBanner } from "./usage.mjs";
+import { provenanceBanner, formatResetTime } from "./usage.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
 import { validateSchemaShape } from "./schema.mjs";
 
@@ -693,9 +693,10 @@ function checkGovernance(model, effCwd, l, cfg, errors) {
 function checkHeadroom(model, l, headroom, errors, warnings) {
   if (isClaudeModel(model)) return;
   if (headroom?.state === "exhausted" && headroom?.provenance === "live") {
+    const resets = formatResetTime(headroom.resetsAt) ?? headroom.resetsAt;
     errors.push(
       `${l}: seats ':cloud' model '${model}', but the weekly allowance is exhausted ` +
-      `(${headroom.weeklyPctUsed}%, resets ${headroom.resetsAt}) — every :cloud leaf will park in ` +
+      `(${headroom.weeklyPctUsed}%, resets ${resets}) — every :cloud leaf will park in ` +
       `\`quota\`. Recast these leaves onto Claude tiers, or re-run after the reset.`
     );
   } else if (headroom?.provenance && headroom.provenance !== "live" && warnings) {
