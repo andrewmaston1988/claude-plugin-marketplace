@@ -1,6 +1,6 @@
-# Manifest field reference — schemas, child manifests, named runs
+# Manifest field reference — schemas, child manifests, named runs, integrate.from
 
-Deep reference for three manifest features. Read when you are actually writing one of
+Deep reference for four manifest features. Read when you are actually writing one of
 these fields; the decision of *whether* to use them lives in SKILL.md.
 
 ### Schema-guaranteed leaf output — `returns`
@@ -43,6 +43,19 @@ A task with `"manifest": "<path>"` runs that child manifest as one node — the 
 ```
 
 `audit-one-repo.json` is a normal manifest (its prompts may use `{{item}}`/`{{index}}` when the node has `forEach`), except: no `resultsDir`/`concurrency`/`digest` (the parent owns the run), and no `manifest` tasks of its own (one level). The node itself is an agentless container — `model`/`prompt`/`returns`/etc. belong on the child's tasks; only `after`, `when`, `forEach`, `timeoutMs` go on the node.
+
+### Folding a `forEach` fan-out back — `integrate.from` naming the parent
+
+`integrate.from` accepts a `forEach` task's id, meaning **every clone that expanded from
+it**: `from: ["fix"]` resolves at merge time to `fix[0]`…`fix[n-1]`, in index order — exactly
+as if the author had listed the clones by hand, which is impossible at authoring time since
+clone ids are minted at run time from the source array's length. `integrate()` itself is
+unchanged: it still merges named branches sequentially into the `into` worktree, a content
+conflict still leaves markers plus a `conflicts` list with the node `ok`. A capped or empty
+`forEach` source leaves nothing to merge; a failed clone is handled exactly as a failed
+hand-listed source is today. `validate`'s preview line reuses the `forEach`'s own cap:
+`join ≤ 30 branches (fix forEach)`. See the README's "Folding a forEach fan-out back" for the
+worked example.
 
 ### Named manifests + args — recurring runs, saved once
 

@@ -82,11 +82,37 @@ named task's branch into `into`:
 ```
 
 Every id in `from` must be a task that WRITES, for the same reason `isolation.from` must be: a
-read-only task has no branch to merge.
+read-only task has no branch to merge. The one exception is a `forEach` parent — see below.
 
 **A conflict is not a failure.** The merge stops with markers in the tree, the node stays `ok`,
 and the conflicting paths land in its result — pass `{{result:join}}` to the next leaf and tell
 it to resolve them. Without an integrate node that merge is the next leaf's job.
+
+## Folding a `forEach` fan-out back — `integrate.from` naming the parent
+
+A `forEach` parent named in `from` owns no branch itself — its clones do, and their ids do not
+exist at authoring time. `from: ["fix"]` resolves at merge time to every clone that actually
+expanded, `fix[0]`…`fix[n-1]`, in index order — the same runtime expansion `forEach` already
+performs, applied one step later:
+
+```json
+{ "id": "fix", "after": ["find-sites"], "forEach": { "from": "find-sites", "path": "sites", "maxItems": 30 },
+  "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
+{ "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
+```
+
+Nothing about `integrate` itself changes: the merge is still sequential, a conflict still leaves
+markers with the node `ok`. Everything else follows from that:
+
+- A `maxItems` cap means capped items never became clones — there is nothing of theirs to merge.
+- A failed clone is handled exactly as a failed hand-listed source is today.
+- An empty `forEach` source resolves to an empty `from` list — the integrate merges nothing and
+  completes `ok`.
+- The integrate waits for every clone to settle, not just the parent's aggregate, and a
+  no-change clone's branch survives `collect()` until the merge — same reasoning as "An
+  `integrate.from` source is the exception" above.
+
+`validate`'s preview line names the fan-in's cap: `join ≤ 30 branches (fix forEach)`.
 
 ## Worktree names do not carry across manifests
 
