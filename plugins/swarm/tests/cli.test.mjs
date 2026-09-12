@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
@@ -357,6 +357,100 @@ test("stop: refuses on a finished run, naming the state", () => {
     ok(r2.stderr.includes("nothing to stop"), r2.stderr);
     ok(r2.stderr.includes("finished"), r2.stderr);
     ok(!existsSync(join(resultsDir, "stop")), "must not write a stop file against a finished run");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run: refuses a results dir whose engine is alive (fresh heartbeat, no summary) — exit 1, claude never invoked", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+    }));
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    const runLog = JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "a", model: "haiku" }] }) + "\n";
+    writeFileSync(join(resultsDir, "run.log"), runLog);
+    writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
+
+    const shimLog = join(dir, "shim.log");
+    const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes(resultsDir), r.stderr);
+    ok(r.stderr.includes("4321"), r.stderr);
+    ok(r.stderr.includes("swarm stop"), r.stderr);
+    ok(!existsSync(shimLog), "claude shim must never be invoked against a live engine");
+    equal(readFileSync(join(resultsDir, "run.log"), "utf8"), runLog, "run.log must not gain a second run-start");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run --force: also refuses a live engine — force is not a bypass", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+    }));
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    const runLog = JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "a", model: "haiku" }] }) + "\n";
+    writeFileSync(join(resultsDir, "run.log"), runLog);
+    writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
+
+    const shimLog = join(dir, "shim.log");
+    const r = runCli(["run", manifest, "--force"], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes("swarm stop"), r.stderr);
+    ok(!existsSync(shimLog), "claude shim must never be invoked against a live engine, even with --force");
+    equal(readFileSync(join(resultsDir, "run.log"), "utf8"), runLog, "run.log must not gain a second run-start");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run: a stale heartbeat (dead engine) is not mistaken for live — resume proceeds", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+    }));
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "a", model: "haiku" }] }) + "\n");
+    const hbPath = join(resultsDir, "heartbeat");
+    writeFileSync(hbPath, "2020-01-01T00:00:00.000Z 4321\n");
+    const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
+    utimesSync(hbPath, anHourAgo, anHourAgo);
+
+    const shimLog = join(dir, "shim.log");
+    const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(existsSync(shimLog), "a dead engine's results dir must still resume and dispatch");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("run: a fresh results dir (no heartbeat ever written) is not mistaken for live", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+    }));
+    const shimLog = join(dir, "shim.log");
+    const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(existsSync(shimLog), "a never-run results dir must dispatch normally");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
