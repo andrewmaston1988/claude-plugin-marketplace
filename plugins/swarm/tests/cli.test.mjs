@@ -1,7 +1,7 @@
 import { spawnSync, spawn } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok, deepEqual, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, utimesSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, utimesSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
@@ -452,6 +452,78 @@ test("run: a fresh results dir (no heartbeat ever written) is not mistaken for l
     equal(r.status, 0, r.stdout + r.stderr);
     ok(existsSync(shimLog), "a never-run results dir must dispatch normally");
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C1: ask refuses a results dir whose engine is alive — exit 1, claude never invoked", () => {
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "out");
+    mkdirSync(join(resultsDir, "results"), { recursive: true });
+    writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({
+      cwd: dir, resultsDir, tasks: [{ id: "t1", model: "haiku" }],
+    }));
+    writeFileSync(join(resultsDir, "results", "t1.json"), JSON.stringify({
+      id: "t1", model: "haiku", ok: true, output: "original", sessionId: "s-1", cwd: dir,
+    }));
+    const runLog = JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "t1", model: "haiku" }] }) + "\n";
+    writeFileSync(join(resultsDir, "run.log"), runLog);
+    writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
+
+    const shimLog = join(dir, "shim.log");
+    const r = runCli(["ask", resultsDir, "t1", "why?"], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes(resultsDir), r.stderr);
+    ok(r.stderr.includes("4321"), r.stderr);
+    ok(r.stderr.includes("swarm stop"), r.stderr);
+    ok(!existsSync(shimLog), "claude shim must never be invoked against a live engine");
+    equal(readFileSync(join(resultsDir, "run.log"), "utf8"), runLog, "run.log must not gain a second run-start");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C2: run refuses to start while an ask is live", async () => {
+  const dir = tmp();
+  let askPromise;
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.5 }));
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "t1", prompt: "x", model: "haiku" }],
+    }));
+    const resultsDir = join(dir, "out");
+
+    const r0 = runCli(["run", manifest], {
+      cwd: dir,
+      env: { SWARM_HOME: home, SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first answer" },
+    });
+    equal(r0.status, 0, r0.stdout + r0.stderr);
+    const hbPath = join(resultsDir, "heartbeat");
+    const baseline = statSync(hbPath).mtimeMs;
+
+    askPromise = runCliAsync(["ask", resultsDir, "t1", "why?"], {
+      cwd: dir,
+      env: { SWARM_HOME: home, SWARM_SHIM_SLEEP_MS: "2000", SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "slow answer" },
+    });
+
+    const deadline = Date.now() + 10000;
+    while (statSync(hbPath).mtimeMs === baseline && Date.now() < deadline) await sleep(20);
+    ok(statSync(hbPath).mtimeMs > baseline, "the ask must touch the heartbeat before a concurrent run can be refused");
+
+    const shimLog2 = join(dir, "shim2.log");
+    const r1 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog2 } });
+    equal(r1.status, 1, r1.stdout + r1.stderr);
+    ok(!existsSync(shimLog2), "run must refuse before dispatching anything while the ask is live");
+
+    const a = await askPromise;
+    equal(a.status, 0, a.stdout + a.stderr);
+  } finally {
+    await askPromise?.catch(() => {});
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -1259,6 +1331,51 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
     const askCall = JSON.parse(readFileSync(shimLog, "utf8").trim());
     equal(askCall.argv[askCall.argv.indexOf("--resume") + 1], "shim-session");
     ok(readFileSync(join(dir, "out", "results", "t1.ask.log"), "utf8").includes("because X"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C3: ask stdout is exactly the answer and the tokens line, no roster frames", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", model: "haiku" }] }));
+    const r0 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
+    equal(r0.status, 0, r0.stdout + r0.stderr);
+
+    const a = runCli(["ask", join(dir, "out"), "t1", "why?"], {
+      cwd: dir,
+      env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "because X" },
+    });
+    equal(a.status, 0, a.stdout + a.stderr);
+    const lines = a.stdout.trimEnd().split("\n");
+    equal(lines.length, 3, a.stdout);
+    equal(lines[0], "because X");
+    equal(lines[1], "");
+    ok(lines[2].includes("tokens: 1.5k"), lines[2]);
+    ok(!/✓/.test(a.stdout), a.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C3: a failed ask exits non-zero, leaves the leaf ok, records the failure", () => {
+  const dir = tmp();
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", model: "haiku" }] }));
+    const r0 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
+    equal(r0.status, 0, r0.stdout + r0.stderr);
+
+    const a = runCli(["ask", join(dir, "out"), "t1", "why?"], {
+      cwd: dir,
+      env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_EXIT: "1", SWARM_SHIM_OUTPUT: "No conversation found with session ID shim-session" },
+    });
+    equal(a.status, 1, a.stdout + a.stderr);
+    const res = JSON.parse(readFileSync(join(dir, "out", "results", "t1.json"), "utf8"));
+    equal(res.ok, true, "the leaf itself must stay ok even though the ask failed");
+    equal(res.asks[0].ok, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

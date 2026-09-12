@@ -3,13 +3,13 @@
 // drill-down costs one turn instead of a re-run. Same model, same cwd, same
 // tool allowlist as the original dispatch — a read-only leaf stays read-only
 // under questioning.
-import { existsSync, appendFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
-import { readResult, writeResult } from "./results.mjs";
+import { readResult } from "./results.mjs";
 import { isClaudeModel } from "./models.mjs";
 import { isUnderRoot } from "./manifest.mjs";
-import { runTask, makeDefaultIo } from "./scheduler.mjs";
+import { runPlan, makeDefaultIo } from "./scheduler.mjs";
 
 export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = makeDefaultIo() }) {
   const prior = readResult(resultsDir, taskId);
@@ -36,26 +36,40 @@ export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = m
     }
   }
 
-  const task = {
-    id: taskId,
-    model: askModel,
-    allowedTools: prior.allowedTools || "Read,Grep,Glob",
-    cwd,
-    resume: prior.sessionId,
-    timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-  };
-  const r = await runTask(task, question, cfg, io, null, {});
-  if (!r.ok) throw new Error(`ask failed (exit ${r.exit}): ${r.raw.slice(0, 500)}`);
+  // The manifest snapshot is the effective plan at dispatch, but it's a
+  // stripped RECORD (effectivePlanDoc drops empty `after`, and `timeoutMs`
+  // entirely) — not input-ready. Every task needs `after` back so the
+  // scheduling loop can read it; the target additionally needs the dispatch
+  // fields the snapshot never carried, sourced from its own last result.
+  const manifest = JSON.parse(readFileSync(join(resultsDir, "manifest.json"), "utf8"));
+  const isTopLevel = manifest.tasks.some((t) => t.id === taskId);
+  // A forEach clone (`fix[0]`) or manifest child (`node~child`) never appears in
+  // manifest.tasks — it joined the roster mid-run via an expand event. Its own
+  // result carries every field a manifest task would have declared, so build the
+  // ask task from that instead of requiring a manifest entry that doesn't exist.
+  const tasks = isTopLevel
+    ? manifest.tasks.map((t) => (t.id === taskId
+        ? { ...t, after: t.after || [], allowedTools: prior.allowedTools || "Read,Grep,Glob", timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
+        : { ...t, after: t.after || [] }))
+    : [
+        ...manifest.tasks.map((t) => ({ ...t, after: t.after || [] })),
+        {
+          id: taskId,
+          model: prior.model,
+          cwd: prior.cwd,
+          originalCwd: prior.originalCwd || prior.cwd,
+          allowedTools: prior.allowedTools || "Read,Grep,Glob",
+          scratchRedirect: false,
+          timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          after: [],
+        },
+      ];
+  // An ask is a one-off answer, not a monitored run: no roster/live-view
+  // frames, only the CLI's own answer + tokens line. Suppressing io.snapshot
+  // is what runPlan's paint() checks before rendering anything.
+  await runPlan({ ...manifest, tasks, concurrency: 1 }, cfg, { ...io, snapshot: undefined }, { ask: { taskId, question, model } });
 
-  // Resume forks a new session id; adopt it so the next ask continues THIS
-  // conversation thread rather than restarting from the original leaf state.
-  if (r.sessionId && r.sessionId !== prior.sessionId) {
-    prior.sessionId = r.sessionId;
-    writeResult(resultsDir, taskId, prior);
-  }
-  appendFileSync(
-    join(resultsDir, "results", `${taskId}.ask.log`),
-    `## Q ${new Date().toISOString()}\n${question}\n\n## A\n${r.output}\n\n`
-  );
-  return { answer: r.output, tokens: r.tokens, sessionId: r.sessionId ?? prior.sessionId };
+  const updated = readResult(resultsDir, taskId);
+  const askEntry = updated.asks[updated.asks.length - 1];
+  return { answer: askEntry.answer, tokens: askEntry.tokens, sessionId: updated.sessionId, ok: askEntry.ok };
 }

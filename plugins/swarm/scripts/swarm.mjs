@@ -278,6 +278,22 @@ async function cmdValidate(rest) {
   return 0;
 }
 
+// A second engine on the same resultsDir resumes each leaf's recorded session
+// alongside the first — two processes driving one Claude session. Only a real
+// heartbeat file makes a dir "live"; a brand-new or never-run dir has none, and
+// runLiveness alone can't tell that apart from a genuinely alive engine.
+function refuseLiveEngine(dir, cfg, verb) {
+  const hb = readHeartbeat(dir);
+  if (!hb) return false;
+  const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
+  const live = runLiveness(dir, { heartbeatMs });
+  if (live.finishedMs == null && live.stoppedMs == null && live.abortedMs == null) {
+    err(`swarm: ${dir} already has a live engine (pid ${hb.pid}) — swarm status ${dir} to watch it, swarm stop ${dir} to end it before ${verb}.`);
+    return true;
+  }
+  return false;
+}
+
 async function cmdRun(rest) {
   const cfg = getConfig();
   const force = rest.includes("--force");
@@ -299,19 +315,7 @@ async function cmdRun(rest) {
       spawn(cmdLine, { shell: true, detached: true, stdio: "ignore" }).unref();
     } catch { /* notification is garnish, never a failure */ }
   };
-  // A second engine on the same resultsDir resumes each leaf's recorded session
-  // alongside the first — two processes driving one Claude session. Only a real
-  // heartbeat file makes a dir "live"; a brand-new or never-run dir has none, and
-  // runLiveness alone can't tell that apart from a genuinely alive engine.
-  const hb = readHeartbeat(plan.resultsDir);
-  if (hb) {
-    const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
-    const live = runLiveness(plan.resultsDir, { heartbeatMs });
-    if (live.finishedMs == null && live.stoppedMs == null && live.abortedMs == null) {
-      err(`swarm: ${plan.resultsDir} already has a live engine (pid ${hb.pid}) — swarm status ${plan.resultsDir} to watch it, swarm stop ${plan.resultsDir} to end it before re-running.`);
-      return 1;
-    }
-  }
+  if (refuseLiveEngine(plan.resultsDir, cfg, "re-running")) return 1;
 
   plan.estimate = estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")));
 
@@ -1200,10 +1204,13 @@ async function main() {
         }
         const [resultsDir, taskId, question] = positional;
         if (!resultsDir || !taskId || !question) { err(USAGE); return 1; }
+        const cfg = getConfig();
+        if (refuseLiveEngine(resultsDir, cfg, "asking")) return 1;
         const { askLeaf } = await import("../src/ask.mjs");
         const { formatTokens } = await import("../src/results.mjs");
         const { tokenTotal } = await import("../src/stream.mjs");
-        const r = await askLeaf({ resultsDir, taskId, question, model, cfg: getConfig() });
+        const r = await askLeaf({ resultsDir, taskId, question, model, cfg });
+        if (!r.ok) { err(`swarm: ask failed: ${r.answer}`); return 1; }
         out(r.answer);
         out("");
         out(dim(`tokens: ${formatTokens(tokenTotal(r.tokens))} · session ${r.sessionId} · log: results/${taskId}.ask.log`));

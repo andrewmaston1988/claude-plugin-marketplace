@@ -277,7 +277,9 @@ Every leaf's Claude Code session id is captured in its result JSON. `ask` resume
 swarm ask <resultsDir> census-edges "show the exact preload line you cited"
 ```
 
-The resume runs with the leaf's own model, cwd, and tool allowlist (a read-only leaf stays read-only). Q/A history appends to `results/<id>.ask.log`, and each follow-up continues the same conversation thread. `--model <m>` re-asks on a different model — subject to the same `allowedRoots` governance gate as dispatch. Leaves that ran in a since-removed worktree can't be resumed; `ask` says so rather than guessing.
+An ask runs through the same engine as `run` — same `run.log`, same heartbeat, same live-engine guard — so it shows on `status` and the dashboard as that leaf running again, not as a separate event. It refuses to start while the run's engine is already live, and for the same reason a `run` refuses to start while an ask is live: two processes must never drive one Claude session.
+
+The resume runs with the leaf's own model, cwd, and tool allowlist (a read-only leaf stays read-only). Each follow-up appends to the leaf's `asks[]` history in its result JSON and to `results/<id>.ask.log`, and continues the same conversation thread. `--model <m>` re-asks on a different model — subject to the same `allowedRoots` governance gate as dispatch. Leaves that ran in a since-removed worktree can't be resumed; `ask` says so rather than guessing. A failed ask never demotes the leaf's own accepted result — the failure is recorded in `asks[]`, not on the leaf.
 
 ## Self-healing runs
 
