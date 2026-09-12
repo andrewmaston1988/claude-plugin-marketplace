@@ -143,8 +143,8 @@ export function recordedSessionIds(dir) {
 // torn write costs one tick, and the file's own mtime IS the liveness signal, so
 // tmp+rename (which would also bump mtime, just later) buys nothing here.
 // stop: presence alone is the signal — `swarm stop` creates it, the engine
-// notices it on its next heartbeat tick and never deletes it (the record of a
-// deliberate stop must outlive the run).
+// notices it on its next heartbeat tick. A fresh engine clears it on start
+// (see runPlan) so a resumed run isn't stopped by its predecessor's marker.
 export function heartbeatPath(dir) {
   return join(dir, "heartbeat");
 }

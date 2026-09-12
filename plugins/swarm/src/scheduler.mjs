@@ -1,4 +1,4 @@
-import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { buildDispatch, toSpawnable } from "./dispatch.mjs";
@@ -341,6 +341,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   const tasks = [...plan.tasks];
   if (plan.digest) tasks.push(buildDigestTask(plan));
   initResultsDir(plan.resultsDir);
+  // A prior `swarm stop` leaves its marker and no other engine is live here (cmdRun
+  // refuses one): clear it before any await, so a stop landing during startup still counts.
+  rmSync(stopPath(plan.resultsDir), { force: true });
   // P1: the run records its own intent — the effective plan persists beside
   // the outcomes it produced, so the corpus can answer "what was asked".
   writeManifestSnapshot(plan.resultsDir, effectivePlanDoc(plan));
