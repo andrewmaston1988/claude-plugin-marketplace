@@ -1498,6 +1498,8 @@ test("statusline install: writes the self-resolving shim into ~/.swarm and print
     ok(existsSync(shim), "shim written");
     ok(r.stdout.includes('"statusLine"'), r.stdout);
     ok(r.stdout.includes(shim.replaceAll("\\", "/")), "forward-slash path in the snippet");
+    // Without it the harness repaints only on conversation updates: an idle session's bar freezes.
+    ok(/"refreshInterval": \d+/.test(r.stdout), r.stdout);
     // a fake registry whose installPath is THIS working tree: the shim must resolve through it
     const registry = join(dir, "installed_plugins.json");
     const pluginRoot = join(import.meta.dirname, "..");

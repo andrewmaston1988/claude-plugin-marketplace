@@ -124,22 +124,23 @@ test("routeGuard: only the exact-latest sequence commits — anything older, or 
   assert.equal(routeGuard(3, 2), false, "a sequence the counter never issued discards — `>=` here is the off-by-one that lets stale builds through");
 });
 
-test("coalesce: a burst of requests arms one scheduled run, and the latch resets after it fires (L10)", () => {
-  const { coalesce } = loadLive();
-  const scheduled = [];
-  const request = coalesce((fn) => scheduled.push(fn));
+test("singleFlight: a burst during a build earns exactly one trailing build, and the flight frees after it (L10)", async () => {
+  const { singleFlight } = loadLive();
+  const settle = [];
   let ran = 0;
-  request(() => ran++);
-  request(() => ran++);
-  request(() => ran++);
-  assert.equal(scheduled.length, 1, "three requests, one scheduled run");
-  assert.equal(ran, 0, "nothing runs until the scheduler fires");
-  scheduled.pop()();
-  assert.equal(ran, 1, "exactly one route ran");
-  request(() => ran++);
-  assert.equal(scheduled.length, 1, "the latch reset — a later burst schedules again");
-  scheduled.pop()();
-  assert.equal(ran, 2);
+  const request = singleFlight(() => { ran++; return new Promise((r) => settle.push(r)); });
+  const tick = () => new Promise((r) => setTimeout(r, 0));
+  request(); await tick();
+  assert.equal(ran, 1, "the first request builds");
+  request(); request(); request(); request(); await tick();
+  assert.equal(ran, 1, "requests during a build start nothing");
+  settle.shift()(); await tick();
+  assert.equal(ran, 2, "exactly one trailing build for the whole burst");
+  settle.shift()(); await tick();
+  assert.equal(ran, 2, "no burst during the trailing build, no third");
+  request(); await tick();
+  assert.equal(ran, 3, "the flight freed — a later request builds at once");
+  settle.shift()();
 });
 
 // ── show-all: the Show all N row and the expand query it drives ───────────

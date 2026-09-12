@@ -1047,7 +1047,9 @@ async function main() {
         const cmd = `node ${shim.replaceAll("\\", "/")}`;
         out(`statusline: shim written to ${shim} — it resolves the installed plugin on every paint, so plugin updates never break it.`);
         out("Add to ~/.claude/settings.json (edit the file in place; a symlinked settings.json must not be replaced):");
-        out(JSON.stringify({ statusLine: { type: "command", command: cmd } }, null, 2));
+        // refreshInterval (seconds): without it the harness repaints only on conversation
+        // updates, so an idle session's bar freezes on its dispatch-time counts.
+        out(JSON.stringify({ statusLine: { type: "command", command: cmd, refreshInterval: 5 } }, null, 2));
         return 0;
       }
       case "install": {

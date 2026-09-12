@@ -268,7 +268,20 @@
   const runState = (r) => { const b = r.byState || {}; if (r.stopped) return "bad"; if (b.failed || b["failed:timeout"] || b["failed:stopped"] || b.blocked) return "bad"; if (b.running || b.retrying) return "run"; if (b["rate-limited"] || b.quota) return "warn"; if (r.active) return "run"; return "ok"; };
   const dot = (c, ring) => `<svg class="rail" viewBox="0 0 56 56" width="56" height="56" preserveAspectRatio="none"><path d="M12 0v56" stroke="var(--rule)" stroke-width="2"/><circle cx="12" cy="28" r="5" fill="${COLOR[c]}"/>${ring ? '<circle class="ring" cx="12" cy="28" r="9"/>' : ""}</svg>`;
 
-  const api = async (p) => { const r = await fetch(q(p), { cache: "no-store" }); if (!r.ok) throw new Error(`${r.status} ${p}`); return r.json(); };
+  // A hung request would hold the single in-flight route build forever.
+  const FETCH_TIMEOUT_MS = 20000;
+  const api = async (p) => {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const r = await fetch(q(p), { cache: "no-store", signal: ac.signal });
+      if (!r.ok) throw new Error(`${r.status} ${p}`);
+      return await r.json();
+    } catch (e) {
+      if (e && e.name === "AbortError") throw new Error(`timed out after ${FETCH_TIMEOUT_MS / 1000}s: ${p}`);
+      throw e;
+    } finally { clearTimeout(timer); }
+  };
 
   // Partial updates: render to markup, then patch the live DOM in place — attributes
   // and text updated, elements kept — so a rerender never recreates the spinning
@@ -1005,9 +1018,10 @@
       commitView({ view: v, html: `<div class="empty">${esc(e.message)}</div>` });
     }
   }
-  // Event-driven callers (SSE, the poll, the toggles) coalesce onto one route per
-  // microtask; hashchange calls route() directly — navigation never queues behind a
-  // latch. Identity until live.js loads, swapped at boot for window.swarmLive.coalesce.
+  // Event-driven callers (SSE, the poll, the toggles) share one in-flight route build
+  // plus one trailing rebuild; hashchange calls route() directly — navigation never
+  // queues behind a refresh. Identity until live.js loads, swapped at boot for
+  // window.swarmLive.singleFlight(route).
   let requestRoute = (fn) => fn();
   // One delegated click handler for everything in main: navigation rows and the
   // wave toggle. forEach groups and manifest nodes no longer accordion — (h) split
@@ -1114,7 +1128,7 @@
   // live.js is a hard dependency of buildRows/renderRunHtml — unlike perf.js, a
   // failed load must not route into a TypeError; it renders the empty panel instead.
   loadScript("/live.js").then(() => {
-    requestRoute = window.swarmLive.coalesce(queueMicrotask);
+    requestRoute = window.swarmLive.singleFlight(route);
     route(); connect(); startTimers();
   }).catch((e) => {
     commitView({ html: `<div class="empty">${esc(e.message)}</div>` });
