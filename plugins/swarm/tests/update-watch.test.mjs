@@ -188,11 +188,16 @@ test("update watcher: defaultSpawnReplacement (D4a) goes through spawnLoggedDaem
       return { pid: 4242, unref: () => {} };
     };
     const _openSync = () => 99; // a fake fd -- proof the log path went through openSync, not "ignore"
-    const res = await defaultSpawnReplacement([process.execPath, "C:\\s\\serve.mjs", "scripts/swarm.mjs", "serve"], home, { _spawn, _openSync });
+    const closed = [];
+    const _closeSync = (fd) => { closed.push(fd); };
+    const res = await defaultSpawnReplacement([process.execPath, "C:\\s\\serve.mjs", "scripts/swarm.mjs", "serve"], home, { _spawn, _openSync, _closeSync });
     assert.deepEqual(res, { ok: true, pid: 4242 });
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0].opts.stdio, ["ignore", 99, 99], "stdout/stderr must be real fds so a crash before the replacement's own pid write still leaves a stack trace, never stdio: \"ignore\"");
     assert.equal(calls[0].opts.detached, true);
+    // The long-lived daemon runs this on every handover attempt: the parent's copy
+    // of the fd must be closed, or each failed attempt leaks one (code review dash-cr-1).
+    assert.deepEqual(closed, [99], "the parent closes its log fd after the spawn");
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 

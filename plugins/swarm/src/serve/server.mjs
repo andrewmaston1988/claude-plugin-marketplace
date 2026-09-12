@@ -54,6 +54,7 @@ function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Wor
   const spawn = () => {
     worker = new _Worker(ESTATE_WORKER, { workerData: { home, pollMs, heartbeatMs, quietWarnMs } });
     worker.on("message", (msg) => {
+      if (msg?.type === "build-error") { dlog("estate-worker", { event: "build-error", msg: msg.msg }); return; }
       if (msg?.type !== "snapshot") return;
       backoffMs = 1000;
       notify({ version: msg.version, rows: msg.rows });
@@ -69,23 +70,36 @@ function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Wor
   };
   spawn();
 
+  // One fallback timer for every request waiting on the first snapshot: concurrent
+  // cold-start requests share a single in-thread build instead of one scan each.
+  let fallbackTimer = null;
   return {
     current() {
       if (latest) return Promise.resolve(latest);
       return new Promise((resolve) => {
         waiters.push(resolve);
-        _setTimeout(() => {
-          const i = waiters.indexOf(resolve);
-          if (i === -1) return; // already resolved by a snapshot in the meantime
-          waiters.splice(i, 1);
+        if (fallbackTimer) return;
+        fallbackTimer = _setTimeout(() => {
+          fallbackTimer = null;
+          if (latest || closed || !waiters.length) return;
           dlog("estate-worker", { event: "fallback", msg: "in-thread snapshot" });
-          resolve(buildSnapshot(home, new Map(), { now: Date.now(), heartbeatMs, quietWarnMs }));
+          notify(buildSnapshot(home, new Map(), { now: Date.now(), heartbeatMs, quietWarnMs }));
         }, _firstWaitMs);
       });
     },
     refresh() { try { worker?.postMessage({ type: "refresh" }); } catch {} },
     onSnapshot(cb) { listeners.add(cb); },
-    close() { closed = true; clearTimeout(backoffTimer); try { worker?.terminate(); } catch {} },
+    close() {
+      closed = true;
+      clearTimeout(backoffTimer); clearTimeout(fallbackTimer); fallbackTimer = null;
+      try { worker?.terminate(); } catch {}
+      // Nothing may wait on a closed estate: hand pending requests the last snapshot.
+      const ws = waiters; waiters = [];
+      for (const resolve of ws) resolve(latest ?? { version: "closed", rows: [] });
+    },
+    // An update handover closes the http server and, if the replacement fails,
+    // re-listens on the SAME server — the estate must come back with it.
+    reopen() { if (!closed) return; closed = false; backoffMs = 1000; spawn(); },
   };
 }
 
@@ -435,5 +449,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     handle(req, res).catch((e) => { log(`${req.url}: ${e.message}`); try { send(res, 500, { error: "internal" }); } catch {} });
   });
   server.on("close", () => { stopHub(); estate.close(); });
+  // A handover retake re-listens on this server after `close` — re-arm the estate.
+  server.on("listening", () => estate.reopen?.());
   return server;
 }

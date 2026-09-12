@@ -23,7 +23,11 @@ function singleFlight(fn) {
 }
 
 const rebuild = singleFlight(() => {
-  const snapshot = buildSnapshot(home, cache, { now: Date.now(), heartbeatMs, quietWarnMs });
+  let snapshot;
+  // A failing build must be visible: report it rather than let singleFlight's
+  // catch swallow it and leave every request on the in-thread fallback, silently.
+  try { snapshot = buildSnapshot(home, cache, { now: Date.now(), heartbeatMs, quietWarnMs }); }
+  catch (e) { parentPort.postMessage({ type: "build-error", msg: String(e?.stack ?? e) }); return; }
   if (snapshot.version === lastVersion) return;
   lastVersion = snapshot.version;
   parentPort.postMessage({ type: "snapshot", version: snapshot.version, rows: snapshot.rows });

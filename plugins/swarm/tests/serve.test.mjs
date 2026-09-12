@@ -1125,6 +1125,49 @@ test("S5b: three consecutive worker exits back off 1s, 2s, 4s before respawning"
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+// An update handover closes the http server, and a failed replacement makes the old
+// daemon re-listen on the SAME server. Closing the estate for good on `close` froze
+// the list silently from then on (code review dash-cr-1).
+test("S7: a server that closes and listens again (handover retake) re-arms its estate worker", async () => {
+  const { home } = seedHome();
+  try {
+    const workers = [];
+    class FakeWorker {
+      constructor() { this.listeners = {}; this.terminated = false; workers.push(this); }
+      on(event, cb) { (this.listeners[event] ||= []).push(cb); return this; }
+      postMessage() {}
+      terminate() { this.terminated = true; }
+    }
+    await withServer({ home, seams: { _Worker: FakeWorker } }, async ({ server }) => {
+      assert.equal(workers.length, 1);
+      await new Promise((r) => server.close(r));
+      assert.equal(workers[0].terminated, true, "close terminates the worker");
+      await new Promise((r) => server.listen(0, "127.0.0.1", r));
+      assert.equal(workers.length, 2, "re-listening spawns a fresh worker");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("S8: concurrent requests before the first snapshot share ONE fallback build", async () => {
+  const { home } = seedHome();
+  try {
+    class SilentWorker {
+      on() { return this; }
+      postMessage() {}
+      terminate() {}
+    }
+    let fallbackTimers = 0;
+    const _setTimeout = (fn, ms) => { if (ms === 40) fallbackTimers++; return setTimeout(fn, ms); };
+    await withServer({ home, seams: { _Worker: SilentWorker, _firstWaitMs: 40, _setTimeout } }, async ({ get }) => {
+      const rs = await Promise.all([get("/api/runs"), get("/api/runs"), get("/api/runs")]);
+      for (const r of rs) assert.equal(r.status, 200);
+      assert.equal(fallbackTimers, 1, "one fallback timer, so one in-thread build, for all three");
+      assert.equal((await get("/api/runs")).status, 200);
+      assert.equal(fallbackTimers, 1, "the fallback snapshot is kept: a later request needs no build");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("S6: a snapshot with a newly active run gets its run.log watched — no root/project event needed", async () => {
   const { home } = seedHome();
   const freshDir = join(home, "runs", "C--code-a", "live-9");

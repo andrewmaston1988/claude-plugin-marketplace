@@ -940,9 +940,10 @@ async function cmdServe(rest) {
   };
   process.on("uncaughtException", crash);
   process.on("unhandledRejection", crash);
-  // Test-only crash triggers, unreachable over HTTP: they exercise the
+  // Test-only crash triggers, armed only under `node --test` (NODE_TEST_CONTEXT), so
+  // a stray exported variable can never crash-loop a real daemon. They exercise the
   // REGISTERED handlers above, never call `crash` directly.
-  if (process.env.SWARM_SERVE_TEST_CRASH === "before-listen") {
+  if (process.env.NODE_TEST_CONTEXT && process.env.SWARM_SERVE_TEST_CRASH === "before-listen") {
     process.nextTick(() => { throw new Error("SWARM_SERVE_TEST_CRASH=before-listen"); });
   }
   const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`) });
@@ -979,7 +980,7 @@ async function cmdServe(rest) {
     throw e;
   }
   writePid(home, { ...record, listening: true }); // the restart/handover protocol reads this
-  if (process.env.SWARM_SERVE_TEST_CRASH === "after-listen") {
+  if (process.env.NODE_TEST_CONTEXT && process.env.SWARM_SERVE_TEST_CRASH === "after-listen") {
     setTimeout(() => { throw new Error("SWARM_SERVE_TEST_CRASH=after-listen"); }, 20);
   }
   out(`dashboard: serving ~/.swarm/runs on port ${port}`);
