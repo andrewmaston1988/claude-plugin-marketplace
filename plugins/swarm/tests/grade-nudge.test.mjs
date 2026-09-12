@@ -7,7 +7,7 @@ import { equal, deepEqual, ok, match } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync } from "node:fs";
 import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
-import { decideGradeNudge, ungradedRuns, lastRunStart } from "../src/grade-nudge.mjs";
+import { decideGradeNudge, ungradedRuns, lastRunStart, runGradeable } from "../src/grade-nudge.mjs";
 import { gradedRunKeys } from "../src/scores.mjs";
 import { waiverPath } from "../src/results.mjs";
 
@@ -276,6 +276,18 @@ test("the walk never reads the run.log of a run it can skip on a cheap predicate
     deepEqual(runs.map((r) => basename(r.dir)), ["ungraded-1"]);
     equal(read.length, 1, "only the one run that survives the cheap predicates has its log read");
     ok(read[0].includes("ungraded-1"), `the single read was ${read[0]}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("runGradeable: a waived run asks nothing — the closing block and digest footer share the Stop hook's escape", () => {
+  const home = tmp();
+  try {
+    const dir = runDir(home, { name: "waivable-1", starts: [{ launcher: "me" }] });
+    equal(runGradeable(dir, { cfg: GRADING_ON, graded: new Set() })?.count, 1, "control: an unwaived run with one leaf must ask");
+    writeFileSync(waiverPath(dir), JSON.stringify({ waivedAt: new Date().toISOString(), reason: "smoke" }));
+    equal(runGradeable(dir, { cfg: GRADING_ON, graded: new Set() }), undefined);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
