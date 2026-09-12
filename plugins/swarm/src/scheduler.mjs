@@ -1,4 +1,4 @@
-import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync, rmSync, appendFileSync } from "node:fs";
 import { freemem } from "node:os";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
@@ -352,7 +352,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
 
 // Execute the plan's dependency graph under the concurrency cap.
 // Returns { summary, summaryPath, digestPath, digestFailed, worktreesKept }.
-export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, _writeSummary = writeSummary } = {}) {
+export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, ask = null, _writeSummary = writeSummary } = {}) {
   const worktree = io.worktree || defaultWorktree;
   const tasks = [...plan.tasks];
   if (plan.digest) tasks.push(buildDigestTask(plan));
@@ -486,7 +486,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   // launcher: the dispatching session's CLAUDE_CODE_SESSION_ID — absent when the
   // engine runs outside a session, so the run belongs to nobody rather than to
   // whoever asks about it next. A resume appends a fresh run-start, re-stamping.
-  appendRunLog(plan.resultsDir, { ts: started, event: "run-start", pid: process.pid, ...(process.env.CLAUDE_CODE_SESSION_ID ? { launcher: process.env.CLAUDE_CODE_SESSION_ID } : {}), tasks: tasks.map((t) => ({ id: t.id, model: t.model })) });
+  appendRunLog(plan.resultsDir, { ts: started, event: "run-start", pid: process.pid, ...(process.env.CLAUDE_CODE_SESSION_ID ? { launcher: process.env.CLAUDE_CODE_SESSION_ID } : {}), ...(ask && { ask: ask.taskId }), tasks: tasks.map((t) => ({ id: t.id, model: t.model })) });
   const runStartMs = io.now();
   const state = new Map(tasks.map((t) => [t.id, "pending"]));
   const durations = new Map();
@@ -677,7 +677,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   // pass's body while reporting success. Invalidation is transitive: in A → B → C,
   // a re-running A invalidates C, which never names A.
   let cachedIds = new Set();
-  if (!force) {
+  if (ask) {
+    // Every task but the one being interrogated is force-skipped, regardless
+    // of its prior state — an ask must reach its target with no dependent or
+    // digest re-running, and no re-run of the target itself.
+    for (const t of tasks) {
+      if (t.id === ask.taskId) continue;
+      record(t, "skipped", null, null);
+    }
+  } else if (!force) {
     for (const t of tasks) {
       const prior = readResult(plan.resultsDir, t.id);
       if (prior && prior.ok === true) cachedIds.add(t.id);
@@ -997,6 +1005,29 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   const launch = (task) => {
     record(task, "running");
     const promise = (async () => {
+      // Ask mode: interrogate the recorded leaf in place. No worktree prepare,
+      // no retry/fallback/digest — this is a single resumed dispatch, and the
+      // leaf's own terminal state must never flip because the interrogation
+      // itself failed (D8): the state recorded below is always "ok".
+      if (ask && task.id === ask.taskId) {
+        const prior = readResult(plan.resultsDir, task.id);
+        const model = ask.model || task.model;
+        const r = await runTask({ ...task, cwd: prior.cwd, model, resume: prior.sessionId }, ask.question, cfg, io, null, streamHooks(task));
+        appendFileSync(join(plan.resultsDir, "results", `${task.id}.ask.log`), `Q: ${ask.question}\nA: ${r.output}\n\n`);
+        const askEntry = {
+          question: ask.question,
+          answer: r.output,
+          ok: r.ok,
+          model,
+          ...(tokenTotal(r.tokens) + (r.tokens?.cacheRead || 0) > 0 && { tokens: r.tokens }),
+          ...(r.sessionId && { sessionId: r.sessionId }),
+        };
+        const updated = { ...prior, asks: [...(prior.asks || []), askEntry] };
+        if (r.ok && r.sessionId) updated.sessionId = r.sessionId;
+        writeResult(plan.resultsDir, task.id, updated);
+        record(task, "ok", r.durationMs, r.tokens, r.ok ? undefined : `ask failed: ${r.output}`);
+        return task.id;
+      }
       if (task.scratchRedirect) mkdirSync(task.cwd, { recursive: true });
       if (task.outputDir) mkdirSync(task.outputDir, { recursive: true });
       // report mode drafts here; the prompt names it, so it must exist
