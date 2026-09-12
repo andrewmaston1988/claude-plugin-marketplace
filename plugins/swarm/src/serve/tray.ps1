@@ -17,6 +17,10 @@ param(
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 
+# Get-TrayAction (D4c): the pure decide-what-to-do-next function the 2s poll
+# below calls every tick.
+. (Join-Path $PSScriptRoot 'tray-decide.ps1')
+
 if (-not $PidFile -or -not $NodeExe -or -not $ShimPath) { exit 1 }
 
 # One tray at a time: a re-exec spawns no new tray (the daemon polls the pid FILE,
@@ -79,15 +83,18 @@ $script:itemOpen.add_Click({
 })
 $menu.Items.Add($script:itemOpen) | Out-Null
 
-$script:itemRestart = New-Object System.Windows.Forms.ToolStripMenuItem
-$script:itemRestart.Text = 'Restart'
 # Through the stable shim, never a baked plugin-cache path — the menu must
 # survive every `claude plugin update`. Start-Process keeps the menu
-# responsive; the poll shows the new daemon as it comes up.
-$script:itemRestart.add_Click({
+# responsive; the poll shows the new daemon as it comes up. Shared by the
+# menu's own Restart click and the poll's auto-restart (D4c).
+function Start-SwarmDaemonRestart {
   Start-Process -FilePath $script:NodeExe -WindowStyle Hidden `
     -ArgumentList @($script:ShimPath, 'scripts/swarm.mjs', 'serve', 'restart')
-})
+}
+
+$script:itemRestart = New-Object System.Windows.Forms.ToolStripMenuItem
+$script:itemRestart.Text = 'Restart'
+$script:itemRestart.add_Click({ Start-SwarmDaemonRestart })
 $menu.Items.Add($script:itemRestart) | Out-Null
 
 $script:itemStop = New-Object System.Windows.Forms.ToolStripMenuItem
@@ -109,11 +116,19 @@ $menu.Items.Add($script:itemExit) | Out-Null
 $script:tray.ContextMenuStrip = $menu
 
 # Poll the pid RECORD (JSON, with a bare-integer fallback for a daemon started
-# before the record format) every 2s. A daemon dead for 5 straight polls exits
-# the tray: the icon must not linger once nothing can bring the daemon back on
-# its own, and 10s comfortably rides out a restart or update handover, after
-# which this poll sees the replacement's new pid.
+# before the record format) every 2s, and hand the read to Get-TrayAction
+# (D4c): a daemon dead for 5 straight polls (record present, same pid) either
+# auto-restarts through the shim (like the menu's own Restart) or, past 3
+# restarts in 10 minutes, gives up and reports "crashed" instead of thrashing.
+# A record ABSENT for 5 straight polls (a deliberate `serve stop`) still just
+# exits the tray. $script:lastDeadPid / deadStreak / absentStreak /
+# restartTimestamps persist across ticks; a pid change mid-streak (the
+# daemon's own handover retake landing between polls) is read as healed, not
+# as "still dead".
 $script:deadStreak = 0
+$script:absentStreak = 0
+$script:lastDeadPid = 0
+$script:restartTimestamps = @()
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = 2000
 $timer.add_Tick({
@@ -137,17 +152,52 @@ $timer.add_Tick({
       $proc = Get-Process -Id $daemonPid -ErrorAction SilentlyContinue
       $alive = ($null -ne $proc)
     }
-    if ($alive) {
+
+    $prevLastDeadPid = $script:lastDeadPid
+    $samePid = $true
+    $streakForDecision = 0
+    if ($daemonPid -gt 0 -and -not $alive) {
+      $samePid = ($daemonPid -eq $prevLastDeadPid)
+      if ($samePid) { $script:deadStreak = $script:deadStreak + 1 } else { $script:deadStreak = 1 }
+      $script:lastDeadPid = $daemonPid
+      $script:absentStreak = 0
+      $streakForDecision = $script:deadStreak
+    } elseif ($daemonPid -le 0) {
+      $samePid = $false
+      $script:absentStreak = $script:absentStreak + 1
       $script:deadStreak = 0
+      $script:lastDeadPid = 0
+      $streakForDecision = $script:absentStreak
+    } else {
+      $script:deadStreak = 0
+      $script:lastDeadPid = 0
+      $script:absentStreak = 0
+    }
+
+    $recordPidForDecision = $null
+    if ($daemonPid -gt 0) { $recordPidForDecision = $daemonPid }
+    $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $action = Get-TrayAction -RecordPid $recordPidForDecision -Alive $alive -Streak $streakForDecision `
+      -SamePid $samePid -RestartTimestamps @($script:restartTimestamps) -Now $nowMs
+
+    if ($alive) {
       $script:itemStatus.Text = 'Status: running (PID {0})' -f $daemonPid
       if ($daemonVersion) { $script:itemVersion.Text = 'Version: {0}' -f $daemonVersion }
       else { $script:itemVersion.Text = 'Version: unknown' }
       $script:tray.Text = 'swarm dashboard - running'
+    } elseif ($action -eq 'crashed') {
+      $script:itemStatus.Text = 'Status: crashed - use Restart'
+      $script:tray.Text = 'swarm dashboard - crashed'
     } else {
-      $script:deadStreak = $script:deadStreak + 1
       $script:itemStatus.Text = 'Status: stopped'
       $script:tray.Text = 'swarm dashboard - stopped'
-      if ($script:deadStreak -ge 5) { [System.Windows.Forms.Application]::Exit() }
+    }
+
+    if ($action -eq 'restart') {
+      $script:restartTimestamps = @($script:restartTimestamps) + $nowMs
+      Start-SwarmDaemonRestart
+    } elseif ($action -eq 'exit') {
+      [System.Windows.Forms.Application]::Exit()
     }
   } catch { }
 })
