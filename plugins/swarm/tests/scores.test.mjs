@@ -579,6 +579,19 @@ test("gradedRunKeys: a resultsDir that will not canonicalise is skipped, never m
   deepEqual([...keys], [canonicalRunKey("C:/runs/real-1")]);
 });
 
+// Operator decision 2026-09-12: key graded-ness by <enc>/<name> relative to
+// the runs root, so moving SWARM_HOME or the machine does not orphan grades.
+test("canonicalRunKey: the same run under a runs tree keys the same regardless of the machine/home prefix", () => {
+  const here = canonicalRunKey("C:/Users/andrew/.swarm/runs/C--code-x/local-time-1");
+  const there = canonicalRunKey("D:/elsewhere/.swarm/runs/C--code-x/local-time-1");
+  equal(here, there);
+  equal(here, "c--code-x/local-time-1");
+});
+
+test("canonicalRunKey: a resultsDir outside any runs tree keeps its full normalised path", () => {
+  equal(canonicalRunKey("C:/some/other/place"), "c:/some/other/place");
+});
+
 test("gradedRunKeys: a re-graded (superseded) dir still counts as graded — any row names the dir", () => {
   const first = row({ resultsDir: "C:/runs/review-1", leaf: "a", grades: { adherence: 3, handoff: 3, truthfulness: 3, depth: 3 }, note: "poor" });
   const second = row({ resultsDir: "C:/runs/review-1", leaf: "a" }); // the re-grade: same (dir, leaf) dedupe key
