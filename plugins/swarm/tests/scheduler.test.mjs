@@ -1106,6 +1106,26 @@ test("liveness: a stop file kills every tracked child, writes the summary exactl
   }
 });
 
+test("resume: a stop file leftover from a prior `swarm stop` is cleared on start, so the run is not immediately stopped", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ delayMs: 300, output: "x" }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("leaf", { timeoutMs: 60000 })]);
+    initResultsDir(p.resultsDir);
+    writeFileSync(stopPath(p.resultsDir), "");
+
+    const r = await runPlan(p, { ...CFG, heartbeatSecs: 0.05 }, io);
+
+    equal(r.summary.tasks.find((t) => t.id === "leaf").state, "ok");
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    ok(!logLines.some((l) => l.event === "run-stop"), "a leftover stop file must not stop a fresh engine");
+    ok(!existsSync(stopPath(p.resultsDir)), "the leftover stop file must be removed on start");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("liveness: SIGINT routes through requestStop and stops the run", async () => {
   const dir = tmp();
   try {
