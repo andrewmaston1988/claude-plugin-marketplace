@@ -126,11 +126,8 @@
     });
   }
 
-  // Transitive reduction of the rail's node-key graph: an edge U->N is dropped
-  // once U is also reachable through one of N's OTHER upstreams, so a fan-in
-  // through a join draws once, not once per original ancestor. Ancestor sets
-  // are memoised across the whole map; a `visiting` guard makes a malformed
-  // cycle return an incomplete-but-finite set instead of recursing forever.
+  // Transitive reduction: drop U->N when U is already an ancestor of another of N's
+  // upstreams. `visiting` keeps a malformed cycle finite.
   function reduceEdges(targetsByKey) {
     const cache = new Map();
     function ancestorsOf(key, visiting) {
