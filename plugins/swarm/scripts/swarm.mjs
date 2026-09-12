@@ -31,6 +31,7 @@ const USAGE = `usage: swarm.mjs <command>
   ollama-usage [--cookie '<value>']   ollama.com :cloud weekly-allowance meter (exit 1 when exhausted)
   grade --init <resultsDir>  write grades.json — one skeleton row per model leaf (Claude tiers included), for you to fill in
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
+  grade --waive <resultsDir> --reason "<text>"   excuse a run from grading — writes grade-waiver.json, never a store row
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
   cost                       per-model meter weight from the banked usage history (multiplier vs cheapest measured)
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
@@ -641,6 +642,27 @@ async function cmdGradeFile(path) {
   return 0;
 }
 
+// `grade --waive` — the one escape from the grading nudges (D5): a dir that
+// exists, a reason that says why, tmp+rename so a torn write never leaves a
+// half-written waiver behind. Re-waiving overwrites.
+async function cmdGradeWaive(dir, reason) {
+  const { existsSync, writeFileSync, renameSync } = await import("node:fs");
+  const { waiverPath } = await import("../src/results.mjs");
+  if (!dir || !existsSync(dir)) {
+    err(`swarm: no results dir at ${dir ?? "(none given)"} — grade --waive needs an existing resultsDir`);
+    return 1;
+  }
+  if (!reason || !reason.trim()) {
+    err("swarm: grade --waive needs a non-empty --reason — the waiver is the one escape and must say why");
+    return 1;
+  }
+  const p = waiverPath(dir);
+  writeFileSync(`${p}.tmp`, JSON.stringify({ waivedAt: new Date().toISOString(), reason }, null, 2) + "\n");
+  renameSync(`${p}.tmp`, p);
+  out(p);
+  return 0;
+}
+
 async function readModelsCache() {
   const map = new Map();
   try {
@@ -1185,8 +1207,10 @@ async function main() {
       case "grade": {
         const initDir = getFlag("init", rest);
         const file = getFlag("file", rest);
+        const waiveDir = getFlag("waive", rest);
         if (initDir) return await cmdGradeInit(initDir);
         if (file) return await cmdGradeFile(file);
+        if (waiveDir) return await cmdGradeWaive(waiveDir, getFlag("reason", rest));
         err(USAGE);
         return 1;
       }

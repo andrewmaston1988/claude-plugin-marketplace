@@ -1,6 +1,6 @@
 import { spawnSync, spawn } from "node:child_process";
 import { test } from "node:test";
-import { equal, ok, deepEqual } from "node:assert/strict";
+import { equal, ok, deepEqual, match } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -1618,6 +1618,37 @@ test("run: digest.md carries exactly one grade footer while the run is ungraded,
     equal(off.run().status, 0);
     equal(footers(off.dir), 0, "grading off: no footer");
   } finally { rmSync(off.dir, { recursive: true, force: true }); }
+});
+
+test("A5: grade --waive needs a non-empty reason; writes the waiver file; store rows unchanged", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    const resultsDir = join(dir, "out");
+    mkdirSync(join(resultsDir, "results"), { recursive: true });
+    writeFileSync(join(resultsDir, "results", "one.json"), JSON.stringify({ id: "one", model: "haiku", ok: true }));
+    writeFileSync(join(home, "model-scores.jsonl"), JSON.stringify({ resultsDir, leaf: "other" }) + "\n");
+    const before = readFileSync(join(home, "model-scores.jsonl"), "utf8");
+
+    const noReason = runCli(["grade", "--waive", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(noReason.status, 1, noReason.stdout + noReason.stderr);
+    match(noReason.stderr, /--reason/);
+    ok(!existsSync(join(resultsDir, "grade-waiver.json")), "no waiver written without a reason");
+
+    const r = runCli(["grade", "--waive", resultsDir, "--reason", "smoke"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    const waiverFile = join(resultsDir, "grade-waiver.json");
+    ok(existsSync(waiverFile), r.stdout);
+    const body = JSON.parse(readFileSync(waiverFile, "utf8"));
+    equal(body.reason, "smoke");
+    ok(typeof body.waivedAt === "string" && !Number.isNaN(Date.parse(body.waivedAt)));
+    ok(r.stdout.includes("grade-waiver.json"), r.stdout);
+
+    equal(readFileSync(join(home, "model-scores.jsonl"), "utf8"), before, "waiving never appends a store row");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("statusline install: writes the self-resolving shim into ~/.swarm and prints the settings.json line; the shim runs the installed plugin's bar", () => {
