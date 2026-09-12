@@ -7,7 +7,8 @@ import http from "node:http";
 import { createServer, safeSegment } from "../src/serve/server.mjs";
 import { RUN_LOG, NOW, buildFixture } from "./fixtures/run-fixture.mjs";
 import { touchHeartbeat, heartbeatPath } from "../src/results.mjs";
-import { listRuns as realListRuns, projectKeys as realProjectKeys } from "../src/runlog.mjs";
+import { listRuns as realListRuns, projectKeys as realProjectKeys, readRun as realReadRun } from "../src/runlog.mjs";
+import { buildSnapshot } from "../src/serve/estate.mjs";
 
 const cfg = (over = {}) => ({ quietWarnSecs: 60, dashboard: { port: 0, bind: "127.0.0.1", token: null, ...over } });
 
@@ -35,13 +36,45 @@ function seedHome() {
   return { home, live, done };
 }
 
+// The default `_estate`: rebuilds in-thread on every `current()` (so a test writing a
+// fixture then GETting /api/runs sees it immediately, same as the old per-request
+// scan) plus its own `pollMs` timer (so the poll/watcher-recovery tests, which fire no
+// fs.watch listener at all, still see the clock pick up a change). Tests that care
+// about the REAL worker-supervision path inject their own `_estate` or `_Worker`.
+function makeInThreadEstate({ home, now, heartbeatMs, quietWarnMs, pollMs }) {
+  const cache = new Map();
+  let latest = null;
+  const listeners = new Set();
+  const rebuild = () => {
+    const snapshot = buildSnapshot(home, cache, { now: now(), heartbeatMs, quietWarnMs });
+    const changed = !latest || snapshot.version !== latest.version;
+    latest = snapshot;
+    if (changed) for (const cb of listeners) cb(snapshot);
+  };
+  rebuild();
+  const timer = setInterval(rebuild, pollMs);
+  return {
+    current: () => { rebuild(); return Promise.resolve(latest); },
+    refresh: rebuild,
+    onSnapshot: (cb) => listeners.add(cb),
+    close: () => clearInterval(timer),
+  };
+}
+
 async function withServer(opts, fn) {
   const { home } = opts;
   const watchers = [];
   const _watch = (path, listener) => { const w = { path, listener, closed: false, close() { this.closed = true; } }; watchers.push(w); return w; };
+  const dashCfg = opts.cfg || cfg();
+  const now = () => opts.now ?? NOW;
   // _pollMs defaults slow: only the poll tests opt into a fast tick, so no other
   // test's frame counting can be perturbed by a liveness broadcast landing mid-window.
-  const server = createServer({ home, cfg: opts.cfg || cfg(), now: () => opts.now ?? NOW, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30, _pollMs: opts.pollMs ?? 60_000, ...(opts.seams || {}) });
+  const pollMs = opts.pollMs ?? 60_000;
+  const seams = opts.seams || {};
+  const estateSeam = !seams._estate && !seams._Worker
+    ? { _estate: makeInThreadEstate({ home, now, heartbeatMs: Math.max(50, (dashCfg.heartbeatSecs ?? 15) * 1000), quietWarnMs: (dashCfg.quietWarnSecs ?? 60) * 1000, pollMs }) }
+    : {};
+  const server = createServer({ home, cfg: dashCfg, now, _watch, _heartbeatMs: opts.heartbeatMs ?? 60_000, _debounceMs: 30, _pollMs: pollMs, ...estateSeam, ...seams });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const port = server.address().port;
   const get = (path, { raw = false } = {}) => new Promise((resolve, reject) => {
@@ -926,6 +959,190 @@ test("single-run payload derives its label from project keys, never a full estat
       assert.equal(r.body.groupLabel, "a");          // still labelled correctly
       assert.equal(listRunsCalls, 0);                // RED before the fix: this was 1
       assert.equal(keyCalls, 1);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("S1: /api/runs answers three GETs from one cached snapshot — never rescans disk per request", async () => {
+  const { home } = seedHome();
+  let listRunsCalls = 0, readRunCalls = 0;
+  const _listRuns = (...a) => { listRunsCalls++; return realListRuns(...a); };
+  const _readRun = (...a) => { readRunCalls++; return realReadRun(...a); };
+  try {
+    const snapshot = buildSnapshot(home, new Map(), { now: NOW, heartbeatMs: 15_000, quietWarnMs: 60_000, _listRuns, _readRun });
+    listRunsCalls = 0; readRunCalls = 0; // only calls made DURING the GETs below count
+    // A static estate: `current()` always resolves the already-built snapshot, the same
+    // shape /api/runs sees in production between worker snapshots.
+    const estate = { current: () => Promise.resolve(snapshot), refresh: () => {}, onSnapshot: () => {}, close: () => {} };
+    await withServer({ home, seams: { _estate: estate } }, async ({ get }) => {
+      for (let i = 0; i < 3; i++) assert.equal((await get("/api/runs")).status, 200);
+    });
+    assert.equal(listRunsCalls, 0, "no scan on the request path");
+    assert.equal(readRunCalls, 0, "no re-read on the request path");
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("S2: a new snapshot version broadcasts one `runs` frame; the same version again broadcasts none", async () => {
+  const { home } = seedHome();
+  try {
+    let lastVersion = "v0";
+    const listeners = new Set();
+    const estate = {
+      current: () => Promise.resolve({ version: lastVersion, rows: [] }),
+      refresh: () => {},
+      onSnapshot: (cb) => listeners.add(cb),
+      close: () => {},
+      // Mirrors the worker's own version gate (estate-worker.mjs's singleFlight
+      // rebuild): a snapshot only reaches listeners when the version actually moved.
+      push(snapshot) {
+        if (snapshot.version === lastVersion) return;
+        lastVersion = snapshot.version;
+        for (const cb of listeners) cb(snapshot);
+      },
+    };
+    await withServer({ home, seams: { _estate: estate } }, async ({ port }) => {
+      const frames = [];
+      const req = http.get({ host: "127.0.0.1", port, path: "/events" }, (res) => {
+        res.setEncoding("utf8");
+        res.on("data", (c) => frames.push(c));
+      });
+      await new Promise((r) => setTimeout(r, 40));
+      const runsFrames = () => frames.join("").split("\n\n").filter((f) => /^event: runs$/m.test(f)).length;
+      frames.length = 0;
+      estate.push({ version: "v1", rows: [] });
+      await new Promise((r) => setTimeout(r, 40));
+      assert.equal(runsFrames(), 1, "a new version broadcasts once");
+      frames.length = 0;
+      estate.push({ version: "v1", rows: [] });
+      await new Promise((r) => setTimeout(r, 40));
+      req.destroy();
+      assert.equal(runsFrames(), 0, "the same version again broadcasts nothing");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("S3: the default worker estate respawns on exit, and /api/runs keeps answering from the last snapshot", async () => {
+  const { home } = seedHome();
+  try {
+    let spawnCount = 0;
+    const workers = [];
+    class FakeWorker {
+      constructor() { spawnCount++; this.listeners = {}; workers.push(this); }
+      on(event, cb) { (this.listeners[event] ||= []).push(cb); return this; }
+      emit(event, ...args) { for (const cb of this.listeners[event] || []) cb(...args); }
+      postMessage() {}
+      terminate() {}
+    }
+    // `_setTimeout` fires its callback inline: the respawn happens synchronously so
+    // the test never waits on a real backoff timer.
+    await withServer({ home, seams: { _Worker: FakeWorker, _setTimeout: (fn) => { fn(); return 0; } } }, async ({ get }) => {
+      assert.equal(spawnCount, 1, "one worker spawned at boot");
+      workers[0].emit("message", { type: "snapshot", version: "v1", rows: [{ project: "p", name: "n" }] });
+      const before = await get("/api/runs");
+      assert.equal(before.status, 200);
+      assert.deepEqual(before.body.runs.map((r) => r.name), ["n"]);
+      workers[0].emit("exit", 1);
+      assert.equal(spawnCount, 2, "a respawn is triggered on exit");
+      // The estate keeps serving the LAST snapshot until the new worker posts one.
+      const after = await get("/api/runs");
+      assert.equal(after.status, 200);
+      assert.deepEqual(after.body.runs.map((r) => r.name), ["n"]);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("S4: a client whose socket dies is dropped without breaking broadcast to the live one", async () => {
+  const { home } = seedHome();
+  try {
+    await withServer({ home, heartbeatMs: 30 }, async ({ port, watchers }) => {
+      const framesB = [];
+      const reqA = http.get({ host: "127.0.0.1", port, path: "/events" }, (res) => { res.on("data", () => {}); res.on("error", () => {}); });
+      const reqB = http.get({ host: "127.0.0.1", port, path: "/events" }, (res) => {
+        res.setEncoding("utf8");
+        res.on("data", (c) => framesB.push(c));
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      reqA.destroy(); // kill client A's socket mid-connection
+      framesB.length = 0;
+      await new Promise((r) => setTimeout(r, 80)); // at least one more heartbeat tick
+      assert.ok(framesB.some((f) => /^: ping/m.test(f)), "the live client keeps receiving heartbeats after the other dies — the broken one never throws through the broadcast loop");
+      reqB.destroy();
+      // Both sockets are now dead — the hub only stops once `clients` is actually
+      // empty, so seeing it stop proves BOTH were removed (a leaked dead entry
+      // would keep the hub, and its watchers, running forever).
+      await new Promise((r) => setTimeout(r, 80));
+      assert.ok(watchers.length > 0, "watchers were registered while the hub was up");
+      assert.ok(watchers.every((w) => w.closed), "the hub stopped once every client was dropped");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("S5a: a worker that never posts still answers /api/runs — from the in-thread fallback after _firstWaitMs", async () => {
+  const { home } = seedHome();
+  try {
+    class SilentWorker {
+      constructor() { this.listeners = {}; }
+      on(event, cb) { (this.listeners[event] ||= []).push(cb); return this; }
+      postMessage() {}
+      terminate() {}
+    }
+    await withServer({ home, seams: { _Worker: SilentWorker, _firstWaitMs: 30 } }, async ({ get }) => {
+      const r = await get("/api/runs");
+      assert.equal(r.status, 200);
+      assert.ok(Array.isArray(r.body.runs), "the in-thread fallback still answers with a real snapshot");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("S5b: three consecutive worker exits back off 1s, 2s, 4s before respawning", async () => {
+  const { home } = seedHome();
+  try {
+    const scheduled = [];
+    const _setTimeout = (fn, delay) => { scheduled.push({ fn, delay }); return scheduled.length; };
+    const workers = [];
+    class FakeWorker {
+      constructor() { this.listeners = {}; workers.push(this); }
+      on(event, cb) { (this.listeners[event] ||= []).push(cb); return this; }
+      emit(event, ...args) { for (const cb of this.listeners[event] || []) cb(...args); }
+      postMessage() {}
+      terminate() {}
+    }
+    await withServer({ home, seams: { _Worker: FakeWorker, _setTimeout } }, async () => {
+      assert.equal(workers.length, 1, "one worker at boot");
+      workers[0].emit("exit", 1);
+      assert.equal(scheduled[0].delay, 1000, "first respawn waits 1s");
+      scheduled[0].fn(); // manually fire the backoff timer -> spawn() -> a second worker
+      assert.equal(workers.length, 2);
+      workers[1].emit("exit", 1);
+      assert.equal(scheduled[1].delay, 2000, "second respawn waits 2s — doubled");
+      scheduled[1].fn();
+      assert.equal(workers.length, 3);
+      workers[2].emit("exit", 1);
+      assert.equal(scheduled[2].delay, 4000, "third respawn waits 4s — doubled again");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("S6: a snapshot with a newly active run gets its run.log watched — no root/project event needed", async () => {
+  const { home } = seedHome();
+  const freshDir = join(home, "runs", "C--code-a", "live-9");
+  buildFixture(freshDir);
+  try {
+    let notify;
+    const estate = {
+      current: () => Promise.resolve({ version: "v0", rows: [] }),
+      refresh: () => {},
+      onSnapshot: (cb) => { notify = cb; },
+      close: () => {},
+    };
+    await withServer({ home, seams: { _estate: estate } }, async ({ port, watchers }) => {
+      const req = http.get({ host: "127.0.0.1", port, path: "/events" }, (res) => { res.on("data", () => {}); });
+      await new Promise((r) => setTimeout(r, 30));
+      // Nothing but the snapshot notification happens below — no root/project
+      // watcher's listener is ever invoked in this test.
+      notify({ version: "v1", rows: [{ project: "C--code-a", name: "live-9", active: true }] });
+      req.destroy();
+      assert.ok(watchers.some((w) => w.path === join(freshDir, "run.log")), "the newly-active run's run.log is watched from the snapshot alone");
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
