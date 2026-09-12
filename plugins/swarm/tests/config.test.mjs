@@ -191,6 +191,19 @@ test("minFreeMemMb of 0 disables the spawn floor without throwing", () => {
   }
 });
 
+test("minFreeMemMb of 0 (disabled floor) skips the ordering check even with a valve armed above it", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ minFreeMemMb: 0, valveFreeMemMb: 1024 }));
+    const cfg = loadConfig(p);
+    equal(cfg.minFreeMemMb, 0);
+    equal(cfg.valveFreeMemMb, 1024);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("user config deep-merges over defaults without clobbering siblings", () => {
   const dir = tmp();
   try {

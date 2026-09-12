@@ -85,7 +85,9 @@ export function loadConfig(overridePath, env = process.env) {
   validateProjects(cfg.projects);
   validateMemFloor(cfg, "minFreeMemMb");
   validateMemFloor(cfg, "valveFreeMemMb");
-  if (cfg.valveFreeMemMb > cfg.minFreeMemMb) {
+  // minFreeMemMb: 0 is the documented "disabled" sentinel for the spawn floor —
+  // the valve is then the only mechanism, so the ordering check doesn't apply.
+  if (cfg.minFreeMemMb > 0 && cfg.valveFreeMemMb > cfg.minFreeMemMb) {
     throw new Error(`valveFreeMemMb (${cfg.valveFreeMemMb}) must not exceed minFreeMemMb (${cfg.minFreeMemMb}) — the valve would fire before the spawn floor ever parks a leaf; lower valveFreeMemMb or raise minFreeMemMb in ~/.swarm/config.json`);
   }
   return cfg;
