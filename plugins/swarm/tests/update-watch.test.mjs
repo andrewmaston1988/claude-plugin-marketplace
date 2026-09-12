@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { startUpdateWatch } from "../src/serve/update-watch.mjs";
+import { startUpdateWatch, defaultSpawnReplacement } from "../src/serve/update-watch.mjs";
 
 const REGISTRY_NAME = "installed_plugins.json";
 
@@ -177,6 +177,23 @@ test("update watcher: a replacement that never comes up hands the port back to t
     assert.equal(s.calls.spawn.length, 1, "no retry loop on the same version");
     s.handle.stop();
   } finally { rmSync(s.dir, { recursive: true, force: true }); }
+});
+
+test("update watcher: defaultSpawnReplacement (D4a) goes through spawnLoggedDaemon -- real fds, not stdio: \"ignore\"", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-watch-spawn-"));
+  try {
+    const calls = [];
+    const _spawn = (cmd, args, opts) => {
+      calls.push({ cmd, args, opts });
+      return { pid: 4242, unref: () => {} };
+    };
+    const _openSync = () => 99; // a fake fd -- proof the log path went through openSync, not "ignore"
+    const res = await defaultSpawnReplacement([process.execPath, "C:\\s\\serve.mjs", "scripts/swarm.mjs", "serve"], home, { _spawn, _openSync });
+    assert.deepEqual(res, { ok: true, pid: 4242 });
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].opts.stdio, ["ignore", 99, 99], "stdout/stderr must be real fds so a crash before the replacement's own pid write still leaves a stack trace, never stdio: \"ignore\"");
+    assert.equal(calls[0].opts.detached, true);
+  } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
 test("update watcher: an unwatchable registry dir falls back to slow polling; stop() disarms everything", async () => {

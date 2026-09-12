@@ -9,8 +9,7 @@
 // registry events, the spawner and the clock, and nothing ever re-execs.
 import { watch as fsWatch } from "node:fs";
 import { basename, dirname } from "node:path";
-import { spawn } from "node:child_process";
-import { isStale, isAlive, waitForDaemon, resolveInstalled, readPid } from "./daemon.mjs";
+import { isStale, isAlive, waitForDaemon, resolveInstalled, readPid, spawnLoggedDaemon } from "./daemon.mjs";
 
 // The re-exec argv: through the STABLE shim, never this plugin's sha-versioned
 // cache dir — that dir moves on every update, and a launch path baked to it is
@@ -19,12 +18,12 @@ import { isStale, isAlive, waitForDaemon, resolveInstalled, readPid } from "./da
 // takeover path it writes the pid record itself.
 export const reExecArgv = (shimPath) => [process.execPath, shimPath, "scripts/swarm.mjs", "serve"];
 
-const defaultSpawnReplacement = async (argv) => {
-  try {
-    const child = spawn(argv[0], argv.slice(1), { detached: true, stdio: "ignore", windowsHide: true });
-    child.unref();
-    return { ok: true, pid: child.pid };
-  } catch (e) { return { ok: false, reason: e.message }; }
+// Through the same recipe `serve --daemon` uses (daemon.mjs's spawnLoggedDaemon):
+// a replacement that crashes before writing its own pid record must still leave
+// a stack trace, and `stdio: "ignore"` here was exactly why it did not.
+export const defaultSpawnReplacement = async (argv, home, seams = {}) => {
+  const r = spawnLoggedDaemon(argv, home, seams);
+  return r.ok ? { ok: true, pid: r.pid } : { ok: false, reason: r.reason };
 };
 
 export function startUpdateWatch({
@@ -33,7 +32,7 @@ export function startUpdateWatch({
   debounceMs = 500, pollMs = 250, deadlineMs = 20000, slowPollMs = 5000,
   resolve = () => resolveInstalled({ registry: registryPath }),
   readRecord = () => readPid(home),
-  prepare, spawnReplacement = defaultSpawnReplacement, confirm = null, retake,
+  prepare, spawnReplacement = (argv) => defaultSpawnReplacement(argv, home), confirm = null, retake,
   exit = () => process.exit(0), onStale = () => {}, log = () => {},
   watch = fsWatch,
   setTimeout: _setTimeout = (...a) => setTimeout(...a), clearTimeout: _clearTimeout = (...a) => clearTimeout(...a),
