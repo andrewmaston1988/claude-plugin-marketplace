@@ -497,6 +497,7 @@ test("summarySuperseded: null inputs never supersede", () => {
   assert.equal(summarySuperseded(100, null), false);
   assert.equal(summarySuperseded(100, 50), false, "started before finished — not superseded");
   assert.equal(summarySuperseded(50, 100), true, "started after finished — superseded");
+  assert.equal(summarySuperseded(100, 100), false, "started same ms as finished — a same-ms run owns its own summary, not superseded");
 });
 
 // P1 — the predicate partitions the whole state vocabulary, so there is a case per
