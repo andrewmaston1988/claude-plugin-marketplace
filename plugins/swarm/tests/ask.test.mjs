@@ -224,10 +224,13 @@ test("Q2: mid-ask, runLiveness reports the run live (not finished)", async () =>
   try {
     const spawn2 = fakeSpawnFactory(() => ({ output: STREAM, delayMs: 80 }));
     const runPromise = runPlan(p, SCHED_CFG, makeIo(spawn2), { ask: { taskId: "a", question: "?" } });
-    await sleep(20);
-    const mid = runLiveness(p.resultsDir, { heartbeatMs: 15000 });
-    ok(mid.finishedMs == null && mid.stoppedMs == null && mid.abortedMs == null, JSON.stringify(mid));
-    await runPromise;
+    try {
+      await sleep(20);
+      const mid = runLiveness(p.resultsDir, { heartbeatMs: 15000 });
+      ok(mid.finishedMs == null && mid.stoppedMs == null && mid.abortedMs == null, JSON.stringify(mid));
+    } finally {
+      await runPromise;
+    }
     const after = runLiveness(p.resultsDir, { heartbeatMs: 15000 });
     ok(after.finishedMs != null, JSON.stringify(after));
   } finally {
