@@ -913,8 +913,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       id: `${task.id}[${i}]`,
       // Clones run concurrently, so each needs its OWN tree — inheriting the
       // parent's name would put every clone in one directory. A shared name is
-      // rejected at validation; the private shorthand lands here.
-      ...(task.worktreeName !== undefined && { worktreeName: `${task.id}[${i}]` }),
+      // rejected at validation; the private shorthand lands here. Dash, not
+      // the id's own `[i]` bracket — brackets are invalid in a git ref, and
+      // this name feeds branchNameFor() straight into `git worktree add`.
+      ...(task.worktreeName !== undefined && { worktreeName: `${task.id}-${i}` }),
       ...(task.childPlan
         ? { manifestItem: item, manifestIndex: i }
         : { prompt: substituteItems(base, item, i), promptFinal: true }),

@@ -2351,7 +2351,7 @@ test("forEach clones each get their own private worktree, never the parent's", a
     const r = await runPlan(p, CFG, io);
 
     const names = collectCalls.map((c) => c.name).sort();
-    deepEqual(names, ["fix[0]", "fix[1]"],
+    deepEqual(names, ["fix-0", "fix-1"],
       "each clone needs its own tree — sharing the parent's name races them in one directory");
     equal(r.worktreesKept.length, 2);
   } finally {
@@ -2928,19 +2928,13 @@ test("IS3: integrate's missing-ref throw still fires for a ref absent for a reas
 //
 // F3/F4/F5/F7 hand-build the POST-expansion shape (an aggregate "fix" plus
 // numbered clone leaves) instead of driving it through a real `forEach`
-// template. Reason, found while writing this test: `expandForEach`
-// (scheduler.mjs) unconditionally names every clone's worktree
-// `${parentId}[${i}]` — a literal `[`/`]` in the name — and git rejects
-// brackets in a ref outright (`git check-ref-format`). Any real forEach
-// clone using `isolation: "worktree"` therefore fails at `prepareIsolation`
-// before it ever spawns; this is a pre-existing defect in clone worktree-
-// naming, unrelated to integrate.from resolution, and out of this plan's
-// scope to fix. Hand-building gives clones a valid worktreeName (`fix-0`,
-// `fix-1`) while keeping the bracketed id (`fix[0]`, `fix[1]`) the real
-// CLONE_RE convention and `resolveIntegrateFrom` expect — exercising the
-// real integrate/collect/merge code this plan changes, without tripping
-// the unrelated bug. F6 (zero clones) never mints a clone worktree at all,
-// so it drives a real `forEach` template untouched.
+// template, so they can pin the collect/merge behaviour independently of
+// expansion itself. `expandForEach` mints each clone's worktree as
+// `${parentId}-${i}` (dash — a bracket is not a valid git ref char) while
+// keeping the bracketed id (`fix[0]`, `fix[1]`) the CLONE_RE convention and
+// `resolveIntegrateFrom` expect; F9 below drives a real `forEach` template
+// (non-empty source, `isolation: "worktree"` clones) end to end through
+// actual expansion instead.
 function forEachFixLeaf(over = {}) {
   return integrateLeaf("fix", {
     after: ["src"], worktreeName: "fix",
@@ -3170,6 +3164,57 @@ test("F7: a failed clone blocks integrate exactly as a failed hand-listed source
     equal(states["fix[1]"], "failed");
     equal(states.join, "blocked", "a failed clone's branch is exactly as unusable as any other failed source");
     ok(!existsSync(join(p.resultsDir, "results", "join.json")), "a blocked node never runs, never writes a result");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// F9: drives a REAL forEach template (not fixCloneTasks' hand-built shape)
+// through actual expansion, so a real 3-item source mints 3 real clones and
+// prepareIsolation runs for real on each — this is what the bracketed
+// worktree name broke (see the F3-F7 header comment above).
+test("F9: a real forEach template with a worktree name actually expands and folds back through integrate", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      const pr = promptOf(call);
+      if (cwd.endsWith("wt-feat")) {
+        writeFileSync(join(cwd, "base.txt"), "base\n");
+        commitAllInRepo(cwd, "base");
+        return { output: "done" };
+      }
+      if (pr === "do src") return { output: '{"files":["a","b","c"]}' };
+      const m = /wt-fix-(\d+)$/.exec(cwd);
+      if (m) {
+        writeFileSync(join(cwd, `fix${m[1]}.txt`), `fix ${m[1]}\n`);
+        commitAllInRepo(cwd, `fix ${m[1]}`);
+        return { output: `done-${m[1]}` };
+      }
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 4, goal: "",
+      tasks: [
+        integrateLeaf("helper", { cwd: repo, originalCwd: repo, isolation: { worktree: "feat" }, worktreeName: "feat", timeoutMs: 30000 }),
+        integrateLeaf("src", { cwd: repo, originalCwd: repo, prompt: "do src" }),
+        forEachFixLeaf({ cwd: repo, originalCwd: repo, isolation: { worktree: "fix" }, timeoutMs: 30000 }),
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 30000, after: ["helper", "fix"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["fix"] } },
+      ],
+    };
+    await runPlan(p, CFG, io);
+
+    const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
+    equal(res.ok, true, res.output);
+    equal(res.outputJson.merged.length, 3, "a real 3-item forEach must expand to 3 clones and fold every one back");
+    ok(existsSync(join(p.resultsDir, "wt-feat", "fix0.txt")));
+    ok(existsSync(join(p.resultsDir, "wt-feat", "fix1.txt")));
+    ok(existsSync(join(p.resultsDir, "wt-feat", "fix2.txt")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });

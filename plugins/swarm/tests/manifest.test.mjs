@@ -1362,6 +1362,23 @@ test("a shared worktree name cannot collide with a private worktree task id", ()
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("a forEach task's future clone worktree cannot collide with a real task's own worktree", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "find" }),
+      claudeTask({ id: "fix", after: ["find"], isolation: "worktree",
+        forEach: { from: "find", path: "", maxItems: 3 } }),
+      // expandForEach will mint "fix"'s clones as fix-0/fix-1/fix-2 —
+      // a real task that already owns "fix-1" must be rejected up front,
+      // since neither name can be reserved against the other.
+      claudeTask({ id: "fix-1", isolation: "worktree" }),
+    ] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => /forEach clone worktree "fix-1"/.test(e)), JSON.stringify(errs));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("an ordered chain of three passes validation", () => {
   const dir = tmp();
   try {
