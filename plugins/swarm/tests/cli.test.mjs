@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync, mkdirSync } from "node:fs";
@@ -1546,6 +1546,66 @@ test("statusline install: writes the self-resolving shim into ~/.swarm and print
     equal(out.status, 0, out.stderr);
     equal(out.stdout, "\n", "no live runs → blank bar, exit 0");
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The bug (2026-09-12): `serve restart` against a LIVE daemon on the CURRENTLY
+// installed version hit the `blocksStart` already-running short-circuit — meant
+// for `start` only — before ever reaching the `verb === "restart"` kill/wait/
+// respawn path. A live daemon on the current version is exactly the tray's
+// Restart button case, and it did nothing.
+test("serve restart: a live daemon on the current version is killed and replaced, never short-circuited as already-running", async () => {
+  const dir = tmp();
+  const home = join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "config.json"), JSON.stringify({
+    dashboard: { enabled: true, port: 0, bind: "127.0.0.1", tray: false, autoRestartOnUpdate: false },
+  }));
+  const version = "v-restart-test";
+  const registry = join(dir, "installed_plugins.json");
+  writeFileSync(registry, JSON.stringify({
+    plugins: { "swarm@andrewmaston1988-claude-plugins": [{ scope: "user", installPath: dir, version, lastUpdated: "2026-09-12T00:00:00Z" }] },
+  }));
+  const { writePid, readPid, isAlive, waitForExit } = await import("../src/serve/daemon.mjs");
+
+  // A real, long-lived process standing in for the old daemon — isAlive/kill must
+  // observe a real pid, not a fake one that was never running.
+  const sleeper = spawn(process.execPath, ["-e", "setInterval(()=>{},1e9)"], { stdio: "ignore" });
+  await new Promise((resolve, reject) => { sleeper.once("spawn", resolve); sleeper.once("error", reject); });
+  let daemonPid = null;
+  try {
+    // version matches the registry above → NOT stale, so this is the "already
+    // running, current version" case the short-circuit wrongly caught.
+    writePid(home, { pid: sleeper.pid, port: 0, version, listening: true, startedMs: Date.now() });
+
+    // cwd is the OS tmpdir, not `dir`: the replacement daemon inherits it, and a
+    // daemon cwd'd inside `dir` locks that directory on Windows until well after
+    // the killed process's pid stops answering isAlive, turning cleanup to EPERM.
+    // Async, not runCli's spawnSync: on POSIX the killed sleeper is OUR child, and a
+    // blocked event loop never reaps it — the zombie keeps answering kill(pid, 0) and
+    // restart aborts with "the old daemon did not exit" (Linux CI).
+    const r = await runCliAsync(["serve", "restart"], { cwd: tmpdir(), env: { SWARM_HOME: home, SWARM_PLUGIN_REGISTRY: registry } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(!/already running/.test(r.stdout), `restart must never short-circuit as already-running:\n${r.stdout}`);
+    ok(r.stdout.includes(`stopped pid ${sleeper.pid}`), r.stdout);
+    ok(!isAlive(sleeper.pid), "the old daemon must actually be killed");
+
+    const rec = readPid(home);
+    ok(rec?.pid && rec.pid !== sleeper.pid, `a replacement daemon must be recorded: ${JSON.stringify(rec)}`);
+    daemonPid = rec.pid;
+    ok(r.stdout.includes(`restarted pid ${rec.pid}`), r.stdout);
+  } finally {
+    // Wait for actual exit before rmSync — a killed-but-not-yet-reaped process
+    // still holds its log file open on Windows and turns cleanup into EPERM.
+    if (daemonPid && isAlive(daemonPid)) {
+      try { process.kill(daemonPid); } catch { /* already gone */ }
+      await waitForExit(daemonPid, { sleep: (ms) => new Promise((r) => setTimeout(r, ms)) });
+    }
+    if (isAlive(sleeper.pid)) {
+      try { process.kill(sleeper.pid); } catch { /* already gone */ }
+      await waitForExit(sleeper.pid, { sleep: (ms) => new Promise((r) => setTimeout(r, ms)) });
+    }
     rmSync(dir, { recursive: true, force: true });
   }
 });
