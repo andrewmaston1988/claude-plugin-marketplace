@@ -40,7 +40,6 @@ export function readRunLog(content, { now = Date.now() } = {}) {
   let roster = [];
   let startedMs = null;
   let enginePid = null;
-  let ask = null;
   const state = new Map();
   const tokens = new Map();
   const durations = new Map();
@@ -63,7 +62,6 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       roster = (entry.tasks || []).map((t) => (typeof t === "string" ? { id: t, model: "?" } : t));
       startedMs = Date.parse(entry.ts) || now;
       enginePid = Number.isInteger(entry.pid) ? entry.pid : null;
-      ask = typeof entry.ask === "string" ? entry.ask : null;
       state.clear(); tokens.clear(); durations.clear(); runningSince.clear();
       activity.clear(); lastEvent.clear(); clones.clear(); children.clear();
       continue;
@@ -111,7 +109,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       quietMs: st === "running" && last != null ? now - last : null,
     };
   });
-  return { startedMs, enginePid, ask, tasks };
+  return { startedMs, enginePid, tasks };
 }
 
 // Graph annotations from the manifest snapshot: after / kind / parent / depth,
@@ -181,7 +179,7 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, heartbeat
   dir = resolve(dir);
   const logPath = join(dir, "run.log");
   if (!existsSync(logPath)) return null;
-  const { startedMs, enginePid, ask, tasks: logged } = readRunLog(readFileSync(logPath, "utf8"), { now });
+  const { startedMs, enginePid, tasks: logged } = readRunLog(readFileSync(logPath, "utf8"), { now });
   const manifest = readJson(join(dir, "manifest.json"));
   const { tasks, waves } = topology(logged, manifest);
   const { finishedMs, stoppedMs, abortedMs } = runLiveness(dir, { now, heartbeatMs });
@@ -197,7 +195,6 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, heartbeat
     stoppedMs,
     abortedMs,
     enginePid,
-    ask,
     quietWarnMs,
     tasks,
     waves,
