@@ -103,9 +103,15 @@ export function classifyFailure({ timedOut, output, stopped }, quotaPatterns = D
 }
 
 // The valve's target pick. Undefined when no id currently reads "running" —
-// a stale `running` entry mid-settle must be a no-op, never a crash.
-export function pickNewestRunning(ids, state, startedAt) {
-  const runningIds = ids.filter((id) => state.get(id) === "running");
+// a stale `running` entry mid-settle must be a no-op, never a crash. `state`
+// lags real liveness until the terminal record() call, so also require the
+// child process itself to still be alive.
+export function pickNewestRunning(ids, state, startedAt, children) {
+  const alive = (id) => {
+    const child = children.get(id);
+    return child != null && child.exitCode === null && child.signalCode === null;
+  };
+  const runningIds = ids.filter((id) => state.get(id) === "running" && alive(id));
   if (runningIds.length === 0) return undefined;
   return runningIds.reduce((a, b) => ((startedAt.get(b) ?? 0) > (startedAt.get(a) ?? 0) ? b : a));
 }
@@ -711,7 +717,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     // dying to an OOM. Only when there is a second running leaf to fall back
     // to; children.get may already be gone if it settled between ticks.
     if (running.size > 1 && memLow(cfg.valveFreeMemMb)) {
-      const newest = pickNewestRunning([...running.keys()], state, startedAt);
+      const newest = pickNewestRunning([...running.keys()], state, startedAt, children);
       if (newest !== undefined) {
         memoryStopped.add(newest);
         try { children.get(newest)?.kill(); } catch { /* already gone */ }
@@ -1085,8 +1091,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       // token count) in the raw stream would misread them as transient.
       // A leaf the valve just killed produced no output text classifyFailure
       // could ever match — memoryStopped is set directly by the heartbeat, so
-      // it is checked ahead of everything else, even a stray r.ok race.
-      const isMemoryStop = memoryStopped.has(task.id);
+      // it is checked ahead of everything else, even a stray r.ok race. The
+      // `!r.ok` guard covers the valve racing a leaf that had already exited
+      // ok: pickNewestRunning excludes dead children, but the flag can still
+      // be set from the same tick that kills a genuinely live one, so clear
+      // it unconditionally here to avoid leaking a stale entry either way.
+      const isMemoryStop = memoryStopped.has(task.id) && !r.ok;
+      memoryStopped.delete(task.id);
       const st = isMemoryStop ? "memory"
         : r.ok ? "ok"
         : r.schemaErrors ? "failed"
@@ -1134,7 +1145,6 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       // D4/D5: land the valve's kill as a park, not a retry — it never
       // touches attempts, so it can never exhaust a leaf's retry budget.
       if (isMemoryStop) {
-        memoryStopped.delete(task.id);
         parkForMemory(task);
         return task.id;
       }

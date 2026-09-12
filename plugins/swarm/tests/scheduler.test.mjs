@@ -243,13 +243,31 @@ test("classifyFailure: ollama detection survives an overridden quotaPatterns", (
 test("pickNewestRunning: no id currently reads 'running' -> undefined, no throw", () => {
   const state = new Map([["a", "retrying"], ["b", "ok"]]);
   const startedAt = new Map([["a", 10], ["b", 20]]);
-  equal(pickNewestRunning(["a", "b"], state, startedAt), undefined);
+  equal(pickNewestRunning(["a", "b"], state, startedAt, new Map()), undefined);
 });
 
 test("pickNewestRunning: picks the later-started running id", () => {
   const state = new Map([["a", "running"], ["b", "running"]]);
   const startedAt = new Map([["a", 10], ["b", 20]]);
-  equal(pickNewestRunning(["a", "b"], state, startedAt), "b");
+  const children = new Map([
+    ["a", { exitCode: null, signalCode: null }],
+    ["b", { exitCode: null, signalCode: null }],
+  ]);
+  equal(pickNewestRunning(["a", "b"], state, startedAt, children), "b");
+});
+
+// VALVE RACE: `state` stays "running" until the terminal record() call, which
+// lands after settle() → enforceReturns → collect() → writeResult — a leaf
+// whose child has already exited (settle ran, record() hasn't caught up) must
+// never be the valve's pick just because `state` hasn't caught up yet.
+test("pickNewestRunning: a dead child is skipped even though its state still reads 'running'", () => {
+  const state = new Map([["a", "running"], ["b", "running"]]);
+  const startedAt = new Map([["a", 10], ["b", 20]]); // b started later...
+  const children = new Map([
+    ["a", { exitCode: null, signalCode: null }],   // a: genuinely still alive
+    ["b", { exitCode: 0, signalCode: null }],       // b: already exited ok
+  ]);
+  equal(pickNewestRunning(["a", "b"], state, startedAt, children), "a");
 });
 
 test("retry: rate-limited leaf retries with backoff and succeeds; dependents unharmed", async () => {

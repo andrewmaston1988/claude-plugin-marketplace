@@ -17,16 +17,22 @@ export function fakeSpawnFactory(handler = () => ({})) {
     const child = new EventEmitter();
     child.stdout = new EventEmitter();
     child.stderr = new EventEmitter();
+    // Mirror real ChildProcess: both null while alive, so the valve's
+    // liveness check (exitCode/signalCode) has something real to read.
+    child.exitCode = null;
+    child.signalCode = null;
     let done = false;
     gauge.active++;
     gauge.max = Math.max(gauge.max, gauge.active);
-    const close = (code) => {
+    const close = (code, signal = null) => {
       if (done) return;
       done = true;
       gauge.active--;
+      child.exitCode = signal ? null : code;
+      child.signalCode = signal;
       child.emit("close", code);
     };
-    child.kill = () => close(null);
+    child.kill = () => close(null, "SIGTERM");
     let emitted = false;
     if (spec.outputAtMs != null) {
       setTimeout(() => {
