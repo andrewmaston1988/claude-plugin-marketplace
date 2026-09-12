@@ -341,5 +341,5 @@ function lastRunStart(logPath, mtimeMs, size, readFile = readFileSync) {
 // of summary.json (restore, copy, AV scan) would otherwise mark a finished run
 // superseded, permanently.
 export function summarySuperseded(summaryFinishedMs, lastRunStartMs) {
-  return summaryFinishedMs != null && lastRunStartMs != null && lastRunStartMs >= summaryFinishedMs;
+  return summaryFinishedMs != null && lastRunStartMs != null && lastRunStartMs > summaryFinishedMs;
 }
