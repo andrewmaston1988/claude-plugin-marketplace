@@ -717,9 +717,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         try { children.get(newest)?.kill(); } catch { /* already gone */ }
       }
     }
-    // Re-drive (D3): once memory has recovered past the floor, hand every
-    // parked leaf back to the scheduler loop as pending in one pass.
-    if (memoryParked.size > 0 && !memLow(cfg.minFreeMemMb)) {
+    // Re-drive (D3): once memory has recovered past the floor, OR nothing is
+    // running at all (the spawn floor's own rule: never block the first leaf),
+    // hand every parked leaf back as pending — the floor re-parks the rest.
+    if (memoryParked.size > 0 && (running.size === 0 || !memLow(cfg.minFreeMemMb))) {
       for (const id of memoryParked) {
         state.set(id, "pending");
         activityMap.delete(id);

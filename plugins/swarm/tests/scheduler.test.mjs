@@ -1273,18 +1273,35 @@ test("liveness: SIGINT routes through requestStop and stops the run", async () =
 test("SIGNOFF-2: stop wins over memory-parked leaves — the loop must not hang waiting for memory to clear", async () => {
   const dir = tmp();
   try {
-    const spawn = fakeSpawnFactory(() => ({ output: "a done", delayMs: 20 }));
+    const spawn = fakeSpawnFactory((call) => (promptOf(call) === "do a" ? { output: "a done", delayMs: 20 } : { output: "b", delayMs: 5000 }));
     const io = makeIo(spawn, { freeMemMb: () => 1 }); // permanently starved
     const p = plan(dir, [task("a"), task("b")]);
     const cfg = { ...CFG, minFreeMemMb: 2048, concurrency: 2, heartbeatSecs: 0.05 };
     const runPromise = runPlan(p, cfg, io);
-    // let a finish and b sit parked, then request stop
+    // let a finish (b redrives and starts running under Fix 3), then request stop
     setTimeout(() => writeFileSync(stopPath(p.resultsDir), ""), 150);
     const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("runPlan hung: stop did not win over a memory-parked leaf")), 3000));
     const r = await Promise.race([runPromise, timeout]);
 
     equal(r.summary.stopped, true);
     equal(r.summary.tasks.find((t) => t.id === "b").state, "failed:stopped");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("SIGNOFF-3: memory never recovers — the redrive must still keep one leaf moving at a time", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "done", delayMs: 20 }));
+    const io = makeIo(spawn, { freeMemMb: () => 1 }); // permanently starved, never recovers
+    const p = plan(dir, [task("a"), task("b"), task("c")]);
+    const cfg = { ...CFG, minFreeMemMb: 2048, concurrency: 3, heartbeatSecs: 0.05 };
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("runPlan stalled: no leaf ever re-drove under a permanently low memory floor")), 3000));
+    const r = await Promise.race([runPlan(p, cfg, io), timeout]);
+
+    equal(spawn.gauge.max, 1, "never more than one leaf running at once under the floor");
+    for (const id of ["a", "b", "c"]) equal(r.summary.tasks.find((t) => t.id === id).state, "ok");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
