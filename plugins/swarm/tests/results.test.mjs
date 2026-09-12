@@ -404,6 +404,7 @@ test("formatClosing counts memory parks, pluralised, and stays silent when there
   const many = formatClosing({ ...base, memoryParks: 3 });
   ok(many.includes("3 leaf parks"), many);
   ok(many.includes("low memory"), many);
+  ok(many.trimEnd().endsWith("; nothing to do."), many);
   ok(!formatClosing(base).includes("low memory"), "no memory line when nothing parked");
   ok(!formatClosing({ ...base, memoryParks: 0 }).includes("low memory"), "no memory line when count is 0");
 });

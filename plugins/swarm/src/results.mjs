@@ -477,7 +477,7 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
   // A memory park is normal operation, not a failure — the engine handled the
   // machine running low, and every parked leaf resumed. Say so once, with a count.
   if (memoryParks > 0) {
-    lines.push(dim(`${memoryParks} leaf park${memoryParks === 1 ? "" : "s"} for low memory — handled`));
+    lines.push(dim(`${memoryParks} leaf park${memoryParks === 1 ? "" : "s"} for low memory; nothing to do.`));
   }
   // LAST, and printed by the engine — not left to the session's memory. Which
   // model to use for what is otherwise decided by remembered incidents, and the
