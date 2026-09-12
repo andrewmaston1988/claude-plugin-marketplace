@@ -438,6 +438,26 @@ function validateWorktreeGroups(rawTasks, errors, label) {
         `worktree of the same name — both resolve to wt-${name}. Rename one.`);
     }
   }
+
+  // A forEach task's clones don't exist yet at validation time, but
+  // expandForEach (scheduler.mjs) will mint each one's worktree as
+  // `${id}-${i}` once it runs — the same filename-safe charset a real task's
+  // own worktree name is allowed to use. Catch the collision now, since no
+  // separator can be reserved against an author's own choice.
+  for (const t of rawTasks) {
+    if (t.forEach === undefined || resolveWorktreeName(t) === undefined) continue;
+    const maxItems = t.forEach.maxItems;
+    if (!Number.isInteger(maxItems) || maxItems < 1) continue;
+    for (let i = 0; i < maxItems; i++) {
+      const cloneName = `${t.id}-${i}`;
+      const clash = rawTasks.find((o) => o !== t && resolveWorktreeName(o) === cloneName);
+      if (clash) {
+        errors.push(
+          `${label(t)}: forEach clone worktree "${cloneName}" would collide with task '${clash.id}', ` +
+          `which already resolves to that same worktree name — rename '${clash.id}''s worktree.`);
+      }
+    }
+  }
 }
 
 // `itemAllowed`: child tasks under a forEach parent node may read {{item}}
@@ -617,11 +637,6 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
           const src = rawTasks.find((o) => o.id === srcId);
           if (src && src.isolation === undefined) {
             errors.push(`${l}: integrate.from '${srcId}' has no worktree, so it has no branch to merge — give '${srcId}' an isolation block`);
-          } else if (src && src.forEach !== undefined) {
-            errors.push(
-              `${l}: integrate.from '${srcId}' is a forEach task — its clones own the branches ` +
-              `('${srcId}[0]', '${srcId}[1]', …) and '${srcId}' itself never gets one. ` +
-              `Merge a single-tree task instead.`);
           } else if (src && src.when !== undefined) {
             errors.push(
               `${l}: integrate.from '${srcId}' is when-gated — if its gate is false it is skipped ` +

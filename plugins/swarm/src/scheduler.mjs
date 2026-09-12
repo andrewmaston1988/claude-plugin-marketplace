@@ -539,6 +539,20 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   // when empty, because the merge needs the ref, not its contents.
   const integrateSources = new Set(tasks.flatMap((t) => t.integrate?.from ?? []));
 
+  // A forEach parent named in integrate.from owns no branch itself — its clones
+  // do. A clone's own id is never authored into integrate.from (it doesn't
+  // exist until expansion), so its protection is inherited from its parent.
+  const cloneParentOf = (id) => { const m = /^(.+)\[\d+\]$/.exec(id); return m?.[1]; };
+  const isIntegrateSourceId = (id) => integrateSources.has(id) || integrateSources.has(cloneParentOf(id));
+
+  // integrate.from naming a forEach parent means every clone that expanded
+  // from it, resolved at merge time in index order — the parent itself never
+  // gets a branch (D1, foreach-integrate-fold-back). A plain id passes through.
+  const resolveIntegrateFrom = (fromList) => fromList.flatMap((id) => {
+    const t = tasks.find((o) => o.id === id);
+    return t?.aggregate ? t.after : [id];
+  });
+
   const groupMembers = new Map();   // name -> [task ids, in manifest order]
   const groupFinal = new Map();
   const groupFirst = new Map();
@@ -845,7 +859,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     const t0 = io.now();
     let result;
     try {
-      const sources = task.integrate.from.map(branchOf);
+      const sources = resolveIntegrateFrom(task.integrate.from).map(branchOf);
       const out = worktree.integrate(
         { ...task, worktreeName: task.integrate.into, sources }, cfg, plan.resultsDir,
         { repo: task.originalCwd || plan.cwd });
@@ -899,8 +913,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       id: `${task.id}[${i}]`,
       // Clones run concurrently, so each needs its OWN tree — inheriting the
       // parent's name would put every clone in one directory. A shared name is
-      // rejected at validation; the private shorthand lands here.
-      ...(task.worktreeName !== undefined && { worktreeName: `${task.id}[${i}]` }),
+      // rejected at validation; the private shorthand lands here. Dash, not
+      // the id's own `[i]` bracket — brackets are invalid in a git ref, and
+      // this name feeds branchNameFor() straight into `git worktree add`.
+      ...(task.worktreeName !== undefined && { worktreeName: `${task.id}-${i}` }),
       ...(task.childPlan
         ? { manifestItem: item, manifestIndex: i }
         : { prompt: substituteItems(base, item, i), promptFinal: true }),
@@ -1165,7 +1181,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         const isChainFollower = (groupMembers.get(wtName)?.length ?? 1) > 1;
         const collected = worktree.collect(task, cfg, wt, {
           isChainFollower,
-          isIntegrateSource: integrateSources.has(task.id),
+          isIntegrateSource: isIntegrateSourceId(task.id),
         });
         result.worktree = collected;
         if (collected.kept) worktreesKept.push({

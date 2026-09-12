@@ -8,7 +8,7 @@ import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationE
 import { resolveRef, listManifests } from "../src/registry.mjs";
 import { discoverModels, writeModelsCache, visibleModels, probeTopModels, deriveCloudName } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
-import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
+import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
@@ -248,6 +248,7 @@ async function cmdValidate(rest) {
         const n = t.childPlan.tasks.filter((c) => c.compute === undefined).length;
         return t.forEach ? `${t.id} ≤ ${t.forEach.maxItems} × ${n} child leaves` : `${t.id} = ${n} child leaves`;
       }),
+      ...integrateCaps(plan.tasks),
     ].join(", ");
     const label = composed.length ? "expansion" : "forEach expansion";
     out(`worst case: up to ${leaves} leaves${caps ? ` after ${label} (${caps})` : ""}${computes.length ? ` · ${computes.length} compute step(s), zero tokens` : ""}`);

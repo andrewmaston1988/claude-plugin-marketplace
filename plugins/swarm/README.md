@@ -236,6 +236,22 @@ Width goes `1 → 2 → 1`: `migrate-x` and `migrate-y` run concurrently in priv
 - **`integrate`** is an agentless node like `compute` — it spends nothing. It merges each named task's branch into the `into` worktree, creating that tree if the chain has not reached it yet.
 - **A conflict is not a failure.** The merge stops with markers left in the tree, the node stays `ok`, and the conflicting paths land in its result — pass `{{result:join}}` to the next leaf and tell it to resolve them. Failing the node instead would turn an ordinary merge conflict into a dead run needing rescue; the next link is a model that can read markers.
 
+### Folding a `forEach` fan-out back — `integrate.from` naming the parent
+
+"Discover N sites, fix each in isolation, fold the results together" is `forEach` writing in worktrees, then `integrate` naming the `forEach` task itself — every clone that actually expanded merges, in index order:
+
+```json
+{ "tasks": [
+    { "id": "find-sites", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: {\"sites\":[…]}" },
+    { "id": "fix", "after": ["find-sites"], "forEach": { "from": "find-sites", "path": "sites", "maxItems": 30 },
+      "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
+
+    { "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
+  ] }
+```
+
+`fix[0]`…`fix[n-1]` own the branches, not `fix` itself — `from: ["fix"]` resolves to those clone branches at merge time, the same way `{{result:fix}}` resolves to their outputs. A capped or empty source array, and a failed clone, behave exactly as they do for a hand-listed `from`: nothing to merge, or a blocked `join`. `validate`'s preview line reuses the `forEach`'s own cap: `join ≤ 30 branches (fix forEach)`.
+
 ## Results layout
 
 ```

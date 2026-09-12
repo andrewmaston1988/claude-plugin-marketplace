@@ -101,6 +101,7 @@ placed. Naming one does not commit the rest of the manifest to it:
 | **a list only known at runtime** | `forEach` — the leaf cloned per item of a dependency's result |
 | **an earlier task's commits** | widening — `isolation.from` seeds private trees from that branch |
 | **several branches at once** | `integrate` — an agentless merge folding them back into one tree |
+| **a `forEach`'s clone branches** | `integrate.from` naming the `forEach` task itself — every clone that expanded, folded back |
 
 **Width changes as often as the work demands.** A fan-out can feed a chain, which can end in
 an `integrate`, which can re-branch into another fan-out, which integrates again — all in one
@@ -272,9 +273,14 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
 
     { "id": "escalate", "after": ["fix", "dedupe"],
       "when": { "from": "dedupe", "expr": "length(value) > 20" },
-      "model": "sonnet", "prompt": "Many sites were touched: {{result:fix}} …" }
+      "model": "sonnet", "prompt": "Many sites were touched: {{result:fix}} …" },
+
+    { "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
   ] }
 ```
+
+`fix`'s clones own branches, not `fix` itself — `join` folds every expanded clone back via
+`integrate.from: ["fix"]` (see topology.md).
 
 - **`compute`** — an agentless step: an expression over `deps['<id>']` (each dependency's JSON output; raw text binds as a string). Zero tokens; the result is a normal task result, so `{{result:}}` and `forEach.from` consume it. Replaces `model`+`prompt` — never combine them.
 - **`forEach`** — clones this leaf once per element of a dependency's JSON array. `from` names a dependency in `after`; `path` selects the array inside its output (`""` = the output itself); **`maxItems` is required — the cap is the approval**. Clones get ids `fix[0]`, `fix[1]`, … and inherit model/effort/fallbackModel/retries/isolation. `{{item}}` (whole element), `{{item.field}}`, `{{index}}` substitute at clone time. Dependents wait for ALL clones; `{{result:fix}}` inlines a JSON array of clone outputs. If the source array exceeds `maxItems` the run proceeds loudly (result field + run.log + closing warning) — never silently.
@@ -313,6 +319,7 @@ field, resolved by the engine at runtime:
 | the leaf must read all of a dependency's output | `{{resultPath:<id>}}` — *Mixed topology* |
 | later leaves must build on an earlier one's **commits** | `isolation.from` — *Mixed topology* |
 | parallel branches must be folded back together | `integrate` — *Mixed topology* |
+| a `forEach`'s clones must be folded back together | `integrate.from` naming the `forEach` task — *Mixed topology* |
 | it's a whole sub-graph | a `manifest` node — *Deeper manifest fields* |
 
 **The one thing that cannot be automated** is a judgement someone must make *between*
@@ -344,6 +351,7 @@ prose. That is why the law above is a law.
 | "The verifier can just be part of the consumer leaf." | A leaf checking its own input is not verification — it has every incentive the finder had. The verifier is its own task, `after` the finder, fed `{{resultPath:}}`, on a different model family. **Observed: a verifier wave folded into its consumer.** |
 | "I know there are six items — I'll write the six leaves out." | If the list comes from a dependency's *output*, the count is a runtime fact and hand-expanding it hardcodes today's answer. `forEach` clones from the actual result. **Observed: hand-expanded static leaves.** |
 | "The branches will merge fine, an integrate node is ceremony." | Sibling private trees never see each other. Without the node the merge silently becomes the next leaf's job, and nothing announces it. **Observed: a dropped integrate node.** |
+| "Clone ids don't exist until runtime, I'll hand-list the leaves I expect." | `integrate.from` accepts the `forEach` task's own id and resolves to every clone that expanded, in order. Hand-listing hardcodes today's count. |
 | "This is basically a fan-out." | You have named a shape before placing a task. Ask the per-task question and see what the answers build — "basically" is the tell that you skipped it. |
 | "The graph is too hard to write, I'll do it in two waves." | Every reason to split has a field (§4). A second manifest is fresh prompts, fresh spend, a full gate — earned only by a judgement a human must make between segments. |
 | "They both touch the repo, so they must be chained." | Output vs edits is the question, not the repo. Leaves editing disjoint files stay parallel in private trees; only accumulation needs a shared tree or `isolation.from`. |
