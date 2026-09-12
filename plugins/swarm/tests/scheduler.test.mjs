@@ -432,6 +432,41 @@ test("M4: the valve kills the newest running leaf under the low-memory floor, an
   }
 });
 
+// M5: a memory park must never consume a retry attempt. A chain of three
+// decoys (d1->d2->d3), each long enough to still be running when the next
+// heartbeat's redrive flips "b" back to pending, gives the valve a partner
+// to fire against three times before "b" ever runs uncontested. With
+// retry.spawnError: 0, any attempt spent on those parks would leave b
+// terminal on the very first kill instead of finishing ok on the fourth.
+test("M5: a valve-killed leaf with a zero retry budget still finishes ok after three parks", async () => {
+  const dir = tmp();
+  try {
+    let nowN = 0;
+    const spawn = fakeSpawnFactory((call) => (
+      promptOf(call) === "do b" ? { output: "b done", delayMs: 300 } : { output: "done", delayMs: 150 }
+    ));
+    const io = makeIo(spawn, { freeMemMb: () => 1, now: () => (nowN += 10) }); // permanently starved
+    const p = plan(dir, [
+      task("d1"),
+      task("d2", { after: ["d1"] }),
+      task("d3", { after: ["d2"] }),
+      task("b"),
+    ], { concurrency: 2 });
+    const cfg = { ...CFG, concurrency: 2, minFreeMemMb: 0, valveFreeMemMb: 2048, heartbeatSecs: 0.05, retry: { spawnError: 0 } };
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("runPlan hung waiting on b's parks")), 5000));
+    const r = await Promise.race([runPlan(p, cfg, io), timeout]);
+
+    equal(spawn.calls.filter((c) => promptOf(c) === "do b").length, 4, "3 killed attempts + 1 clean finish");
+    deepEqual(r.summary.tasks.map((t) => t.state), ["ok", "ok", "ok", "ok"]);
+
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const bParks = logLines.filter((l) => l.id === "b" && l.state === "retrying" && l.note === "memory-park");
+    equal(bParks.length, 3, "b must have been parked for memory exactly three times, never as a retry");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("returns-validation failure classifies failed, not rate-limited, despite 429-shaped transcript noise", async () => {
   const dir = tmp();
   try {
