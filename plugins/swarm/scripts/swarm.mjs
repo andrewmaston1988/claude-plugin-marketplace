@@ -10,7 +10,7 @@ import { discoverModels, writeModelsCache, visibleModels, probeTopModels, derive
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd } from "../src/results.mjs";
+import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
@@ -298,6 +298,20 @@ async function cmdRun(rest) {
       spawn(cmdLine, { shell: true, detached: true, stdio: "ignore" }).unref();
     } catch { /* notification is garnish, never a failure */ }
   };
+  // A second engine on the same resultsDir resumes each leaf's recorded session
+  // alongside the first — two processes driving one Claude session. Only a real
+  // heartbeat file makes a dir "live"; a brand-new or never-run dir has none, and
+  // runLiveness alone can't tell that apart from a genuinely alive engine.
+  const hb = readHeartbeat(plan.resultsDir);
+  if (hb) {
+    const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
+    const live = runLiveness(plan.resultsDir, { heartbeatMs });
+    if (live.finishedMs == null && live.stoppedMs == null && live.abortedMs == null) {
+      err(`swarm: ${plan.resultsDir} already has a live engine (pid ${hb.pid}) — swarm status ${plan.resultsDir} to watch it, swarm stop ${plan.resultsDir} to end it before re-running.`);
+      return 1;
+    }
+  }
+
   plan.estimate = estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")));
 
   // Ground truth, up front: a session that has to reconstruct the run directory
