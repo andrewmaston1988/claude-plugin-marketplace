@@ -31,6 +31,8 @@ import { readRun } from "./runlog.mjs";
 //                         { ts, event: "schema-retry", id }         returns re-ask fired
 //                         { ts, event: "citations", id, checked, drifted, refuted }   N3 mechanical verification
 //                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn
+//   grade-waiver.json   { waivedAt, reason } — written by `swarm grade --waive`; excuses the run from
+//                       ungradedRuns/the grading nudges without ever counting as a grade
 
 export function initResultsDir(dir) {
   mkdirSync(join(dir, "results"), { recursive: true });
@@ -151,6 +153,10 @@ export function heartbeatPath(dir) {
 
 export function stopPath(dir) {
   return join(dir, "stop");
+}
+
+export function waiverPath(dir) {
+  return join(dir, "grade-waiver.json");
 }
 
 export function touchHeartbeat(dir, iso, pid) {
