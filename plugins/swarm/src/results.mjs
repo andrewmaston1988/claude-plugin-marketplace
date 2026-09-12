@@ -114,6 +114,16 @@ export function writeSummary(dir, obj) {
   return p;
 }
 
+export function readSummary(dir) {
+  const p = join(dir, "summary.json");
+  if (!existsSync(p)) return null;
+  try {
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 export function writeDigestMd(dir, text, gradeable) {
   const p = join(dir, "digest.md");
   let out = text.endsWith("\n") ? text : text + "\n";

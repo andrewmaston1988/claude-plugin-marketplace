@@ -9,7 +9,7 @@ import { runPlan } from "../src/scheduler.mjs";
 import {
   initResultsDir, writeResult, readResult, writeManifestSnapshot, heartbeatPath,
 } from "../src/results.mjs";
-import { runLiveness } from "../src/runlog.mjs";
+import { runLiveness, readRun } from "../src/runlog.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import * as defaultWorktree from "../src/worktree.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
@@ -211,7 +211,7 @@ test("Q2: mid-ask, runLiveness reports the run live (not finished)", async () =>
   }
 });
 
-test("Q3: only the asked leaf spawns; dependents and __digest are skipped", async () => {
+test("Q3: only the asked leaf spawns; dependents and __digest keep their finished state", async () => {
   const { dir, plan: p } = await finishedRun(
     [schedTask("a"), schedTask("b", { after: ["a"] })],
     { digest: { model: "haiku", instructions: "sum up" } }
@@ -220,8 +220,10 @@ test("Q3: only the asked leaf spawns; dependents and __digest are skipped", asyn
     const spawn2 = fakeSpawnFactory(() => ({ output: STREAM }));
     const r = await runPlan(p, SCHED_CFG, makeIo(spawn2), { ask: { taskId: "a", question: "?" } });
     equal(spawn2.calls.length, 1, "only the asked leaf spawns");
-    equal(r.summary.tasks.find((t) => t.id === "b").state, "skipped");
-    equal(r.summary.tasks.find((t) => t.id === DIGEST_ID).state, "skipped");
+    // b and the digest already finished "ok" in the prior run — an ask must not
+    // relabel them, since nothing about them re-ran.
+    equal(r.summary.tasks.find((t) => t.id === "b").state, "ok");
+    equal(r.summary.tasks.find((t) => t.id === DIGEST_ID).state, "ok");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -301,6 +303,60 @@ test("Q6: ask in a kept worktree reuses it without calling prepareIsolation", as
     equal(r.summary.tasks.find((t) => t.id === "impl").state, "ok");
     equal(prepareCalls, 0, "the ask never calls prepareIsolation");
     ok(existsSync(join(wtPath, "sentinel.txt")), "the file written before the ask survives");
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", wtPath], { cwd: repo, windowsHide: true });
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("Q8: ask preserves the prior summary and status for every other task, including worktreesKept", async () => {
+  const repo = mkdtempSync(join(tmpdir(), "swarm-ask-repo-"));
+  const dir = mkdtempSync(join(tmpdir(), "swarm-ask-wt3-"));
+  spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo, windowsHide: true });
+  writeFileSync(join(repo, "a.txt"), "hello\n");
+  spawnSync("git", ["add", "."], { cwd: repo, windowsHide: true });
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], { cwd: repo, windowsHide: true });
+  const wtPath = join(dir, "run", "wt-wt");
+  try {
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 4, goal: "",
+      tasks: [
+        { id: "wt", prompt: "do wt", model: "haiku", allowedTools: "Read,Edit,Bash", cwd: repo, originalCwd: repo, scratchRedirect: false, isolation: "worktree", timeoutMs: 5000, after: [] },
+        schedTask("b"),
+        schedTask("c"),
+      ],
+    };
+    const spawn = fakeSpawnFactory((call) => {
+      const m = promptOf(call)?.match(/^do (.+)/);
+      const id = m ? m[1] : "unknown";
+      if (id === "wt") writeFileSync(join(call.opts.cwd, "made-by-leaf.txt"), "output\n"); // uncommitted -> tree kept
+      return { output: streamInit(`s-${id}`, `output for ${id}`) };
+    });
+    await runPlan(p, SCHED_CFG, makeIo(spawn));
+
+    const beforeSummary = JSON.parse(readFileSync(join(p.resultsDir, "summary.json"), "utf8"));
+    equal(beforeSummary.worktreesKept.length, 1);
+    const beforeWt = beforeSummary.tasks.find((t) => t.id === "wt");
+    const beforeC = beforeSummary.tasks.find((t) => t.id === "c");
+    const beforeStatus = readRun(p.resultsDir);
+    const beforeStatusWt = beforeStatus.tasks.find((t) => t.id === "wt");
+    const beforeStatusC = beforeStatus.tasks.find((t) => t.id === "c");
+
+    const spawn2 = fakeSpawnFactory(() => ({ output: STREAM }));
+    const r = await runPlan(p, SCHED_CFG, makeIo(spawn2), { ask: { taskId: "b", question: "?" } });
+
+    equal(JSON.stringify(r.summary.worktreesKept), JSON.stringify(beforeSummary.worktreesKept));
+    equal(JSON.stringify(r.summary.tasks.find((t) => t.id === "wt")), JSON.stringify(beforeWt));
+    equal(JSON.stringify(r.summary.tasks.find((t) => t.id === "c")), JSON.stringify(beforeC));
+
+    const afterStatus = readRun(p.resultsDir);
+    const afterStatusWt = afterStatus.tasks.find((t) => t.id === "wt");
+    const afterStatusC = afterStatus.tasks.find((t) => t.id === "c");
+    equal(afterStatusWt.state, beforeStatusWt.state);
+    equal(afterStatusWt.durationMs, beforeStatusWt.durationMs);
+    equal(afterStatusC.state, beforeStatusC.state);
+    equal(afterStatusC.durationMs, beforeStatusC.durationMs);
   } finally {
     spawnSync("git", ["worktree", "remove", "--force", wtPath], { cwd: repo, windowsHide: true });
     rmSync(dir, { recursive: true, force: true });

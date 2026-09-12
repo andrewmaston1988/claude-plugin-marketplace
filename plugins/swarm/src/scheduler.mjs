@@ -10,7 +10,7 @@ import {
 } from "./digest.mjs";
 import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from "./manifest.mjs";
 import {
-  initResultsDir, resultPath, writeResult, readResult, writeSummary,
+  initResultsDir, resultPath, writeResult, readResult, writeSummary, readSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
   renderProvenance, touchHeartbeat, stopPath, recordedSessionIds,
 } from "./results.mjs";
@@ -678,12 +678,17 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   // a re-running A invalidates C, which never names A.
   let cachedIds = new Set();
   if (ask) {
-    // Every task but the one being interrogated is force-skipped, regardless
-    // of its prior state — an ask must reach its target with no dependent or
-    // digest re-running, and no re-run of the target itself.
+    // Every task but the one being interrogated is frozen out of scheduling —
+    // an ask must reach its target with no dependent or digest re-running, and
+    // no re-run of the target itself. Re-recorded as its TRUE prior state (from
+    // the finished run's summary.json), not a blanket "skipped": readRunLog
+    // rebuilds per-task state from scratch on every run-start line, so replaying
+    // anything else here is what `status` would show for these tasks post-ask.
+    const priorSummary = readSummary(plan.resultsDir);
     for (const t of tasks) {
       if (t.id === ask.taskId) continue;
-      record(t, "skipped", null, null);
+      const priorRow = priorSummary?.tasks?.find((r) => r.id === t.id);
+      record(t, priorRow?.state ?? "skipped", priorRow?.durationMs ?? null, priorRow?.tokens ?? null);
     }
   } else if (!force) {
     for (const t of tasks) {
@@ -1330,28 +1335,52 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   process.off("SIGINT", sigintHandler);
   process.off("SIGTERM", sigtermHandler);
 
-  const summary = {
-    started,
-    finished: new Date().toISOString(),
-    ...(stopRequested && { stopped: true, stopReason }),
-    tasks: tasks.map((t) => ({
-      id: t.id,
-      // model + costUsd feed the estimate corpus (src/estimate.mjs loadCorpus)
-      model: t.model,
-      state: state.get(t.id),
-      durationMs: durations.get(t.id) ?? null,
-      tokens: tokensMap.get(t.id) ?? null,
-      ...(costMap.has(t.id) && { costUsd: costMap.get(t.id) }),
-      resultPath: resultPath(plan.resultsDir, t.id),
-    })),
-    blocked: tasks.filter((t) => state.get(t.id) === "blocked").map((t) => t.id),
-    worktreesKept,
-    totalTokens: [...tokensMap.values()].reduce(addTokens, emptyTokens()),
-    ...(truncations.length && { truncations }),
-    ...(refutations.length && { refutations }),
-    ...(plan.estimate !== undefined && { estimate: plan.estimate }),
-    ...(costWarnFired && { costWarnFired: true }),
-  };
+  // Ask mode changes exactly one row of a run the engine already finished: the
+  // interrogated leaf gains duration/tokens from the ask on top of its prior
+  // totals; every other row, and worktreesKept (nothing here re-collects a
+  // tree), is carried over byte-verbatim from that finished run's summary.json.
+  let summary;
+  if (ask) {
+    const priorSummary = readSummary(plan.resultsDir) ?? { started, tasks: [], worktreesKept: [] };
+    const priorRow = priorSummary.tasks.find((t) => t.id === ask.taskId);
+    const askedRow = {
+      ...(priorRow ?? { id: ask.taskId, model: tasks.find((t) => t.id === ask.taskId)?.model, resultPath: resultPath(plan.resultsDir, ask.taskId) }),
+      state: "ok",
+      durationMs: (priorRow?.durationMs ?? 0) + (durations.get(ask.taskId) ?? 0),
+      tokens: addTokens(priorRow?.tokens ?? emptyTokens(), tokensMap.get(ask.taskId) ?? emptyTokens()),
+    };
+    const mergedTasks = priorSummary.tasks.map((t) => (t.id === ask.taskId ? askedRow : t));
+    summary = {
+      ...priorSummary,
+      finished: new Date().toISOString(),
+      tasks: mergedTasks,
+      worktreesKept: priorSummary.worktreesKept,
+      totalTokens: mergedTasks.reduce((acc, t) => addTokens(acc, t.tokens ?? emptyTokens()), emptyTokens()),
+    };
+  } else {
+    summary = {
+      started,
+      finished: new Date().toISOString(),
+      ...(stopRequested && { stopped: true, stopReason }),
+      tasks: tasks.map((t) => ({
+        id: t.id,
+        // model + costUsd feed the estimate corpus (src/estimate.mjs loadCorpus)
+        model: t.model,
+        state: state.get(t.id),
+        durationMs: durations.get(t.id) ?? null,
+        tokens: tokensMap.get(t.id) ?? null,
+        ...(costMap.has(t.id) && { costUsd: costMap.get(t.id) }),
+        resultPath: resultPath(plan.resultsDir, t.id),
+      })),
+      blocked: tasks.filter((t) => state.get(t.id) === "blocked").map((t) => t.id),
+      worktreesKept,
+      totalTokens: [...tokensMap.values()].reduce(addTokens, emptyTokens()),
+      ...(truncations.length && { truncations }),
+      ...(refutations.length && { refutations }),
+      ...(plan.estimate !== undefined && { estimate: plan.estimate }),
+      ...(costWarnFired && { costWarnFired: true }),
+    };
+  }
   const summaryPath = _writeSummary(plan.resultsDir, summary);
 
   // Report mode: the leaf wrote the body AND its own title; the engine APPENDS a
