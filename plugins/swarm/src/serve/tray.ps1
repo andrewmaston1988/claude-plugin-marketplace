@@ -195,6 +195,10 @@ $timer.add_Tick({
 
     if ($action -eq 'restart') {
       $script:restartTimestamps = @($script:restartTimestamps) + $nowMs
+      # Start the count again: the new daemon takes seconds to write its record, and
+      # every poll in that gap still sees the dead pid — without this reset each one
+      # would fire another restart and trip "crashed" within a few seconds.
+      $script:deadStreak = 0
       Start-SwarmDaemonRestart
     } elseif ($action -eq 'exit') {
       [System.Windows.Forms.Application]::Exit()

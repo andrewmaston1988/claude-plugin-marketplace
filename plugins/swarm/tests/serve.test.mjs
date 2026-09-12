@@ -946,39 +946,41 @@ test("D1: a clone dropped by a contracted expansion has no roster row — its re
 // bites: the payload shape is identical either way.
 test("single-run payload derives its label from project keys, never a full estate scan", async () => {
   const { home } = seedHome();
-  let listRunsCalls = 0, keyCalls = 0;
-  const seams = {
-    _listRuns: (...a) => { listRunsCalls++; return realListRuns(...a); },
-    _projectKeys: (...a) => { keyCalls++; return realProjectKeys(...a); },
-  };
+  let keyCalls = 0;
+  const seams = { _projectKeys: (...a) => { keyCalls++; return realProjectKeys(...a); } };
+  // The estate scan moved into estate.mjs's worker, so createServer has no listRuns
+  // seam to spy on; the server module not importing it at all is the pin.
+  const serverSrc = readFileSync(new URL("../src/serve/server.mjs", import.meta.url), "utf8");
+  assert.ok(!/import\s*\{[^}]*\blistRuns\b[^}]*\}\s*from\s*"\.\.\/runlog\.mjs"/.test(serverSrc),
+    "server.mjs must not import listRuns — the estate worker owns the scan");
   try {
     await withServer({ home, seams }, async ({ get }) => {
-      listRunsCalls = 0; keyCalls = 0;               // ignore anything the boot did
+      keyCalls = 0;                                  // ignore anything the boot did
       const r = await get("/api/runs/C--code-a/live-1");
       assert.equal(r.status, 200);
       assert.equal(r.body.groupLabel, "a");          // still labelled correctly
-      assert.equal(listRunsCalls, 0);                // RED before the fix: this was 1
       assert.equal(keyCalls, 1);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-test("S1: /api/runs answers three GETs from one cached snapshot — never rescans disk per request", async () => {
+// Counting spies here would be decorative: the server never receives them, so a
+// handler that rescanned disk would go uncounted. Instead the snapshot names a run
+// that does not exist on disk — only a handler that reads the snapshot can return it.
+test("S1: /api/runs answers from the estate snapshot, never from a disk scan", async () => {
   const { home } = seedHome();
-  let listRunsCalls = 0, readRunCalls = 0;
-  const _listRuns = (...a) => { listRunsCalls++; return realListRuns(...a); };
-  const _readRun = (...a) => { readRunCalls++; return realReadRun(...a); };
   try {
-    const snapshot = buildSnapshot(home, new Map(), { now: NOW, heartbeatMs: 15_000, quietWarnMs: 60_000, _listRuns, _readRun });
-    listRunsCalls = 0; readRunCalls = 0; // only calls made DURING the GETs below count
-    // A static estate: `current()` always resolves the already-built snapshot, the same
-    // shape /api/runs sees in production between worker snapshots.
+    const onDisk = buildSnapshot(home, new Map(), { now: NOW, heartbeatMs: 15_000, quietWarnMs: 60_000 });
+    const ghost = { ...onDisk.rows[0], project: "C--code-ghost", name: "only-in-the-snapshot", group: "C--code-ghost", groupLabel: "ghost" };
+    const snapshot = { version: "s1", rows: [ghost] };
     const estate = { current: () => Promise.resolve(snapshot), refresh: () => {}, onSnapshot: () => {}, close: () => {} };
     await withServer({ home, seams: { _estate: estate } }, async ({ get }) => {
-      for (let i = 0; i < 3; i++) assert.equal((await get("/api/runs")).status, 200);
+      for (let i = 0; i < 3; i++) {
+        const r = await get("/api/runs");
+        assert.equal(r.status, 200);
+        assert.deepEqual(r.body.runs.map((x) => x.name), ["only-in-the-snapshot"], "the rows come from the snapshot, not the seeded runs dir");
+      }
     });
-    assert.equal(listRunsCalls, 0, "no scan on the request path");
-    assert.equal(readRunCalls, 0, "no re-read on the request path");
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
