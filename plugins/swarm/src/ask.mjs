@@ -45,7 +45,10 @@ export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = m
   const tasks = manifest.tasks.map((t) => (t.id === taskId
     ? { ...t, after: t.after || [], allowedTools: prior.allowedTools || "Read,Grep,Glob", timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
     : { ...t, after: t.after || [] }));
-  await runPlan({ ...manifest, tasks, concurrency: 1 }, cfg, io, { ask: { taskId, question, model } });
+  // An ask is a one-off answer, not a monitored run: no roster/live-view
+  // frames, only the CLI's own answer + tokens line. Suppressing io.snapshot
+  // is what runPlan's paint() checks before rendering anything.
+  await runPlan({ ...manifest, tasks, concurrency: 1 }, cfg, { ...io, snapshot: undefined }, { ask: { taskId, question, model } });
 
   const updated = readResult(resultsDir, taskId);
   const askEntry = updated.asks[updated.asks.length - 1];

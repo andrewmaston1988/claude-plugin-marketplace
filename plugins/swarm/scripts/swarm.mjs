@@ -1200,10 +1200,24 @@ async function main() {
         }
         const [resultsDir, taskId, question] = positional;
         if (!resultsDir || !taskId || !question) { err(USAGE); return 1; }
+        const cfg = getConfig();
+        // Same live-engine refusal as `run` (swarm.mjs:306-314), mirrored here:
+        // an ask dispatches into the same resultsDir a live run's engine owns,
+        // and two processes resuming one Claude session corrupts both.
+        const hb = readHeartbeat(resultsDir);
+        if (hb) {
+          const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
+          const live = runLiveness(resultsDir, { heartbeatMs });
+          if (live.finishedMs == null && live.stoppedMs == null && live.abortedMs == null) {
+            err(`swarm: ${resultsDir} already has a live engine (pid ${hb.pid}) — swarm status ${resultsDir} to watch it, swarm stop ${resultsDir} to end it before asking.`);
+            return 1;
+          }
+        }
         const { askLeaf } = await import("../src/ask.mjs");
         const { formatTokens } = await import("../src/results.mjs");
         const { tokenTotal } = await import("../src/stream.mjs");
-        const r = await askLeaf({ resultsDir, taskId, question, model, cfg: getConfig() });
+        const r = await askLeaf({ resultsDir, taskId, question, model, cfg });
+        if (!r.ok) { err(`swarm: ask failed: ${r.answer}`); return 1; }
         out(r.answer);
         out("");
         out(dim(`tokens: ${formatTokens(tokenTotal(r.tokens))} · session ${r.sessionId} · log: results/${taskId}.ask.log`));
