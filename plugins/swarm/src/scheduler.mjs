@@ -1016,7 +1016,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       // itself failed (D8): the state recorded below is always "ok".
       if (ask && task.id === ask.taskId) {
         const prior = readResult(plan.resultsDir, task.id);
-        const model = ask.model || task.model;
+        // prior.model is what actually ran (post-fallback) and what askLeaf's
+        // governance gate checked — task.model is only the manifest's ask.
+        const model = ask.model || prior.model;
         const r = await runTask({ ...task, cwd: prior.cwd, model, resume: prior.sessionId }, ask.question, cfg, io, null, streamHooks(task));
         appendFileSync(join(plan.resultsDir, "results", `${task.id}.ask.log`), `Q: ${ask.question}\nA: ${r.output}\n\n`);
         const askEntry = {

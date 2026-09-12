@@ -289,6 +289,23 @@ test("Q5: the ask resumes the recorded sessionId, even though the prior result i
   }
 });
 
+test("Q9: with no ask.model override, the ask spawns with the leaf's actual result.model, not its manifest model", async () => {
+  // the leaf's manifest model is "haiku", but its dispatch fell back to
+  // "sonnet" before it ran — result.model is the model that actually ran,
+  // and governance already checked THAT one.
+  const { dir, plan: p } = await finishedRun([schedTask("a")]);
+  try {
+    const prior = readResult(p.resultsDir, "a");
+    writeResult(p.resultsDir, "a", { ...prior, model: "sonnet" });
+    const spawn2 = fakeSpawnFactory(() => ({ output: STREAM }));
+    await runPlan(p, SCHED_CFG, makeIo(spawn2), { ask: { taskId: "a", question: "?" } });
+    const args = spawn2.calls[0].args;
+    equal(args[args.indexOf("--model") + 1], "sonnet");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Q6: ask in a kept worktree reuses it without calling prepareIsolation", async () => {
   const repo = mkdtempSync(join(tmpdir(), "swarm-ask-repo-"));
   const dir = mkdtempSync(join(tmpdir(), "swarm-ask-wt-"));
