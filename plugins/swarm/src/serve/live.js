@@ -126,6 +126,36 @@
     });
   }
 
+  // Transitive reduction: drop U->N when U is already an ancestor of another of N's
+  // upstreams. `visiting` keeps a malformed cycle finite.
+  function reduceEdges(targetsByKey) {
+    const cache = new Map();
+    function ancestorsOf(key, visiting) {
+      if (cache.has(key)) return cache.get(key);
+      if (visiting.has(key)) return new Set();
+      visiting.add(key);
+      const result = new Set();
+      for (const u of targetsByKey.get(key) || []) {
+        result.add(u);
+        for (const a of ancestorsOf(u, visiting)) result.add(a);
+      }
+      visiting.delete(key);
+      cache.set(key, result);
+      return result;
+    }
+    const reduced = new Map();
+    for (const [key, ups] of targetsByKey) {
+      const keep = new Set(ups);
+      for (const u of ups) {
+        for (const v of ups) {
+          if (v !== u && ancestorsOf(v, new Set()).has(u)) { keep.delete(u); break; }
+        }
+      }
+      reduced.set(key, keep);
+    }
+    return reduced;
+  }
+
   // The header's third figure: the disk total of runs, never the rendered set.
   // `finishedTotals` is built by server.mjs from EVERY disk run (the `all` list,
   // not the capped `picked`), so summing it gives the lifetime-per-disk total.
@@ -136,5 +166,5 @@
     return n;
   };
 
-  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay };
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges };
 })();
