@@ -288,6 +288,118 @@ test("retry: backoff park with nothing else running keeps the process alive (exi
   }
 });
 
+// ── memory survivability (D3/D4/D5/D6) ──────────────────────────────────────
+
+test("M1/M2/M5: spawn floor parks a leaf that would exceed it while another runs, costs no attempt, and never gates the one nothing else is running against", async () => {
+  const dir = tmp();
+  try {
+    let n = 0;
+    const freeMemMb = () => (++n <= 1 ? 500 : 99999); // low only for the park check itself
+    const spawn = fakeSpawnFactory(() => ({ output: "done" }));
+    const io = makeIo(spawn, { freeMemMb });
+    const p = plan(dir, [task("a"), task("b")]);
+    const r = await runPlan(p, { ...CFG, minFreeMemMb: 2048, heartbeatSecs: 0.05 }, io);
+
+    equal(spawn.calls.length, 2, "b parked once, never double-dispatched — no attempt spent parking"); // M5
+    deepEqual(r.summary.tasks.map((t) => t.state), ["ok", "ok"]);
+
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const iA_ok = logLines.findIndex((l) => l.id === "a" && l.state === "ok");
+    const iB_retrying = logLines.findIndex((l) => l.id === "b" && l.state === "retrying");
+    const iA_running = logLines.findIndex((l) => l.id === "a" && l.state === "running");
+    ok(iB_retrying >= 0, "b must have been parked");
+    ok(iA_running >= 0 && iA_running < iB_retrying, "a was already running when b parked"); // M1
+    ok(iB_retrying < iA_ok, "b parked before a's own run finished"); // M1
+
+    ok(io.snapshots.some((s) => s.includes("⏸ low memory")), "roster must show the park note"); // M1
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M2: the only task in the plan launches immediately even with memory already below the floor", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "done" }));
+    const io = makeIo(spawn, { freeMemMb: () => 1 }); // permanently starved
+    const p = plan(dir, [task("solo")]);
+    const r = await runPlan(p, { ...CFG, minFreeMemMb: 2048 }, io);
+
+    equal(spawn.calls.length, 1, "the only leaf must not be gated by the floor when nothing else runs");
+    equal(r.summary.tasks[0].state, "ok");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M3: a memory-parked leaf resumes without a per-park timer — real-subprocess liveness regression", async () => {
+  const dir = tmp();
+  try {
+    const fixture = fileURLToPath(new URL("./helpers/memory-park-child.mjs", import.meta.url));
+    const child = nodeSpawn(process.execPath, [fixture, dir], { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "", err = "";
+    child.stdout.on("data", (d) => { out += d; });
+    child.stderr.on("data", (d) => { err += d; });
+    const code = await new Promise((resolve) => child.on("close", resolve));
+    equal(code, 0, `engine child exited ${code}; stderr: ${err.slice(0, 300)}`);
+    deepEqual(JSON.parse(out), { a: "ok", b: "ok" });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M4: the valve kills the newest running leaf under the low-memory floor, and the redrive resumes its session", async () => {
+  const dir = tmp();
+  try {
+    let nowN = 0;
+    let memN = 0;
+    let bCalls = 0;
+    const freeMemMb = () => (++memN === 2 ? 500 : 99999); // low only at the valve's first check
+    const spawn = fakeSpawnFactory((call) => {
+      const p = promptOf(call);
+      if (p === "do a") return { output: "a done", delayMs: 300 };
+      bCalls++;
+      if (bCalls === 1) {
+        return {
+          // init + a mid-response assistant chunk (no stop_reason yet): a
+          // genuine "died mid-stream" shape, so the valve's kill must be
+          // distinguished from that via memoryStopped, not from this text.
+          output: [
+            JSON.stringify({ type: "system", subtype: "init", session_id: "s-b1" }),
+            JSON.stringify({ type: "assistant", message: { id: "m1" } }),
+          ].join("\n") + "\n",
+          outputAtMs: 5,
+          delayMs: 3000, // bounded: without the valve this leaf still ends, giving RED a real (not hung) failure
+        };
+      }
+      return { output: "b done", delayMs: 10 };
+    });
+    const io = makeIo(spawn, { freeMemMb, now: () => (nowN += 10) });
+    const p = plan(dir, [task("a"), task("b")]);
+    const cfg = { ...CFG, minFreeMemMb: 2048, valveFreeMemMb: 1024, heartbeatSecs: 0.05 };
+
+    const peek = new Promise((resolve) => {
+      setTimeout(() => resolve(readResult(p.resultsDir, "b")), 150);
+    });
+    const [r, midB] = await Promise.all([runPlan(p, cfg, io), peek]);
+
+    ok(midB, "expected an interim (killed) result for b before it resumed");
+    equal(midB.ok, false);
+    equal(midB.sessionId, "s-b1");
+    ok(midB.output.includes("low memory"), midB.output);
+    ok(!midB.output.includes("do not kill or diff-hunt"), midB.output);
+
+    equal(bCalls, 2, "b: one killed attempt, one resumed attempt");
+    const ri = spawn.calls.findIndex((c, i) => i > 0 && promptOf(c) === "do b" && c.args.includes("--resume"));
+    ok(ri >= 0, "the resumed spawn for b must carry --resume");
+    equal(spawn.calls[ri].args[spawn.calls[ri].args.indexOf("--resume") + 1], "s-b1");
+
+    deepEqual(r.summary.tasks.map((t) => t.state), ["ok", "ok"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("returns-validation failure classifies failed, not rate-limited, despite 429-shaped transcript noise", async () => {
   const dir = tmp();
   try {

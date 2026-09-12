@@ -54,6 +54,7 @@ export function makeIo(spawn, over = {}) {
     spawn,
     fetch: async () => ({ ok: true }),
     now: () => Date.now(),
+    freeMemMb: () => Infinity,
     stdout: (line) => lines.push(line),
     snapshot: (block) => snapshots.push(block),
     // isolated SWARM_HOME so quota-cache reads/writes never touch the real one

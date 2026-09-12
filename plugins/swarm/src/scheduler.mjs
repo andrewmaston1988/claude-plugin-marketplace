@@ -1,4 +1,5 @@
 import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { freemem } from "node:os";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { buildDispatch, toSpawnable } from "./dispatch.mjs";
@@ -43,6 +44,7 @@ export function makeDefaultIo() {
     },
     fetch: (...a) => globalThis.fetch(...a),
     now: () => Date.now(),
+    freeMemMb: () => freemem() / 1048576,
     stdout: (line) => process.stdout.write(line + "\n"),
     snapshot: createSnapshotWriter(),
     maxLines: liveViewLines(),
@@ -489,6 +491,14 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   const attempts = new Map();     // id -> retries consumed on the current model
   const usedFallback = new Set(); // ids already switched to their fallbackModel
   let retryWaiting = 0;           // leaves sleeping out a backoff
+  // Memory survivability (D3/D4): ids parked because free memory is under
+  // minFreeMemMb (spawn floor, or a valve kill's landing state); ids the valve
+  // has just killed, read once by launch() to classify that settle as a park
+  // rather than a failure. memoryParkCount is the closing block's leaf count.
+  const memoryParked = new Set();
+  const memoryStopped = new Set();
+  let memoryParkCount = 0;
+  const memLow = (mb) => mb > 0 && io.freeMemMb() < mb;
   const worktreesKept = [];
   let digestPath = null;
   let digestFailed = false;
@@ -628,6 +638,20 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     }, delayMs);
   };
 
+  // Park a leaf for low memory: no timer. The heartbeat (ref'd for as long as
+  // anything is parked — see below) is what re-drives it once io.freeMemMb()
+  // clears minFreeMemMb again; a parked leaf never spawned, so nothing here
+  // touches attempts.
+  const parkForMemory = (task) => {
+    memoryParked.add(task.id);
+    memoryParkCount++;
+    state.set(task.id, "retrying");
+    activityMap.set(task.id, "⏸ low memory");
+    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, state: "retrying", note: "memory-park" });
+    paint();
+    if (heartbeat.ref) heartbeat.ref();
+  };
+
   // Resume: an existing ok result satisfies the task without re-running it —
   // its recorded duration and tokens still count in roster and summary.
   //
@@ -675,6 +699,29 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   const heartbeat = setInterval(() => {
     touchHeartbeat(plan.resultsDir, new Date().toISOString(), process.pid);
     if (!stopRequested && existsSync(stopPath(plan.resultsDir))) requestStop("stop-file");
+    // Valve (D4): a deliberate, targeted kill — cheaper than the whole run
+    // dying to an OOM. Only when there is a second running leaf to fall back
+    // to; children.get may already be gone if it settled between ticks.
+    if (running.size > 1 && memLow(cfg.valveFreeMemMb)) {
+      const newest = [...running.keys()]
+        .filter((id) => state.get(id) === "running")
+        .reduce((a, b) => ((startedAt.get(b) ?? 0) > (startedAt.get(a) ?? 0) ? b : a));
+      if (newest !== undefined) {
+        memoryStopped.add(newest);
+        try { children.get(newest)?.kill(); } catch { /* already gone */ }
+      }
+    }
+    // Re-drive (D3): once memory has recovered past the floor, hand every
+    // parked leaf back to the scheduler loop as pending in one pass.
+    if (memoryParked.size > 0 && !memLow(cfg.minFreeMemMb)) {
+      for (const id of memoryParked) {
+        state.set(id, "pending");
+        activityMap.delete(id);
+      }
+      memoryParked.clear();
+      if (heartbeat.unref) heartbeat.unref();
+      wake();
+    }
     if (running.size > 0) paint();
   }, heartbeatMs);
   if (heartbeat.unref) heartbeat.unref();
@@ -1029,9 +1076,22 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       // returns-validation failures are semantic — the leaf itself ran fine.
       // Never classify them by transcript grep: a stray "429" (line number,
       // token count) in the raw stream would misread them as transient.
-      const st = r.ok ? "ok"
+      // A leaf the valve just killed produced no output text classifyFailure
+      // could ever match — memoryStopped is set directly by the heartbeat, so
+      // it is checked ahead of everything else, even a stray r.ok race.
+      const isMemoryStop = memoryStopped.has(task.id);
+      const st = isMemoryStop ? "memory"
+        : r.ok ? "ok"
         : r.schemaErrors ? "failed"
         : classifyFailure({ timedOut: r.timedOut, output: r.raw, stopped: stopRequested }, cfg.quotaPatterns);
+      if (isMemoryStop) {
+        // runTask's generic mid-stream message tells a reader not to kill or
+        // diff-hunt — exactly backwards here, where the kill was deliberate.
+        result.output = result.output.replace(
+          /leaf terminated mid-stream \(no end_turn\)[^\n]*\n?/,
+          "leaf stopped for low memory — parked; the engine resumes it automatically once memory recovers.\n",
+        );
+      }
       if (st === "quota") {
         const resetsAt = parseQuotaReset(r.raw);
         if (resetsAt) result.quotaResetsAt = resetsAt;
@@ -1063,6 +1123,14 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       }
 
       writeResult(plan.resultsDir, task.id, result);
+
+      // D4/D5: land the valve's kill as a park, not a retry — it never
+      // touches attempts, so it can never exhaust a leaf's retry budget.
+      if (isMemoryStop) {
+        memoryStopped.delete(task.id);
+        parkForMemory(task);
+        return task.id;
+      }
 
       if (!r.ok) {
         const retry = cfg.retry || {};
@@ -1171,12 +1239,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         if (t.aggregateManifest) { runManifestAggregate(t); progressed = true; continue; }
         if (t.compute) { runCompute(t); progressed = true; continue; }
         if (t.integrate) { runIntegrate(t); progressed = true; continue; }
+        // Spawn floor (D3): only once something is already running — the very
+        // first leaf of a run must never be gated by the machine's headroom.
+        if (running.size > 0 && memLow(cfg.minFreeMemMb)) { parkForMemory(t); continue; }
         launch(t);
       }
     }
     if (progressed) continue;
 
-    if (running.size === 0 && (retryWaiting === 0 || stopRequested)) break;
+    if (running.size === 0 && memoryParked.size === 0 && (retryWaiting === 0 || stopRequested)) break;
     if (running.size > 0) {
       await Promise.race(running.values());
       // running is keyed by id and released on settlement; state is the truth about
@@ -1264,5 +1335,5 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   // requested-but-absent is a distinct, LOUD state — never silence
   const reportMissing = !!plan.digest?.report && !reportPath;
 
-  return { summary, summaryPath, digestPath, digestFailed, reportPath, reportMissing, worktreesKept };
+  return { summary, summaryPath, digestPath, digestFailed, reportPath, reportMissing, worktreesKept, memoryParks: memoryParkCount };
 }
