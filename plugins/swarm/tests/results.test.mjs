@@ -396,6 +396,18 @@ test("formatClosing covers digest present, absent, failed, and total tokens", ()
   ok(!formatClosing(base).includes("tokens:"), "no tokens line when nothing counted");
 });
 
+test("formatClosing counts memory parks, pluralised, and stays silent when there were none", () => {
+  const base = { summaryPath: "S/summary.json" };
+  const one = formatClosing({ ...base, memoryParks: 1 });
+  ok(one.includes("1 leaf park"), one);
+  ok(!one.includes("1 leaf parks"), one);
+  const many = formatClosing({ ...base, memoryParks: 3 });
+  ok(many.includes("3 leaf parks"), many);
+  ok(many.includes("low memory"), many);
+  ok(!formatClosing(base).includes("low memory"), "no memory line when nothing parked");
+  ok(!formatClosing({ ...base, memoryParks: 0 }).includes("low memory"), "no memory line when count is 0");
+});
+
 test("formatClosing: tokens line carries actual-vs-estimate only when an estimate exists", () => {
   const base = { summaryPath: "S/summary.json", totalTokens: { input: 100000, output: 60200, cacheCreation: 0, cacheRead: 0 } };
   const over = formatClosing({ ...base, estimate: { tokens: 100000, counted: [], unknown: [] } });
