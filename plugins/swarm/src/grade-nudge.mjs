@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { swarmHome } from "./config.mjs";
 import { canonicalRunKey } from "./scores.mjs";
+import { listLeaves } from "./results.mjs";
 
 // The engine CLI the block reason names — the same command shape the run's
 // own closing block prints, pasteable from any shell.
@@ -71,6 +72,16 @@ export function ungradedRuns({ env = process.env, home = swarmHome(env), graded 
     }
   }
   return out;
+}
+
+// The one "does this run still owe grades" rule, shared by the closing block and
+// the digest footer: grading on, gradeable leaves present, and no store rows for
+// the run's canonical key. Undefined means ask nothing.
+export function runGradeable(dir, { cfg, graded }) {
+  if (cfg?.grading?.enabled !== true) return undefined;
+  if (graded?.has(canonicalRunKey(dir))) return undefined;
+  const count = listLeaves(dir, { gradeable: true }).length;
+  return count > 0 ? { count, resultsDir: dir, cli: CLI } : undefined;
 }
 
 // Pure: given the walked runs, the store's graded keys, this session's id and

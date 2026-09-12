@@ -1488,6 +1488,44 @@ test("run: the closing block asks for grading only when grading.enabled is true"
   }
 });
 
+// digest.md is the one file a dispatching session reads, so the grading ask must
+// reach it — once, only while grading is on and the run has no store rows.
+test("run: digest.md carries exactly one grade footer while the run is ungraded, and none once graded or with grading off", () => {
+  const footers = (d) => (readFileSync(join(d, "out", "digest.md"), "utf8").match(/awaiting grading/g) || []).length;
+  const setup = (enabled) => {
+    const dir = tmp();
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"), JSON.stringify({ grading: { enabled } }));
+    const manifest = join(dir, "m.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out", goal: "digest footer",
+      tasks: [{ id: "one", prompt: "look", model: "haiku" }, { id: "two", prompt: "look", model: "haiku" }],
+      digest: { model: "haiku", instructions: "" },
+    }));
+    const run = () => runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
+    return { dir, home, run };
+  };
+  const on = setup(true);
+  try {
+    equal(on.run().status, 0);
+    equal(footers(on.dir), 1, "ungraded: one footer");
+    const replay = on.run();
+    equal(replay.status, 0);
+    equal(footers(on.dir), 1, "a cached replay rewrites, never doubles");
+    // backslashes: the store's rows are canonicalised, not string-matched
+    writeFileSync(join(on.home, "model-scores.jsonl"), JSON.stringify({ resultsDir: join(on.dir, "out").replaceAll("/", "\\"), leaf: "one" }) + "\n");
+    const graded = on.run();
+    equal(footers(on.dir), 0, "graded: the replay's digest carries no footer");
+    ok(!/awaiting grading/.test(graded.stdout), `graded: the closing block stays silent\n${graded.stdout}`);
+  } finally { rmSync(on.dir, { recursive: true, force: true }); }
+  const off = setup(false);
+  try {
+    equal(off.run().status, 0);
+    equal(footers(off.dir), 0, "grading off: no footer");
+  } finally { rmSync(off.dir, { recursive: true, force: true }); }
+});
+
 test("statusline install: writes the self-resolving shim into ~/.swarm and prints the settings.json line; the shim runs the installed plugin's bar", () => {
   const dir = tmp();
   try {

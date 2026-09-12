@@ -10,7 +10,7 @@ import { discoverModels, writeModelsCache, visibleModels, probeTopModels, derive
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath } from "../src/results.mjs";
+import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd } from "../src/results.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
@@ -324,6 +324,22 @@ async function cmdRun(rest) {
     out("To re-execute this manifest: --force (same resultsDir; results are overwritten).");
   }
 
+  // Grading is opt-in (grading.enabled): off, nothing asks and the store is never
+  // read; `grade`/`perf` still work when called. On, the closing block and the
+  // digest footer share one rule — the run still has no store rows.
+  let gradeable;
+  if (cfg.grading?.enabled === true) {
+    const { runGradeable } = await import("../src/grade-nudge.mjs");
+    const { readRows, scoresPath, gradedRunKeys } = await import("../src/scores.mjs");
+    gradeable = runGradeable(plan.resultsDir, { cfg, graded: gradedRunKeys(readRows(scoresPath())) });
+  }
+  // Rewritten from the digest leaf's stored output, never the file on disk, so a
+  // replay carries one footer, never two; a graded replay drops it.
+  if (r.digestPath) {
+    const body = readResult(plan.resultsDir, "__digest")?.output;
+    if (body) writeDigestMd(plan.resultsDir, body, gradeable);
+  }
+
   out(formatClosing({
     digestPath: r.digestPath,
     reportPath: r.reportPath,
@@ -337,13 +353,7 @@ async function cmdRun(rest) {
     estimate: plan.estimate,
     resultsDir: plan.resultsDir,
     engine: fileURLToPath(import.meta.url),
-    // Grading is opt-in (grading.enabled): off, the closing block never asks and
-    // the skill's grade step is skipped; `grade`/`perf` still work when called.
-    gradeable: cfg.grading?.enabled === true ? {
-      count: listLeaves(plan.resultsDir, { gradeable: true }).length,
-      resultsDir: plan.resultsDir,
-      cli: fileURLToPath(import.meta.url),
-    } : undefined,
+    gradeable,
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
