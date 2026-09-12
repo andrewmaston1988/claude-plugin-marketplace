@@ -1270,6 +1270,26 @@ test("liveness: SIGINT routes through requestStop and stops the run", async () =
   }
 });
 
+test("SIGNOFF-2: stop wins over memory-parked leaves — the loop must not hang waiting for memory to clear", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: "a done", delayMs: 20 }));
+    const io = makeIo(spawn, { freeMemMb: () => 1 }); // permanently starved
+    const p = plan(dir, [task("a"), task("b")]);
+    const cfg = { ...CFG, minFreeMemMb: 2048, concurrency: 2, heartbeatSecs: 0.05 };
+    const runPromise = runPlan(p, cfg, io);
+    // let a finish and b sit parked, then request stop
+    setTimeout(() => writeFileSync(stopPath(p.resultsDir), ""), 150);
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("runPlan hung: stop did not win over a memory-parked leaf")), 3000));
+    const r = await Promise.race([runPromise, timeout]);
+
+    equal(r.summary.stopped, true);
+    equal(r.summary.tasks.find((t) => t.id === "b").state, "failed:stopped");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("per-leaf log streams progressively to results/<id>.log (real shim)", async () => {
   const dir = tmp();
   try {

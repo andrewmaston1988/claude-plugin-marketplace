@@ -1253,7 +1253,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     }
     if (progressed) continue;
 
-    if (running.size === 0 && memoryParked.size === 0 && (retryWaiting === 0 || stopRequested)) break;
+    // Stop wins: whatever is parked or waiting gets swept to failed:stopped below.
+    if (running.size === 0 && (stopRequested || (memoryParked.size === 0 && retryWaiting === 0))) break;
     if (running.size > 0) {
       await Promise.race(running.values());
       // running is keyed by id and released on settlement; state is the truth about
