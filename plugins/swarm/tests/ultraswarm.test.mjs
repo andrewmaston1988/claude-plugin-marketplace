@@ -22,7 +22,9 @@ test("decide: SessionStart arms only on swarm.always; UserPromptSubmit only on t
 test("modeFor: cloud under an allowed root (either slash style, any case), Anthropic otherwise", async () => {
   const cfg = { provider: { allowedRoots: ["C:/code"] } };
   equal(await modeFor({ cwd: "C:/code/claude-plugin-marketplace", config: cfg }), MODE_CLOUD);
-  equal(await modeFor({ cwd: "c:\\CODE\\primordial", config: cfg }), MODE_CLOUD);
+  // Windows paths are case-insensitive and either slash; POSIX paths are case-sensitive,
+  // and a governance gate must never widen them.
+  equal(await modeFor({ cwd: "c:\\CODE\\primordial", config: cfg }), process.platform === "win32" ? MODE_CLOUD : MODE_ANTHROPIC);
   equal(await modeFor({ cwd: "C:/code", config: cfg }), MODE_CLOUD);
   equal(await modeFor({ cwd: "C:/codex/other", config: cfg }), MODE_ANTHROPIC);
   equal(await modeFor({ cwd: "D:/work", config: cfg }), MODE_ANTHROPIC);

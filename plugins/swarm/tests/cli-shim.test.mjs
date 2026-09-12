@@ -80,7 +80,8 @@ test("row 5 (end-to-end): `swarm install` leaves three working files; the resolv
   const dir = tmp();
   try {
     const { resolver, bashShim, cmdShim, result } = installInto(dir);
-    assert.ok(existsSync(resolver) && existsSync(bashShim) && existsSync(cmdShim), "all three files written");
+    assert.ok(existsSync(resolver) && existsSync(bashShim), "resolver and bash wrapper written");
+    assert.equal(existsSync(cmdShim), process.platform === "win32", ".cmd is written on win32 and nowhere else");
     assert.ok(readFileSync(resolver).equals(readFileSync(RESOLVER_SRC)),
       "the installed resolver must be byte-identical to statusline/resolver.mjs — a drifted copy is the stale-engine bug one level down");
     assert.ok(result.stdout.includes(join(resolver)), "install prints each written path");
