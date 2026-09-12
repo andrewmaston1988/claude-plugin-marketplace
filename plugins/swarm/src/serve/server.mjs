@@ -2,10 +2,11 @@
 // segment is validated and re-resolved under the runs root, so a request can
 // never name a file outside it. Zero deps — node:http only.
 import http from "node:http";
+import { Worker } from "node:worker_threads";
 import { readFileSync, readdirSync, existsSync, statSync, watch as fsWatch } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readRun, listRuns, projectKeys, resultSuperseded } from "../runlog.mjs";
+import { readRun, projectKeys, resultSuperseded } from "../runlog.mjs";
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
@@ -15,15 +16,92 @@ import { deriveCloudName } from "../discovery.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
 import { coverage, reliability, leaders, costView } from "./perf-views.mjs";
 import { projectGrouping } from "./grouping.mjs";
+import { buildSnapshot, filterRuns } from "./estate.mjs";
+import { createLogger } from "./log.mjs";
 
 const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
 const PERF_JS = fileURLToPath(new URL("./perf.js", import.meta.url));
 const LIVE_JS = fileURLToPath(new URL("./live.js", import.meta.url));
+const ESTATE_WORKER = fileURLToPath(new URL("./estate-worker.mjs", import.meta.url));
 const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
 // The estate view: every live run, plus the newest few finished PER DISPLAY GROUP — a
 // global newest-N let one busy project crowd the others off the list entirely.
 // dashboard.finishedPerProject overrides the default.
 const FINISHED_PER_PROJECT = 10;
+// A handle can silently stop delivering (server.mjs's own long-standing note on the
+// old hub poll) — this just re-creates run.log watchers from the latest snapshot.
+const WATCHER_RECOVERY_MS = 10_000;
+
+// The default `_estate`: a worker owns buildSnapshot, restarting with backoff on
+// exit (1s -> 30s cap). `current()` resolves the first snapshot once it lands, or
+// after `_firstWaitMs` builds one in-thread so no request waits unboundedly.
+function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Worker, _setTimeout, _firstWaitMs }) {
+  let worker = null;
+  let latest = null;
+  let backoffMs = 1000;
+  let backoffTimer = null;
+  let closed = false;
+  const listeners = new Set();
+  let waiters = [];
+
+  const notify = (snapshot) => {
+    latest = snapshot;
+    const ws = waiters; waiters = [];
+    for (const resolve of ws) resolve(snapshot);
+    for (const cb of listeners) cb(snapshot);
+  };
+
+  const spawn = () => {
+    worker = new _Worker(ESTATE_WORKER, { workerData: { home, pollMs, heartbeatMs, quietWarnMs } });
+    worker.on("message", (msg) => {
+      if (msg?.type === "build-error") { dlog("estate-worker", { event: "build-error", msg: msg.msg }); return; }
+      if (msg?.type !== "snapshot") return;
+      backoffMs = 1000;
+      notify({ version: msg.version, rows: msg.rows });
+    });
+    worker.on("error", (e) => dlog("estate-worker", { event: "error", msg: e.message }));
+    worker.on("exit", (code) => {
+      if (closed) return;
+      dlog("estate-worker", { event: "exit", code });
+      const delay = backoffMs;
+      backoffMs = Math.min(30_000, backoffMs * 2);
+      backoffTimer = _setTimeout(() => { backoffTimer = null; spawn(); }, delay);
+    });
+  };
+  spawn();
+
+  // One fallback timer for every request waiting on the first snapshot: concurrent
+  // cold-start requests share a single in-thread build instead of one scan each.
+  let fallbackTimer = null;
+  return {
+    current() {
+      if (latest) return Promise.resolve(latest);
+      return new Promise((resolve) => {
+        waiters.push(resolve);
+        if (fallbackTimer) return;
+        fallbackTimer = _setTimeout(() => {
+          fallbackTimer = null;
+          if (latest || closed || !waiters.length) return;
+          dlog("estate-worker", { event: "fallback", msg: "in-thread snapshot" });
+          notify(buildSnapshot(home, new Map(), { now: Date.now(), heartbeatMs, quietWarnMs }));
+        }, _firstWaitMs);
+      });
+    },
+    refresh() { try { worker?.postMessage({ type: "refresh" }); } catch {} },
+    onSnapshot(cb) { listeners.add(cb); },
+    close() {
+      closed = true;
+      clearTimeout(backoffTimer); clearTimeout(fallbackTimer); fallbackTimer = null;
+      try { worker?.terminate(); } catch {}
+      // Nothing may wait on a closed estate: hand pending requests the last snapshot.
+      const ws = waiters; waiters = [];
+      for (const resolve of ws) resolve(latest ?? { version: "closed", rows: [] });
+    },
+    // An update handover closes the http server and, if the replacement fails,
+    // re-listens on the SAME server — the estate must come back with it.
+    reopen() { if (!closed) return; closed = false; backoffMs = 1000; spawn(); },
+  };
+}
 
 // A single path segment as the engine writes them (ids, encoded cwds, run names):
 // no separators, no dot-only names, nothing a URL decoder could turn into one.
@@ -57,19 +135,30 @@ const MANIFEST = {
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _listRuns = listRuns, _projectKeys = projectKeys }) {
+export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000 }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
   const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
   const pollMs = _pollMs ?? dash.livenessPollMs ?? 10_000;
   const finishedPerProject = dash.finishedPerProject ?? FINISHED_PER_PROJECT;
+  const dlog = createLogger({ logDir: home }).log;
 
   // Resolve a run dir from validated segments and prove it sits under the root.
   const runDir = (project, name) => {
     const dir = resolve(runsRoot, project, name);
     return dir.startsWith(runsRoot + sep) ? dir : null;
   };
+
+  // Holds the latest snapshot for the server's lifetime — independent of whether any
+  // SSE client is connected, since /api/runs needs it either way.
+  const estate = _estate ?? createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Worker, _setTimeout, _firstWaitMs });
+  let lastRows = [];
+  estate.onSnapshot((s) => {
+    lastRows = s.rows;
+    if (started) refreshRunWatchers(s.rows);
+    broadcast("runs", {});
+  });
 
   // ── SSE hub ────────────────────────────────────────────────────────────────
   const clients = new Set();
@@ -81,12 +170,14 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   // non-null after it stops delivering, so gating on it let a dead hub refuse every
   // rebuild — the run a client never saw appear.
   let started = false;
-  let activeDirs = new Set(); // run dirs active as of the last refresh
   const pending = new Map(); // dir -> timer
 
+  // A broken client must not throw through the loop and skip the rest (D5).
+  const drop = (res) => { clients.delete(res); if (!clients.size) stopHub(); };
+  const write1 = (res, s) => { try { res.write(s); } catch { drop(res); } };
   const broadcast = (event, data) => {
     const frame = `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
-    for (const res of clients) res.write(frame);
+    for (const res of clients) write1(res, frame);
   };
   const scheduleRun = (run) => {
     clearTimeout(pending.get(run.dir));
@@ -96,10 +187,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     }, _debounceMs));
   };
   const projectWatchers = new Map(); // project dir -> watcher (a new run dir appears here, not at the root)
-  const onRootOrProject = () => { refreshWatchers(); broadcast("runs", {}); };
-  const refreshWatchers = () => {
+  const onRootOrProject = () => { refreshProjectWatchers(); estate.refresh(); };
+  const refreshProjectWatchers = () => {
     // fs.watch is not recursive: the root sees new PROJECT dirs, each project dir sees
-    // new RUN dirs, and each active run's run.log sees its own appends.
+    // new RUN dirs. Run.log watchers are driven by snapshot rows, not this scan.
     let projects = [];
     try { projects = readdirSync(runsRoot).map((p) => join(runsRoot, p)); } catch {}
     for (const [dir, w] of projectWatchers) if (!projects.includes(dir)) { try { w.close(); } catch {} projectWatchers.delete(dir); }
@@ -107,21 +198,27 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       if (projectWatchers.has(dir)) continue;
       try { projectWatchers.set(dir, _watch(dir, onRootOrProject)); } catch (e) { log(`watch ${dir}: ${e.message}`); }
     }
-    const active = new Map(_listRuns(home, { now: now(), heartbeatMs }).filter((r) => r.active).map((r) => [r.dir, r]));
+  };
+  // Takes the active set from the snapshot's rows, never a fresh listRuns — the
+  // estate worker already did that scan. `dir` is recomputed via runDir since
+  // snapshot rows carry no absolute paths.
+  const refreshRunWatchers = (rows) => {
+    const active = new Map();
+    for (const r of rows) {
+      if (!r.active) continue;
+      const dir = runDir(r.project, r.name);
+      if (dir) active.set(dir, r);
+    }
     for (const [dir, w] of runWatchers) if (!active.has(dir)) { try { w.close(); } catch {} runWatchers.delete(dir); }
     for (const [dir, run] of active) {
       if (runWatchers.has(dir)) continue;
       try {
-        runWatchers.set(dir, _watch(join(dir, "run.log"), () => scheduleRun(run)));
+        runWatchers.set(dir, _watch(join(dir, "run.log"), () => {
+          estate.refresh();
+          scheduleRun({ dir, project: run.project, name: run.name });
+        }));
       } catch (e) { log(`watch ${dir}: ${e.message}`); }
     }
-    // Whether the active set moved is RETURNED, never broadcast from here:
-    // onRootOrProject already broadcasts unconditionally right after calling us, so
-    // a broadcast inside would double-fire on every root/project event. Only the
-    // poll — which has no other signal — acts on the return.
-    const changed = active.size !== activeDirs.size || [...active.keys()].some((d) => !activeDirs.has(d));
-    activeDirs = new Set(active.keys());
-    return changed;
   };
   const startHub = () => {
     if (started) return;
@@ -129,13 +226,16 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     try {
       rootWatcher = _watch(runsRoot, onRootOrProject);
     } catch (e) { log(`watch ${runsRoot}: ${e.message}`); rootWatcher = { close() {} }; }
-    refreshWatchers();
-    heartbeat = setInterval(() => { for (const res of clients) res.write(": ping\n\n"); }, _heartbeatMs);
-    // The clock is the only signal for the two transitions no fs event can carry: a
-    // run finishing (summary.json lands in an unwatched path) and an engine dying
-    // (not a filesystem event at all). It also rebuilds watchers unconditionally,
-    // which is what recovers a handle that silently stopped delivering.
-    poll = setInterval(() => { if (refreshWatchers()) broadcast("runs", {}); }, pollMs);
+    refreshProjectWatchers();
+    refreshRunWatchers(lastRows);
+    // `lastRows` is only set by a snapshot notification, which may not have fired yet
+    // (the estate's own first build can predate this hub ever starting) — pull the
+    // current snapshot directly too, so the first client is never missing a watcher.
+    estate.current().then((s) => { lastRows = s.rows; if (started) refreshRunWatchers(s.rows); }).catch(() => {});
+    heartbeat = setInterval(() => { for (const res of clients) write1(res, ": ping\n\n"); }, _heartbeatMs);
+    // A handle can silently stop delivering; this just re-creates run.log watchers
+    // from the latest snapshot. Data freshness is the worker's own poll now.
+    poll = setInterval(() => refreshRunWatchers(lastRows), WATCHER_RECOVERY_MS);
   };
   const stopHub = () => {
     if (!started) return;
@@ -149,9 +249,6 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     clearInterval(heartbeat);
     clearInterval(poll);
     poll = null;
-    // Cleared with the rest: a hub restarted for a fresh client must not compare
-    // against the previous session's set and broadcast a phantom transition.
-    activeDirs = new Set();
     for (const t of pending.values()) clearTimeout(t);
     pending.clear();
   };
@@ -193,40 +290,13 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const grading = cfg.grading?.enabled === true;
 
   const routes = {
-    "/api/runs": (res, url) => {
-      const all = _listRuns(home, { now: now(), heartbeatMs });
-      // Groups derive from EVERY raw key — worktree keys and fully-finished repos
-      // included, before any filtering — or the common-prefix derivation shifts
-      // with whatever happened to survive the cap.
-      const { groupOf, labelOf } = projectGrouping([...new Set(all.map((r) => r.project))]);
-      const finishedTotals = {};
-      for (const r of all) if (!r.active) { const g = groupOf(r.project); finishedTotals[g] = (finishedTotals[g] || 0) + 1; }
+    "/api/runs": async (res, url) => {
+      const s = await estate.current();
       // `expand` names display GROUPS the page wants uncapped (the Show-all rows).
       // Unknown names match no group and are simply ignored — the value never
       // reaches a path join, so a stale bookmark cannot fault the estate view.
       const expanded = new Set(url.searchParams.getAll("expand"));
-      const seen = new Map();
-      const picked = all.filter((r) => {
-        if (r.active) return true;
-        const g = groupOf(r.project);
-        // Skip the counter entirely, not merely bypass the comparison: an expanded
-        // row must never consume another group's allowance.
-        if (expanded.has(g)) return true;
-        const n = seen.get(g) || 0;
-        seen.set(g, n + 1);
-        return n < finishedPerProject;
-      });
-      const rows = picked.map((r) => {
-        const run = readRun(r.dir, { now: now(), quietWarnMs, heartbeatMs });
-        return {
-          project: r.project, name: r.name, active: r.active, aborted: r.aborted, stopped: r.stopped, mtimeMs: r.mtimeMs,
-          group: groupOf(r.project), groupLabel: labelOf(groupOf(r.project)),
-          startedMs: run?.startedMs ?? null, finishedMs: run?.finishedMs ?? null,
-          byState: run?.totals.byState ?? {}, leaves: run?.tasks.length ?? 0, waves: run?.waves.length ?? 0,
-          tokens: run ? run.tasks.reduce((n, t) => n + (t.tokens ? (t.tokens.input || 0) + (t.tokens.output || 0) + (t.tokens.cacheCreation || 0) : 0), 0) : 0,
-          hasDigest: !!(run?.digestPath || run?.reportPath),
-        };
-      });
+      const { rows, finishedTotals } = filterRuns(s.rows, { finishedPerProject, expanded });
       send(res, 200, { runs: rows, finishedTotals, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, grading });
     },
   };
@@ -288,7 +358,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     });
   };
 
-  const handle = (req, res) => {
+  const handle = async (req, res) => {
     const url = new URL(req.url, "http://x");
     if (dash.token && url.searchParams.get("t") !== dash.token) return send(res, 401, { error: "token" });
     if (req.method !== "GET") return send(res, 405, { error: "GET only" });
@@ -311,7 +381,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       res.write(": connected\n\n");
       clients.add(res);
       startHub();
-      req.on("close", () => { clients.delete(res); if (!clients.size) stopHub(); });
+      req.on("close", () => drop(res));
+      res.on("error", () => drop(res));
       return;
     }
     if (p === "/perf.js") {
@@ -323,7 +394,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       return send(res, 200, readFileSync(LIVE_JS, "utf8"), "text/javascript; charset=utf-8");
     }
     if (p === "/api/perf") return perf(res, url);
-    if (routes[p]) return routes[p](res, url);
+    if (routes[p]) return await routes[p](res, url);
 
     // A trailing slash is what the URL parser leaves behind after collapsing an
     // encoded dot-segment (%2e%2e) — never a resource, so never served.
@@ -375,8 +446,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   };
 
   const server = http.createServer((req, res) => {
-    try { handle(req, res); } catch (e) { log(`${req.url}: ${e.message}`); try { send(res, 500, { error: "internal" }); } catch {} }
+    handle(req, res).catch((e) => { log(`${req.url}: ${e.message}`); try { send(res, 500, { error: "internal" }); } catch {} });
   });
-  server.on("close", stopHub);
+  server.on("close", () => { stopHub(); estate.close(); });
+  // A handover retake re-listens on this server after `close` — re-arm the estate.
+  server.on("listening", () => estate.reopen?.());
   return server;
 }

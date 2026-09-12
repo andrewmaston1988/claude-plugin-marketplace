@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSy
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawnSync } from "node:child_process";
+import { spawnSync, spawn } from "node:child_process";
 import {
   writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, launcherPath,
   pidPath, resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, ensureShim,
@@ -394,4 +394,50 @@ test("tray.ps1: no parameter shadows a read-only PowerShell variable, and the da
   const declared = [out.params].flat().map((p) => p.toLowerCase());
   assert.ok(passed.length >= 5, `found the tray spawn flags: ${passed}`);
   for (const p of passed) assert.ok(declared.includes(p), `swarm.mjs passes -${p}, which tray.ps1 does not declare`);
+});
+
+// U2: `serve --daemon` forks through spawnLoggedDaemon (D4a), the same recipe
+// as update-watch.mjs's replacement -- proof by observation, not by grepping
+// source: a detached child's stdout only reaches dashboard-stdio.log if it was
+// spawned with real fds, never stdio: "ignore".
+test("swarm.mjs serve --daemon: the fork's stdout is captured to dashboard-stdio.log (spawnLoggedDaemon, D4a), not stdio: \"ignore\"", async () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-daemon-u2-"));
+  writeFileSync(join(home, "config.json"), JSON.stringify({
+    disable1mContext: true,
+    dashboard: { enabled: true, port: 0, bind: "127.0.0.1", tray: false, autoRestartOnUpdate: false },
+  }), "utf8");
+  const swarmMjs = fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url));
+  let daemonPid = null;
+  try {
+    const parent = await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [swarmMjs, "serve", "--daemon"], {
+        env: { ...process.env, SWARM_HOME: home }, windowsHide: true,
+      });
+      let stderr = "";
+      child.stderr.on("data", (d) => { stderr += d; });
+      const timer = setTimeout(() => { try { child.kill(); } catch { /* best effort */ } reject(new Error(`--daemon parent did not exit; stderr: ${stderr}`)); }, 45000);
+      child.on("exit", (code) => { clearTimeout(timer); resolve({ code, stderr }); });
+      child.on("error", (e) => { clearTimeout(timer); reject(e); });
+    });
+    assert.equal(parent.code, 0, `--daemon parent must exit 0 once it has forked the child; stderr: ${parent.stderr}`);
+
+    const deadline = Date.now() + 45000;
+    let record = null;
+    while (Date.now() < deadline) {
+      if (existsSync(pidPath(home))) {
+        const r = readPid(home);
+        if (r?.pid && r.listening) { record = r; break; }
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
+    assert.ok(record, "expected a listening pid record written by the detached child");
+    daemonPid = record.pid;
+
+    assert.ok(existsSync(join(home, "dashboard-stdio.log")), "spawnLoggedDaemon must create dashboard-stdio.log");
+    const log = readFileSync(join(home, "dashboard-stdio.log"), "utf8");
+    assert.match(log, /dashboard: serving/, "the child's stdout must be captured to dashboard-stdio.log, not discarded by stdio: \"ignore\"");
+  } finally {
+    if (daemonPid) { try { process.kill(daemonPid); } catch { /* already gone */ } }
+    rmSync(home, { recursive: true, force: true });
+  }
 });

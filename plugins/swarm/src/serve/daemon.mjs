@@ -2,11 +2,11 @@
 // Startup-folder autostart, staleness against the plugin registry, doctor's
 // checks. Pure functions with injected paths so tests never touch the real home
 // dir or spawn anything.
-import { readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, mkdirSync, copyFileSync, openSync, closeSync } from "node:fs";
 import { join } from "node:path";
 import { hostname, networkInterfaces, homedir } from "node:os";
 import { connect } from "node:net";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
 
 export const pidPath = (home) => join(home, "dashboard.pid");
@@ -41,6 +41,28 @@ export function clearPid(home) {
 export function isAlive(pid, _kill = process.kill) {
   if (!pid) return false;
   try { _kill(pid, 0); return true; } catch { return false; }
+}
+
+// The one spawn recipe for every detached daemon launch: `serve --daemon`'s
+// fork and the update watcher's replacement, so both leave a crash stack in
+// dashboard-stdio.log instead of one going to stdio: "ignore". argv[0] is the
+// node executable, argv.slice(1) its args — the same shape reExecArgv returns.
+// The parent closes its copy of the log fd once the child holds its own: a
+// long-lived daemon calls this on every update handover attempt.
+export function spawnLoggedDaemon(argv, home, { _spawn = spawn, _openSync = openSync, _closeSync = closeSync } = {}) {
+  mkdirSync(home, { recursive: true });
+  const logPath = join(home, "dashboard-stdio.log");
+  let logFd;
+  try { logFd = _openSync(logPath, "a"); } catch (e) { return { ok: false, reason: `cannot open ${logPath}: ${e.message}`, logPath }; }
+  try {
+    const child = _spawn(argv[0], argv.slice(1), { detached: true, stdio: ["ignore", logFd, logFd], windowsHide: true });
+    child.unref();
+    return { ok: true, pid: child.pid, logPath };
+  } catch (e) {
+    return { ok: false, reason: e.message, logPath };
+  } finally {
+    try { _closeSync(logFd); } catch { /* already closed */ }
+  }
 }
 
 // The plugin registry — the SAME file statusline/resolver.mjs reads; its path and

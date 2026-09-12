@@ -139,6 +139,7 @@ function loadPage(opts = {}) {
   const winListeners = {};
   const window = { addEventListener: (t, f) => { (winListeners[t] ||= []).push(f); } };
   let esListeners = {};
+  const esInstances = [];
   const fetchLog = [];
   const pendingFetches = [];
   const fetch = (url, init = {}) => {
@@ -160,7 +161,15 @@ function loadPage(opts = {}) {
     head: { appendChild: (s) => { if (/live\.js(\?|$)/.test(s.src)) vm.runInContext(LIVE_JS, context, { filename: "live.js" }); s.onload && s.onload(); } },
   };
   const DOMParser = function () { this.parseFromString = (markup) => ({ documentElement: parseHtml(markup, ids).childNodes[0] }); };
-  const EventSource = function () { const es = { addEventListener: (t, f) => { (esListeners[t] ||= []).push(f); } }; return es; };
+  // readyState/close()/onopen: enough of the real EventSource surface for D6's
+  // reconnect wiring — a fresh instance per connect() call, CONNECTING until a
+  // test drives it to OPEN or CLOSED, since nothing here simulates a real socket.
+  const EventSource = function () {
+    const es = { readyState: EventSource.CONNECTING, addEventListener: (t, f) => { (esListeners[t] ||= []).push(f); }, close: () => { es.readyState = EventSource.CLOSED; } };
+    esInstances.push(es);
+    return es;
+  };
+  EventSource.CONNECTING = 0; EventSource.OPEN = 1; EventSource.CLOSED = 2;
 
   Object.assign(context, { window, document, location, fetch, DOMParser, EventSource, navigator: {},
     URLSearchParams, AbortController, setInterval: () => 0,
@@ -190,6 +199,11 @@ function loadPage(opts = {}) {
     location, hdr, main, flush,
     fireHashchange: () => winListeners.hashchange.forEach((f) => f()),
     fireSse: (t, d) => (esListeners[t] || []).forEach((f) => f({ data: d || "{}" })),
+    esCount: () => esInstances.length,
+    // Drives the CURRENT (latest) EventSource — the one page.html's connect() just
+    // created — since a reconnect replaces `es` with a fresh instance.
+    fireEsOpen: () => { const es = esInstances[esInstances.length - 1]; es.readyState = EventSource.OPEN; es.onopen && es.onopen(); },
+    fireEsError: (readyState) => { const es = esInstances[esInstances.length - 1]; if (readyState !== undefined) es.readyState = readyState; es.onerror && es.onerror(); },
     fetchLog,
     pendingCount: () => pendingFetches.length,
     fireTimers: (ms) => timers.filter((t) => t.fn && t.ms === ms).forEach((t) => { const fn = t.fn; t.fn = null; fn(); }),
@@ -585,19 +599,70 @@ test("switcher: renders on a COLD #/perf load with window.perfViews never stubbe
 // Events arriving faster than /api/runs answers must still paint. With only a
 // microtask coalesce, each event started its own fetch; every response landed
 // already superseded, routeGuard discarded it, and the list never repainted.
+// Drives it with "runs" (a snapshot-version broadcast), not "run" — P3 drops
+// the list view's reaction to per-run events entirely, so "runs" is the only
+// event left that can still starve the list under a fast burst.
 test("Test 9: SSE events faster than the list answers still commit fresh data, one fetch at a time", async () => {
   const P = loadPage();
   await P.flush();
   P.respondList(listData(listRow()));
   await P.flush();
   for (let i = 0; i < 4; i++) {
-    P.fireSse("run"); await P.flush();
-    P.fireSse("run"); await P.flush();
+    P.fireSse("runs"); await P.flush();
+    P.fireSse("runs"); await P.flush();
     assert.ok(P.pendingCount() <= 1, `never more than one list fetch in flight (iteration ${i})`);
     P.respondList(listData(listRow({ name: `FRESH${i}` })));
     await P.flush();
   }
   assert.ok(/FRESH\d/.test(P.screenText()), "a response from the burst committed");
+});
+
+// D3's page half: the list view no longer refetches on every per-run `run`
+// event (root cause item 1 — that is what starved the page under live runs).
+// It refreshes on `runs` only, the snapshot-changed broadcast.
+test("P3: the list view ignores `run` events and refreshes on `runs` only", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  const before = P.listFetches().length;
+  P.fireSse("run"); await P.flush();
+  assert.equal(P.listFetches().length, before, "a per-run `run` event starts no list fetch on the list view");
+  P.fireSse("runs"); await P.flush();
+  assert.equal(P.listFetches().length, before + 1, "a `runs` event starts exactly one list fetch");
+});
+
+// D6: reconnect on a fatal CLOSE only — the browser's own retry already covers
+// CONNECTING — with backoff, and a catch-up list fetch once the new connection
+// opens, so events missed during the gap are not silently lost.
+test("P4: EventSource reconnect — CLOSED backs off and reconnects, CONNECTING is left alone, open triggers a catch-up refresh", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+
+  // A CONNECTING-state error is the browser's own retry in progress — connect()
+  // must not double up on top of it.
+  const esBefore = P.esCount();
+  P.fireEsError(0 /* CONNECTING */);
+  await P.flush();
+  assert.equal(P.esCount(), esBefore, "no reconnect scheduled while the browser is already retrying");
+
+  // A CLOSED error is fatal — the browser has given up. connect() closes,
+  // schedules one reconnect after reconnectDelay(0) = 1000ms, and does so once.
+  P.fireEsError(2 /* CLOSED */);
+  await P.flush();
+  assert.equal(P.esCount(), esBefore, "no new EventSource until the backoff timer fires");
+  P.fireTimers(1000);
+  await P.flush();
+  assert.equal(P.esCount(), esBefore + 1, "exactly one reconnect after reconnectDelay(0)");
+
+  // The next `open` on the new connection is the catch-up: a fresh list fetch,
+  // covering whatever `runs`/`run` events were missed during the gap.
+  const before = P.listFetches().length;
+  P.fireEsOpen();
+  await P.flush();
+  assert.equal(P.listFetches().length, before + 1, "the reconnect's open triggers one catch-up list fetch");
 });
 
 test("Test 10: a hung list request times out into the error panel and frees the next refresh", async () => {
