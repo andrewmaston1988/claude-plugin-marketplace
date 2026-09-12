@@ -132,6 +132,30 @@ test("askLeaf: a failed resume surfaces ok:false, does not update sessionId", as
   }
 });
 
+test("askLeaf: resumes a forEach clone whose id is not a top-level manifest task", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-ask-clone-"));
+  try {
+    initResultsDir(dir);
+    // "fix" is the forEach parent in the manifest; "fix[0]" only exists as an
+    // expanded clone with its own result — never a key in manifest.tasks.
+    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [{ id: "fix", model: "haiku", forEach: { over: "{{x}}" } }] });
+    writeResult(dir, "fix[0]", {
+      id: "fix[0]", model: "haiku", ok: true, exit: 0, durationMs: 5,
+      output: "clone finding", sessionId: "s-clone", cwd: tmpdir(), allowedTools: "Read,Grep",
+    });
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    const io = makeIo(spawn);
+    const r = await askLeaf({ resultsDir: dir, taskId: "fix[0]", question: "why though?", cfg: CFG, io });
+
+    equal(r.answer, "the follow-up answer");
+    const args = spawn.calls[0].args;
+    equal(args[args.indexOf("--resume") + 1], "s-clone");
+    equal(readResult(dir, "fix[0]").asks.length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── Q1-Q7: ask mode through runPlan directly (test plan swarm-ask-in-run-test-plan.md) ──
 
 const SCHED_CFG = {

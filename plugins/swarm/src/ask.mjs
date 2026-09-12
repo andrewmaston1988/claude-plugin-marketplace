@@ -42,9 +42,28 @@ export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = m
   // scheduling loop can read it; the target additionally needs the dispatch
   // fields the snapshot never carried, sourced from its own last result.
   const manifest = JSON.parse(readFileSync(join(resultsDir, "manifest.json"), "utf8"));
-  const tasks = manifest.tasks.map((t) => (t.id === taskId
-    ? { ...t, after: t.after || [], allowedTools: prior.allowedTools || "Read,Grep,Glob", timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
-    : { ...t, after: t.after || [] }));
+  const isTopLevel = manifest.tasks.some((t) => t.id === taskId);
+  // A forEach clone (`fix[0]`) or manifest child (`node~child`) never appears in
+  // manifest.tasks — it joined the roster mid-run via an expand event. Its own
+  // result carries every field a manifest task would have declared, so build the
+  // ask task from that instead of requiring a manifest entry that doesn't exist.
+  const tasks = isTopLevel
+    ? manifest.tasks.map((t) => (t.id === taskId
+        ? { ...t, after: t.after || [], allowedTools: prior.allowedTools || "Read,Grep,Glob", timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
+        : { ...t, after: t.after || [] }))
+    : [
+        ...manifest.tasks.map((t) => ({ ...t, after: t.after || [] })),
+        {
+          id: taskId,
+          model: prior.model,
+          cwd: prior.cwd,
+          originalCwd: prior.originalCwd || prior.cwd,
+          allowedTools: prior.allowedTools || "Read,Grep,Glob",
+          scratchRedirect: false,
+          timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+          after: [],
+        },
+      ];
   // An ask is a one-off answer, not a monitored run: no roster/live-view
   // frames, only the CLI's own answer + tokens line. Suppressing io.snapshot
   // is what runPlan's paint() checks before rendering anything.
