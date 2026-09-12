@@ -405,6 +405,34 @@ test("Q8: ask preserves the prior summary and status for every other task, inclu
   }
 });
 
+test("Q10: a second ask on the same leaf APPENDS to asks[], leaving the first entry and the leaf's output intact", async () => {
+  const { dir, plan: p } = await finishedRun([schedTask("a")]);
+  try {
+    const before = readResult(p.resultsDir, "a");
+    const spawn2 = fakeSpawnFactory(() => ({ output: STREAM }));
+    await runPlan(p, SCHED_CFG, makeIo(spawn2), { ask: { taskId: "a", question: "first?" } });
+    const afterFirst = readResult(p.resultsDir, "a");
+    equal(afterFirst.asks.length, 1);
+
+    const secondStream = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s-3" }),
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "the second answer", usage: { input_tokens: 20, output_tokens: 10 } }),
+    ].join("\n") + "\n";
+    const spawn3 = fakeSpawnFactory(() => ({ output: secondStream }));
+    await runPlan(p, SCHED_CFG, makeIo(spawn3), { ask: { taskId: "a", question: "second?" } });
+    const afterSecond = readResult(p.resultsDir, "a");
+
+    equal(afterSecond.asks.length, 2);
+    equal(afterSecond.asks[0].question, "first?");
+    equal(afterSecond.asks[0].answer, afterFirst.asks[0].answer);
+    equal(afterSecond.asks[1].question, "second?");
+    equal(afterSecond.asks[1].answer, "the second answer");
+    equal(afterSecond.output, before.output);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("Q7: a failed ask leaves the leaf ok, records the failure in asks[]", async () => {
   const { dir, plan: p } = await finishedRun([schedTask("a")]);
   try {
