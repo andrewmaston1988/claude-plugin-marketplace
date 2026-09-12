@@ -369,6 +369,7 @@ async function cmdRun(rest) {
     resultsDir: plan.resultsDir,
     engine: fileURLToPath(import.meta.url),
     gradeable,
+    memoryParks: r.memoryParks,
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
