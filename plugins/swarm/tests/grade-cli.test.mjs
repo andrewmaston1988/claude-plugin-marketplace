@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, isAbsolute } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
 import { ASPECTS } from "../src/aspects.mjs";
@@ -180,6 +180,51 @@ test("perf: an unknown aspect fails with the valid list", () => {
 // normalization stamps compute/integrate/manifest nodes with a display
 // sentinel model that reaches results/<id>.json, so a truthy-model
 // gradeable filter hands them skeleton rows.
+// A relative dir given to --init (the normal case when cwd IS the runs dir)
+// must land absolute in grades.json — canonicalRunKey never resolves against
+// a cwd, so a relative resultsDir can never match a later run-dir walk.
+test("grade --init: a relative dir argument is stored as an absolute resultsDir", () => {
+  const dir = tmp();
+  try {
+    const run = fakeRun(dir);
+    const r = runCli(["grade", "--init", "run-1"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, r.stderr);
+    const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
+    ok(isAbsolute(batch.resultsDir), batch.resultsDir);
+    equal(resolve(batch.resultsDir), resolve(run));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A grades.json can carry a relative resultsDir from an old --init or manual
+// edit; grades.json lives inside the results dir, so its own directory is
+// the correct base to resolve against.
+test("grade --file: a relative resultsDir resolves against grades.json's directory before being stored", () => {
+  const dir = tmp();
+  try {
+    const run = fakeRun(dir);
+    const home = join(dir, "home");
+    const p = join(run, "grades.json");
+    writeFileSync(p, JSON.stringify({
+      resultsDir: ".",
+      session: "abc123",
+      rows: [
+        { leaf: "verdict", domain: "godot", outcome: "completed", note: "",
+          grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 } },
+      ],
+    }));
+    const r = runCli(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    equal(rows.length, 1);
+    ok(isAbsolute(rows[0].resultsDir), rows[0].resultsDir);
+    equal(resolve(rows[0].resultsDir), resolve(run));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("grade --init: a sentinel-model (compute) result gets no row", () => {
   const dir = tmp();
   try {

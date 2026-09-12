@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // swarm CLI — thin argv layer over src/. Subcommands: models | validate | run.
 // stdout carries status lines + paths only, never raw task output.
-import { join, resolve, dirname, basename } from "node:path";
+import { join, resolve, dirname, basename, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
@@ -557,6 +557,7 @@ function getFlag(name, args) {
 // deliberately unappendable as written: validation rejects a null universal, so
 // an untouched skeleton cannot land.
 async function cmdGradeInit(dir) {
+  dir = resolve(dir);
   const { writeFileSync } = await import("node:fs");
   const { UNIVERSAL, CAPABILITY, OUTCOMES } = await import("../src/aspects.mjs");
   const leaves = listLeaves(dir, { gradeable: true });
@@ -604,12 +605,15 @@ async function cmdGradeFile(path) {
     err(`swarm: ${path} is not valid JSON: ${e.message}`);
     return 1;
   }
-  const dir = batch?.resultsDir;
+  let dir = batch?.resultsDir;
   const session = batch?.session;
   if (typeof dir !== "string" || !dir.trim() || !Array.isArray(batch.rows) || !batch.rows.length) {
     err('swarm: grades file must be { "resultsDir": "<run dir>", "session": "<id>", "rows": [ … ] }');
     return 1;
   }
+  // grades.json lives inside its own resultsDir, so a relative resultsDir
+  // resolves against this file's directory, not the process cwd.
+  if (!isAbsolute(dir)) dir = resolve(dirname(path), dir);
   if (typeof session !== "string" || !session.trim() || session.startsWith("<")) {
     err('swarm: fill in "session" with this session\'s id — every row records who graded it.');
     return 1;
@@ -663,6 +667,7 @@ async function cmdGradeFile(path) {
 async function cmdGradeWaive(dir, reason) {
   const { existsSync, writeFileSync, renameSync } = await import("node:fs");
   const { waiverPath } = await import("../src/results.mjs");
+  if (dir) dir = resolve(dir);
   if (!dir || !existsSync(dir)) {
     err(`swarm: no results dir at ${dir ?? "(none given)"} — grade --waive needs an existing resultsDir`);
     return 1;
