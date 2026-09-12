@@ -584,8 +584,81 @@ test("prune: removes the worktree and branch, prints freed, leaves the run recor
     ok(!existsSync(wt.path), "the worktree directory must be gone");
     equal(gitOut(["branch", "--list", "swarm/impl"], repo), "", "the branch must be gone");
     equal(readFileSync(join(resultsDir, "run.log"), "utf8"), runLog, "run.log must survive prune");
-    equal(readFileSync(join(resultsDir, "summary.json"), "utf8"), summary, "summary.json must survive prune");
+    const newSummary = JSON.parse(readFileSync(join(resultsDir, "summary.json"), "utf8"));
+    deepEqual(newSummary.worktreesKept, [], "the pruned entry must be dropped from the record");
+    ok(readFileSync(join(resultsDir, "summary.json"), "utf8") !== summary, "summary.json must be rewritten, not left claiming a dead worktree");
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("prune --dry-run: a kept worktree whose path is already gone from disk is not a prune row — nothing to prune", () => {
+  const repo = initPruneRepo();
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
+    writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: join(resultsDir, "wt-gone") }]);
+
+    const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(/has no kept worktrees — nothing to prune/.test(r.stdout), r.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("prune: a real prune rewrites worktreesKept to drop the pruned entry; a second prune finds nothing", () => {
+  const repo = initPruneRepo();
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir);
+    writeFileSync(join(wt.path, "work.txt"), "x\n");
+    commitAll(wt.path, "work");
+    spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
+
+    writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: wt.path }]);
+
+    const r = runCli(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, r.stdout + r.stderr);
+
+    const summary = JSON.parse(readFileSync(join(resultsDir, "summary.json"), "utf8"));
+    deepEqual(summary.worktreesKept, []);
+
+    const r2 = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r2.status, 0, r2.stdout + r2.stderr);
+    ok(/has no kept worktrees — nothing to prune/.test(r2.stdout), r2.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("prune --dry-run: summary.json is left byte-identical", () => {
+  const repo = initPruneRepo();
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "out");
+    mkdirSync(resultsDir, { recursive: true });
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir);
+    writeFileSync(join(wt.path, "work.txt"), "x\n");
+    commitAll(wt.path, "work");
+    spawnSync("git", ["merge", "-q", "swarm/impl"], { cwd: repo, windowsHide: true });
+
+    writeFinishedRun(resultsDir, [{ name: "impl", branch: "swarm/impl", path: wt.path }]);
+    const before = readFileSync(join(resultsDir, "summary.json"), "utf8");
+
+    const r = runCli(["prune", resultsDir, "--dry-run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    equal(readFileSync(join(resultsDir, "summary.json"), "utf8"), before, "dry-run must never write summary.json");
+  } finally {
+    spawnSync("git", ["worktree", "remove", "--force", join(dir, "out", "wt-impl")], { cwd: repo, windowsHide: true });
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });
   }

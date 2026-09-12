@@ -529,7 +529,11 @@ async function cmdPrune(rest) {
     return 0;
   }
   out(formatPrune(rows, { dryRun }));
-  if (!dryRun) executePrune(rows, git, fs);
+  if (!dryRun) {
+    executePrune(rows, git, fs);
+    // survivors: whatever wasn't just removed and wasn't already gone before we started
+    writeSummary(dir, { ...summary, worktreesKept: worktreesKept.filter((wt) => fs.existsSync(wt.path)) });
+  }
   return 0;
 }
 
