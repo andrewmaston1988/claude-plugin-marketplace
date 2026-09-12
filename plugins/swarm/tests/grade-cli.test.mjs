@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, resolve, isAbsolute } from "node:path";
+import { join, resolve, isAbsolute, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
 import { ASPECTS } from "../src/aspects.mjs";
@@ -197,17 +197,19 @@ test("grade --init: a relative dir argument is stored as an absolute resultsDir"
   }
 });
 
-// A grades.json can carry a relative resultsDir from an old --init or manual
-// edit; grades.json lives inside the results dir, so its own directory is
-// the correct base to resolve against.
-test("grade --file: a relative resultsDir resolves against grades.json's directory before being stored", () => {
+// A grades.json can carry a relative resultsDir left over from a `grade --init
+// <name>` run from the runs root — that's the dir's OWN basename, relative to
+// wherever --init ran, not to grades.json's location. grades.json lives inside
+// the results dir, so the dir holding grades.json already IS the results dir;
+// resolving the relative string underneath it would double the path segment.
+test("grade --file: a relative resultsDir is the directory holding grades.json itself, not a child of it", () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
     const home = join(dir, "home");
     const p = join(run, "grades.json");
     writeFileSync(p, JSON.stringify({
-      resultsDir: ".",
+      resultsDir: basename(run),
       session: "abc123",
       rows: [
         { leaf: "verdict", domain: "godot", outcome: "completed", note: "",

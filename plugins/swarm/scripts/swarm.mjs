@@ -611,9 +611,10 @@ async function cmdGradeFile(path) {
     err('swarm: grades file must be { "resultsDir": "<run dir>", "session": "<id>", "rows": [ … ] }');
     return 1;
   }
-  // grades.json lives inside its own resultsDir, so a relative resultsDir
-  // resolves against this file's directory, not the process cwd.
-  if (!isAbsolute(dir)) dir = resolve(dirname(path), dir);
+  // grades.json lives inside its own resultsDir — a relative resultsDir was
+  // relative to wherever `grade --init` ran, not to this file's location, so
+  // the directory holding grades.json already IS the results dir.
+  if (!isAbsolute(dir)) dir = dirname(path);
   if (typeof session !== "string" || !session.trim() || session.startsWith("<")) {
     err('swarm: fill in "session" with this session\'s id — every row records who graded it.');
     return 1;
