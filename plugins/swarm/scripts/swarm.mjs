@@ -773,7 +773,7 @@ async function cmdCost() {
 // copy and records its pid (written by the parent, per the plugin daemon rule).
 async function cmdServe(rest) {
   const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir, pidPath,
-    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort, waitForExit, restartPlan, drainAndClose } = await import("../src/serve/daemon.mjs");
+    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort, waitForExit, restartPlan, drainAndClose, spawnLoggedDaemon } = await import("../src/serve/daemon.mjs");
   const home = swarmHome();
   const cfg = getConfig();
   const port = cfg.dashboard?.port ?? 7331;
@@ -850,20 +850,17 @@ async function cmdServe(rest) {
   // writes pre-fork so a second `serve --daemon` sees the child and short-circuits.
   const startDetached = async () => {
     ensureShim({ home, resolverSrc: fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)) });
-    const { spawn } = await import("node:child_process");
-    const { openSync, mkdirSync, writeFileSync, renameSync } = await import("node:fs");
-    mkdirSync(home, { recursive: true });
-    // Raw stdio (crash stacks) — separate from dashboard.log, which the daemon
-    // itself owns as a structured, rotated event log.
-    const logPath = join(home, "dashboard-stdio.log");
-    const logFd = openSync(logPath, "a");
-    let child;
-    try { child = spawn(process.execPath, [enginePath, "serve"], { detached: true, stdio: ["ignore", logFd, logFd], windowsHide: true }); }
-    catch (e) { return { ok: false, reason: `could not spawn the daemon: ${e.message}` }; }
-    child.unref();
-    if (!takeover) writePid(home, { pid: child.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() });
+    // The same recipe `update-watch.mjs`'s replacement spawn uses (daemon.mjs's
+    // spawnLoggedDaemon): raw stdio (crash stacks) to dashboard-stdio.log,
+    // separate from dashboard.log, which the daemon owns as a structured,
+    // rotated event log.
+    const started = spawnLoggedDaemon([process.execPath, enginePath, "serve"], home);
+    if (!started.ok) return { ok: false, reason: `could not spawn the daemon: ${started.reason}` };
+    if (!takeover) writePid(home, { pid: started.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() });
     if (process.platform === "win32" && cfg.dashboard?.tray !== false) {
       try {
+        const { spawn } = await import("node:child_process");
+        const { writeFileSync, renameSync } = await import("node:fs");
         const { renderTrayIconPng } = await import("../src/serve/icon.mjs");
         const iconPath = join(home, "dashboard-icon.png");
         writeFileSync(`${iconPath}.tmp`, renderTrayIconPng());
@@ -882,7 +879,7 @@ async function cmdServe(rest) {
         tray.unref();
       } catch (e) { err(`dashboard: tray not started: ${e.message}`); }
     }
-    return { ok: true, pid: child.pid, logPath };
+    return { ok: true, pid: started.pid, logPath: started.logPath };
   };
 
   if (verb === "restart") {
@@ -931,6 +928,23 @@ async function cmdServe(rest) {
   const { startUpdateWatch } = await import("../src/serve/update-watch.mjs");
   ensureShim({ home, resolverSrc: fileURLToPath(new URL("../statusline/resolver.mjs", import.meta.url)) });
   const dlog = createLogger({ logDir: home }).log;
+  // Registered before ANYTHING else in this branch — including the pre-listen
+  // pid write and listenOnce/bindFailureRecordAction below — so a crash in the
+  // bind/takeover window (exactly where an update-watch replacement runs) is
+  // logged too, not just one after serving starts (amended after dash-ar-1).
+  // No pid clear: that is how the tray tells a crash from a deliberate `serve
+  // stop`, which does clear it.
+  const crash = (e) => {
+    dlog("crash", { msg: String(e?.message ?? e), stack: e?.stack });
+    setTimeout(() => process.exit(1), 150);
+  };
+  process.on("uncaughtException", crash);
+  process.on("unhandledRejection", crash);
+  // Test-only crash triggers, unreachable over HTTP: they exercise the
+  // REGISTERED handlers above, never call `crash` directly.
+  if (process.env.SWARM_SERVE_TEST_CRASH === "before-listen") {
+    process.nextTick(() => { throw new Error("SWARM_SERVE_TEST_CRASH=before-listen"); });
+  }
   const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`) });
   const bind = cfg.dashboard?.bind ?? "0.0.0.0";
   // SSE streams never "finish", so they cannot count as in-flight for the
@@ -965,6 +979,9 @@ async function cmdServe(rest) {
     throw e;
   }
   writePid(home, { ...record, listening: true }); // the restart/handover protocol reads this
+  if (process.env.SWARM_SERVE_TEST_CRASH === "after-listen") {
+    setTimeout(() => { throw new Error("SWARM_SERVE_TEST_CRASH=after-listen"); }, 20);
+  }
   out(`dashboard: serving ~/.swarm/runs on port ${port}`);
   for (const u of urlLines(port)) out(`  ${u}`);
   out(dim(`firewall (once, elevated): ${firewallHint(port)}`));
