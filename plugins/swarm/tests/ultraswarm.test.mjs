@@ -60,8 +60,15 @@ const dec = (reading) => decide({
 const OLLAMA = { sessionPctUsed: 10, sessionResetsAt: "S", weeklyPctUsed: 50, resetsAt: "W" };
 
 test("decide: U1 RED — an exhausted provider names the reset, OUTSIDE the standing block", async () => {
-  const out = await dec({ ...OLLAMA, state: "exhausted", weeklyPctUsed: 100, resetsAt: "2026-09-07T00:00:00Z" });
-  ok(out.includes("2026-09-07T00:00:00Z"), out);
+  const prevTz = process.env.TZ;
+  process.env.TZ = "Europe/London";
+  let out;
+  try {
+    out = await dec({ ...OLLAMA, state: "exhausted", weeklyPctUsed: 100, resetsAt: "2026-09-07T00:00:00Z" });
+  } finally {
+    if (prevTz === undefined) delete process.env.TZ; else process.env.TZ = prevTz;
+  }
+  ok(out.includes("Mon 7 Sep, 01:00"), out);
   // The block is instruction and ends where it ends; the usage line follows it.
   ok(out.startsWith(standingBlock(MODE_CLOUD) + "\n"), out);
   ok(out.endsWith("</EXTREMELY_IMPORTANT>") === false, out);

@@ -81,7 +81,7 @@ Other useful keys (defaults shown in `config.default.json`): `provider.url` (Ant
     Refresh: swarm ollama-usage --cookie '<value>'   (writes ~/.swarm/ollama-cookie.json)
 ```
 
-`/!\ Network Error`, `/!\ Fetch Timed Out`, `/!\ Page Unreadable` and `/!\ No Cookie` are the other forms. `last seen` is an absolute UTC timestamp — compare it yourself against the `resets` dates the figures carry; no relative age is printed. `validate` fails on a `live` exhausted reading only; a cached 100% warns with the banner, because it may describe a window that has since reset. `provider.cloud.ollama.settingsUrl` overrides the fetch URL (test hook, like `quotaUsageUrl`).
+`/!\ Network Error`, `/!\ Fetch Timed Out`, `/!\ Page Unreadable` and `/!\ No Cookie` are the other forms. `last seen` is an absolute UTC timestamp; `resets` renders in the reader's own local time — both are the same absolute instant either way, so a bare glance still tells you whether the cache predates the reset, no arithmetic and no relative age printed. `validate` fails on a `live` exhausted reading only; a cached 100% warns with the banner, because it may describe a window that has since reset. `provider.cloud.ollama.settingsUrl` overrides the fetch URL (test hook, like `quotaUsageUrl`).
 
 ### Per-repo leaf guard (`projects`)
 
@@ -294,10 +294,10 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
 `swarm quota` answers one question for **every** provider at once — *can I dispatch right now, and on what?* — one session and one weekly line each, provider-named:
 
 ```
-anthropic session: 42% — resets 2026-09-06T18:00:00Z
-anthropic weekly_all: 71% — resets 2026-09-12T00:00:00Z
-ollama session: 12% — resets 2026-09-06T12:00:00Z
-ollama weekly: 87% — resets 2026-09-08T00:00:00Z
+anthropic session: 42% — resets Sun 6 Sep, 19:00
+anthropic weekly_all: 71% — resets Sat 12 Sep, 01:00
+ollama session: 12% — resets Sun 6 Sep, 13:00
+ollama weekly: 87% — resets Tue 8 Sep, 01:00
 ```
 
 Anthropic is fetched (its credential renews itself); a cloud provider is read from cache, because its cookie needs a human and `quota` must not stall on one. The exit code keeps its meaning — 1 when **Anthropic** is exhausted — and a cloud provider's state is reported beside it, never conflated with it.
