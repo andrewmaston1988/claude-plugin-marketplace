@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSy
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import {
   writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, launcherPath,
   pidPath, resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, ensureShim,
@@ -367,4 +368,30 @@ test("tray.ps1: every Start-Process -ArgumentList is an array, not a formatted s
     assert.ok(!/\s-f\s/.test(a), `-ArgumentList must not format a path into a string: ${a}`);
     assert.ok(a.startsWith("@(") || a.includes(","), `-ArgumentList must pass an array: ${a}`);
   }
+});
+
+// A parameter named after a read-only automatic variable (`-Home` vs `$HOME`) fails
+// at binding — "Cannot overwrite variable Home because it is read-only or constant" —
+// before a single line runs, so the tray never appeared and nothing said why.
+test("tray.ps1: no parameter shadows a read-only PowerShell variable, and the daemon passes only declared ones", { skip: process.platform !== "win32" && "tray is Windows-only" }, () => {
+  const tray = fileURLToPath(new URL("../src/serve/tray.ps1", import.meta.url));
+  const probe = [
+    "$errs = $null; $toks = $null",
+    `$ast = [System.Management.Automation.Language.Parser]::ParseFile('${tray.replaceAll("'", "''")}', [ref]$toks, [ref]$errs)`,
+    "$names = @($ast.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })",
+    "$locked = @(Get-Variable | Where-Object { $_.Options -match 'ReadOnly|Constant' } | ForEach-Object { $_.Name })",
+    "@{ params = $names; clash = @($names | Where-Object { $locked -contains $_ }); parseErrors = $errs.Count } | ConvertTo-Json -Compress",
+  ].join("\n");
+  const r = spawnSync("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(probe, "utf16le").toString("base64")], { encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout.trim());
+  assert.equal(out.parseErrors, 0, "tray.ps1 parses clean");
+  assert.deepEqual([out.clash].flat(), [], `parameters shadowing read-only variables: ${out.clash}`);
+  // Every -Flag the daemon hands the tray must be a parameter the tray declares.
+  const swarm = readFileSync(fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url)), "utf8");
+  const spawnArgs = swarm.slice(swarm.indexOf("trayScript, "), swarm.indexOf("], { detached", swarm.indexOf("trayScript, ")));
+  const passed = [...spawnArgs.matchAll(/"-(\w+)"/g)].map((m) => m[1].toLowerCase());
+  const declared = [out.params].flat().map((p) => p.toLowerCase());
+  assert.ok(passed.length >= 5, `found the tray spawn flags: ${passed}`);
+  for (const p of passed) assert.ok(declared.includes(p), `swarm.mjs passes -${p}, which tray.ps1 does not declare`);
 });

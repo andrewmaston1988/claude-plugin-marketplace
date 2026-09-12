@@ -17,6 +17,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
+import { pathToFileURL } from "node:url";
 import { tokenTotal } from "../src/stream.mjs";
 import { formatTokens } from "../src/results.mjs";
 import { readRun, runLiveness } from "../src/runlog.mjs";
@@ -117,7 +118,9 @@ export function render(opts = {}) {
   return line;
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, "/")}`).href) {
+// pathToFileURL, not `file:///` + argv: a POSIX argv already starts with "/", and the
+// four-slash URL never matched, so the bar printed nothing on Linux/macOS.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   let line = "";
   try { line = render({ home: process.env.SWARM_HOME || join(homedir(), ".swarm") }); } catch { /* statusline must never error */ }
   process.stdout.write(line + "\n");

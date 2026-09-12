@@ -878,7 +878,7 @@ async function cmdServe(rest) {
         // console and breakaway halves both do.
         const tray = spawn("cmd.exe", ["/c", "start", "", "/min", "powershell.exe", "-WindowStyle", "Hidden", "-NonInteractive",
           "-File", trayScript, "-PidFile", pidPath(home), "-NodeExe", process.execPath, "-ShimPath", shimPath,
-          "-Port", String(port), "-IconPath", iconPath, "-Home", home], { detached: true, stdio: "ignore", windowsHide: true });
+          "-Port", String(port), "-IconPath", iconPath, "-SwarmHome", home], { detached: true, stdio: "ignore", windowsHide: true });
         tray.unref();
       } catch (e) { err(`dashboard: tray not started: ${e.message}`); }
     }

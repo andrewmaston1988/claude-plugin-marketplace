@@ -2,14 +2,16 @@
 # (cmd /c start shape — see cmdServe) with every path a named parameter:
 #   powershell -WindowStyle Hidden -NonInteractive -File tray.ps1 `
 #     -PidFile <dashboard.pid> -NodeExe <node.exe> -ShimPath <~/.swarm/serve.mjs> `
-#     -Port <n> -IconPath <dashboard-icon.png> -Home <~/.swarm>
+#     -Port <n> -IconPath <dashboard-icon.png> -SwarmHome <~/.swarm>
 param(
   [string]$PidFile,
   [string]$NodeExe,
   [string]$ShimPath,
   [int]$Port = 7331,
   [string]$IconPath = "",
-  [string]$Home = ""
+  # Not -Home: $HOME is a read-only automatic variable, and binding to it fails the
+  # whole script before a line runs.
+  [string]$SwarmHome = ""
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -22,7 +24,7 @@ if (-not $PidFile -or -not $NodeExe -or -not $ShimPath) { exit 1 }
 # path while this tray is still alive. A live tray process named by the guard
 # makes the newcomer exit silently instead of stacking a second icon. Pid reuse
 # onto another powershell process is possible but rare; the guard is a heuristic.
-$guardPath = if ($Home) { Join-Path $Home 'dashboard-tray.pid' } else { '' }
+$guardPath = if ($SwarmHome) { Join-Path $SwarmHome 'dashboard-tray.pid' } else { '' }
 if ($guardPath -and (Test-Path $guardPath -PathType Leaf)) {
   $otherRaw = Get-Content $guardPath -ErrorAction SilentlyContinue
   $otherPid = 0
