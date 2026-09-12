@@ -646,7 +646,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     memoryParked.add(task.id);
     memoryParkCount++;
     state.set(task.id, "retrying");
-    activityMap.set(task.id, "⏸ low memory");
+    activityMap.set(task.id, `⏸ low memory — ${(io.freeMemMb() / 1024).toFixed(1)} GB free`);
     appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, state: "retrying", note: "memory-park" });
     paint();
     if (heartbeat.ref) heartbeat.ref();
