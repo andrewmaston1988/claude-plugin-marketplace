@@ -21,6 +21,8 @@
   },
   "concurrency": 4,
   "timeoutMs": 3600000,
+  "minFreeMemMb": 2048,
+  "valveFreeMemMb": 1024,
   "disable1mContext": true,
   "projects": [],
   "heartbeatSecs": 15,

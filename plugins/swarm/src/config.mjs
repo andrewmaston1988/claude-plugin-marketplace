@@ -52,6 +52,17 @@ function validateProjects(projects) {
   });
 }
 
+// minFreeMemMb (spawn floor) and valveFreeMemMb (kill-newest-running valve) are
+// both hard-error, not silent-fallback: a malformed value would arm/disarm
+// memory protection without the user noticing. 0 is a valid value (disables
+// that gate) — only non-integers and negatives are refused.
+function validateMemFloor(cfg, key) {
+  const v = cfg[key];
+  if (!Number.isInteger(v) || v < 0) {
+    throw new Error(`${key} must be a non-negative integer (MB) — e.g. "${key}": 2048 in ~/.swarm/config.json; 0 disables it`);
+  }
+}
+
 // Deep merge: override wins; objects merge recursively; arrays and scalars replace.
 export function deepMerge(base, override) {
   const out = { ...base };
@@ -72,6 +83,13 @@ export function loadConfig(overridePath, env = process.env) {
     throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
   }
   validateProjects(cfg.projects);
+  validateMemFloor(cfg, "minFreeMemMb");
+  validateMemFloor(cfg, "valveFreeMemMb");
+  // minFreeMemMb: 0 is the documented "disabled" sentinel for the spawn floor —
+  // the valve is then the only mechanism, so the ordering check doesn't apply.
+  if (cfg.minFreeMemMb > 0 && cfg.valveFreeMemMb > cfg.minFreeMemMb) {
+    throw new Error(`valveFreeMemMb (${cfg.valveFreeMemMb}) must not exceed minFreeMemMb (${cfg.minFreeMemMb}) — the valve would fire before the spawn floor ever parks a leaf; lower valveFreeMemMb or raise minFreeMemMb in ~/.swarm/config.json`);
+  }
   return cfg;
 }
 

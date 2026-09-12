@@ -434,7 +434,7 @@ export function gradeFooter({ count, resultsDir, cli }) {
   ].join("\n");
 }
 
-export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate, gradeable, resultsDir, engine }) {
+export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate, gradeable, resultsDir, engine, memoryParks = 0 }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -473,6 +473,11 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
   }
   if (worktreesKept.length) {
     lines.push(formatKeptWorktrees(worktreesKept, { resultsDir, engine }));
+  }
+  // A memory park is normal operation, not a failure — the engine handled the
+  // machine running low, and every parked leaf resumed. Say so once, with a count.
+  if (memoryParks > 0) {
+    lines.push(dim(`${memoryParks} leaf park${memoryParks === 1 ? "" : "s"} for low memory; nothing to do.`));
   }
   // LAST, and printed by the engine — not left to the session's memory. Which
   // model to use for what is otherwise decided by remembered incidents, and the

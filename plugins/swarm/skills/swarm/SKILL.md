@@ -163,6 +163,7 @@ Read the two columns for what they are: **`output` is the work. `input` is the t
 
 - **`⚠ quiet <N>s`** in the activity cell — the leaf has emitted no event for longer than the quiet threshold. *This* is the stall indicator. A leaf with a live activity cell is not stalled, no matter its token count.
 - States: **`failed`**, **`rate-limited`**, **`quota`**, **`retrying`**, **`blocked`** — all tagged explicitly on the row.
+- **`⏸ low memory`** on a `retrying` row is the engine managing the machine's headroom, not a failure — it parks and redrives on its own; don't diagnose or intervene.
 - The closing block's truncation warnings.
 
 **There is no per-leaf kill.** Do not propose one. The run is the unit; killing it kills every leaf's work, and resume re-runs the incomplete ones anyway.

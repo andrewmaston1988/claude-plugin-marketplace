@@ -123,6 +123,87 @@ test("disable1mContext must be a boolean: a number throws naming the key and the
   }
 });
 
+test("loadConfig returns shipped memory-floor defaults when user config is missing", () => {
+  const dir = tmp();
+  try {
+    const cfg = loadConfig(join(dir, "nope.json"));
+    equal(cfg.minFreeMemMb, 2048);
+    equal(cfg.valveFreeMemMb, 1024);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("minFreeMemMb must be a non-negative integer: a string throws naming the key", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ minFreeMemMb: "2048" }));
+    throws(() => loadConfig(p), (e) => e.message.includes("minFreeMemMb"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("minFreeMemMb must be a non-negative integer: a negative number throws naming the key", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ minFreeMemMb: -1 }));
+    throws(() => loadConfig(p), (e) => e.message.includes("minFreeMemMb"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("valveFreeMemMb must be a non-negative integer: a non-integer throws naming the key", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ valveFreeMemMb: 12.5 }));
+    throws(() => loadConfig(p), (e) => e.message.includes("valveFreeMemMb"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("valveFreeMemMb greater than minFreeMemMb is refused, naming both keys", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ minFreeMemMb: 512, valveFreeMemMb: 1024 }));
+    throws(() => loadConfig(p), (e) => e.message.includes("valveFreeMemMb") && e.message.includes("minFreeMemMb"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("minFreeMemMb of 0 disables the spawn floor without throwing", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ minFreeMemMb: 0, valveFreeMemMb: 0 }));
+    const cfg = loadConfig(p);
+    equal(cfg.minFreeMemMb, 0);
+    equal(cfg.valveFreeMemMb, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("minFreeMemMb of 0 (disabled floor) skips the ordering check even with a valve armed above it", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ minFreeMemMb: 0, valveFreeMemMb: 1024 }));
+    const cfg = loadConfig(p);
+    equal(cfg.minFreeMemMb, 0);
+    equal(cfg.valveFreeMemMb, 1024);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("user config deep-merges over defaults without clobbering siblings", () => {
   const dir = tmp();
   try {
