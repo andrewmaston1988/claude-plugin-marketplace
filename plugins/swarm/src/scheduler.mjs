@@ -341,11 +341,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   const tasks = [...plan.tasks];
   if (plan.digest) tasks.push(buildDigestTask(plan));
   initResultsDir(plan.resultsDir);
-  // A stop file from a prior `swarm stop` outlives that run on purpose; the
-  // run-refuses-a-live-engine guard already proved no other engine owns it,
-  // so a fresh engine starting here owns it too and must clear it before any
-  // await, or a signal/stop-file that lands during startup would race a stale
-  // marker this engine never wrote.
+  // A prior `swarm stop` leaves its marker and no other engine is live here (cmdRun
+  // refuses one): clear it before any await, so a stop landing during startup still counts.
   rmSync(stopPath(plan.resultsDir), { force: true });
   // P1: the run records its own intent — the effective plan persists beside
   // the outcomes it produced, so the corpus can answer "what was asked".
