@@ -617,11 +617,6 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
           const src = rawTasks.find((o) => o.id === srcId);
           if (src && src.isolation === undefined) {
             errors.push(`${l}: integrate.from '${srcId}' has no worktree, so it has no branch to merge — give '${srcId}' an isolation block`);
-          } else if (src && src.forEach !== undefined) {
-            errors.push(
-              `${l}: integrate.from '${srcId}' is a forEach task — its clones own the branches ` +
-              `('${srcId}[0]', '${srcId}[1]', …) and '${srcId}' itself never gets one. ` +
-              `Merge a single-tree task instead.`);
           } else if (src && src.when !== undefined) {
             errors.push(
               `${l}: integrate.from '${srcId}' is when-gated — if its gate is false it is skipped ` +

@@ -75,6 +75,23 @@ export function leafCounts(tasks, digest) {
   return counts;
 }
 
+// integrate.from naming a forEach parent is a variable-width join: the cap on
+// what it can fold in is the parent's own maxItems. Named separately from
+// leafCounts because integrate is agentless (no model, no token cost) — this
+// is a branch-count warning for the validate preview, not a spend estimate.
+export function integrateCaps(tasks) {
+  const byId = new Map(tasks.map((t) => [t.id, t]));
+  const lines = [];
+  for (const t of tasks) {
+    if (!t.integrate) continue;
+    for (const srcId of t.integrate.from) {
+      const src = byId.get(srcId);
+      if (src?.forEach) lines.push(`${t.id} ≤ ${src.forEach.maxItems} branches (${srcId} forEach)`);
+    }
+  }
+  return lines;
+}
+
 // -> null when no counted model has history, else { tokens, usd?, counted, unknown }.
 // usd appears only with full coverage: no unknown models, cost samples for
 // every counted one — synthetic dollars for subscription corpora are noise.

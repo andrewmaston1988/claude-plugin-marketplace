@@ -5,6 +5,7 @@ import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { loadManifest, ValidationError, DEFAULT_TOOLS, isUnderRoot, hasWriteTools, guardFor } from "../src/manifest.mjs";
 import { getUsage, resetUsageMemo, saveCookie } from "../src/ollama-usage.mjs";
+import { integrateCaps } from "../src/estimate.mjs";
 
 const CFG = {
   provider: { allowedRoots: [] },
@@ -1550,7 +1551,7 @@ test("integrate node: agentless, validated, normalized onto its target worktree"
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("agentless nodes reject outputDir; from/integrate reject a forEach source", () => {
+test("agentless nodes reject outputDir; isolation.from rejects a forEach source", () => {
   const dir = tmp();
   try {
     const od = writeManifest(dir, { tasks: [
@@ -1567,6 +1568,8 @@ test("agentless nodes reject outputDir; from/integrate reject a forEach source",
     ok(errorsOf(() => loadManifest(odc, CFG, dir)).some((e) => /agentless.*outputDir/.test(e)),
       "compute rejects outputDir");
 
+    // isolation.from bases a NEW single tree off one branch — a forEach parent
+    // has no single branch (its clones each own one), so this rejection stays.
     const fe = writeManifest(dir, { tasks: [
       claudeTask({ id: "src", prompt: "…return JSON list" }),
       claudeTask({ id: "fan", after: ["src"], isolation: "worktree", allowedTools: "Read,Edit",
@@ -1575,27 +1578,63 @@ test("agentless nodes reject outputDir; from/integrate reject a forEach source",
     ] }, "fe.json");
     ok(errorsOf(() => loadManifest(fe, CFG, dir)).some((e) => /is a forEach task/.test(e)),
       "isolation.from rejects a forEach parent");
-
-    const fei = writeManifest(dir, { tasks: [
-      claudeTask({ id: "src2", prompt: "…return JSON list" }),
-      claudeTask({ id: "fan2", after: ["src2"], isolation: "worktree", allowedTools: "Read,Edit",
-        forEach: { from: "src2", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
-      { id: "join2", after: ["fan2"], integrate: { into: "feat", from: ["fan2"] } },
-    ] }, "fei.json");
-    ok(errorsOf(() => loadManifest(fei, CFG, dir)).some((e) => /is a forEach task/.test(e)),
-      "integrate.from rejects a forEach parent");
-
-    // A read-only forEach parent trips both rules; the forEach one is the more
-    // specific diagnosis, so it must be the one reported.
-    const feRo = writeManifest(dir, { tasks: [
-      claudeTask({ id: "src3", prompt: "…return JSON list" }),
-      claudeTask({ id: "fan3", after: ["src3"], isolation: "worktree", allowedTools: "Read,Grep",
-        forEach: { from: "src3", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
-      claudeTask({ id: "next3", after: ["fan3"], isolation: { worktree: "n3", from: "fan3" } }),
-    ] }, "fero.json");
-    ok(errorsOf(() => loadManifest(feRo, CFG, dir)).some((e) => /is a forEach task/.test(e)),
-      "forEach beats no-write-tools — the clones own branches, which is the real fix");
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── F1/F2: integrate.from over a forEach parent (foreach-integrate-fold-back) ──
+// integrate MERGES named branches rather than basing a new tree off one, so a
+// forEach parent's clone branches ('id[0]', 'id[1]', …) are exactly the kind of
+// multi-branch source integrate already knows how to fold in. Only this
+// rejection is lifted — isolation.from above still rejects, and the when-gated
+// / no-write-tools sibling checks still fire (F2).
+test("F1: integrate.from accepts a forEach parent", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "src", prompt: "…return JSON list" }),
+      claudeTask({ id: "fix", after: ["src"], isolation: "worktree", allowedTools: "Read,Edit",
+        forEach: { from: "src", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
+      { id: "join", after: ["fix"], integrate: { into: "feat", from: ["fix"] } },
+    ] }, "fi.json");
+    const plan = loadManifest(p, CFG, dir);
+    const join = plan.tasks.find((t) => t.id === "join");
+    deepEqual(join.integrate.from, ["fix"], "the clone expansion happens at run time, not here");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("F2: integrate.from over a forEach parent still rejects when-gated / no-write-tools sources", () => {
+  const dir = tmp();
+  try {
+    const gated = writeManifest(dir, { tasks: [
+      claudeTask({ id: "src", prompt: "…return JSON list" }),
+      claudeTask({ id: "fix", after: ["src"], isolation: "worktree", allowedTools: "Read,Edit",
+        forEach: { from: "src", path: "", maxItems: 3 }, prompt: "fix {{item}}",
+        when: { from: "src", truthy: "ok" } }),
+      { id: "join", after: ["fix"], integrate: { into: "feat", from: ["fix"] } },
+    ] }, "gated.json");
+    ok(errorsOf(() => loadManifest(gated, CFG, dir)).some((e) => /is when-gated/.test(e)),
+      "a when-gated forEach source is still refused — its worktree may never exist");
+
+    const noWrite = writeManifest(dir, { tasks: [
+      claudeTask({ id: "src2", prompt: "…return JSON list" }),
+      claudeTask({ id: "fix2", after: ["src2"], isolation: "worktree", allowedTools: "Read,Grep",
+        forEach: { from: "src2", path: "", maxItems: 3 }, prompt: "fix {{item}}" }),
+      { id: "join2", after: ["fix2"], integrate: { into: "feat", from: ["fix2"] } },
+    ] }, "nowrite.json");
+    ok(errorsOf(() => loadManifest(noWrite, CFG, dir)).some((e) => /has no write tools/.test(e)),
+      "a read-only forEach source is still refused — its clones commit nothing");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("F8: integrateCaps names the forEach cap an integrate node folds in", () => {
+  const tasks = [
+    { id: "src", model: "haiku" },
+    { id: "fix", forEach: { from: "src", path: "", maxItems: 5 } },
+    { id: "join", integrate: { into: "feat", from: ["fix"] } },
+    { id: "plain", isolation: "worktree" },
+    { id: "join2", integrate: { into: "feat2", from: ["plain"] } },
+  ];
+  deepEqual(integrateCaps(tasks), ["join ≤ 5 branches (fix forEach)"]);
 });
 
 // ── leaf guards (swarm-leaf-guard-no-cargo) ────────────────────────────────────
