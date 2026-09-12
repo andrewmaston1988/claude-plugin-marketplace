@@ -604,9 +604,15 @@
     svg.setAttribute("height", height);
     svg.setAttribute("width", width);
     svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
+    // Draw the transitive reduction, not the raw after-graph: the digest's `after`
+    // lists every leaf, so undoing that here is what keeps a fan-in narrowing
+    // into its join instead of drawing one line per original ancestor.
+    const targetsByKey = new Map();
+    for (const [key, n] of nodes) targetsByKey.set(key, new Set(n.after.map((a) => laneOf.get(a)).filter((k) => k && k !== key)));
+    const reducedTargets = window.swarmLive.reduceEdges(targetsByKey);
     let out = "";
     for (const [key, n] of nodes) {
-      const targets = new Set(n.after.map((a) => laneOf.get(a)).filter((k) => k && k !== key));
+      const targets = reducedTargets.get(key);
       for (const tk of targets) {
         const d = nodes.get(tk);
         if (!d || d.y >= n.y) continue;

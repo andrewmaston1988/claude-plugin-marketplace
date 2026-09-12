@@ -237,6 +237,62 @@ test("header: no token figure remains — the third figure is a run count, not f
   assert.doesNotMatch(header, /\b\d+(?:\.\d+)?[Mk]\b/, "no M/k token suffix in the header");
 });
 
+// ── rail transitive reduction: a fan-in draws once, through the nearest
+//    join, never a redundant line from every ancestor (R1-R4) ───────────────
+
+test("reduceEdges: platform-review fan-in — digest narrows to {join}, join keeps its three, dash-* keep {harness} (R1)", () => {
+  const { reduceEdges } = loadLive();
+  const targetsByKey = new Map([
+    ["scale-copy", new Set()],
+    ["harness", new Set(["scale-copy"])],
+    ["dash-wasm", new Set(["harness"])],
+    ["dash-api", new Set(["harness"])],
+    ["graph-view", new Set(["harness"])],
+    ["join", new Set(["dash-wasm", "dash-api", "graph-view"])],
+    ["__digest", new Set(["scale-copy", "harness", "dash-wasm", "dash-api", "graph-view", "join"])],
+  ]);
+  const reduced = reduceEdges(targetsByKey);
+  assert.deepEqual([...reduced.get("__digest")], ["join"], "digest draws one line, through join, not six");
+  assert.deepEqual(new Set(reduced.get("join")), new Set(["dash-wasm", "dash-api", "graph-view"]), "join's own fan-in is genuine — all three survive");
+  for (const d of ["dash-wasm", "dash-api", "graph-view"]) {
+    assert.deepEqual([...reduced.get(d)], ["harness"], `${d} keeps its single upstream`);
+  }
+});
+
+test("reduceEdges: ar/verify/impl chain — impl drops the redundant ar edge, digest narrows to impl (R2)", () => {
+  const { reduceEdges } = loadLive();
+  const targetsByKey = new Map([
+    ["ar", new Set()],
+    ["verify", new Set(["ar"])],
+    ["impl", new Set(["ar", "verify"])],
+    ["__digest", new Set(["ar", "verify", "impl"])],
+  ]);
+  const reduced = reduceEdges(targetsByKey);
+  assert.deepEqual([...reduced.get("impl")], ["verify"], "ar is reachable via verify — the direct ar->impl edge is redundant");
+  assert.deepEqual([...reduced.get("__digest")], ["impl"], "digest narrows through the deepest node");
+});
+
+test("reduceEdges: a genuine diamond survives — d's fan-in from b and c is NOT redundant (R3)", () => {
+  const { reduceEdges } = loadLive();
+  const targetsByKey = new Map([
+    ["a", new Set()],
+    ["b", new Set(["a"])],
+    ["c", new Set(["a"])],
+    ["d", new Set(["b", "c"])],
+  ]);
+  const reduced = reduceEdges(targetsByKey);
+  assert.deepEqual(new Set(reduced.get("d")), new Set(["b", "c"]), "neither b nor c is an ancestor of the other — both edges are real");
+});
+
+test("reduceEdges: a malformed 2-cycle returns without throwing (R4)", () => {
+  const { reduceEdges } = loadLive();
+  const targetsByKey = new Map([
+    ["x", new Set(["y"])],
+    ["y", new Set(["x"])],
+  ]);
+  assert.doesNotThrow(() => reduceEdges(targetsByKey));
+});
+
 test("page wiring: the runs fetch splices expandQuery inside q()'s argument, and collapse drops the expansion (T6/T7)", () => {
   const page = readFileSync(PAGE_HTML, "utf8");
   // The composition must put expand INSIDE the path handed to q(), so the token
