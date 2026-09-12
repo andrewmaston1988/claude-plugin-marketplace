@@ -1582,7 +1582,10 @@ test("serve restart: a live daemon on the current version is killed and replaced
     // cwd is the OS tmpdir, not `dir`: the replacement daemon inherits it, and a
     // daemon cwd'd inside `dir` locks that directory on Windows until well after
     // the killed process's pid stops answering isAlive, turning cleanup to EPERM.
-    const r = runCli(["serve", "restart"], { cwd: tmpdir(), env: { SWARM_HOME: home, SWARM_PLUGIN_REGISTRY: registry } });
+    // Async, not runCli's spawnSync: on POSIX the killed sleeper is OUR child, and a
+    // blocked event loop never reaps it — the zombie keeps answering kill(pid, 0) and
+    // restart aborts with "the old daemon did not exit" (Linux CI).
+    const r = await runCliAsync(["serve", "restart"], { cwd: tmpdir(), env: { SWARM_HOME: home, SWARM_PLUGIN_REGISTRY: registry } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!/already running/.test(r.stdout), `restart must never short-circuit as already-running:\n${r.stdout}`);
     ok(r.stdout.includes(`stopped pid ${sleeper.pid}`), r.stdout);
