@@ -23,6 +23,7 @@ import { readRun } from "./runlog.mjs";
 //                         { ts, event: "run-start", tasks: [{ id, model }] }
 //                         { ts, id, state, durationMs?, tokens?, note? }   state changes
 //                         { ts, id, event: "tokens", tokens }       live usage ticks
+//                         { ts, id, event: "session", sessionId }   the leaf's session, as soon as its stream names it — resume reads it
 //                         { ts, event: "expand", id, model, clones, truncated?, total? }   forEach expansion
 //                         { ts, event: "expand-manifest", id, children: [{id, model}] }    child-manifest splice
 //                       (child-manifest task ids are namespaced "<node>~<childId>")
@@ -122,6 +123,21 @@ export function appendRunLog(dir, obj) {
   appendFileSync(join(dir, "run.log"), JSON.stringify(obj) + "\n");
 }
 
+// id -> the last session id run.log recorded for it, across every generation.
+export function recordedSessionIds(dir) {
+  const out = new Map();
+  let text = "";
+  try { text = readFileSync(join(dir, "run.log"), "utf8"); } catch { return out; }
+  for (const line of text.split("\n")) {
+    if (!line.includes('"event":"session"')) continue;
+    try {
+      const e = JSON.parse(line);
+      if (e.id && typeof e.sessionId === "string") out.set(e.id, e.sessionId);
+    } catch { /* torn tail */ }
+  }
+  return out;
+}
+
 // ── liveness control files ────────────────────────────────────────────────────
 // heartbeat: one line, ISO timestamp + pid, overwritten whole on every tick — a
 // torn write costs one tick, and the file's own mtime IS the liveness signal, so
@@ -159,6 +175,7 @@ const GLYPHS = {
   failed: "✗",
   "failed:timeout": "✗",
   "failed:stopped": "✗",
+  interrupted: "✗",
   "rate-limited": "⧖",
   quota: "⏳",
   retrying: "↻",
@@ -170,9 +187,9 @@ const GLYPHS = {
 
 // States whose rows carry an explicit [state] tag; ok/running/pending read
 // from the glyph alone.
-const TAGGED = new Set(["failed", "failed:timeout", "failed:stopped", "rate-limited", "quota", "blocked", "skipped"]);
+const TAGGED = new Set(["failed", "failed:timeout", "failed:stopped", "interrupted", "rate-limited", "quota", "blocked", "skipped"]);
 
-const FOOTER_ORDER = ["ok", "failed", "rate-limited", "quota", "blocked", "skipped", "running", "retrying", "pending"];
+const FOOTER_ORDER = ["ok", "failed", "interrupted", "rate-limited", "quota", "blocked", "skipped", "running", "retrying", "pending"];
 
 export function formatTokens(n) {
   if (!n) return "—";
@@ -193,7 +210,7 @@ function fmtElapsed(ms) {
 // watched, then the ones that went wrong, and only then the settled majority.
 const ROW_PRIORITY = [
   "running", "retrying", "rate-limited", "quota",
-  "failed", "failed:timeout", "failed:stopped", "blocked",
+  "failed", "failed:timeout", "failed:stopped", "interrupted", "blocked",
   "ok", "skipped", "pending",
 ];
 const rank = (state) => {
@@ -315,9 +332,15 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
 // which counts leaves the engine dispatched.
 export function renderRun(run, { now = Date.now(), quietWarnMs = 60000 } = {}) {
   const { dir } = run;
-  const tasks = run.tasks.filter((t) => t.kind !== "agentless" || t.lastEventMs != null);
+  // A dead engine settles nothing: run.log's last word for its live leaves stays
+  // "running" forever, so the heartbeat (via readRun's abortedMs) overrides it.
+  const dead = run.abortedMs != null;
+  const tasks = run.tasks
+    .filter((t) => t.kind !== "agentless" || t.lastEventMs != null)
+    .map((t) => (dead && (t.state === "running" || t.state === "retrying") ? { ...t, state: "interrupted" } : t));
   const lines = [
     `${bold("run:")} ${cyan(dir)}`,
+    ...(dead ? [yellow(`⚠ engine dead — no heartbeat since ${new Date(run.abortedMs).toISOString()}. Re-run the manifest: interrupted leaves resume their own sessions.`)] : []),
     "",
     renderRoster({ title: run.name, tasks, now, startedMs: run.startedMs ?? now, quietWarnMs }),
     "",

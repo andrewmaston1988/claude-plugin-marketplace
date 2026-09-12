@@ -2741,3 +2741,60 @@ test("a task without a leafGuard spawns with neither SWARM_LEAF_GUARD nor _PROJE
     equal(spawn.calls[0].opts.env.SWARM_LEAF_GUARD_PROJECT, undefined);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// A leaf's session id is recorded the moment its stream announces it, so a leaf
+// whose engine died before it settled (no results/<id>.json) still resumes its
+// own session — context intact — instead of restarting cold.
+const logLines = (p) => readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+const resumeArg = (call) => { const i = call.args.indexOf("--resume"); return i < 0 ? null : call.args[i + 1]; };
+const deadEngineLog = (p, entries) => {
+  initResultsDir(p.resultsDir);
+  writeFileSync(join(p.resultsDir, "run.log"), entries.map((e) => JSON.stringify({ ts: "2026-09-12T08:50:00.000Z", ...e })).join("\n") + "\n");
+};
+
+test("session: a leaf's session id lands in run.log before the leaf settles", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut("hi", "s-live") }));
+    const p = plan(dir, [task("a")]);
+    await runPlan(p, CFG, makeIo(spawn));
+    const lines = logLines(p);
+    const at = lines.findIndex((e) => e.id === "a" && e.event === "session" && e.sessionId === "s-live");
+    ok(at >= 0, JSON.stringify(lines));
+    ok(at < lines.findIndex((e) => e.id === "a" && e.state === "ok"), "recorded before the settle");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("resume: a leaf the dead engine never settled resumes its recorded session", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [task("a")]);
+    deadEngineLog(p, [{ event: "run-start", tasks: [{ id: "a", model: "haiku" }] }, { id: "a", state: "running" }, { id: "a", event: "session", sessionId: "s-dead" }]);
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut("back", "s-dead") }));
+    await runPlan(p, CFG, makeIo(spawn));
+    equal(resumeArg(spawn.calls[0]), "s-dead");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("resume: a failed result without a session id falls back to the recorded one", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [task("a")]);
+    deadEngineLog(p, [{ event: "run-start", tasks: [{ id: "a", model: "haiku" }] }, { id: "a", event: "session", sessionId: "s-early" }]);
+    writeResult(p.resultsDir, "a", { id: "a", model: "haiku", ok: false, exit: null, output: "spawn died" });
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut("back", "s-early") }));
+    await runPlan(p, CFG, makeIo(spawn));
+    equal(resumeArg(spawn.calls[0]), "s-early");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("resume: --force starts fresh even with a recorded session", async () => {
+  const dir = tmp();
+  try {
+    const p = plan(dir, [task("a")]);
+    deadEngineLog(p, [{ event: "run-start", tasks: [{ id: "a", model: "haiku" }] }, { id: "a", event: "session", sessionId: "s-dead" }]);
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut("fresh", "s-new") }));
+    await runPlan(p, CFG, makeIo(spawn), { force: true });
+    equal(resumeArg(spawn.calls[0]), null);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

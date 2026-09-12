@@ -11,7 +11,7 @@ import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from 
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
-  renderProvenance, touchHeartbeat, stopPath,
+  renderProvenance, touchHeartbeat, stopPath, recordedSessionIds,
 } from "./results.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
@@ -209,7 +209,7 @@ async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
 }
 
 // Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
-export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, onChild } = {}) {
+export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, onChild, onSession } = {}) {
   return new Promise((resolve) => {
     const { argv, env } = buildDispatch(task, prompt, cfg);
     const started = io.now();
@@ -269,7 +269,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
     const parser = createStreamParser({
       onUsage: (id, usage) => { acc.record(id, usage); onTokens?.(acc.totals()); },
       onResult: (evt) => { resultEvt = evt; },
-      onInit: (evt) => { initEvt = evt; },
+      onInit: (evt) => { initEvt = evt; if (evt?.session_id) onSession?.(evt.session_id); },
       onStop: (sr) => { sawAssistant = true; if (sr === "end_turn") sawEndTurn = true; },
       onActivity,
     });
@@ -458,6 +458,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   if (plan.estimate !== undefined) io.stdout(formatEstimate(plan.estimate));
 
   const started = new Date().toISOString();
+  // Read before this run's run-start is appended: every session a previous engine
+  // saw start, including leaves it died before settling.
+  const recordedSessions = force ? new Map() : recordedSessionIds(plan.resultsDir);
   // run-start line lets `status` derive pending tasks (ids never seen since
   // the latest run-start are pending) and carries models for the roster view.
   // pid: lets a reader tell a killed engine (no summary, pid gone) from a live one.
@@ -580,6 +583,11 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   // a busy leaf calls tools far faster than a watcher needs.
   const streamHooks = (task) => ({
     onChild: (child) => children.set(task.id, child),
+    // Durable the moment the stream names it: an engine that dies before this
+    // leaf settles writes no result, and without this line resume starts cold.
+    onSession: (sessionId) => {
+      appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "session", sessionId });
+    },
     onTokens: (totals) => {
       tokensMap.set(task.id, totals);
       lastEventAt.set(task.id, io.now());
@@ -934,9 +942,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       // Resume a previously-failed leaf in place: re-enter its kept worktree
       // (partial diff intact) and resume its session, rather than starting cold.
       // --force is a deliberate fresh redo, so it resets the tree and drops the
-      // session. A first-ever run has no prior and does neither.
+      // session. A first-ever run has no prior and does neither. A leaf whose
+      // engine died before it settled has no result, only its recorded session.
       const prior = force ? null : readResult(plan.resultsDir, task.id);
-      const resumeId = prior && prior.ok === false ? prior.sessionId : null;
+      const resumeId = prior?.ok === true ? null : (prior?.sessionId ?? recordedSessions.get(task.id) ?? null);
 
       let wt = null;
       let taskCwd = task.cwd;

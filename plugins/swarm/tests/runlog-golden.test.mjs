@@ -30,6 +30,7 @@ test("golden: renderStatus over the fixture run.log is byte-stable", () => {
   process.env.NO_COLOR = "1";
   try {
     buildFixture(dir);
+    writeFileSync(join(dir, "heartbeat"), "live\n"); // a live engine: status must not read it as dead
     const actual = normalise(renderStatus(dir, NOW, QUIET_MS), dir);
     if (process.env.CAPTURE_GOLDEN) {
       mkdirSync(FIXTURES, { recursive: true });

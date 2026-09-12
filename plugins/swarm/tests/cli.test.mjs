@@ -1037,6 +1037,7 @@ test("status: renders the roster with counts, elapsed, tokens from a synthetic r
       { ts: t0, id: "e", state: "rate-limited" },
     ];
     writeFileSync(join(rd, "run.log"), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+    writeFileSync(join(rd, "heartbeat"), "live\n"); // a live engine
     const r = runCli(["status", rd], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("1 ok · 1 failed · 1 rate-limited · 1 blocked · 1 running · 1 pending"), r.stdout);
