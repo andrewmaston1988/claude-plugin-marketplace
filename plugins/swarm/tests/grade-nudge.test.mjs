@@ -4,11 +4,12 @@
 // spawns no hook binary in tests; decideGradeNudge is the seam.
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync } from "node:fs";
 import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { decideGradeNudge, ungradedRuns, lastRunStart } from "../src/grade-nudge.mjs";
 import { gradedRunKeys } from "../src/scores.mjs";
+import { waiverPath } from "../src/results.mjs";
 
 const GRADING_ON = { grading: { enabled: true } };
 
@@ -21,7 +22,12 @@ function tmp() {
 // tail, and a results/ holding one leaf per id. The wrong-answer fixtures are
 // built with the same helper on purpose — a walker that lists everything, or
 // a decision that attributes unstamped runs, must trip them.
-function runDir(home, { enc = "C--code-x", name, starts, tail = [], results = ["a"], noResults = false }) {
+// `live` picks the liveness fixture ungradedRuns' D4 predicate reads:
+// "finished" (default — a summary.json with a finished timestamp, so every
+// pre-D4 test here keeps meaning "done" without knowing liveness exists),
+// "in-flight" (a fresh heartbeat, no summary), or "aborted" (a heartbeat
+// backdated well past runLiveness' default staleness window, no summary).
+function runDir(home, { enc = "C--code-x", name, starts, tail = [], results = ["a"], noResults = false, live = "finished" }) {
   const dir = join(home, "runs", enc, name);
   mkdirSync(dir, { recursive: true });
   const lines = starts.map((s) => JSON.stringify({ ts: "2026-09-10T00:00:00Z", event: "run-start", pid: 1, tasks: [{ id: "a", model: "m" }], ...s }));
@@ -30,14 +36,24 @@ function runDir(home, { enc = "C--code-x", name, starts, tail = [], results = ["
     mkdirSync(join(dir, "results"), { recursive: true });
     for (const id of results) writeFileSync(join(dir, "results", `${id}.json`), JSON.stringify({ id, model: "m", ok: true }));
   }
+  if (live === "finished") {
+    writeFileSync(join(dir, "summary.json"), JSON.stringify({ started: "2026-09-10T00:00:00Z", finished: "2026-09-10T00:05:00Z" }));
+  } else if (live === "in-flight") {
+    writeFileSync(join(dir, "heartbeat"), `${new Date().toISOString()} 1\n`);
+  } else if (live === "aborted") {
+    const hb = join(dir, "heartbeat");
+    writeFileSync(hb, "2020-01-01T00:00:00.000Z 1\n");
+    const stale = new Date("2020-01-01T00:00:00.000Z");
+    utimesSync(hb, stale, stale);
+  }
   return dir;
 }
 
-function decide({ runs, graded = new Set(), sessionId = "me", seen = {} }) {
-  return decideGradeNudge({ config: GRADING_ON, runs, graded, sessionId, seen });
+function decide({ runs, graded = new Set(), sessionId = "me" }) {
+  return decideGradeNudge({ config: GRADING_ON, runs, graded, sessionId });
 }
 
-test("row 3: only runs this session dispatched are listed — another session's and unstamped are not", () => {
+test("row 3 / B4 / B5: only runs this session dispatched are listed — another session's and unstamped are not", () => {
   const home = tmp();
   try {
     const mine = runDir(home, { name: "mine-1", starts: [{ launcher: "me" }] });
@@ -97,28 +113,29 @@ test("row 4c: an all-failed run graded with outcome:failed and no grades counts 
   }
 });
 
-test("row 6: blocks once per session — a second stop is silent, a different session blocks again", () => {
+test("B2: a finished ungraded run blocks the first stop and the second — decideGradeNudge keeps no once-gate of its own", () => {
   const home = tmp();
   try {
     runDir(home, { name: "once-1", starts: [{ launcher: "me" }] });
-    runDir(home, { name: "other-1", starts: [{ launcher: "other" }] });
     const runs = ungradedRuns({ home });
-    ok(decide({ runs, seen: {} }).block, "the first stop blocks");
-    equal(decide({ runs, seen: { me: Date.now() } }).block, false, "the marker makes the second stop silent");
-    ok(decide({ runs, sessionId: "other", seen: { me: Date.now() } }).block, "another session gets its own one block");
+    ok(decideGradeNudge({ config: GRADING_ON, runs, graded: new Set(), sessionId: "me" }).block, "the first stop blocks");
+    ok(
+      decideGradeNudge({ config: GRADING_ON, runs, graded: new Set(), sessionId: "me", seen: { me: Date.now() } }).block,
+      "the second stop blocks too — an old-shaped seen marker, if one is even passed in, must not silence it"
+    );
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("row 7: grading.enabled false — silent regardless of how many ungraded runs exist", () => {
+test("row 7 / B6: grading.enabled false — silent regardless of how many ungraded runs exist", () => {
   const home = tmp();
   try {
     runDir(home, { name: "a-1", starts: [{ launcher: "me" }] });
     runDir(home, { name: "b-1", starts: [{ launcher: "me" }] });
     const runs = ungradedRuns({ home });
-    equal(decideGradeNudge({ config: { grading: { enabled: false } }, runs, graded: new Set(), sessionId: "me", seen: {} }).block, false);
-    equal(decideGradeNudge({ config: {}, runs, graded: new Set(), sessionId: "me", seen: {} }).block, false, "the key absent entirely is the same as off");
+    equal(decideGradeNudge({ config: { grading: { enabled: false } }, runs, graded: new Set(), sessionId: "me" }).block, false);
+    equal(decideGradeNudge({ config: {}, runs, graded: new Set(), sessionId: "me" }).block, false, "the key absent entirely is the same as off");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -159,6 +176,72 @@ test("row 11: a broken tail after the run-start line never breaks the decision �
     runDir(home, { name: "torn-1", starts: [{ launcher: "me" }], tail: ['{"event":"run-start","ts":"torn', "{not json at all"] });
     const d = decide({ runs: ungradedRuns({ home }) });
     ok(d.block, "the run-start still resolves and the run is listed");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("B1: an in-flight run (fresh heartbeat, no summary) never blocks a stop", () => {
+  const home = tmp();
+  try {
+    runDir(home, { name: "inflight-1", starts: [{ launcher: "me" }], live: "in-flight" });
+    const runs = ungradedRuns({ home });
+    deepEqual(runs, [], "an in-flight run must not be listed");
+    equal(decide({ runs }).block, false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("B7: an aborted run (stale heartbeat, no summary) never blocks — it awaits its resumer", () => {
+  const home = tmp();
+  try {
+    runDir(home, { name: "aborted-1", starts: [{ launcher: "me" }], live: "aborted" });
+    const runs = ungradedRuns({ home });
+    deepEqual(runs, [], "an aborted run must not be listed");
+    equal(decide({ runs }).block, false);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("B3: grading a run, or waiving it, clears only that run", () => {
+  const home = tmp();
+  try {
+    const gradedLater = runDir(home, { name: "grade-me-1", starts: [{ launcher: "me" }] });
+    const waivedLater = runDir(home, { name: "waive-me-1", starts: [{ launcher: "me" }] });
+    const untouched = runDir(home, { name: "leave-me-1", starts: [{ launcher: "me" }] });
+
+    const graded = gradedRunKeys([{ resultsDir: gradedLater, leaf: "a", outcome: "completed" }]);
+    writeFileSync(waiverPath(waivedLater), JSON.stringify({ waivedAt: new Date().toISOString(), reason: "smoke" }));
+
+    const runs = ungradedRuns({ home, graded });
+    const dirs = runs.map((r) => r.dir);
+    ok(dirs.includes(untouched), "the untouched run is still listed");
+    ok(!dirs.includes(gradedLater), "the graded run is cleared");
+    ok(!dirs.includes(waivedLater), "the waived run is cleared");
+
+    const d = decide({ runs, graded });
+    ok(d.reason.includes(untouched));
+    ok(!d.reason.includes(gradedLater));
+    ok(!d.reason.includes(waivedLater));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("B8: a waived run is skipped before its run.log is read", () => {
+  const home = tmp();
+  try {
+    const waived = runDir(home, { name: "waived-1", starts: [{ launcher: "me" }] });
+    writeFileSync(waiverPath(waived), JSON.stringify({ waivedAt: new Date().toISOString(), reason: "smoke" }));
+    runDir(home, { name: "ungraded-1", starts: [{ launcher: "me" }] });
+
+    const read = [];
+    const runs = ungradedRuns({ home, _readFile: (p, enc) => { read.push(p); return readFileSync(p, enc); } });
+
+    deepEqual(runs.map((r) => basename(r.dir)), ["ungraded-1"]);
+    ok(!read.some((p) => p.includes("waived-1")), "the waived run's run.log must never be read");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

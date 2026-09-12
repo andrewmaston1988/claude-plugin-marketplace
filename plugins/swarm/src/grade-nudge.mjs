@@ -5,12 +5,13 @@
 // module owns the mechanics; hooks/grade-nudge.mjs is the thin stdin/stdout
 // wrapper, and the decision below is pure over injected state so tests never
 // spawn a hook binary (the plugin's established seam: decideNudge, decide).
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { swarmHome } from "./config.mjs";
 import { canonicalRunKey } from "./scores.mjs";
-import { listLeaves } from "./results.mjs";
+import { listLeaves, waiverPath } from "./results.mjs";
+import { runLiveness } from "./runlog.mjs";
 
 // The engine CLI the block reason names — the same command shape the run's
 // own closing block prints, pasteable from any shell.
@@ -44,7 +45,10 @@ export function lastRunStart(text) {
 // _readFile is the injection seam the ordering test counts through — the only
 // way to prove the cheap predicates run first, since skipping a run and reading
 // its log then skipping it produce the same output.
-export function ungradedRuns({ env = process.env, home = swarmHome(env), graded = new Set(), _readFile = readFileSync } = {}) {
+// heartbeatMs bounds the liveness check (D4): only a finished or explicitly
+// stopped run counts as ungraded — an in-flight or aborted run is skipped
+// before its run.log is ever read.
+export function ungradedRuns({ env = process.env, home = swarmHome(env), graded = new Set(), heartbeatMs = 15_000, _readFile = readFileSync } = {}) {
   const out = [];
   const runsRoot = join(home, "runs");
   let encodings = [];
@@ -56,14 +60,18 @@ export function ungradedRuns({ env = process.env, home = swarmHome(env), graded 
       const dir = join(runsRoot, enc, name);
       // Cheapest predicates first: run.log is the expensive read (45.6MB across
       // the estate, largest 2.2MB) and every stop pays for the whole walk, so a
-      // run already graded or with nothing to grade must never reach it.
+      // run already graded, waived, or with nothing to grade must never reach it.
       const key = canonicalRunKey(dir);
       if (key == null || graded.has(key)) continue;
+      if (existsSync(waiverPath(dir))) continue;
       // Nothing to grade: no results/ dir, or no result file in it — agentless
       // nodes produce no row and skipped leaves write none.
       let files = [];
       try { files = readdirSync(join(dir, "results")); } catch { continue; }
       if (!files.some((f) => f.endsWith(".json"))) continue;
+      // In-flight or aborted: awaiting a resume, which owns the run instead (D4).
+      const live = runLiveness(dir, { heartbeatMs });
+      if (live.finishedMs == null && live.stoppedMs == null) continue;
       let text;
       try { text = _readFile(join(dir, "run.log"), "utf8"); } catch { continue; } // not a run dir
       const start = lastRunStart(text);
@@ -75,26 +83,26 @@ export function ungradedRuns({ env = process.env, home = swarmHome(env), graded 
 }
 
 // The one "does this run still owe grades" rule, shared by the closing block and
-// the digest footer: grading on, gradeable leaves present, and no store rows for
-// the run's canonical key. Undefined means ask nothing.
+// the digest footer: grading on, gradeable leaves present, no store rows for the
+// run's canonical key, and no waiver on file. Undefined means ask nothing.
 export function runGradeable(dir, { cfg, graded }) {
   if (cfg?.grading?.enabled !== true) return undefined;
   if (graded?.has(canonicalRunKey(dir))) return undefined;
+  if (existsSync(waiverPath(dir))) return undefined;
   const count = listLeaves(dir, { gradeable: true }).length;
   return count > 0 ? { count, resultsDir: dir, cli: CLI } : undefined;
 }
 
-// Pure: given the walked runs, the store's graded keys, this session's id and
-// the once-per-session markers, should this stop be blocked? A run is listed
-// iff its owning run-start was stamped with THIS session and the store holds
-// no row for its canonical key. Grading is a discrete task, so the marker is
-// once per session — never a cooldown.
-export function decideGradeNudge({ config, runs, graded, sessionId, seen }) {
+// Pure: given the walked runs, the store's graded keys and this session's id,
+// should this stop be blocked? A run is listed iff its owning run-start was
+// stamped with THIS session and the store holds no row for its canonical key.
+// No once-gate here (D3) — the hook re-fires every turn end; the `stop_hook_active`
+// guard there is what keeps a single turn from looping.
+export function decideGradeNudge({ config, runs, graded, sessionId }) {
   if (config?.grading?.enabled !== true) return { block: false, reason: null };
   if (!sessionId) return { block: false, reason: null };
   const mine = (runs || []).filter((r) => r.launcher === sessionId && !graded?.has(r.key));
   if (!mine.length) return { block: false, reason: null };
-  if (seen?.[sessionId]) return { block: false, reason: null };
   return { block: true, reason: gradeNudgeReason(mine) };
 }
 
@@ -104,6 +112,6 @@ function gradeNudgeReason(runs) {
     `${runs.length} swarm run${one ? "" : "s"} this session dispatched ${one ? "has" : "have"} no rows in the grading store (grading.enabled is on) — ungraded evidence never reaches \`swarm perf\`, which then decays back into routing by remembered incidents.`,
     `Grade each results dir: fill every universal aspect 1-10, drop \`grades\` on rows whose leaf produced no output, then \`swarm grade --file\` the grades.json it prints.`,
     ...runs.map((r) => `  node ${CLI} grade --init ${r.dir}`),
-    `If these runs are not worth grading, simply stop again — this reminder fires once per session.`,
+    `Not worth grading? \`swarm grade --waive <dir> --reason "<why>"\` — this asks at every stop until each run is graded or waived.`,
   ].join("\n");
 }
