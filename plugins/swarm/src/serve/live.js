@@ -87,17 +87,22 @@
     return seq === latest;
   }
 
-  // Collapse a burst of route requests into one per scheduled tick: the first
-  // caller arms the latch, the rest join it. The scheduled fn re-reads the
-  // hash when it runs, so a coalesced request can never miss a navigation that
-  // landed in between.
-  function coalesce(schedule) {
-    let armed = false;
-    return (fn) => {
-      if (armed) return;
-      armed = true;
-      schedule(() => { armed = false; fn(); });
+  // One route build in flight; requests during it earn exactly one trailing
+  // build. A per-microtask latch was not enough: with no in-flight guard every
+  // SSE event started its own fetch, each response landed already superseded,
+  // routeGuard discarded them all, and the page went quiet under live runs.
+  // The trailing build re-reads the hash, so it never misses a navigation.
+  function singleFlight(fn) {
+    let running = false;
+    let dirty = false;
+    const run = () => {
+      running = true;
+      Promise.resolve().then(fn).catch(() => {}).finally(() => {
+        running = false;
+        if (dirty) { dirty = false; run(); }
+      });
     };
+    return () => { if (running) { dirty = true; return; } run(); };
   }
 
   // The one DOM-touching export here, and the exception to "no DOM access" above:
@@ -126,5 +131,5 @@
     return n;
   };
 
-  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, coalesce, loadScript, headerRunCount };
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount };
 })();

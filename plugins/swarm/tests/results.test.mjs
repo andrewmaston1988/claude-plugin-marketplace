@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -273,6 +273,7 @@ test("renderStatus: rebuilds the roster from run.log with live tokens and elapse
       { ts: new Date(NOW - 5000).toISOString(), id: "b", event: "activity", activity: "Grep src/auth" },
     ];
     writeFileSync(join(rd, "run.log"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    writeFileSync(join(rd, "heartbeat"), "live\n"); // a live engine
     const out = renderStatus(rd, NOW);
     ok(out.includes(`run: ${rd}`), out);
     match(out, /✓ {2}a\s+haiku\s+30s\s+1\.5k/);
@@ -297,6 +298,7 @@ test("renderStatus: quietWarnMs is caller-tunable (config-threaded from the CLI)
       { ts: t0, id: "a", state: "running" },
     ];
     writeFileSync(join(rd, "run.log"), entries.map((e) => JSON.stringify(e)).join("\n") + "\n");
+    writeFileSync(join(rd, "heartbeat"), "live\n"); // a live engine
     ok(/⚠ quiet 30s/.test(renderStatus(rd, NOW, 10000)), "10s threshold: 30s silence warns");
     ok(!/⚠ quiet/.test(renderStatus(rd, NOW, 120000)), "120s threshold: 30s silence is fine");
   } finally {
@@ -592,6 +594,33 @@ test("row 7 footer half: grading off keeps footer out of closing block and diges
     const digestPath = writeDigestMd(dir, "# digest");
     const digest = readFileSync(digestPath, "utf8");
     ok(!digest.includes("awaiting grading"), "digest.md must not mention grading when gradeable is absent");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A dead engine settles nothing, so run.log's last word for a leaf it was running
+// stays "running" forever. status must read the heartbeat, not that last word.
+test("renderStatus: a dead engine's running leaves read as interrupted, and the header says the engine is dead", async () => {
+  const { renderStatus } = await import("../src/results.mjs");
+  const dir = tmp();
+  try {
+    const rd = join(dir, "dead");
+    initResultsDir(rd);
+    const t0 = new Date(NOW - 60000).toISOString();
+    writeFileSync(join(rd, "run.log"), [
+      { ts: t0, event: "run-start", tasks: [{ id: "a", model: "haiku" }, { id: "b", model: "haiku" }] },
+      { ts: t0, id: "a", state: "ok", durationMs: 1000 },
+      { ts: t0, id: "b", state: "running" },
+    ].map((e) => JSON.stringify(e)).join("\n") + "\n");
+    writeFileSync(join(rd, "heartbeat"), `${t0} 4242\n`);
+    const stale = new Date(Date.now() - 3_600_000);
+    utimesSync(join(rd, "heartbeat"), stale, stale);
+    const out = renderStatus(rd, Date.now());
+    match(out, /engine dead/);
+    match(out, /b\s+haiku.*\[interrupted\]/);
+    ok(!/1 running/.test(out), out);
+    ok(out.includes("1 interrupted"), out);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

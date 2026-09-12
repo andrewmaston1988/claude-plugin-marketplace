@@ -23,6 +23,7 @@ export const stateColor = {
   ok: green,
   failed: red,
   "failed:timeout": red,
+  interrupted: yellow,
   "rate-limited": yellow,
   quota: yellow,
   retrying: yellow,

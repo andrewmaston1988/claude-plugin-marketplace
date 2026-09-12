@@ -141,7 +141,14 @@ function loadPage(opts = {}) {
   let esListeners = {};
   const fetchLog = [];
   const pendingFetches = [];
-  const fetch = (url) => { fetchLog.push(url); return new Promise((resolve) => pendingFetches.push({ url, resolve })); };
+  const fetch = (url, init = {}) => {
+    fetchLog.push(url);
+    return new Promise((resolve, reject) => {
+      pendingFetches.push({ url, resolve });
+      init.signal?.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" })));
+    });
+  };
+  const timers = [];
 
   const context = {}; // closed over by the document stub below
   const document = {
@@ -156,7 +163,11 @@ function loadPage(opts = {}) {
   const EventSource = function () { const es = { addEventListener: (t, f) => { (esListeners[t] ||= []).push(f); } }; return es; };
 
   Object.assign(context, { window, document, location, fetch, DOMParser, EventSource, navigator: {},
-    URLSearchParams, setInterval: () => 0, setTimeout: () => 0, queueMicrotask: (f) => Promise.resolve().then(f), console });
+    URLSearchParams, AbortController, setInterval: () => 0,
+    // Timers are captured, never fired, unless a test fires them: the page must not
+    // depend on wall-clock time to behave.
+    setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
+    queueMicrotask: (f) => Promise.resolve().then(f), console });
   if (opts.perfViews) window.perfViews = opts.perfViews; // perf.js is never loaded here; stub the contract
   vm.createContext(context);
   vm.runInContext(script, context, { filename: "page.html" });
@@ -180,6 +191,8 @@ function loadPage(opts = {}) {
     fireHashchange: () => winListeners.hashchange.forEach((f) => f()),
     fireSse: (t, d) => (esListeners[t] || []).forEach((f) => f({ data: d || "{}" })),
     fetchLog,
+    pendingCount: () => pendingFetches.length,
+    fireTimers: (ms) => timers.filter((t) => t.fn && t.ms === ms).forEach((t) => { const fn = t.fn; t.fn = null; fn(); }),
     listFetches: () => fetchLog.filter(isList),
     runFetches: () => fetchLog.filter(isRun),
     respondList: (data) => respond(isList, data),
@@ -567,4 +580,36 @@ test("switcher: renders on a COLD #/perf load with window.perfViews never stubbe
   await gotoPerf(P, "#/perf");
   assert.equal(segLabels(P.main).length, 5, "the switcher rendered without perf.js being loaded at all");
   assert.equal(activeSegLabel(P.main), "rank");
+});
+
+// Events arriving faster than /api/runs answers must still paint. With only a
+// microtask coalesce, each event started its own fetch; every response landed
+// already superseded, routeGuard discarded it, and the list never repainted.
+test("Test 9: SSE events faster than the list answers still commit fresh data, one fetch at a time", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  for (let i = 0; i < 4; i++) {
+    P.fireSse("run"); await P.flush();
+    P.fireSse("run"); await P.flush();
+    assert.ok(P.pendingCount() <= 1, `never more than one list fetch in flight (iteration ${i})`);
+    P.respondList(listData(listRow({ name: `FRESH${i}` })));
+    await P.flush();
+  }
+  assert.ok(/FRESH\d/.test(P.screenText()), "a response from the burst committed");
+});
+
+test("Test 10: a hung list request times out into the error panel and frees the next refresh", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.fireSse("runs"); await P.flush();
+  assert.equal(P.pendingCount(), 1, "the refresh is in flight");
+  P.fireTimers(20000); await P.flush();
+  assert.ok(/timed out/.test(P.screenText()), "the error panel names the timeout");
+  const before = P.listFetches().length;
+  P.fireSse("runs"); await P.flush();
+  assert.equal(P.listFetches().length - before, 1, "the next event starts a new fetch");
 });
