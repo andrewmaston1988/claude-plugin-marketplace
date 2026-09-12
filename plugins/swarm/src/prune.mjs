@@ -58,6 +58,7 @@ export function plan(run, git, fs) {
   const rows = [];
   const seen = new Set();
   for (const wt of run.worktreesKept || []) {
+    if (!fs.existsSync(wt.path)) continue; // already gone from disk — not a row to plan or report
     const repo = wt.repo || run.repo;
     rows.push({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo });
     seen.add(resolve(wt.path));
