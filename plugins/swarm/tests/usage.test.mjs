@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   normalizeAnthropic, normalizeOllama, readCachedUsage, usageLines, notableLines,
-  QUOTA_CACHE_FILENAME,
+  formatResetTime, QUOTA_CACHE_FILENAME,
 } from "../src/usage.mjs";
+
+const LONDON = "Europe/London";
 
 const ANTHROPIC = {
   limits: [
@@ -59,9 +61,9 @@ test("normalizeOllama/Anthropic: G4 an unreadable provider is `unknown` with no 
 // ---- the printed lines ----------------------------------------------------
 
 test("usageLines: G5 every provider prints the same shape, provider-named", () => {
-  const lines = usageLines([normalizeAnthropic(ANTHROPIC), normalizeOllama(OLLAMA_OK)]);
-  ok(lines.includes("anthropic session: 42% — resets 2026-09-06T12:00:00Z"), lines.join("\n"));
-  ok(lines.includes("ollama weekly: 83.8% — resets 2026-09-12T08:00:00Z"), lines.join("\n"));
+  const lines = usageLines([normalizeAnthropic(ANTHROPIC), normalizeOllama(OLLAMA_OK)], { timeZone: LONDON });
+  ok(lines.includes("anthropic session: 42% — resets Sun 6 Sep, 13:00"), lines.join("\n"));
+  ok(lines.includes("ollama weekly: 83.8% — resets Sat 12 Sep, 09:00"), lines.join("\n"));
   ok(lines.some((l) => l.startsWith("anthropic weekly (Opus):")), lines.join("\n"));
 });
 
@@ -91,7 +93,7 @@ test("notableLines: G7b the cached banner stamps last-seen in absolute UTC — t
   ok(lines.some((l) => l.includes(`last seen: ${stamp}`)), lines.join("\n"));
   ok(!lines.some((l) => l.includes("ago")), `'ago' must never print: ${lines.join("\n")}`);
   // the figures themselves keep their own absolute reset stamps
-  deepEqual(usageLines([u]).filter((l) => l.startsWith("ollama weekly")), ["ollama weekly: 83.8% — resets 2026-09-12T08:00:00Z"]);
+  deepEqual(usageLines([u], { timeZone: LONDON }).filter((l) => l.startsWith("ollama weekly")), ["ollama weekly: 83.8% — resets Sat 12 Sep, 09:00"]);
 });
 
 // Test 4 — every failure reason names itself; a healthy cached reading is silent.
@@ -176,4 +178,45 @@ test("readCachedUsage: G11 never throws — missing cache, corrupt cache, a prov
     const out = await readCachedUsage(cfg, { now: NOW, cachePath: corrupt, _ollama: blowsUp });
     deepEqual(out.map((u) => u.state), ["unknown", "unknown"]);
   });
+});
+
+// ---- formatResetTime: local time, no arithmetic ----------------------------
+
+test("formatResetTime: R1 an absolute instant reads in the reader's own zone, no seconds", () => {
+  equal(formatResetTime("2026-09-12T08:00:00.490024+00:00", { timeZone: LONDON }), "Sat 12 Sep, 09:00");
+});
+
+test("formatResetTime: R2 the same instant in UTC differs from London BST; winter shows GMT", () => {
+  equal(formatResetTime("2026-09-12T08:00:00.490024+00:00", { timeZone: "UTC" }), "Sat 12 Sep, 08:00");
+  // 12 Jan is outside BST (last Sun Mar -> last Sun Oct) — London stays on GMT, no +1h.
+  equal(formatResetTime("2026-01-12T08:00:00Z", { timeZone: LONDON }), "Mon 12 Jan, 08:00");
+});
+
+test("usageLines: R3 prints '— resets <formatted>' and keeps the raw ISO in the data", () => {
+  const u = normalizeOllama(OLLAMA_OK);
+  const lines = usageLines([u], { timeZone: LONDON });
+  ok(lines.includes("ollama weekly: 83.8% — resets Sat 12 Sep, 09:00"), lines.join("\n"));
+  // rendering only — the data structure still carries the raw ISO instant.
+  equal(u.limits.find((l) => l.kind === "weekly").resetsAt, "2026-09-12T08:00:00Z");
+});
+
+test("notableLines: R4 weekly-exhausted and session-limit lines use the same formatter", () => {
+  const exhausted = notableLines([normalizeOllama({ ...OLLAMA_OK, state: "exhausted", weeklyPctUsed: 100 })], { timeZone: LONDON });
+  equal(exhausted[0], "ollama: weekly allowance exhausted, resets Sat 12 Sep, 09:00");
+
+  const session = notableLines([normalizeOllama({ ...OLLAMA_OK, sessionPctUsed: 100 })], { timeZone: LONDON });
+  equal(session[0], "ollama: session limit reached, resets Sun 6 Sep, 13:00");
+});
+
+test("formatResetTime: R5 a missing or unparseable resetsAt prints no clause, never throws", () => {
+  equal(formatResetTime(null), null);
+  equal(formatResetTime(undefined), null);
+  equal(formatResetTime("not-a-date"), null);
+
+  const missing = normalizeOllama({ ...OLLAMA_OK, sessionResetsAt: undefined, resetsAt: "garbage" });
+  const lines = usageLines([missing], { timeZone: LONDON });
+  ok(lines.every((l) => !l.includes("resets")), lines.join("\n"));
+
+  const exhausted = notableLines([normalizeOllama({ ...OLLAMA_OK, state: "exhausted", weeklyPctUsed: 100, resetsAt: "garbage" })], { timeZone: LONDON });
+  equal(exhausted[0], "ollama: weekly allowance exhausted");
 });

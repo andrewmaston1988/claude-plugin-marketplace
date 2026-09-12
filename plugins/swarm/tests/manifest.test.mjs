@@ -404,6 +404,8 @@ const liveHeadroom = (over = {}) => ({
 
 test("headroom: M1 a LIVE exhausted meter rejects a :cloud seat, naming task, model, pct, reset, recast", () => {
   const dir = tmp();
+  const prevTz = process.env.TZ;
+  process.env.TZ = "Europe/London";
   try {
     const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
@@ -412,9 +414,10 @@ test("headroom: M1 a LIVE exhausted meter rejects a :cloud seat, naming task, mo
     }));
     ok(errs.some((e) =>
       e.includes("find-diag") && e.includes("glm-5.3:cloud") && e.includes("100")
-      && e.includes("2026-09-07T00:00:00Z") && /recast/i.test(e)
+      && e.includes("Mon 7 Sep, 01:00") && /recast/i.test(e)
     ), errs.join("|"));
   } finally {
+    if (prevTz === undefined) delete process.env.TZ; else process.env.TZ = prevTz;
     rmSync(dir, { recursive: true, force: true });
   }
 });

@@ -93,14 +93,43 @@ export async function readCachedUsage(cfg = {}, { env = process.env, now = Date.
   return out;
 }
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+// The reader's own clock, absolute (not "in 2 days") — no arithmetic between
+// the printed digits and the provider's own site. Locale is pinned to en-GB's
+// field order but month names are hand-rolled: ICU's own `month: "short"`
+// renders "Sept", four letters, which this plugin's line shape does not use.
+// The zone defaults to the host's; tests pin one so they never depend on the
+// machine running them. Returns null (never throws) for a missing or
+// unparseable instant — callers drop the whole "resets ..." clause.
+export function formatResetTime(iso, { timeZone } = {}) {
+  if (!iso) return null;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const zone = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: zone,
+    weekday: "short",
+    day: "numeric",
+    month: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const get = (type) => parts.find((p) => p.type === type)?.value;
+  const month = MONTHS[Number(get("month")) - 1];
+  return `${get("weekday")} ${Number(get("day"))} ${month}, ${get("hour")}:${get("minute")}`;
+}
+
 // `<provider> <kind>: <pct>% — resets <when>` — the line shape `quota` already
 // printed for Anthropic, now every provider's.
-export function usageLines(usages) {
+export function usageLines(usages, { timeZone } = {}) {
   const lines = [];
   for (const u of usages) {
     for (const l of u.limits) {
       const scope = l.scope ? ` (${l.scope})` : "";
-      const resets = l.resetsAt ? ` — resets ${l.resetsAt}` : "";
+      const formatted = formatResetTime(l.resetsAt, { timeZone });
+      const resets = formatted ? ` — resets ${formatted}` : "";
       lines.push(`${u.provider} ${l.kind}${scope}: ${l.percent}%${resets}`);
     }
   }
@@ -140,13 +169,14 @@ export function provenanceBanner(usage) {
 // healthy — or live-fetched — provider adds nothing beyond its figures; the
 // standing block is instruction, and unprompted noise beside it trains the
 // reader to skip the whole thing.
-export function notableLines(usages) {
+export function notableLines(usages, { timeZone } = {}) {
   const lines = [];
   for (const u of usages) {
     lines.push(...provenanceBanner(u));
     if (u.state === "exhausted") {
       const weekly = u.limits.find((l) => l.kind === "weekly");
-      lines.push(`${u.provider}: weekly allowance exhausted${weekly?.resetsAt ? `, resets ${weekly.resetsAt}` : ""}`);
+      const formatted = formatResetTime(weekly?.resetsAt, { timeZone });
+      lines.push(`${u.provider}: weekly allowance exhausted${formatted ? `, resets ${formatted}` : ""}`);
       continue;
     }
     // A full session bar blocks dispatch RIGHT NOW even while the weekly verdict
@@ -154,7 +184,8 @@ export function notableLines(usages) {
     // verdict change.
     const session = u.limits.find((l) => l.kind === "session");
     if (session && session.percent >= 100) {
-      lines.push(`${u.provider}: session limit reached${session.resetsAt ? `, resets ${session.resetsAt}` : ""}`);
+      const formatted = formatResetTime(session.resetsAt, { timeZone });
+      lines.push(`${u.provider}: session limit reached${formatted ? `, resets ${formatted}` : ""}`);
     }
   }
   return lines;

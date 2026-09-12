@@ -128,11 +128,12 @@ async function cmdModels(rest = []) {
   // annotated here, above the :cloud list, so it reads as a preflight rather
   // than a per-model property. The banner replaces the old stale line: a
   // reading that was not fetched now is marked, or not shown at all.
-  const { provenanceBanner } = await import("../src/usage.mjs");
+  const { provenanceBanner, formatResetTime } = await import("../src/usage.mjs");
   const headroom = await usageHeadroom(cfg);
   for (const line of provenanceBanner(headroom)) out(line);
   if (headroom.state === "exhausted") {
-    out(`⚠ :cloud weekly allowance exhausted (${headroom.weeklyPctUsed}%) — resets ${headroom.resetsAt}. These models will not launch.`);
+    const resets = formatResetTime(headroom.resetsAt) ?? headroom.resetsAt;
+    out(`⚠ :cloud weekly allowance exhausted (${headroom.weeklyPctUsed}%) — resets ${resets}. These models will not launch.`);
   }
   const showAll = rest.includes("--all");
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
@@ -388,7 +389,11 @@ async function cmdRun(rest) {
     const quotaBad = bad.filter((t) => t.state === "quota");
     if (quotaBad.length) {
       const resets = quotaBad.map((t) => readResult(plan.resultsDir, t.id)?.quotaResetsAt).find(Boolean);
-      out(`quota: ${quotaBad.length} leaf(s) blocked by Anthropic usage limits${resets ? ` — re-run after ${resets}` : ""}`);
+      // quotaResetsAt is either a real ISO instant (parseQuotaReset's epoch path) or a
+      // human-text fragment like "3pm" — format the former, pass the latter through.
+      const { formatResetTime } = await import("../src/usage.mjs");
+      const shown = resets ? (formatResetTime(resets) ?? resets) : null;
+      out(`quota: ${quotaBad.length} leaf(s) blocked by Anthropic usage limits${shown ? ` — re-run after ${shown}` : ""}`);
     }
     out("resume: re-run the same command — ok results are skipped, failed/blocked work re-executes.");
     return 1;
