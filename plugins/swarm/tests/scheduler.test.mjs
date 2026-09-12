@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
-import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure } from "../src/scheduler.mjs";
+import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
@@ -236,6 +236,20 @@ test("classifyFailure: ollama detection survives an overridden quotaPatterns", (
   // install whose config.json already holds the old four patterns, since `config init`
   // never overwrites a value that is already set.
   equal(classifyFailure({ timedOut: false, output: OLLAMA_WEEKLY_429 }, ["something else"]), "quota");
+});
+
+// SIGNOFF-1: the valve's reduce() had no initial value — an empty filter result
+// (running ids present but none reads state "running") threw instead of no-op'ing.
+test("pickNewestRunning: no id currently reads 'running' -> undefined, no throw", () => {
+  const state = new Map([["a", "retrying"], ["b", "ok"]]);
+  const startedAt = new Map([["a", 10], ["b", 20]]);
+  equal(pickNewestRunning(["a", "b"], state, startedAt), undefined);
+});
+
+test("pickNewestRunning: picks the later-started running id", () => {
+  const state = new Map([["a", "running"], ["b", "running"]]);
+  const startedAt = new Map([["a", 10], ["b", 20]]);
+  equal(pickNewestRunning(["a", "b"], state, startedAt), "b");
 });
 
 test("retry: rate-limited leaf retries with backoff and succeeds; dependents unharmed", async () => {

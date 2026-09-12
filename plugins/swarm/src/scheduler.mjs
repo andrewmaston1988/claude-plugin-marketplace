@@ -102,6 +102,14 @@ export function classifyFailure({ timedOut, output, stopped }, quotaPatterns = D
   return "failed";
 }
 
+// The valve's target pick. Undefined when no id currently reads "running" —
+// a stale `running` entry mid-settle must be a no-op, never a crash.
+export function pickNewestRunning(ids, state, startedAt) {
+  const runningIds = ids.filter((id) => state.get(id) === "running");
+  if (runningIds.length === 0) return undefined;
+  return runningIds.reduce((a, b) => ((startedAt.get(b) ?? 0) > (startedAt.get(a) ?? 0) ? b : a));
+}
+
 function tryParseJson(output) {
   const trimmed = String(output || "").trim();
   if (!trimmed) return undefined;
@@ -703,9 +711,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     // dying to an OOM. Only when there is a second running leaf to fall back
     // to; children.get may already be gone if it settled between ticks.
     if (running.size > 1 && memLow(cfg.valveFreeMemMb)) {
-      const newest = [...running.keys()]
-        .filter((id) => state.get(id) === "running")
-        .reduce((a, b) => ((startedAt.get(b) ?? 0) > (startedAt.get(a) ?? 0) ? b : a));
+      const newest = pickNewestRunning([...running.keys()], state, startedAt);
       if (newest !== undefined) {
         memoryStopped.add(newest);
         try { children.get(newest)?.kill(); } catch { /* already gone */ }
