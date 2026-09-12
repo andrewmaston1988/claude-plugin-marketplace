@@ -143,13 +143,23 @@ export function readRows(path = scoresPath()) {
 // backslashes — raw-string membership marks nearly every graded run ungraded,
 // silently and permanently. Separators fold to "/", case folds (Windows paths
 // are case-insensitive), a trailing separator is stripped.
+// Operator decision 2026-09-12: under a runs tree, the key is just <enc>/<name>
+// (the two segments after the last "runs" component) — moving SWARM_HOME or the
+// machine must not orphan grades. A path with no "runs" component, or fewer than
+// two segments after it, keeps the full normalised path.
 // Returns null for what cannot identify a run — not a string, empty, or "."
 // (a real row in the store): such a key is skipped, never guessed at.
 export function canonicalRunKey(p) {
   if (typeof p !== "string") return null;
   const t = p.trim();
   if (!t || t === ".") return null;
-  return t.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+  const normalized = t.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase();
+  const segments = normalized.split("/");
+  const runsIdx = segments.lastIndexOf("runs");
+  if (runsIdx !== -1 && segments.length - runsIdx - 1 >= 2) {
+    return `${segments[runsIdx + 1]}/${segments[runsIdx + 2]}`;
+  }
+  return normalized;
 }
 
 // Canonical keys of every resultsDir the store holds ANY row for. A dir is

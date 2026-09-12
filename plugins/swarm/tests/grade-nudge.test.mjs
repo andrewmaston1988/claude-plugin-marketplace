@@ -265,8 +265,8 @@ test("the walk never reads the run.log of a run it can skip on a cheap predicate
     // read — 45.6MB across the real estate, largest 2.2MB. Output alone cannot
     // prove the ordering: reading a log and then skipping the run leaves exactly
     // the same result as never reading it. So count the reads.
-    const graded = new Set();
-    for (const name of ["graded-1", "graded-2"]) graded.add(runDir(home, { name, starts: [{ launcher: "me" }] }).replaceAll("\\", "/").toLowerCase());
+    const dirs = ["graded-1", "graded-2"].map((name) => runDir(home, { name, starts: [{ launcher: "me" }] }));
+    const graded = gradedRunKeys(dirs.map((resultsDir) => ({ resultsDir, leaf: "a", outcome: "completed" })));
     runDir(home, { name: "nothing-to-grade-1", starts: [{ launcher: "me" }], noResults: true });
     runDir(home, { name: "ungraded-1", starts: [{ launcher: "me" }] });
 
