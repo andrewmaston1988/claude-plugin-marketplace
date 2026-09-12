@@ -1288,20 +1288,24 @@ test("liveness: SIGINT routes through requestStop and stops the run", async () =
   }
 });
 
-test("SIGNOFF-2: stop wins over memory-parked leaves — the loop must not hang waiting for memory to clear", async () => {
+test("SIGNOFF-2: stop wins over a leaf still parked for memory — the loop exit itself must fire, not a lucky redrive", async () => {
   const dir = tmp();
   try {
-    const spawn = fakeSpawnFactory((call) => (promptOf(call) === "do a" ? { output: "a done", delayMs: 20 } : { output: "b", delayMs: 5000 }));
+    const spawn = fakeSpawnFactory(() => ({ output: "x", delayMs: 10000 }));
     const io = makeIo(spawn, { freeMemMb: () => 1 }); // permanently starved
     const p = plan(dir, [task("a"), task("b")]);
-    const cfg = { ...CFG, minFreeMemMb: 2048, concurrency: 2, heartbeatSecs: 0.05 };
+    // heartbeatSecs long enough that the memory redrive (heartbeat-only) cannot
+    // fire inside this test's timeout — b must still be genuinely parked when
+    // stop lands, so only the loop-exit condition can end the run.
+    const cfg = { ...CFG, minFreeMemMb: 2048, concurrency: 2, heartbeatSecs: 10 };
     const runPromise = runPlan(p, cfg, io);
-    // let a finish (b redrives and starts running under Fix 3), then request stop
-    setTimeout(() => writeFileSync(stopPath(p.resultsDir), ""), 150);
+    // signal, not the stop-file: detecting the file also needs a heartbeat tick.
+    setTimeout(() => process.emit("SIGINT"), 50);
     const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("runPlan hung: stop did not win over a memory-parked leaf")), 3000));
     const r = await Promise.race([runPromise, timeout]);
 
     equal(r.summary.stopped, true);
+    equal(r.summary.tasks.find((t) => t.id === "a").state, "failed:stopped");
     equal(r.summary.tasks.find((t) => t.id === "b").state, "failed:stopped");
   } finally {
     rmSync(dir, { recursive: true, force: true });
