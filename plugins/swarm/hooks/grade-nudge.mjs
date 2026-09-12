@@ -1,25 +1,17 @@
 #!/usr/bin/env node
-// Stop hook: when grading is enabled, block the stop once per session if any
-// run THIS session dispatched has no rows in the score store — the backstop
-// for the grading ask the engine prints into the run's stdout, the one place a
-// dispatching session never reads. Reports, never grades. Silent (exit 0) on a
-// continuation stop (stop_hook_active), with no session id, when grading is
-// disabled — before the store read or the runs walk happen — or on a
-// malformed config: a hook must never break the stop.
-import fs from 'node:fs';
-import path from 'node:path';
+// Stop hook: when grading is enabled, block the stop at every turn end if any
+// finished run THIS session dispatched has no rows in the score store — the
+// backstop for the grading ask the engine prints into the run's stdout, the
+// one place a dispatching session never reads. Reports, never grades. A
+// continuation stop (stop_hook_active) still exits silently, so one turn
+// never loops — the next turn's stop asks again until the run is graded or
+// waived. Also silent (exit 0) with no session id, when grading is disabled
+// — before the store read or the runs walk happen — or on a malformed
+// config: a hook must never break the stop.
 import { pathToFileURL } from 'node:url';
-import { loadConfig, swarmHome } from '../src/config.mjs';
+import { loadConfig } from '../src/config.mjs';
 import { readRows, scoresPath, gradedRunKeys } from '../src/scores.mjs';
 import { decideGradeNudge, ungradedRuns } from '../src/grade-nudge.mjs';
-
-// Once-per-session markers, keyed on the Stop payload's session_id — a sibling
-// of workflow-nudge's marker in the swarm home.
-const SEEN = '.grade-nudge-seen.json';
-
-function readJSON(p) {
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
-}
 
 async function main() {
   let stdin = '';
@@ -37,35 +29,17 @@ async function main() {
   try { config = loadConfig(undefined, process.env); } catch { process.exit(0); }
   if (config?.grading?.enabled !== true) process.exit(0);
 
-  const home = swarmHome(process.env);
-  const seenPath = path.join(home, SEEN);
-  // The marker bounds the COST, not just the nagging: the hook process is fresh
-  // per stop, so a session that has already been nudged would otherwise re-read
-  // the store and re-walk the runs tree on every subsequent stop for nothing.
-  // decideGradeNudge checks it too — that copy keeps the pure decision honest
-  // under injected state; this one is what stops the work happening at all.
-  const seen = readJSON(seenPath);
-  if (seen?.[sessionId]) process.exit(0);
-
-  // The store, read once per stop, and only for a session still owed a nudge.
+  // The store and the runs walk, read fresh every stop — no once-marker to
+  // short-circuit them (D3): the whole point is that this re-fires every turn.
+  const heartbeatMs = Math.max(50, (config.heartbeatSecs ?? 15) * 1000);
   const graded = gradedRunKeys(readRows(scoresPath(process.env)));
   const decision = decideGradeNudge({
     config,
-    runs: ungradedRuns({ env: process.env, graded }),
+    runs: ungradedRuns({ env: process.env, graded, heartbeatMs }),
     graded,
     sessionId,
-    seen,
   });
   if (!decision.block) process.exit(0);
-
-  try {
-    const next = { ...(seen || {}) };
-    next[sessionId] = Date.now();
-    // Dead sessions' markers must not rot the file; a week outlives any session.
-    for (const [k, v] of Object.entries(next)) if (Date.now() - v > 7 * 86_400_000) delete next[k];
-    fs.mkdirSync(home, { recursive: true });
-    fs.writeFileSync(seenPath, JSON.stringify(next), 'utf8');
-  } catch { /* marker failure must not break the nudge */ }
 
   process.stdout.write(JSON.stringify({ decision: 'block', reason: decision.reason }) + '\n');
   process.exit(0);
