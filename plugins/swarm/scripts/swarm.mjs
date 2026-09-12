@@ -837,7 +837,10 @@ async function cmdServe(rest) {
   const running = readPid(home);
   const aliveRunning = isAlive(running?.pid);
   const takeover = Boolean(running?.pid && running.pid !== process.pid && aliveRunning && isStale(running, installed));
-  if (blocksStart(running, installed, process.pid, aliveRunning)) {
+  // restart never short-circuits here — even a live, current-version daemon must
+  // go through the kill -> waitForExit -> startDetached path below; that short
+  // circuit exists for `start` only.
+  if (verb !== "restart" && blocksStart(running, installed, process.pid, aliveRunning)) {
     out(`dashboard: already running (pid ${running.pid})`);
     for (const u of urlLines(port)) out(`  ${u}`);
     exitSoon(0); return 0;
