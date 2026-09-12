@@ -1064,18 +1064,30 @@
 
   // ── live ────────────────────────────────────────────────────────────────
   let es;
+  let esAttempt = 0;
   function connect() {
     es = new EventSource(q("/events"));
     // pendingView as well as view: a refresh for a screen still being navigated to
     // must not be dropped because its commit has not landed (and vice versa).
+    // The list view no longer reacts here — it refreshes on `runs` only (below),
+    // the estate snapshot changing; a per-run `run` event still drives whichever
+    // run view has that run open.
     es.addEventListener("run", (e) => {
       let d = {}; try { d = JSON.parse(e.data); } catch {}
       const v = pendingView || view;
-      if (v.name === "runs") requestRoute(route);
-      else if (v.project === d.project && v.run === d.name) requestRoute(route);
+      if (v.project === d.project && v.run === d.name) requestRoute(route);
     });
     es.addEventListener("runs", () => { if ((pendingView || view).name === "runs") requestRoute(route); });
-    es.onerror = () => { /* EventSource reconnects on its own */ };
+    // D6: reconnect only once the browser has given up (readyState CLOSED) —
+    // the CONNECTING case is its own retry already in flight. `esAttempt` resets
+    // on a successful open; on() fetches a catch-up route so events missed
+    // during the gap are not silently lost.
+    es.onopen = () => { if (esAttempt) requestRoute(route); esAttempt = 0; };
+    es.onerror = () => {
+      if (es.readyState !== EventSource.CLOSED) return;
+      es.close();
+      setTimeout(connect, window.swarmLive.reconnectDelay(esAttempt++));
+    };
   }
   window.addEventListener("resize", () => { if (view.name === "run" && currentRun) rerender(); });
 

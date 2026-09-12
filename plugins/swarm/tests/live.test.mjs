@@ -36,6 +36,11 @@ test("projectOpen: closed unless manually opened — the (d) inversion (L2)", ()
   assert.equal(projectOpen("p-untouched", openProjects), false);
 });
 
+test("reconnectDelay: doubles from 1s, capped at 30s (L2)", () => {
+  const { reconnectDelay } = loadLive();
+  assert.deepEqual([0, 1, 2, 3, 4, 5, 6].map(reconnectDelay), [1000, 2000, 4000, 8000, 16000, 30000, 30000]);
+});
+
 test("elapsedText: running moves with now; finished is fixed regardless of now; pending is null (L3)", () => {
   const { elapsedText } = loadLive();
   const running = { state: "running", startedMs: 1000 };

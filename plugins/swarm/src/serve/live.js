@@ -71,6 +71,11 @@
 
   const runEnded = (run) => !!(run && (run.finishedMs || run.abortedMs || run.stoppedMs));
 
+  // D6: the backoff a CLOSED EventSource reconnects with — 1s, doubling, capped
+  // at 30s. The browser's own retry already covers the CONNECTING case; this is
+  // only reached once it has given up.
+  const reconnectDelay = (attempt) => Math.min(30_000, 1_000 * 2 ** attempt);
+
   // The runs list has no single run to end, so it always polls; a run/leaf view
   // polls only while its run is still open, and never for a run not yet fetched.
   function shouldPoll(view, run, now) {
@@ -131,5 +136,5 @@
     return n;
   };
 
-  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount };
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay };
 })();
