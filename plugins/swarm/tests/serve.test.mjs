@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import http from "node:http";
 import { createServer, safeSegment } from "../src/serve/server.mjs";
 import { RUN_LOG, NOW, buildFixture } from "./fixtures/run-fixture.mjs";
+import { buildForEachFixture } from "./fixtures/foreach-fixture.mjs";
 import { touchHeartbeat, heartbeatPath } from "../src/results.mjs";
 import { listRuns as realListRuns, projectKeys as realProjectKeys, readRun as realReadRun } from "../src/runlog.mjs";
 import { buildSnapshot } from "../src/serve/estate.mjs";
@@ -400,6 +401,23 @@ test("events: SSE emits one debounced run event per burst, names the run, and he
       assert.match(runEvents[0], /"project":"C--code-a"/);
       assert.match(runEvents[0], /"name":"live-1"/);
       assert.match(text, /^: ping/m, "heartbeat comment present");
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+test("leaf route: a manifest-forEach clone's session serves its child step's authored prompt (T6)", async () => {
+  // `chain[0]~walk` is a session of a clone; clones are never in manifest.tasks, so the
+  // prompt must be found through the forEach parent's child list.
+  const { home } = seedHome();
+  buildForEachFixture(join(home, "runs", "C--code-a", "fe-1"));
+  try {
+    await withServer({ home }, async ({ get }) => {
+      const walk = await get(`/api/runs/C--code-a/fe-1/leaves/${encodeURIComponent("chain[1]~walk")}`);
+      assert.equal(walk.status, 200);
+      assert.equal(walk.body.prompt, "walk {{item}}");
+      assert.equal(walk.body.authored, true);
+      const verify = await get(`/api/runs/C--code-a/fe-1/leaves/${encodeURIComponent("chain[0]~verify")}`);
+      assert.equal(verify.body.prompt, "verify it");
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
