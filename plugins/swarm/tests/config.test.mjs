@@ -474,7 +474,7 @@ test("win32 command-line check: with a .cmd launcher, the measured length includ
       const prompt = "x".repeat(promptLen);
       const { argv } = buildDispatch(baseTask, prompt, cfg);
       const bare = windowsCommandLineLength(argv);
-      const { cmd, args } = toSpawnable(argv);
+      const { cmd, args } = toSpawnable(argv, { _platform: "win32" });
       const wrapped = windowsCommandLineLength([cmd, ...args]);
       if (bare <= 32000 && wrapped > 32000) { found = true; break; }
     }

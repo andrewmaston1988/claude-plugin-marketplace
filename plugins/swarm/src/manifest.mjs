@@ -416,7 +416,7 @@ function checkCommandLineLengths(tasks, cfg, io, errors, label) {
     if (typeof t.model !== "string" || !t.model || typeof t.prompt !== "string") continue;
     const prompt = measurablePrompt(t.prompt, cfg);
     const { argv } = buildDispatch(t, prompt, cfg);
-    const { cmd, args } = toSpawnable(argv);
+    const { cmd, args } = toSpawnable(argv, { _platform: io.platform });
     const len = windowsCommandLineLength([cmd, ...args]);
     if (len > WIN_CMDLINE_MAX) {
       errors.push(

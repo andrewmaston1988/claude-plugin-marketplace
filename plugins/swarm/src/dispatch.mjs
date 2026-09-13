@@ -74,8 +74,8 @@ export function buildDispatch(task, prompt, cfg) {
 // node directly with the underlying script (supports %~dp0 self-relative paths).
 // Anything else falls back to `cmd /c` (fine for argv without quotes).
 
-export function resolveExecutable(cmd, { _spawnSync = spawnSync, _env = process.env } = {}) {
-  if (process.platform !== "win32") return cmd;
+export function resolveExecutable(cmd, { _spawnSync = spawnSync, _env = process.env, _platform = process.platform } = {}) {
+  if (_platform !== "win32") return cmd;
   if (isAbsolute(cmd) || cmd.includes(sep) || cmd.includes("/")) return cmd;
   const r = _spawnSync("where", [cmd], { encoding: "utf8", windowsHide: true, timeout: 5000, env: _env });
   if (r.status === 0 && r.stdout) {
@@ -115,10 +115,10 @@ export function windowsCommandLineLength(argv) {
   return argv.map(quoteArgWin).join(" ").length;
 }
 
-export function toSpawnable(argv, { _readFileSync = readFileSync, _spawnSync = spawnSync, _env = process.env } = {}) {
+export function toSpawnable(argv, { _readFileSync = readFileSync, _spawnSync = spawnSync, _env = process.env, _platform = process.platform } = {}) {
   let [cmd, ...args] = argv;
-  if (process.platform !== "win32") return { cmd, args };
-  cmd = resolveExecutable(cmd, { _spawnSync, _env });
+  if (_platform !== "win32") return { cmd, args };
+  cmd = resolveExecutable(cmd, { _spawnSync, _env, _platform });
   if (!/\.(bat|cmd)$/i.test(cmd)) return { cmd, args };
   try {
     const content = _readFileSync(cmd, "utf8");
