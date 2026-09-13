@@ -452,21 +452,22 @@
     const byId = new Map(tasks.map((t) => [t.id, t]));
     const rows = [];
     waves.forEach((ids, w) => {
-      const wtasks = ids.map((id) => byId.get(id)).filter(Boolean);
+      // an expanded clone container runs no session — its sessions stand in its place
+      const wtasks = ids.map((id) => byId.get(id)).filter((t) => t && !(t.kind === "container" && t.expanded));
       const parents = new Map();
       const singles = [];
       for (const t of wtasks) {
-        if ((t.kind === "clone" || t.kind === "child") && byId.has(t.parent)) {
+        if ((t.kind === "clone" || t.kind === "child" || t.kind === "container") && byId.has(t.parent)) {
           if (!parents.has(t.parent)) parents.set(t.parent, []);
           parents.get(t.parent).push(t);
         } else singles.push(t);
       }
       const members = [];
       for (const t of singles) {
-        // (h) split by kind: a forEach parent's clones expand inline (no accordion);
-        // a manifest parent becomes a single navigable row — its members render only
-        // on the node screen (#/run/<p>/<n>/node/<id>), never inline here.
-        if (parents.has(t.id)) members.push({ type: t.kind === "manifest" ? "node" : "group", id: t.id, task: t, kids: parents.get(t.id) });
+        // A forEach row is a label its clones branch from, its sessions listed clone by
+        // clone beneath it; a manifest parent is a single navigable row whose members
+        // render only on its node screen (#/run/<p>/<n>/node/<id>), never inline here.
+        if (parents.has(t.id)) members.push({ type: t.kind === "manifest" ? "node" : "label", id: t.id, task: t, kids: parents.get(t.id) });
         else members.push({ type: "task", id: t.id, task: t });
       }
       for (const [pid, kids] of parents) if (!byId.has(pid) || !singles.find((s) => s.id === pid)) for (const k of kids) members.push({ type: "task", id: k.id, task: k });
@@ -475,9 +476,9 @@
       rows.push({ type: "wave", wave: w, members, open, tasks: wtasks });
       if (open) {
         for (const m of members) {
-          if (m.type === "group") {
-            rows.push({ type: "group", wave: w, id: m.id, task: m.task, kids: m.kids });
-            for (const k of m.kids) rows.push({ type: "task", wave: w, id: k.id, task: k, nested: true });
+          if (m.type === "label") {
+            rows.push({ type: "label", wave: w, id: m.id, task: m.task, kids: m.kids });
+            for (const k of m.kids) rows.push({ type: "task", wave: w, id: k.id, task: k, block: m.id });
           } else if (m.type === "node") {
             rows.push({ type: "node", wave: w, id: m.id, task: m.task, kids: m.kids });
           } else rows.push({ type: "task", wave: w, id: m.id, task: m.task });
@@ -486,7 +487,10 @@
     });
     return rows;
   }
-  const stateOfGroup = (kids) => kids.some((k) => k.state === "running" || k.state === "retrying") ? "run" : kids.some((k) => /failed|blocked/.test(k.state)) ? "bad" : kids.some((k) => k.state === "rate-limited" || k.state === "quota") ? "warn" : kids.every((k) => k.state === "ok" || k.state === "skipped") ? "ok" : "pend";
+  // live.js owns the rollup, shared with the rail's line colours.
+  const stateOfGroup = (kids) => window.swarmLive.stateOfGroup(kids);
+  // A clone session reads `X[i] local`, the clone's id faint; the full id stays the key.
+  const sessionName = (id) => { const tilde = id.lastIndexOf("~"); return tilde > 0 ? `<span class="faint">${esc(id.slice(0, tilde))}</span> ${esc(id.slice(tilde + 1))}` : esc(id); };
   const stripHtml = (kids, sq) => {
     const max = 40;
     const dots = kids.slice(0, max).map((k) => `<i class="${sq ? "sq " : ""}${cls(k.state)}"></i>`).join("");
@@ -528,11 +532,13 @@
         }
         continue;
       }
-      if (r.type === "group") {
-        // (h) a forEach parent is a wave whose members happened to be created at
-        // runtime — a label, not an accordion: no chevron, no toggle, kids always follow.
+      if (r.type === "label") {
+        // A forEach is the trunk its clones branch from: no dot and no strip (its clones
+        // follow, never collapsed); tappable, for the definition driving it.
         const t = r.task;
-        html += `<li class="row" data-node="${esc(t.id)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· forEach ×${r.kids.length}</span></span>${stripHtml(r.kids)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(t.model || "")} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div></div></li>`;
+        const clones = new Set(r.kids.map((k) => /^\[(\d+)\]/.exec(k.id.slice(t.id.length))?.[1])).size;
+        const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
+        html += `<li class="row leaf tap" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· forEach ×${clones}</span></span><span class="meta">${countsHtml(byStateOf(r.kids))} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       if (r.type === "node") {
@@ -549,83 +555,59 @@
       const right = window.swarmLive.elapsedText(t, now) ?? t.state;
       const sub = quiet ? `quiet ${quietSecs}s · ${esc(t.model)}` : t.state === "running" && t.activity ? `${esc(t.model)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(t.model || "");
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
-      html += `<li class="row leaf tap${quiet ? " quiet" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.nested ? "&nbsp;&nbsp;" : ""}${esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
+      html += `<li class="row leaf tap${quiet ? " quiet" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
     html += `</ul></div>`;
     return { html, rows };
   }
 
-  // Draw the rail as ONE overlay: node centres measured from the rows, so lanes
-  // and fan-in curves meet at every row boundary regardless of row height.
+  // Draw the rail as ONE overlay. live.js decides every lane and route (railRows →
+  // railLayout); this only measures row centres — so lines meet at every row boundary
+  // whatever the row height — and paints. A line is coloured by the rollup of what it
+  // carries; a node by its own state.
   function drawRail(tasks, rows) {
     const svg = $("#rail"), list = $("#rows");
     if (!svg || !list) return;
-    const byId = new Map(tasks.map((t) => [t.id, t]));
-    // Lane assignment first, so the rail can be sized before anything is measured:
-    // rows re-measure after the width changes, since the text column reflows.
-    const rowMeta = new Map(rows.map((r, i) => [i, r]));
-    const laneFor = new Map();
-    let laneCounter = 0, currentWave = -1, maxLane = 0;
-    const MAX_LANES = 8;
-    rows.forEach((r, i) => {
-      if (!r || (r.type === "wave" && r.open)) return;
-      if (r.wave !== currentWave) { currentWave = r.wave; laneCounter = 0; }
-      const lane = r.nested ? 1 : laneCounter++;
-      laneFor.set(i, lane);
-      maxLane = Math.max(maxLane, Math.min(lane, MAX_LANES - 1));
-    });
-    // Wide open waves narrow the pitch rather than sharing a lane: 14px up to six
-    // lanes, 8px beyond, so a 10-wide wave still reads one lane per leaf.
-    const LANE_W = maxLane > 5 ? 8 : 14, LANE_X0 = 12, R = maxLane > 5 ? 3.5 : 5;
-    const railW = LANE_X0 + maxLane * LANE_W + 9 + 10; // last lane + ring radius + breathing room
-    const graph = list.parentElement;
-    graph.style.setProperty("--rail", `${Math.max(56, railW)}px`);
-
+    const live = window.swarmLive;
+    const rail = live.railRows(rows);
+    const layout = live.railLayout(rail);
+    const pitch = live.railPitch(layout.maxLane);
+    // Sized before anything is measured: rows re-measure after the width changes,
+    // since the text column reflows.
+    list.parentElement.style.setProperty("--rail", `${pitch.width}px`);
     const listTop = list.getBoundingClientRect().top;
-    const nodes = new Map(); // node key -> {x,y,c,ring}
-    const laneOf = new Map();
     const rowEls = [...list.children];
-    rowEls.forEach((el, i) => {
-      const r = rowMeta.get(i);
-      if (!laneFor.has(i)) return;
-      const lane = laneFor.get(i);
-      const rect = el.getBoundingClientRect();
-      const y = rect.top - listTop + rect.height / 2;
-      const x = LANE_X0 + Math.min(lane, MAX_LANES - 1) * LANE_W;
-      let key, c, ring = false, ids;
-      if (r.type === "wave") { key = `wave:${r.wave}`; ids = r.tasks.map((t) => t.id); c = stateOfGroup(r.tasks); ring = c === "run"; }
-      else if (r.type === "group" || r.type === "node") { key = r.id; ids = [r.id, ...r.kids.map((k) => k.id)]; c = stateOfGroup([r.task, ...r.kids]); ring = c === "run"; }
-      else { key = r.id; ids = [r.id]; c = cls(r.task.state); ring = r.task.state === "running" || r.task.state === "retrying"; }
-      nodes.set(key, { x, y, c, ring, ids, after: [...new Set(ids.flatMap((id) => byId.get(id)?.after || []))] });
-      for (const id of ids) laneOf.set(id, key);
-    });
+    const cy = (i) => { const rect = rowEls[i].getBoundingClientRect(); return rect.top - listTop + rect.height / 2; };
+    const statesOf = new Map(rail.map((r) => [r.key, r.states]));
+    const classOf = (states) => (states.length === 1 ? cls(states[0]) : stateOfGroup(states.map((state) => ({ state }))));
+    const stroke = (keys) => COLOR[classOf(keys.flatMap((k) => statesOf.get(k) || []))];
     const height = list.getBoundingClientRect().height;
-    const width = Math.max(56, railW);
     svg.setAttribute("height", height);
-    svg.setAttribute("width", width);
-    svg.setAttribute("viewBox", `0 0 ${width} ${height}`);
-    // The digest's `after` lists every leaf; drawing the reduction keeps a fan-in
-    // narrowing into its join instead of one line per ancestor.
-    const targetsByKey = new Map();
-    for (const [key, n] of nodes) targetsByKey.set(key, new Set(n.after.map((a) => laneOf.get(a)).filter((k) => k && k !== key)));
-    const reducedTargets = window.swarmLive.reduceEdges(targetsByKey);
+    svg.setAttribute("width", pitch.width);
+    svg.setAttribute("viewBox", `0 0 ${pitch.width} ${height}`);
     let out = "";
-    for (const [key, n] of nodes) {
-      const targets = reducedTargets.get(key);
-      for (const tk of targets) {
-        const d = nodes.get(tk);
-        if (!d || d.y >= n.y) continue;
-        const ym = n.y - 22;
-        const col = COLOR[d.c === "pend" ? "pend" : d.c];
-        out += `<path d="M${d.x} ${d.y} L${d.x} ${Math.max(d.y, ym)} C${d.x} ${n.y} ${n.x} ${ym} ${n.x} ${n.y}" stroke="${col}" stroke-width="2" fill="none"/>`;
-      }
-      if (!targets.size && n.y > 30) out += `<path d="M${n.x} ${n.y - 28} L${n.x} ${n.y}" stroke="var(--rule)" stroke-width="2"/>`;
+    for (const s of layout.segments) {
+      const x0 = pitch.x(s.lane0), x1 = pitch.x(s.lane1), y0 = cy(s.row0) + s.off0, y1 = cy(s.row1) + s.off1, ym = (y0 + y1) / 2;
+      const d = x0 === x1 ? `M${x0} ${y0} L${x1} ${y1}` : `M${x0} ${y0} C${x0} ${ym} ${x1} ${ym} ${x1} ${y1}`;
+      out += `<path d="${d}" stroke="${stroke(s.carries)}" stroke-width="2" fill="none"/>`;
     }
-    for (const [key, n] of nodes) {
-      const hollow = n.c === "pend";
-      const k = esc(key);
-      out += hollow ? `<circle data-key="${k}" cx="${n.x}" cy="${n.y}" r="${R}" fill="none" stroke="var(--faint)" stroke-width="2"/>` : `<circle data-key="${k}" cx="${n.x}" cy="${n.y}" r="${R}" fill="${COLOR[n.c]}"/>`;
-      if (n.ring) out += `<circle class="ring" data-key="ring:${k}" cx="${n.x}" cy="${n.y}" r="${R + 4}"/>`;
+    for (const c of layout.curves) {
+      const y = cy(c.row), xa = pitch.x(c.from), xb = pitch.x(c.to);
+      const [ya, yb] = c.kind === "in" ? [y - 22, y] : [y, y + 22];
+      out += `<path d="M${xa} ${ya} C${xa} ${yb} ${xb} ${ya} ${xb} ${yb}" stroke="${stroke(c.carries)}" stroke-width="2" fill="none"/>`;
+    }
+    const parentless = new Set(rail.filter((r) => !r.parents.length).map((r) => r.key));
+    for (const n of layout.nodes) {
+      const x = pitch.x(n.lane), y = cy(n.row);
+      if (parentless.has(n.key) && y > 30) out += `<path d="M${x} ${y - 28} L${x} ${y}" stroke="var(--rule)" stroke-width="2"/>`;
+    }
+    for (const n of layout.nodes) {
+      const states = statesOf.get(n.key);
+      const c = classOf(states);
+      const ring = states.length === 1 ? states[0] === "running" || states[0] === "retrying" : c === "run";
+      const x = pitch.x(n.lane), y = cy(n.row), k = esc(n.key);
+      out += c === "pend" ? `<circle data-key="${k}" cx="${x}" cy="${y}" r="${pitch.r}" fill="none" stroke="var(--faint)" stroke-width="2"/>` : `<circle data-key="${k}" cx="${x}" cy="${y}" r="${pitch.r}" fill="${COLOR[c]}"/>`;
+      if (ring) out += `<circle class="ring" data-key="ring:${k}" cx="${x}" cy="${y}" r="${pitch.r + 4}"/>`;
     }
     setSvg(svg, out);
   }

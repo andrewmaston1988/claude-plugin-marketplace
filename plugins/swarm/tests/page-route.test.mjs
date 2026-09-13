@@ -1,8 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import vm from "node:vm";
+import { readRun } from "../src/runlog.mjs";
+import { buildForEachFixture } from "./fixtures/foreach-fixture.mjs";
 
 // page.html is one IIFE inside a <script> tag with no exports: route(), the
 // renderers, the paint primitives and `api` are all closed over. So this
@@ -331,7 +335,9 @@ test("Test 6: setHtml/setHeader/setSvg are called only from the commit layer", (
   // `const NAME = (...) =>` arrow. Matching only the former was a blind spot: an
   // arrow paint helper written textually after commitView inherited its name and
   // passed while violating the invariant (code review, 2026-09-09).
-  const decl = /^(\s*)(?:(async\s+)?function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\()/;
+  // Anchored at the IIFE's own two-space indent, so an inner helper arrow (four spaces
+  // or more, like drawRail's `stroke`) does not steal the attribution of its caller.
+  const decl = /^ {2}(?:(async\s+)?function\s+([A-Za-z_$][\w$]*)|(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\()/;
   // The function a line sits in: the last `function NAME(` declaration at or
   // above it. (page.html declares functions at IIFE top level only; inner
   // helpers are const arrows, which do not reset the attribution.) A token in
@@ -339,7 +345,7 @@ test("Test 6: setHtml/setHeader/setSvg are called only from the commit layer", (
   // both — so this matches call position, not the token's mere presence.
   const enclosing = new Array(lines.length);
   let cur = null;
-  lines.forEach((l, i) => { const m = l.match(decl); if (m) cur = m[3] || m[4]; enclosing[i] = cur; });
+  lines.forEach((l, i) => { const m = l.match(decl); if (m) cur = m[2] || m[3]; enclosing[i] = cur; });
   const ALLOWED = { setHtml: ["setHeader", "commitView", "rerender"], setHeader: ["commitView", "rerender"], setSvg: ["drawRail"] };
   for (const [name, allowed] of Object.entries(ALLOWED)) {
     const re = new RegExp(`\\b${name}\\s*\\(`, "g");
@@ -487,6 +493,32 @@ test("badges: run rows and leaf rows carry none — the screen a run is READ on 
   assert.equal(chip.textContent, "glm", "the chip stays plain text");
   assert.equal(badgesIn(P.main).length + badgesIn(P.hdr).length, 0, "no badge on the leaf screen");
   assert.ok(!P.screenText().includes("💲"), "no 💲 glyph anywhere on the leaf screen");
+});
+
+test("forEach run: one rail dot per session row, none for the forEach label, and no dot strip on it (T14)", async () => {
+  // The real server payload: readRun over the manifest-forEach fixture.
+  const root = mkdtempSync(join(tmpdir(), "swarm-page-fe-"));
+  const dir = join(root, "C--code-tgt", "FERUN");
+  let run;
+  try { buildForEachFixture(dir); run = JSON.parse(JSON.stringify(readRun(dir))); } finally { rmSync(root, { recursive: true, force: true }); }
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.location.hash = "#/run/C--code-tgt/FERUN";
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun({ ...run, groupLabel: "tgt", abortedMs: null, stoppedMs: null });
+  await P.flush();
+  const dots = allNodes(P.main).filter((n) => n.nodeType === 1 && n.tagName === "CIRCLE" && !(n.getAttribute("data-key") || "").startsWith("ring:"));
+  assert.deepEqual(dots.map((n) => n.getAttribute("data-key")).sort(), [
+    "chain[0]~extend", "chain[0]~verify", "chain[0]~walk", "chain[1]~extend", "chain[1]~verify", "chain[1]~walk",
+    "chain[2]", "enum", "glossary",
+  ], "every session and the unexpanded clone get a dot; the forEach row and expanded containers do not");
+  const label = allNodes(P.main).find((n) => n.nodeType === 1 && n.tagName === "LI" && n.getAttribute("data-key") === "chain");
+  assert.ok(label, "the forEach row renders");
+  assert.ok(/forEach ×3/.test(label.textContent), "it names its clone count");
+  assert.equal(allNodes(label).filter((n) => (n.getAttribute?.("class") || "").split(/\s+/).includes("strip")).length, 0, "no dot strip");
 });
 
 test("cost view: the fifth pill routes, the server's screen draws, and the foot names the config", async () => {
