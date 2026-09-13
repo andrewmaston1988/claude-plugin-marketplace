@@ -87,6 +87,34 @@ export function resolveExecutable(cmd, { _spawnSync = spawnSync, _env = process.
   return cmd;
 }
 
+// CreateProcess argv quoting (the same rule cmd.exe/CommandLineToArgvW use):
+// an argument with no space/tab/quote passes through bare; otherwise it's
+// quoted, with a run of backslashes doubled only when it precedes a quote
+// (embedded or closing) and a literal quote escaped by one backslash. Used by
+// manifest.mjs's win32 command-line-length check — a plain space-join would
+// undercount a quote-heavy prompt, since quoting can more than double it.
+function quoteArgWin(arg) {
+  if (arg.length > 0 && !/[\s"]/.test(arg)) return arg;
+  let result = '"';
+  let backslashes = 0;
+  for (const c of arg) {
+    if (c === "\\") {
+      backslashes++;
+    } else if (c === '"') {
+      result += "\\".repeat(backslashes * 2 + 1) + '"';
+      backslashes = 0;
+    } else {
+      result += "\\".repeat(backslashes) + c;
+      backslashes = 0;
+    }
+  }
+  return result + "\\".repeat(backslashes * 2) + '"';
+}
+
+export function windowsCommandLineLength(argv) {
+  return argv.map(quoteArgWin).join(" ").length;
+}
+
 export function toSpawnable(argv, { _readFileSync = readFileSync, _spawnSync = spawnSync, _env = process.env } = {}) {
   let [cmd, ...args] = argv;
   if (process.platform !== "win32") return { cmd, args };
