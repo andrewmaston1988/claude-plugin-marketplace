@@ -260,7 +260,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
       });
     } catch (e) {
       // same contract as settle(): the log is durable before the task resolves
-      const done = () => resolve({ ok: false, exit: null, durationMs: 0, output: `spawn error: ${e.message}`, raw: "", timedOut: false, tokens: emptyTokens() });
+      const done = () => resolve({ ok: false, exit: null, durationMs: 0, output: `spawn error: ${e.message}`, raw: "", timedOut: false, tokens: emptyTokens(), errorCode: e.code });
       if (leafLog) leafLog.end(`spawn error: ${e.message}\n`, done);
       else done();
       return;
@@ -309,7 +309,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
       leafLog.end(res);
     });
 
-    const settle = (exit, errMsg) => {
+    const settle = (exit, errMsg, errorCode) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
@@ -332,6 +332,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
         raw: String(raw),
         stopReason: sawEndTurn ? "end_turn" : (sawAssistant ? "incomplete" : null),
         timedOut,
+        errorCode,
         tokens: pickFinalTokens(resultEvt?.usage, acc.totals()),
         costUsd: resultEvt?.total_cost_usd,
         numTurns: resultEvt?.num_turns,
@@ -345,7 +346,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
         apiKeySource: initEvt?.apiKeySource ?? null,
       }));
     };
-    child.on("error", (e) => settle(null, `spawn error: ${e.message}`));
+    child.on("error", (e) => settle(null, `spawn error: ${e.message}`, e.code));
     child.on("close", (code) => settle(code));
   });
 }
@@ -1214,7 +1215,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
           scheduleRetry(task, delay, `↻ retry ${n + 1}/${retry.rateLimited ?? 2} in ${Math.round(delay / 1000)}s`);
           return task.id;
         }
-        if (st === "failed" && r.exit === null && !r.timedOut && n < (retry.spawnError ?? 1)) {
+        // ENAMETOOLONG is a deterministic argv-size failure (win32 command-line
+        // cap) — retrying it burns a slot on a leaf that will fail identically.
+        if (st === "failed" && r.exit === null && !r.timedOut && r.errorCode !== "ENAMETOOLONG" && n < (retry.spawnError ?? 1)) {
           attempts.set(task.id, n + 1);
           scheduleRetry(task, 2000, "↻ retry after spawn error");
           return task.id;

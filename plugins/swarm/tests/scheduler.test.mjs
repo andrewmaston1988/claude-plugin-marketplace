@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
@@ -462,6 +463,71 @@ test("M5: a valve-killed leaf with a zero retry budget still finishes ok after t
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     const bParks = logLines.filter((l) => l.id === "b" && l.state === "retrying" && l.note === "memory-park");
     equal(bParks.length, 3, "b must have been parked for memory exactly three times, never as a retry");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// errorCode/ENAMETOOLONG: a spawn error whose e.code is a deterministic argv-size
+// failure must never burn a retry attempt on a leaf that will fail identically.
+test("runTask: a synchronous spawn throw carries e.code through as result.errorCode", async () => {
+  const dir = tmp();
+  try {
+    const io = makeIo(() => { const e = new Error("spawn ENAMETOOLONG"); e.code = "ENAMETOOLONG"; throw e; });
+    const r = await runTask(task("a"), "do a", CFG, io, null, {});
+    equal(r.ok, false);
+    equal(r.exit, null);
+    equal(r.errorCode, "ENAMETOOLONG");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runTask: an async child 'error' event carries e.code through as result.errorCode", async () => {
+  const dir = tmp();
+  try {
+    const io = makeIo((cmd, args, opts) => {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => {};
+      setTimeout(() => {
+        const e = new Error("spawn ENOENT");
+        e.code = "ENOENT";
+        child.emit("error", e);
+      }, 1);
+      return child;
+    });
+    const r = await runTask(task("a"), "do a", CFG, io, null, {});
+    equal(r.ok, false);
+    equal(r.exit, null);
+    equal(r.errorCode, "ENOENT");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runPlan: a spawn error with errorCode ENAMETOOLONG never retries, even with a spawn-error retry budget", async () => {
+  const dir = tmp();
+  try {
+    let calls = 0;
+    const io = makeIo((cmd, args, opts) => {
+      calls++;
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.kill = () => {};
+      setTimeout(() => {
+        const e = new Error("spawn ENAMETOOLONG");
+        e.code = "ENAMETOOLONG";
+        child.emit("error", e);
+      }, 1);
+      return child;
+    });
+    const p = plan(dir, [task("a")]);
+    const r = await runPlan(p, { ...CFG, retry: { spawnError: 1 } }, io);
+    equal(calls, 1, "ENAMETOOLONG must not be retried, unlike a generic spawn error");
+    equal(r.summary.tasks[0].state, "failed");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

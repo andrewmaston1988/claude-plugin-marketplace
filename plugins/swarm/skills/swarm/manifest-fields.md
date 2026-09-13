@@ -3,6 +3,10 @@
 Deep reference for four manifest features. Read when you are actually writing one of
 these fields; the decision of *whether* to use them lives in SKILL.md.
 
+### Prompt length on Windows
+
+A leaf's `prompt` is measured through the CreateProcess-quoted command line at `swarm validate` time; a prompt over ~32k characters on Windows fails validation — point the leaf at a file holding its instructions instead of inlining it.
+
 ### Schema-guaranteed leaf output — `returns`
 
 A task with `returns` gets its output validated against a JSON-Schema subset on completion. Invalid output triggers exactly ONE corrective re-ask through the leaf's own resumed session (the errors are field-precise teaching lines); still-invalid output fails the task with those errors. Put it on any leaf whose JSON feeds `forEach.from`, `compute`, `when`, or a chain link — guaranteed shape is what makes the deterministic-steps grammar reliable on model output.
