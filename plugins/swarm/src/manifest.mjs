@@ -4,6 +4,7 @@ import { resolve, join, basename, dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
+import { buildDispatch, toSpawnable, windowsCommandLineLength } from "./dispatch.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
 import { provenanceBanner, formatResetTime } from "./usage.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
@@ -25,6 +26,18 @@ const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 const CLONE_ID_RE = /\[\d+\]$/;
 const ITEM_TEMPLATE_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/;
+const ITEM_TEMPLATE_RE_G = /\{\{(item(?:\.[^}]*)?|index)\}\}/g;
+
+// win32's CreateProcess caps a whole command line at 32,767 characters; a
+// leaf whose real argv exceeds this can never spawn (ENAMETOOLONG). 32,000
+// is that cap less headroom. A resultPath placeholder resolves to a real
+// filesystem path — 260 is Windows' own legacy MAX_PATH, the same ceiling
+// that path would be bound by at runtime. FOREACH_ITEM_MAX bounds a forEach
+// template's {{item}}/{{index}} — a result-inline cap says nothing about how
+// long a forEach item can be, so it gets its own named ceiling.
+const WIN_CMDLINE_MAX = 32000;
+const RESULT_PATH_MEASURE_LEN = 260;
+export const FOREACH_ITEM_MAX = 4000;
 // The isolation object's own allowlist — KNOWN_TASK_KEYS only gates top-level keys.
 const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch", "from"]);
 const KNOWN_TASK_KEYS = new Set([
@@ -97,6 +110,7 @@ function defaultManifestIo() {
     spawnSync: (command, opts) => nodeSpawnSync(command, { shell: true, encoding: "utf8", ...opts }),
     stdout: (line) => console.log(line),
     repoToplevel: realRepoToplevel,
+    platform: process.platform,
   };
 }
 
@@ -375,6 +389,42 @@ export function isAgentless(t) {
 const SENTINEL_MODELS = new Set(["compute", "integrate", "manifest"]);
 export function isSentinelModel(model) {
   return SENTINEL_MODELS.has(String(model || ""));
+}
+
+// Worst-case measurable prompt: the runtime templater (substituteTemplates)
+// needs plan.resultsDir and can't run at validate time, so placeholders are
+// substituted with filler at their ceiling instead — a manifest that would
+// only overflow once the real value lands must fail now, not mid-run.
+function measurablePrompt(prompt, cfg) {
+  const resultCap = cfg.resultInlineCap ?? 4000;
+  return String(prompt || "")
+    .replace(TEMPLATE_RE, (whole, kind) => "x".repeat(kind === "result" ? resultCap : RESULT_PATH_MEASURE_LEN))
+    .replace(ITEM_TEMPLATE_RE_G, () => "x".repeat(FOREACH_ITEM_MAX));
+}
+
+// win32 only: the real command line the scheduler would spawn for each
+// leaf, measured through buildDispatch + toSpawnable (so the cmd /d /s /c
+// wrapper toSpawnable adds for a .cmd/.bat launcher is counted) with
+// CreateProcess quoting (windowsCommandLineLength) — a plain join
+// undercounts a quote-heavy prompt or the --settings JSON.
+function checkCommandLineLengths(tasks, cfg, io, errors, label) {
+  if (io.platform !== "win32") return;
+  for (const t of tasks) {
+    if (isSentinelModel(t.model)) continue;
+    // A malformed task (missing prompt/model) is already reported by
+    // validateTaskShapes — measuring it here would dispatch garbage argv.
+    if (typeof t.model !== "string" || !t.model || typeof t.prompt !== "string") continue;
+    const prompt = measurablePrompt(t.prompt, cfg);
+    const { argv } = buildDispatch(t, prompt, cfg);
+    const { cmd, args } = toSpawnable(argv);
+    const len = windowsCommandLineLength([cmd, ...args]);
+    if (len > WIN_CMDLINE_MAX) {
+      errors.push(
+        `${label(t)}: win32 command line would be ${len} characters, over the ${WIN_CMDLINE_MAX}-character ` +
+        `limit — point the leaf at a file holding its instructions instead of inlining it in the prompt`
+      );
+    }
+  }
 }
 
 // Transitive `after` reachability over a task list. Exported because the
@@ -866,6 +916,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
     cwd, resultsDir, cfg, errors, label, io, probedGuards,
     defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
+  checkCommandLineLengths(tasks, cfg, io, errors, label);
   return { tasks };
 }
 
@@ -963,6 +1014,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     cwd, resultsDir, cfg, errors, label, childPlans, headroom, warnings, io: resolvedIo, probedGuards,
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
+  checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
 
   let digest;
   if (raw.digest !== undefined) {
