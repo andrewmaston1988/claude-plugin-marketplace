@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
 import { buildDispatch, toSpawnable, windowsCommandLineLength } from "./dispatch.mjs";
+import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
 import { provenanceBanner, formatResetTime } from "./usage.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
@@ -1033,6 +1034,15 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
         ...(report && { report }),
       };
     }
+  }
+
+  // The digest leaf is dispatched through the same buildDispatch/toSpawnable
+  // path as any other task (scheduler.mjs), so its prompt is just as exposed
+  // to the win32 command-line cap — build it the same way the scheduler does
+  // and measure it too.
+  if (digest) {
+    const digestTask = buildDigestTask({ tasks, resultsDir, goal: raw.goal || "", digest, cwd });
+    checkCommandLineLengths([digestTask], cfg, resolvedIo, errors, () => "digest");
   }
 
   if (errors.length) throw new ValidationError(errors);
