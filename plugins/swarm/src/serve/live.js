@@ -156,6 +156,139 @@
     return reduced;
   }
 
+  // One colour for a set of tasks: any live → run, any failed → bad, any held on a
+  // limit → warn, all done → ok, else pending. The page's dot strips and the rail share it.
+  const stateOfGroup = (kids) => kids.some((k) => k.state === "running" || k.state === "retrying") ? "run" : kids.some((k) => /failed|blocked/.test(k.state)) ? "bad" : kids.some((k) => k.state === "rate-limited" || k.state === "quota") ? "warn" : kids.every((k) => k.state === "ok" || k.state === "skipped") ? "ok" : "pend";
+
+  // Pitch narrows as the rail widens so a wide wave still reads one lane per line;
+  // past 24 lanes the surplus shares the last one, and can pass behind dots.
+  const MAX_RAIL_LANES = 24;
+  function railPitch(maxLane) {
+    const laneW = maxLane > 12 ? 5 : maxLane > 5 ? 8 : 14;
+    const x0 = 12;
+    const last = Math.min(maxLane, MAX_RAIL_LANES - 1);
+    return {
+      laneW, x0, r: maxLane > 12 ? 2.5 : maxLane > 5 ? 3.5 : 5,
+      width: Math.max(56, x0 + last * laneW + 19), // last lane + ring radius + breathing room
+      x: (lane) => x0 + Math.min(lane, MAX_RAIL_LANES - 1) * laneW,
+    };
+  }
+
+  // buildRows' rows → railLayout's input: one entry per drawn row, its parents as DRAWN
+  // keys. A parent hidden inside a collapsed wave or a manifest node maps to that row;
+  // a forEach member, seen from outside its block, maps to the forEach row (its trunk);
+  // a clone's first session branches off that trunk. Reduced last, so the digest (after
+  // every row) holds one line open, not one per row.
+  function railRows(rows) {
+    const keyOf = new Map();
+    const drawn = [];
+    rows.forEach((r, index) => {
+      let own;
+      let key = r.id;
+      if (r.type === "wave") { if (r.open) return; key = `wave:${r.wave}`; own = r.tasks; }
+      else if (r.type === "node") own = [r.task, ...r.kids];
+      else own = [r.task];
+      for (const t of own) keyOf.set(t.id, key);
+      drawn.push({ key, index, own, kind: r.type === "label" ? "label" : "node", block: r.type === "task" ? r.block : undefined });
+    });
+    const blockOf = new Map(drawn.filter((e) => e.block).map((e) => [e.key, e.block]));
+    const inBlock = (e) => (e.own[0].after || []).filter((a) => blockOf.get(a) === e.block);
+    const dependedOn = new Set(drawn.filter((e) => e.block).flatMap(inBlock));
+    const targetsByKey = new Map();
+    for (const e of drawn) {
+      const parents = new Set();
+      if (e.block) {
+        const local = inBlock(e);
+        e.root = !local.length;
+        e.sink = !dependedOn.has(e.key);
+        if (e.root) parents.add(e.block);
+        for (const a of local) parents.add(a);
+      } else {
+        for (const t of e.own) for (const a of t.after || []) {
+          const k = blockOf.get(a) ?? keyOf.get(a);
+          if (k && k !== e.key) parents.add(k);
+        }
+      }
+      targetsByKey.set(e.key, parents);
+    }
+    const reduced = reduceEdges(targetsByKey);
+    return drawn.map((e) => ({ key: e.key, index: e.index, kind: e.kind, block: e.block, root: e.root, sink: e.sink, parents: [...reduced.get(e.key)], states: e.own.map((t) => t.state) }));
+  }
+
+  // The git-graph router. A line (a row's outgoing edges) owns its lane from its row
+  // until its last target lands, so it never runs behind an unrelated dot. A row
+  // continues the lane of a parent line that ends on it, else takes the lowest free
+  // lane. A forEach clone branches one lane right of its trunk — a line in the way
+  // steps aside just above that row — and its last session merges back into the trunk,
+  // which carries it on. Segments and curves carry the keys whose state colours them:
+  // `upstream` (what the line brings down) plus `merged` (sinks folded in below).
+  // Offsets are pixels from a row's measured centre. Pure: no DOM, no pixels of x.
+  function railLayout(rows) {
+    const kids = new Map();
+    for (const r of rows) for (const p of r.parents) (kids.get(p) || kids.set(p, []).get(p)).push(r.key);
+    let slots = [];
+    const segments = [], curves = [], nodes = [], landed = [];
+    const lanes = new Map(), trunks = new Map();
+    let maxLane = 0;
+    const carriesOf = (s) => [...s.upstream, ...s.merged];
+    const open = (s, lane, row, off) => { s.lane = lane; s.seg = { lane, row, off }; };
+    const close = (s, row, off) => segments.push({ lane0: s.seg.lane, row0: s.seg.row, off0: s.seg.off, lane1: s.lane, row1: row, off1: off, carries: carriesOf(s) });
+    const freeFrom = (i) => { while (slots[i]) i++; return i; };
+    for (const r of rows) {
+      const i = r.index;
+      const trunk = r.block ? trunks.get(r.block) : null;
+      let L;
+      if (r.root && trunk) {
+        L = trunk.lane + 1;
+        if (slots[L]) {
+          slots = [...slots.slice(0, L), null, ...slots.slice(L)];
+          slots.forEach((s, k) => {
+            if (!s || s.lane === k) return;
+            close(s, i, -40);
+            segments.push({ lane0: s.lane, row0: i, off0: -40, lane1: k, row1: i, off1: -26, carries: carriesOf(s), step: true });
+            open(s, k, i, -26);
+          });
+        }
+      }
+      const incoming = [];
+      slots.forEach((s, k) => { if (s && s.targets.has(r.key)) incoming.push(k); });
+      if (L === undefined) {
+        const cont = incoming.find((k) => slots[k].targets.size === 1);
+        L = cont !== undefined ? cont : freeFrom(trunk ? trunk.lane + 1 : 0);
+      }
+      const inherited = new Set();
+      for (const k of incoming) {
+        const s = slots[k];
+        s.targets.delete(r.key);
+        landed.push([s.from, r.key]);
+        for (const c of carriesOf(s)) inherited.add(c);
+        if (k === L) { close(s, i, 0); slots[k] = null; continue; } // a continuation: r was its only target
+        curves.push({ from: k, to: L, row: i, kind: "in", carries: r.root ? [...s.upstream] : carriesOf(s) });
+        if (!s.targets.size) { close(s, i, -22); slots[k] = null; }
+      }
+      lanes.set(r.key, L);
+      if (r.kind !== "label") nodes.push({ key: r.key, lane: L, row: i });
+      if (r.sink && trunk && slots[trunk.lane] === trunk) {
+        curves.push({ from: L, to: trunk.lane, row: i, kind: "out", carries: [r.key] });
+        close(trunk, i, 22);
+        trunk.merged.add(r.key);
+        open(trunk, trunk.lane, i, 22);
+      }
+      const targets = new Set(kids.get(r.key) || []);
+      if (targets.size) {
+        const s = { from: r.key, targets, upstream: r.kind === "label" ? inherited : new Set([r.key]), merged: new Set() };
+        open(s, L, i, 0);
+        slots[L] = s;
+        if (r.kind === "label") trunks.set(r.key, s);
+      }
+      slots.forEach((s, k) => { if (s) maxLane = Math.max(maxLane, k); });
+      maxLane = Math.max(maxLane, L);
+    }
+    const last = rows.length ? rows[rows.length - 1].index : 0;
+    for (const s of slots) if (s) close(s, last, 0);
+    return { lanes, segments, curves, nodes, landed, maxLane };
+  }
+
   // The header's third figure: the disk total of runs, never the rendered set.
   // `finishedTotals` is built by server.mjs from EVERY disk run (the `all` list,
   // not the capped `picked`), so summing it gives the lifetime-per-disk total.
@@ -166,5 +299,5 @@
     return n;
   };
 
-  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges };
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges, stateOfGroup, railPitch, railRows, railLayout };
 })();
