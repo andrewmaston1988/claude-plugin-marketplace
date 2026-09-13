@@ -74,23 +74,54 @@ export function buildDispatch(task, prompt, cfg) {
 // node directly with the underlying script (supports %~dp0 self-relative paths).
 // Anything else falls back to `cmd /c` (fine for argv without quotes).
 
-export function resolveExecutable(cmd, { _spawnSync = spawnSync, _env = process.env } = {}) {
-  if (process.platform !== "win32") return cmd;
+export function resolveExecutable(cmd, { _spawnSync = spawnSync, _env = process.env, _platform = process.platform, _cache } = {}) {
+  if (_platform !== "win32") return cmd;
   if (isAbsolute(cmd) || cmd.includes(sep) || cmd.includes("/")) return cmd;
+  if (_cache?.has(cmd)) return _cache.get(cmd);
   const r = _spawnSync("where", [cmd], { encoding: "utf8", windowsHide: true, timeout: 5000, env: _env });
+  let resolved = cmd;
   if (r.status === 0 && r.stdout) {
     const lines = r.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     // `where` also lists extensionless files (e.g. a POSIX sh shim next to its
     // .cmd twin) — those aren't spawnable on Windows, so prefer real executables.
-    return lines.find((l) => /\.(exe|cmd|bat|com)$/i.test(l)) || lines[0] || cmd;
+    resolved = lines.find((l) => /\.(exe|cmd|bat|com)$/i.test(l)) || lines[0] || cmd;
   }
-  return cmd;
+  _cache?.set(cmd, resolved);
+  return resolved;
 }
 
-export function toSpawnable(argv, { _readFileSync = readFileSync, _spawnSync = spawnSync, _env = process.env } = {}) {
+// CreateProcess argv quoting (the same rule cmd.exe/CommandLineToArgvW use):
+// an argument with no space/tab/quote passes through bare; otherwise it's
+// quoted, with a run of backslashes doubled only when it precedes a quote
+// (embedded or closing) and a literal quote escaped by one backslash. Used by
+// manifest.mjs's win32 command-line-length check — a plain space-join would
+// undercount a quote-heavy prompt, since quoting can more than double it.
+function quoteArgWin(arg) {
+  if (arg.length > 0 && !/[\s"]/.test(arg)) return arg;
+  let result = '"';
+  let backslashes = 0;
+  for (const c of arg) {
+    if (c === "\\") {
+      backslashes++;
+    } else if (c === '"') {
+      result += "\\".repeat(backslashes * 2 + 1) + '"';
+      backslashes = 0;
+    } else {
+      result += "\\".repeat(backslashes) + c;
+      backslashes = 0;
+    }
+  }
+  return result + "\\".repeat(backslashes * 2) + '"';
+}
+
+export function windowsCommandLineLength(argv) {
+  return argv.map(quoteArgWin).join(" ").length;
+}
+
+export function toSpawnable(argv, { _readFileSync = readFileSync, _spawnSync = spawnSync, _env = process.env, _platform = process.platform, _cache } = {}) {
   let [cmd, ...args] = argv;
-  if (process.platform !== "win32") return { cmd, args };
-  cmd = resolveExecutable(cmd, { _spawnSync, _env });
+  if (_platform !== "win32") return { cmd, args };
+  cmd = resolveExecutable(cmd, { _spawnSync, _env, _platform, _cache });
   if (!/\.(bat|cmd)$/i.test(cmd)) return { cmd, args };
   try {
     const content = _readFileSync(cmd, "utf8");

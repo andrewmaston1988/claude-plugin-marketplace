@@ -1,7 +1,11 @@
 # Manifest field reference — schemas, child manifests, named runs, integrate.from
 
-Deep reference for four manifest features. Read when you are actually writing one of
+Deep reference for five manifest features. Read when you are actually writing one of
 these fields; the decision of *whether* to use them lives in SKILL.md.
+
+### Prompt length on Windows
+
+A leaf's `prompt` is measured through the CreateProcess-quoted command line at `swarm validate` time; a prompt over ~32k characters on Windows fails validation — point the leaf at a file holding its instructions instead of inlining it.
 
 ### Schema-guaranteed leaf output — `returns`
 

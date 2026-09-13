@@ -371,6 +371,42 @@ test("governance: non-Claude digest model outside roots rejected", () => {
   }
 });
 
+// The digest leaf dispatches through the same buildDispatch/toSpawnable path as
+// any other task (scheduler.mjs) — RED before the fix: checkCommandLineLengths
+// only ever measured plan.tasks, so an oversized digest.instructions block
+// passed validation even though the digest leaf could never actually spawn.
+test("win32 command-line check: oversized digest.instructions fails validation naming the digest", () => {
+  const dir = tmp();
+  try {
+    const cfg = { ...CFG, claudePath: "C:\\fake\\claude.exe" };
+    const p = writeManifest(dir, {
+      tasks: [claudeTask()],
+      digest: { model: "haiku", instructions: "x".repeat(32000) },
+    });
+    throws(
+      () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
+      (e) => /digest/.test(e.message) && /command line/.test(e.message)
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("win32 command-line check: digest.instructions just under the cap passes", () => {
+  const dir = tmp();
+  try {
+    const cfg = { ...CFG, claudePath: "C:\\fake\\claude.exe" };
+    const p = writeManifest(dir, {
+      tasks: [claudeTask()],
+      digest: { model: "haiku", instructions: "x".repeat(2000) },
+    });
+    const plan = loadManifest(p, cfg, dir, { io: { platform: "win32" } });
+    equal(plan.digest.instructions.length, 2000);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── headroom (:cloud weekly-allowance preflight) ──────────────────────────────
 
 // Writes ~/.swarm/ollama-usage.json under a scratch SWARM_HOME so
