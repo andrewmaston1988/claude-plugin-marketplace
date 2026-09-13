@@ -6,7 +6,7 @@ import { Worker } from "node:worker_threads";
 import { readFileSync, readdirSync, existsSync, statSync, watch as fsWatch } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readRun, projectKeys, resultSuperseded } from "../runlog.mjs";
+import { readRun, projectKeys, resultSuperseded, resolveTaskId } from "../runlog.mjs";
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
@@ -261,28 +261,17 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   };
   const notFound = (res) => send(res, 404, { error: "not found" });
 
-  // The prompt a task was authored with, from the run's manifest snapshot. Mirrors the
-  // id conventions topology() uses: `fix[0]` belongs to `fix`, `node~child` to that
-  // node's child list. Null when the run has no snapshot or the id is not in it.
+  // The prompt a task was authored with, from the run's manifest snapshot, resolved by
+  // the same id parser topology() uses. Null when the run has no snapshot or the id is
+  // not in it.
   const authoredPrompt = (dir, id) => {
     let m;
     try { m = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8")); } catch { return null; }
-    const tasks = m?.tasks || [];
     // The digest is a `digest` block, never a member of tasks, so it would otherwise
     // 404 while in flight. Its instructions are the authored steer; the prompt actually
     // dispatched is assembled from every leaf's results at run time.
     if (id === DIGEST_ID) return m?.digest?.instructions || null;
-    // Guarded like topology()'s `clone && defs.has(clone[1])`: a real task whose id merely
-    // ends in [n] is not a clone, and must fall through to the plain lookup rather than 404.
-    const clone = /^(.*)\[\d+\]$/.exec(id);
-    const parent = clone && tasks.find((t) => t.id === clone[1]);
-    if (parent) return parent.prompt || null;
-    const tilde = id.indexOf("~");
-    if (tilde > 0) {
-      const node = tasks.find((t) => t.id === id.slice(0, tilde));
-      return (node?.child || []).find((c) => c.id === id.slice(tilde + 1))?.prompt || null;
-    }
-    return tasks.find((t) => t.id === id)?.prompt || null;
+    return resolveTaskId(id, m?.tasks).def?.prompt || null;
   };
 
   // grading.enabled drives the page's Performance entry: greyed when off, the

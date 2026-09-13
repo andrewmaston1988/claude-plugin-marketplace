@@ -112,6 +112,49 @@ export function readRunLog(content, { now = Date.now() } = {}) {
   return { startedMs, enginePid, tasks };
 }
 
+// The one parser for the ids the engine mints: `X[i]` (a forEach clone), `X[i]~local`
+// (a session of a manifest clone), `node~local` (a top-level manifest node's child).
+// Parsed from the right because the engine composes them, and clones are never in
+// manifest.tasks — so a clone's definition is its forEach parent's. `tasks` is the
+// manifest's task list or a Map of it. kind: task | clone | container | child | unknown.
+export function resolveTaskId(id, tasks) {
+  const defs = tasks instanceof Map ? tasks : new Map((tasks || []).map((t) => [t.id, t]));
+  if (defs.has(id)) return { kind: "task", def: defs.get(id), parent: null };
+  const tilde = id.lastIndexOf("~");
+  if (tilde > 0) {
+    const node = id.slice(0, tilde);
+    const owner = resolveTaskId(node, defs);
+    const def = (owner.def?.child || []).find((c) => c.id === id.slice(tilde + 1));
+    if (def && (owner.kind === "task" || owner.kind === "container")) {
+      return {
+        kind: "child", def, node,
+        parent: owner.kind === "task" ? node : owner.parent,
+        forEach: owner.kind === "container" ? owner.def : null,
+        // a step with no local edges waits on what its node waits on
+        upstream: [...(owner.def.after || [])],
+      };
+    }
+  }
+  // Guarded on the base being a task: an id that merely ends in [n] is not a clone.
+  const clone = CLONE_RE.exec(id);
+  if (clone && defs.has(clone[1])) {
+    const def = defs.get(clone[1]);
+    return { kind: def.child ? "container" : "clone", def, parent: clone[1], forEach: def, index: Number(clone[2]) };
+  }
+  return { kind: "unknown", def: null, parent: null };
+}
+
+// running > failed > waiting on a limit > all done > under way > not started.
+function rollupState(states) {
+  if (states.some((s) => s === "running" || s === "retrying")) return "running";
+  const bad = states.find((s) => /^failed|^blocked/.test(s));
+  if (bad) return bad;
+  const warn = states.find((s) => s === "rate-limited" || s === "quota");
+  if (warn) return warn;
+  if (states.every((s) => s === "ok" || s === "skipped")) return "ok";
+  return states.some((s) => s !== "pending") ? "running" : "pending";
+}
+
 // Graph annotations from the manifest snapshot: after / kind / parent / depth,
 // plus the wave grouping. Rows the log never mentioned (agentless nodes, a leaf
 // that never started) are appended as pending so the graph is whole.
@@ -125,31 +168,49 @@ export function topology(tasks, manifest) {
   }
   const kindOf = (d) => (d.forEach ? "forEach" : d.child ? "manifest" : d.compute || d.integrate || !d.model ? "agentless" : "leaf");
   for (const r of rows) {
-    const clone = CLONE_RE.exec(r.id);
-    const tilde = r.id.indexOf("~");
     if (r.id === DIGEST_ID) {
       r.kind = "digest";
       r.parent = null;
-      r.after = rows.filter((x) => x.id !== DIGEST_ID).map((x) => x.id);
-    } else if (clone && defs.has(clone[1])) {
-      r.kind = "clone";
-      r.parent = clone[1];
-      r.after = [...(defs.get(clone[1]).after || [])];
-    } else if (tilde > 0) {
-      const node = r.id.slice(0, tilde);
-      const childId = r.id.slice(tilde + 1);
-      const nodeDef = defs.get(node);
-      const childDef = (nodeDef?.child || []).find((c) => c.id === childId);
+      continue; // its `after` is every other row, set once they are final
+    }
+    const t = resolveTaskId(r.id, defs);
+    if (t.kind === "child") {
       r.kind = "child";
-      r.parent = node;
-      r.after = childDef?.after?.length ? childDef.after.map((a) => `${node}~${a}`) : [...(nodeDef?.after || [])];
-    } else {
-      const d = defs.get(r.id);
-      r.kind = d ? kindOf(d) : "leaf";
+      r.parent = t.parent;
+      r.after = t.def.after?.length ? t.def.after.map((a) => `${t.node}~${a}`) : t.upstream;
+    } else if (t.kind === "clone" || t.kind === "container") {
+      r.kind = t.kind;
+      r.parent = t.parent;
+      r.after = [...(t.def.after || [])];
+      if (t.kind === "container") r.expanded = rows.some((x) => x.id.startsWith(`${r.id}~`));
+    } else if (t.kind === "task") {
+      r.kind = kindOf(t.def);
       r.parent = null;
-      r.after = [...(d?.after || [])];
+      r.after = [...(t.def.after || [])];
+    } else {
+      // no manifest snapshot to resolve against: keep the id's own shape
+      const tilde = r.id.lastIndexOf("~");
+      r.kind = tilde > 0 ? "child" : "leaf";
+      r.parent = tilde > 0 ? r.id.slice(0, tilde) : null;
+      r.after = [];
     }
   }
+  // An expanded forEach's members are its clones' sessions, its plain clones, and any
+  // clone not yet expanded; a row after the forEach waits on each clone's last one.
+  const sinks = new Map();
+  for (const [id, d] of defs) {
+    if (!d.forEach) continue;
+    const members = rows.filter((r) => r.parent === id && !(r.kind === "container" && r.expanded));
+    if (!members.length) continue;
+    const dependedOn = new Set(members.flatMap((m) => m.after));
+    sinks.set(id, members.filter((m) => !dependedOn.has(m.id)).map((m) => m.id));
+    const row = rows.find((r) => r.id === id);
+    // readRunLog defaults to pending: anything else is the engine's own record, which wins
+    if (row && row.state === "pending") row.state = rollupState(members.map((m) => m.state));
+  }
+  // …every row outside that forEach, clones of a downstream forEach included
+  for (const r of rows) if (r.kind !== "digest") r.after = r.after.flatMap((a) => (a !== r.parent && sinks.get(a)) || [a]);
+  for (const r of rows) if (r.kind === "digest") r.after = rows.filter((x) => x.id !== DIGEST_ID).map((x) => x.id);
   const byId = new Map(rows.map((r) => [r.id, r]));
   const depth = new Map();
   const visiting = new Set();
@@ -159,7 +220,9 @@ export function topology(tasks, manifest) {
     visiting.add(id);
     const r = byId.get(id);
     let d = 0;
-    for (const a of r?.after || []) if (byId.has(a)) d = Math.max(d, depthOf(a) + 1);
+    // clones never wait on each other: a forEach's members all sit in its wave
+    if (r && r.parent && defs.get(r.parent)?.forEach && (r.kind === "clone" || r.kind === "child" || r.kind === "container")) d = depthOf(r.parent);
+    else for (const a of r?.after || []) if (byId.has(a)) d = Math.max(d, depthOf(a) + 1);
     visiting.delete(id);
     depth.set(id, d);
     return d;
@@ -184,7 +247,8 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, heartbeat
   const { tasks, waves } = topology(logged, manifest);
   const { finishedMs, stoppedMs, abortedMs } = runLiveness(dir, { now, heartbeatMs });
   const byState = {};
-  for (const t of tasks) byState[t.state] = (byState[t.state] || 0) + 1;
+  // an expanded clone container runs no session — its sessions are counted instead
+  for (const t of tasks) if (!(t.kind === "container" && t.expanded)) byState[t.state] = (byState[t.state] || 0) + 1;
   const optional = (name) => (existsSync(join(dir, name)) ? join(dir, name) : null);
   return {
     dir,
