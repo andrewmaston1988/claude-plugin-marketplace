@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
-import { SHAPES, GLOSSARY, GLOSSARY_STATES, FAN_OUT, INTERNAL_FANOUT, PLAIN_FOREACH, UNEXPANDED, thirtyCloneDigest, collapsedWave } from "./fixtures/rail-shapes.mjs";
+import { SHAPES, GLOSSARY, GLOSSARY_STATES, FAN_OUT, INTERNAL_FANOUT, PLAIN_FOREACH, UNEXPANDED, thirtyCloneDigest, collapsedWave, chainDigest } from "./fixtures/rail-shapes.mjs";
 
 // live.js is a browser static: load it the way tests/live.test.mjs does.
 const LIVE_JS = fileURLToPath(new URL("../src/serve/live.js", import.meta.url));
@@ -22,9 +22,12 @@ function colourOf(rows, carries) {
   return live.stateOfGroup(carries.flatMap((k) => (states.get(k) || []).map((state) => ({ state }))));
 }
 
-test("railLayout: no line ever runs through a node that is not its own endpoint — every shape (T7)", () => {
+test("railLayout: every edge is delivered, and no line runs through a node that is not its own endpoint — every shape (T7)", () => {
   for (const [name, rows] of Object.entries(SHAPES)) {
-    const { segments, nodes } = live.railLayout(rows);
+    const { segments, nodes, landed } = live.railLayout(rows);
+    // a line that lost its lane would draw nothing at all, so first: nothing went missing
+    const want = rows.flatMap((r) => r.parents.map((p) => `${p}>${r.key}`)).sort();
+    assert.deepEqual(plain(landed).map(([a, b]) => `${a}>${b}`).sort(), want, `${name}: an edge was dropped`);
     for (const s of segments) {
       if (s.lane0 !== s.lane1) continue; // a step-aside, between rows
       const through = nodes.filter((n) => n.lane === s.lane0 && n.row > s.row0 && n.row < s.row1);
@@ -104,6 +107,8 @@ test("railLayout: a clone with internal fan-out/fan-in keeps every edge (T13b)",
 
 test("railRows + railLayout: a digest after every row reclaims lanes — 30 clones stay within 4 lanes (T13c)", () => {
   assert.ok(live.railLayout(live.railRows(thirtyCloneDigest())).maxLane <= 3);
+  // unreduced, every step's line would stay open to the digest: one lane per step
+  assert.equal(live.railLayout(live.railRows(chainDigest(10))).maxLane, 0, "a 10-step chain + digest is one straight line");
 });
 
 test("railLayout: the trunk below a running forEach label carries only its upstream (T13d)", () => {

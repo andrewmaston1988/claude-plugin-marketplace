@@ -89,6 +89,16 @@ export function thirtyCloneDigest() {
   ];
 }
 
+// An n-step chain whose digest waits on every step, one step per wave.
+export function chainDigest(n) {
+  const steps = range(n).map((i) => task(`s${i}`, i ? [`s${i - 1}`] : []));
+  const digest = task("__digest", steps.map((s) => s.id), "pending");
+  return [...steps, digest].flatMap((t, w) => [
+    { type: "wave", wave: w, open: true, tasks: [t] },
+    { type: "task", wave: w, id: t.id, task: t },
+  ]);
+}
+
 // Wave 1 is collapsed into one row; d waits on a member of it.
 export function collapsedWave() {
   const a = task("a"), b = task("b", ["a"]), c = task("c", ["a"]), d = task("d", ["b"], "pending");
