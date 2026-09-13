@@ -215,14 +215,10 @@
     return drawn.map((e) => ({ key: e.key, index: e.index, kind: e.kind, block: e.block, root: e.root, sink: e.sink, parents: [...reduced.get(e.key)], states: e.own.map((t) => t.state) }));
   }
 
-  // The git-graph router. A line (a row's outgoing edges) owns its lane from its row
-  // until its last target lands, so it never runs behind an unrelated dot. A row
-  // continues the lane of a parent line that ends on it, else takes the lowest free
-  // lane. A forEach clone branches one lane right of its trunk — a line in the way
-  // steps aside just above that row — and its last session merges back into the trunk,
-  // which carries it on. Segments and curves carry the keys whose state colours them:
-  // `upstream` (what the line brings down) plus `merged` (sinks folded in below).
-  // Offsets are pixels from a row's measured centre. Pure: no DOM, no pixels of x.
+  // The git-graph router: a line owns its lane from its row until its last target lands,
+  // so it never runs behind an unrelated dot. A forEach clone branches one lane right of
+  // its trunk and merges back into it; lines carry `upstream` + `merged` keys, which
+  // colour them. Pure data — offsets are pixels from a row's measured centre.
   function railLayout(rows) {
     const kids = new Map();
     for (const r of rows) for (const p of r.parents) (kids.get(p) || kids.set(p, []).get(p)).push(r.key);

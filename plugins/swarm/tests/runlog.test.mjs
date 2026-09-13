@@ -88,7 +88,8 @@ test("topology: after edges, depth, waves, clone/child/agentless kinds", () => {
     assert.equal(byId["review"].kind, "manifest");
     assert.equal(byId["review~lint"].kind, "child");
     assert.equal(byId["review~lint"].parent, "review");
-    assert.deepEqual(byId["review~lint"].after, ["fix"], "a child with no edges of its own waits on what the node waits on");
+    assert.deepEqual(byId["review"].after, ["fix[0]", "fix[1]"], "a row after an expanded forEach waits on its clones");
+    assert.deepEqual(byId["review~lint"].after, ["fix[0]", "fix[1]"], "a child with no edges of its own waits on what the node waits on");
     assert.deepEqual(byId["review~test"].after, ["review~lint"], "child edges are namespaced");
     assert.equal(byId["__digest"].kind, "digest");
     assert.deepEqual(byId["__digest"].after, run.tasks.filter((t) => t.id !== "__digest").map((t) => t.id), "the digest waits on every other row, clones and children included");
@@ -159,6 +160,24 @@ test("topology: a forEach reports its members' rollup until the engine records i
   withForEach((run) => assert.equal(run.tasks.find((t) => t.id === "chain").state, "running"));
   const settled = FOREACH_LOG + '\n{"ts":"2026-09-05T01:05:00Z","id":"chain","state":"failed","durationMs":0}';
   withForEach((run) => assert.equal(run.tasks.find((t) => t.id === "chain").state, "failed", "the engine's own terminal state wins"), { log: settled });
+});
+
+test("topology: a forEach fed by another forEach — its clones wait on the first one's clones too (review)", () => {
+  const manifest = { tasks: [
+    { id: "enum", model: "m" },
+    { id: "X", model: "m", after: ["enum"], forEach: { from: "enum", path: "", maxItems: 5 } },
+    { id: "Y", model: "m", after: ["X"], forEach: { from: "X", path: "", maxItems: 5 } },
+  ] };
+  const rows = ["enum", "X", "X[0]", "X[1]", "Y", "Y[0]"].map((id) => ({ id, state: "pending" }));
+  const byId = Object.fromEntries(topology(rows, manifest).tasks.map((t) => [t.id, t]));
+  assert.deepEqual(byId["Y"].after, ["X[0]", "X[1]"]);
+  assert.deepEqual(byId["Y[0]"].after, ["X[0]", "X[1]"], "a clone inherits its forEach's upstream, sinks and all");
+});
+
+test("topology: a forEach with some clones done and some not started reports running (review)", () => {
+  const manifest = { tasks: [{ id: "up", model: "m" }, { id: "X", model: "m", after: ["up"], forEach: { from: "up", path: "", maxItems: 5 } }] };
+  const rows = [{ id: "up", state: "ok" }, { id: "X", state: "pending" }, { id: "X[0]", state: "ok" }, { id: "X[1]", state: "pending" }];
+  assert.equal(topology(rows, manifest).tasks.find((t) => t.id === "X").state, "running", "under way, not pending and not done");
 });
 
 test("topology: agentless nodes from the manifest that never appear in run.log still get a row and a kind", () => {

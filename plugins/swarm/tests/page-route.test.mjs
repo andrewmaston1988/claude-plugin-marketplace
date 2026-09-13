@@ -519,6 +519,13 @@ test("forEach run: one rail dot per session row, none for the forEach label, and
   assert.ok(label, "the forEach row renders");
   assert.ok(/forEach ×3/.test(label.textContent), "it names its clone count");
   assert.equal(allNodes(label).filter((n) => (n.getAttribute?.("class") || "").split(/\s+/).includes("strip")).length, 0, "no dot strip");
+  assert.equal(label.getAttribute("data-href"), "#/run/C--code-tgt/FERUN/leaf/chain", "the forEach row taps through to its own leaf screen");
+  // a clone session reads `chain[0] walk`: the clone faint, the step plain
+  const walk = allNodes(P.main).find((n) => n.nodeType === 1 && n.tagName === "LI" && n.getAttribute("data-key") === "chain[0]~walk");
+  const name = allNodes(walk).find((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes("name"));
+  const faint = allNodes(name).find((n) => n.nodeType === 1 && (n.getAttribute("class") || "") === "faint");
+  assert.equal(faint && faint.textContent, "chain[0]");
+  assert.equal(name.textContent, "chain[0] walk");
 });
 
 test("cost view: the fifth pill routes, the server's screen draws, and the foot names the config", async () => {

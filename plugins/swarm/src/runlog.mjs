@@ -208,7 +208,8 @@ export function topology(tasks, manifest) {
     // readRunLog defaults to pending: anything else is the engine's own record, which wins
     if (row && row.state === "pending") row.state = rollupState(members.map((m) => m.state));
   }
-  for (const r of rows) if (r.parent === null && r.kind !== "digest") r.after = r.after.flatMap((a) => sinks.get(a) || [a]);
+  // …every row outside that forEach, clones of a downstream forEach included
+  for (const r of rows) if (r.kind !== "digest") r.after = r.after.flatMap((a) => (a !== r.parent && sinks.get(a)) || [a]);
   for (const r of rows) if (r.kind === "digest") r.after = rows.filter((x) => x.id !== DIGEST_ID).map((x) => x.id);
   const byId = new Map(rows.map((r) => [r.id, r]));
   const depth = new Map();
