@@ -27,7 +27,7 @@ const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 const CLONE_ID_RE = /\[\d+\]$/;
 const ITEM_TEMPLATE_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/;
-const ITEM_TEMPLATE_RE_G = /\{\{(item(?:\.[^}]*)?|index)\}\}/g;
+const ITEM_TEMPLATE_RE_G = new RegExp(ITEM_TEMPLATE_RE.source, "g");
 
 // win32's CreateProcess caps a whole command line at 32,767 characters; a
 // leaf whose real argv exceeds this can never spawn (ENAMETOOLONG). 32,000
@@ -410,6 +410,10 @@ function measurablePrompt(prompt, cfg) {
 // undercounts a quote-heavy prompt or the --settings JSON.
 function checkCommandLineLengths(tasks, cfg, io, errors, label) {
   if (io.platform !== "win32") return;
+  // `resolveExecutable` shells out to `where` (up to 5s) per distinct command —
+  // every leaf in a manifest resolves the same claudePath, so cache it once
+  // per validate call instead of once per task.
+  const resolveCache = new Map();
   for (const t of tasks) {
     if (isSentinelModel(t.model)) continue;
     // A malformed task (missing prompt/model) is already reported by
@@ -417,7 +421,7 @@ function checkCommandLineLengths(tasks, cfg, io, errors, label) {
     if (typeof t.model !== "string" || !t.model || typeof t.prompt !== "string") continue;
     const prompt = measurablePrompt(t.prompt, cfg);
     const { argv } = buildDispatch(t, prompt, cfg);
-    const { cmd, args } = toSpawnable(argv, { _platform: io.platform });
+    const { cmd, args } = toSpawnable(argv, { _platform: io.platform, _cache: resolveCache });
     const len = windowsCommandLineLength([cmd, ...args]);
     if (len > WIN_CMDLINE_MAX) {
       errors.push(

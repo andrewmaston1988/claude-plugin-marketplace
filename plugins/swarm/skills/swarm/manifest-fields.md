@@ -1,6 +1,6 @@
 # Manifest field reference — schemas, child manifests, named runs, integrate.from
 
-Deep reference for four manifest features. Read when you are actually writing one of
+Deep reference for five manifest features. Read when you are actually writing one of
 these fields; the decision of *whether* to use them lives in SKILL.md.
 
 ### Prompt length on Windows

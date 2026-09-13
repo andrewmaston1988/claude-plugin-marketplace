@@ -74,17 +74,20 @@ export function buildDispatch(task, prompt, cfg) {
 // node directly with the underlying script (supports %~dp0 self-relative paths).
 // Anything else falls back to `cmd /c` (fine for argv without quotes).
 
-export function resolveExecutable(cmd, { _spawnSync = spawnSync, _env = process.env, _platform = process.platform } = {}) {
+export function resolveExecutable(cmd, { _spawnSync = spawnSync, _env = process.env, _platform = process.platform, _cache } = {}) {
   if (_platform !== "win32") return cmd;
   if (isAbsolute(cmd) || cmd.includes(sep) || cmd.includes("/")) return cmd;
+  if (_cache?.has(cmd)) return _cache.get(cmd);
   const r = _spawnSync("where", [cmd], { encoding: "utf8", windowsHide: true, timeout: 5000, env: _env });
+  let resolved = cmd;
   if (r.status === 0 && r.stdout) {
     const lines = r.stdout.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
     // `where` also lists extensionless files (e.g. a POSIX sh shim next to its
     // .cmd twin) — those aren't spawnable on Windows, so prefer real executables.
-    return lines.find((l) => /\.(exe|cmd|bat|com)$/i.test(l)) || lines[0] || cmd;
+    resolved = lines.find((l) => /\.(exe|cmd|bat|com)$/i.test(l)) || lines[0] || cmd;
   }
-  return cmd;
+  _cache?.set(cmd, resolved);
+  return resolved;
 }
 
 // CreateProcess argv quoting (the same rule cmd.exe/CommandLineToArgvW use):
@@ -115,10 +118,10 @@ export function windowsCommandLineLength(argv) {
   return argv.map(quoteArgWin).join(" ").length;
 }
 
-export function toSpawnable(argv, { _readFileSync = readFileSync, _spawnSync = spawnSync, _env = process.env, _platform = process.platform } = {}) {
+export function toSpawnable(argv, { _readFileSync = readFileSync, _spawnSync = spawnSync, _env = process.env, _platform = process.platform, _cache } = {}) {
   let [cmd, ...args] = argv;
   if (_platform !== "win32") return { cmd, args };
-  cmd = resolveExecutable(cmd, { _spawnSync, _env, _platform });
+  cmd = resolveExecutable(cmd, { _spawnSync, _env, _platform, _cache });
   if (!/\.(bat|cmd)$/i.test(cmd)) return { cmd, args };
   try {
     const content = _readFileSync(cmd, "utf8");
