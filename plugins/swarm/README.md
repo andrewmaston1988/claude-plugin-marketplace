@@ -1,20 +1,123 @@
 # swarm — alternative-model fan-out engine
 
-A Claude Code session authors a JSON manifest (the same authoring act as writing a Workflow script); the swarm engine dispatches each task via CLI — capable `:cloud` models (GLM, MiniMax, qwen, …) through your provider, Claude models via plain `claude -p` — runs the dependency graph in the background, and compresses results through a digest stage so the session never swallows raw output.
+A Claude Code session authors a JSON manifest; swarm dispatches each task via CLI —
+capable `:cloud` models (GLM, MiniMax, qwen, …) through your provider, Claude models via
+plain `claude -p` — runs the dependency graph in the background, and compresses results
+through a digest so the session never swallows raw output.
 
-The widest shape is **quality from group-think**: many independent perspectives, redundant attempts, diverse-lens judging — near-opus-swarm quality from capable alternative models on an alternative subscription, delivered at interactive speed. But the manifest is a dispatch surface, not a fan-out surface: one delegated leaf is a first-class use, and phased chains run several leaves in sequence on one shared branch. The smarts live in the plan and the leaves; the plumbing has none.
+Widest shape: **quality from group-think** — many independent perspectives, redundant
+attempts, diverse-lens judging, near-opus quality on alternative models at interactive
+speed. But a manifest also works for one delegated leaf, or a phased chain of several
+leaves in sequence on one shared branch — the plumbing is the same either way.
+
+## Setup
+
+```bash
+/swarm:swarm setup   # writes ~/.swarm/config.json, explains every key, edits what you name
+```
+
+The shipped `config.default.json` is overwritten on every plugin update — your own config
+is the only durable copy; re-run `swarm config init` after an update to pick up new keys.
+
+The one key you must set to arm alternative models:
+
+```json
+{ "provider": { "allowedRoots": ["C:/personal-projects"] } }
+```
+
+**Why (data governance):** your org may have a data agreement with Anthropic but not with
+other model providers, so non-Claude dispatch is **deny-by-default** — a task whose
+effective `cwd` isn't under a listed root fails validation. Default `[]` still runs fine
+with Claude models only; list only roots cleared to leave for your provider.
+
+Every other key (`provider.url`, `provider.mode`, `concurrency`, `timeoutMs`,
+`worktreeBranchPrefix`, `modelDenylist`, `provider.cloud.ollama.*`, `notifyCmd`,
+`grading.enabled`, `dashboard.*`, `swarm.always`) is documented inline in
+`config.default.json` with its default — `setup` walks the ones worth touching. Swarm
+never manages credentials; auth is your provider app's ambient sign-in.
+
+**Provenance:** every fetched figure (`validate`, `run`, `models`, `ollama-usage`) says
+where it came from. A failed live fetch (expired cookie, network, timeout) still shows the
+last cached reading, but never bare — every render prefixes a `/!\ Cookie Expired` /
+`Network Error` / `Fetch Timed Out` / `No Cookie` banner with an absolute UTC
+`last seen` timestamp. `validate` only fails on a *live* exhausted reading; a cached 100%
+warns instead, since the window may have since reset.
+
+### Per-repo leaf guard (`projects`)
+
+A leaf is a full headless Claude Code session, and `allowedTools` scopes tool *names*, not
+what a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every
+leaf that runs under that repo:
+
+```json
+{ "projects": [{ "name": "myrepo", "hooks": { "preToolUse": "python scripts/leaf_guard.py" } }] }
+```
+
+Before every tool call the engine runs that command from the leaf's cwd with the ordinary
+PreToolUse payload on stdin. **Exit 0 allows, exit 2 denies** (stderr is the reason shown
+to the leaf); anything else — another code, a timeout, a spawn failure — also denies,
+naming why: the guard fails closed. Use it to fence build/test commands to a serial tail,
+block network or `git push`, require an edit marker, or keep a leaf off a secrets path —
+anything expressible from the payload is one `if` away.
+
+Matched by the task's repo basename (`git rev-parse --show-toplevel`, falling back to cwd;
+case-insensitive on Windows); an unmatched repo runs unguarded, interactive sessions never
+see it. Each guard is probed once at `validate` with a harmless payload, so a broken script
+fails the manifest before any leaf spends. A task opts out with `"leafGuard": false`
+only — nothing in `env`/`settings.env` can forge or clear the guard.
+
+**Requirements:** Node, `claude` on PATH, and (for `:cloud` models) ollama recent enough
+to serve `/api/experimental/model-recommendations` (~v0.23+).
+
+## Install
+
+`/swarm:swarm setup` (Stage 0) installs the `swarm` command for you — do this. Manually:
+`swarm install` writes `~/.local/bin/swarm-resolver.mjs`, `swarm`, and `swarm.cmd`
+(`~/.local/bin` must be on PATH); idempotent, re-run after a plugin update.
+
+<!-- swarm-bootstrap-exception: the only sanctioned engine-path instruction in the tree -->
+Working in a clone of this marketplace, run instead: `node plugins/swarm/scripts/swarm.mjs install`.
+
+## Usage
+
+```bash
+swarm models              # discover launchable :cloud models + Claude aliases — run first
+swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
+swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
+swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
+swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
+swarm quota                # Anthropic utilization per limit window
+swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
+swarm grade --init <resultsDir>   # write grades.json — one skeleton row per :cloud leaf
+swarm grade --file <grades.json>  # validate the filled batch and append it to the score store
+swarm perf [--aspect X] [--model Y] [--domain D]   # aspect x model table with sample counts
+```
+
+A bare name resolves through the manifest registry (`<cwd>/.swarm/manifests/<name>.json`,
+then `~/.swarm/manifests/`; the resolution is always announced). `--args` fills
+`{{args.*}}` placeholders — `validate --resolved` prints the substituted document as the
+approval preview; each distinct args value gets its own fingerprinted results dir.
+
+In a session, the **swarm** skill drives this end-to-end: drafts the manifest, shows it in
+an `AskUserQuestion` box (the preview is the approval — every model and leaf visible
+before anything runs; with `swarm.always`, states it and runs), runs in the background,
+and reads only `digest.md` when the run completes.
 
 ## Positioning
 
-- **Workflow** — Claude Code's built-in orchestration tool: Claude-quality agents scripted in JS, inside the harness. Fast, Claude-priced.
+- **Workflow** — Claude Code's built-in orchestration: Claude-quality agents scripted in JS, inside the harness. Fast, Claude-priced.
 - **pipeline** — durable queued throughput ending in PRs. Huge capacity, not fast.
 - **swarm** — interactive-speed group-think on capable alternative models.
 
-Compose freely — a pipeline dev session or a Workflow plan may use swarm as its alternative-model leaf executor.
+Compose freely — a pipeline dev session or a Workflow plan may use swarm as its
+alternative-model leaf executor.
 
 ### Swarm vs Workflow, honestly
 
-The structural split: a swarm manifest is a **static, previewable plan** — every model and leaf enumerable in one approval, simple enough for a weak model to author — while a Workflow script is **imperative orchestration** reviewed as code, with the full power and full cost that implies. Neither dominates; here is the real shape of the trade.
+A swarm manifest is a **static, previewable plan** — every model and leaf enumerable in
+one approval, simple enough for a weak model to author. A Workflow script is **imperative
+orchestration** reviewed as code, with the full power and full cost that implies. Neither
+dominates:
 
 | | swarm | Workflow |
 |---|---|---|
@@ -46,117 +149,25 @@ The structural split: a swarm manifest is a **static, previewable plan** — eve
 | Weak-model authorability — fill-in-the-blanks JSON; validation errors teach | ✅ | ⚠️ JS bar |
 | Mechanical citation verification — `{file, line, quote}` returns string-matched against real files before any verifier spawns | ✅ zero tokens | ❌ |
 
-Rule of thumb: bounded fan-out breadth — investigation sweeps, judge panels, generation, mechanical implementation sweeps, and now discover-then-map pipelines — is swarm's shape, especially when alternative models are armed. Reach for Workflow when the orchestration itself needs unbounded loops, session MCP tools, or budget-driven control flow — or when you simply want zero setup.
-
-## Setup
-
-Run `/swarm:swarm setup` in a session — it materialises every key into `~/.swarm/config.json` (`swarm config init`), explains each one, and edits the ones you name. The shipped `config.default.json` is overwritten on every plugin update, so your own file is the only durable copy; re-run `config init` after an update to pick up new keys. The one key you must set to arm alternative models:
-
-```json
-{
-  "provider": {
-    "allowedRoots": ["C:/personal-projects"]
-  }
-}
-```
-
-**Why `allowedRoots` exists (data governance).** Your organisation may have a data agreement with Anthropic but not with other model providers. Non-Claude dispatch is therefore **deny-by-default**: an open-model task whose effective `cwd` is not under a listed root fails validation with the governance reason. With the default `[]`, swarm still runs fine with Claude models — the alternative-model path simply never arms. List only roots whose code is cleared to leave for your provider.
-
-Other useful keys (defaults shown in `config.default.json`): `provider.url` (Anthropic-format endpoint, default `http://localhost:11434` for a direct ollama setup), `provider.mode` (`"env"` merges `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`/`ANTHROPIC_MODEL` into a plain `claude -p` call — the default; `"launch"` shells out via `launchCmd`), `concurrency` (a ceiling — a manifest may run narrower, never wider), `timeoutMs`, `worktreeBranchPrefix`, `modelDenylist` (case-insensitive substrings — matching models fail validation and never appear in the `models` roster; for taking a model out of circulation on quality grounds). Swarm never manages credentials — auth is your provider app's ambient sign-in.
-
-```json
-{
-  "provider": {
-    "cloud": { "ollama": { "enabled": false, "cookiePath": null } },
-    "usageTimeoutMs": 5000
-  }
-}
-```
-
-`provider.cloud.ollama.enabled` arms ollama.com cloud-usage preflight — false by default, so a user who has never heard of it meets nothing. `cookiePath` overrides where the session cookie is stored (default `~/.swarm/ollama-cookie.json`, written by `ollama-usage --cookie`, never `config.json` — a cookie in a file that's read/printed/diffed constantly would end up in a transcript). `usageTimeoutMs` (default 5000) bounds the usage fetch; a hung ollama.com times out into the cached reading instead of wedging `validate`.
-
-**Provenance: every figure says where it came from.** A `swarm` command that can fetch does — `validate`, `run`, `models`, `ollama-usage` — memoised to one request per process. When the live fetch fails (an expired cookie is the ordinary case), the last cached figure is still shown, but never bare: every render prefixes
-
-```
-/!\ Cookie Expired — figures below are cached.  last seen: 2026-09-07T14:49Z
-    Refresh: swarm ollama-usage --cookie '<value>'   (writes ~/.swarm/ollama-cookie.json)
-```
-
-`/!\ Network Error`, `/!\ Fetch Timed Out`, `/!\ Page Unreadable` and `/!\ No Cookie` are the other forms. `last seen` is an absolute UTC timestamp; `resets` renders in the reader's own local time — both are the same absolute instant either way, so a bare glance still tells you whether the cache predates the reset, no arithmetic and no relative age printed. `validate` fails on a `live` exhausted reading only; a cached 100% warns with the banner, because it may describe a window that has since reset. `provider.cloud.ollama.settingsUrl` overrides the fetch URL (test hook, like `quotaUsageUrl`).
-
-### Per-repo leaf guard (`projects`)
-
-A leaf is a full headless Claude Code session, and `allowedTools` scopes tool *names*, not what
-a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every leaf that
-runs under that repo — one config entry, one script the repo keeps and tests:
-
-```json
-{ "projects": [{ "name": "myrepo", "hooks": { "preToolUse": "python scripts/leaf_guard.py" } }] }
-```
-
-Before every tool call in a guarded leaf the engine's hook runs that command from the leaf's
-cwd with the PreToolUse payload on stdin — `tool_name`, `tool_input` (a Bash `command`, an
-Edit/Write `file_path`, a Read path, …), the same JSON any PreToolUse hook receives. **Exit 0
-allows the call; exit 2 denies it, and whatever the script wrote to stderr is the reason the
-leaf sees.** Anything else — another exit code, a timeout, a spawn failure — also denies,
-naming the failure: the guard fails closed, because a policy that silently stops applying is
-worse than one that loudly blocks.
-
-What a repo can do with it is whatever a PreToolUse hook can do, decided by the repo rather
-than by every manifest author: refuse build or test commands in lanes so only a serial tail
-compiles; fence writes to a directory or a file pattern; block network-touching commands, package
-installs, or `git push`; require a header marker on every edit under a given directory; keep
-a leaf from reading a secrets path. The script sees the full payload, so any rule expressible over
-it is one `if` away.
-
-Mechanics: each entry's `name` is matched against the basename of the task's repo root (`git
-rev-parse --show-toplevel`, falling back to the task's cwd if that fails; case-insensitive on
-Windows); a leaf whose repo name matches no entry, or whose entry has no `hooks.preToolUse`,
-runs unguarded; interactive sessions never see the hook. Each distinct guard is probed once at
-`validate` with a harmless Bash payload, so a script that cannot run fails the manifest before
-any leaf spends. A task opts out with `"leafGuard": false` — the only accepted value — for a
-leaf that must be allowed the thing the guard denies (the one build tail, say); nothing in a
-task's `env` or `settings.env` can forge or clear the guard.
-
-Requirements: Node, `claude` on PATH, and (for `:cloud` models) an ollama install recent enough to serve `/api/experimental/model-recommendations` (~v0.23+).
-
-## Install
-
-Put the `swarm` command on PATH once. `swarm install` writes `~/.local/bin/swarm-resolver.mjs`, `~/.local/bin/swarm`, and `~/.local/bin/swarm.cmd`; `~/.local/bin` must be on PATH. It is idempotent — re-run it after a plugin update to refresh the resolver copy.
-
-**Installed the plugin?** Run `/swarm:swarm setup` in a Claude Code session. Its Stage 0 installs the command for you, resolving the engine from the skill's own base directory — so you never construct a path, which is the whole point of this command existing.
-
-**Working in a clone of this marketplace?** The line below is the only place this documentation names the engine path, and it is relative to the repo root:
-
-<!-- swarm-bootstrap-exception: the only sanctioned engine-path instruction in the tree -->
-node plugins/swarm/scripts/swarm.mjs install
-
-## Usage
-
-```bash
-swarm models              # discover launchable :cloud models + Claude aliases — run first
-swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
-swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
-swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
-swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
-swarm quota                # Anthropic utilization per limit window
-swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
-swarm grade --init <resultsDir>   # write grades.json — one skeleton row per :cloud leaf
-swarm grade --file <grades.json>  # validate the filled batch and append it to the score store
-swarm perf [--aspect X] [--model Y] [--domain D]   # aspect x model table with sample counts
-```
-
-A bare name resolves through the manifest registry (`<cwd>/.swarm/manifests/<name>.json`, then `~/.swarm/manifests/`; the resolution is always announced). `--args` fills `{{args.*}}` placeholders — `validate --resolved` prints the fully substituted document as the approval preview, and each distinct args value gets its own fingerprinted results dir so resume never crosses parameterizations.
-
-In a session, the **swarm** skill drives this end-to-end: it drafts the manifest, shows it in an AskUserQuestion box (the preview is the approval — every model and leaf visible before anything runs) — or, with `swarm.always`, states it and runs — runs in the background, and reads only `digest.md` when the run completes.
+Rule of thumb: bounded fan-out — sweeps, judge panels, generation, mechanical
+implementation, discover-then-map — is swarm's shape, especially with alternative models
+armed. Reach for Workflow when the orchestration itself needs unbounded loops, session MCP
+tools, budget-driven control flow, or you simply want zero setup.
 
 ## Model discovery
 
-Discovery covers the **ollama cloud catalog only**. `models` unions the curated recommendations endpoint with the full `/api/tags` catalog (either source failing is non-fatal), derives `:cloud` names from bare tags, validates and enriches each candidate free via the daemon's `/api/show` (capabilities, context length, parameter count), and prints the roster largest-first — `glm-5.2:cloud — Frontier open model (756B, 1.0M ctx)`. The Claude tiers (`haiku`/`sonnet`/`opus`) are a static always-available alias list appended after the discovered set — they are not discovered, and no non-ollama provider ever is.
+Covers the **ollama cloud catalog only**. `models` unions the curated recommendations
+endpoint with the full `/api/tags` catalog, enriches each candidate free via `/api/show`
+(capabilities, context length, parameter count), and prints the roster largest-first —
+`glm-5.2:cloud — Frontier open model (756B, 1.0M ctx)`. Claude tiers (`haiku`/`sonnet`/
+`opus`) are a static always-available alias list appended after — never discovered, and no
+non-ollama provider ever is.
 
-Model families collapse: an entry superseded by a strictly-newer same-lineage sibling (`glm-5.1` next to `glm-5.2`) is hidden behind it, with a dim footer counting the hidden rows; `swarm models --all` shows them marked `[superseded by …]`. When a superseder drops out of the roster — denylisted, or removed by the entitlement probe — its elder resurfaces automatically.
-
-Entitlement is handled by removal, not annotation: each `models` refresh fires a one-token probe at the top 3 visible cloud entries (a removal cascades to whichever entry resurfaces into the slice, capped at six probes total), and a 402 "extra usage" rejection removes that row from `~/.swarm/models-cache.json` (the same removal happens lazily when a live dispatch fails with that body). The roster then simply doesn't offer the model, and the next refresh restores it once the account can run it again. The cache keeps the full roster — the denylist and supersession hiding are display filters, applied identically by the CLI and by the ultraswarm hook's model list.
+An entry superseded by a strictly-newer same-lineage sibling is hidden behind it
+(`swarm models --all` shows the hidden rows). Entitlement is handled by removal, not
+annotation: each refresh probes the top cloud entries with one token each, and a 402
+rejection removes that row from `~/.swarm/models-cache.json` until the account can run it
+again.
 
 ## Example manifest
 
@@ -191,7 +202,9 @@ Entitlement is handled by removal, not annotation: each `models` refresh fires a
 
 ## Deterministic steps — forEach / when / compute
 
-The glue logic between agent calls that never needed an LLM, without making the manifest a programming language. Every leaf stays enumerable at approval time — `validate` prints the worst-case leaf count the caps permit.
+Glue logic between agent calls that never needed an LLM, without making the manifest a
+programming language. Every leaf stays enumerable at approval time — `validate` prints the
+worst-case leaf count.
 
 ```json
 { "tasks": [
@@ -204,13 +217,23 @@ The glue logic between agent calls that never needed an LLM, without making the 
   ] }
 ```
 
-- **`forEach`** clones a template leaf at runtime over a dependency's JSON array — the "discover a work-list, then map over it" shape that previously forced a manual second wave. `maxItems` is **required**: the cap is the approval. Clones (`fix[0]`, `fix[1]`, …) are full tasks — own result, tokens row, retry budget, `fallbackModel`, `ask` session — and dependents of the parent wait for all of them (`{{result:fix}}` = JSON array of clone outputs). Overflow is loud: a `truncated` field in the parent result, a run.log event, and a closing-block warning — a capped run never reads as full coverage.
-- **`when`** gates a leaf on a dependency's output — false means the task completes as `skipped` (dependents still run). The expression must yield true/false; a bare value is a validation-time teaching error.
-- **`compute`** is an agentless expression step (dedupe / filter / count / threshold / flatten) over dependency JSON — zero tokens, result consumable like any leaf's. No `eval`, no external `jq`: a hand-rolled, bounded evaluator (`length`, `count`, `filter`, `unique_by`, `flatten`, `min/max/sum`, `contains`; comparisons and boolean logic; 500-char cap), because manifests may themselves be model-authored and the trust boundary stays tight.
+- **`forEach`** clones a template leaf at runtime over a dependency's JSON array. `maxItems`
+  is required — the cap is the approval. Clones (`fix[0]`, `fix[1]`, …) are full tasks —
+  own result, tokens, retry budget, `fallbackModel`, `ask` session; dependents wait for all
+  of them (`{{result:fix}}` = array of clone outputs). A capped run reports `truncated`
+  loudly rather than reading as full coverage.
+- **`when`** gates a leaf on a dependency's output — false completes the task `skipped`
+  (dependents still run); the expression must yield true/false.
+- **`compute`** is an agentless expression step (dedupe/filter/count/threshold/flatten) —
+  zero tokens, a hand-rolled bounded evaluator (`length`, `count`, `filter`, `unique_by`,
+  `flatten`, `min/max/sum`, `contains`, comparisons, 500-char cap) rather than `eval`,
+  since manifests may themselves be model-authored.
 
 ## Widening after a narrow step — `isolation.from` and `integrate`
 
-Private trees branch from repo HEAD and never see each other's commits, so a fan-out that follows a shared step needs two things the engine now supplies: a way to start from that step's work, and a way to fold the results back.
+Private trees branch from repo HEAD and never see each other's commits, so a fan-out that
+follows a shared step needs a way to start from that step's work and a way to fold results
+back:
 
 ```json
 { "tasks": [
@@ -232,14 +255,20 @@ Private trees branch from repo HEAD and never see each other's commits, so a fan
   ] }
 ```
 
-Width goes `1 → 2 → 1`: `migrate-x` and `migrate-y` run concurrently in private trees that already contain `helper`'s commit, then `join` merges both branches into the `feat` tree and `cleanup` carries on from the combined state.
+Width goes `1 → 2 → 1`: `migrate-x`/`migrate-y` run concurrently in private trees already
+holding `helper`'s commit, then `join` merges both into `feat`, and `cleanup` carries on.
 
-- **`integrate`** is an agentless node like `compute` — it spends nothing. It merges each named task's branch into the `into` worktree, creating that tree if the chain has not reached it yet.
-- **A conflict is not a failure.** The merge stops with markers left in the tree, the node stays `ok`, and the conflicting paths land in its result — pass `{{result:join}}` to the next leaf and tell it to resolve them. Failing the node instead would turn an ordinary merge conflict into a dead run needing rescue; the next link is a model that can read markers.
+- **`integrate`** is an agentless node like `compute` — spends nothing. Merges each named
+  task's branch into the `into` worktree, creating that tree if not yet reached.
+- **A conflict is not a failure.** The merge stops with markers left in the tree, the node
+  stays `ok`, and conflicting paths land in its result — pass `{{result:join}}` to the next
+  leaf to resolve them.
 
 ### Folding a `forEach` fan-out back — `integrate.from` naming the parent
 
-"Discover N sites, fix each in isolation, fold the results together" is `forEach` writing in worktrees, then `integrate` naming the `forEach` task itself — every clone that actually expanded merges, in index order:
+"Discover N sites, fix each in isolation, fold together" is `forEach` writing in
+worktrees, then `integrate` naming the `forEach` task — every clone that actually expanded
+merges, in index order:
 
 ```json
 { "tasks": [
@@ -251,7 +280,10 @@ Width goes `1 → 2 → 1`: `migrate-x` and `migrate-y` run concurrently in priv
   ] }
 ```
 
-`fix[0]`…`fix[n-1]` own the branches, not `fix` itself — `from: ["fix"]` resolves to those clone branches at merge time, the same way `{{result:fix}}` resolves to their outputs. A capped or empty source array, and a failed clone, behave exactly as they do for a hand-listed `from`: nothing to merge, or a blocked `join`. `validate`'s preview line reuses the `forEach`'s own cap: `join ≤ 30 branches (fix forEach)`.
+`fix[0]`…`fix[n-1]` own the branches, not `fix` itself — `from: ["fix"]` resolves to those
+clone branches, the same way `{{result:fix}}` resolves to their outputs. A capped or empty
+source array, or a failed clone, behave exactly as they do for a hand-listed `from`.
+`validate`'s preview reuses the `forEach`'s own cap: `join ≤ 30 branches (fix forEach)`.
 
 ## Results layout
 
@@ -268,47 +300,79 @@ Width goes `1 → 2 → 1`: `migrate-x` and `migrate-y` run concurrently in priv
                               # still has every session id on disk for resume to fall back to
 ```
 
-`isolation` is either the string `"worktree"` — a private tree keyed by the leaf's own id, the fan-out shape where clones must not collide — or an object carrying up to three keys:
+`isolation` is either the string `"worktree"` — a private tree keyed by the leaf's own id —
+or an object:
 
 | Key | Effect |
 |---|---|
-| `worktree` | Every leaf naming this name meets in **one** tree on one branch, so an ordered chain accumulates: phase 1 commits, a read-only reviewer sees those commits, phase 2 builds on them. Links sharing a name must be totally ordered by `after`, and `forEach` cannot share a tree. |
-| `branch` | Names the branch explicitly instead of deriving it from the worktree name (default `swarm/<worktree>`) — for continuing work onto a branch that already exists. |
-| `from` | Bases this tree on **that task's branch tip** instead of repo HEAD, so the leaf starts holding the code it builds on. The named task must be a declared dependency, worktree-isolated, and able to WRITE (a read-only task commits nothing, so it owns no branch); a `forEach` parent is rejected, since its clones own the branches. |
+| `worktree` | Every leaf naming this name meets in **one** tree on one branch, so an ordered chain accumulates. Links sharing a name must be totally ordered by `after`; `forEach` cannot share a tree. |
+| `branch` | Names the branch explicitly instead of deriving it from the worktree name (default `swarm/<worktree>`). |
+| `from` | Bases this tree on **that task's branch tip** instead of repo HEAD. The named task must be a dependency, worktree-isolated, and write-capable; a `forEach` parent is rejected (its clones own the branches). |
 
-`worktreesKept` in `summary.json` carries one entry per shared group — `{ id, name, branch, path, diffstat, taskIds }`, its diffstat spanning every phase — not one per task. A branch carrying commits not yet landed (compared by patch, so squash-merges count as landed) is never deleted or force-reset; the engine refuses rather than lose it.
+`worktreesKept` in `summary.json` carries one entry per shared group. A branch with
+commits not yet landed (by patch, so squash-merges count) is never deleted or force-reset —
+the engine refuses rather than lose it. `swarm prune <resultsDir>` destroys one run's kept
+worktrees and branches, never its results — refuses a live run, prints every tree first,
+`--dry-run` for a no-op preview. Nothing prunes on its own.
 
-A kept worktree is the salvage, not litter — it survives on purpose so the session can merge from it. `swarm prune <resultsDir>` destroys one run's kept worktrees and their branches, never its results: it refuses a live run, prints every tree's path, branch and size, then removes them and closes with `freed <N> GB across <k> worktrees`. Run `--dry-run` first — same table, nothing touched. Nothing prunes on its own: the workflow-discipline closing phase reminds you which runs still hold worktrees.
+Leaves dispatch with `--output-format stream-json`; a provider that emits plain text
+instead degrades gracefully (raw stdout becomes `output`, token columns stay empty).
 
-Leaves are dispatched with `--output-format stream-json`, so the engine extracts each leaf's final text into `output` and its per-turn API usage into `tokens` (`{ input, output, cacheCreation, cacheRead }`). A provider that emits plain text instead degrades gracefully: raw stdout becomes `output` and the token columns stay empty.
+Stdout repaints a roster snapshot on every state change and heartbeat (`heartbeatSecs`,
+default 15): glyph, id, model, duration, work tokens, plus a counts footer. Running rows
+show the leaf's latest tool call; a leaf silent past `quietWarnSecs` (default 60) shows
+`⚠ quiet Ns` instead. Failed tasks block their dependents; independent branches continue;
+re-`run` resumes (`ok` work skipped, `rate-limited` retries). A live engine (heartbeat
+younger than `heartbeatSecs * 3`) makes `run` — even `--force` — refuse rather than
+double-drive the same leaf; `swarm stop <resultsDir>` ends it first.
 
-Stdout repaints a full **roster snapshot** on every task state change and on a heartbeat (`heartbeatSecs`, default 15): one row per task — glyph, id, model, duration (elapsed ticks live for running leaves), work tokens (input + output + cache writes; live counts climb as turns complete) — plus a counts footer with the run total. Running rows also show the leaf's **latest tool call** (`◐  map-rest … 12.4k  Grep client/scripts/ui`); a leaf silent for more than `quietWarnSecs` (default 60) shows `⚠ quiet Ns` instead — hangs surface in a minute, not at the timeout. On a TTY the snapshot redraws in place; piped output appends plain-text snapshots so the tail of the buffer is always the current picture, and `NO_COLOR` is honoured. After the roster, a closing block: digest path, summary path, total tokens, kept worktrees — never raw task output. Failed tasks block their dependents; independent branches continue; re-`run` resumes (completed work is skipped, `rate-limited` tasks retry). If the resultsDir's engine is still alive (a heartbeat younger than `heartbeatSecs * 3`), `run` — even with `--force` — refuses instead of resuming: two engines on one run dir would drive the same leaf's Claude session twice. `swarm status <resultsDir>` to watch it, `swarm stop <resultsDir>` to end it first. A `run` on a stopped resultsDir clears the stop marker on start, so the resumed run isn't immediately stopped by its predecessor's leftover file.
-
-`status <resultsDir>` renders the same roster read-only from `run.log` (add `--watch` for live repaint in a second terminal). Past that same `heartbeatSecs * 3` staleness window, `status` relabels every `running`/`retrying` row `interrupted` (`✗`, tagged, counted in the footer) and adds one line — `⚠ engine dead — no heartbeat since <iso>. Re-run the manifest: interrupted leaves resume their own sessions.` — so a crashed engine reads as dead rather than as a run that's merely quiet.
+`status <resultsDir>` renders the same roster read-only (`--watch` for live repaint). Past
+that same staleness window it relabels every `running`/`retrying` row `interrupted` and
+adds `⚠ engine dead — no heartbeat since <iso>` — a crashed engine reads as dead, not quiet.
 
 ## Interrogating a leaf
 
-Every leaf's Claude Code session id is captured in its result JSON. `ask` resumes that session with a follow-up question — the leaf already holds its file reads and reasoning in context, so a drill-down costs one turn instead of a re-run:
+Every leaf's Claude Code session id is captured in its result JSON. `ask` resumes that
+session with a follow-up — the leaf already holds its context, so a drill-down costs one
+turn instead of a re-run:
 
 ```bash
 swarm ask <resultsDir> census-edges "show the exact preload line you cited"
 ```
 
-An ask runs through the same engine as `run` — same `run.log`, same heartbeat, same live-engine guard — so it shows on `status` and the dashboard as that leaf running again, not as a separate event. It refuses to start while the run's engine is already live, and for the same reason a `run` refuses to start while an ask is live: two processes must never drive one Claude session.
-
-The resume runs with the leaf's own model, cwd, and tool allowlist (a read-only leaf stays read-only). Each follow-up appends to the leaf's `asks[]` history in its result JSON and to `results/<id>.ask.log`, and continues the same conversation thread. `--model <m>` re-asks on a different model — subject to the same `allowedRoots` governance gate as dispatch. Leaves that ran in a since-removed worktree can't be resumed; `ask` says so rather than guessing. A failed ask never demotes the leaf's own accepted result — the failure is recorded in `asks[]`, not on the leaf.
+Runs through the same engine as `run` — same `run.log`, heartbeat, live-engine guard — so
+it shows on `status`/dashboard as that leaf running again. Uses the leaf's own model, cwd,
+and tool allowlist; `--model <m>` re-asks on a different model (same governance gate).
+Leaves in a since-removed worktree can't be resumed. A failed ask is recorded in `asks[]`,
+never demotes the leaf's accepted result.
 
 ## Self-healing runs
 
 Transient failures recover in-run; temporal ones fail fast with the recovery named:
 
-- **Rate limits** retry with exponential backoff (`retry.rateLimited`, default 2 attempts from `retry.backoffMs` 30s) — the leaf shows `↻ retry 2/3 in 45s` and its concurrency slot frees during the wait. Spawn errors get one quick retry. Timeouts never auto-retry (a too-big leaf costs double for the same outcome — rescope and resume instead).
-- **`fallbackModel`** (per task) is the only substitution the engine will ever make — declared in the manifest you approved, validated against `allowedRoots` at load time like any dispatch target. Quota exhaustion switches to it immediately; rate limits switch after retries exhaust. The switch is logged (`↯ fallback → glm-5.2:cloud`) and recorded in run.log.
-- **Quota is a first-class state** (`⏳`), distinct from rate limits: Anthropic usage exhaustion is temporal (hours), so instead of retrying, the run parses the reset time into the result and closing block, and the first Claude leaf to hit the wall pre-emptively marks every still-pending undefended Claude leaf `quota` — one failure, one lesson, no wasted dispatches. Re-running after reset skips all `ok` work.
-- **Quota preflight**: when a plan contains Claude leaves, the engine first queries Anthropic's usage endpoint with Claude Code's own local OAuth credentials (free, predictive — utilization % and reset times per window, cached `quotaCacheSecs`). Exhausted quota with undefended Claude leaves aborts *before* dispatch with the leaf list and reset time; ≥`quotaWarnPct` (80) warns and proceeds. Strictly best-effort — any endpoint failure and the run proceeds; mid-run classification is the backstop. Disable with `"quotaPreflight": false`; `quotaPatterns` extends message matching without a plugin update.
-- **Memory pressure parks, it doesn't fail.** Below `minFreeMemMb` (default 2048) a pending leaf doesn't start — its row goes `retrying` with the note `⏸ low memory — <x.x> GB free`, same as a backoff retry, but `attempts` is untouched (parks are unlimited). Below `valveFreeMemMb` (default 1024) with more than one leaf running, the engine stops its own newest leaf the same way `swarm stop` would (`child.kill()`, no PIDs), and that settle is classified `memory`, never a normal failure. Both cases redrive on the next heartbeat tick once free memory clears `minFreeMemMb` — not a per-park timer, so a fully parked run still exits cleanly if memory never recovers. An engine with nothing else running still starts one leaf: a starved machine degrades to serial, it doesn't stall. The closing block totals parks in one line (`N leaf parks for low memory`).
+- **Rate limits** retry with exponential backoff (`retry.rateLimited`, default 2 attempts,
+  `retry.backoffMs` 30s) — the slot frees during the wait. Spawn errors get one quick
+  retry. Timeouts never auto-retry (rescope and resume instead).
+- **`fallbackModel`** (per task) is the only substitution the engine ever makes — validated
+  against `allowedRoots` like any dispatch target. Quota switches to it immediately; rate
+  limits switch after retries exhaust. Logged (`↯ fallback → glm-5.2:cloud`).
+- **Quota (`⏳`) is distinct from rate limits** — temporal (hours), so instead of retrying
+  the run parses the reset time and the first Claude leaf to hit the wall pre-emptively
+  marks every still-pending undefended Claude leaf `quota`. Re-running after reset skips
+  `ok` work.
+- **Quota preflight**: with Claude leaves present, the engine queries Anthropic's usage
+  endpoint first (free, local OAuth creds, cached `quotaCacheSecs`). Exhausted quota with
+  undefended Claude leaves aborts before dispatch; ≥`quotaWarnPct` (80) warns and proceeds.
+  Best-effort — any endpoint failure and the run proceeds. Disable with
+  `"quotaPreflight": false`.
+- **Memory pressure parks, it doesn't fail.** Below `minFreeMemMb` (2048) a pending leaf
+  waits (`retrying`, unlimited); below `valveFreeMemMb` (1024) with >1 leaf running, the
+  engine stops its own newest leaf (classified `memory`, not a failure). Both redrive once
+  memory clears — not on a timer, so a fully parked run still exits cleanly if memory never
+  recovers. An engine with nothing else running still starts one leaf — degrades to serial
+  rather than stalling.
 
-`swarm quota` answers one question for **every** provider at once — *can I dispatch right now, and on what?* — one session and one weekly line each, provider-named:
+`swarm quota` answers *can I dispatch right now, and on what* for every provider at once:
 
 ```
 anthropic session: 42% — resets Sun 6 Sep, 19:00
@@ -317,21 +381,29 @@ ollama session: 12% — resets Sun 6 Sep, 13:00
 ollama weekly: 87% — resets Tue 8 Sep, 01:00
 ```
 
-Anthropic is fetched (its credential renews itself); a cloud provider is read from cache, because its cookie needs a human and `quota` must not stall on one. The exit code keeps its meaning — 1 when **Anthropic** is exhausted — and a cloud provider's state is reported beside it, never conflated with it.
+Anthropic is fetched live; a cloud provider reads from cache (its cookie needs a human, so
+`quota` must not stall on one). Exit code 1 means **Anthropic** exhausted specifically.
 
-**`swarm ollama-usage`** owns the `:cloud` side's *fetch* and cookie: a zero-dependency preflight against `ollama.com/settings` (no npm package, node:* only), independent of your provider app's own usage tooling. First run, hand it the browser session cookie: `swarm ollama-usage --cookie '<value>'` saves it to `provider.cloud.ollama.cookiePath` and fetches immediately; every later call reuses the saved cookie. It prints the same two lines `quota` does, exits 1 when the weekly meter reads 100%, and falls back to the last cached reading when the cookie is expired or missing (with no cache at all: one "no reading yet" line and exit 0).
+**`swarm ollama-usage`** owns the `:cloud` side's fetch and cookie — zero-dependency,
+independent of your provider app's own tooling. First run: `swarm ollama-usage --cookie
+'<value>'` saves it and fetches immediately; later calls reuse it. Exits 1 at 100% weekly,
+falls back to cache when the cookie is expired or missing.
 
-Both commands print through `src/usage.mjs`, which is also what the ultraswarm hook consults — so a reading is worded identically wherever it surfaces, and adding a second cloud provider is one reader rather than another command. Nothing here arms itself: a provider is read only when `provider.cloud.<name>.enabled` is `true`, regardless of whether a cookie is saved.
-
-A provider that cannot take work now also gets one line beside the standing-mode block — exhausted, a snapshot too old to trust, or a full session bar. A healthy provider says nothing.
+Both commands share `src/usage.mjs`, also consulted by the ultraswarm hook, so a reading
+reads identically everywhere. Nothing arms itself — a provider is read only when
+`provider.cloud.<name>.enabled` is `true`. A provider that can't take work now gets one
+line beside the standing-mode block; a healthy provider says nothing.
 
 ## Model capability scores
 
-Which model to use for what is otherwise decided by remembered incidents. `grade` records what a run's `:cloud` leaves actually did; `perf` reads it back. Opt-in: `"grading": { "enabled": true }` in `~/.swarm/config.json` makes every run's closing block ask for grades; off (the default) nothing asks, `grade`/`perf` still answer by hand, and the dashboard greys its Performance page.
+Which model to use for what is otherwise decided by remembered incidents. `grade` records
+what a run's `:cloud` leaves actually did; `perf` reads it back. Opt-in:
+`"grading": { "enabled": true }` — off by default, `grade`/`perf` still answer by hand.
 
-When enabled, the nudge appears in three places: the engine's closing block on stdout, the footer of `digest.md`, and the session Stop hook listing any ungraded runs this session dispatched. The digest and Stop-hook backstops matter because every dispatch is backgrounded and the skill forbids reading raw stdout, so a session that only reads `digest.md` still sees it. The Stop hook asks at every turn end, not once per session — it has no once-marker, only the `stop_hook_active` guard that keeps a single turn from looping. Not worth grading a run? `swarm grade --waive <resultsDir> --reason "<why>"` excuses it from all three places without ever adding a store row.
-
-The agent that authored the manifest grades it — it is the only party that knows what each leaf was *asked* for, which the digest does not hold. Claude tiers produce no rows: their capability is not what is in question.
+When enabled, the nudge appears on the engine's closing block, `digest.md`'s footer, and
+the session Stop hook (every turn end, not once). `swarm grade --waive <resultsDir>
+--reason "<why>"` excuses a run without a store row. The manifest's author grades it — the
+only party that knows what each leaf was *asked* for.
 
 ```bash
 swarm grade --init <resultsDir>   # → <resultsDir>/grades.json, one row per :cloud leaf
@@ -341,7 +413,8 @@ swarm grade --waive <resultsDir> --reason "<why>"   # excuse a run instead — n
 swarm perf --aspect search --domain godot
 ```
 
-**Ten aspects, graded 1-10.** Four are graded on every leaf; six only where the leaf stressed them, and stay `null` otherwise. They co-occur freely — a leaf that reads reference images and then designs geometry from them has no single primary act.
+**Ten aspects, graded 1-10.** Four graded on every leaf; six only where the leaf stressed
+them (`null` otherwise) — they co-occur freely.
 
 | | aspect | the question |
 |---|---|---|
@@ -356,40 +429,60 @@ swarm perf --aspect search --domain godot
 | | `vision` | interpreted an image correctly |
 | | `geometry` | proportion, structure and layout came out right |
 
-**`domain`** is one lowercase token on every row naming the language or ecosystem the leaf worked in — `godot`, `rust`, `node`, `python`, `docs`. A field, not a category, so adding an ecosystem costs nothing and never closes the list — but it is not the repo and not the task: `this-repo`, `rust+plans` and the like are refused, because nothing decomposes them back into a domain a query can ask for.
+`domain` is one lowercase token naming the leaf's language/ecosystem (`godot`, `rust`,
+`node`, `python`, `docs`) — never the repo or task. `outcome` (`completed | wrong | failed
+| timeout | session-died | not-capable`) is separate from the grades: the first two
+require grades, the rest forbid them — `not-capable` records the model couldn't do the
+thing *on this harness*.
 
-**`outcome`** is separate from the grades, because a 1-10 cannot say "the session died": `completed | wrong | failed | timeout | session-died | not-capable`. The first two require grades; the rest **forbid** them — you cannot grade a report that was never submitted, and averaging a number that describes nothing buries the outcome. `not-capable` is the useful one: it records that the model could not do the thing *on this harness*, which is often not what its catalogue entry claims.
+Each row also snapshots mechanical columns (`ok`, `durationMs`, `tokens`, `numTurns`,
+citation counts) and the model's declared capabilities from `models-cache.json` — auditable
+context, never a substitute for the grade.
 
-Each row also snapshots the mechanical columns from the leaf's result (`ok`, `durationMs`, `tokens`, `numTurns`, citation counts) and the model's declared `capabilities`/`contextLength`/`parameterCount` from `models-cache.json`. Those make a grade auditable; they never replace one — `numTurns` cannot separate three turns doing the wrong thing from thirty being thorough.
+**Store:** `~/.swarm/model-scores.jsonl`, append-only, line-atomic. Re-grading a run
+replaces its rows rather than double-weighting the model.
 
-**Store:** `~/.swarm/model-scores.jsonl`, append-only, one line per graded leaf. Line-atomic, so concurrent runs cannot corrupt it, and no run dirties the repo. Re-grading a run replaces its rows rather than double-weighting the model: the newest row per `(resultsDir, leaf)` wins.
+**Reading `perf`.** Per aspect × model, each cell shows sample count `n`, raw `mean`, and a
+`wtd` score weighted by evidence — `n < 5` is provisional; an aspect with no rows prints
+`n=0` rather than being omitted.
 
-**Reading `perf`.** Retrievable aggregated scores, per aspect × model. Every cell shows its sample count `n`, the raw `mean`, and a `wtd` score that cells rank on — the mean weighted for how much evidence stands behind it, so a single lucky leaf cannot head the table. `n < 5` is marked provisional, and an aspect with no rows prints at `n=0` rather than being omitted: absence is evidence.
-
-**`swarm validate` prints the record the seating is decided on.** With grading on, validate appends a `seats:` block between the estimate and the results dir: per seated model its leaf ids, `overall`/`impl`/`code` scores with their `n`, the cost band, and the frontier verdict; then one line for the launchable models it did not seat. A model with no graded row is `never graded` and an unknown cost is `cost unmeasured` — in words, never a number, because absence is not zero. The block states the record and never judges it: the seating rule deliberately gives an under-canon model the seat, so a warning would fire on correct seats and be ignored on real ones — `n<20` is the rule's own term and reads as the argument for the seat. Grading off, nothing seated, or an empty store, and the block does not print at all.
+**`swarm validate`** prints the record the seating is decided on when grading is on: a
+`seats:` block per seated model (leaf ids, scores, cost band, frontier verdict) plus one
+line for launchable models it didn't seat. `never graded` / `cost unmeasured` are written
+in words, never a number — absence is not zero.
 
 ## Cost — the meter weight beside the score
 
-`swarm cost` reads a second store: `~/.swarm/usage-history.jsonl`, one JSON line per **live** usage fetch that carried measurable weekly segments (a cached reading banks nothing, so no duplicate snapshots). Each line holds the week's meter percentage and, per `:cloud` model, its cumulative `requests` and its share of the week's meter.
+`swarm cost` reads `~/.swarm/usage-history.jsonl` — one line per **live** usage fetch that
+carried measurable weekly segments (cached readings bank nothing).
 
-The derivation (`cost.mjs`) has four load-bearing properties:
+- **Weeks split on a falling count, never a falling percentage** — a model's cumulative
+  `requests` only rises within a week, so a fall (or a model's absence) proves a reset.
+- **One reading per model per week: that week's last snapshot** — averaging repeated views
+  of one running total would weight by fetch frequency.
+- **A rate is weighted by the requests that produced it** — a share below the page's 0.1%
+  resolution contributes requests to the total but no rate: unknown, not zero.
+- **The multiplier's floor is a measured model with ≥ 200 measured requests.** A model with
+  no history is **unmeasured** — excluded from comparison entirely, neither free nor dear.
 
-- **Weeks split on a falling count, never a falling percentage.** Within a week a model's cumulative `requests` only rises, so a fall between two snapshots — or a model absent from the next one — proves a reset exactly, with no margin to tune.
-- **One reading per model per week: that week's last snapshot.** The lines are repeated views of one running total, so averaging them weights the result by how often someone happened to fetch.
-- **A rate is weighted by the requests that produced it, over the weeks that produced one.** A share below the page's 0.1% resolution contributes its requests to the total but cannot contribute a rate — unknown, not zero.
-- **The multiplier's floor is a measured model with ≥ 200 measured requests.** A thinner model keeps its real reading (it can honestly read 0.8×) but cannot set the floor; a model with no history is **unmeasured** — neither free nor dear, excluded from the comparison entirely.
+The multiplier is the per-request meter weight against that floor, printed beside the
+grades, never collapsed into one number. A model is **dominated** when another is strictly
+higher-scoring *and* strictly cheaper — the only comparison made, since a ratio would let
+one cheap fluke leaf outrank a well-evidenced model.
 
-The multiplier is the per-request meter weight against that floor — what a seat costs relative to the cheapest measured model, banked week over week. It stays a separate column on purpose: `swarm perf` and `swarm models` print it beside the grades with the frontier's verdict, never collapsed into one number. A model is **dominated** when another is strictly higher-scoring *and* strictly cheaper; a ratio would let one cheap fluke leaf outrank a well-evidenced model, so domination is the only comparison made. `swarm cost` prints the table alone.
-
-**Best value is a threshold, never a ratio.** The card names the *cheapest* model that is still worth seating: on the frontier, within `valueMargin` of the best frontier quality, and not thin. A cheap fluke clears none of those — which is the failure `scores.mjs` names when it refuses to collapse quality and cost into one number. The card prints the margin it used, so the pick is judgeable rather than trusted. `provider.cloud.ollama.valueMargin` (default `0.5`) sets it; a malformed value falls back rather than inventing an edge.
-
-**Best value is a threshold, never a ratio.** The card names the *cheapest* model still worth seating: on the frontier, within `valueMargin` of the best frontier quality, and not thin. A cheap fluke clears none of those — which is the failure `scores.mjs` names when it refuses to collapse quality and cost into one number. The card prints the margin it used, so the pick is judgeable rather than trusted. `provider.cloud.ollama.valueMargin` (default `0.5`) sets it; a malformed value falls back rather than inventing an edge.
-
-Band boundaries are arbitrary, so they are config: `provider.cloud.ollama.costBands` (default `[2, 5]`; anything malformed falls back rather than inventing an edge out of a string). On the dashboard's Performance pages and a model's detail view the band is `💲`/`💲💲`/`💲💲💲`; an unmeasured model renders `—`, never a blank that would read as *dominated*. Badges belong where models are compared — they never appear on leaf or run rows (the terminal keeps plain `$`/`$$`/`$$$`, which align in a Windows console).
+**Best value is a threshold, never a ratio.** The card names the *cheapest* model still
+worth seating: on the frontier, within `valueMargin` (default `0.5`) of the best frontier
+quality, and not thin — the margin used is printed, so the pick is judgeable. Cost bands
+(`provider.cloud.ollama.costBands`, default `[2, 5]`) render `💲`/`💲💲`/`💲💲💲` on the
+dashboard and model detail views; unmeasured renders `—`, never a blank that would read as
+dominated. Badges never appear on leaf/run rows (the terminal keeps plain `$`/`$$`/`$$$`).
 
 ## Dashboard
 
-A read-only web dashboard over `~/.swarm/runs`, built for a phone on your LAN: every project's runs, each run's live graph and roster, a leaf's tokens, activity and output, a finished run's digest or report, and a Performance page ranking the model score store the way `swarm perf` does. It refreshes itself while a run is live.
+A read-only web dashboard over `~/.swarm/runs`, built for a phone on your LAN: every
+project's runs, a run's live graph and roster, a leaf's tokens/activity/output, a finished
+run's digest, and a Performance page ranking the model score store. Refreshes itself while
+a run is live.
 
 ```bash
 swarm serve --daemon            # start in the background; prints the URL to open
@@ -398,33 +491,33 @@ swarm serve doctor              # checks port, pid, autostart, version, firewall
 swarm serve install-autostart   # start it with Windows
 ```
 
-Settings live under `dashboard` in `~/.swarm/config.json` — port, bind address, an optional access token, refresh timings — and `/swarm:swarm setup` walks them. `dashboard.enabled: false` turns it off.
+Settings live under `dashboard` in `~/.swarm/config.json` (port, bind address, access
+token, refresh timings) — `/swarm:swarm setup` walks them; `dashboard.enabled: false`
+turns it off.
 
-## Status bar
-
-The fleet bar — every live run this session launched, as `swarm ▮1 · sweep 3/8 ◐ glm-5.2,minimax-m3 1.2M · ⚠ sweep verify-b quiet 6m` — is `statusline/swarm-statusline.mjs`. Install it once:
+## Status bar — the fleet bar
 
 ```bash
 swarm statusline install   # writes ~/.swarm/statusline.mjs, prints the settings.json block
 ```
 
-`settings.json` points at the shim, never at the plugin's cache path: the shim looks up the installed plugin in `installed_plugins.json` on every paint, so plugin updates never break the bar. The printed block carries `"refreshInterval": 5`: Claude Code otherwise re-runs a status command only when the conversation updates, so an idle session's bar would freeze on its dispatch-time counts (each paint costs ~300 ms). Only runs launched by the current session show (the engine stamps the launching session id on `run-start`); a manual run with no stdin shows every live run. `/swarm:swarm setup` offers this as one of its stages.
+Shows every live run this session launched: `swarm ▮1 · sweep 3/8 ◐ glm-5.2,minimax-m3
+1.2M · ⚠ sweep verify-b quiet 6m` — running/ok/failed/quiet counts and per-model tokens,
+read from `run.log` the same way the dashboard and `swarm status` do (never from scanning
+`results/` for file presence). Only runs launched by *this* session show (the engine
+stamps the launching session id); a manual run with no stdin shows every live run.
+`/swarm:swarm setup` offers this install as one of its stages.
 
-Every count on the bar — running/ok/failed/quiet, per-model tokens — comes from `run.log` via `readRun`, the same parse the dashboard and `swarm status` use, never from scanning `results/` for file presence. A run is only ever listed as superseded once a later `run-start` timestamp actually appears in its `run.log`; a touched mtime with no new `run-start` line leaves it on the bar rather than dropping a still-live run.
-
-## Statusline segment
-
-Live progress of the most recent run in the Claude Code status bar — `🐝 5✓ 2▶ 1⧖ 160k` (state counts plus the run's work-token total) — appended to your existing statusLine command:
-
-```bash
-node "<abs-path-to>/swarm/statusline/swarm-glyph.mjs"
-```
-
-Shows nothing when no run has been active in the last 30 minutes; never errors.
+`settings.json` points at a self-resolving shim (`~/.swarm/statusline.mjs`), never at the
+plugin's cache path — the shim looks up the installed plugin on every paint, so plugin
+updates never break the bar. The printed block carries `"refreshInterval": 5`, since Claude
+Code otherwise repaints a status command only on conversation updates and an idle bar would
+freeze on its dispatch-time counts.
 
 ## Completion notification
 
-Set `notifyCmd` in `~/.swarm/config.json` to fire a command when a run finishes (tokens: `{status}`, `{digest}`, `{summary}`) — e.g. ping yourself via the slack-bridge plugin:
+Set `notifyCmd` in `~/.swarm/config.json` to fire a command when a run finishes (tokens:
+`{status}`, `{digest}`, `{summary}`) — e.g. ping yourself via the slack-bridge plugin:
 
 ```json
 { "notifyCmd": "claude-slack notify --message \"{status} — digest: {digest}\"" }
@@ -442,8 +535,17 @@ Make offering swarm a standing habit by adding one line to your CLAUDE.md:
 
 ## Ultraswarm standing mode
 
-`"swarm": { "always": true }` in `~/.swarm/config.json` is standing consent: the swarm skill runs its full ceremony (orchestrating-agents, executing-swarms, `models`, `validate`) and then dispatches on a printed gate statement instead of an AskUserQuestion. A `SessionStart` hook (re-injected after `/clear` and compaction) announces it in a short `<EXTREMELY_IMPORTANT>` block carrying one mode bracket — `[:cloud tier preferred]` when the session's cwd is under a `provider.allowedRoots` entry, `[Anthropic orchestration only]` otherwise, decided the same way the governance gate decides it. The keyword **`ultraswarm`** in a prompt injects the same block for that session without the config flag. Silent otherwise; no model list — the skill's own `models` step discovers what is launchable.
+`"swarm": { "always": true }` in `~/.swarm/config.json` is standing consent: the swarm
+skill runs its full ceremony (orchestrating-agents, executing-swarms, `models`, `validate`)
+then dispatches on a printed gate statement instead of an `AskUserQuestion`. A
+`SessionStart` hook announces it each session, mode-bracketed
+(`[:cloud tier preferred]` under an `allowedRoots` cwd, `[Anthropic orchestration only]`
+otherwise). The keyword **`ultraswarm`** in a prompt injects the same block for that
+session without the config flag.
 
 ## Workflow nudge
 
-A `PreToolUse` hook on the **Workflow** tool: when alternative models are armed (`provider.allowedRoots` non-empty), the first Workflow call of a session is intercepted with a "consider swarm instead" reason — retrying Workflow passes straight through, and the reminder never repeats within the session. A speed bump, not a wall. Silent on unarmed machines and in pipeline child sessions; disable with `"swarm": { "workflowNudge": false }`.
+A `PreToolUse` hook on the **Workflow** tool: when alternative models are armed, the first
+Workflow call of a session is intercepted with a "consider swarm instead" reason —
+retrying passes straight through, and it never repeats within the session. Silent on
+unarmed machines and in pipeline child sessions; disable with `"swarm": { "workflowNudge": false }`.
