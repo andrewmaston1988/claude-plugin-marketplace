@@ -19,6 +19,21 @@ const DEFAULTS = {
     verbModel: "claude-haiku-4-5",
   },
   extensions: [],
+  remote: {
+    brokerPort: 7898,
+    controlPort: 7897,
+    controlToken: null,
+    createChannels: false,
+    operatorUserId: null,
+    // Must exceed the poll cadence /slack-remote prescribes (a 3-minute cron) —
+    // a window shorter than the tick closes before the session has even seen the
+    // message. A reply that lands after it is still posted by the idle drain,
+    // just as a standalone message rather than in place of the placeholder.
+    replyTimeoutMs: 300_000,
+    replyPollIntervalMs: 1_000,
+    pollIntervalMs: 1_000,
+    heartbeatIntervalMs: 15_000,
+  },
 };
 
 const REQUIRED = ["tokens.bot", "tokens.app", "claude.cwd"];

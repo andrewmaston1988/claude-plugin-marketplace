@@ -88,6 +88,92 @@ export async function runDoctor({ config, paths, web, log }) {
     return await checkDaemonStatus();
   });
 
+  // Remote-control subsystem checks (only when a control token is configured).
+  if (config.remote?.controlToken) {
+    await check("Remote-control broker", async () => {
+      const port = config.remote.brokerPort ?? 7898;
+      try {
+        const res = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(2000) });
+        if (!res.ok) throw new Error(`broker on ${port} not healthy`);
+        const body = await res.json();
+        return `healthy on ${port} (${body.peers} peer(s))`;
+      } catch {
+        return `not reachable on ${port} — a live session's MCP server will self-start it`;
+      }
+    });
+
+    // Exercises the exact route slack_post uses: a send TO the reserved
+    // "slack-bridge" recipient. An unpatched broker rejects it ("Peer not found"),
+    // so this goes genuinely red on the reply-path BLOCKER the plan called out.
+    // The probe is taken back scoped by from_id "doctor" — no live reply path
+    // ever sees it, and a delivered residue self-cleans in 24h.
+    await check("Remote-control reply recipient", async () => {
+      const port = config.remote.brokerPort ?? 7898;
+      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${config.remote.controlToken}` };
+      const probe = `doctor probe ${new Date().toISOString()}`;
+      try {
+        const send = await fetch(`http://127.0.0.1:${port}/send-message`, {
+          method: "POST", headers,
+          body: JSON.stringify({ from_id: "doctor", to_id: "slack-bridge", text: probe }),
+          signal: AbortSignal.timeout(2000),
+        });
+        const body = await send.json().catch(() => ({}));
+        if (!send.ok || body.ok === false) {
+          throw new Error(body.error ?? `broker on ${port} returned ${send.status} — the daemon's reply route is broken; restart the broker (broker stop && broker start)`);
+        }
+        await fetch(`http://127.0.0.1:${port}/poll-messages`, {
+          method: "POST", headers,
+          body: JSON.stringify({ id: "slack-bridge", from_id: "doctor" }),
+          signal: AbortSignal.timeout(2000),
+        }).catch(() => {});
+        return "reserved recipient accepts replies (send + scoped poll-back)";
+      } catch (e) {
+        if (e instanceof TypeError || /ECONNREFUSED|ECONNRESET|fetch failed|aborted|timeout/i.test(e?.message ?? "")) {
+          return "broker not reachable — probed on the next doctor run while it is up";
+        }
+        throw e;
+      }
+    });
+
+    await check("Remote-control endpoint", async () => {
+      const port = config.remote.controlPort ?? 7897;
+      let res;
+      try {
+        res = await fetch(`http://127.0.0.1:${port}/health`, {
+          headers: { Authorization: `Bearer ${config.remote.controlToken}` },
+          signal: AbortSignal.timeout(2000),
+        });
+      } catch {
+        // Nothing listening yet is the expected pre-start state: the control
+        // server is created in the bin's `start` branch, and setup runs doctor
+        // before the daemon exists. Informational, like the sibling broker check
+        // and checkDaemonStatus — a throw here fails the wizard's step-9
+        // `failed.length === 0` gate on every first enable, naming as the remedy
+        // the very launch it just refused.
+        return `not running on ${port} — comes up with the bridge (claude-slack start)`;
+      }
+      // Any HTTP response is a real verdict: 401 means the token differs from the
+      // running daemon's and no amount of waiting clears it.
+      if (res.status === 401) throw new Error("token mismatch — controlToken differs from the running daemon");
+      if (!res.ok) throw new Error(`endpoint on ${port} returned ${res.status}`);
+      return `healthy on ${port}`;
+    });
+
+    if (config.remote.createChannels) {
+      checks.push({ name: "Remote-control scopes", ok: true, detail: "channels:write/manage configured — /slack-remote creates #rc-<context>" });
+    } else {
+      checks.push({
+        name: "Remote-control DM-seize",
+        ok: !!config.remote.operatorUserId,
+        detail: config.remote.operatorUserId
+          ? `seizes the operator's DM (user ${config.remote.operatorUserId})`
+          : "no remote.operatorUserId — DM-seize refuses instead of guessing a DM. Set it, or enable remote.createChannels",
+      });
+    }
+  } else {
+    checks.push({ name: "Remote control", ok: true, detail: "disabled (no remote.controlToken)" });
+  }
+
   return checks;
 }
 

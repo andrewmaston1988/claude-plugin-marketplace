@@ -72,6 +72,13 @@ export function createWebClient({ token, log }) {
 
     conversationsReplies: (params) => call("conversations.replies", params),
 
+    // Remote-control channel seize: create a channel, join an existing one, set
+    // its topic, and list conversations (for the DM-seize fallback).
+    conversationsCreate: (params) => call("conversations.create", params),
+    conversationsJoin: (params) => call("conversations.join", params),
+    conversationsSetTopic: (params) => call("conversations.setTopic", params),
+    conversationsList: (params) => call("conversations.list", params),
+
     appsConnectionsOpen: () =>
       fetch(`${SLACK_API}/apps.connections.open`, {
         method: "POST",

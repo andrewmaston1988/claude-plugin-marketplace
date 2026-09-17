@@ -1,6 +1,8 @@
 import { createInterface } from "node:readline/promises";
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
-import { execFile, execSync } from "node:child_process";
+import { execFile, execSync, spawn } from "node:child_process";
+import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
 import { renderManifest } from "./manifest.mjs";
@@ -52,7 +54,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 2: Slack app manifest
     hr();
-    say("Step 1/8 — Create your Slack app\n");
+    say("Step 1/9 — Create your Slack app\n");
     const displayName = await ask("App display name [Claude Code]: ");
     const manifest = renderManifest({ displayName: displayName.trim() || "Claude Code" });
     say("\nPaste this manifest at " + SLACK_APP_CREATE_URL + "\n");
@@ -61,7 +63,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 3: Token capture
     hr();
-    say("Step 2/8 — Token capture\n");
+    say("Step 2/9 — Token capture\n");
     config.tokens.bot = await captureToken(ask, say, "Bot Token (xoxb-…)", config.tokens.bot, async (t) => {
       const noop = { info() {}, warn() {}, child() { return noop; } };
       const web = createWebClient({ token: t, log: noop });
@@ -82,7 +84,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 4: Local config
     hr();
-    say("Step 3/8 — Local configuration\n");
+    say("Step 3/9 — Local configuration\n");
 
     config.claude = config.claude ?? {};
     config.claude.cwd = await captureDir(ask, say, "Claude working directory", config.claude.cwd ?? process.cwd());
@@ -106,7 +108,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 5: Autostart
     hr();
-    say("Step 4/8 — Autostart\n");
+    say("Step 4/9 — Autostart\n");
     const autostart = await ask(`Install autostart for ${process.platform}? [Y/n] `);
     if (!autostart.trim().toLowerCase().startsWith("n")) {
       try {
@@ -130,7 +132,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 5: PATH / shell alias
     hr();
-    say("Step 5/8 — Add claude-slack to PATH\n");
+    say("Step 5/9 — Add claude-slack to PATH\n");
     {
       const { fileURLToPath: _ftu } = await import("node:url");
       const entryAbs = _ftu(new URL("../../bin/claude-slack.mjs", import.meta.url));
@@ -183,7 +185,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 6: Extensions
     hr();
-    say("Step 6/8 — Extensions (optional)\n");
+    say("Step 6/9 — Extensions (optional)\n");
     say("Enter absolute paths to extension ESM modules, one per line.");
     say("Press Enter on an empty line when done (or just Enter to skip).");
     const extPaths = [];
@@ -204,9 +206,46 @@ export async function runWizard({ paths, log }) {
       writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
     }
 
-    // Step 7: Smoke test via doctor
+    // Step 7: Remote control (optional)
     hr();
-    say("Step 7/8 — Smoke test\n");
+    say("Step 7/9 — Remote control (optional)\n");
+    say("Remote control lets a live interactive session seize a Slack channel so you can");
+    say("talk to it from mobile (provider-agnostic — works on GLM/Kimi, not just /rc).");
+    say("The remote-mcp server ships plugin-declared in the manifest — see README → Remote control.\n");
+    const wantRemote = await ask("Enable remote control? [y/N] ");
+    if (wantRemote.trim().toLowerCase().startsWith("y")) {
+      config.remote = config.remote ?? {};
+      const tokRaw = await ask("Control shared-secret token (blank = generate one): ");
+      config.remote.controlToken = tokRaw.trim() || randomBytes(24).toString("hex");
+      const scopesChoice = await ask("Did you add channels:write + channels:manage scopes (lets /slack-remote create a #rc-<context> channel)? [y/N] ");
+      config.remote.createChannels = scopesChoice.trim().toLowerCase().startsWith("y");
+      if (!config.remote.createChannels) {
+        // DM-seize refuses without this — it must know WHICH DM is the operator's.
+        const opId = await ask("Your Slack user id (for the DM-seize default — find it in Slack → Profile → ⋮ → Copy member ID): ");
+        config.remote.operatorUserId = opId.trim() || null;
+        if (!config.remote.operatorUserId) say("  ⚠ no operator user id — DM-seize will refuse until you set remote.operatorUserId by hand");
+      }
+      writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
+      say(`✓ remote.controlToken written (${config.remote.createChannels ? "channel create enabled" : "DM-seize default — no new scopes needed"})`);
+      say(`  control: 127.0.0.1:${config.remote.controlPort ?? 7897}, broker: ${config.remote.brokerPort ?? 7898}`);
+      const { fileURLToPath: _ftu2 } = await import("node:url");
+      const entryAbs = _ftu2(new URL("../../bin/claude-slack.mjs", import.meta.url));
+      const regCmd = `claude mcp add --scope user slack-bridge-remote -- node "${entryAbs}" remote-mcp`;
+      say("\nOptional fallback for environments without plugin-declared MCP — register");
+      say("the server user-scoped by hand (not needed on a normal plugin install):");
+      say("  " + regCmd);
+      const runReg = await ask("Run it now? [Y/n] ");
+      if (!runReg.trim().toLowerCase().startsWith("n")) {
+        try { execSync(regCmd, { stdio: "inherit" }); say("✓ registered"); }
+        catch (e) { say(`✗ registration failed: ${e.message}`); say("  run it manually after the wizard."); }
+      }
+    } else {
+      say("Skipped — the bridge runs without remote control (every Slack message spawns claude -p).");
+    }
+
+    // Step 8: Smoke test via doctor
+    hr();
+    say("Step 8/9 — Smoke test\n");
     const noop = { info() {}, warn() {}, child() { return noop; } };
     const web = createWebClient({ token: config.tokens.bot, log: noop });
     const results = await runDoctor({ config, paths, web, log: noop });
@@ -214,26 +253,22 @@ export async function runWizard({ paths, log }) {
 
     const failed = results.filter(r => !r.ok);
 
-    // Step 7: Offer to start
+    // Step 9: Offer to start
     hr();
-    say("Step 8/8 — Launch\n");
+    say("Step 9/9 — Launch\n");
     if (failed.length === 0) {
       const start = await ask("Start the bridge daemon now? [Y/n] ");
       if (!start.trim().toLowerCase().startsWith("n")) {
         say("Starting bridge — press Ctrl-C to stop.\n");
         rl.close();
-        // Re-exec this process as the bridge
-        const { startBridge } = await import("../index.mjs");
-        const { createSocketModeClient } = await import("../socket-mode/index.mjs");
-        const { createSessionStore } = await import("../session-store/index.mjs");
-        const { createQueue } = await import("../core/queue.mjs");
-        const { createLogger } = await import("../log.mjs");
-        const log2 = createLogger({ logDir: paths.logDir, tag: "bridge" });
-        const web2 = createWebClient({ token: config.tokens.bot, log: log2 });
-        const socket = createSocketModeClient({ appToken: config.tokens.app, log: log2 });
-        const store = createSessionStore({ path: paths.sessionsFile ?? join(paths.dataDir, "sessions.json"), log: log2 });
-        const queue = createQueue({ log: log2 });
-        startBridge({ config, log: log2, web: web2, socket, store, queue });
+        // Re-exec the CLI rather than wiring a bridge inline. The inline copy had
+        // drifted from `start` — no remote subsystem, no PID file — so a bridge
+        // launched from here ran with no control endpoint, no claims store and no
+        // routing branch: /slack-remote seize failed and every message silently
+        // spawned claude -p. One path through the bin, one behaviour.
+        const binPath = fileURLToPath(new URL("../../bin/claude-slack.mjs", import.meta.url));
+        const child = spawn(process.execPath, [binPath, "start"], { stdio: "inherit" });
+        child.on("exit", (code) => process.exit(code ?? 0));
         return; // don't close rl twice
       }
     } else {
