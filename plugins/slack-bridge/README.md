@@ -222,11 +222,11 @@ Restart any interactive session you want to control this way so it picks up the 
 ### Slack scopes
 
 - **Default (`createChannels: false`):** `/slack-remote` seizes an **existing DM** with the bot. No new Slack scopes are required.
-- **Channel-create (`createChannels: true`):** add `channels:write` and `channels:manage` to the bot token, and `/slack-remote` creates a dedicated `#ln-<peer-id-short>` channel instead.
+- **Channel-create (`createChannels: true`):** add `channels:write` and `channels:manage` to the bot token, and `/slack-remote` creates a dedicated `#rc-<context-slug>` channel instead.
 
 ### Using it from a live session
 
-In an interactive Claude Code session, invoke the `/slack-remote` skill (or call the `slack_seize` MCP tool directly). It reports the channel to DM. Reply via `slack_post`; release with `slack_release` (or `/slack-remote release`). See `skills/slack-remote.md`.
+In an interactive Claude Code session, invoke the `/slack-remote` skill (or call the `slack_seize` MCP tool directly). It reports the channel to DM. Reply via `slack_post`; release with `slack_release` (or `/slack-remote release`). See `skills/slack-remote/SKILL.md`.
 
 ### Config keys
 

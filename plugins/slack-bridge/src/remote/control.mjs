@@ -1,16 +1,5 @@
-// Control endpoint: the localhost HTTP surface the live session's MCP server
-// calls to seize/release a Slack channel and post outbound messages. Token-guarded
-// (shared secret in bridge config, passed to the MCP server). Default localhost-only.
-//
-// /claim    {peer_id, channel?, name?} — create #rc-<name-slug> (if scopes allow) or
-//                                       join the given channel; records the claim.
-//                                       `name` defaults the channel to the session's
-//                                       context (cwd basename / operator label).
-//                                       Returns {channel, ...}.
-// /release  {peer_id}            — frees the peer's claim.
-// /post     {peer_id, message}   — posts to the peer's claimed channel.
-// /heartbeat{peer_id}           — refreshes last_seen.
-// /health                          — liveness.
+// Control endpoint — the token-guarded localhost HTTP surface the live session's
+// remote-mcp server calls. Routes: /claim, /release, /health.
 import http from "node:http";
 
 const MAX_BODY_BYTES = 1_000_000;
@@ -19,10 +8,8 @@ function shortName(peerId) {
   return String(peerId).slice(0, 4).toLowerCase();
 }
 
-// Slack channel names: lowercase, [a-z0-9_-], max 80 chars. Slugify a context
-// label (the session's cwd basename or an operator-supplied label) into a channel
-// suffix. Returns null for an empty/all-invalid input so the caller can fall back
-// to the peer-id fragment.
+// Slack channel names: lowercase [a-z0-9_-], max 80 chars. Returns null for an
+// empty/all-invalid input so the caller falls back to the peer-id fragment.
 function slugify(s) {
   if (!s) return null;
   return String(s).toLowerCase()
@@ -38,13 +25,9 @@ export function createControlServer({
   canCreateChannels = false,
   log = () => {},
 } = {}) {
-  // `name` is an optional descriptive label for the created channel (the session's
-  // cwd basename or an operator-supplied label). When present + slugifiable, the
-  // channel is `#rc-<slug>` (e.g. `#rc-long-night`) — the /rc-style "a channel with a
-  // name describing the chat context just appears" experience. The `rc-` prefix
-  // namespaces remote-control channels so they group together and don't collide with
-  // real project channels, and generalizes across every project. Falls back to the
-  // peer-id fragment when no usable name is provided.
+  // `name` labels the created channel: #rc-<slug> (e.g. #rc-long-night). The rc-
+  // prefix namespaces remote-control channels apart from real project channels.
+  // Falls back to the peer-id fragment when no usable name is provided.
   async function claimChannel(peerId, channel, name) {
     if (channel) {
       const joined = await web.conversationsJoin({ channel });
@@ -68,6 +51,7 @@ export function createControlServer({
         }
       }
       const channelId = created?.channel?.id;
+      if (!channelId) throw new Error("channel creation failed after retries — provide a channel or try again");
       const channelName = created?.channel?.name ?? chanName;
       let topic = null;
       if (channelId) {
@@ -99,18 +83,6 @@ export function createControlServer({
     "/release": async (body) => {
       if (!body.peer_id) return { ok: false, error: "peer_id required" };
       claims.release(body.peer_id);
-      return { ok: true };
-    },
-    "/post": async (body) => {
-      if (!body.peer_id) return { ok: false, error: "peer_id required" };
-      const claim = claims.getByPeer(body.peer_id);
-      if (!claim) return { ok: false, error: `no claim for peer ${body.peer_id}` };
-      await web.chatPostMessage({ channel: claim.channel, text: String(body.message ?? "") });
-      return { ok: true };
-    },
-    "/heartbeat": async (body) => {
-      if (!body.peer_id) return { ok: false, error: "peer_id required" };
-      claims.touch?.(body.peer_id);
       return { ok: true };
     },
   };

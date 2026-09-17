@@ -1,10 +1,5 @@
-// readSessionName / readSessionAiTitle / encodeCwd: the name-derivation path for
-// slack_seize. The MCP server reads the operator-named session name (the chat's custom
-// title — a `custom-title` record) as the primary channel-name source, the auto
-// `ai-title` (CC's generated summary, maybe nonsensical) as the last-resort fallback, and
-// never the cwd basename (that means something broke). The session-derived `name` arg
-// sits between them. Together: custom title → session-derived name → ai-title → daemon
-// peer-id fragment.
+// The slack_seize name-derivation path: custom-title → session-derived name →
+// ai-title → daemon peer-id fragment; the cwd basename is never used.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

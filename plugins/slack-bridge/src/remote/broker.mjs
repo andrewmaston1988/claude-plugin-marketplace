@@ -1,11 +1,7 @@
-// Forked from plugins/claude-peers/src/broker/index.mjs, trimmed to the handlers
-// remote-control needs: /register, /heartbeat, /list-peers, /send-message,
-// /poll-messages, /take-messages, /unregister, /health, /shutdown. Drops /set-summary (unused —
-// the live session's identity is its broker peer-id, not a free-text summary).
-// Keeps ad-hoc-sender auto-registration (the daemon sends as the fixed id
-// "slack-bridge" without ever calling /register), self-heal (the MCP server
-// respawns this broker if it's down — see broker-client.mjs), and corrupt-file
-// quarantine. Distinct default port: 7898, not claude-peers' 7899.
+// Forked from plugins/claude-peers/src/broker/index.mjs (port 7898, distinct from
+// claude-peers' 7899). Keeps ad-hoc-sender auto-registration, self-heal, and
+// corrupt-file quarantine; drops /set-summary. Delivery matches the parent:
+// pushed messages are retained 24h; /take-messages is what removes.
 import http from "node:http";
 import fs from "node:fs";
 import { emptyState, loadState, saveState } from "./broker-store.mjs";

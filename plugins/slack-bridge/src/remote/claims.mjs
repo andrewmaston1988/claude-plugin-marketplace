@@ -61,14 +61,6 @@ export function createClaimsStore({ path, log }) {
       return load()[channel] ?? null;
     },
 
-    getByPeer(peerId) {
-      const data = load();
-      for (const ch of Object.keys(data)) {
-        if (data[ch].peer_id === peerId) return data[ch];
-      }
-      return null;
-    },
-
     all() {
       return { ...load() };
     },
@@ -88,14 +80,6 @@ export function createClaimsStore({ path, log }) {
       }
       persist(data);
       return reaped;
-    },
-
-    touch(peerId) {
-      const data = load();
-      for (const ch of Object.keys(data)) {
-        if (data[ch].peer_id === peerId) data[ch].last_seen = new Date().toISOString();
-      }
-      persist(data);
     },
 
     close() { cache = null; },

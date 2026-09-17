@@ -119,7 +119,7 @@ export async function runDoctor({ config, paths, web, log }) {
 
     checks.push({
       name: "Remote-control scopes",
-      ok: !!config.remote.createChannels,
+      ok: true,
       detail: config.remote.createChannels
         ? "channels:write/manage configured — /slack-remote creates #rc-<context>"
         : "DM-seize default (no channels:write/manage) — /slack-remote seizes an existing DM",

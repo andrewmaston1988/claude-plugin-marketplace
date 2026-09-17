@@ -351,6 +351,10 @@ export async function routeToLiveSession({ web, channel, threadTs, text, claim, 
     return;
   }
 
+  // Drop any stale reply from a previous routed message before sending this one,
+  // so a late answer is never served as the reply to the current message.
+  try { await broker.pollMessages("slack-bridge"); } catch { /* best-effort */ }
+
   try {
     const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
     if (r && r.ok === false) throw new Error(r.error ?? "send failed");

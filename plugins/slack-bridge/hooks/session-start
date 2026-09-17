@@ -9,7 +9,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-SKILL_FILE="${PLUGIN_ROOT}/skills/slack-bridge-context.md"
+SKILL_FILE="${PLUGIN_ROOT}/skills/slack-bridge-context/SKILL.md"
 
 skill_content="$(cat "${SKILL_FILE}" 2>/dev/null || echo "Error reading slack-bridge-context skill")"
 

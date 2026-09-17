@@ -1,16 +1,7 @@
-// Forked from plugins/claude-peers/src/mcp/server.mjs. The live interactive session
-// loads this stdio MCP server (declared in the plugin manifest, mirroring
-// claude-peers; the setup wizard can additionally register it user-scoped as a
-// fallback). It registers with the internal broker (gets a peer-id), polls for
-// inbound Slack messages pushed by the daemon, and surfaces slack_seize /
-// slack_release / slack_post tools that call the daemon's control endpoint over
-// localhost HTTP (shared-secret bearer token).
-//
-// Delivery is push-or-poll, decided at handshake: a session launched with the
-// --dangerously-load-development-channels allowlist naming this plugin renders
-// pushed <channel> blocks; every other session — including all cloud-model
-// sessions — is instructed to poll check_messages instead, so inbound Slack
-// messages are never silently dropped.
+// Forked from plugins/claude-peers/src/mcp/server.mjs: registers with the internal
+// broker, surfaces slack_seize/release/post (via the daemon's token-guarded control
+// endpoint), and delivers inbound push-or-poll — a session without the --channels
+// allowlist is told to poll, so Slack messages are never silently dropped.
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
@@ -97,15 +88,6 @@ const text = (t, isError = false) => ({ content: [{ type: "text", text: t }], ..
 const errText = (prefix, e) => text(`${prefix}: ${e instanceof Error ? e.message : String(e)}`, true);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Default the created channel's name to the session's project dir (cwd basename) so a
-// channel describing the chat context "just appears" — the /rc experience — without
-// the operator or session having to pass a label. The daemon slugifies this (or an
-// explicit `name` arg) into `#rc-<slug>`.
-export function defaultChannelName(cwd) {
-  const base = String(cwd).split(/[\\/]/).pop() || "";
-  return base || null;
-}
-
 // Encode a cwd into the segment Claude Code uses for its per-project session dir
 // (e.g. `C:\code\long-night` → `C--code-long-night`): backslash, forward slash, and
 // colon all rewritten to `-`. Matches the `~/.claude/projects/<encoded-cwd>/` layout.
@@ -163,10 +145,9 @@ function readLatestSessionField(cwd, recordType, field, { projectsDir } = {}) {
   }
 }
 
-// The operator-named session name — the chat name the operator set in Claude Code, stored
-// as a `custom-title` record. This is the PRIMARY channel-name source: when the operator
-// names the chat, the channel "just appears" named after it. Returns null if the operator
-// hasn't named the chat (the common case).
+// The operator-named chat name, read from a `custom-title` session record (best-effort:
+// that record shape is not observed on every harness, and a missing one falls through
+// cleanly to the session-derived name). Returns null when the chat was never named.
 export function readSessionName(cwd, opts) {
   return readLatestSessionField(cwd, "custom-title", "customTitle", opts);
 }
@@ -287,18 +268,9 @@ export function createRemoteMcpServer({
     async slack_seize(args) {
       if (!myId) return text("Not registered with broker yet", true);
       try {
-        // Name precedence: the operator-named session name (the chat's custom title set
-        // in CC — a `custom-title` record, read from the session JSONL; the channel "just
-        // appears" named after the conversation when the operator named it) → an explicit
-        // `name` arg the session derived from task context (branch/plan/feature — used
-        // when the operator hasn't named the chat, which is the common case) → the auto
-        // `ai-title` (CC's maybe-nonsensical generated summary — last-resort fallback before
-        // the daemon's peer-id fragment, because it's better than nothing). There is NO
-        // cwd-basename fallback: a channel named after the project dir means something
-        // broke, so cwd is never used; if even the ai-title is unreadable, we pass null and
-        // the daemon falls back to its peer-id fragment — a `#rc-<peer-id>` name is the
-        // visible "something broke" signal. "If you can read it, pass it; if it's not set,
-        // derive; if you can't get it, derive."
+        // Name precedence: operator custom-title (best-effort read from the session
+        // JSONL) → the session-derived `name` arg → auto ai-title → daemon peer-id
+        // fragment. Never the cwd basename — a project-dir channel name means broke.
         const name = readSessionName(_cwd) || args.name || readSessionAiTitle(_cwd) || null;
         const r = await controlFetch("/claim", { peer_id: myId, channel: args.channel ?? null, name });
         const label = r.channel_name ? `#${r.channel_name}` : r.channel;

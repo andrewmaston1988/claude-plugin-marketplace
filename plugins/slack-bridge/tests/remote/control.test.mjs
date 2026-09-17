@@ -110,27 +110,6 @@ test("/release clears the claim", async (t) => {
   assert.equal(claims.get("C1"), null);
 });
 
-test("/post posts the message to the peer's claimed channel", async (t) => {
-  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "post-")), "claims.json") });
-  await claims.claim("peerB", "C-existing");
-  const web = makeWeb();
-  const { call } = await startControl(t, { web, claims });
-  const r = await call("/post", { peer_id: "peerB", message: "hello from the live session" });
-  assert.equal(r.status, 200);
-  assert.equal(r.body.ok, true);
-  const postCall = web.calls.find(([c]) => c === "chatPostMessage");
-  assert.ok(postCall, "must post to Slack");
-  assert.equal(postCall[1].channel, "C-existing");
-  assert.equal(postCall[1].text, "hello from the live session");
-});
-
-test("/post for a peer with no claim is rejected", async (t) => {
-  const { call } = await startControl(t);
-  const r = await call("/post", { peer_id: "nobody", message: "x" });
-  assert.equal(r.body.ok, false);
-  assert.match(r.body.error, /no claim|not claimed/i);
-});
-
 test("GET /health returns ok", async (t) => {
   const { get } = await startControl(t);
   const r = await get("/health");

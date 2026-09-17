@@ -1,9 +1,6 @@
-// The 2026-07-21 operator reversal ("claude-peers works. do what that does")
-// directs the remote-mcp server to be declared in the plugin manifest, exactly
-// as claude-peers declares its own. The reversal-era edit never reached the
-// branch — this pin exists so it cannot silently vanish again: without the
-// declaration the server only loads via the wizard's user-scoped step, and
-// sessions that never ran the wizard get no remote-control tools at all.
+// Pins the 2026-07-21 operator reversal: the remote-mcp server must be declared
+// in the plugin manifest, mirroring claude-peers. The reversal-era edit never
+// reached the branch once already — without it, sessions get no remote tools.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

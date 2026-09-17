@@ -210,7 +210,7 @@ export async function runWizard({ paths, log }) {
     say("Step 7/9 — Remote control (optional)\n");
     say("Remote control lets a live interactive session seize a Slack channel so you can");
     say("talk to it from mobile (provider-agnostic — works on GLM/Kimi, not just /rc).");
-    say("Needs a one-time user-scoped MCP registration. See README → Remote control.\n");
+    say("The remote-mcp server ships plugin-declared in the manifest — see README → Remote control.\n");
     const wantRemote = await ask("Enable remote control? [y/N] ");
     if (wantRemote.trim().toLowerCase().startsWith("y")) {
       config.remote = config.remote ?? {};
@@ -224,8 +224,8 @@ export async function runWizard({ paths, log }) {
       const { fileURLToPath: _ftu2 } = await import("node:url");
       const entryAbs = _ftu2(new URL("../../bin/claude-slack.mjs", import.meta.url));
       const regCmd = `claude mcp add --scope user slack-bridge-remote -- node "${entryAbs}" remote-mcp`;
-      say("\nOne-time user-scoped MCP registration (plugin-declared MCP does NOT render");
-      say("channel notifications as of 2026-07-16, so this manual step is required):");
+      say("\nOptional fallback for environments without plugin-declared MCP — register");
+      say("the server user-scoped by hand (not needed on a normal plugin install):");
       say("  " + regCmd);
       const runReg = await ask("Run it now? [Y/n] ");
       if (!runReg.trim().toLowerCase().startsWith("n")) {

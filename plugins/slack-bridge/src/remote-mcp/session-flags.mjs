@@ -1,10 +1,7 @@
-// Forked from plugins/claude-peers/src/session-flags.mjs (2026-09-17), with the
-// plugin spec switched to slack-bridge. Detect whether this session can render
-// our channel notifications.
-//
-// Channel blocks only render when the session was launched with a channels flag
-// naming this plugin. Sessions routed through third-party providers never get
-// one, so they must be told to poll instead of waiting for a push.
+// Forked from plugins/claude-peers/src/session-flags.mjs, plugin spec switched to
+// slack-bridge. Channel blocks render only when the session was launched with a
+// --channels allowlist naming this plugin; provider-routed sessions never get one
+// and must be told to poll instead of waiting for a push.
 
 import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync } from "node:fs";

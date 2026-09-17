@@ -74,13 +74,19 @@ test("claimed channel + live peer → routed to broker, runClaude NOT called, re
   const rc = makeRunClaude();
   const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: { replyTimeoutMs: 3000, replyPollIntervalMs: 20 } };
 
+  // A stale reply to an earlier routed message, queued BEFORE this send: the
+  // pre-send drain must discard it, or it would be served as this message's reply.
+  messages.push({ from_id: "peerA", text: "stale reply to an earlier message" });
+
   await handleMessage({
     web, store: makeStore(), queue: createQueue({ log: makeLog() }), config, log: makeLog(),
     payload: { type: "message", channel: "C1", text: "hello from slack", client_msg_id: "m-route-1" },
     botUserId: "U123", isFirstInSession: true, remote: { claims, broker }, _runClaude: rc.fn,
   });
 
-  // The reply arrives via the broker: inject it, the poll loop picks it up.
+  // The reply arrives causally — only after the routed send. The pre-send drain
+  // discards anything queued before the send, so seeding earlier would be drained.
+  await waitFor(() => broker.sendCalls.length === 1, 3000);
   messages.push({ from_id: "peerA", text: "live reply!" });
   await waitFor(() => web.calls.some(([t, p]) => t === "update" && typeof p.text === "string" && p.text.includes("live reply!")), 3000);
 
@@ -88,6 +94,10 @@ test("claimed channel + live peer → routed to broker, runClaude NOT called, re
   assert.ok(
     broker.sendCalls.some((s) => s.from_id === "slack-bridge" && s.to_id === "peerA" && s.text === "hello from slack"),
     "must send the Slack message to the broker addressed to the claiming peer",
+  );
+  assert.ok(
+    !web.calls.some(([t, p]) => t === "update" && typeof p.text === "string" && p.text.includes("stale")),
+    "a stale pre-send reply must be drained, never served as this message's reply",
   );
 });
 
