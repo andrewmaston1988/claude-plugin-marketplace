@@ -1,7 +1,8 @@
 import { createInterface } from "node:readline/promises";
 import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync } from "node:fs";
-import { execFile, execSync } from "node:child_process";
+import { execFile, execSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { join, resolve } from "node:path";
 import { renderManifest } from "./manifest.mjs";
@@ -260,18 +261,14 @@ export async function runWizard({ paths, log }) {
       if (!start.trim().toLowerCase().startsWith("n")) {
         say("Starting bridge — press Ctrl-C to stop.\n");
         rl.close();
-        // Re-exec this process as the bridge
-        const { startBridge } = await import("../index.mjs");
-        const { createSocketModeClient } = await import("../socket-mode/index.mjs");
-        const { createSessionStore } = await import("../session-store/index.mjs");
-        const { createQueue } = await import("../core/queue.mjs");
-        const { createLogger } = await import("../log.mjs");
-        const log2 = createLogger({ logDir: paths.logDir, tag: "bridge" });
-        const web2 = createWebClient({ token: config.tokens.bot, log: log2 });
-        const socket = createSocketModeClient({ appToken: config.tokens.app, log: log2 });
-        const store = createSessionStore({ path: paths.sessionsFile ?? join(paths.dataDir, "sessions.json"), log: log2 });
-        const queue = createQueue({ log: log2 });
-        startBridge({ config, log: log2, web: web2, socket, store, queue });
+        // Re-exec the CLI rather than wiring a bridge inline. The inline copy had
+        // drifted from `start` — no remote subsystem, no PID file — so a bridge
+        // launched from here ran with no control endpoint, no claims store and no
+        // routing branch: /slack-remote seize failed and every message silently
+        // spawned claude -p. One path through the bin, one behaviour.
+        const binPath = fileURLToPath(new URL("../../bin/claude-slack.mjs", import.meta.url));
+        const child = spawn(process.execPath, [binPath, "start"], { stdio: "inherit" });
+        child.on("exit", (code) => process.exit(code ?? 0));
         return; // don't close rl twice
       }
     } else {

@@ -137,17 +137,26 @@ export async function runDoctor({ config, paths, web, log }) {
 
     await check("Remote-control endpoint", async () => {
       const port = config.remote.controlPort ?? 7897;
+      let res;
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/health`, {
+        res = await fetch(`http://127.0.0.1:${port}/health`, {
           headers: { Authorization: `Bearer ${config.remote.controlToken}` },
           signal: AbortSignal.timeout(2000),
         });
-        if (res.status === 401) throw new Error("token mismatch — controlToken differs from the running daemon");
-        if (!res.ok) throw new Error(`endpoint on ${port} returned ${res.status}`);
-        return `healthy on ${port}`;
-      } catch (e) {
-        throw new Error(`not reachable on ${port} (is the bridge running?) — ${e.message}`);
+      } catch {
+        // Nothing listening yet is the expected pre-start state: the control
+        // server is created in the bin's `start` branch, and setup runs doctor
+        // before the daemon exists. Informational, like the sibling broker check
+        // and checkDaemonStatus — a throw here fails the wizard's step-9
+        // `failed.length === 0` gate on every first enable, naming as the remedy
+        // the very launch it just refused.
+        return `not running on ${port} — comes up with the bridge (claude-slack start)`;
       }
+      // Any HTTP response is a real verdict: 401 means the token differs from the
+      // running daemon's and no amount of waiting clears it.
+      if (res.status === 401) throw new Error("token mismatch — controlToken differs from the running daemon");
+      if (!res.ok) throw new Error(`endpoint on ${port} returned ${res.status}`);
+      return `healthy on ${port}`;
     });
 
     if (config.remote.createChannels) {
