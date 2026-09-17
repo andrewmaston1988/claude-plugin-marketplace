@@ -156,3 +156,32 @@ test("reply timeout → 'live session didn't reply' posted; claim retained", asy
   assert.equal(rc.calls.length, 0, "must not spawn on a claimed+live channel even on timeout");
   assert.ok(claims.get("C3"), "claim must be retained after a reply timeout (peer may be slow, not dead)");
 });
+
+test("multi-chunk reply → every message posted, not just the first", async () => {
+  const claims = createClaimsStore({ path: tmpClaims() });
+  await claims.claim("peerD", "C4");
+  const messages = [];
+  const broker = makeFakeBroker({ alive: new Set(["peerD"]), messages });
+  const web = makeWeb();
+  const rc = makeRunClaude();
+  const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: { replyTimeoutMs: 3000, replyPollIntervalMs: 20 } };
+
+  await handleMessage({
+    web, store: makeStore(), queue: createQueue({ log: makeLog() }), config, log: makeLog(),
+    payload: { type: "message", channel: "C4", text: "hello", client_msg_id: "m-route-5" },
+    botUserId: "U123", isFirstInSession: true, remote: { claims, broker }, _runClaude: rc.fn,
+  });
+  await waitFor(() => broker.sendCalls.length === 1, 3000);
+  // A session replying in several slack_post chunks: all arrive inside the
+  // reply window. Taking only the first would leave the rest marked-delivered
+  // by the next routed message's pre-send drain — silently lost.
+  messages.push({ from_id: "peerD", text: "chunk one" });
+  messages.push({ from_id: "peerD", text: "chunk two" });
+
+  await waitFor(() => web.calls.some(([t, p]) => t === "post" && typeof p.text === "string" && p.text.includes("chunk two")), 3000);
+  assert.ok(
+    web.calls.some(([t, p]) => t === "update" && typeof p.text === "string" && p.text.includes("chunk one")),
+    "the first chunk must replace the routed placeholder",
+  );
+  assert.equal(rc.calls.length, 0, "runClaude must NOT be called for a claimed+live channel");
+});

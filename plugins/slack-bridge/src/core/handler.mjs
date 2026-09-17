@@ -368,17 +368,28 @@ export async function routeToLiveSession({ web, channel, threadTs, text, claim, 
     return;
   }
 
-  const reply = await pollReply({ broker, peerId: claim.peer_id, timeoutMs, pollIntervalMs, log });
-  if (reply) {
-    try {
-      await postResponse({
-        web, channel, placeholderTs, threadTs,
-        responseText: reply.text, existingSession: claim.peer_id, isFirstInSession: false,
-        cmdEcho, extensions: null, sessionId: null, config,
-      });
-    } catch (e) {
-      log.error("failed to post live-session reply", { channel, error: e.message });
-      await postError({ web, channel, placeholderTs, threadTs, message: `live session reply post failed: ${e.message}` });
+  const replies = await pollReply({ broker, peerId: claim.peer_id, timeoutMs, pollIntervalMs, log });
+  if (replies.length) {
+    for (let i = 0; i < replies.length; i++) {
+      try {
+        if (i === 0) {
+          // The first reply replaces the placeholder; the rest post after it —
+          // a session that replies in several chunks must not have chunks 2..N
+          // silently discarded by the next routed message's pre-send drain.
+          await postResponse({
+            web, channel, placeholderTs, threadTs,
+            responseText: replies[i].text, existingSession: claim.peer_id, isFirstInSession: false,
+            cmdEcho, extensions: null, sessionId: null, config,
+          });
+        } else {
+          const postParams = { channel, text: replies[i].text };
+          if (threadTs) postParams.thread_ts = threadTs;
+          await web.chatPostMessage(postParams);
+        }
+      } catch (e) {
+        log.error("failed to post live-session reply", { channel, error: e.message });
+        await postError({ web, channel, placeholderTs: null, threadTs, message: `live session reply post failed: ${e.message}` });
+      }
     }
   } else {
     await postError({ web, channel, placeholderTs, threadTs, message: "live session didn't reply in time" });
@@ -387,18 +398,22 @@ export async function routeToLiveSession({ web, channel, threadTs, text, claim, 
 
 // Poll the broker for THIS peer's reply only (from_id-scoped, and the claims
 // store allows one channel per peer, so concurrent claims can't take each
-// other's replies). Unsolicited outbound from a session with no in-flight
-// routed message is a declared v1 limitation.
+// other's replies). Returns every message that arrives: after the first
+// non-empty poll it keeps draining until a poll comes back empty, so a
+// multi-chunk reply (several slack_post calls in quick succession) is delivered
+// whole — anything arriving after the settle window is unsolicited outbound,
+// a declared v1 limitation.
 async function pollReply({ broker, peerId, timeoutMs, pollIntervalMs, log }) {
   const deadline = Date.now() + timeoutMs;
+  const out = [];
   while (Date.now() < deadline) {
     let msgs = [];
     try { msgs = await broker.pollMessages("slack-bridge", peerId) ?? []; } catch (e) { log?.warn?.("poll error", { error: e.message }); }
-    const reply = msgs[0] ?? null;
-    if (reply) return reply;
+    out.push(...msgs);
+    if (out.length && msgs.length === 0) return out;
     await new Promise((r) => setTimeout(r, pollIntervalMs));
   }
-  return null;
+  return out;
 }
 
 export function startBridge({ config, log, web, socket, store, queue, extensions, remote }) {

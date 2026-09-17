@@ -53,7 +53,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 2: Slack app manifest
     hr();
-    say("Step 1/8 — Create your Slack app\n");
+    say("Step 1/9 — Create your Slack app\n");
     const displayName = await ask("App display name [Claude Code]: ");
     const manifest = renderManifest({ displayName: displayName.trim() || "Claude Code" });
     say("\nPaste this manifest at " + SLACK_APP_CREATE_URL + "\n");
@@ -62,7 +62,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 3: Token capture
     hr();
-    say("Step 2/8 — Token capture\n");
+    say("Step 2/9 — Token capture\n");
     config.tokens.bot = await captureToken(ask, say, "Bot Token (xoxb-…)", config.tokens.bot, async (t) => {
       const noop = { info() {}, warn() {}, child() { return noop; } };
       const web = createWebClient({ token: t, log: noop });
@@ -83,7 +83,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 4: Local config
     hr();
-    say("Step 3/8 — Local configuration\n");
+    say("Step 3/9 — Local configuration\n");
 
     config.claude = config.claude ?? {};
     config.claude.cwd = await captureDir(ask, say, "Claude working directory", config.claude.cwd ?? process.cwd());
@@ -107,7 +107,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 5: Autostart
     hr();
-    say("Step 4/8 — Autostart\n");
+    say("Step 4/9 — Autostart\n");
     const autostart = await ask(`Install autostart for ${process.platform}? [Y/n] `);
     if (!autostart.trim().toLowerCase().startsWith("n")) {
       try {
@@ -131,7 +131,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 5: PATH / shell alias
     hr();
-    say("Step 5/8 — Add claude-slack to PATH\n");
+    say("Step 5/9 — Add claude-slack to PATH\n");
     {
       const { fileURLToPath: _ftu } = await import("node:url");
       const entryAbs = _ftu(new URL("../../bin/claude-slack.mjs", import.meta.url));
@@ -184,7 +184,7 @@ export async function runWizard({ paths, log }) {
 
     // Step 6: Extensions
     hr();
-    say("Step 6/8 — Extensions (optional)\n");
+    say("Step 6/9 — Extensions (optional)\n");
     say("Enter absolute paths to extension ESM modules, one per line.");
     say("Press Enter on an empty line when done (or just Enter to skip).");
     const extPaths = [];

@@ -263,7 +263,7 @@ if (cmd === "remote-mcp") {
   // createRemoteMcpServer (and its createRpcEndpoint) call log(msg, extra) as a
   // plain function, not a logger object.
   const mcpLog = (msg, extra) => log.info(msg, extra);
-  const server = createRemoteMcpServer({ config, log: mcpLog });
+  const server = createRemoteMcpServer({ config, configPath: configArg, log: mcpLog });
   await server.start();
   return; // stays alive on stdin + timers
 }
@@ -309,7 +309,7 @@ if (cmd === "broker") {
   if (sub === "start") {
     if (await _brokerHealth(brokerPort)) { process.stdout.write(`broker already running on port ${brokerPort}\n`); setTimeout(() => process.exit(0), 150); return; }
     const entry = (await import("node:url")).fileURLToPath(import.meta.url);
-    const child = (await import("node:child_process")).spawn(process.execPath, [entry, "broker", "run", "--port", String(brokerPort)], { detached: true, stdio: "ignore", windowsHide: true });
+    const child = (await import("node:child_process")).spawn(process.execPath, [entry, "broker", "run", "--port", String(brokerPort), "--config", configArg], { detached: true, stdio: "ignore", windowsHide: true });
     child.unref();
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 200));
@@ -421,35 +421,46 @@ const queue = createQueue({ log });
 
 // Remote-control subsystem: internal broker + claims store + control endpoint.
 // Only wired when a control token is configured (the doctor flags an unconfigured
-// endpoint). Without it the routing branch is skipped — the bridge behaves exactly
-// as before (every message spawns `claude -p`).
+// endpoint). Without it — or when its wiring fails — the routing branch is
+// skipped and the bridge behaves exactly as before (every message spawns
+// `claude -p`).
 let remote = null;
 if (config.remote?.controlToken) {
-  const { createClaimsStore } = await import("../src/remote/claims.mjs");
-  const { createBrokerClient } = await import("../src/remote/broker-client.mjs");
-  const { createControlServer } = await import("../src/remote/control.mjs");
-  const claims = createClaimsStore({ path: _join(paths.stateDir, "remote-claims.json"), log });
-  const broker = createBrokerClient({ port: config.remote.brokerPort, token: config.remote.controlToken, log });
-  const control = createControlServer({
-    web, claims, token: config.remote.controlToken,
-    canCreateChannels: !!config.remote.createChannels,
-    operatorUserId: config.remote.operatorUserId ?? null,
-    log,
-  });
-  await broker.ensureBroker();
-  await control.listen(config.remote.controlPort);
-  log.info("remote-control ready", { brokerPort: config.remote.brokerPort, controlPort: config.remote.controlPort });
-  // Periodically drop claims whose live session has died, so a dead session's
-  // channel falls back to the spawn path within ~30s rather than waiting on the
-  // per-message liveness check.
-  const reapTimer = setInterval(() => {
-    broker.listPeers()
-      .then((peers) => { const alive = new Set(peers.map((p) => p.id)); return claims.reapDead({ isAlive: async (id) => alive.has(id) }); })
-      .then((reaped) => { if (reaped.length) log.info("reaped stale remote claims", { reaped }); })
-      .catch(() => {});
-  }, 30_000);
-  reapTimer.unref?.();
-  remote = { claims, broker, control };
+  try {
+    const { createClaimsStore } = await import("../src/remote/claims.mjs");
+    const { createBrokerClient } = await import("../src/remote/broker-client.mjs");
+    const { createControlServer } = await import("../src/remote/control.mjs");
+    // claims takes the logger object (log?.warn); broker-client and control call
+    // log(msg, extra) as a plain function — same adapter as the remote-mcp branch.
+    const fnLog = (msg, extra) => log.info(msg, extra);
+    const claims = createClaimsStore({ path: _join(paths.stateDir, "remote-claims.json"), log });
+    const broker = createBrokerClient({ port: config.remote.brokerPort, token: config.remote.controlToken, configPath, log: fnLog });
+    const control = createControlServer({
+      web, claims, token: config.remote.controlToken,
+      canCreateChannels: !!config.remote.createChannels,
+      operatorUserId: config.remote.operatorUserId ?? null,
+      log: fnLog,
+    });
+    await broker.ensureBroker();
+    await control.listen(config.remote.controlPort);
+    log.info("remote-control ready", { brokerPort: config.remote.brokerPort, controlPort: config.remote.controlPort });
+    // Periodically drop claims whose live session has died, so a dead session's
+    // channel falls back to the spawn path within ~30s rather than waiting on the
+    // per-message liveness check.
+    const reapTimer = setInterval(() => {
+      broker.listPeers()
+        .then((peers) => { const alive = new Set(peers.map((p) => p.id)); return claims.reapDead({ isAlive: async (id) => alive.has(id) }); })
+        .then((reaped) => { if (reaped.length) log.info("reaped stale remote claims", { reaped }); })
+        .catch(() => {});
+    }, 30_000);
+    reapTimer.unref?.();
+    remote = { claims, broker, control };
+  } catch (e) {
+    // Remote control is auxiliary: a broker that won't start or a taken control
+    // port degrades to the spawn path rather than taking the core bridge down.
+    log.warn("remote-control failed to start — falling back to claude -p spawns", { error: e.message });
+    remote = null;
+  }
 } else {
   log.warn("remote-control disabled — set remote.controlToken in config to enable");
 }

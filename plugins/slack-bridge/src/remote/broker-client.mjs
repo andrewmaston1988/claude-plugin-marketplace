@@ -14,6 +14,7 @@ const isConnectionError = (e) =>
 export function createBrokerClient({
   port,
   token = null,
+  configPath = null,
   binPath = fileURLToPath(new URL("../../bin/claude-slack.mjs", import.meta.url)),
   log = () => {},
   _fetch = fetch,
@@ -40,7 +41,13 @@ export function createBrokerClient({
 
   function spawnBroker() {
     // detached + ignored stdio: the broker must outlive the bridge process tree.
-    const child = _spawn(_execPath, [binPath, "broker", "run", "--port", String(port)], {
+    // Same config file this client's token came from: a broker on a different
+    // config either 401s every authed call or, with no token there, guards
+    // nothing — and the token mismatch never self-heals (isConnectionError
+    // doesn't match a 401, so no respawn is attempted).
+    const args = [binPath, "broker", "run", "--port", String(port)];
+    if (configPath) args.push("--config", configPath);
+    const child = _spawn(_execPath, args, {
       detached: true,
       stdio: "ignore",
       windowsHide: true,

@@ -170,6 +170,7 @@ export function readSessionAiTitle(cwd, opts) {
 
 export function createRemoteMcpServer({
   config,
+  configPath = null,
   log = () => {},
   input = process.stdin,
   output = process.stdout,
@@ -185,7 +186,7 @@ export function createRemoteMcpServer({
   const controlPort = config.remote?.controlPort ?? 7897;
   const controlToken = config.remote?.controlToken ?? null;
   const controlUrl = `http://127.0.0.1:${controlPort}`;
-  const broker = createBrokerClient({ port: brokerPort, token: controlToken, log, _fetch, _spawn });
+  const broker = createBrokerClient({ port: brokerPort, token: controlToken, configPath, log, _fetch, _spawn });
 
   let myId = null;
   let myGitRoot = null;
