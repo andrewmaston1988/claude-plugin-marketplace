@@ -230,14 +230,7 @@ In an interactive Claude Code session, invoke the `/slack-remote` skill (or call
 
 ### Config keys
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `remote.controlToken` | `null` | Shared-secret bearer token for the control endpoint. `null` = remote control disabled. |
-| `remote.brokerPort` | `7898` | Internal localhost broker port (distinct from claude-peers' 7899). |
-| `remote.controlPort` | `7897` | Internal localhost control endpoint port. |
-| `remote.createChannels` | `false` | `true` → `/slack-remote` creates `#rc-<context-slug>` (needs `channels:write`/`channels:manage`). `false` → DM-seize. |
-| `remote.replyTimeoutMs` | `120000` | How long the bridge waits for the live session to reply before posting a timeout. |
-| `remote.replyPollIntervalMs` | `1000` | Poll cadence for the live session's reply. |
+See [CONFIG.md](CONFIG.md) for the authoritative `remote.*` key table — including `remote.operatorUserId`, which the default DM-seize path (`createChannels: false`) requires.
 
 The broker self-starts (and self-heals) when the first live session's MCP server registers; `claude-slack doctor` reports its health and the control endpoint's reachability.
 

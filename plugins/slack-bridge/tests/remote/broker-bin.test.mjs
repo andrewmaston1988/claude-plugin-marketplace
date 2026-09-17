@@ -1,9 +1,5 @@
-// The broker bin subcommand must actually start: `broker run` spawns the
-// detached daemon the remote-mcp server and the bridge both self-heal against,
-// so an instant death there (a helper-signature mismatch once killed every
-// spawn) takes remote control — and with it the bridge — down. Nothing else in
-// the suite exercises the bin, so this test spawns it for real, isolated under
-// a temp APPDATA/LOCALAPPDATA so it can never touch the installed state.
+// `broker run` is what remote-mcp and the bridge both self-heal against, so an
+// instant bin death takes remote control down with it — no other test spawns the real bin.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

@@ -1,5 +1,5 @@
 // Verbatim fork of plugins/claude-peers/src/broker/store.mjs. Atomic JSON writes
-// with corrupt-file quarantine (renamed .corrupt-<ts>, never silently overwritten).
+// only — corrupt-state quarantine lives in the caller (broker.mjs).
 import fs from "node:fs";
 import path from "node:path";
 

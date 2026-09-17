@@ -260,7 +260,10 @@ if (cmd === "remote-mcp") {
   const { createRemoteMcpServer } = await import("../src/remote-mcp/server.mjs");
   const { createLogger: _cl } = await import("../src/log.mjs");
   const log = _cl({ logDir: paths.logDir, tag: "remote-mcp" });
-  const server = createRemoteMcpServer({ config, log });
+  // createRemoteMcpServer (and its createRpcEndpoint) call log(msg, extra) as a
+  // plain function, not a logger object.
+  const mcpLog = (msg, extra) => log.info(msg, extra);
+  const server = createRemoteMcpServer({ config, log: mcpLog });
   await server.start();
   return; // stays alive on stdin + timers
 }
@@ -291,7 +294,7 @@ if (cmd === "broker") {
     const broker = createBroker({ stateFile, log: brokerLog, token: brokerToken, onShutdown: () => shutdown() });
     try { await broker.listen(brokerPort); }
     catch (e) {
-      if (e.code === "EADDRINUSE") { log(`port ${brokerPort} already in use — another broker is running`); setTimeout(() => process.exit(0), 150); return; }
+      if (e.code === "EADDRINUSE") { brokerLog(`port ${brokerPort} already in use — another broker is running`); setTimeout(() => process.exit(0), 150); return; }
       throw e;
     }
     _writePidFile(pidFile);

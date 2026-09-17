@@ -84,7 +84,10 @@ export function createControlServer({
     "/claim": async (body) => {
       if (!body.peer_id) return { ok: false, error: "peer_id required" };
       // Pre-check the claim store BEFORE creating any Slack channel, so a
-      // rejected claim (held channel, second channel) never orphans one.
+      // rejected claim (held channel, second channel) normally never orphans
+      // one. Not airtight: claims.claim re-checks, but a concurrent /claim
+      // that passed this same pre-check while claimChannel awaited Slack can
+      // lose the store race and orphan its channel.
       const pre = claims.canClaim(body.peer_id, body.channel ?? null);
       if (!pre.ok) return pre;
       const { id, name, topic, is_dm } = await claimChannel(body.peer_id, body.channel, body.name);

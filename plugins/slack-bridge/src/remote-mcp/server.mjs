@@ -3,11 +3,11 @@
 // endpoint), and delivers inbound push-or-poll — a session without the --channels
 // allowlist is told to poll, so Slack messages are never silently dropped.
 import { spawn, execFile } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRpcEndpoint } from "./jsonrpc.mjs";
+import { createBrokerClient } from "../remote/broker-client.mjs";
 import { detectChannelsEnabled } from "./session-flags.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
@@ -86,7 +86,6 @@ export const TOOLS = [
 
 const text = (t, isError = false) => ({ content: [{ type: "text", text: t }], ...(isError ? { isError: true } : {}) });
 const errText = (prefix, e) => text(`${prefix}: ${e instanceof Error ? e.message : String(e)}`, true);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Encode a cwd into the segment Claude Code uses for its per-project session dir
 // (e.g. `C:\code\long-night` → `C--code-long-night`): backslash, forward slash,
@@ -163,22 +162,11 @@ export function readSessionName(cwd, opts) {
   return readLatestSessionField(cwd, "custom-title", "customTitle", opts);
 }
 
-// The auto-generated `ai-title` — CC's generated summary (often just derived from the
-// first message, e.g. "Greeting GLM"). NOT a name the operator chose, so it is a poor
-// channel label and is used only as the last-resort fallback before the daemon's peer-id
-// fragment: if the operator didn't name the chat AND the session didn't derive a context
-// slug, the ai-title is better than nothing.
+// CC's auto-generated `ai-title` — a first-message-derived summary, so a
+// last-resort label, never a chosen name.
 export function readSessionAiTitle(cwd, opts) {
   return readLatestSessionField(cwd, "ai-title", "aiTitle", opts);
 }
-
-// (No cwd-basename channel-name fallback: a channel named after the project dir means
-// something broke — the session failed to derive a context slug. The last-resort fallback
-// is the auto ai-title; only if THAT is unreadable too does the daemon fall back to its
-// peer-id fragment, which is the visible "something broke" signal.)
-
-const isConnectionError = (e) =>
-  e instanceof TypeError || /ECONNREFUSED|ECONNRESET|fetch failed|aborted|timeout/i.test(e?.message ?? "");
 
 export function createRemoteMcpServer({
   config,
@@ -196,61 +184,12 @@ export function createRemoteMcpServer({
   const brokerPort = config.remote?.brokerPort ?? 7898;
   const controlPort = config.remote?.controlPort ?? 7897;
   const controlToken = config.remote?.controlToken ?? null;
-  const brokerUrl = `http://127.0.0.1:${brokerPort}`;
   const controlUrl = `http://127.0.0.1:${controlPort}`;
-  const binPath = fileURLToPath(new URL("../../bin/claude-slack.mjs", import.meta.url));
+  const broker = createBrokerClient({ port: brokerPort, token: controlToken, log, _fetch, _spawn });
 
   let myId = null;
   let myGitRoot = null;
   let channelsAvailable; // memoised: reading the process table is not free
-
-  async function isBrokerAlive() {
-    try {
-      const res = await _fetch(`${brokerUrl}/health`, { signal: AbortSignal.timeout(2000) });
-      return res.ok;
-    } catch {
-      return false;
-    }
-  }
-
-  function spawnBroker() {
-    const child = _spawn(process.execPath, [binPath, "broker", "run", "--port", String(brokerPort)], {
-      detached: true, stdio: "ignore", windowsHide: true,
-    });
-    child.unref();
-  }
-
-  let ensuring = null;
-  function ensureBroker() {
-    ensuring ??= doEnsureBroker().finally(() => { ensuring = null; });
-    return ensuring;
-  }
-  async function doEnsureBroker() {
-    if (await isBrokerAlive()) return;
-    log("broker not reachable — starting daemon");
-    spawnBroker();
-    for (let i = 0; i < 30; i++) {
-      await sleep(200);
-      if (await isBrokerAlive()) return;
-    }
-    throw new Error("failed to start broker daemon after 6s");
-  }
-
-  async function brokerFetch(path, body, { retried = false } = {}) {
-    try {
-      const res = await _fetch(`${brokerUrl}${path}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${controlToken}` },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(`Broker error (${path}): ${res.status} ${await res.text()}`);
-      return await res.json();
-    } catch (e) {
-      if (retried || !isConnectionError(e)) throw e;
-      await ensureBroker();
-      return brokerFetch(path, body, { retried: true });
-    }
-  }
 
   async function controlFetch(path, body) {
     const res = await _fetch(`${controlUrl}${path}`, {
@@ -274,7 +213,7 @@ export function createRemoteMcpServer({
 
   async function register() {
     myGitRoot = await getGitRoot(_cwd);
-    const reg = await brokerFetch("/register", { pid: _pid, cwd: _cwd, git_root: myGitRoot, tty: null, summary: "slack-bridge remote" });
+    const reg = await broker.register({ pid: _pid, cwd: _cwd, git_root: myGitRoot, tty: null, summary: "slack-bridge remote" });
     myId = reg.id;
     log(`registered as peer ${myId}`);
   }
@@ -310,7 +249,7 @@ export function createRemoteMcpServer({
         // reply-poll picks it up and updates the "routed to live session" placeholder
         // in place — matching the integration-test contract. A direct control /post
         // would post out-of-band and leave the placeholder to time out.
-        const result = await brokerFetch("/send-message", { from_id: myId, to_id: "slack-bridge", text: args.message });
+        const result = await broker.sendMessage(myId, "slack-bridge", args.message);
         if (!result.ok) return text(`Failed to post: ${result.error}`, true);
         return text("Reply sent to Slack.");
       } catch (e) {
@@ -321,7 +260,7 @@ export function createRemoteMcpServer({
       if (!myId) return text("Not registered with broker yet", true);
       try {
         // to_id "slack-bridge" is the outbound route to Slack (same path as slack_post).
-        const result = await brokerFetch("/send-message", { from_id: myId, to_id: args.to_id, text: args.message });
+        const result = await broker.sendMessage(myId, args.to_id, args.message);
         if (!result.ok) return text(`Failed to send: ${result.error}`, true);
         return text(args.to_id === "slack-bridge" ? "Reply sent to Slack." : `Message sent to peer ${args.to_id}`);
       } catch (e) {
@@ -334,7 +273,7 @@ export function createRemoteMcpServer({
         // Consume path: returns everything held — pushed or not — so a push
         // that never rendered (idle session, no allowlist, cloud model) is
         // still recoverable. May re-show an already-seen message.
-        const result = await brokerFetch("/take-messages", { id: myId });
+        const result = await broker.takeMessages(myId);
         if (result.messages.length === 0) return text("No new messages.");
         const lines = result.messages.map((m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`);
         return text(`${result.messages.length} message(s):\n\n${lines.join("\n\n---\n\n")}`
@@ -389,8 +328,8 @@ export function createRemoteMcpServer({
   async function poll() {
     if (!myId) return;
     try {
-      const result = await brokerFetch("/poll-messages", { id: myId });
-      for (const msg of result.messages) {
+      const messages = await broker.pollMessages(myId);
+      for (const msg of messages) {
         rpc.notify("notifications/claude/channel", {
           content: msg.text,
           meta: { from_id: msg.from_id, from_summary: "", from_cwd: "", sent_at: msg.sent_at },
@@ -404,7 +343,7 @@ export function createRemoteMcpServer({
 
   async function heartbeat() {
     if (!myId) return;
-    try { await brokerFetch("/heartbeat", { id: myId }); } catch { /* self-heals on next poll */ }
+    try { await broker.heartbeat(myId); } catch { /* self-heals on next poll */ }
   }
 
   async function start() {
@@ -414,7 +353,7 @@ export function createRemoteMcpServer({
       log("remote control disabled — no remote.controlToken; server dormant");
       return;
     }
-    await ensureBroker();
+    await broker.ensureBroker();
     await register();
     const pollTimer = _setInterval(poll, config.remote.pollIntervalMs);
     pollTimer.unref?.();
@@ -423,5 +362,5 @@ export function createRemoteMcpServer({
     log("MCP endpoint ready");
   }
 
-  return { start, _onRequest: onRequest, _register: register, _poll: poll, _brokerFetch: brokerFetch, _ensureBroker: ensureBroker, _controlFetch: controlFetch, _myId: () => myId };
+  return { start, _onRequest: onRequest, _register: register, _poll: poll, _brokerFetch: broker.brokerFetch, _ensureBroker: broker.ensureBroker, _controlFetch: controlFetch, _myId: () => myId };
 }

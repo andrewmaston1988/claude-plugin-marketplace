@@ -2,6 +2,7 @@
 name: slack-remote
 description: Use when the operator wants remote control of this live session from Slack mobile — seizing a channel, receiving messages, replying, or releasing.
 argument-hint: "[release]"
+disable-model-invocation: true
 ---
 
 Remote control lets the operator step away from the terminal and keep talking to THIS live session from Slack on mobile — provider-agnostic (works on GLM, Kimi, any cloud model, not just the Anthropic API the built-in /rc needs).
@@ -34,7 +35,18 @@ If `slack_seize` is unavailable (the `slack-bridge-remote` MCP server isn't wire
 
 ## Receiving messages
 
-Inbound Slack messages arrive as a `<channel source="slack-bridge">` block mid-turn. Reply IMMEDIATELY — pause what you're doing, answer, then resume. Treat it like a coworker tapping your shoulder.
+Two delivery paths, depending on how this session was launched:
+
+- **Push** (launched with `--dangerously-load-development-channels plugin:slack-bridge`): inbound Slack messages arrive as a `<channel source="slack-bridge">` block mid-turn. Reply IMMEDIATELY — pause what you're doing, answer, then resume. Treat it like a coworker tapping your shoulder.
+- **Poll** (no such flag — every cloud-model session, and most others): the block never renders. Set up a recurring poll now:
+
+  ```
+  CronCreate(cron="*/3 * * * *", prompt="Call check_messages. If it returns messages, reply to each with slack_post, then resume what you were doing.", recurring=true)
+  ```
+
+  Between ticks, call `check_messages` directly whenever you're waiting on the operator's reply.
+
+The MCP server's `initialize` instructions state which path you are on — follow them.
 
 ## Replying
 
