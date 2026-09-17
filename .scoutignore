@@ -74,21 +74,28 @@ cldr-data
 .scout
 # --- scout managed defaults: edit above or below, not inside ---
 # Scout ignore patterns. Similar to .gitignore, but NOT identical — read the
-# two rules below before adding a line, because a wrong pattern matches nothing
+# three rules below before adding a line, because a wrong pattern matches nothing
 # and says nothing.
 #
 # How lines are interpreted:
-#   - Bare directory names (no slash, no wildcard, no leading "!")
-#     feed the fast directory-prune optimisation in os.walk — these
-#     subtrees are never descended into. Use them for caches, build
-#     output, vendored dependencies. ALWAYS the first choice.
-#   - Anything else (contains "/", "*", "?", or starts with "!") falls
-#     through to per-file fnmatch and is matched against the path
-#     relative to the repo root, plus the bare filename.
+#   - Bare names (no slash, no wildcard) match that name as ANY component
+#     of the path relative to the repo root — a directory level or the
+#     file's own name (the repository's own directory name never counts).
+#     A bare name that matches a directory feeds the fast directory-prune
+#     in os.walk — the subtree is never descended into. Use them for
+#     caches, build output, vendored dependencies. ALWAYS the first choice.
+#   - Anything else (contains "/", "*", "?") is a glob, fnmatched against
+#     the path relative to the repo root, plus the bare filename.
+#   - A leading "!" negates. A negated line re-includes what it matches,
+#     even beneath an ignored directory, and it wins over every exclusion
+#     wherever it sits in the file (.gitignore's last-match-wins does not
+#     apply: scout's managed block may sit above or below your lines, so
+#     line order cannot be the mechanism). Re-inclusion costs
+#     the fast prune: a directory whose subtree a negation could match is
+#     walked per-file instead of pruned — an unanchored negation (no "/")
+#     drops the prune for every ignored directory.
 #
-# THREE FORMS THAT SILENTLY MATCH NOTHING — all three look right:
-#   package-lock.json   a bare FILE name goes to the directory-prune set,
-#                       and matches no directory.      Use *package-lock.json
+# TWO FORMS THAT SILENTLY MATCH NOTHING — both look right:
 #   perf/history/       a trailing slash is a .gitignore habit; this is
 #                       tested against `perf/history/run.json`, and a
 #                       pattern ending in "/" never matches a file.
@@ -144,6 +151,10 @@ cldr-data
 # `**/examples/**` would over-exclude them.
 *vendor/**/examples/**
 *third_party/**/examples/**
+
+# Build output (`target` — Cargo's and Maven's default build directory; gitignored,
+# so git-delta indexing never meets it, but a full scan walks thousands of artefacts)
+target
 
 # MSVC / VC++ build output — `Debug`/`Release` are the standard configuration
 # directories and `*.res`/`*.recipe` are compiler intermediates. A local build
