@@ -131,7 +131,9 @@ export function createBroker({
     },
 
     "/send-message"(body) {
-      if (!state.peers[body.to_id]) {
+      // hasOwn, not a bare index: state.peers is a parsed object, so `peers["constructor"]`
+      // is truthy — that would skip the reserved check and queue to an id nothing polls.
+      if (!Object.hasOwn(state.peers, body.to_id)) {
         if (!RESERVED_PEER_IDS.has(body.to_id)) {
           return { ok: false, error: `Peer ${body.to_id} not found` };
         }
@@ -145,7 +147,7 @@ export function createBroker({
       }
       const from = String(body.from_id ?? "");
       const now = _now().toISOString();
-      if (!state.peers[from]) {
+      if (!Object.hasOwn(state.peers, from)) {
         // Unregistered sender: auto-register so replies have a route back. The
         // daemon relies on this — it sends as "slack-bridge" with no /register,
         // so a reserved id registers as reserved (never reaped), not adhoc.
@@ -177,7 +179,7 @@ export function createBroker({
       const mine = state.messages.filter((m) => m.to_id === body.id && !m.delivered
         && (!body.from_id || m.from_id === body.from_id));
       for (const msg of mine) msg.delivered = true;
-      const peer = state.peers[body.id];
+      const peer = Object.hasOwn(state.peers, body.id) ? state.peers[body.id] : null;
       if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
       purgeExpired();
       persist();
@@ -190,7 +192,7 @@ export function createBroker({
     "/take-messages"(body) {
       const mine = state.messages.filter((m) => m.to_id === body.id);
       state.messages = state.messages.filter((m) => m.to_id !== body.id);
-      const peer = state.peers[body.id];
+      const peer = Object.hasOwn(state.peers, body.id) ? state.peers[body.id] : null;
       if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
       persist();
       return { messages: mine };

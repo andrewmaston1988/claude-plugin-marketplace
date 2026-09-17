@@ -13,7 +13,7 @@ If `$ARGUMENTS` is `release`, skip straight to *Releasing*.
 
 Call the `slack_seize` MCP tool. The daemon names the created channel `#rc-<slug>` where `<slug>` is chosen in this order:
 
-1. **The session name the operator set in Claude Code** (the chat's custom title) — read automatically from the session JSONL, best-effort: when the operator has named the chat, the channel appears named after it, so you never override a name the operator chose.
+1. **The session name the operator set in Claude Code** (the chat's custom title) — read from the session JSONL where the harness records one (best-effort: not observed on every harness), so when the operator has named the chat the channel appears named after it, and you never override a name the operator chose.
 2. **A slug you derive from the current task context**, passed as the `name` arg — for the common case where the operator has *not* named the chat (operators rarely name chats). Derive it from something descriptive of what you're working on right now: the git branch (`autonomous/slack-bridge-remote-control` → `slack-bridge-remote-control`), the plan slug, or the feature/bug name. Slugify it yourself (lowercase, hyphens, no spaces). **Always do this** — it is your job, not the daemon's.
 3. **The auto ai-title** — Claude Code's generated summary (often just derived from the first message, so maybe nonsensical). Read automatically as a last-resort fallback so the channel is never nameless.
 
@@ -27,7 +27,7 @@ So the normal call is to derive a context slug and pass it:
 slack_seize  name="slack-bridge-remote-control"
 ```
 
-If the operator has named the chat, your `name` is ignored and their custom title is used — so passing a context slug is always safe and never clobbers an operator-chosen name. If you skip the `name` arg and the chat isn't named, you get the (maybe nonsensical) ai-title — usable but rarely descriptive, so prefer to derive.
+If the operator has named the chat and the harness recorded it, your `name` is ignored and their custom title is used — so passing a context slug is always safe and never clobbers an operator-chosen name. If you skip the `name` arg and the chat isn't named, you get the (maybe nonsensical) ai-title — usable but rarely descriptive, so prefer to derive.
 
 It returns the channel name, e.g. `📱 Slack remote ready: #rc-slack-bridge-remote-control — live session a1b2c3d4`. Report that to the operator verbatim: tell them to DM that channel from a second device.
 
@@ -38,11 +38,7 @@ If `slack_seize` is unavailable (the `slack-bridge-remote` MCP server isn't wire
 Two delivery paths, depending on how this session was launched:
 
 - **Push** (launched with `--dangerously-load-development-channels plugin:slack-bridge`): inbound Slack messages arrive as a `<channel source="slack-bridge">` block mid-turn. Reply IMMEDIATELY — pause what you're doing, answer, then resume. Treat it like a coworker tapping your shoulder.
-- **Poll** (no such flag — every cloud-model session, and most others): the block never renders. Set up a recurring poll now:
-
-  ```
-  CronCreate(cron="*/3 * * * *", prompt="Call check_messages. If it returns messages, reply to each with slack_post, then resume what you were doing.", recurring=true)
-  ```
+- **Poll** (no such flag — every cloud-model session, and most others): the block never renders. Set up the recurring poll the MCP server's `initialize` instructions prescribe — follow them verbatim; they carry the exact `CronCreate` call, the schema-load step, and the job's 7-day expiry.
 
   Between ticks, call `check_messages` directly whenever you're waiting on the operator's reply.
 
@@ -56,7 +52,7 @@ Reply with the `slack_post` tool:
 slack_post  message="your reply to the operator"
 ```
 
-(Equivalent: `send_message` with `to_id="slack-bridge"`.) Your reply replaces the "📱 routed to live session…" placeholder in Slack.
+(Equivalent: `send_message` with `to_id="slack-bridge"`.) Answer inside the routing window and your reply replaces the "📱 routed to live session…" placeholder in Slack. Land it after the window — the session was slow, or no message was routed — and the daemon still posts it to the channel as its own message rather than dropping it.
 
 ## Releasing
 

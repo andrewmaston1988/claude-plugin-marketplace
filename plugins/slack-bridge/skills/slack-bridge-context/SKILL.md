@@ -1,6 +1,6 @@
 ---
 name: slack-bridge-context
-description: Use when running a Claude Code session under the Slack bridge (CLAUDE_VIA_SLACK=1). Enforces commands-in-standalone-code-blocks and no-colon-before-tool-calls.
+description: Use when running a Claude Code session under the Slack bridge (CLAUDE_VIA_SLACK=1) — the operator is reading on mobile Slack.
 ---
 
 `CLAUDE_VIA_SLACK=1` is set — the user is on mobile Slack. Apply these rules for the duration of the session:

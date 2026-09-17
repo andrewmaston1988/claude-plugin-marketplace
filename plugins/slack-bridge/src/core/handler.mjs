@@ -329,14 +329,26 @@ export async function postError({ web, channel, placeholderTs, threadTs, message
   } catch { /* placeholder already gone; error was already logged by the caller */ }
 }
 
+// Peers with a route polling right now. The idle drain skips these: /poll-messages
+// marks what it returns delivered, and pollReply ignores delivered messages, so a
+// drain that ran underneath a live window would destroy the reply it was sent for.
+const activeRoutes = new Set();
+
 /**
  * Route a claimed channel's message to its live session: placeholder, broker
  * send, poll the peer's reply, post it in place. On timeout the claim is
  * retained (slow, not dead) and "didn't reply in time" is posted.
  */
 export async function routeToLiveSession({ web, channel, threadTs, text, claim, broker, config, log, cmdEcho }) {
-  const timeoutMs = config.remote?.replyTimeoutMs ?? 120_000;
+  const timeoutMs = config.remote?.replyTimeoutMs ?? 300_000;
   const pollIntervalMs = config.remote?.replyPollIntervalMs ?? 1_000;
+
+  // Post whatever THIS peer sent that no window consumed, before the new
+  // placeholder: a late answer to a previous message is never served as this
+  // message's reply, and is never destroyed unread either. from_id scoping plus
+  // one-claim-per-peer (claims store) keeps concurrent claimed channels from
+  // draining each other's replies.
+  await drainLeftoverReplies({ broker, web, channel, threadTs, peerId: claim.peer_id, log });
 
   let placeholderTs = null;
   try {
@@ -353,22 +365,21 @@ export async function routeToLiveSession({ web, channel, threadTs, text, claim, 
     return;
   }
 
-  // Drop any stale reply from THIS peer before sending, so a late answer to a
-  // previous message is never served as the reply to the current one. from_id
-  // scoping plus one-claim-per-peer (claims store) keeps concurrent claimed
-  // channels from draining each other's replies.
-  try { await broker.pollMessages("slack-bridge", claim.peer_id); } catch { /* best-effort */ }
-
+  activeRoutes.add(claim.peer_id);
+  let replies = [];
   try {
-    const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
-    if (r && r.ok === false) throw new Error(r.error ?? "send failed");
-  } catch (e) {
-    log.error("failed to route to live session", { channel, error: e.message });
-    await postError({ web, channel, placeholderTs, threadTs, message: `failed to route to live session: ${e.message}` });
-    return;
+    try {
+      const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
+      if (r && r.ok === false) throw new Error(r.error ?? "send failed");
+    } catch (e) {
+      log.error("failed to route to live session", { channel, error: e.message });
+      await postError({ web, channel, placeholderTs, threadTs, message: `failed to route to live session: ${e.message}` });
+      return;
+    }
+    replies = await pollReply({ broker, peerId: claim.peer_id, timeoutMs, pollIntervalMs, log });
+  } finally {
+    activeRoutes.delete(claim.peer_id);
   }
-
-  const replies = await pollReply({ broker, peerId: claim.peer_id, timeoutMs, pollIntervalMs, log });
   if (replies.length) {
     for (let i = 0; i < replies.length; i++) {
       try {
@@ -396,13 +407,8 @@ export async function routeToLiveSession({ web, channel, threadTs, text, claim, 
   }
 }
 
-// Poll the broker for THIS peer's reply only (from_id-scoped, and the claims
-// store allows one channel per peer, so concurrent claims can't take each
-// other's replies). Returns every message that arrives: after the first
-// non-empty poll it keeps draining until a poll comes back empty, so a
-// multi-chunk reply (several slack_post calls in quick succession) is delivered
-// whole — anything arriving after the settle window is unsolicited outbound,
-// a declared v1 limitation.
+// Poll this peer's reply only — from_id-scoped, and the claims store allows one
+// channel per peer, so concurrent claims can't take each other's replies.
 async function pollReply({ broker, peerId, timeoutMs, pollIntervalMs, log }) {
   const deadline = Date.now() + timeoutMs;
   const out = [];
@@ -410,10 +416,55 @@ async function pollReply({ broker, peerId, timeoutMs, pollIntervalMs, log }) {
     let msgs = [];
     try { msgs = await broker.pollMessages("slack-bridge", peerId) ?? []; } catch (e) { log?.warn?.("poll error", { error: e.message }); }
     out.push(...msgs);
+    // Drain until an empty poll: a multi-chunk reply (several slack_post calls in
+    // quick succession) must arrive whole, not just its first chunk.
     if (out.length && msgs.length === 0) return out;
     await new Promise((r) => setTimeout(r, pollIntervalMs));
   }
   return out;
+}
+
+// Post drained replies that no window consumed. A slack_post landing after its
+// window closed — or with none open — would otherwise be destroyed by the next
+// drain while the session was told it had sent.
+async function postLeftovers({ web, channel, threadTs, msgs, log }) {
+  let posted = 0;
+  for (const m of msgs) {
+    if (!m?.text) continue;
+    try {
+      const p = { channel, text: m.text };
+      if (threadTs) p.thread_ts = threadTs;
+      await web.chatPostMessage(p);
+      posted++;
+    } catch (e) {
+      log.warn("failed to post a late live-session reply", { channel, error: e.message });
+    }
+  }
+  return posted;
+}
+
+async function drainLeftoverReplies({ broker, web, channel, threadTs, peerId, log }) {
+  let msgs = [];
+  try { msgs = await broker.pollMessages("slack-bridge", peerId) ?? []; } catch { return 0; }
+  if (!msgs.length) return 0;
+  const posted = await postLeftovers({ web, channel, threadTs, msgs, log });
+  if (posted) log.info("posted late live-session replies", { channel, peer_id: peerId, count: posted });
+  return posted;
+}
+
+/**
+ * Drain every claimed peer that has no route polling. Driven from a tick in
+ * startBridge: slack_post cannot see whether a window is open, so the daemon is
+ * the only place that can deliver what the session was told it had sent.
+ */
+export async function drainIdleLeftovers({ broker, web, claims, log }) {
+  if (!broker || !claims) return 0;
+  let total = 0;
+  for (const [channel, claim] of Object.entries(claims.all())) {
+    if (!claim?.peer_id || activeRoutes.has(claim.peer_id)) continue;
+    total += await drainLeftoverReplies({ broker, web, channel, threadTs: null, peerId: claim.peer_id, log });
+  }
+  return total;
 }
 
 export function startBridge({ config, log, web, socket, store, queue, extensions, remote }) {
@@ -447,6 +498,15 @@ export function startBridge({ config, log, web, socket, store, queue, extensions
     handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions })
       .catch(e => log.error("slash command unhandled", { error: e.message }));
   });
+
+  // A reply sent outside a live window has no poller. Drain claimed peers on a
+  // tick so it is posted rather than destroyed by the next route's pre-send drain.
+  if (remote?.broker && remote?.claims) {
+    const drainTimer = setInterval(() => {
+      drainIdleLeftovers({ broker: remote.broker, web, claims: remote.claims, log }).catch(() => {});
+    }, 30_000);
+    drainTimer.unref?.();
+  }
 
   socket.start();
   log.info("bridge started");

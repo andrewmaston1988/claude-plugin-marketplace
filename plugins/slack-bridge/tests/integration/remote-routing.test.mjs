@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { handleMessage } from "../../src/core/handler.mjs";
+import { handleMessage, drainIdleLeftovers } from "../../src/core/handler.mjs";
 import { createQueue } from "../../src/core/queue.mjs";
 import { createClaimsStore } from "../../src/remote/claims.mjs";
 
@@ -74,8 +74,9 @@ test("claimed channel + live peer → routed to broker, runClaude NOT called, re
   const rc = makeRunClaude();
   const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: { replyTimeoutMs: 3000, replyPollIntervalMs: 20 } };
 
-  // A stale reply to an earlier routed message, queued BEFORE this send: the
-  // pre-send drain must discard it, or it would be served as this message's reply.
+  // A stale reply to an earlier routed message, queued BEFORE this send: it must
+  // never be served as this message's reply (the pre-send drain clears it), and
+  // must never be destroyed either — it is posted to the channel as its own message.
   messages.push({ from_id: "peerA", text: "stale reply to an earlier message" });
 
   await handleMessage({
@@ -85,7 +86,7 @@ test("claimed channel + live peer → routed to broker, runClaude NOT called, re
   });
 
   // The reply arrives causally — only after the routed send. The pre-send drain
-  // discards anything queued before the send, so seeding earlier would be drained.
+  // clears anything queued before the send, so seeding earlier would be drained.
   await waitFor(() => broker.sendCalls.length === 1, 3000);
   messages.push({ from_id: "peerA", text: "live reply!" });
   await waitFor(() => web.calls.some(([t, p]) => t === "update" && typeof p.text === "string" && p.text.includes("live reply!")), 3000);
@@ -97,7 +98,11 @@ test("claimed channel + live peer → routed to broker, runClaude NOT called, re
   );
   assert.ok(
     !web.calls.some(([t, p]) => t === "update" && typeof p.text === "string" && p.text.includes("stale")),
-    "a stale pre-send reply must be drained, never served as this message's reply",
+    "a stale pre-send reply must never be served as this message's reply",
+  );
+  assert.ok(
+    web.calls.some(([t, p]) => t === "post" && typeof p.text === "string" && p.text.includes("stale")),
+    "the stale reply must still reach the channel as its own message, not be destroyed by the drain",
   );
 });
 
@@ -184,4 +189,55 @@ test("multi-chunk reply → every message posted, not just the first", async () 
     "the first chunk must replace the routed placeholder",
   );
   assert.equal(rc.calls.length, 0, "runClaude must NOT be called for a claimed+live channel");
+});
+
+// --- idle drain ---
+// slack_post cannot see whether a routing window is open. A reply landing after its
+// window closed — or with none open — has no poller, so the daemon drains claimed
+// peers on a tick and posts what it finds. Without this the message sits until the
+// next route's pre-send drain marks it delivered, while the session was told it sent.
+
+test("idle drain posts a leftover reply that no window consumed, once", async () => {
+  const claims = createClaimsStore({ path: tmpClaims() });
+  await claims.claim("peerE", "C5");
+  const messages = [{ from_id: "peerE", text: "sent after the window closed" }];
+  const broker = makeFakeBroker({ alive: new Set(["peerE"]), messages });
+  const web = makeWeb();
+
+  const posted = await drainIdleLeftovers({ broker, web, claims, log: makeLog() });
+  assert.equal(posted, 1, "a leftover reply must be posted, never left to be destroyed");
+  assert.ok(
+    web.calls.some(([t, p]) => t === "post" && typeof p.text === "string" && p.text.includes("sent after the window closed")),
+    "the leftover must reach the channel as its own message",
+  );
+  assert.equal(await drainIdleLeftovers({ broker, web, claims, log: makeLog() }), 0,
+    "the second tick must find nothing — the reply was consumed by the first");
+});
+
+test("idle drain skips a peer whose route is polling, leaving the reply for that route", async () => {
+  const claims = createClaimsStore({ path: tmpClaims() });
+  await claims.claim("peerF", "C6");
+  const messages = [];
+  const broker = makeFakeBroker({ alive: new Set(["peerF"]), messages });
+  const web = makeWeb();
+  const rc = makeRunClaude();
+  const config = { slack: {}, claude: { cwd: "/tmp", timeout: 1000 }, remote: { replyTimeoutMs: 3000, replyPollIntervalMs: 20 } };
+
+  await handleMessage({
+    web, store: makeStore(), queue: createQueue({ log: makeLog() }), config, log: makeLog(),
+    payload: { type: "message", channel: "C6", text: "hello", client_msg_id: "m-route-6" },
+    botUserId: "U123", isFirstInSession: true, remote: { claims, broker }, _runClaude: rc.fn,
+  });
+  await waitFor(() => broker.sendCalls.length === 1, 3000);
+
+  // Pushed in the same macrotask as the drain call below, so the route's 20 ms poll
+  // cannot have run yet: a drain ignoring the guard would see this and return 1.
+  messages.push({ from_id: "peerF", text: "the reply the window is waiting for" });
+  assert.equal(await drainIdleLeftovers({ broker, web, claims, log: makeLog() }), 0,
+    "a drain under a live route would mark the in-flight reply delivered and destroy it");
+  assert.ok(
+    !web.calls.some(([t, p]) => t === "post" && typeof p.text === "string" && p.text.includes("the reply the window")),
+    "the live route's reply must not be posted standalone",
+  );
+  await waitFor(() => web.calls.some(([t, p]) => t === "update" && typeof p.text === "string" && p.text.includes("the reply the window")), 3000);
 });

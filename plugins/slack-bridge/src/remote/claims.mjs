@@ -36,7 +36,9 @@ export function createClaimsStore({ path, log }) {
   // the first claim's Slack channel.
   function canClaim(peerId, channel) {
     const data = load();
-    const existing = data[channel];
+    // hasOwn, not a bare index: a parsed object inherits constructor/toString/
+    // valueOf, and `data["constructor"]` is truthy — a false "already claimed".
+    const existing = Object.hasOwn(data, channel) ? data[channel] : null;
     if (existing && existing.peer_id !== peerId) {
       return { ok: false, error: `channel ${channel} already claimed by ${existing.peer_id}` };
     }
@@ -78,7 +80,8 @@ export function createClaimsStore({ path, log }) {
     },
 
     get(channel) {
-      return load()[channel] ?? null;
+      const data = load();
+      return Object.hasOwn(data, channel) ? data[channel] : null;
     },
 
     all() {

@@ -18,7 +18,7 @@ export const INSTRUCTIONS = `You are connected to the slack-bridge remote-contro
 IMPORTANT: When you receive a <channel source="slack-bridge" ...> message, it is a Slack message from the operator. Reply using the slack_post tool (or send_message with to_id "slack-bridge") so your reply posts back to the Slack channel the operator is reading.
 
 Available tools:
-- slack_seize: Seize a Slack channel for remote control. With no channel arg the daemon creates a #rc-<name> channel. The name is chosen in this order: the session name the operator set in Claude Code (the chat's custom title, read automatically), then the 'name' arg you pass (a slug derived from the current task context for when the chat isn't named), then the auto ai-title as a last resort. Requires channels:write/manage scopes, else seizes an existing DM. Returns the channel name to report to the operator.
+- slack_seize: Seize a Slack channel for remote control. With no channel arg the daemon creates a #rc-<name> channel. The name is chosen in this order: the session name the operator set in Claude Code (the chat's custom title, read automatically where the harness records one), then the 'name' arg you pass (a slug derived from the current task context for when the chat isn't named), then the auto ai-title as a last resort. Requires channels:write/manage scopes, else seizes an existing DM. Returns the channel name to report to the operator.
 - slack_release: Release the seized channel.
 - slack_post: Post a message to the seized Slack channel (your reply to the operator).
 - send_message: Send a message to another peer by id. With to_id "slack-bridge" it posts to the seized Slack channel (passthrough).
@@ -42,12 +42,12 @@ export function buildInstructions(channelsAvailable) {
 export const TOOLS = [
   {
     name: "slack_seize",
-    description: "Seize a Slack channel for remote control. With no channel, the daemon creates a #rc-<name> channel. The name is chosen in this order: (1) the session name the operator set in Claude Code (the chat's custom title — read automatically), (2) the 'name' arg you pass, a slug derived from the current task context (branch/plan/feature) for when the operator hasn't named the chat, (3) the auto ai-title as a last resort. Requires channels:write/manage scopes, else seizes an existing DM with the bot. Returns the channel name to report to the operator.",
+    description: "Seize a Slack channel for remote control. With no channel, the daemon creates a #rc-<name> channel. The name is chosen in this order: (1) the session name the operator set in Claude Code (the chat's custom title — read automatically where the harness records one), (2) the 'name' arg you pass, a slug derived from the current task context (branch/plan/feature) for when the operator hasn't named the chat, (3) the auto ai-title as a last resort. Requires channels:write/manage scopes, else seizes an existing DM with the bot. Returns the channel name to report to the operator.",
     inputSchema: {
       type: "object",
       properties: {
         channel: { type: "string", description: "Optional existing channel id to seize (join) instead of creating one." },
-        name: { type: "string", description: "A short slug derived from the current task context (git branch, plan slug, or feature name) for when the operator hasn't named the chat. The operator-set custom title always takes priority over this. If omitted and there is no custom title, the auto ai-title is used as a last resort." },
+        name: { type: "string", description: "A short slug derived from the current task context (git branch, plan slug, or feature name) for when the operator hasn't named the chat. The operator-set custom title takes priority over this where the harness records one. If omitted and there is no custom title, the auto ai-title is used as a last resort." },
       },
     },
   },

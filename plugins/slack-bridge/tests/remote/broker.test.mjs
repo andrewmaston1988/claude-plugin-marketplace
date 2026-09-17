@@ -249,6 +249,34 @@ test("the daemon sender registers as reserved, not the reaped adhoc kind", async
   assert.equal(reply.body.ok, true, `reply after idle failed: ${reply.body.error}`);
 });
 
+// --- prototype-key guards ---
+// state.peers is a bare JSON.parse product, so `state.peers["constructor"]` is
+// Object — truthy. The old `!state.peers[body.to_id]` guard therefore let a
+// prototype key through the reserved check and queued a message to an id nothing
+// polls, reporting ok:true. Object.hasOwn is the fix.
+
+test("a prototype key is not a recipient: send-message refuses instead of queueing into the void", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const r = await call("/send-message", { from_id: a.id, to_id: "constructor", text: "into the void" });
+  assert.equal(r.body.ok, false, "a prototype key must not be accepted as a recipient");
+  assert.match(r.body.error, /not found/i);
+});
+
+test("an unknown prototype-key sender is registered as an own property, not read off the prototype", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: reg } = await call("/register", REG);
+  const send = await call("/send-message", { from_id: "constructor", to_id: reg.id, text: "hi" });
+  assert.equal(send.body.ok, true, `send failed: ${send.body.error}`);
+  // The registration itself is the point: a bare index reads Object off the prototype,
+  // skips the auto-register, and leaves a sender that nothing can reply to.
+  const { body: peers } = await call("/list-peers", { scope: "machine", cwd: "x", git_root: null, include_adhoc: true });
+  assert.ok(peers.some((p) => p.id === "constructor"), "the prototype-key sender must be registered");
+  const reply = await call("/send-message", { from_id: reg.id, to_id: "constructor", text: "re: hi" });
+  assert.equal(reply.body.ok, true, `reply to the prototype-key sender failed: ${reply.body.error}`);
+  assert.equal((await call("/poll-messages", { id: "constructor" })).body.messages[0].text, "re: hi");
+});
+
 test("an unknown non-reserved recipient is still rejected — the reserved branch is not an open door", async (t) => {
   const { call } = await startBroker(t);
   const { body: reg } = await call("/register", REG);

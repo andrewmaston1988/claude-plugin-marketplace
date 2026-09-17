@@ -105,3 +105,21 @@ test("canClaim is the pure pre-check — same rules, no writes", async () => {
   assert.equal(store.canClaim("peerD", "C3").ok, true, "fresh claim");
   assert.equal(store.get("C2"), null, "canClaim must never write");
 });
+
+// The store loads a bare JSON.parse product, so a bare index returns inherited
+// properties: `data["constructor"]` is Object (truthy), which the routing branch
+// reads as a live claim and canClaim reads as "already claimed by undefined".
+
+test("a prototype key is not a claim: get() returns null for constructor/toString", () => {
+  const store = createClaimsStore({ path: tmpFile() });
+  assert.equal(store.get("constructor"), null);
+  assert.equal(store.get("toString"), null);
+  assert.equal(store.get("__proto__"), null);
+});
+
+test("claiming a prototype-key channel is not falsely rejected as already claimed", () => {
+  const store = createClaimsStore({ path: tmpFile() });
+  const r = store.claim("peerA", "constructor");
+  assert.equal(r.ok, true, `a prototype-key channel must be claimable, got: ${r.error}`);
+  assert.equal(store.get("constructor").peer_id, "peerA");
+});

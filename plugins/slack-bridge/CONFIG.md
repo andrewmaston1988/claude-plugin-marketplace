@@ -59,7 +59,7 @@ Defaults: `claude.model` null (Claude default); `proxy.url` `http://localhost:11
     "controlPort": 7897,
     "createChannels": false,
     "operatorUserId": "U0123ABC",
-    "replyTimeoutMs": 120000,
+    "replyTimeoutMs": 300000,
     "replyPollIntervalMs": 1000
   }
 }
@@ -72,7 +72,7 @@ Defaults: `claude.model` null (Claude default); `proxy.url` `http://localhost:11
 | `remote.controlPort` | `7897` | Internal localhost control endpoint port. Localhost-only; the token is the auth boundary. |
 | `remote.createChannels` | `false` | `true` → `/slack-remote` creates `#rc-<context-slug>` (requires `channels:write` + `channels:manage` on the bot token). `false` → DM-seize (no new scopes). |
 | `remote.operatorUserId` | `null` | The operator's Slack user id. Selects which DM the DM-seize fallback seizes — without it, DM-seize **refuses** rather than guessing at a DM. Only used when `createChannels` is `false`. The wizard asks for it. |
-| `remote.replyTimeoutMs` | `120000` | Per-message: how long the bridge waits for the live session's reply before posting "live session didn't reply in time". The claim is retained across a timeout (peer may be slow, not dead), but **a reply arriving after the window is dropped** — the in-flight route is the only thing that knows which Slack channel a reply belongs to, so keep this generous if your sessions think long. |
+| `remote.replyTimeoutMs` | `300000` | Per-message: how long the bridge waits for the live session's reply before posting "live session didn't reply in time". Keep it clear of the poll cadence your sessions use — this plugin prescribes a 3-minute cron, so 300 s clears it; a window shorter than the tick closes before the session has seen the message. The claim is retained across a timeout (peer may be slow, not dead). A reply arriving after the window is **not** dropped: the daemon's 30 s idle drain posts it to the claimed channel as its own message. |
 | `remote.replyPollIntervalMs` | `1000` | How often the bridge polls the broker for the live session's reply. |
 | `remote.pollIntervalMs` | `1000` | How often the session-side MCP server polls the broker for inbound Slack messages to push as `<channel>` blocks. Each poll is a broker state write (marks messages delivered). |
 | `remote.heartbeatIntervalMs` | `15000` | How often the session-side MCP server heartbeats its peer registration so the broker's liveness view stays current. |
