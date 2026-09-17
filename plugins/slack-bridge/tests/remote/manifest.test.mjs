@@ -1,6 +1,6 @@
-// Pins the 2026-07-21 operator reversal: the remote-mcp server must be declared
-// in the plugin manifest, mirroring claude-peers. The reversal-era edit never
-// reached the branch once already — without it, sessions get no remote tools.
+// Pins the operator's reversal ("claude-peers works. do what that does"): the
+// remote-mcp server must be declared in the plugin manifest, mirroring
+// claude-peers. The reversal-era edit never reached the branch once already.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";

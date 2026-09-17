@@ -153,7 +153,10 @@ export function createBroker({
     // render it, and nothing acks back, so deleting here loses the message
     // outright. /take-messages is what actually removes.
     "/poll-messages"(body) {
-      const mine = state.messages.filter((m) => m.to_id === body.id && !m.delivered);
+      // Optional from_id scopes the poll to one sender, so concurrent claimed
+      // channels never mark each other's replies delivered.
+      const mine = state.messages.filter((m) => m.to_id === body.id && !m.delivered
+        && (!body.from_id || m.from_id === body.from_id));
       for (const msg of mine) msg.delivered = true;
       const peer = state.peers[body.id];
       if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();

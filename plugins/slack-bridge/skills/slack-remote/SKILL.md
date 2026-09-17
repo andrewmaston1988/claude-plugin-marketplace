@@ -18,6 +18,8 @@ Call the `slack_seize` MCP tool. The daemon names the created channel `#rc-<slug
 
 The project dir basename is **never** used — a channel named after the project dir means something broke (you failed to derive a context slug). If even the ai-title is unreadable, the daemon falls back to a peer-id fragment (`#rc-a1b2`), which is the visible "something broke" signal.
 
+On a default install (`createChannels: false` — no `channels:write` scopes) nothing is created: the daemon seizes the operator's **existing DM with the bot** instead, and `slack_seize` names that DM. Receiving, replying, and releasing work identically either way.
+
 So the normal call is to derive a context slug and pass it:
 
 ```

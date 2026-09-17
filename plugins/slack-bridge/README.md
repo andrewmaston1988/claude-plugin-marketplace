@@ -235,7 +235,7 @@ In an interactive Claude Code session, invoke the `/slack-remote` skill (or call
 | `remote.controlToken` | `null` | Shared-secret bearer token for the control endpoint. `null` = remote control disabled. |
 | `remote.brokerPort` | `7898` | Internal localhost broker port (distinct from claude-peers' 7899). |
 | `remote.controlPort` | `7897` | Internal localhost control endpoint port. |
-| `remote.createChannels` | `false` | `true` → `/slack-remote` creates `#ln-<short>` (needs `channels:write`/`channels:manage`). `false` → DM-seize. |
+| `remote.createChannels` | `false` | `true` → `/slack-remote` creates `#rc-<context-slug>` (needs `channels:write`/`channels:manage`). `false` → DM-seize. |
 | `remote.replyTimeoutMs` | `120000` | How long the bridge waits for the live session to reply before posting a timeout. |
 | `remote.replyPollIntervalMs` | `1000` | Poll cadence for the live session's reply. |
 

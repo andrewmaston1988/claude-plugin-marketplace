@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync } from "node:fs";
-import { join as _join } from "node:path";
+import { join as _join, dirname as _dirname } from "node:path";
 import { createWebClient } from "../src/web-api/index.mjs";
 import { createSocketModeClient } from "../src/socket-mode/index.mjs";
 import { createSessionStore } from "../src/session-store/index.mjs";
@@ -30,6 +30,17 @@ function _readPid(paths) {
   return parseInt(readFileSync(f, "utf8").trim(), 10) || null;
 }
 function _clearPid(paths) { try { unlinkSync(_pidFile(paths)); } catch {} }
+
+// Broker subcommands hold a pid FILE (port-scoped), not the paths object.
+function _writePidFile(file) {
+  mkdirSync(_dirname(file), { recursive: true });
+  writeFileSync(file, String(process.pid));
+}
+function _readPidFile(file) {
+  if (!existsSync(file)) return null;
+  return parseInt(readFileSync(file, "utf8").trim(), 10) || null;
+}
+function _clearPidFile(file) { try { unlinkSync(file); } catch {} }
 function _isAlive(pid) { try { process.kill(pid, 0); return true; } catch { return false; } }
 
 // Port-scoped broker pid files (a test broker must not clobber the real one).
@@ -257,19 +268,21 @@ if (cmd === "broker") {
     const { createBroker } = await import("../src/remote/broker.mjs");
     const { createLogger: _cl } = await import("../src/log.mjs");
     const log = _cl({ logDir: paths.logDir, tag: "remote-broker" });
+    // createBroker calls log(msg, extra) as a plain function, not a logger object.
+    const brokerLog = (msg, extra) => log.info(msg, extra);
     let shutdown;
-    const broker = createBroker({ stateFile, log, onShutdown: () => shutdown() });
+    const broker = createBroker({ stateFile, log: brokerLog, onShutdown: () => shutdown() });
     try { await broker.listen(brokerPort); }
     catch (e) {
       if (e.code === "EADDRINUSE") { log(`port ${brokerPort} already in use — another broker is running`); setTimeout(() => process.exit(0), 150); return; }
       throw e;
     }
-    _writePid(pidFile, process.pid);
+    _writePidFile(pidFile);
     const reapTimer = setInterval(() => broker.reapDead(), 30_000);
-    shutdown = () => { clearInterval(reapTimer); _clearPid(pidFile); broker.close().then(() => process.exit(0)); };
+    shutdown = () => { clearInterval(reapTimer); _clearPidFile(pidFile); broker.close().then(() => process.exit(0)); };
     process.on("SIGTERM", shutdown);
     process.on("SIGINT", shutdown);
-    log(`remote-control broker listening on 127.0.0.1:${brokerPort} (state: ${stateFile})`);
+    log.info(`remote-control broker listening on 127.0.0.1:${brokerPort} (state: ${stateFile})`);
     return;
   }
 
@@ -288,7 +301,7 @@ if (cmd === "broker") {
   }
 
   if (sub === "stop") {
-    if (!(await _brokerHealth(brokerPort))) { _clearPid(pidFile); process.stdout.write(`broker not running on port ${brokerPort} (stale pid cleared)\n`); setTimeout(() => process.exit(0), 150); return; }
+    if (!(await _brokerHealth(brokerPort))) { _clearPidFile(pidFile); process.stdout.write(`broker not running on port ${brokerPort} (stale pid cleared)\n`); setTimeout(() => process.exit(0), 150); return; }
     try { await fetch(`http://127.0.0.1:${brokerPort}/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) }); } catch {}
     for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 150));
@@ -301,7 +314,7 @@ if (cmd === "broker") {
 
   if (sub === "status") {
     const h = await _brokerHealth(brokerPort);
-    const pid = _readPid(pidFile);
+    const pid = _readPidFile(pidFile);
     if (h) process.stdout.write(`running on port ${brokerPort} — ${h.peers} peer(s)${pid ? ` (pid ${pid})` : ""}\n`);
     else process.stdout.write(`not running on port ${brokerPort}\n`);
     setTimeout(() => process.exit(h ? 0 : 1), 150);

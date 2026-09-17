@@ -32,6 +32,13 @@ test("encodeCwd rewrites backslash, forward slash, and colon to dash", () => {
   assert.equal(encodeCwd("/home/andrew/torrent-hub"), "-home-andrew-torrent-hub");
 });
 
+test("encodeCwd maps dots to dashes, matching the harness's per-project dir layout", () => {
+  // A dotted cwd (.swarm, .worktrees) must hit the same encoded dir the harness
+  // writes — leaving '.' intact silently breaks every name read on those paths.
+  assert.equal(encodeCwd("C:\\work\\x\\.worktrees\\main"), "C--work-x--worktrees-main");
+  assert.equal(encodeCwd("/home/a/.swarm/runs"), "-home-a--swarm-runs");
+});
+
 test("readSessionName returns the latest custom-title from the most-recently-modified JSONL", () => {
   const dir = tmpProjectsDir();
   writeSession(dir, "C--code-long-night", "old-session", [
@@ -146,7 +153,7 @@ test("full seize-name precedence: custom title > session-derived name > ai-title
   assert.equal(derive3({}), null); // never cwd basename — null signals "broke"
 });
 
-// --- delivery: push or poll (ported from claude-peers' current server, 2026-09-17) ---
+// --- delivery: push or poll (matches claude-peers' current server) ---
 // A session launched without the --channels allowlist never renders a push, and
 // cloud-model sessions cannot render one at all. The handshake must detect
 // that and instruct the session to poll — otherwise inbound Slack messages are

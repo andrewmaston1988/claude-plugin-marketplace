@@ -89,10 +89,10 @@ const errText = (prefix, e) => text(`${prefix}: ${e instanceof Error ? e.message
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Encode a cwd into the segment Claude Code uses for its per-project session dir
-// (e.g. `C:\code\long-night` → `C--code-long-night`): backslash, forward slash, and
-// colon all rewritten to `-`. Matches the `~/.claude/projects/<encoded-cwd>/` layout.
+// (e.g. `C:\code\long-night` → `C--code-long-night`): backslash, forward slash,
+// colon, and dot all rewritten to `-`. Matches `~/.claude/projects/<encoded-cwd>/`.
 export function encodeCwd(cwd) {
-  return String(cwd).replace(/[\\/:]/g, "-");
+  return String(cwd).replace(/[\\/.:]/g, "-");
 }
 
 // Scan the most-recently-modified session JSONL in this project's session dir for the

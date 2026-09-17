@@ -143,7 +143,7 @@ test("unknown POST path is a 404", async (t) => {
   assert.equal(notFound.status, 404);
 });
 
-// --- delivery retention (ported from claude-peers' current broker, 2026-09-17) ---
+// --- delivery retention (matches claude-peers' current broker) ---
 // The push is a channel notification into a session that may never render it
 // (no --channels allowlist on launch, or a provider whose sessions cannot render
 // at all), and nothing acks back. Deleting on push destroyed the message before

@@ -85,7 +85,7 @@ export function createBrokerClient({
     },
     listPeers: (opts = {}) => brokerFetch("/list-peers", { scope: "machine", cwd: "", git_root: null, include_adhoc: true, ...opts }),
     sendMessage: (fromId, toId, text) => brokerFetch("/send-message", { from_id: fromId, to_id: toId, text }),
-    pollMessages: (id) => brokerFetch("/poll-messages", { id }).then((r) => r.messages ?? []),
+    pollMessages: (id, fromId) => brokerFetch("/poll-messages", fromId ? { id, from_id: fromId } : { id }).then((r) => r.messages ?? []),
     register: (body) => brokerFetch("/register", body),
     heartbeat: (id) => brokerFetch("/heartbeat", { id }),
     unregister: (id) => brokerFetch("/unregister", { id }),

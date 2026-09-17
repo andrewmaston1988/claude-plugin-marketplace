@@ -114,14 +114,18 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
     // the stale claim) so Slack is never silent.
     const claim = remote?.claims?.get(channel) ?? null;
     if (claim && remote?.broker) {
-      let alive = false;
-      try { alive = await remote.broker.isAlive(claim.peer_id); } catch { alive = false; }
-      if (alive) {
+      // null = broker unreachable: fall through to spawn WITHOUT reaping — a
+      // transient outage must not convert a live channel to claude -p spawns.
+      let alive = null;
+      try { alive = await remote.broker.isAlive(claim.peer_id); } catch { /* fall through */ }
+      if (alive === true) {
         await routeToLiveSession({ web, channel, threadTs, text, claim, broker: remote.broker, config, log, cmdEcho: deriveTitle(text) });
         return;
       }
-      try { await remote.claims.release(claim.peer_id); } catch { /* reaped below */ }
-      log.info("remote-control claim reaped (peer dead), falling back to spawn", { channel, peer_id: claim.peer_id });
+      if (alive === false) {
+        try { await remote.claims.release(claim.peer_id); } catch { /* reaped below */ }
+        log.info("remote-control claim reaped (peer dead), falling back to spawn", { channel, peer_id: claim.peer_id });
+      }
     }
 
     const existingSession = store.get(key);
@@ -325,12 +329,9 @@ export async function postError({ web, channel, placeholderTs, threadTs, message
 }
 
 /**
- * Route a Slack message to a live interactive session via the internal broker.
- * Posts a "📱 routed to live session…" placeholder, sends the text to the claiming
- * peer, then polls the broker for that peer's reply (updating the placeholder with
- * it). On a ~120s timeout, posts "live session didn't reply in time" and retains
- * the claim (the peer may be slow, not dead). Reuses postResponse for the reply so
- * markdown/tables/splitting match the spawn path.
+ * Route a claimed channel's message to its live session: placeholder, broker
+ * send, poll the peer's reply, post it in place. On timeout the claim is
+ * retained (slow, not dead) and "didn't reply in time" is posted.
  */
 export async function routeToLiveSession({ web, channel, threadTs, text, claim, broker, config, log, cmdEcho }) {
   const timeoutMs = config.remote?.replyTimeoutMs ?? 120_000;
@@ -351,9 +352,10 @@ export async function routeToLiveSession({ web, channel, threadTs, text, claim, 
     return;
   }
 
-  // Drop any stale reply from a previous routed message before sending this one,
-  // so a late answer is never served as the reply to the current message.
-  try { await broker.pollMessages("slack-bridge"); } catch { /* best-effort */ }
+  // Drop any stale reply from THIS peer before sending, so a late answer to a
+  // previous message is never served as the reply to the current one. Scoped by
+  // from_id: concurrent claimed channels never drain each other's replies.
+  try { await broker.pollMessages("slack-bridge", claim.peer_id); } catch { /* best-effort */ }
 
   try {
     const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
@@ -381,15 +383,15 @@ export async function routeToLiveSession({ web, channel, threadTs, text, claim, 
   }
 }
 
-// Drain the broker's slack-bridge queue looking for a reply from `peerId`. Drained
-// messages from other peers are dropped in v1 (single-live-session common case);
-// a daemon-wide poll loop for unsolicited outbound is a future enhancement.
+// Poll the broker for THIS peer's reply only (from_id-scoped, so concurrent
+// claimed channels never take each other's replies). Unsolicited outbound from
+// a session with no in-flight routed message is a declared v1 limitation.
 async function pollReply({ broker, peerId, timeoutMs, pollIntervalMs, log }) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     let msgs = [];
-    try { msgs = await broker.pollMessages("slack-bridge") ?? []; } catch (e) { log?.warn?.("poll error", { error: e.message }); }
-    const reply = msgs.find((m) => m && m.from_id === peerId);
+    try { msgs = await broker.pollMessages("slack-bridge", peerId) ?? []; } catch (e) { log?.warn?.("poll error", { error: e.message }); }
+    const reply = msgs[0] ?? null;
     if (reply) return reply;
     await new Promise((r) => setTimeout(r, pollIntervalMs));
   }
