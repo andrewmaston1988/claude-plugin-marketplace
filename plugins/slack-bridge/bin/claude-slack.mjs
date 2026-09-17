@@ -241,7 +241,22 @@ if (cmd === "remote-mcp") {
   // slack_seize / slack_release / slack_post tools.
   const paths = getDefaultPaths();
   const configArg = getFlag("--config", rest) ?? paths.configFile;
-  const config = await loadConfig({ configPath: configArg });
+  let config;
+  try {
+    config = await loadConfig({ configPath: configArg });
+  } catch {
+    // Manifest-declared server: this loads in sessions on plugin installs that
+    // never ran setup. Quiet exit — a missing config is "not set up", not an
+    // error worth spewing into every session's MCP log.
+    process.stderr.write(`slack-bridge remote-mcp: no config at ${configArg} — remote control not set up\n`);
+    setTimeout(() => process.exit(0), 150);
+    return;
+  }
+  if (!config.remote?.controlToken) {
+    process.stderr.write("slack-bridge remote-mcp: no remote.controlToken — remote control disabled, exiting\n");
+    setTimeout(() => process.exit(0), 150);
+    return;
+  }
   const { createRemoteMcpServer } = await import("../src/remote-mcp/server.mjs");
   const { createLogger: _cl } = await import("../src/log.mjs");
   const log = _cl({ logDir: paths.logDir, tag: "remote-mcp" });
@@ -254,9 +269,11 @@ if (cmd === "broker") {
   const paths = getDefaultPaths();
   const configArg = getFlag("--config", rest) ?? paths.configFile;
   let brokerPort;
+  let brokerToken = null;
   try {
     const c = await loadConfig({ configPath: configArg });
     brokerPort = c.remote?.brokerPort ?? 7898;
+    brokerToken = c.remote?.controlToken ?? null;
   } catch { brokerPort = 7898; }
   const portOverride = getFlag("--port", rest);
   if (portOverride) brokerPort = parseInt(portOverride, 10);
@@ -271,7 +288,7 @@ if (cmd === "broker") {
     // createBroker calls log(msg, extra) as a plain function, not a logger object.
     const brokerLog = (msg, extra) => log.info(msg, extra);
     let shutdown;
-    const broker = createBroker({ stateFile, log: brokerLog, onShutdown: () => shutdown() });
+    const broker = createBroker({ stateFile, log: brokerLog, token: brokerToken, onShutdown: () => shutdown() });
     try { await broker.listen(brokerPort); }
     catch (e) {
       if (e.code === "EADDRINUSE") { log(`port ${brokerPort} already in use — another broker is running`); setTimeout(() => process.exit(0), 150); return; }
@@ -302,7 +319,13 @@ if (cmd === "broker") {
 
   if (sub === "stop") {
     if (!(await _brokerHealth(brokerPort))) { _clearPidFile(pidFile); process.stdout.write(`broker not running on port ${brokerPort} (stale pid cleared)\n`); setTimeout(() => process.exit(0), 150); return; }
-    try { await fetch(`http://127.0.0.1:${brokerPort}/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) }); } catch {}
+    try {
+      await fetch(`http://127.0.0.1:${brokerPort}/shutdown`, {
+        method: "POST",
+        headers: brokerToken ? { Authorization: `Bearer ${brokerToken}` } : {},
+        signal: AbortSignal.timeout(2000),
+      });
+    } catch {}
     for (let i = 0; i < 20; i++) {
       await new Promise((r) => setTimeout(r, 150));
       if (!(await _brokerHealth(brokerPort, 500))) { process.stdout.write(`broker on port ${brokerPort} stopped\n`); setTimeout(() => process.exit(0), 150); return; }
@@ -403,10 +426,12 @@ if (config.remote?.controlToken) {
   const { createBrokerClient } = await import("../src/remote/broker-client.mjs");
   const { createControlServer } = await import("../src/remote/control.mjs");
   const claims = createClaimsStore({ path: _join(paths.stateDir, "remote-claims.json"), log });
-  const broker = createBrokerClient({ port: config.remote.brokerPort, log });
+  const broker = createBrokerClient({ port: config.remote.brokerPort, token: config.remote.controlToken, log });
   const control = createControlServer({
     web, claims, token: config.remote.controlToken,
-    canCreateChannels: !!config.remote.createChannels, log,
+    canCreateChannels: !!config.remote.createChannels,
+    operatorUserId: config.remote.operatorUserId ?? null,
+    log,
   });
   await broker.ensureBroker();
   await control.listen(config.remote.controlPort);

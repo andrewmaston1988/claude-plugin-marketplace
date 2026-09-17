@@ -23,6 +23,7 @@ export function createControlServer({
   claims,
   token,
   canCreateChannels = false,
+  operatorUserId = null,
   log = () => {},
 } = {}) {
   // `name` labels the created channel: #rc-<slug> (e.g. #rc-long-night). The rc-
@@ -60,14 +61,21 @@ export function createControlServer({
           topic = `live session ${peerId}`;
         } catch (e) { log("setTopic failed (needs channels:manage scope)", { error: e.message }); }
       }
-      return { id: channelId, name: channelName, topic };
+      return { id: channelId, name: channelName, topic, is_dm: false };
     }
-    // DM-seize fallback (no channel-creation scopes): join an existing IM with the bot.
-    // The operator's DM is the natural remote-control surface when scopes are absent.
+    // DM-seize fallback (no channel-creation scopes): the operator's own DM
+    // with the bot, matched on remote.operatorUserId. Never the first IM in
+    // the list — that could be anyone's DM.
     if (web.conversationsList) {
-      const list = await web.conversationsList({ types: "im", limit: 10 });
-      const im = list?.channels?.[0];
-      if (im) return { id: im.id, name: im.name ?? null, topic: null };
+      if (!operatorUserId) {
+        throw new Error("no channel specified, no channel-creation scopes, and no remote.operatorUserId to select the DM — provide a channel or configure either");
+      }
+      const list = await web.conversationsList({ types: "im", limit: 100 });
+      const im = list?.channels?.find((c) => c.user === operatorUserId);
+      if (!im) {
+        throw new Error(`no DM with the bot found for operator user ${operatorUserId} — message the bot once so the DM exists`);
+      }
+      return { id: im.id, name: im.name ?? null, topic: null, is_dm: true };
     }
     throw new Error("no channel specified and channel-creation scopes not configured — provide a channel or add channels:write/channels:manage");
   }
@@ -75,10 +83,14 @@ export function createControlServer({
   const handlers = {
     "/claim": async (body) => {
       if (!body.peer_id) return { ok: false, error: "peer_id required" };
-      const { id, name, topic } = await claimChannel(body.peer_id, body.channel, body.name);
+      // Pre-check the claim store BEFORE creating any Slack channel, so a
+      // rejected claim (held channel, second channel) never orphans one.
+      const pre = claims.canClaim(body.peer_id, body.channel ?? null);
+      if (!pre.ok) return pre;
+      const { id, name, topic, is_dm } = await claimChannel(body.peer_id, body.channel, body.name);
       const r = claims.claim(body.peer_id, id, { channelName: name });
       if (!r.ok) return r;
-      return { ok: true, channel: id, channel_name: name, topic };
+      return { ok: true, channel: id, channel_name: name, topic, is_dm: !!is_dm };
     },
     "/release": async (body) => {
       if (!body.peer_id) return { ok: false, error: "peer_id required" };

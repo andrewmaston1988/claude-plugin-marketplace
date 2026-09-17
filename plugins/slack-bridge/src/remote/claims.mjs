@@ -29,13 +29,33 @@ export function createClaimsStore({ path, log }) {
     cache = data;
   }
 
+  // Pure predicate shared by /claim's pre-check (before any Slack channel is
+  // created) and claim() itself: channel held by another peer, or this peer
+  // already holding a different channel. One claim per peer because replies
+  // are drained from_id-scoped — a second claim's replies would surface in
+  // the first claim's Slack channel.
+  function canClaim(peerId, channel) {
+    const data = load();
+    const existing = data[channel];
+    if (existing && existing.peer_id !== peerId) {
+      return { ok: false, error: `channel ${channel} already claimed by ${existing.peer_id}` };
+    }
+    const held = Object.entries(data).find(([ch, c]) => c.peer_id === peerId && ch !== channel);
+    if (held) {
+      const label = held[1].channel_name ? `#${held[1].channel_name}` : held[0];
+      return { ok: false, error: `peer already holds ${label} — release it first (one channel per session)` };
+    }
+    return { ok: true };
+  }
+
   return {
+    canClaim,
+
     claim(peerId, channel, { channelName } = {}) {
+      const pre = canClaim(peerId, channel);
+      if (!pre.ok) return pre;
       const data = load();
       const existing = data[channel];
-      if (existing && existing.peer_id !== peerId) {
-        return { ok: false, error: `channel ${channel} already claimed by ${existing.peer_id}` };
-      }
       const now = new Date().toISOString();
       data[channel] = {
         peer_id: peerId,

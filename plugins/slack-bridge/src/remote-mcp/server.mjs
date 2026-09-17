@@ -95,13 +95,11 @@ export function encodeCwd(cwd) {
   return String(cwd).replace(/[\\/.:]/g, "-");
 }
 
-// Scan the most-recently-modified session JSONL in this project's session dir for the
-// latest record of `recordType` and return its `field` value (or null). The session that
-// just spawned this MCP server is the one actively writing its JSONL, so
-// "most-recently-modified" is a reliable proxy for "the current session" without needing
-// CC to pass a session-id env var. `projectsDir` is injectable for tests (defaults to
-// `~/.claude/projects`). Reads only the last 1 MB so a multi-hundred-MB transcript does
-// not stall a seize.
+// Scan the most-recently-modified session JSONL in this project's session dir for
+// the latest record of `recordType` and return its `field` value (newest match wins).
+// "Most-recently-modified" is a heuristic for "the current session" — wrong only when
+// two sessions share a project dir, and a miss falls through to the next name source.
+// `projectsDir` is injectable for tests (defaults to `~/.claude/projects`).
 function readLatestSessionField(cwd, recordType, field, { projectsDir } = {}) {
   try {
     const dir = (projectsDir ?? path.join(os.homedir(), ".claude", "projects")) + "";
@@ -121,23 +119,36 @@ function readLatestSessionField(cwd, recordType, field, { projectsDir } = {}) {
     if (!latest) return null;
     const fp = path.join(projDir, latest);
     const size = fs.statSync(fp).size;
-    const tail = Math.min(size, 1_000_000);
-    const buf = Buffer.alloc(tail);
+    // Forward chunk scan with a line carry: the record can sit anywhere in the
+    // file (a title set hours ago on a transcript that has grown since), so a
+    // fixed tail read would miss it; chunking keeps memory bounded.
+    const CHUNK = 1_000_000;
     const fd = fs.openSync(fp, "r");
+    let value = null;
     try {
-      fs.readSync(fd, buf, 0, tail, size - tail);
+      let pos = 0;
+      let carry = "";
+      const checkLine = (line) => {
+        if (!line.includes(recordType)) return;
+        try {
+          const o = JSON.parse(line);
+          if (o && o.type === recordType && o[field]) value = o[field];
+        } catch {
+          /* corrupt line or a utf8 char split at the chunk boundary — skip */
+        }
+      };
+      while (pos < size) {
+        const len = Math.min(CHUNK, size - pos);
+        const buf = Buffer.alloc(len);
+        fs.readSync(fd, buf, 0, len, pos);
+        pos += len;
+        const lines = (carry + buf.toString("utf8")).split("\n");
+        carry = lines.pop() ?? ""; // partial tail line — rejoined with the next chunk
+        for (const line of lines) checkLine(line);
+      }
+      if (carry) checkLine(carry);
     } finally {
       fs.closeSync(fd);
-    }
-    let value = null;
-    for (const line of buf.toString("utf8").split("\n")) {
-      if (!line.includes(recordType)) continue;
-      try {
-        const o = JSON.parse(line);
-        if (o && o.type === recordType && o[field]) value = o[field];
-      } catch {
-        /* partial line at the split boundary — skip */
-      }
     }
     return value;
   } catch {
@@ -182,9 +193,11 @@ export function createRemoteMcpServer({
   _setInterval = setInterval,
   _detectChannels = detectChannelsEnabled,
 } = {}) {
-  const brokerUrl = `http://127.0.0.1:${config.remote.brokerPort}`;
-  const controlUrl = `http://127.0.0.1:${config.remote.controlPort}`;
-  const controlToken = config.remote.controlToken;
+  const brokerPort = config.remote?.brokerPort ?? 7898;
+  const controlPort = config.remote?.controlPort ?? 7897;
+  const controlToken = config.remote?.controlToken ?? null;
+  const brokerUrl = `http://127.0.0.1:${brokerPort}`;
+  const controlUrl = `http://127.0.0.1:${controlPort}`;
   const binPath = fileURLToPath(new URL("../../bin/claude-slack.mjs", import.meta.url));
 
   let myId = null;
@@ -201,7 +214,7 @@ export function createRemoteMcpServer({
   }
 
   function spawnBroker() {
-    const child = _spawn(process.execPath, [binPath, "broker", "run", "--port", String(config.remote.brokerPort)], {
+    const child = _spawn(process.execPath, [binPath, "broker", "run", "--port", String(brokerPort)], {
       detached: true, stdio: "ignore", windowsHide: true,
     });
     child.unref();
@@ -226,7 +239,9 @@ export function createRemoteMcpServer({
   async function brokerFetch(path, body, { retried = false } = {}) {
     try {
       const res = await _fetch(`${brokerUrl}${path}`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${controlToken}` },
+        body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(`Broker error (${path}): ${res.status} ${await res.text()}`);
       return await res.json();
@@ -273,7 +288,7 @@ export function createRemoteMcpServer({
         // fragment. Never the cwd basename — a project-dir channel name means broke.
         const name = readSessionName(_cwd) || args.name || readSessionAiTitle(_cwd) || null;
         const r = await controlFetch("/claim", { peer_id: myId, channel: args.channel ?? null, name });
-        const label = r.channel_name ? `#${r.channel_name}` : r.channel;
+        const label = r.is_dm ? "your DM with the bot" : r.channel_name ? `#${r.channel_name}` : r.channel;
         return text(`📱 Slack remote ready: ${label}${r.topic ? ` — ${r.topic}` : ""}. DM it from a second device; inbound messages arrive here as a <channel source=\"slack-bridge\"> block. Reply with slack_post.`);
       } catch (e) {
         return errText("Seize failed", e);
@@ -332,6 +347,17 @@ export function createRemoteMcpServer({
 
   async function onRequest(method, params) {
     if (method === "initialize") {
+      // Dormant (no remote.controlToken): honest empty state — no tools, no
+      // reply instructions. The session gets a clean "off" instead of a
+      // half-configured server it cannot use.
+      if (!controlToken) {
+        return {
+          protocolVersion: PROTOCOL_VERSION,
+          capabilities: { tools: {} },
+          serverInfo: { name: "slack-bridge-remote", version: SERVER_VERSION },
+          instructions: "slack-bridge remote control is not configured (no remote.controlToken in config.json). Nothing to do here — run claude-slack setup to enable it.",
+        };
+      }
       channelsAvailable ??= _detectChannels();
       if (!channelsAvailable) log("channels unavailable — instructing this session to poll");
       return {
@@ -341,8 +367,9 @@ export function createRemoteMcpServer({
         instructions: buildInstructions(channelsAvailable),
       };
     }
-    if (method === "tools/list") return { tools: TOOLS };
+    if (method === "tools/list") return { tools: controlToken ? TOOLS : [] };
     if (method === "tools/call") {
+      if (!controlToken) throw new Error("Remote control is not configured (no remote.controlToken in config.json)");
       const handler = toolHandlers[params.name];
       if (!handler) {
         const e = new Error(`Unknown tool: ${params.name}`);
@@ -381,6 +408,12 @@ export function createRemoteMcpServer({
   }
 
   async function start() {
+    // CONFIG.md: remote control is off unless remote.controlToken is set. Dormant
+    // means dormant — no broker spawn, no poll/heartbeat timers, no registration.
+    if (!controlToken) {
+      log("remote control disabled — no remote.controlToken; server dormant");
+      return;
+    }
     await ensureBroker();
     await register();
     const pollTimer = _setInterval(poll, config.remote.pollIntervalMs);

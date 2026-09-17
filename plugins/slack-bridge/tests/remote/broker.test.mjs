@@ -216,6 +216,80 @@ test("reaping a dead peer drops its retained messages, not just its unpushed one
     "a reaped peer must not leak retained messages");
 });
 
+// --- reserved recipient (the daemon never /register s) ---
+// slack_post routes replies as to_id "slack-bridge". The daemon only ever
+// appears as an ad-hoc sender, which the 1 h ad-hoc reap removes — so the
+// recipient must materialise on demand and survive every reap, or every reply
+// on a cold, restarted, or idle broker fails with "Peer not found".
+
+test("a send TO the reserved slack-bridge id works on a cold broker, before anything sent FROM it", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: reg } = await call("/register", REG);
+  const reply = await call("/send-message", { from_id: reg.id, to_id: "slack-bridge", text: "a reply" });
+  assert.equal(reply.body.ok, true, `send to reserved id failed: ${reply.body.error}`);
+  const { body: polled } = await call("/poll-messages", { id: "slack-bridge" });
+  assert.deepEqual(polled.messages.map((m) => m.text), ["a reply"]);
+});
+
+test("the daemon sender registers as reserved, not the reaped adhoc kind", async (t) => {
+  let now = Date.parse("2026-09-17T12:00:00Z");
+  const { broker, call } = await startBroker(t, { _now: () => new Date(now) });
+  const { body: reg } = await call("/register", REG);
+  await call("/send-message", { from_id: "slack-bridge", to_id: reg.id, text: "hello" });
+  now += 2 * 60 * 60 * 1000; // past the 1 h ad-hoc reap
+  await call("/list-peers", { scope: "machine", cwd: "x", git_root: null, include_adhoc: true }); // triggers reapDead
+  const { body: peers } = await call("/list-peers", { scope: "machine", cwd: "x", git_root: null, include_adhoc: true });
+  const sb = peers.find((p) => p.id === "slack-bridge");
+  assert.ok(sb, "slack-bridge must survive the ad-hoc reap");
+  assert.equal(sb.kind, "reserved", `kind must be reserved, got ${sb.kind}`);
+  broker.reapDead();
+  const { body: after } = await call("/list-peers", { scope: "machine", cwd: "x", git_root: null, include_adhoc: true });
+  assert.ok(after.some((p) => p.id === "slack-bridge"), "reserved peer must never be reaped");
+  const reply = await call("/send-message", { from_id: reg.id, to_id: "slack-bridge", text: "re: hello" });
+  assert.equal(reply.body.ok, true, `reply after idle failed: ${reply.body.error}`);
+});
+
+test("an unknown non-reserved recipient is still rejected — the reserved branch is not an open door", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: reg } = await call("/register", REG);
+  const r = await call("/send-message", { from_id: reg.id, to_id: "no-such-peer", text: "x" });
+  assert.equal(r.body.ok, false);
+  assert.match(r.body.error, /not found/);
+});
+
+test("the reserved peer cannot be unregistered", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: reg } = await call("/register", REG);
+  await call("/send-message", { from_id: reg.id, to_id: "slack-bridge", text: "materialise" });
+  const r = await call("/unregister", { id: "slack-bridge" });
+  assert.equal(r.body.ok, false);
+  assert.match(r.body.error, /reserved/);
+});
+
+// --- token guard (mirrors the control endpoint) ---
+
+test("with a token set, POST routes without a Bearer header get 401", async (t) => {
+  const { port } = await startBroker(t, { token: "sekrit" });
+  const res = await fetch(`http://127.0.0.1:${port}/send-message`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ from_id: "s1", to_id: "slack-bridge", text: "x" }),
+  });
+  assert.equal(res.status, 401);
+});
+
+test("with a token set, a correct Bearer header is accepted and /health stays open", async (t) => {
+  const { port } = await startBroker(t, { token: "sekrit" });
+  const res = await fetch(`http://127.0.0.1:${port}/send-message`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: "Bearer sekrit" },
+    body: JSON.stringify({ from_id: "s1", to_id: "slack-bridge", text: "x" }),
+  });
+  assert.equal(res.status, 200);
+  assert.equal((await res.json()).ok, true);
+  const health = await fetch(`http://127.0.0.1:${port}/health`);
+  assert.equal(health.status, 200, "/health must stay open for liveness probes");
+});
+
 // Pin, already held by the fork's reap: re-registration purges the old id's
 // undelivered queue like a death does — otherwise messages to the old id leak.
 test("re-register purges the old id and its undelivered messages from state", async (t) => {

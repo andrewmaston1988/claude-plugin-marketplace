@@ -198,7 +198,7 @@ Edit `config.json` (path shown in Step 3 above) to adjust any of these:
 
 Remote control lets a **live interactive** Claude Code session seize a Slack channel, so the operator can step away from the terminal and keep talking to that same session from a phone. It is provider-agnostic — it works on any cloud model (GLM, Kimi, …), not just the Anthropic API that the built-in `/rc` requires.
 
-When a channel is claimed, inbound Slack messages are routed to the live session through an internal localhost broker instead of spawning a fresh `claude -p`. The live session replies, and its reply replaces the "📱 routed to live session…" placeholder in Slack. If the live session doesn't reply within ~120 s, the bridge posts a timeout notice and **keeps the claim** (the peer may be slow, not dead). When the claiming session dies, the claim is reaped and Slack falls back to the spawn path.
+When a channel is claimed, inbound Slack messages are routed to the live session through an internal localhost broker instead of spawning a fresh `claude -p`. The live session replies, and its reply replaces the "📱 routed to live session…" placeholder in Slack. If the live session doesn't reply within ~120 s, the bridge posts a timeout notice and **keeps the claim** (the peer may be slow, not dead) — but **a reply arriving after that window is dropped**: the in-flight route is the only thing that knows which Slack channel a reply belongs to, so keep `remote.replyTimeoutMs` generous if your sessions think long. When the claiming session dies, the claim is reaped and Slack falls back to the spawn path.
 
 ### Enabling
 

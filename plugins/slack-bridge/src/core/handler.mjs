@@ -114,8 +114,9 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
     // the stale claim) so Slack is never silent.
     const claim = remote?.claims?.get(channel) ?? null;
     if (claim && remote?.broker) {
-      // null = broker unreachable: fall through to spawn WITHOUT reaping — a
-      // transient outage must not convert a live channel to claude -p spawns.
+      // null = broker unreachable: keep the claim and serve THIS message via the
+      // spawn path — a transient outage costs per-message spawns, not the claim;
+      // routing resumes when the broker returns.
       let alive = null;
       try { alive = await remote.broker.isAlive(claim.peer_id); } catch { /* fall through */ }
       if (alive === true) {
@@ -353,8 +354,9 @@ export async function routeToLiveSession({ web, channel, threadTs, text, claim, 
   }
 
   // Drop any stale reply from THIS peer before sending, so a late answer to a
-  // previous message is never served as the reply to the current one. Scoped by
-  // from_id: concurrent claimed channels never drain each other's replies.
+  // previous message is never served as the reply to the current one. from_id
+  // scoping plus one-claim-per-peer (claims store) keeps concurrent claimed
+  // channels from draining each other's replies.
   try { await broker.pollMessages("slack-bridge", claim.peer_id); } catch { /* best-effort */ }
 
   try {
@@ -383,9 +385,10 @@ export async function routeToLiveSession({ web, channel, threadTs, text, claim, 
   }
 }
 
-// Poll the broker for THIS peer's reply only (from_id-scoped, so concurrent
-// claimed channels never take each other's replies). Unsolicited outbound from
-// a session with no in-flight routed message is a declared v1 limitation.
+// Poll the broker for THIS peer's reply only (from_id-scoped, and the claims
+// store allows one channel per peer, so concurrent claims can't take each
+// other's replies). Unsolicited outbound from a session with no in-flight
+// routed message is a declared v1 limitation.
 async function pollReply({ broker, peerId, timeoutMs, pollIntervalMs, log }) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {

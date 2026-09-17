@@ -74,3 +74,34 @@ test("all() returns a snapshot of every claim", async () => {
   const all = store.all();
   assert.deepEqual(Object.keys(all).sort(), ["C1", "C2"]);
 });
+
+// One claim per peer: replies are drained from_id-scoped, so a peer holding two
+// channels would see the second route's replies surface in the first's Slack
+// channel. The store rejects the second channel before any Slack channel is created.
+test("a peer holding one channel cannot claim a second", async () => {
+  const store = createClaimsStore({ path: tmpFile() });
+  await store.claim("peerA", "C1", { channelName: "rc-one" });
+  const r = await store.claim("peerA", "C2");
+  assert.equal(r.ok, false);
+  assert.match(r.error, /already holds/i);
+  assert.equal(store.get("C1").peer_id, "peerA", "original claim must stay intact");
+  assert.equal(store.get("C2"), null, "the rejected claim must not be recorded");
+});
+
+test("after release, the same peer can claim a different channel", async () => {
+  const store = createClaimsStore({ path: tmpFile() });
+  await store.claim("peerA", "C1");
+  await store.release("peerA");
+  const r = await store.claim("peerA", "C2");
+  assert.equal(r.ok, true);
+});
+
+test("canClaim is the pure pre-check — same rules, no writes", async () => {
+  const store = createClaimsStore({ path: tmpFile() });
+  await store.claim("peerB", "C1", { channelName: "rc-one" });
+  assert.equal(store.canClaim("peerB", "C2").ok, false, "second channel for the same peer");
+  assert.equal(store.canClaim("peerC", "C1").ok, false, "channel held by another peer");
+  assert.equal(store.canClaim("peerB", "C1").ok, true, "idempotent re-claim of held channel");
+  assert.equal(store.canClaim("peerD", "C3").ok, true, "fresh claim");
+  assert.equal(store.get("C2"), null, "canClaim must never write");
+});

@@ -13,6 +13,7 @@ const isConnectionError = (e) =>
 
 export function createBrokerClient({
   port,
+  token = null,
   binPath = fileURLToPath(new URL("../../bin/claude-slack.mjs", import.meta.url)),
   log = () => {},
   _fetch = fetch,
@@ -21,6 +22,12 @@ export function createBrokerClient({
   _setInterval = setInterval,
 } = {}) {
   const baseUrl = `http://127.0.0.1:${port}`;
+  // /health stays unauthenticated on purpose: it's the liveness probe that
+  // decides whether to spawn the broker, and the token comes from the same
+  // config the broker itself was started with.
+  const authHeaders = token
+    ? { "Content-Type": "application/json", Authorization: `Bearer ${token}` }
+    : { "Content-Type": "application/json" };
 
   async function health() {
     try {
@@ -63,7 +70,7 @@ export function createBrokerClient({
     try {
       const res = await _fetch(`${baseUrl}${path}`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders,
         body: JSON.stringify(body),
       });
       if (!res.ok) throw new Error(`Broker error (${path}): ${res.status} ${await res.text()}`);
@@ -89,6 +96,6 @@ export function createBrokerClient({
     register: (body) => brokerFetch("/register", body),
     heartbeat: (id) => brokerFetch("/heartbeat", { id }),
     unregister: (id) => brokerFetch("/unregister", { id }),
-    shutdown: () => _fetch(`${baseUrl}/shutdown`, { method: "POST", signal: AbortSignal.timeout(2000) }).catch(() => {}),
+    shutdown: () => _fetch(`${baseUrl}/shutdown`, { method: "POST", headers: authHeaders, signal: AbortSignal.timeout(2000) }).catch(() => {}),
   };
 }

@@ -102,6 +102,39 @@ export async function runDoctor({ config, paths, web, log }) {
       }
     });
 
+    // Exercises the exact route slack_post uses: a send TO the reserved
+    // "slack-bridge" recipient. An unpatched broker rejects it ("Peer not found"),
+    // so this goes genuinely red on the reply-path BLOCKER the plan called out.
+    // The probe is taken back scoped by from_id "doctor" — no live reply path
+    // ever sees it, and a delivered residue self-cleans in 24h.
+    await check("Remote-control reply recipient", async () => {
+      const port = config.remote.brokerPort ?? 7898;
+      const headers = { "Content-Type": "application/json", Authorization: `Bearer ${config.remote.controlToken}` };
+      const probe = `doctor probe ${new Date().toISOString()}`;
+      try {
+        const send = await fetch(`http://127.0.0.1:${port}/send-message`, {
+          method: "POST", headers,
+          body: JSON.stringify({ from_id: "doctor", to_id: "slack-bridge", text: probe }),
+          signal: AbortSignal.timeout(2000),
+        });
+        const body = await send.json().catch(() => ({}));
+        if (!send.ok || body.ok === false) {
+          throw new Error(body.error ?? `broker on ${port} returned ${send.status} — the daemon's reply route is broken; restart the broker (broker stop && broker start)`);
+        }
+        await fetch(`http://127.0.0.1:${port}/poll-messages`, {
+          method: "POST", headers,
+          body: JSON.stringify({ id: "slack-bridge", from_id: "doctor" }),
+          signal: AbortSignal.timeout(2000),
+        }).catch(() => {});
+        return "reserved recipient accepts replies (send + scoped poll-back)";
+      } catch (e) {
+        if (e instanceof TypeError || /ECONNREFUSED|ECONNRESET|fetch failed|aborted|timeout/i.test(e?.message ?? "")) {
+          return "broker not reachable — probed on the next doctor run while it is up";
+        }
+        throw e;
+      }
+    });
+
     await check("Remote-control endpoint", async () => {
       const port = config.remote.controlPort ?? 7897;
       try {
@@ -117,13 +150,17 @@ export async function runDoctor({ config, paths, web, log }) {
       }
     });
 
-    checks.push({
-      name: "Remote-control scopes",
-      ok: true,
-      detail: config.remote.createChannels
-        ? "channels:write/manage configured — /slack-remote creates #rc-<context>"
-        : "DM-seize default (no channels:write/manage) — /slack-remote seizes an existing DM",
-    });
+    if (config.remote.createChannels) {
+      checks.push({ name: "Remote-control scopes", ok: true, detail: "channels:write/manage configured — /slack-remote creates #rc-<context>" });
+    } else {
+      checks.push({
+        name: "Remote-control DM-seize",
+        ok: !!config.remote.operatorUserId,
+        detail: config.remote.operatorUserId
+          ? `seizes the operator's DM (user ${config.remote.operatorUserId})`
+          : "no remote.operatorUserId — DM-seize refuses instead of guessing a DM. Set it, or enable remote.createChannels",
+      });
+    }
   } else {
     checks.push({ name: "Remote control", ok: true, detail: "disabled (no remote.controlToken)" });
   }

@@ -27,6 +27,7 @@ async function startControl(t, opts = {}) {
     claims,
     token: opts.token ?? "secret",
     canCreateChannels: opts.canCreateChannels ?? true,
+    operatorUserId: opts.operatorUserId ?? null,
     log: () => {},
   });
   t.after(() => server.close());
@@ -129,4 +130,54 @@ test("requests with the wrong bearer token are rejected with 401", async (t) => 
   const { call } = await startControl(t);
   const r = await call("/claim", { peer_id: "peerA" }, { token: "wrong" });
   assert.equal(r.status, 401);
+});
+
+// A rejected claim must not orphan a freshly-created Slack channel: the store
+// pre-check runs BEFORE claimChannel touches Slack.
+test("/claim by a peer already holding a channel is rejected BEFORE any Slack channel is created", async (t) => {
+  const web = makeWeb();
+  const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "ctrl2-")), "claims.json") });
+  await claims.claim("peerA", "C1", { channelName: "rc-one" });
+  const { call } = await startControl(t, { web, claims });
+  const r = await call("/claim", { peer_id: "peerA", name: "second-context" });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, false);
+  assert.match(r.body.error, /already holds/i);
+  assert.ok(!web.calls.some(([c]) => c === "conversationsCreate"),
+    "a rejected claim must not orphan a created Slack channel");
+});
+
+// --- DM-seize (createChannels false) ---
+// The fallback selects the OPERATOR's DM by remote.operatorUserId — never the
+// first IM in the list, which could be anyone's DM.
+
+test("DM-seize picks the operator's DM when operatorUserId is set", async (t) => {
+  const web = {
+    conversationsList: async (p) => ({ ok: true, channels: [
+      { id: "D-other", user: "U999", name: null },
+      { id: "D-op", user: "U123", name: null },
+    ] }),
+  };
+  const { call, claims } = await startControl(t, { web, canCreateChannels: false, operatorUserId: "U123" });
+  const r = await call("/claim", { peer_id: "peerA" });
+  assert.equal(r.body.ok, true, r.body.error);
+  assert.equal(r.body.channel, "D-op", "must match the configured operator's DM, not the first IM");
+  assert.equal(r.body.is_dm, true);
+  assert.equal(claims.get("D-op").peer_id, "peerA");
+});
+
+test("DM-seize refuses when no operatorUserId is configured — never guesses a DM", async (t) => {
+  const web = { conversationsList: async () => ({ ok: true, channels: [{ id: "D-anyone", user: "U999" }] }) };
+  const { call } = await startControl(t, { web, canCreateChannels: false, operatorUserId: null });
+  const r = await call("/claim", { peer_id: "peerA" });
+  assert.equal(r.body.ok, false);
+  assert.match(r.body.error, /operatorUserId|no channel/i);
+});
+
+test("DM-seize refuses when the operator has no DM with the bot yet", async (t) => {
+  const web = { conversationsList: async () => ({ ok: true, channels: [{ id: "D-other", user: "U999" }] }) };
+  const { call } = await startControl(t, { web, canCreateChannels: false, operatorUserId: "U123" });
+  const r = await call("/claim", { peer_id: "peerA" });
+  assert.equal(r.body.ok, false);
+  assert.match(r.body.error, /no DM/);
 });

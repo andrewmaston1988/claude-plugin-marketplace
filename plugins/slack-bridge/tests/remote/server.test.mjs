@@ -115,6 +115,20 @@ test("readers tolerate unparseable lines (partial split at the tail boundary)", 
   assert.equal(readSessionAiTitle("C:\\code\\messy", { projectsDir: dir }), "Final Auto");
 });
 
+// A custom title can be set hours ago on a transcript that has grown megabytes
+// since — a fixed last-1MB tail read misses it and the channel gets a
+// context-free name. The scan must cover the whole file, chunked.
+test("readSessionName finds a custom-title set further back than the last 1 MB", () => {
+  const dir = tmpProjectsDir();
+  const filler = `{"type":"message","content":"${"x".repeat(200)}"}`;
+  const lines = [`{"type":"custom-title","customTitle":"Ancient Name","sessionId":"s1"}`];
+  const need = Math.ceil(1_100_000 / (filler.length + 1));
+  for (let i = 0; i < need; i++) lines.push(filler);
+  writeSession(dir, "C--code-huge", "s1", lines);
+  assert.equal(readSessionName("C:\\code\\huge", { projectsDir: dir }), "Ancient Name",
+    "a title beyond the last 1 MB must still be found");
+});
+
 test("full seize-name precedence: custom title > session-derived name > ai-title (never cwd)", () => {
   const dir = tmpProjectsDir();
   writeSession(dir, "C--code-long-night", "s1", [
@@ -217,4 +231,57 @@ test("check_messages recovers a message the push timer already drained (the oper
   const res = await server._onRequest("tools/call", { name: "check_messages" });
   assert.ok(res.content[0].text.includes("hello from mobile"),
     "a message pushed-but-unrendered must survive to check_messages");
+});
+
+// --- dormant (no remote.controlToken) ---
+// The manifest declares this server, so it loads in every plugin-installed
+// session — including installs that never ran setup. Dormant means dormant: a
+// clean "off" (no tools, honest instructions), and start() touches nothing —
+// no broker spawn, no timers, no registration into a live broker's state.
+
+test("no controlToken: initialize reports not-configured, tools/list is empty, tools/call refuses", async () => {
+  const server = createRemoteMcpServer({
+    config: { remote: { brokerPort: 59998, controlPort: 0, controlToken: null } },
+    input: new PassThrough(),
+    output: new PassThrough(),
+  });
+  const init = await server._onRequest("initialize", {});
+  assert.match(init.instructions, /not configured/);
+  const tools = await server._onRequest("tools/list", {});
+  assert.deepEqual(tools.tools, []);
+  await assert.rejects(server._onRequest("tools/call", { name: "slack_seize" }), /not configured/);
+});
+
+test("no controlToken: start() starts nothing — no broker spawn, no timers, no registration", async () => {
+  const server = createRemoteMcpServer({
+    config: { remote: { brokerPort: 59998, controlPort: 0, controlToken: null, pollIntervalMs: 60_000, heartbeatIntervalMs: 60_000 } },
+    input: new PassThrough(),
+    output: new PassThrough(),
+    _spawn: () => { throw new Error("dormant server must not spawn the broker"); },
+    _setInterval: () => { throw new Error("dormant server must not start timers"); },
+  });
+  await server.start(); // must return early, not reject with the injected errors
+  assert.equal(server._myId(), null, "dormant server must not register");
+});
+
+test("a config with no remote key at all constructs dormant (defensive factory)", async () => {
+  const server = createRemoteMcpServer({ config: {}, input: new PassThrough(), output: new PassThrough() });
+  const init = await server._onRequest("initialize", {});
+  assert.match(init.instructions, /not configured/);
+  assert.deepEqual((await server._onRequest("tools/list", {})).tools, []);
+});
+
+// --- broker auth (mirrors the control endpoint's token guard) ---
+
+test("brokerFetch sends the Bearer header — requests against a token-guarded broker succeed", async (t) => {
+  const broker = createBroker({ stateFile: tmpState(), token: "t" });
+  t.after(() => broker.close());
+  const port = await broker.listen(0);
+  const server = createRemoteMcpServer({
+    config: { remote: { brokerPort: port, controlPort: 0, controlToken: "t", pollIntervalMs: 60_000, heartbeatIntervalMs: 60_000 } },
+    input: new PassThrough(),
+    output: new PassThrough(),
+  });
+  const peers = await server._brokerFetch("/list-peers", { scope: "machine", cwd: "x", git_root: null });
+  assert.ok(Array.isArray(peers), "a token-guarded broker must accept the server's credentialed fetch");
 });

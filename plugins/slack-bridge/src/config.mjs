@@ -24,6 +24,7 @@ const DEFAULTS = {
     controlPort: 7897,
     controlToken: null,
     createChannels: false,
+    operatorUserId: null,
     replyTimeoutMs: 120_000,
     replyPollIntervalMs: 1_000,
     pollIntervalMs: 1_000,

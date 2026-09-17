@@ -10,6 +10,11 @@ const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 // Ad-hoc sender ids arrive from outside the register flow — constrain them.
 const ADHOC_ID_RE = /^[a-z0-9][a-z0-9_-]{0,31}$/;
 const ADHOC_REAP_MS = 60 * 60 * 1000;
+// The daemon never /register s — it appears only as a sender (auto-registered
+// adhoc) and as a recipient. Ad-hoc peers are reaped after 1 h, so a reserved
+// recipient must not depend on prior traffic: it is materialised on receive
+// and never reaped, or every reply on a cold or restarted broker fails.
+const RESERVED_PEER_IDS = new Set(["slack-bridge"]);
 // A pushed message is kept so check_messages can still find it: the push is a
 // notification with no ack, and a session that never renders it (no --channels
 // allowlist on launch, or a provider whose sessions cannot render at all) must
@@ -22,6 +27,7 @@ const MAX_BODY_BYTES = 1_000_000;
 export function createBroker({
   stateFile = null,
   log = () => {},
+  token = null,
   onShutdown = null,
   _kill = (pid) => process.kill(pid, 0),
   _now = () => new Date(),
@@ -49,6 +55,7 @@ export function createBroker({
   }
 
   function isAlive(peer) {
+    if (peer.kind === "reserved") return true; // materialised on receive, immune to reap
     if (peer.kind === "adhoc") return _now() - new Date(peer.last_seen) < ADHOC_REAP_MS;
     try {
       _kill(peer.pid);
@@ -125,19 +132,31 @@ export function createBroker({
 
     "/send-message"(body) {
       if (!state.peers[body.to_id]) {
-        return { ok: false, error: `Peer ${body.to_id} not found` };
+        if (!RESERVED_PEER_IDS.has(body.to_id)) {
+          return { ok: false, error: `Peer ${body.to_id} not found` };
+        }
+        const now = _now().toISOString();
+        state.peers[body.to_id] = {
+          id: body.to_id, pid: 0, cwd: "", git_root: null, tty: null,
+          summary: "(reserved: daemon recipient)", kind: "reserved", registered_at: now, last_seen: now,
+        };
+      } else if (state.peers[body.to_id].kind === "adhoc" && RESERVED_PEER_IDS.has(body.to_id)) {
+        state.peers[body.to_id].kind = "reserved"; // state file written pre-reserved: upgrade in place
       }
       const from = String(body.from_id ?? "");
       const now = _now().toISOString();
       if (!state.peers[from]) {
-        // Unregistered sender: auto-register as adhoc so replies have a route back.
-        // The daemon relies on this — it sends as "slack-bridge" with no /register.
+        // Unregistered sender: auto-register so replies have a route back. The
+        // daemon relies on this — it sends as "slack-bridge" with no /register,
+        // so a reserved id registers as reserved (never reaped), not adhoc.
         if (!ADHOC_ID_RE.test(from)) return { ok: false, error: `Invalid sender id ${from}` };
         state.peers[from] = {
           id: from, pid: 0, cwd: "", git_root: null, tty: null,
-          summary: "(ad-hoc sender)", kind: "adhoc", registered_at: now, last_seen: now,
+          summary: RESERVED_PEER_IDS.has(from) ? "(slack-bridge daemon)" : "(ad-hoc sender)",
+          kind: RESERVED_PEER_IDS.has(from) ? "reserved" : "adhoc", registered_at: now, last_seen: now,
         };
       } else if (state.peers[from].kind === "adhoc") {
+        if (RESERVED_PEER_IDS.has(from)) state.peers[from].kind = "reserved";
         state.peers[from].last_seen = now;
       }
       state.messages.push({
@@ -178,6 +197,7 @@ export function createBroker({
     },
 
     "/unregister"(body) {
+      if (RESERVED_PEER_IDS.has(body.id)) return { ok: false, error: `Peer ${body.id} is reserved` };
       reap(body.id);
       persist();
       return { ok: true };
@@ -197,6 +217,14 @@ export function createBroker({
       }
       res.writeHead(200);
       return res.end("slack-bridge remote-control broker");
+    }
+    // Token guard, mirroring the control endpoint: with remote.controlToken
+    // set, every state-touching route requires it. /health stays open —
+    // liveness probes must start or adopt the broker without the secret.
+    if (token) {
+      const auth = req.headers.authorization ?? "";
+      const provided = auth.startsWith("Bearer ") ? auth.slice(7) : "";
+      if (provided !== token) return json(401, { error: "unauthorized" });
     }
     if (req.url === "/shutdown") {
       json(200, { ok: true });
