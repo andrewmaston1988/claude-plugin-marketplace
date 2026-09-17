@@ -13,5 +13,11 @@
     "bridge",
     "socket-mode",
     "daemon"
-  ]
+  ],
+  "mcpServers": {
+    "slack-bridge-remote": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/bin/claude-slack.mjs", "remote-mcp"]
+    }
+  }
 }

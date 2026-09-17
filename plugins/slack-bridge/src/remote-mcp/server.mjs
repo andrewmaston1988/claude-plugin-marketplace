@@ -1,15 +1,23 @@
 // Forked from plugins/claude-peers/src/mcp/server.mjs. The live interactive session
-// loads this stdio MCP server (user-scoped — see README; plugin-declared MCP does
-// not render notifications/claude/channel as of 2026-07-16). It registers with the
-// internal broker (gets a peer-id), polls for inbound Slack messages pushed by the
-// daemon, and surfaces slack_seize / slack_release / slack_post tools that call the
-// daemon's control endpoint over localhost HTTP (shared-secret bearer token).
+// loads this stdio MCP server (declared in the plugin manifest, mirroring
+// claude-peers; the setup wizard can additionally register it user-scoped as a
+// fallback). It registers with the internal broker (gets a peer-id), polls for
+// inbound Slack messages pushed by the daemon, and surfaces slack_seize /
+// slack_release / slack_post tools that call the daemon's control endpoint over
+// localhost HTTP (shared-secret bearer token).
+//
+// Delivery is push-or-poll, decided at handshake: a session launched with the
+// --dangerously-load-development-channels allowlist naming this plugin renders
+// pushed <channel> blocks; every other session — including all cloud-model
+// sessions — is instructed to poll check_messages instead, so inbound Slack
+// messages are never silently dropped.
 import { spawn, execFile } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createRpcEndpoint } from "./jsonrpc.mjs";
+import { detectChannelsEnabled } from "./session-flags.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 export const SERVER_VERSION = "0.1.0";
@@ -24,6 +32,21 @@ Available tools:
 - slack_post: Post a message to the seized Slack channel (your reply to the operator).
 - send_message: Send a message to another peer by id. With to_id "slack-bridge" it posts to the seized Slack channel (passthrough).
 - check_messages: Manually poll for inbound Slack messages (fallback).`;
+
+// Appended only when the push path cannot reach this session. Concrete tool calls,
+// not prose: the weakest model that reads this must get a working cron in one pass.
+export const POLLING_INSTRUCTIONS = `MESSAGE DELIVERY IN THIS SESSION: push is UNAVAILABLE. This session was not launched with \`--dangerously-load-development-channels plugin:slack-bridge\`, so a <channel source="slack-bridge"> block will never render for you. Ignore the paragraph above about channel messages — you must poll instead, or you will never see the operator's Slack messages.
+
+Set up the poll now, before your other startup work:
+
+1. If the CronCreate tool's schema is not loaded, load it first: ToolSearch(query="select:CronCreate")
+2. CronCreate(cron="*/3 * * * *", prompt="Call check_messages. If it returns messages, reply to each with slack_post, then resume what you were doing.", recurring=true)
+
+That checks every 3 minutes. The job lives only in this session and expires after 7 days — create it again in your next session. Between ticks, call check_messages directly whenever you are waiting on the operator's reply.`;
+
+export function buildInstructions(channelsAvailable) {
+  return channelsAvailable ? INSTRUCTIONS : `${INSTRUCTIONS}\n\n${POLLING_INSTRUCTIONS}`;
+}
 
 export const TOOLS = [
   {
@@ -65,7 +88,7 @@ export const TOOLS = [
   },
   {
     name: "check_messages",
-    description: "Manually check for new inbound Slack messages. Messages are normally pushed automatically via channel notifications, but you can use this as a fallback.",
+    description: "Retrieve inbound Slack messages held by the broker — including ones already pushed as a notification that may not have rendered, so a push missed while your session was idle is not lost. May re-show a message you already saw.",
     inputSchema: { type: "object", properties: {} },
   },
 ];
@@ -176,6 +199,7 @@ export function createRemoteMcpServer({
   _pid = process.pid,
   _cwd = process.cwd(),
   _setInterval = setInterval,
+  _detectChannels = detectChannelsEnabled,
 } = {}) {
   const brokerUrl = `http://127.0.0.1:${config.remote.brokerPort}`;
   const controlUrl = `http://127.0.0.1:${config.remote.controlPort}`;
@@ -184,6 +208,7 @@ export function createRemoteMcpServer({
 
   let myId = null;
   let myGitRoot = null;
+  let channelsAvailable; // memoised: reading the process table is not free
 
   async function isBrokerAlive() {
     try {
@@ -319,10 +344,14 @@ export function createRemoteMcpServer({
     async check_messages() {
       if (!myId) return text("Not registered with broker yet", true);
       try {
-        const result = await brokerFetch("/poll-messages", { id: myId });
+        // Consume path: returns everything held — pushed or not — so a push
+        // that never rendered (idle session, no allowlist, cloud model) is
+        // still recoverable. May re-show an already-seen message.
+        const result = await brokerFetch("/take-messages", { id: myId });
         if (result.messages.length === 0) return text("No new messages.");
         const lines = result.messages.map((m) => `From ${m.from_id} (${m.sent_at}):\n${m.text}`);
-        return text(`${result.messages.length} new message(s):\n\n${lines.join("\n\n---\n\n")}`);
+        return text(`${result.messages.length} message(s):\n\n${lines.join("\n\n---\n\n")}`
+          + `\n\n(Any of these may already have appeared as a channel notification — reply once.)`);
       } catch (e) {
         return errText("Error checking messages", e);
       }
@@ -331,11 +360,13 @@ export function createRemoteMcpServer({
 
   async function onRequest(method, params) {
     if (method === "initialize") {
+      channelsAvailable ??= _detectChannels();
+      if (!channelsAvailable) log("channels unavailable — instructing this session to poll");
       return {
         protocolVersion: PROTOCOL_VERSION,
         capabilities: { experimental: { "claude/channel": {} }, tools: {} },
         serverInfo: { name: "slack-bridge-remote", version: SERVER_VERSION },
-        instructions: INSTRUCTIONS,
+        instructions: buildInstructions(channelsAvailable),
       };
     }
     if (method === "tools/list") return { tools: TOOLS };
@@ -387,5 +418,5 @@ export function createRemoteMcpServer({
     log("MCP endpoint ready");
   }
 
-  return { start, _onRequest: onRequest, _register: register, _poll: poll, _brokerFetch: brokerFetch, _ensureBroker: ensureBroker, _controlFetch: controlFetch };
+  return { start, _onRequest: onRequest, _register: register, _poll: poll, _brokerFetch: brokerFetch, _ensureBroker: ensureBroker, _controlFetch: controlFetch, _myId: () => myId };
 }

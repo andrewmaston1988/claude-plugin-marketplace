@@ -213,13 +213,11 @@ Run `claude-slack setup` and answer **yes** at the *Remote control* step. The wi
 }
 ```
 
-Then run the one-time, **user-scoped** MCP registration (this must be user-scoped — plugin-declared MCP servers do not render channel notifications as of 2026-07-16, so the live session would never see inbound messages):
+The `remote-mcp` server is declared in the plugin manifest, so sessions with the plugin installed load it automatically. (The setup wizard can also register it user-scoped as a fallback for environments without plugin-declared MCP.)
 
-```bash
-claude mcp add --scope user slack-bridge-remote -- node /path/to/bin/claude-slack.mjs remote-mcp
-```
+Delivery is push-or-poll, decided per session at handshake: a session launched with the `--dangerously-load-development-channels` allowlist naming slack-bridge receives inbound messages as rendered `<channel>` blocks; every other session — including all cloud-model sessions — is instructed at handshake to `CronCreate` a 3-minute `check_messages` poll, so inbound Slack messages are never silently dropped. The broker retains pushed messages for 24 h, so `check_messages` can always recover one the session never rendered.
 
-Restart any interactive session you want to control this way so it picks up the new MCP server.
+Restart any interactive session you want to control this way so it picks up the MCP server.
 
 ### Slack scopes
 

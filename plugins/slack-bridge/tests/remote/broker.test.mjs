@@ -142,3 +142,94 @@ test("unknown POST path is a 404", async (t) => {
   const notFound = await call("/no-such", {});
   assert.equal(notFound.status, 404);
 });
+
+// --- delivery retention (ported from claude-peers' current broker, 2026-09-17) ---
+// The push is a channel notification into a session that may never render it
+// (no --channels allowlist on launch, or a provider whose sessions cannot render
+// at all), and nothing acks back. Deleting on push destroyed the message before
+// check_messages — the documented recovery — could reach it. Retain instead.
+
+test("a pushed message is retained and take-messages can still recover it", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "missed while idle" });
+  const { body: pushed } = await call("/poll-messages", { id: b.id });
+  assert.deepEqual(pushed.messages.map((m) => m.text), ["missed while idle"]);
+  const { body: taken } = await call("/take-messages", { id: b.id });
+  assert.deepEqual(taken.messages.map((m) => m.text), ["missed while idle"],
+    "a pushed-but-unrendered message must survive to check_messages");
+});
+
+test("take-messages consumes: a second take returns nothing", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "once" });
+  await call("/poll-messages", { id: b.id });
+  assert.equal((await call("/take-messages", { id: b.id })).body.messages.length, 1);
+  assert.equal((await call("/take-messages", { id: b.id })).body.messages.length, 0);
+});
+
+test("take-messages returns never-pushed messages too, and stops them being pushed later", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "never pushed" });
+  const { body: taken } = await call("/take-messages", { id: b.id });
+  assert.deepEqual(taken.messages.map((m) => m.text), ["never pushed"]);
+  const { body: polled } = await call("/poll-messages", { id: b.id });
+  assert.equal(polled.messages.length, 0, "a consumed message must not resurface as a push");
+});
+
+test("retained messages are purged once past the retention window", async (t) => {
+  let now = Date.parse("2026-09-17T12:00:00Z");
+  const stateFile = tmpState();
+  const { call } = await startBroker(t, { stateFile, _now: () => new Date(now) });
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "stale" });
+  await call("/poll-messages", { id: b.id });
+  now += 23 * 60 * 60 * 1000;
+  await call("/poll-messages", { id: b.id });
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).messages.length, 1,
+    "still inside the window — must still be retained");
+  now += 2 * 60 * 60 * 1000;
+  await call("/poll-messages", { id: b.id }); // any traffic triggers the purge
+  assert.equal((await call("/take-messages", { id: b.id })).body.messages.length, 0);
+});
+
+test("reaping a dead peer drops its retained messages, not just its unpushed ones", async (t) => {
+  const stateFile = tmpState();
+  const dead = new Set();
+  const _kill = (pid) => { if (dead.has(pid)) throw new Error("ESRCH"); };
+  const { call } = await startBroker(t, { stateFile, _kill });
+  const { body: a } = await call("/register", { ...REG, pid: 111 });
+  const { body: b } = await call("/register", { ...REG, pid: 222 });
+  await call("/send-message", { from_id: b.id, to_id: a.id, text: "retained" });
+  await call("/poll-messages", { id: a.id });
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).messages.length, 1,
+    "pushed message must be retained");
+  dead.add(111);
+  await call("/list-peers", { scope: "machine", cwd: "x", git_root: null });
+  assert.equal(JSON.parse(fs.readFileSync(stateFile, "utf8")).messages.length, 0,
+    "a reaped peer must not leak retained messages");
+});
+
+// Pin, already held by the fork's reap: re-registration purges the old id's
+// undelivered queue like a death does — otherwise messages to the old id leak.
+test("re-register purges the old id and its undelivered messages from state", async (t) => {
+  const stateFile = tmpState();
+  const broker = createBroker({ stateFile });
+  t.after(() => broker.close());
+  const port = await broker.listen(0);
+  const call = async (p, body) =>
+    (await fetch(`http://127.0.0.1:${port}${p}`, { method: "POST", body: JSON.stringify(body) })).json();
+  const a = await call("/register", { ...REG, pid: process.pid });
+  const b = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: b.id, to_id: a.id, text: "queued for old id" });
+  await call("/register", { ...REG, pid: process.pid }); // a re-registers
+  const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+  assert.equal(state.messages.filter((m) => m.to_id === a.id).length, 0,
+    "undelivered messages to the replaced id must be purged");
+});

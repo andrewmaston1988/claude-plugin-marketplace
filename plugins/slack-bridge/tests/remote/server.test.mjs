@@ -10,7 +10,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readSessionName, readSessionAiTitle, encodeCwd } from "../../src/remote-mcp/server.mjs";
+import { PassThrough } from "node:stream";
+import { readSessionName, readSessionAiTitle, encodeCwd, createRemoteMcpServer, POLLING_INSTRUCTIONS } from "../../src/remote-mcp/server.mjs";
+import { createBroker } from "../../src/remote/broker.mjs";
 
 function tmpProjectsDir() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-name-"));
@@ -147,4 +149,70 @@ test("full seize-name precedence: custom title > session-derived name > ai-title
     readSessionAiTitle("C:\\code\\long-night", { projectsDir: dir3 }) ||
     null;
   assert.equal(derive3({}), null); // never cwd basename — null signals "broke"
+});
+
+// --- delivery: push or poll (ported from claude-peers' current server, 2026-09-17) ---
+// A session launched without the --channels allowlist never renders a push, and
+// cloud-model sessions cannot render one at all. The handshake must detect
+// that and instruct the session to poll — otherwise inbound Slack messages are
+// silently destroyed on exactly the sessions remote control exists for.
+
+function tmpState() {
+  return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-mcp-")), "state.json");
+}
+
+async function serverWithBroker(t, { detect = () => false } = {}) {
+  const broker = createBroker({ stateFile: tmpState() });
+  t.after(() => broker.close());
+  const port = await broker.listen(0);
+  const config = {
+    remote: { brokerPort: port, controlPort: 0, controlToken: "t", pollIntervalMs: 60_000, heartbeatIntervalMs: 60_000 },
+  };
+  // PassThrough, not process.stdin/stdout: the rpc endpoint's listeners on the
+  // real stdin are a live handle that keeps the test runner from ever exiting.
+  const server = createRemoteMcpServer({
+    config,
+    input: new PassThrough(),
+    output: new PassThrough(),
+    _detectChannels: detect,
+  });
+  await server._register();
+  const call = async (p, body) =>
+    (await fetch(`http://127.0.0.1:${port}${p}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    })).json();
+  return { server, broker, call, port };
+}
+
+test("initialize: channels unavailable appends the poll directive (CronCreate check_messages)", async (t) => {
+  const { server } = await serverWithBroker(t, { detect: () => false });
+  const res = await server._onRequest("initialize", {});
+  assert.ok(res.instructions.includes("CronCreate"),
+    "a session that cannot render pushes must be told to poll");
+  assert.ok(res.instructions.includes(POLLING_INSTRUCTIONS),
+    "the poll directive must be the concrete, copyable steps");
+});
+
+test("initialize: channels available ships the push instructions without the poll directive", async (t) => {
+  const { server } = await serverWithBroker(t, { detect: () => true });
+  const res = await server._onRequest("initialize", {});
+  assert.ok(res.instructions.includes("<channel source=\"slack-bridge\">"),
+    "push instructions must describe the channel block");
+  assert.ok(!res.instructions.includes(POLLING_INSTRUCTIONS),
+    "an allowlisted session must not be told to poll");
+});
+
+test("check_messages recovers a message the push timer already drained (the operator-facing defect)", async (t) => {
+  const { server, call } = await serverWithBroker(t);
+  const myId = server._myId();
+  assert.ok(myId, "test hook must expose the registered peer id");
+  // the daemon routes an inbound Slack message to the live session's peer id
+  await call("/send-message", { from_id: "slack-bridge", to_id: myId, text: "hello from mobile" });
+  // the server's own push timer drains the queue within a second of arrival —
+  // on a session that never renders the push, this is where messages died
+  await server._poll();
+  // check_messages is the documented recovery: it must still find the message
+  const res = await server._onRequest("tools/call", { name: "check_messages" });
+  assert.ok(res.content[0].text.includes("hello from mobile"),
+    "a message pushed-but-unrendered must survive to check_messages");
 });
