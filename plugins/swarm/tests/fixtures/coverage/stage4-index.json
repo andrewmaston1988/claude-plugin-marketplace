@@ -1,0 +1,101 @@
+{
+  "entries": [
+    {
+      "path": "C:\\code\\claude-plugin-marketplace\\plugins\\swarm\\src\\ask.mjs",
+      "lines": [
+        [
+          1,
+          90
+        ]
+      ]
+    },
+    {
+      "path": "C:\\code\\claude-plugin-marketplace\\plugins\\swarm\\src\\dispatch.mjs",
+      "lines": [
+        [
+          1,
+          217
+        ]
+      ]
+    },
+    {
+      "path": "C:\\code\\claude-plugin-marketplace\\plugins\\swarm\\src\\results.mjs",
+      "lines": [
+        [
+          1,
+          503
+        ]
+      ]
+    },
+    {
+      "path": "C:\\code\\claude-plugin-marketplace\\plugins\\swarm\\src\\runlog.mjs",
+      "lines": [
+        [
+          1,
+          409
+        ]
+      ]
+    },
+    {
+      "path": "C:\\code\\claude-plugin-marketplace\\plugins\\swarm\\src\\scheduler.mjs",
+      "lines": [
+        [
+          1,
+          1000
+        ],
+        [
+          1001,
+          1445
+        ]
+      ]
+    },
+    {
+      "path": "C:\\code\\claude-plugin-marketplace\\plugins\\swarm\\src\\stream.mjs",
+      "lines": [
+        [
+          1,
+          441
+        ]
+      ]
+    },
+    {
+      "path": "C:\\code\\claude-plugin-marketplace\\plugins\\swarm\\tests\\scheduler.test.mjs",
+      "lines": [
+        [
+          1,
+          1000
+        ],
+        [
+          1001,
+          2000
+        ],
+        [
+          2001,
+          3000
+        ],
+        [
+          3001,
+          3405
+        ]
+      ]
+    },
+    {
+      "path": "C:\\code\\claude\\skills\\code-review\\principles_cross_cutting.md",
+      "lines": [
+        [
+          1,
+          71
+        ]
+      ]
+    },
+    {
+      "path": "C:\\code\\claude\\skills\\code-review\\principles_maintainability.md",
+      "lines": [
+        [
+          1,
+          166
+        ]
+      ]
+    }
+  ]
+}
