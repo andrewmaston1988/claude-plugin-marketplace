@@ -896,8 +896,25 @@
     html += `<div style="height:12px"></div>`;
     // The badge's source: the server's cost points, plus the spread for a model
     // priced but graded nowhere (its cost is real; its quality is simply not compared).
-    const costOf = new Map(p.views.cost.points.map((x) => [x.model, x]));
-    for (const s of p.views.cost.spread) if (!costOf.has(s.model)) costOf.set(s.model, { multiplier: s.mult, band: s.band, onFrontier: false, dominatedBy: null, thin: s.thin });
+    const costByModel = new Map();
+    const costKey = (value) => JSON.stringify([value.provider || null, value.model]);
+    const pricedQualityKeys = new Set();
+    for (const x of p.views.cost.points) {
+      const list = costByModel.get(x.model) || [];
+      list.push(x);
+      costByModel.set(x.model, list);
+      pricedQualityKeys.add(costKey(x));
+    }
+    for (const s of p.views.cost.spread) {
+      if (pricedQualityKeys.has(costKey(s))) continue;
+      const list = costByModel.get(s.model) || [];
+      list.push({ multiplier: s.mult, band: s.band, onFrontier: false, dominatedBy: null, thin: s.thin });
+      costByModel.set(s.model, list);
+    }
+    // A quality row can have several provider-local cost entries. There is no
+    // honest single badge for that case; the cost screen below keeps those
+    // entries in their provider sections.
+    const costOf = new Map([...costByModel].filter(([, entries]) => entries.length === 1).map(([model, entries]) => [model, entries[0]]));
     if (model) {
       // One model as a dashboard: tiles, compressed aspect bars, its coverage row, its reliability bar.
       await loadPerfJs();

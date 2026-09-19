@@ -10,9 +10,8 @@ import { readRun, projectKeys, resultSuperseded, resolveTaskId } from "../runlog
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
-import { multipliers, costPerModel, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
+import { ollamaCloudCostRows, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
-import { deriveCloudName } from "../discovery.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
 import { coverage, reliability, leaders, costView } from "./perf-views.mjs";
 import { projectGrouping } from "./grouping.mjs";
@@ -313,8 +312,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     // The meter banks its own names; the score store carries the roster's
     // cloud forms. Same mapping the CLI's cloudCostRows applies — never a
     // second rule.
-    return multipliers(costPerModel(costCache.snaps))
-      .map((r) => ({ ...r, model: deriveCloudName(r.model) }));
+    return ollamaCloudCostRows(costCache.snaps);
   };
   const rankOf = (cells, model) => {
     const ranked = cells.filter((c) => c.combined != null);
@@ -329,16 +327,16 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const rows = scoreRows();
     const live = dedupe(rows);
     const domains = [...new Set(live.map((r) => r.domain).filter(Boolean))].sort();
-    const report = aggregate(rows, { aspect, model, domain });
+    const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
     const bands = resolveBands(cfg.provider?.cloud?.ollama?.costBands);
     const valueMargin = cfg.provider?.cloud?.ollama?.valueMargin;
     send(res, 200, {
       grading, path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
       aspects: ASPECTS, universals: UNIVERSAL, domains,
       filters: report.filters,
-      overall: overall(rows, { model, domain }).cells,
+      overall: overall(rows, { model, domain, combineProviders: true }).cells,
       // Drill-in: where this model sits among every model in the same domain filter.
-      ...(model ? { rank: rankOf(overall(rows, { domain }).cells, model) } : {}),
+      ...(model ? { rank: rankOf(overall(rows, { domain, combineProviders: true }).cells, model) } : {}),
       report: report.aspects,
       views: {
         coverage: coverage(report), reliability: reliability(live), leaders: leaders(report),

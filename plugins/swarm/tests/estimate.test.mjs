@@ -66,6 +66,27 @@ test("loadCorpus drops costUsd from non-Claude (:cloud) rows — subscription do
   }
 });
 
+test("Stage 5 RED: estimate corpus separates the same model id by provider", () => {
+  const root = mkdtempSync(join(tmpdir(), "swarm-est-provider-"));
+  try {
+    seedRun(root, "project", "run-1", [
+      { id: "ollama", state: "ok", provider: "ollama", model: "same-model", tokens: tok(100) },
+      { id: "codex", state: "ok", provider: "codex", model: "same-model", tokens: tok(300) },
+    ]);
+    const corpus = loadCorpus(root);
+    equal(corpus.tokens.get(JSON.stringify(["ollama", "same-model"]))[0], 100);
+    equal(corpus.tokens.get(JSON.stringify(["codex", "same-model"]))[0], 300);
+    const est = estimateRun([
+      { id: "o", provider: "ollama", model: "same-model" },
+      { id: "c", provider: "codex", model: "same-model" },
+    ], null, corpus);
+    equal(est.tokens, 400, "the two provider-qualified histories must both contribute");
+    equal(est.counted.length, 2);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("estimateRun omits usd for an all-:cloud manifest — no fabricated dollars on the consent surface", () => {
   // post-filter, a :cloud corpus has token samples but no costUsd samples
   const corpus = { tokens: new Map([["glm-5.2:cloud", [1000, 1200]]]), costUsd: new Map() };

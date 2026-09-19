@@ -7,6 +7,7 @@
 
 import { aggregate, frontier } from "./scores.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
+import { inferStoredIdentity } from "./results.mjs";
 
 // The seating canon: 20 graded runs per model per capability slot. Under it a
 // grade is not a verdict — printed as n<20, the rule's own term, which reads as
@@ -30,19 +31,59 @@ const colPart = (label, cell) =>
 // still being graded. Non-alias names never take this path.
 const CLAUDE_ALIAS_RE = /^(fable|opus|sonnet|haiku)$/i;
 
+function identityOf(value) {
+  const model = typeof value === "string" ? value : value?.model;
+  const explicit = typeof value?.provider === "string" && value.provider.trim();
+  const inferred = explicit ? {} : inferStoredIdentity(model);
+  return { provider: (explicit ? value.provider.trim() : inferred.provider) || null, model, explicit: Boolean(explicit) };
+}
+
+function identityKey(identity) {
+  return JSON.stringify([identity.provider, identity.model]);
+}
+
+function shown(identity) {
+  return identity.explicit && identity.provider ? `${identity.provider}/${identity.model}` : identity.model;
+}
+
+function entriesOf(byModel) {
+  return [...(byModel || [])].map(([key, entry]) => {
+    let parsed = null;
+    try {
+      const value = JSON.parse(key);
+      if (Array.isArray(value) && value.length === 2) parsed = { provider: value[0], model: value[1] };
+    } catch { /* legacy model key */ }
+    const identity = identityOf(parsed || { ...entry, model: parsed?.model || key });
+    return { key, entry, identity };
+  });
+}
+
 // Returns the store's name for a seated model, or null when nothing matches.
 // The caller PRINTS what this resolved to — a silent resolution is a guess the
 // reader cannot check.
 export function resolveSeatModel(name, byModel) {
-  if (byModel.has(name)) return name;
-  if (!CLAUDE_ALIAS_RE.test(String(name || ""))) return null;
-  const family = String(name).toLowerCase();
+  const target = identityOf(name);
+  const entries = entriesOf(byModel);
+  const exact = entries.find(({ identity }) => identity.model === target.model && (!target.provider || identity.provider === target.provider));
+  if (exact) return exact.identity.model;
+  if ((target.provider && target.provider !== "claude") || !CLAUDE_ALIAS_RE.test(String(target.model || ""))) return null;
+  const family = String(target.model).toLowerCase();
   let best = null;
-  for (const [model, entry] of byModel) {
-    if (!String(model).toLowerCase().includes(family)) continue;
-    if (!best || (entry.n || 0) > (byModel.get(best).n || 0)) best = model;
+  for (const { identity, entry } of entries) {
+    if (identity.provider !== "claude" || !String(identity.model).toLowerCase().includes(family)) continue;
+    if (!best || (entry.n || 0) > (best.entry.n || 0)) best = { identity, entry };
   }
-  return best;
+  return best?.identity.model || null;
+}
+
+function resolveSeatIdentity(target, byIdentity) {
+  const exact = byIdentity.get(identityKey(target));
+  if (exact) return exact;
+  if (target.provider !== "claude" || !CLAUDE_ALIAS_RE.test(String(target.model || ""))) return null;
+  const family = String(target.model).toLowerCase();
+  return [...byIdentity.values()]
+    .filter((entry) => entry.identity.provider === "claude" && String(entry.identity.model).toLowerCase().includes(family))
+    .sort((a, b) => (b.entry.n || 0) - (a.entry.n || 0))[0] || null;
 }
 
 export function seatReport({ models = [], rows = [], costRows = [], roster = [], bands = DEFAULT_COST_BANDS } = {}) {
@@ -51,48 +92,53 @@ export function seatReport({ models = [], rows = [], costRows = [], roster = [],
   // One record per model straight from the source aggregators: frontier's wtd
   // IS overall's combined (it derives from it), plus the cost verdict. Never
   // recompute a copy — the copy is what drifts.
-  const byModel = new Map(frontier(rows, costRows, { bands }).map((e) => [e.model, e]));
-  const implCells = new Map(aggregate(rows, { aspect: "impl" }).aspects[0].cells.map((c) => [c.model, c]));
-  const codeCells = new Map(aggregate(rows, { aspect: "code" }).aspects[0].cells.map((c) => [c.model, c]));
+  const frontierRows = frontier(rows, costRows, { bands });
+  const byIdentity = new Map(frontierRows.map((e) => [identityKey(identityOf(e)), { identity: identityOf(e), entry: e }]));
+  const implCells = new Map(aggregate(rows, { aspect: "impl" }).aspects[0].cells.map((c) => [identityKey(identityOf(c)), c]));
+  const codeCells = new Map(aggregate(rows, { aspect: "code" }).aspects[0].cells.map((c) => [identityKey(identityOf(c)), c]));
 
   // Cost is known independently of grades: a never-graded model with a history
   // still shows its band, and a graded model without one shows unmeasured.
-  const multOf = new Map((costRows || []).map((c) => [c.model, c.mult]));
-  const costPart = (model) => {
-    const b = multOf.has(model) ? band(multOf.get(model), bands) : null;
+  const multOf = new Map((costRows || []).map((c) => [identityKey(identityOf(c)), c]));
+  const costPart = (identity) => {
+    const cost = multOf.get(identityKey(identity));
+    const b = cost ? band(cost.mult, bands) : null;
     return b ? `cost ${"$".repeat(b)}` : "cost unmeasured";
   };
 
   const lines = ["seats:"];
-  const seated = new Set(models.map((m) => m.model));
-  for (const { model, leaves } of models) {
-    const key = resolveSeatModel(model, byModel);
-    const shown = key && key !== model ? `${model} -> ${key}` : model;
-    const head = `  ${shown} (${(leaves || []).join(", ")})`;
-    const entry = key ? byModel.get(key) : null;
+  const seated = new Set(models.map((m) => identityKey(identityOf(m))));
+  for (const modelEntry of models) {
+    const target = identityOf(modelEntry);
+    const resolved = resolveSeatIdentity(target, byIdentity);
+    const resolvedIdentity = resolved?.identity || target;
+    const resolvedName = resolved && identityKey(resolvedIdentity) !== identityKey(target)
+      ? `${shown(target)} -> ${shown(resolvedIdentity)}` : shown(target);
+    const head = `  ${resolvedName} (${(modelEntry.leaves || []).join(", ")})`;
+    const entry = resolved?.entry || null;
     // No graded row at all: the whole line is the fact, in words — no digits,
     // no dash, nothing that reads as a score.
     if (!entry || entry.wtd == null) {
-      lines.push(`${head} · never graded · ${costPart(key || model)}`);
+      lines.push(`${head} · never graded · ${costPart(resolvedIdentity)}`);
       continue;
     }
     const parts = [
       `overall ${entry.wtd.toFixed(2)} ${nPart(entry.n)}`,
-      colPart("impl", implCells.get(key)),
-      colPart("code", codeCells.get(key)),
-      costPart(key),
+      colPart("impl", implCells.get(identityKey(resolvedIdentity))),
+      colPart("code", codeCells.get(identityKey(resolvedIdentity))),
+      costPart(resolvedIdentity),
     ];
     if (entry.dominatedBy) parts.push(`dominated by ${entry.dominatedBy}`);
     else if (entry.onFrontier) parts.push("frontier");
     lines.push(`${head} · ${parts.join(" · ")}`);
   }
 
-  const unseated = (roster || []).filter((m) => !seated.has(m.model));
+  const unseated = (roster || []).filter((m) => !seated.has(identityKey(identityOf(m))));
   if (unseated.length) {
     const items = unseated.map((m) => {
-      const key = resolveSeatModel(m.model, byModel);
-      const entry = key ? byModel.get(key) : null;
-      return entry && entry.n > 0 ? `${m.model} ${nPart(entry.n)}` : `${m.model} never graded`;
+      const resolved = resolveSeatIdentity(identityOf(m), byIdentity);
+      const entry = resolved?.entry || null;
+      return entry && entry.n > 0 ? `${shown(identityOf(m))} ${nPart(entry.n)}` : `${shown(identityOf(m))} never graded`;
     });
     lines.push(`  launchable, not seated: ${items.join(" · ")}`);
   }

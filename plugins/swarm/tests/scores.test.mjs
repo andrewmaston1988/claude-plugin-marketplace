@@ -550,6 +550,23 @@ test("frontier: pure — inputs untouched, equal output on repeat", () => {
   equal(JSON.stringify({ rows, costs }), before, "the inputs were mutated");
 });
 
+test("performance quality collapses same model across providers while cost identity stays qualified", () => {
+  const ollama = row({ provider: "ollama", model: "same-model", grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 } });
+  const codex = row({ provider: "codex", model: "same-model", leaf: "codex-leaf", grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 } });
+  deepEqual(validateRow(codex), [], "an explicit Codex provider makes a GPT row gradeable");
+  const report = overall([ollama, codex], { combineProviders: true });
+  equal(report.cells.length, 1, "the same model must be one performance cell");
+  deepEqual(report.cells[0].providers, ["codex", "ollama"]);
+  equal(report.cells[0].n, 2, "quality evidence from both providers contributes to the model cell");
+  equal(overall([ollama, codex]).cells.length, 2, "provider-qualified economics remain available to callers that need them");
+  const points = frontier([ollama, codex], [
+    { provider: "ollama", model: "same-model", mult: 4 },
+    { provider: "codex", model: "same-model", mult: 1 },
+  ]);
+  equal(points.length, 2);
+  ok(points.every((point) => point.provider), "frontier output retains provider identity");
+});
+
 // ── canonicalRunKey / gradedRunKeys: graded-ness against a canonical key ──────
 // The blocker's guard. The store's rows and the runs-tree walk name the same
 // dirs in different spellings; graded-ness must survive the difference or

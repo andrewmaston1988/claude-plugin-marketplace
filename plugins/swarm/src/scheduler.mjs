@@ -21,11 +21,10 @@ import {
 } from "./stream.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createSnapshotWriter, liveViewLines } from "./ui.mjs";
-import { matchQuota, parseQuotaReset, checkQuota, DEFAULT_QUOTA_PATTERNS } from "./quota.mjs";
+import { matchQuota, parseQuotaReset, DEFAULT_QUOTA_PATTERNS } from "./quota.mjs";
 import { evalExpr, evalBool } from "./expr.mjs";
 import { validateValue } from "./schema.mjs";
 import { extractCitations, verifyCitations, citationErrorLines, annotateCitations } from "./citations.mjs";
-import { swarmHome } from "./config.mjs";
 import { removeCachedModel, ENTITLEMENT_RE } from "./discovery.mjs";
 import { ALIVE_STATES } from "./runlog.mjs";
 import * as defaultWorktree from "./worktree.mjs";
@@ -544,61 +543,6 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       }
     }
 
-    // Quota preflight, once per run, only when any Claude-model task exists.
-    // Best-effort (endpoint failure -> proceed silently; the mid-run 'quota'
-    // classification is the backstop). Exhausted quota with undefended Claude
-    // leaves aborts BEFORE dispatch — a run that would deterministically fail
-    // should fail in one second with the reset time, not after four minutes.
-    const claudeTasks = providerGroups.get("claude") || [];
-    if (claudeTasks.length && cfg.quotaPreflight !== false) {
-      const env = io.env || process.env;
-      const q = await checkQuota({
-        cfg,
-        fetch: io.fetch,
-        now: io.now,
-        cachePath: join(swarmHome(env), "quota-cache.json"),
-        ...(env.SWARM_CREDENTIALS && { credentialsPath: env.SWARM_CREDENTIALS }),
-      });
-      // A scoped limit grounds only the model it names — never the whole roster.
-      // Match on the family token, because the two sides are written differently:
-      // a leaf says "sonnet" or "claude-sonnet-5"; the endpoint may say "Sonnet"
-      // OR "Claude Sonnet 4.5". A bare substring test in one direction misses the
-      // multi-word form and would let an exhausted Sonnet bucket dispatch Sonnet.
-      const FAMILY_RE = /(fable|opus|sonnet|haiku)/i;
-      const familyOf = (s) => (String(s || "").match(FAMILY_RE)?.[1] || "").toLowerCase();
-      const blockedScope = (model) =>
-        (q?.exhaustedScopes || []).find((s) => {
-          const mf = familyOf(model), sf = familyOf(s.scope);
-          if (mf && sf) return mf === sf;
-          // Scope names a model we don't recognise: fall back to a two-way substring
-          // test so an unclassifiable exhausted bucket still grounds a leaf naming it.
-          const m = String(model).toLowerCase(), sc = String(s.scope || "").toLowerCase();
-          return Boolean(sc) && (m.includes(sc) || sc.includes(m));
-        });
-      if (q?.exhausted || q?.exhaustedScopes?.length) {
-        const doomed = claudeTasks.filter(
-          (t) => !t.fallbackModel && (q.exhausted || blockedScope(t.model))
-        );
-        if (doomed.length) {
-          const hit = q.exhausted ? q.worst : blockedScope(doomed[0].model);
-          const what = q.exhausted
-            ? `${hit.kind} at ${hit.percent}%`
-            : `the ${hit.scope}-scoped limit is at ${hit.percent}%`;
-          throw new Error(
-            `Anthropic usage exhausted (${what}` +
-            `${hit.resetsAt ? `, resets ${hit.resetsAt}` : ""}) — ` +
-            `${doomed.length} Claude leaf(s) cannot dispatch: ${doomed.map((t) => t.id).join(", ")}. ` +
-            `Recast to :cloud models, add fallbackModel, or re-run after reset.`
-          );
-        }
-      }
-      if (q && !q.exhausted && q.worst.percent >= (cfg.quotaWarnPct ?? 80)) {
-        io.stdout(
-          `⚠ Anthropic usage at ${q.worst.percent}% (${q.worst.kind}` +
-          `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — Claude leaves may hit quota mid-run`
-        );
-      }
-    }
   } catch (e) {
     process.off("SIGINT", sigintHandler);
     process.off("SIGTERM", sigtermHandler);

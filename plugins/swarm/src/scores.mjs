@@ -10,6 +10,8 @@ import { swarmHome } from "./config.mjs";
 import { UNIVERSAL, ASPECTS, OUTCOMES, GRADED_OUTCOMES } from "./aspects.mjs";
 import { isCloudModel, isClaudeModel } from "./models.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
+import { inferStoredIdentity } from "./results.mjs";
+import { isSentinelModel } from "./manifest.mjs";
 
 export function scoresPath(env = process.env) {
   return join(swarmHome(env), "model-scores.jsonl");
@@ -30,6 +32,25 @@ const DOMAIN_RE = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const NON_DOMAINS = new Set(["this-repo", "repo", "repository", "project", "codebase", "general", "misc", "mixed", "various", "other", "unknown", "none", "code"]);
 const DOMAIN_HINT = 'one lowercase token naming the language or ecosystem the leaf worked in — e.g. "rust", "godot", "node", "python", "docs"; not the repo, not the task, no "+" or "/"';
 
+function explicitProvider(row) {
+  return typeof row?.provider === "string" && row.provider.trim() ? row.provider.trim().toLowerCase() : null;
+}
+
+function identityOf(row) {
+  const model = typeof row?.model === "string" ? row.model.trim() : row?.model;
+  const provider = explicitProvider(row);
+  const inferred = provider ? {} : inferStoredIdentity(model);
+  return { provider: provider || inferred.provider || null, model, explicit: Boolean(provider) };
+}
+
+function identityKey(identity) {
+  return JSON.stringify([identity.provider, identity.model]);
+}
+
+function displayIdentity(identity) {
+  return identity.explicit && identity.provider ? `${identity.provider}/${identity.model}` : identity.model;
+}
+
 // Returns an array of human-readable problems; empty means valid. Errors name
 // the field and the fix — a bad batch must teach in one round-trip.
 export function validateRow(row) {
@@ -42,8 +63,14 @@ export function validateRow(row) {
   if (typeof row.leaf !== "string" || !row.leaf.trim()) {
     errs.push("leaf: required, the task id as it appears in results/<id>.json");
   }
-  if (typeof row.model !== "string" || !(isCloudModel(row.model) || isClaudeModel(row.model))) {
-    errs.push(`model: must be a :cloud model name or a Claude tier (got ${JSON.stringify(row.model)}) — e.g. "glm-5.2:cloud" or "sonnet"`);
+  const provider = explicitProvider(row);
+  if (row.provider !== undefined && !provider) {
+    errs.push("provider: must be a non-empty provider identifier when present");
+  }
+  if (typeof row.model !== "string" || !row.model.trim() || isSentinelModel(row.model) || (!provider && !(isCloudModel(row.model) || isClaudeModel(row.model)))) {
+    errs.push(provider
+      ? `model: must be a real provider model, not a sentinel (got ${JSON.stringify(row.model)})`
+      : `model: must be a :cloud model name or a Claude tier (got ${JSON.stringify(row.model)}) — e.g. "glm-5.2:cloud" or "sonnet"`);
   }
   if (typeof row.domain !== "string" || !row.domain.trim() || PLACEHOLDER_RE.test(row.domain.trim())) {
     errs.push(`domain: required, ${DOMAIN_HINT}`);
@@ -205,31 +232,59 @@ export function dedupe(rows) {
 // Pure: rows in, cells out. Every aspect in the requested set gets an entry
 // even with no rows — absence is evidence, and a silently missing row reads as
 // coverage that does not exist.
-export function aggregate(rows, { aspect, model, domain } = {}) {
+export function aggregate(rows, { aspect, model, provider, domain, combineProviders = false } = {}) {
   if (aspect && !ASPECTS.includes(aspect)) {
     throw new Error(`unknown aspect ${JSON.stringify(aspect)} — use one of ${ASPECTS.join(" | ")}`);
   }
   const wanted = aspect ? [aspect] : ASPECTS;
-  const scoped = dedupe(rows).filter((r) =>
-    (!model || r.model === model) && (!domain || r.domain === domain));
+  const scoped = dedupe(rows).filter((r) => {
+    const identity = identityOf(r);
+    return (!model || identity.model === model)
+      && (provider === undefined || identity.provider === String(provider).toLowerCase())
+      && (!domain || r.domain === domain);
+  });
 
   return {
     aspects: wanted.map((a) => {
       const cells = new Map();
-      const cellFor = (m) => {
-        if (!cells.has(m)) {
-          cells.set(m, { model: m, n: 0, mean: null, provisional: true, sum: 0, outcomes: blankOutcomes() });
+      const keyFor = (identity) => combineProviders
+        ? JSON.stringify([identity.model])
+        : identityKey(identity);
+      const cellFor = (identity) => {
+        const key = keyFor(identity);
+        if (!cells.has(key)) {
+          cells.set(key, {
+            ...(combineProviders
+              ? { providers: [] }
+              : identity.explicit && identity.provider ? { provider: identity.provider } : {}),
+            model: identity.model,
+            n: 0,
+            mean: null,
+            provisional: true,
+            sum: 0,
+            outcomes: blankOutcomes(),
+          });
         }
-        return cells.get(m);
+        const cell = cells.get(key);
+        if (combineProviders) {
+          if (identity.provider && !cell.providers.includes(identity.provider)) {
+            cell.providers.push(identity.provider);
+            cell.providers.sort();
+          }
+        } else if (identity.explicit && identity.provider) {
+          cell.provider = identity.provider;
+        }
+        return cell;
       };
       for (const r of scoped) {
+        const identity = identityOf(r);
         const grade = r.grades?.[a];
         // An ungraded row declared no aspects — it could not. It still counts
         // under outcomes for every cell of its model, because "an image read
         // kills the session" must be a query result, not a lost afternoon.
         const ungraded = !GRADED_OUTCOMES.includes(r.outcome);
         if (grade == null && !ungraded) continue;
-        const cell = cellFor(r.model);
+        const cell = cellFor(identity);
         cell.outcomes[r.outcome] += 1;
         if (grade != null) {
           cell.n += 1;
@@ -246,10 +301,16 @@ export function aggregate(rows, { aspect, model, domain } = {}) {
       // Ranked on the shrunk score: an unweighted mean lets one lucky sample head
       // the table two points clear of a forty-sample cell, which the provisional
       // tag warns about but the ordering contradicts.
-      list.sort((x, y) => (y.weighted ?? -1) - (x.weighted ?? -1) || x.model.localeCompare(y.model));
+      list.sort((x, y) => (y.weighted ?? -1) - (x.weighted ?? -1)
+        || displayIdentity(identityOf(x)).localeCompare(displayIdentity(identityOf(y))));
       return { aspect: a, universal: UNIVERSAL.includes(a), cells: list, prior };
     }),
-    filters: { aspect: aspect ?? null, model: model ?? null, domain: domain ?? null },
+    filters: {
+      aspect: aspect ?? null,
+      model: model ?? null,
+      domain: domain ?? null,
+      ...(provider !== undefined && { provider: String(provider).toLowerCase() }),
+    },
   };
 }
 
@@ -266,16 +327,35 @@ function blankOutcomes() {
 // stressed them, so averaging them in would punish exactly the models seated
 // on hard capability work. Same definition as the seat-economics chart's
 // quality axis, but owned here.
-export function overall(rows, { model, domain } = {}) {
-  const report = aggregate(rows, { model, domain });
+export function overall(rows, { model, provider, domain, combineProviders = false } = {}) {
+  const report = aggregate(rows, { model, ...(provider !== undefined && { provider }), domain, combineProviders });
   const universals = report.aspects.filter((a) => a.universal);
   const byModel = new Map();
   for (const a of universals) {
     for (const c of a.cells) {
-      if (!byModel.has(c.model)) {
-        byModel.set(c.model, { model: c.model, n: 0, combined: null, wtds: {}, provisional: false, outcomes: c.outcomes });
+      const identity = identityOf(c);
+      const key = combineProviders ? JSON.stringify([c.model]) : identityKey(identity);
+      if (!byModel.has(key)) {
+        byModel.set(key, {
+          ...(combineProviders ? { providers: [] }
+            : identity.explicit && identity.provider ? { provider: identity.provider } : {}),
+          model: c.model,
+          n: 0,
+          combined: null,
+          wtds: {},
+          provisional: false,
+          outcomes: c.outcomes,
+        });
       }
-      const cell = byModel.get(c.model);
+      const cell = byModel.get(key);
+      if (combineProviders) {
+        for (const p of c.providers || (identity.provider ? [identity.provider] : [])) {
+          if (p && !cell.providers.includes(p)) cell.providers.push(p);
+        }
+        cell.providers.sort();
+      } else if (identity.explicit && identity.provider) {
+        cell.provider = identity.provider;
+      }
       cell.wtds[a.aspect] = c.weighted;
       cell.n = Math.max(cell.n, c.n);
       cell.provisional = cell.provisional || (c.n > 0 && c.provisional);
@@ -285,7 +365,8 @@ export function overall(rows, { model, domain } = {}) {
     const got = universals.map((a) => c.wtds[a.aspect]).filter((v) => v != null);
     return { ...c, combined: got.length ? Number((got.reduce((x, y) => x + y, 0) / got.length).toFixed(2)) : null };
   });
-  cells.sort((x, y) => (y.combined ?? -1) - (x.combined ?? -1) || x.model.localeCompare(y.model));
+  cells.sort((x, y) => (y.combined ?? -1) - (x.combined ?? -1)
+    || displayIdentity(identityOf(x)).localeCompare(displayIdentity(identityOf(y))));
   return { cells, universals: universals.map((a) => a.aspect), filters: report.filters };
 }
 
@@ -323,14 +404,26 @@ export function shrink(mean, n, prior, k = PRIOR_WEIGHT) {
 // a measured-but-thin one — is UNMEASURED: neither on the frontier nor
 // dominated, and it dominates nothing. Missing is not 0 (free) and not
 // Infinity (dear); absence is not evidence in either direction.
-export function frontier(rows, costs, { aspect, model, domain, bands = DEFAULT_COST_BANDS } = {}) {
-  const multOf = new Map((costs || []).map((c) => [c.model, c.mult]));
+export function frontier(rows, costs, { aspect, model, provider, domain, costDomain, bands = DEFAULT_COST_BANDS } = {}) {
+  const costOf = new Map();
+  for (const cost of costs || []) {
+    const identity = identityOf(cost);
+    const key = identityKey(identity);
+    const list = costOf.get(key) || [];
+    list.push({
+      ...cost,
+      ...identity,
+      costDomain: cost.costDomain || `${identity.provider || "legacy"}:${cost.unit || "meter-points"}:${cost.classification || "legacy"}`,
+    });
+    costOf.set(key, list);
+  }
   const cells = aspect
-    ? aggregate(rows, { aspect, model, domain }).aspects[0].cells
-    : overall(rows, { model, domain }).cells;
+    ? aggregate(rows, { aspect, model, ...(provider !== undefined && { provider }), domain }).aspects[0].cells
+    : overall(rows, { model, ...(provider !== undefined && { provider }), domain }).cells;
   // The aggregate's own order is the return order: quality-ranked, never
   // re-ranked by cost — the frontier marks rows, it does not reorder them.
   const entries = cells.map((c) => ({
+    ...(c.provider ? { provider: c.provider } : {}),
     model: c.model,
     wtd: aspect ? c.weighted : c.combined,
     n: c.n,
@@ -339,13 +432,30 @@ export function frontier(rows, costs, { aspect, model, domain, bands = DEFAULT_C
     onFrontier: false,
     dominatedBy: null,
   }));
-  const participants = entries.filter((e) => e.wtd != null && multOf.get(e.model) != null);
-  for (const e of participants) e.multiplier = multOf.get(e.model);
+  const costFor = (entry) => {
+    const identity = identityOf(entry);
+    const candidates = (costOf.get(identityKey(identity)) || [])
+      .filter((cost) => costDomain === undefined || cost.costDomain === costDomain);
+    if (!candidates.length) return null;
+    const domains = new Set(candidates.map((cost) => cost.costDomain));
+    if (costDomain === undefined && domains.size > 1) return null;
+    return candidates.find((cost) => cost.mult != null) || candidates[0];
+  };
+  for (const entry of entries) {
+    const cost = costFor(entry);
+    if (!cost) continue;
+    entry.multiplier = cost.mult ?? null;
+    entry.costDomain = cost.costDomain;
+    for (const field of ["unit", "source", "classification", "asOf", "value", "baseModel"]) {
+      if (cost[field] !== undefined) entry[field] = cost[field];
+    }
+  }
+  const participants = entries.filter((e) => e.wtd != null && e.multiplier != null);
   for (const e of participants) {
     // The first dominator in aggregate order is the highest-quality one, so a
     // dominated row names the best model that beat it, not just any.
-    const dominator = participants.find((p) => p !== e && p.wtd > e.wtd && p.multiplier < e.multiplier);
-    if (dominator) e.dominatedBy = dominator.model;
+    const dominator = participants.find((p) => p !== e && p.costDomain === e.costDomain && p.wtd > e.wtd && p.multiplier < e.multiplier);
+    if (dominator) e.dominatedBy = displayIdentity(identityOf(dominator));
     else e.onFrontier = true;
   }
   for (const e of participants) e.band = band(e.multiplier, bands);

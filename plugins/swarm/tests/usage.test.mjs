@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   normalizeAnthropic, normalizeOllama, readCachedUsage, usageLines, notableLines,
-  formatResetTime, QUOTA_CACHE_FILENAME,
+  formatResetTime, QUOTA_CACHE_FILENAME, normalizeCodex,
 } from "../src/usage.mjs";
 
 const LONDON = "Europe/London";
@@ -49,6 +49,27 @@ test("normalizeOllama: G3 session AND weekly both survive normalisation", () => 
   equal(u.limits[0].percent, 12);
   equal(u.limits[1].percent, 83.8);
   equal(u.limits[1].resetsAt, "2026-09-12T08:00:00Z");
+});
+
+test("Stage 5: Codex normalization preserves every rate-limit id and separates account usage", () => {
+  const u = normalizeCodex({
+    provider: "codex",
+    buckets: [
+      { kind: "rate-limit", limitId: "five-hour", primary: { usedPercent: 42, resetsAt: "2026-09-06T12:00:00Z" }, secondary: null },
+      { kind: "rate-limit", limitId: "weekly", primary: { usedPercent: 100, resetsAt: "2026-09-12T00:00:00Z" } },
+      { kind: "account-usage", summary: { inputTokens: 10 } },
+    ],
+    source: "account/rateLimits/read",
+    provenance: "live",
+    asOf: "2026-09-06T00:00:00Z",
+  });
+  equal(u.provider, "codex");
+  equal(u.state, "exhausted");
+  equal(u.buckets.length, 3, "account usage remains a separate bucket");
+  deepEqual(u.limits.map((l) => l.kind), ["five-hour primary", "weekly primary"]);
+  equal(u.source, "account/rateLimits/read");
+  equal(u.provenance, "live");
+  ok(u.asOf, "the normalized account reading carries an as-of timestamp");
 });
 
 test("normalizeOllama/Anthropic: G4 an unreadable provider is `unknown` with no limits", () => {
@@ -161,6 +182,22 @@ test("readCachedUsage: G10 ollama appears only when enabled", async () => {
     const cfg = { provider: { cloud: { ollama: { enabled: true } } } };
     const on = await readCachedUsage(cfg, { now: NOW, cachePath, _ollama: stubOllama(OLLAMA_OK) });
     deepEqual(on.map((u) => u.provider), ["anthropic", "ollama"]);
+  });
+});
+
+test("Stage 5: readCachedUsage accepts canonical Ollama config and an injected Codex snapshot", async () => {
+  await withHome(async (home) => {
+    const codex = { readUsage: async () => normalizeCodex({
+      provider: "codex",
+      buckets: [{ kind: "rate-limit", limitId: "session", primary: { usedPercent: 10 } }],
+      source: "rpc",
+      provenance: "live",
+      asOf: "2026-09-06T00:00:00Z",
+    }) };
+    const cfg = { providers: { codex: { enabled: true }, ollama: { cloud: { ollama: { enabled: false } } } } };
+    const out = await readCachedUsage(cfg, { now: NOW, cachePath: join(home, QUOTA_CACHE_FILENAME), _codex: codex });
+    deepEqual(out.map((u) => u.provider), ["anthropic", "codex"]);
+    equal(out[1].limits[0].percent, 10);
   });
 });
 

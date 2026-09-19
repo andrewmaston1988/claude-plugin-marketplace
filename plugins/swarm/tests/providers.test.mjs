@@ -103,6 +103,7 @@ test("provider contract helper enforces scoped validation and canonical discover
 
 test("optional capabilities are explicit and unknown capabilities stay scoped", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
+  equal(typeof registry.capability("claude", "preflight"), "function");
   equal(registry.capability("codex", "readUsage"), null);
   throws(() => registry.capability("codex", "invented"), /unknown provider capability/);
   throws(() => registry.register({

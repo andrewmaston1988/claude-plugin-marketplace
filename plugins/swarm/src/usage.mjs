@@ -15,6 +15,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { swarmHome } from "./config.mjs";
+import { providerUsageSnapshot } from "./contracts.mjs";
 
 export const QUOTA_CACHE_FILENAME = "quota-cache.json";
 
@@ -24,23 +25,39 @@ function limit(kind, percent, resetsAt, scope = null) {
   return { kind, percent, resetsAt: resetsAt ?? null, scope };
 }
 
-const none = (provider) => ({ provider, state: "unknown", limits: [] });
+function asOf(value = Date.now()) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
+}
+
+function snapshot(provider, buckets, { source = "unknown", provenance = "none", asOf: at = Date.now() } = {}) {
+  return providerUsageSnapshot({ provider, buckets, source, provenance, asOf: asOf(at) });
+}
+
+const none = (provider, options = {}) => ({
+  ...snapshot(provider, [], options),
+  provider,
+  state: "unknown",
+  limits: [],
+});
 
 // Pure over `parseUsageLimits`'s output (the `result` half of the quota cache,
 // or a fresh fetch).
-export function normalizeAnthropic(parsed) {
-  if (!parsed?.limits?.length) return none("anthropic");
+export function normalizeAnthropic(parsed, options = {}) {
+  if (!parsed?.limits?.length) return none("anthropic", { source: "anthropic-oauth-usage", ...options });
+  const limits = parsed.limits.map((l) => limit(l.kind, l.percent, l.resetsAt, l.scope ?? null));
   return {
+    ...snapshot("anthropic", limits, { source: "anthropic-oauth-usage", provenance: options.provenance || "live", asOf: options.asOf }),
     provider: "anthropic",
     state: parsed.exhausted ? "exhausted" : "ok",
-    limits: parsed.limits.map((l) => limit(l.kind, l.percent, l.resetsAt, l.scope ?? null)),
+    limits,
   };
 }
 
 // Pure over `readUsage`'s output. Provenance fields ride through so the
 // banner can be worded from the SAME shape every consumer holds.
-export function normalizeOllama(reading) {
-  if (!reading || reading.state === "unknown") return none("ollama");
+export function normalizeOllama(reading, options = {}) {
+  if (!reading || reading.state === "unknown") return none("ollama", { source: "ollama-settings", ...options });
   const limits = [];
   if (typeof reading.sessionPctUsed === "number") {
     limits.push(limit("session", reading.sessionPctUsed, reading.sessionResetsAt));
@@ -49,6 +66,11 @@ export function normalizeOllama(reading) {
     limits.push(limit("weekly", reading.weeklyPctUsed, reading.resetsAt ?? reading.weeklyResetsAt));
   }
   return {
+    ...snapshot("ollama", limits, {
+      source: options.source || "ollama-settings",
+      provenance: options.provenance || reading.provenance || "live",
+      asOf: options.asOf || reading.fetchedAt,
+    }),
     provider: "ollama",
     state: reading.state,
     limits,
@@ -56,6 +78,41 @@ export function normalizeOllama(reading) {
     ...(reading.reason != null && { reason: reading.reason }),
     ...(reading.lastSeen != null && { lastSeen: reading.lastSeen }),
     ...(reading.cookiePath != null && { cookiePath: reading.cookiePath }),
+  };
+}
+
+function codexLimitBuckets(buckets) {
+  const limits = [];
+  for (const bucket of buckets || []) {
+    if (!bucket || bucket.kind !== "rate-limit") continue;
+    const id = bucket.limitId || "limit";
+    const entries = ["primary", "secondary"].filter((name) => bucket[name] && typeof bucket[name] === "object")
+      .map((name) => [name, bucket[name]]);
+    if (!entries.length) entries.push(["", bucket]);
+    for (const [name, value] of entries) {
+      const percent = value.usedPercent ?? value.used_percent ?? value.percent;
+      if (typeof percent !== "number") continue;
+      limits.push(limit(name ? `${id} ${name}` : id, percent, value.resetsAt ?? value.resets_at ?? null, id));
+    }
+  }
+  return limits;
+}
+
+// Codex account usage is deliberately retained in `buckets` but is not
+// flattened into a quota bar. Rate-limit ids are the dispatch/headroom view;
+// account summaries and daily buckets are account measurements, not leaf cost.
+export function normalizeCodex(reading, options = {}) {
+  const source = reading?.provider === "codex" && Array.isArray(reading.buckets) ? reading : { provider: "codex", buckets: [] };
+  const limits = codexLimitBuckets(source.buckets);
+  return {
+    ...snapshot("codex", source.buckets, {
+      source: source.source || options.source || "codex-app-server",
+      provenance: source.provenance || options.provenance || "none",
+      asOf: source.asOf || options.asOf,
+    }),
+    provider: "codex",
+    state: limits.some((entry) => entry.percent >= 100) ? "exhausted" : limits.length ? "ok" : "unknown",
+    limits,
   };
 }
 
@@ -75,19 +132,28 @@ function readAnthropicCache(cfg, now, cachePath) {
   }
   if (typeof cached?.ts !== "number") return none("anthropic");
   if (now - cached.ts >= (cfg.quotaCacheSecs ?? 300) * 1000) return none("anthropic");
-  return normalizeAnthropic(cached.result);
+  return normalizeAnthropic(cached.result, { source: "anthropic-oauth-cache", provenance: "cache", asOf: cached.ts });
 }
 
 // Every provider, in one array, cache-only. Callers that can afford a fetch (the
 // `quota` subcommand) fetch first and normalize the fresher reading themselves.
-export async function readCachedUsage(cfg = {}, { env = process.env, now = Date.now(), cachePath, _ollama } = {}) {
+export async function readCachedUsage(cfg = {}, { env = process.env, now = Date.now(), cachePath, _ollama, _codex } = {}) {
   const out = [readAnthropicCache(cfg, now, cachePath)];
-  if (cfg?.provider?.cloud?.ollama?.enabled === true) {
+  const ollamaEnabled = cfg?.providers?.ollama?.cloud?.ollama?.enabled === true || cfg?.provider?.cloud?.ollama?.enabled === true;
+  if (ollamaEnabled) {
     const { usageFromCache } = _ollama || (await import("./ollama-usage.mjs"));
     try {
       out.push(normalizeOllama(usageFromCache(cfg, env)));
     } catch {
       out.push(none("ollama"));
+    }
+  }
+  const codexEnabled = cfg?.providers?.codex?.enabled === true || cfg?.codex?.enabled === true;
+  if (codexEnabled && _codex?.readUsage) {
+    try {
+      out.push(normalizeCodex(await _codex.readUsage({ config: cfg, usageOptIn: false })));
+    } catch {
+      out.push(none("codex", { source: "codex-app-server" }));
     }
   }
   return out;

@@ -468,6 +468,30 @@ test("badges: the perf overall list carries the band badge and the unmeasured em
     "measured reads its band (💲💲 at 4.4×), unmeasured reads —, never a blank");
 });
 
+test("badges: provider-local cost points do not collapse into one ambiguous model badge", async () => {
+  const payload = perfPayload();
+  payload.overall = [{ model: "same-model", combined: 7.9, n: 6, provisional: false, outcomes: { completed: 6 }, wtds: { adherence: 7.9, handoff: 7.9, truthfulness: 7.9, depth: 7.9 } }];
+  payload.views.cost.points = [
+    { model: "same-model", provider: "ollama", wtd: 7.9, n: 6, multiplier: 1, band: 1, onFrontier: true, dominatedBy: null, thin: false },
+  ];
+  payload.views.cost.spread = [
+    { model: "same-model", provider: "ollama", mult: 1, band: 1, requests: 300, measuredRequests: 300, weeks: 1, measuredWeeks: 1, thin: false },
+    { model: "same-model", provider: "codex", mult: 4, band: 1, requests: 10, measuredRequests: 10, weeks: 1, measuredWeeks: 1, thin: false },
+  ];
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.location.hash = "#/perf";
+  P.fireHashchange();
+  await P.flush();
+  P.respondPerf(payload);
+  await P.flush();
+  const badges = badgesIn(P.main);
+  assert.equal(badges.length, 1, "the model still gets the honest unmeasured marker");
+  assert.equal(badges[0].textContent, "—", "provider-local alternatives never become a misleading global multiplier");
+});
+
 test("badges: run rows and leaf rows carry none — the screen a run is READ on stays clean", async () => {
   const P = loadPage();
   await P.flush();

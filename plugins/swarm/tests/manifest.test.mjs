@@ -96,6 +96,33 @@ test("provider identity: explicit and cache-qualified Codex models persist, but 
   }
 });
 
+test("manifest provider field permits the same model on two dispatch providers", () => {
+  const dir = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, allowedRoots: [dir] },
+        codex: { enabled: true, allowedRoots: [dir] },
+      },
+    };
+    const p = writeManifest(dir, {
+      tasks: [
+        { id: "ollama", prompt: "inspect", model: "same-model", provider: "ollama" },
+        { id: "codex", prompt: "inspect", model: "same-model", provider: "codex" },
+      ],
+    }, "same-model.json");
+    const plan = loadManifest(p, cfg, dir);
+    deepEqual(plan.tasks.map((task) => ({ id: task.id, model: task.model, provider: task.provider })), [
+      { id: "ollama", model: "same-model", provider: "ollama" },
+      { id: "codex", model: "same-model", provider: "codex" },
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("provider policy: Codex rejects Claude settings and configured leaf guards unless opted out", () => {
   const dir = tmp();
   try {

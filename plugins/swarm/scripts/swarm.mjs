@@ -6,11 +6,11 @@ import { fileURLToPath } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
-import { discoverModels, writeModelsCache, visibleModels, probeTopModels, deriveCloudName } from "../src/discovery.mjs";
+import { discoverModels, writeModelsCache, visibleModels, probeTopModels } from "../src/discovery.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
+import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, inferStoredIdentity, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
@@ -99,6 +99,20 @@ function modelLine(m) {
   return `${line} (${[size, ...(m.contextLength > 0 ? [fmtCtx(m.contextLength)] : [])].join(", ")})`;
 }
 
+function identityOf(value) {
+  const model = typeof value?.model === "string" ? value.model.trim() : value?.model;
+  const explicit = typeof value?.provider === "string" && value.provider.trim()
+    ? value.provider.trim().toLowerCase()
+    : null;
+  const inferred = explicit ? {} : inferStoredIdentity(model);
+  return { provider: explicit || inferred.provider || null, model };
+}
+
+const identityKey = (value) => {
+  const identity = identityOf(value);
+  return JSON.stringify([identity.provider, identity.model]);
+};
+
 // The single ollama usage entry point for the CLI — getUsage memoises per
 // process, so validate/run/models share one fetch however many seats.
 async function usageHeadroom(cfg) {
@@ -110,9 +124,8 @@ async function usageHeadroom(cfg) {
 // same mapping discovery uses — never a second rule. Both reads are cheap and
 // a missing file reads as empty, so a fresh install is simply "unmeasured".
 async function cloudCostRows() {
-  const { readSnapshots, costPerModel, multipliers, usageHistoryPath } = await import("../src/cost.mjs");
-  return multipliers(costPerModel(readSnapshots(usageHistoryPath())))
-    .map((r) => ({ ...r, model: deriveCloudName(r.model) }));
+  const { ollamaCloudCostRows, readSnapshots, usageHistoryPath } = await import("../src/cost.mjs");
+  return ollamaCloudCostRows(readSnapshots(usageHistoryPath()));
 }
 
 // Band edges are config (`provider.cloud.ollama.costBands`), shared with the
@@ -171,24 +184,30 @@ async function cmdModels(rest = []) {
 // exist yet at validate time.
 function seatedModels(plan) {
   const byModel = new Map();
-  const add = (model, leaf) => {
-    if (!model) return;
-    if (!byModel.has(model)) byModel.set(model, []);
-    byModel.get(model).push(leaf);
+  const add = (value, leaf) => {
+    const identity = identityOf(value);
+    if (!identity.model) return;
+    const key = identityKey(identity);
+    if (!byModel.has(key)) byModel.set(key, { identity, leaves: [] });
+    byModel.get(key).leaves.push(leaf);
   };
   for (const t of plan.tasks) {
     if (isAgentless(t)) continue;
     if (t.childPlan) {
       for (const c of t.childPlan.tasks) {
         if (isAgentless(c)) continue;
-        add(c.model, c.id);
+        add(c, c.id);
       }
       continue;
     }
-    add(t.model, t.id);
+    add(t, t.id);
   }
-  if (plan.digest?.model) add(plan.digest.model, "__digest");
-  return [...byModel].map(([model, leaves]) => ({ model, leaves }));
+  if (plan.digest?.model) add(plan.digest, "__digest");
+  return [...byModel.values()].map(({ identity, leaves }) => ({
+    ...(identity.provider ? { provider: identity.provider } : {}),
+    model: identity.model,
+    leaves,
+  }));
 }
 
 // The launchable roster `swarm models` prints, from the cache it wrote —
@@ -582,6 +601,7 @@ async function cmdGradeInit(dir) {
     session: "<this session's id>",
     rows: leaves.map((l) => ({
       leaf: l.id,
+      ...(l.provider ? { provider: l.provider } : {}),
       model: l.model,
       read: { result: l.resultPath, transcript: l.transcriptPath },
       domain: "<one lowercase token: the language or ecosystem the leaf worked in — rust, godot, node, python, docs. Not the repo, not the task>",
@@ -646,13 +666,14 @@ async function cmdGradeFile(path) {
   }
   for (const r of batch.rows) {
     const result = readResult(dir, r.leaf);
-    const declared = cacheEntries.get(result.model);
+    const declared = cacheEntries.get(identityKey(result)) || cacheEntries.get(result.model);
     const { isClaudeModel } = await import("../src/models.mjs");
-    if (!declared && !isClaudeModel(result.model)) err(dim(`warning: ${result.model} is not in models-cache.json — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
+    if (!declared && !isClaudeModel(result.model)) err(dim(`warning: ${result.provider ? `${result.provider}/` : ""}${result.model} is not in models-cache.json — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
     rows.push({
       ts,
       resultsDir: dir,
       leaf: r.leaf,
+      ...(result.provider ? { provider: result.provider } : {}),
       model: result.model,
       effort: manifestTasks.get(r.leaf)?.effort ?? null,
       domain: r.domain,
@@ -702,11 +723,13 @@ async function readModelsCache() {
     const { readFileSync } = await import("node:fs");
     const cache = JSON.parse(readFileSync(join(swarmHome(), "models-cache.json"), "utf8"));
     for (const m of cache?.models || []) {
-      map.set(m.model, {
+      const declared = {
         capabilities: m.capabilities ?? null,
         contextLength: m.contextLength ?? null,
         parameterCount: m.parameterCount ?? null,
-      });
+      };
+      map.set(identityKey(m), declared);
+      if (!m.provider) map.set(m.model, declared);
     }
   } catch { /* no cache — declared stays null and the caller warns */ }
   return map;
@@ -731,7 +754,7 @@ async function cmdPerf(rest) {
   const domain = getFlag("domain", rest);
   const path = scoresPath();
   const rows = readRows(path);
-  const report = aggregate(rows, { aspect, model, domain });
+  const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
   const costs = await cloudCostRows();
   const bands = await costBands();
   // A model is dominated only when another is strictly better AND strictly
@@ -741,7 +764,16 @@ async function cmdPerf(rest) {
     cost: f && f.band != null ? "$".repeat(f.band) : "—",
     frontier: f ? (f.onFrontier ? "*" : f.dominatedBy ? `dom ${f.dominatedBy}` : "—") : "—",
   });
-  const LEGEND = "    cost $/$$/$$$ = meter weight band vs the cheapest measured model (swarm cost) · * on the quality/cost frontier · dom <model> = a better AND cheaper model exists · — not yet measured";
+  const byModel = (entries) => {
+    const grouped = new Map();
+    for (const entry of entries) {
+      const list = grouped.get(entry.model) || [];
+      list.push(entry);
+      grouped.set(entry.model, list);
+    }
+    return new Map([...grouped].map(([name, list]) => [name, list.length === 1 ? list[0] : { providerLocal: true }]));
+  };
+  const LEGEND = "    cost $/$$/$$$ = meter weight band vs the cheapest measured model (swarm cost) · * on the quality/cost frontier · dom <model> = a better AND cheaper model exists · provider-local = multiple providers for this model · — not yet measured";
   const filters = Object.entries(report.filters).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" · ");
   // Lines and rows differ after a re-grade: the store is append-only and the
   // newest row per (resultsDir, leaf) wins, so say both rather than let the raw
@@ -754,13 +786,16 @@ async function cmdPerf(rest) {
   if (rest.includes("--overall")) {
     // One table: models ranked on the mean of the four universal weighted
     // scores; per-aspect columns beside it so the average cannot hide a hole.
-    const o = overall(rows, { model, domain });
-    const byModel = new Map(frontier(rows, costs, { model, domain, bands }).map((e) => [e.model, e]));
+    const o = overall(rows, { model, domain, combineProviders: true });
+    const costByModel = byModel(frontier(rows, costs, { model, domain, bands }));
     const w = Math.max(5, ...o.cells.map((c) => c.model.length));
     out(`    ${"model".padEnd(w)}    n  overall  ${o.universals.map((a) => a.slice(0, 5).padStart(5)).join("  ")}  cost  frontier`);
     for (const c of o.cells) {
       const cols = o.universals.map((a) => (c.wtds[a] == null ? "—" : c.wtds[a].toFixed(2)).padStart(5)).join("  ");
-      const { cost, frontier: fm } = costCols(byModel.get(c.model));
+      const candidate = costByModel.get(c.model);
+      const { cost, frontier: fm } = candidate?.providerLocal
+        ? { cost: "—", frontier: "provider-local" }
+        : costCols(candidate);
       const flag = c.combined == null ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
       const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
       const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
@@ -778,12 +813,15 @@ async function cmdPerf(rest) {
       out(dim("    n=0 — no rows"));
       continue;
     }
-    const byModel = new Map(frontier(rows, costs, { aspect: a.aspect, model, domain, bands }).map((e) => [e.model, e]));
+    const costByModel = byModel(frontier(rows, costs, { aspect: a.aspect, model, domain, bands }));
     const w = Math.max(...a.cells.map((c) => c.model.length));
     for (const c of a.cells) {
       const mean = c.mean == null ? "—" : c.mean.toFixed(2);
       const wtd = c.weighted == null ? "—" : c.weighted.toFixed(2);
-      const { cost, frontier: fm } = costCols(byModel.get(c.model));
+      const candidate = costByModel.get(c.model);
+      const { cost, frontier: fm } = candidate?.providerLocal
+        ? { cost: "—", frontier: "provider-local" }
+        : costCols(candidate);
       const flag = c.n === 0 ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
       const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
       const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";

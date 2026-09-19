@@ -134,8 +134,12 @@
   // bands, verdicts and both card picks arrive from the server's costView().
   function costScreen(data, h) {
     const { esc, enc } = h;
-    const { points, spread, best, worst, valueMargin } = data;
-    if (!points.length && !spread.length) return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
+    const sections = data.sections?.length ? data.sections : [{
+      provider: null, points: data.points || [], spread: data.spread || [], best: data.best, worst: data.worst,
+    }];
+    if (!sections.some((section) => section.points.length || section.spread.length)) {
+      return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
+    }
     // Null-safe: `costView` only ever picks frontier participants, which always
     // carry a multiplier — but this function is public on window.perfViews, so a
     // caller passing an unmeasured pick must get an em dash, never a "0×" that
@@ -154,29 +158,34 @@
         : why;
       return `<div><label>${esc(label)}</label><span>${pick ? esc(pick.model) : "—"}</span><small>${detail}</small></div>`;
     };
-    const cards = `<div class="kv dash4 costcards">${card("best value", best, "nothing priced and graded yet", valueMargin == null ? "" : `within ${valueMargin} of the best`)}${card("worst value", worst, "nothing is beaten on both axes")}</div>`;
     // Log-scaled over the same 0.5×–20× domain the deleted plots used:
     // multipliers span decades, so a linear bar makes every cheap model a stub
     // and hides the 1×-vs-2× difference that actually decides a seat.
     const LO = Math.log10(0.5), HI = Math.log10(20);
     const pct = (m) => Math.max(2, Math.min(100, ((Math.log10(m) - LO) / (HI - LO)) * 100));
-    const ptOf = new Map(points.map((p) => [p.model, p]));
-    const firstUnm = spread.findIndex((r) => r.mult == null);
-    const rows = spread.map((r, i) => {
-      const p = ptOf.get(r.model);
-      const verdict = r.mult == null ? "unmeasured"
-        : p && p.onFrontier ? "best value"
-        : p && p.dominatedBy ? `beaten by ${esc(p.dominatedBy)}`
-        : "cost only";
-      const tip = `${esc(r.model)} · ${r.mult == null ? "unmeasured" : esc(fmtMult(r.mult))} · ${r.measuredRequests} measured of ${r.requests} requests · ${r.measuredWeeks} of ${r.weeks} weeks${r.thin ? " · thin" : ""}`;
-      const bar = r.mult == null ? `<div class="bar"></div>`
-        : `<div class="bar${r.thin ? " prov" : ""}"><span style="width:${pct(r.mult).toFixed(1)}%"></span></div>`;
-      return `<div class="arow costrow${i === firstUnm && firstUnm > 0 ? " unmfirst" : ""}${r.mult == null ? " unm" : ""}" data-href="#/perf/model/${enc(r.model)}" title="${tip}">`
-        + `<span class="alabel">${esc(r.model)}</span>${bar}`
-        + `<span class="aval valside">${badge(r.band)}${r.mult == null ? "—" : esc(fmtMult(r.mult))}</span>`
-        + `<small class="costverdict">${verdict}</small></div>`;
-    }).join("");
-    return `${cards}<div class="section"><span>cost ranking</span><span class="line"></span></div><div class="cost">${rows}</div>`;
+    const renderSection = (section) => {
+      const { points, spread, best, worst } = section;
+      const provider = section.provider || "unqualified";
+      const cards = `<div class="kv dash4 costcards">${card("best value", best, "nothing priced and graded yet", data.valueMargin == null ? "" : `within ${data.valueMargin} of the best`)}${card("worst value", worst, "nothing is beaten on both axes")}</div>`;
+      const ptOf = new Map(points.map((p) => [p.model, p]));
+      const firstUnm = spread.findIndex((r) => r.mult == null);
+      const rows = spread.map((r, i) => {
+        const p = ptOf.get(r.model);
+        const verdict = r.mult == null ? "unmeasured"
+          : p && p.onFrontier ? "best value"
+          : p && p.dominatedBy ? `beaten by ${esc(p.dominatedBy)}`
+          : "cost only";
+        const tip = `${esc(r.model)} · ${r.mult == null ? "unmeasured" : esc(fmtMult(r.mult))} · ${r.measuredRequests} measured of ${r.requests} requests · ${r.measuredWeeks} of ${r.weeks} weeks${r.thin ? " · thin" : ""}`;
+        const bar = r.mult == null ? `<div class="bar"></div>`
+          : `<div class="bar${r.thin ? " prov" : ""}"><span style="width:${pct(r.mult).toFixed(1)}%"></span></div>`;
+        return `<div class="arow costrow${i === firstUnm && firstUnm > 0 ? " unmfirst" : ""}${r.mult == null ? " unm" : ""}" data-href="#/perf/model/${enc(r.model)}" title="${tip}">`
+          + `<span class="alabel">${esc(r.model)}</span>${bar}`
+          + `<span class="aval valside">${badge(r.band)}${r.mult == null ? "—" : esc(fmtMult(r.mult))}</span>`
+          + `<small class="costverdict">${verdict}</small></div>`;
+      }).join("");
+      return `<div class="section"><span>${esc(provider)} cost</span><span class="line"></span></div>${cards}<div class="section"><span>cost ranking</span><span class="line"></span></div><div class="cost">${rows}</div>`;
+    };
+    return sections.map(renderSection).join("");
   }
 
   // The chip's inner text, kept out of the dashboard template: a band badge

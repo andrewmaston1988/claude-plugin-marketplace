@@ -136,6 +136,53 @@ test("coverage: composite key does not collide when a model or aspect name conta
   equal(cells.find((c) => c.aspect === "a b" && c.model === "c").n, 9);
 });
 
+test("performance views collapse same-named leaves while cost domains stay provider-local", () => {
+  const rows = [
+    ...Array.from({ length: 5 }, (_, i) => graded({ leaf: `ollama-${i}`, provider: "ollama", model: "same-model" })),
+    ...Array.from({ length: 5 }, (_, i) => graded({ leaf: `codex-${i}`, provider: "codex", model: "same-model" })),
+  ];
+  const report = aggregate(rows, { aspect: "adherence", combineProviders: true });
+  const view = coverage(report);
+  equal(view.identities.length, 1);
+  equal(view.cells.filter((c) => c.model === "same-model").length, 1);
+  deepEqual(view.identities[0].providers, ["codex", "ollama"]);
+
+  const rel = reliability(dedupe(rows));
+  equal(rel.length, 1);
+  deepEqual(rel[0].providers, ["codex", "ollama"]);
+
+  const cost = costView(rows, [
+    costRow("same-model", 1, { provider: "ollama", unit: "meter-points", costDomain: "ollama:meter-points:unpriced" }),
+    costRow("same-model", null, { provider: "codex", unit: "usd", classification: "api-equivalent estimate", costDomain: "codex:usd:api-equivalent estimate" }),
+  ]);
+  equal(cost.points.length, 2);
+  equal(cost.points.find((p) => p.provider === "ollama").multiplier, 1);
+  equal(cost.points.find((p) => p.provider === "codex").multiplier, null);
+  equal(cost.points.find((p) => p.provider === "codex").dominatedBy, null,
+    "an incompatible USD estimate cannot dominate or be dominated by meter points");
+  equal(cost.spread.find((p) => p.provider === "codex").classification, "api-equivalent estimate");
+  deepEqual(cost.sections.map((section) => section.provider), ["codex", "ollama"]);
+  equal(cost.best, null, "mixed providers do not produce a misleading global cost pick");
+  equal(cost.sections.find((section) => section.provider === "ollama").best.provider, "ollama");
+});
+
+test("cost view keeps provider history even when a model has no current quality row", () => {
+  const rows = [
+    ...Array.from({ length: 5 }, (_, i) => graded({ leaf: `same-${i}`, provider: "ollama", model: "same-model" })),
+  ];
+  const cost = costView(rows, [
+    costRow("same-model", 1, { provider: "ollama", costDomain: "ollama:meter-points:unpriced" }),
+    costRow("same-model", 4, { provider: "codex", costDomain: "codex:relative:rate-card" }),
+    costRow("old-model", 2, { provider: "codex", costDomain: "codex:relative:rate-card" }),
+  ]);
+  equal(cost.points.filter((point) => point.model === "same-model").length, 2,
+    "the cost read-model keeps one provider-local point per cost section");
+  equal(cost.spread.find((point) => point.model === "old-model").provider, "codex",
+    "historical cost-only models remain in the provider cost data");
+  deepEqual(cost.sections.map((section) => section.provider), ["codex", "ollama"]);
+  equal(cost.sections.find((section) => section.provider === "codex").spread.length, 2);
+});
+
 // ── cost ────────────────────────────────────────────────────────────────────
 
 // Multiplier rows as `multipliers(costPerModel(snaps))` emits them. `m-thin`
