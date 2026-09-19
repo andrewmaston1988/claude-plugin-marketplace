@@ -117,9 +117,13 @@ test("askLeaf: explicit provider override reaches the provider runner", async ()
       },
     };
     const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
-    await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", model: "gpt-5-codex", provider: "codex", cfg, io: makeIo(spawn) });
+    const answer = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", model: "gpt-5-codex", provider: "codex", cfg, io: makeIo(spawn) });
     equal(spawn.calls[0].cmd, "codex");
     ok(!spawn.calls[0].opts.env.ANTHROPIC_MODEL, "Codex ask must not use the Ollama env route");
+    equal(answer.provider, "codex");
+    const stored = JSON.parse(readFileSync(join(dir, "results", "leaf.json"), "utf8"));
+    equal(stored.asks.at(-1).provider, "codex");
+    ok(stored.provider !== "codex", "an override must not rewrite the leaf's own identity");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

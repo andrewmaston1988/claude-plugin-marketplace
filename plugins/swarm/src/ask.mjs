@@ -8,13 +8,13 @@ import { join } from "node:path";
 import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { readResult } from "./results.mjs";
 import { isUnderRoot } from "./roots.mjs";
-import { createDefaultProviderRegistry, providerConfig } from "./providers.mjs";
-import { defaultCodexProviderAdapter } from "./codex.mjs";
+import { providerConfig } from "./providers.mjs";
+import { defaultProviderRegistry } from "./default-providers.mjs";
 import { runPlan, makeDefaultIo } from "./scheduler.mjs";
 
-const PROVIDERS = createDefaultProviderRegistry({ codexAdapter: defaultCodexProviderAdapter });
+const PROVIDERS = defaultProviderRegistry();
 
-export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo() }) {
+export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo(), providerRegistry = PROVIDERS, runnerRegistry }) {
   const prior = readResult(resultsDir, taskId);
   if (!prior) throw new Error(`no result for '${taskId}' under ${resultsDir}`);
   if (!prior.sessionId) {
@@ -28,11 +28,11 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   const manifest = JSON.parse(readFileSync(join(resultsDir, "manifest.json"), "utf8"));
   const recordedTask = manifest.tasks.find((t) => t.id === taskId);
   const recordedProvider = !model ? (prior.provider || recordedTask?.provider) : undefined;
-  const identity = PROVIDERS.resolve(
+  const identity = providerRegistry.resolve(
     { model: askModel, ...(provider || recordedProvider ? { provider: provider || recordedProvider } : {}) },
     { config: cfg },
   );
-  const adapter = PROVIDERS.get(identity.provider);
+  const adapter = providerRegistry.get(identity.provider);
   const problems = adapter.validateTask({ model: askModel, provider: identity.provider }, { config: cfg });
   if (problems?.length) throw new Error(`provider '${identity.provider}' rejected ask: ${problems.join("; ")}`);
   // Same deny-by-default gate as the manifest: a non-Claude model may only see
@@ -81,10 +81,19 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   // frames, only the CLI's own answer + tokens line. Suppressing io.snapshot
   // is what runPlan's paint() checks before rendering anything.
   await runPlan({ ...manifest, tasks, concurrency: 1 }, cfg, { ...io, snapshot: undefined }, {
+    providerRegistry,
+    runnerRegistry,
     ask: { taskId, question, model: askModel, provider: identity.provider },
   });
 
   const updated = readResult(resultsDir, taskId);
   const askEntry = updated.asks[updated.asks.length - 1];
-  return { answer: askEntry.answer, tokens: askEntry.tokens, sessionId: updated.sessionId, ok: askEntry.ok };
+  return {
+    answer: askEntry.answer,
+    tokens: askEntry.tokens,
+    sessionId: updated.sessionId,
+    ok: askEntry.ok,
+    ...(askEntry.provider && { provider: askEntry.provider }),
+    ...(askEntry.runner && { runner: askEntry.runner }),
+  };
 }

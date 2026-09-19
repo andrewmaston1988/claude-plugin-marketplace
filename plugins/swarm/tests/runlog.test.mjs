@@ -599,3 +599,15 @@ test("P2: ALIVE_STATES has one definition, and the scheduler imports it", () => 
   assert.ok(/import\s*\{[^}]*ALIVE_STATES[^}]*\}\s*from\s*"\.\/runlog\.mjs"/.test(sched), "scheduler must import it from runlog.mjs");
   assert.ok(ALIVE_STATES instanceof Set && ALIVE_STATES.size === 3);
 });
+
+test("legacy run-start rows infer provider; explicit provider rows are not marked inferred", () => {
+  const log = [
+    { ts: "2026-09-01T00:00:00.000Z", event: "run-start", tasks: [{ id: "a", model: "glm-5.2:cloud" }, { id: "b", model: "gpt-5-codex", provider: "codex" }] },
+  ].map((e) => JSON.stringify(e)).join("\n") + "\n";
+  const run = readRunLog(log, { now: Date.parse("2026-09-01T00:01:00.000Z") });
+  const byId = Object.fromEntries(run.tasks.map((t) => [t.id, t]));
+  assert.equal(byId.a.provider, "ollama");
+  assert.equal(byId.a.providerInferred, true);
+  assert.equal(byId.b.provider, "codex");
+  assert.equal(byId.b.providerInferred, undefined);
+});

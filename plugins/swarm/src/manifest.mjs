@@ -11,8 +11,8 @@ import { provenanceBanner, formatResetTime } from "./usage.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
 import { validateSchemaShape } from "./schema.mjs";
 import { TEMPLATE_RE } from "./coverage.mjs";
-import { createDefaultProviderRegistry, providerConfig } from "./providers.mjs";
-import { defaultCodexProviderAdapter } from "./codex.mjs";
+import { providerConfig } from "./providers.mjs";
+import { defaultProviderRegistry } from "./default-providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
 
 export { isUnderRoot } from "./roots.mjs";
@@ -53,7 +53,7 @@ const KNOWN_TASK_KEYS = new Set([
   "mustRead",
 ]);
 
-const PROVIDERS = createDefaultProviderRegistry({ codexAdapter: defaultCodexProviderAdapter });
+const PROVIDERS = defaultProviderRegistry();
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
 const MANIFEST_BANNED_KEYS = [

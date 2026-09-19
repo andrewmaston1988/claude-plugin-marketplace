@@ -660,3 +660,20 @@ test("renderStatus: a dead engine's running leaves read as interrupted, and the 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("legacy model-only results infer provider on read without rewriting the stored shape", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-legacy-"));
+  try {
+    initResultsDir(dir);
+    writeResult(dir, "cloud", { id: "cloud", model: "glm-5.2:cloud", ok: true });
+    writeResult(dir, "claude", { id: "claude", model: "sonnet", ok: true });
+    writeResult(dir, "unknown", { id: "unknown", model: "gpt-5", ok: true });
+    const cloud = readResult(dir, "cloud");
+    deepEqual([cloud.provider, cloud.runner], ["ollama", "claude"]);
+    equal(JSON.stringify(cloud), JSON.stringify({ id: "cloud", model: "glm-5.2:cloud", ok: true }));
+    deepEqual([readResult(dir, "claude").provider, readResult(dir, "claude").runner], ["claude", "claude"]);
+    equal(readResult(dir, "unknown").provider, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

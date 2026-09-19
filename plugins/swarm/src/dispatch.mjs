@@ -4,9 +4,10 @@ import { dirname, sep, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { isClaudeModel } from "./models.mjs";
 import { deepMerge } from "./config.mjs";
-import { createDefaultProviderRegistry, providerConfig } from "./providers.mjs";
+import { providerConfig } from "./providers.mjs";
+import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createRunnerRegistry } from "./runners.mjs";
-import { defaultCodexProviderAdapter, defaultCodexRunnerAdapter } from "./codex.mjs";
+import { defaultCodexRunnerAdapter } from "./codex.mjs";
 import { isUnderRoot } from "./roots.mjs";
 import { RUNNER_PARSER_FACTORIES } from "./stream.mjs";
 
@@ -93,7 +94,7 @@ function dispatchRunners(providerRegistry) {
 }
 
 export function createDispatchRegistry({ providerRegistry, runnerRegistry } = {}) {
-  const providers = providerRegistry || createDefaultProviderRegistry({ codexAdapter: defaultCodexProviderAdapter });
+  const providers = providerRegistry || defaultProviderRegistry();
   return {
     providerRegistry: providers,
     runnerRegistry: runnerRegistry || dispatchRunners(providers),
@@ -118,8 +119,10 @@ function validateDispatchPolicy(task, identity, adapter, cfg) {
   const roots = providerConfig(cfg, identity.provider).allowedRoots;
   // Legacy hand-built configs predate canonical provider blocks. Keep their
   // Ollama dispatch byte-compatible, while canonical and Codex configs always
-  // opt into the fail-closed root gate.
-  const rootGate = identity.provider === "codex" || Array.isArray(roots);
+  // opt into the fail-closed root gate. An empty legacy list means "not
+  // configured"; an explicit canonical empty list remains fail-closed.
+  const canonicalBlock = cfg?.providers?.[identity.provider] && typeof cfg.providers[identity.provider] === "object";
+  const rootGate = identity.provider === "codex" || canonicalBlock || (Array.isArray(roots) && roots.length > 0);
   const cwd = task.originalCwd || task.cwd;
   if (rootGate && identity.provider !== "claude" && (!cwd || !Array.isArray(roots) || !roots.some((root) => isUnderRoot(cwd, root)))) {
     throw new Error(
@@ -157,6 +160,8 @@ export function buildDispatch(task, prompt, cfg = {}, options = {}) {
   }
   return {
     ...invocation,
+    provider: identity.provider,
+    model: identity.model,
     runner: runner.id,
     parser,
   };

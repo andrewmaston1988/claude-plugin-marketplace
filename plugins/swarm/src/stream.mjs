@@ -374,6 +374,11 @@ export function createClaudeRunnerParser(options = {}) {
   let realModel;
   let usage = emptyTokens();
   let output = "";
+  let stopReason;
+  let costUsd;
+  let numTurns;
+  let apiKeySource;
+  let error;
   const emit = options.emit || options.onEvent;
   const send = (event) => {
     const canonical = runnerEvent(event);
@@ -385,6 +390,10 @@ export function createClaudeRunnerParser(options = {}) {
       sessionId = event.session_id || event.sessionId;
       if (sessionId) send({ type: "session", sessionId: String(sessionId) });
       if (event.model) realModel = String(event.model);
+      if (event.apiKeySource != null) apiKeySource = event.apiKeySource;
+    },
+    onStop(reason) {
+      if (reason) stopReason = reason;
     },
     onUsage(id, value) {
       const next = usageTokens(value);
@@ -396,8 +405,25 @@ export function createClaudeRunnerParser(options = {}) {
     },
     onResult(result) {
       output = typeof result.result === "string" ? result.result : output;
+      if (result.is_error === true || result.subtype === "error") {
+        error = {
+          code: result.error?.code || result.error_code || "runner_error",
+          message: typeof result.result === "string" ? result.result : "Claude runner failed",
+        };
+        terminal = true;
+        send({
+          type: "error",
+          ...(sessionId ? { sessionId: String(sessionId) } : {}),
+          terminal: true,
+          error,
+        });
+        return;
+      }
       const finalUsage = pickFinalTokens(result.usage, usage);
       usage = finalUsage;
+      if (result.total_cost_usd != null) costUsd = result.total_cost_usd;
+      if (result.num_turns != null) numTurns = result.num_turns;
+      if (result.apiKeySource != null) apiKeySource = result.apiKeySource;
       terminal = true;
       send({
         type: "completed",
@@ -424,7 +450,16 @@ export function createClaudeRunnerParser(options = {}) {
       return this;
     },
     result() {
-      return { ...(sessionId ? { sessionId: String(sessionId) } : {}), ...(realModel ? { realModel } : {}), output, usage, terminal };
+      return {
+        ...(sessionId ? { sessionId: String(sessionId) } : {}),
+        ...(realModel ? { realModel } : {}),
+        output, usage, terminal,
+        ...(stopReason ? { stopReason } : {}),
+        ...(costUsd != null ? { costUsd } : {}),
+        ...(numTurns != null ? { numTurns } : {}),
+        ...(apiKeySource != null ? { apiKeySource } : {}),
+        ...(error ? { error } : {}),
+      };
     },
   };
 }

@@ -42,15 +42,26 @@ function configured(config, id, fallback) {
   return typeof block?.enabled === "boolean" ? block.enabled : fallback;
 }
 
-function descriptor({ id, runnerId, defaultEnabled, matchModel }) {
+function descriptor({ id, runnerId, defaultEnabled, matchModel, capabilities = {} }) {
   return {
     id,
     runnerId,
     enabled: (config) => configured(config, id, defaultEnabled),
     matchModel,
     validateTask: () => [],
-    capabilities: {},
+    capabilities,
   };
+}
+
+async function pingOllamaEndpoint({ config, fetch } = {}) {
+  const endpoint = providerConfig(config, "ollama").url;
+  if (!endpoint) return { ok: true };
+  try {
+    await fetch(endpoint);
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: `endpoint ${endpoint} is unreachable (${e.message}) — open-model tasks cannot dispatch. Is the provider running?` };
+  }
 }
 
 export function defaultProviderAdapters({ codexAdapter } = {}) {
@@ -66,6 +77,7 @@ export function defaultProviderAdapters({ codexAdapter } = {}) {
       runnerId: "claude",
       defaultEnabled: true,
       matchModel: (model) => /(:|-)cloud$/i.test(String(model || "")) ? { provider: "ollama", model } : null,
+      capabilities: { preflight: pingOllamaEndpoint },
     }),
     codexAdapter || descriptor({
       id: "codex",

@@ -2,7 +2,7 @@ import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync, 
 import { freemem } from "node:os";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
-import { buildDispatch, toSpawnable, runnerOf } from "./dispatch.mjs";
+import { buildDispatch, createDispatchRegistry, toSpawnable, runnerOf } from "./dispatch.mjs";
 import { isClaudeModel } from "./models.mjs";
 import {
   buildDigestTask, DIGEST_ID,
@@ -12,14 +12,14 @@ import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from 
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary, readSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
-  renderProvenance, touchHeartbeat, stopPath, recordedSessionIds, transcriptPath,
+  renderProvenance, touchHeartbeat, stopPath, recordedSessionRecords, transcriptPath,
 } from "./results.mjs";
 import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
-  createStreamParser, createUsageAccumulator, pickFinalTokens,
-  addTokens, emptyTokens, tokenTotal,
+  createRunnerParser, addTokens, emptyTokens, tokenTotal,
 } from "./stream.mjs";
+import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createSnapshotWriter, liveViewLines } from "./ui.mjs";
 import { matchQuota, parseQuotaReset, checkQuota, DEFAULT_QUOTA_PATTERNS } from "./quota.mjs";
 import { evalExpr, evalBool } from "./expr.mjs";
@@ -134,7 +134,7 @@ function tryParseJson(output) {
 // Schema, citations and read coverage share ONE corrective re-ask through the leaf's
 // resumed session. Afterwards a schema miss is fatal; a refuted citation or coverage
 // shortfall only annotates (the checker may be wrong). Runs before worktree collection.
-async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks) {
+async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks, runtime) {
   const runner = runnerOf(task, cfg);
   // Coverage is proven from the leaf's OWN transcript: parse its Read calls and
   // check them against `mustRead`. The transcript on disk already holds the full
@@ -174,6 +174,7 @@ async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks)
   const failText = (errs) => `returns validation failed:\n  - ${errs.join("\n  - ")}`;
   const logCitations = (cite) => appendRunLog(resultsDir, {
     ts: new Date().toISOString(), event: "citations", id: task.id,
+    ...runtime?.identity?.(task),
     checked: cite.checked, drifted: cite.drifted.length, refuted: cite.refuted.length,
   });
   const logCoverage = (cov, retried) => appendRunLog(resultsDir, {
@@ -219,7 +220,10 @@ async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks)
     return finish(r, a1, false);
   }
 
-  appendRunLog(resultsDir, { ts: new Date().toISOString(), event: "leaf-contract-retry", id: task.id });
+  appendRunLog(resultsDir, {
+    ts: new Date().toISOString(), event: "leaf-contract-retry", id: task.id,
+    ...runtime?.identity?.(task),
+  });
   // One retry prompt carries every class that fired, in order: schema (carries the
   // schema itself — "expected object" alone doesn't name fields), citations (name
   // file/line/fix), then coverage (name each unread range as a literal Read call).
@@ -240,7 +244,7 @@ async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks)
     : "Reply with your complete corrected answer, in the same form the task originally asked for.";
   const retryPrompt = `${blocks.join("\n\n")}\n${closing}`;
   const leafLog = createWriteStream(join(resultsDir, "results", `${task.id}.log`), { flags: "a" });
-  const r2 = await runTask({ ...task, cwd: taskCwd, resume: r.sessionId }, retryPrompt, cfg, io, leafLog, hooks);
+  const r2 = await runTask({ ...task, cwd: taskCwd, resume: r.sessionId }, retryPrompt, cfg, io, leafLog, hooks, runtime);
 
   const combined = {
     ...r,
@@ -263,9 +267,27 @@ async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks)
 }
 
 // Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
-export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, onChild, onSession } = {}) {
+export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, onChild, onSession } = {}, runtime = {}) {
   return new Promise((resolve) => {
-    const { argv, env } = buildDispatch(task, prompt, cfg);
+    let dispatch;
+    try {
+      dispatch = buildDispatch(task, prompt, cfg, {
+        providerRegistry: runtime.providerRegistry,
+        runnerRegistry: runtime.runnerRegistry,
+        cache: runtime.cache,
+      });
+    } catch (e) {
+      const done = () => resolve({
+        ok: false, exit: null, durationMs: 0, output: `dispatch error: ${e.message}`, raw: "", timedOut: false,
+        tokens: emptyTokens(), errorCode: e.code || "DISPATCH_ERROR",
+        ...(task.provider && { provider: task.provider }),
+      });
+      if (leafLog) leafLog.end(done);
+      else done();
+      return;
+    }
+    const { argv, env, provider, runner, parser: parserName } = dispatch;
+    const runnerDescriptor = runtime.runnerRegistry?.get?.(runner);
     const started = io.now();
     let child;
     try {
@@ -298,7 +320,10 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
       });
     } catch (e) {
       // same contract as settle(): the log is durable before the task resolves
-      const done = () => resolve({ ok: false, exit: null, durationMs: 0, output: `spawn error: ${e.message}`, raw: "", timedOut: false, tokens: emptyTokens(), errorCode: e.code });
+      const done = () => resolve({
+        ok: false, exit: null, durationMs: 0, output: `spawn error: ${e.message}`, raw: "", timedOut: false,
+        tokens: emptyTokens(), errorCode: e.code, provider, runner,
+      });
       if (leafLog) leafLog.end(`spawn error: ${e.message}\n`, done);
       else done();
       return;
@@ -307,26 +332,26 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
     let raw = "";
     let timedOut = false;
     let settled = false;
-    // stream-json events on stdout: per-turn usage feeds the live token count,
-    // the result event carries the final text + authoritative usage. Anything
-    // non-JSONL (old CLI, plain-text provider) leaves both empty and the raw
-    // buffer stands in as the output — same behavior as before stream-json.
-    const acc = createUsageAccumulator();
-    let resultEvt = null;
-    let initEvt = null;
-    // False-green guard: a claude -p session that dies mid-thinking still exits 0
-    // with an empty result. A cleanly-finished leaf emits a terminal assistant
-    // stop_reason "end_turn"; one cut mid-stream never does. We only judge leaves
-    // that actually produced assistant events — a non-stream-json provider is exempt.
-    let sawAssistant = false;
-    let sawEndTurn = false;
-    const parser = createStreamParser({
-      onUsage: (id, usage) => { acc.record(id, usage); onTokens?.(acc.totals()); },
-      onResult: (evt) => { resultEvt = evt; },
-      onInit: (evt) => { initEvt = evt; if (evt?.session_id) onSession?.(evt.session_id); },
-      onStop: (sr) => { sawAssistant = true; if (sr === "end_turn") sawEndTurn = true; },
-      onActivity,
-    });
+    // Every runner emits the same contract. Raw stdout/stderr is retained only
+    // for diagnostics and failure classification; it never decides whether a
+    // non-Claude runner completed successfully.
+    const events = [];
+    let streamError = null;
+    const emit = (event) => {
+      events.push(event);
+      if (event.type === "session" && event.sessionId) onSession?.(event.sessionId);
+      if (event.type === "usage" && event.usage) onTokens?.(event.usage);
+      if (event.type === "activity" && event.activity) {
+        const activity = typeof event.activity === "string"
+          ? event.activity
+          : event.activity.label || event.activity.name || event.activity.command || JSON.stringify(event.activity);
+        onActivity?.(activity);
+      }
+      if (event.type === "error") streamError = event.error || { code: "runner_error", message: "runner failed" };
+    };
+    const parser = typeof runnerDescriptor?.createParser === "function"
+      ? runnerDescriptor.createParser(emit, { task, config: cfg, provider, runner })
+      : createRunnerParser(parserName, { emit });
     // Progressive capture: stream to results/<id>.log as data arrives so a
     // user can tail an individual leaf mid-run (with stream-json, the tail
     // shows tool-call events live).
@@ -353,35 +378,50 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
       clearTimeout(timer);
       parser.end();
       if (errMsg) raw += (raw ? "\n" : "") + errMsg;
-      // Clean finish: an assistant end_turn, OR a terminal result event with
-      // subtype "success". The :cloud proxies (glm/kimi) never put stop_reason
-      // on assistant stream events — only on the final result event — so
-      // judging by assistant events alone failed every successful :cloud leaf
-      // as "terminated mid-stream" (2026-07-16). A genuinely cut leaf emits no
-      // success result event at all, so #192's false-green detection is kept.
-      const cleanFinish = !sawAssistant || sawEndTurn || resultEvt?.subtype === "success";
+      const parsed = parser.result();
+      let classified = null;
+      try {
+        classified = runnerDescriptor?.classifyExit?.(exit, parsed, { ...task, provider });
+      } catch (e) {
+        streamError ||= { code: "runner_classify", message: e.message };
+      }
+      // The Claude CLI has a supported legacy/plain-text mode in the wild. It
+      // produces no canonical data at all, so retain the old raw-output escape
+      // hatch only for Claude. Codex and future runners must emit a terminal
+      // contract event or they fail closed.
+      const hadCanonicalData = events.some((event) => event.type !== "error");
+      const legacyPlain = parserName === "claude"
+        && (!streamError || streamError.code === "missing_terminal")
+        && !hadCanonicalData && (
+        raw.trim().length > 0 || (exit === 0 && !timedOut)
+      );
+      const parsedError = legacyPlain ? null : (streamError || parsed?.error || classified?.error);
+      const terminal = classified?.terminal ?? parsed?.terminal === true;
+      const cleanFinish = legacyPlain || (terminal && !parsedError);
+      const stopReason = parsed?.stopReason || (cleanFinish && parserName === "claude" ? "end_turn" : null);
+      const failPrefix = terminal && parsedError && parsedError.code !== "missing_terminal"
+        ?`leaf ended with a runner error: ${parsedError.message || parsedError.code}`
+        : "leaf terminated mid-stream (no terminal event) — its session died before completing; re-dispatch a fresh manifest, do not kill or diff-hunt.";
+      const output = cleanFinish
+        ? (parsed?.output || (legacyPlain ? String(raw) : ""))
+        : `${failPrefix}\n${parsed?.output || String(raw)}`;
       flushLog().then(() => resolve({
-        ok: exit === 0 && !timedOut && !(resultEvt?.is_error) && cleanFinish,
+        ok: exit === 0 && !timedOut && !parsedError && cleanFinish,
         exit,
         durationMs: io.now() - started,
-        output: cleanFinish
-          ? (resultEvt?.result != null ? String(resultEvt.result) : String(raw))
-          : `leaf terminated mid-stream (no end_turn) — its session died before completing; re-dispatch a fresh manifest, do not kill or diff-hunt.\n${resultEvt?.result != null ? String(resultEvt.result) : String(raw)}`,
+        output: output || (cleanFinish ? String(classified?.output || "") : output),
         raw: String(raw),
-        stopReason: sawEndTurn ? "end_turn" : (sawAssistant ? "incomplete" : null),
+        stopReason,
         timedOut,
-        errorCode,
-        tokens: pickFinalTokens(resultEvt?.usage, acc.totals()),
-        costUsd: resultEvt?.total_cost_usd,
-        numTurns: resultEvt?.num_turns,
-        // The model that actually ran, from the CLI's init event. A Claude alias
-        // (sonnet) launches whatever the tier currently maps to, so only this id
-        // can split generations (opus 4.8 vs 5) in the grading store.
-        realModel: initEvt?.model ?? null,
-        sessionId: initEvt?.session_id ?? resultEvt?.session_id ?? null,
-        // "none" on subscription auth — costUsd is synthetic there, real only
-        // when a key source is named (unit honesty for estimates and warns)
-        apiKeySource: initEvt?.apiKeySource ?? null,
+        errorCode: errorCode || parsedError?.code,
+        tokens: parsed?.usage || emptyTokens(),
+        costUsd: parsed?.costUsd,
+        numTurns: parsed?.numTurns,
+        realModel: parsed?.realModel ?? null,
+        sessionId: parsed?.sessionId ?? null,
+        apiKeySource: parsed?.apiKeySource ?? null,
+        provider,
+        runner,
       }));
     };
     child.on("error", (e) => settle(null, `spawn error: ${e.message}`, e.code));
@@ -391,10 +431,31 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
 
 // Execute the plan's dependency graph under the concurrency cap.
 // Returns { summary, summaryPath, digestPath, digestFailed, worktreesKept }.
-export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, ask = null, _writeSummary = writeSummary } = {}) {
+export async function runPlan(plan, cfg, io = makeDefaultIo(), {
+  force = false,
+  ask = null,
+  _writeSummary = writeSummary,
+  providerRegistry: suppliedProviderRegistry,
+  runnerRegistry,
+  providerUsage,
+} = {}) {
   const worktree = io.worktree || defaultWorktree;
   const tasks = [...plan.tasks];
   if (plan.digest) tasks.push(buildDigestTask(plan));
+  const providerRegistry = suppliedProviderRegistry || defaultProviderRegistry();
+  const effectiveRunnerRegistry = runnerRegistry || createDispatchRegistry({ providerRegistry }).runnerRegistry;
+  const runtime = { providerRegistry, runnerRegistry: effectiveRunnerRegistry };
+  const providerCache = cfg.modelCache || cfg.models || [];
+  const resolvedIdentity = (task) => providerRegistry.resolve(task, { cache: providerCache, config: cfg });
+  // Hand-built unit plans predate durable provider identity. Keep their old
+  // compact log shape, while every normalized manifest task (which has an
+  // explicit provider) carries the provider and derived runner everywhere.
+  const durableIdentity = (task) => {
+    if (task?.provider === undefined) return {};
+    const identity = resolvedIdentity(task);
+    return { provider: identity.provider, runner: providerRegistry.get(identity.provider).runnerId };
+  };
+  runtime.identity = durableIdentity;
   initResultsDir(plan.resultsDir);
   // A prior `swarm stop` leaves its marker and no other engine is live here (cmdRun
   // refuses one): clear it before any await, so a stop landing during startup still counts.
@@ -434,19 +495,52 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   // Preflights must see composed leaves too — a manifest node's children are
   // known statically even though they splice in at run time.
   const leafView = tasks.flatMap((t) => (t.childPlan ? t.childPlan.tasks : [t]));
+  const providerGroups = new Map();
   // Both preflights can throw to abort the run before dispatch — caught here
   // just to remove the signal handlers first; the leaked-listener bug (a later
   // test's process.emit("SIGINT") firing this run's stale handler) is worse
   // than the throw itself, since it corrupts unrelated tests.
   try {
-    if (leafView.some((t) => !isAgentless(t) && t.model !== "manifest" && !isClaudeModel(t.model))) {
-      try {
-        await io.fetch(cfg.provider.url);
-      } catch (e) {
-        throw new Error(
-          `provider endpoint ${cfg.provider.url} is unreachable (${e.message}) — ` +
-          `open-model tasks cannot dispatch. Is the provider running?`
-        );
+    for (const task of leafView) {
+      if (isAgentless(task) || task.model === "manifest") continue;
+      const identity = providerRegistry.resolve(task, {
+        cache: cfg.modelCache || cfg.models || [],
+        config: cfg,
+      });
+      if (!providerGroups.has(identity.provider)) providerGroups.set(identity.provider, []);
+      providerGroups.get(identity.provider).push({ ...task, ...identity });
+    }
+
+    for (const [providerId, providerTasks] of providerGroups) {
+      const adapter = providerRegistry.get(providerId);
+      const context = {
+        provider: providerId,
+        tasks: providerTasks,
+        config: cfg,
+        io,
+        fetch: io.fetch,
+        now: io.now,
+        env: io.env || process.env,
+        ...(io.codexClient && { client: io.codexClient }),
+        usageOptIn: providerUsage === true,
+      };
+      const preflight = providerRegistry.capability(providerId, "preflight");
+      if (preflight) {
+        const health = await preflight(context);
+        if (health === false || health?.ok === false || health?.available === false) {
+          const reason = typeof health === "object" && health.error ? ` (${health.error})` : "";
+          throw new Error(`provider '${providerId}' preflight failed${reason} — tasks cannot dispatch`);
+        }
+      }
+
+      if (providerUsage !== false) {
+        const readUsage = providerRegistry.capability(providerId, "readUsage");
+        if (readUsage) {
+          const usage = await readUsage(context);
+          if (usage?.exhausted && providerTasks.some((t) => !t.fallbackModel)) {
+            throw new Error(`provider '${providerId}' usage is exhausted — ${providerTasks.filter((t) => !t.fallbackModel).map((t) => t.id).join(", ")} cannot dispatch`);
+          }
+        }
       }
     }
 
@@ -455,7 +549,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     // classification is the backstop). Exhausted quota with undefended Claude
     // leaves aborts BEFORE dispatch — a run that would deterministically fail
     // should fail in one second with the reset time, not after four minutes.
-    const claudeTasks = leafView.filter((t) => !isAgentless(t) && isClaudeModel(t.model));
+    const claudeTasks = providerGroups.get("claude") || [];
     if (claudeTasks.length && cfg.quotaPreflight !== false) {
       const env = io.env || process.env;
       const q = await checkQuota({
@@ -518,14 +612,19 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   const started = new Date().toISOString();
   // Read before this run's run-start is appended: every session a previous engine
   // saw start, including leaves it died before settling.
-  const recordedSessions = force ? new Map() : recordedSessionIds(plan.resultsDir);
+  const recordedSessions = force ? new Map() : recordedSessionRecords(plan.resultsDir);
   // run-start line lets `status` derive pending tasks (ids never seen since
   // the latest run-start are pending) and carries models for the roster view.
   // pid: lets a reader tell a killed engine (no summary, pid gone) from a live one.
   // launcher: the dispatching session's CLAUDE_CODE_SESSION_ID — absent when the
   // engine runs outside a session, so the run belongs to nobody rather than to
   // whoever asks about it next. A resume appends a fresh run-start, re-stamping.
-  appendRunLog(plan.resultsDir, { ts: started, event: "run-start", pid: process.pid, ...(process.env.CLAUDE_CODE_SESSION_ID ? { launcher: process.env.CLAUDE_CODE_SESSION_ID } : {}), ...(ask && { ask: ask.taskId }), tasks: tasks.map((t) => ({ id: t.id, model: t.model })) });
+  appendRunLog(plan.resultsDir, {
+    ts: started, event: "run-start", pid: process.pid,
+    ...(process.env.CLAUDE_CODE_SESSION_ID ? { launcher: process.env.CLAUDE_CODE_SESSION_ID } : {}),
+    ...(ask && { ask: ask.taskId }),
+    tasks: tasks.map((t) => ({ id: t.id, model: t.model, ...durableIdentity(t) })),
+  });
   const runStartMs = io.now();
   const state = new Map(tasks.map((t) => [t.id, "pending"]));
   const durations = new Map();
@@ -628,7 +727,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     io.snapshot(renderRoster({
       title: basename(plan.resultsDir),
       tasks: tasks.map((t) => ({
-        id: t.id, model: t.model, state: state.get(t.id),
+        id: t.id, model: t.model, state: state.get(t.id), ...durableIdentity(t),
         durationMs: durations.get(t.id),
         startedMs: startedAt.get(t.id),
         tokens: tokensMap.get(t.id),
@@ -650,6 +749,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     if (tokens && tokenTotal(tokens) + tokens.cacheRead > 0) tokensMap.set(task.id, tokens);
     appendRunLog(plan.resultsDir, {
       ts: new Date().toISOString(), id: task.id, state: st,
+      ...durableIdentity(task),
       ...(durationMs != null && { durationMs }),
       ...(tokensMap.has(task.id) && st !== "running" && { tokens: tokensMap.get(task.id) }),
       ...(note && { note }),
@@ -666,12 +766,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     // Durable the moment the stream names it: an engine that dies before this
     // leaf settles writes no result, and without this line resume starts cold.
     onSession: (sessionId) => {
-      appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "session", sessionId });
+      appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "session", sessionId, ...durableIdentity(task) });
     },
     onTokens: (totals) => {
       tokensMap.set(task.id, totals);
       lastEventAt.set(task.id, io.now());
-      appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "tokens", tokens: totals });
+      appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "tokens", tokens: totals, ...durableIdentity(task) });
       paint(false);
     },
     onActivity: (desc) => {
@@ -679,7 +779,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       lastEventAt.set(task.id, io.now());
       if (io.now() - (lastActivityLogAt.get(task.id) ?? 0) >= 2000) {
         lastActivityLogAt.set(task.id, io.now());
-        appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "activity", activity: desc });
+        appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "activity", activity: desc, ...durableIdentity(task) });
       }
       paint(false);
     },
@@ -737,7 +837,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     // the finished run's summary.json), not a blanket "skipped": readRunLog
     // rebuilds per-task state from scratch on every run-start line, so replaying
     // anything else here is what `status` would show for these tasks post-ask.
-    const priorSummary = readSummary(plan.resultsDir);
+    const priorSummary = readSummary(plan.resultsDir, { normalize: false });
     for (const t of tasks) {
       if (t.id === ask.taskId) continue;
       const priorRow = priorSummary?.tasks?.find((r) => r.id === t.id);
@@ -858,7 +958,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     try {
       pass = evalBool(task.when.expr, { value: valueOf(task.when.from) });
     } catch (e) {
-      writeResult(plan.resultsDir, task.id, { id: task.id, model: task.model, ok: false, exit: null, durationMs: 0, output: `when failed: ${e.message}` });
+      writeResult(plan.resultsDir, task.id, { id: task.id, model: task.model, ...durableIdentity(task), ok: false, exit: null, durationMs: 0, output: `when failed: ${e.message}` });
       record(task, "failed", 0);
       return false;
     }
@@ -881,12 +981,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         : Object.fromEntries(task.after.map((d) => [d, valueOf(d)])) };
       const v = evalExpr(task.compute, scope);
       result = {
-        id: task.id, model: task.model, ok: true, exit: 0, durationMs: io.now() - t0,
+        id: task.id, model: task.model, ...durableIdentity(task), ok: true, exit: 0, durationMs: io.now() - t0,
         output: typeof v === "string" ? v : JSON.stringify(v),
         outputJson: v,
       };
     } catch (e) {
-      result = { id: task.id, model: task.model, ok: false, exit: null, durationMs: io.now() - t0, output: `compute failed: ${e.message}` };
+      result = { id: task.id, model: task.model, ...durableIdentity(task), ok: false, exit: null, durationMs: io.now() - t0, output: `compute failed: ${e.message}` };
     }
     writeResult(plan.resultsDir, task.id, result);
     record(task, result.ok ? "ok" : "failed", result.durationMs);
@@ -906,7 +1006,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         { repo: task.originalCwd || plan.cwd });
       const payload = { into: task.integrate.into, branch: out.branch, merged: out.merged, conflicts: out.conflicts };
       result = {
-        id: task.id, model: task.model, ok: true, exit: 0, durationMs: io.now() - t0,
+        id: task.id, model: task.model, ...durableIdentity(task), ok: true, exit: 0, durationMs: io.now() - t0,
         output: out.conflicts.length
           ? `merged ${out.merged.join(", ")} into ${out.branch}; conflicts left in the tree for the next leaf to resolve: ${out.conflicts.join(", ")}`
           : `merged ${out.merged.join(", ")} into ${out.branch} cleanly`,
@@ -917,7 +1017,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         into: task.integrate.into, merged: out.merged.length, conflicts: out.conflicts.length,
       });
     } catch (e) {
-      result = { id: task.id, model: task.model, ok: false, exit: null, durationMs: io.now() - t0, output: `integrate failed: ${e.message}` };
+      result = { id: task.id, model: task.model, ...durableIdentity(task), ok: false, exit: null, durationMs: io.now() - t0, output: `integrate failed: ${e.message}` };
     }
     writeResult(plan.resultsDir, task.id, result);
     record(task, result.ok ? "ok" : "failed", result.durationMs);
@@ -932,7 +1032,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     if (!Array.isArray(sel)) {
       const where = task.forEach.path ? `'${task.forEach.from}'.${task.forEach.path}` : `'${task.forEach.from}'`;
       writeResult(plan.resultsDir, task.id, {
-        id: task.id, model: task.model, ok: false, exit: null, durationMs: 0,
+        id: task.id, model: task.model, ...durableIdentity(task), ok: false, exit: null, durationMs: 0,
         output: `forEach failed: ${where} is ${typeOf(sel === undefined ? null : sel)} — expected a JSON array (check forEach.path against the dependency's output)`,
       });
       record(task, "failed", 0);
@@ -966,7 +1066,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       after: [...task.after],
     }));
     appendRunLog(plan.resultsDir, {
-      ts: new Date().toISOString(), event: "expand", id: task.id, model: task.model,
+      ts: new Date().toISOString(), event: "expand", id: task.id, model: task.model, ...durableIdentity(task),
       clones: clones.length, ...(truncated && { truncated: true, total: sel.length }),
     });
     if (truncated) {
@@ -1033,7 +1133,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     });
     appendRunLog(plan.resultsDir, {
       ts: new Date().toISOString(), event: "expand-manifest", id: node.id,
-      children: spliced.map((c) => ({ id: c.id, model: c.model })),
+      ...durableIdentity(node),
+      children: spliced.map((c) => ({ id: c.id, model: c.model, ...durableIdentity(c) })),
     });
     tasks.splice(tasks.indexOf(node) + 1, 0, ...spliced);
     for (const c of spliced) {
@@ -1056,7 +1157,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   const runManifestAggregate = (task) => {
     const outputJson = Object.fromEntries(task.aggregateManifest.sinks.map(({ local, full }) => [local, valueOf(full)]));
     const result = {
-      id: task.id, model: task.model, ok: true, exit: 0, durationMs: 0,
+      id: task.id, model: task.model, ...durableIdentity(task), ok: true, exit: 0, durationMs: 0,
       output: JSON.stringify(outputJson), outputJson, children: task.after.length,
     };
     writeResult(plan.resultsDir, task.id, result);
@@ -1069,7 +1170,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       return r && r.outputJson !== undefined ? r.outputJson : String(r?.output ?? "");
     });
     const result = {
-      id: task.id, model: task.model, ok: true, exit: 0, durationMs: 0,
+      id: task.id, model: task.model, ...durableIdentity(task), ok: true, exit: 0, durationMs: 0,
       output: JSON.stringify(outs), outputJson: outs,
       clones: task.after.length,
       ...(task.aggregate.truncated && { truncated: { kept: task.aggregate.kept, total: task.aggregate.total } }),
@@ -1097,16 +1198,19 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
           model,
           ...(ask.provider || task.provider || prior.provider ? { provider: ask.provider || task.provider || prior.provider } : {}),
           resume: prior.sessionId,
-        }, ask.question, cfg, io, null, streamHooks(task));
+        }, ask.question, cfg, io, null, streamHooks(task), runtime);
         appendFileSync(join(plan.resultsDir, "results", `${task.id}.ask.log`), `Q: ${ask.question}\nA: ${r.output}\n\n`);
         const askEntry = {
           question: ask.question,
           answer: r.output,
           ok: r.ok,
           model,
+          ...(r.provider && { provider: r.provider }),
+          ...(r.runner && { runner: r.runner }),
           ...(tokenTotal(r.tokens) + (r.tokens?.cacheRead || 0) > 0 && { tokens: r.tokens }),
           ...(r.sessionId && { sessionId: r.sessionId }),
         };
+        // The leaf's own identity is what it ran as; an override's identity lives on its ask entry.
         const updated = { ...prior, asks: [...(prior.asks || []), askEntry] };
         if (r.ok && r.sessionId) updated.sessionId = r.sessionId;
         writeResult(plan.resultsDir, task.id, updated);
@@ -1124,7 +1228,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       // session. A first-ever run has no prior and does neither. A leaf whose
       // engine died before it settled has no result, only its recorded session.
       const prior = force ? null : readResult(plan.resultsDir, task.id);
-      const resumeId = prior?.ok === true ? null : (prior?.sessionId ?? recordedSessions.get(task.id) ?? null);
+      const recorded = recordedSessions.get(task.id);
+      const resumeId = prior?.ok === true ? null : (prior?.sessionId ?? recorded?.sessionId ?? null);
+      const resumeProvider = task.provider || prior?.provider || recorded?.provider;
 
       let wt = null;
       let taskCwd = task.cwd;
@@ -1143,7 +1249,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
             reset: force, session: resumeId ? "resumed" : "fresh",
           });
         } catch (e) {
-          const result = { id: task.id, model: task.model, ok: false, exit: null, durationMs: 0, output: `worktree setup failed: ${e.message}` };
+          const result = { id: task.id, model: task.model, ...durableIdentity(task), ok: false, exit: null, durationMs: 0, output: `worktree setup failed: ${e.message}` };
           writeResult(plan.resultsDir, task.id, result);
           record(task, "failed", 0);
           return task.id;
@@ -1162,9 +1268,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       // transcript must too (coverage checks the whole attempt history). A fresh
       // run (or --force) truncates.
       const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`), resumeId ? { flags: "a" } : {});
-      let r = await runTask({ ...task, cwd: taskCwd, ...(resumeId && { resume: resumeId }) }, prompt, cfg, io, leafLog, streamHooks(task));
+      let r = await runTask({
+        ...task, cwd: taskCwd,
+        ...(resumeId && { resume: resumeId }),
+        ...(resumeProvider && { provider: resumeProvider }),
+      }, prompt, cfg, io, leafLog, streamHooks(task), runtime);
       if ((task.returns || task.mustRead) && r.ok) {
-        r = await enforceLeafContract(task, r, taskCwd, plan.resultsDir, cfg, io, streamHooks(task));
+        r = await enforceLeafContract(task, r, taskCwd, plan.resultsDir, cfg, io, streamHooks(task), runtime);
       }
 
       // Claude leaves record the REAL model id (from the init event) with the
@@ -1172,9 +1282,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       // Non-Claude models keep the manifest name verbatim: ':cloud' is a
       // routing/governance identity an init-reported bare name must not clobber.
       const stamped = r.realModel && isClaudeModel(task.model) && r.realModel !== task.model;
+      const resultIdentity = task.provider !== undefined
+        ? { provider: r.provider || resolvedIdentity(task).provider, runner: r.runner || providerRegistry.get(r.provider || resolvedIdentity(task).provider).runnerId }
+        : {};
       const result = {
         id: task.id,
         model: stamped ? r.realModel : task.model,
+        ...resultIdentity,
         ...(stamped && { modelAlias: task.model }),
         ok: r.ok,
         exit: r.exit,
@@ -1231,7 +1345,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         // runTask's generic mid-stream message tells a reader not to kill or
         // diff-hunt — exactly backwards here, where the kill was deliberate.
         result.output = result.output.replace(
-          /leaf terminated mid-stream \(no end_turn\)[^\n]*\n?/,
+          /leaf terminated mid-stream \(no (?:end_turn|terminal event)\)[^\n]*\n?/,
           "leaf stopped for low memory — parked; the engine resumes it automatically once memory recovers.\n",
         );
       }
@@ -1297,18 +1411,55 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         // model the user didn't approve
         if ((st === "quota" || st === "rate-limited") && task.fallbackModel && !usedFallback.has(task.id)) {
           usedFallback.add(task.id);
-          appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, event: "fallback", from: task.model, to: task.fallbackModel });
-          task.model = task.fallbackModel;
-          attempts.set(task.id, 0);
-          scheduleRetry(task, 10, `↯ fallback → ${task.model}`);
-          return task.id;
+          const from = { provider: r.provider || resolvedIdentity(task).provider, model: task.model };
+          const target = {
+            model: task.fallbackModel,
+            ...(task.fallbackProvider !== undefined && { provider: task.fallbackProvider }),
+          };
+          let next, rejected;
+          try {
+            next = resolvedIdentity(target);
+            const problems = providerRegistry.get(next.provider).validateTask({ ...task, ...next }, { config: cfg, task });
+            if (problems?.length) rejected = problems.join("; ");
+          } catch (e) {
+            rejected = e.message;
+          }
+          // A rejected fallback ends only this leaf, in its real quota state; the run carries on.
+          if (rejected) {
+            appendRunLog(plan.resultsDir, {
+              ts: new Date().toISOString(), id: task.id, event: "fallback-rejected",
+              fromProvider: from.provider, toProvider: next?.provider ?? target.provider, toModel: target.model, reason: rejected,
+            });
+          } else {
+            appendRunLog(plan.resultsDir, {
+              ts: new Date().toISOString(), id: task.id, event: "fallback",
+              from: from.model, to: next.model,
+              fromProvider: from.provider, toProvider: next.provider,
+              fromModel: from.model, toModel: next.model,
+            });
+            task.model = next.model;
+            task.provider = next.provider;
+            attempts.set(task.id, 0);
+            scheduleRetry(task, 10, `↯ fallback → ${task.provider}/${task.model}`);
+            return task.id;
+          }
         }
         // terminal quota: pre-emptively fail-fast every still-pending leaf in
-        // the same model family without a fallback — one failure, one lesson
+        // the same provider/applicable limit scope without a fallback — one
+        // failure, one lesson. Unrelated providers continue independently.
         if (st === "quota") {
-          const family = isClaudeModel(task.model);
+          const current = resolvedIdentity(task);
+          const familyOf = (model) => String(model || "").match(/(fable|opus|sonnet|haiku)/i)?.[1]?.toLowerCase() || "";
+          // A mid-run transcript without a named family is a provider-wide
+          // quota bucket; a transcript that names one family stays scoped.
+          const quotaFamily = familyOf(r.raw);
           for (const t of tasks) {
-            if (!isAgentless(t) && state.get(t.id) === "pending" && isClaudeModel(t.model) === family && !t.fallbackModel) {
+            if (isAgentless(t) || state.get(t.id) !== "pending" || t.fallbackModel) continue;
+            const candidate = resolvedIdentity(t);
+            const sameScope = candidate.provider === current.provider && (
+              current.provider !== "claude" || !quotaFamily || quotaFamily === familyOf(t.model)
+            );
+            if (sameScope) {
               record(t, "quota");
             }
           }
@@ -1434,8 +1585,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   if (ask) {
     const priorSummary = readSummary(plan.resultsDir) ?? { started, tasks: [], worktreesKept: [] };
     const priorRow = priorSummary.tasks.find((t) => t.id === ask.taskId);
+    const askedTask = tasks.find((t) => t.id === ask.taskId);
     const askedRow = {
-      ...(priorRow ?? { id: ask.taskId, model: tasks.find((t) => t.id === ask.taskId)?.model, resultPath: resultPath(plan.resultsDir, ask.taskId) }),
+      ...(priorRow ?? { id: ask.taskId, model: askedTask?.model, resultPath: resultPath(plan.resultsDir, ask.taskId) }),
+      ...(askedTask ? durableIdentity(askedTask) : {}),
       state: "ok",
       durationMs: (priorRow?.durationMs ?? 0) + (durations.get(ask.taskId) ?? 0),
       tokens: addTokens(priorRow?.tokens ?? emptyTokens(), tokensMap.get(ask.taskId) ?? emptyTokens()),
@@ -1457,6 +1610,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         id: t.id,
         // model + costUsd feed the estimate corpus (src/estimate.mjs loadCorpus)
         model: t.model,
+        ...durableIdentity(t),
         state: state.get(t.id),
         durationMs: durations.get(t.id) ?? null,
         tokens: tokensMap.get(t.id) ?? null,

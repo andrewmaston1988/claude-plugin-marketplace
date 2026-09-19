@@ -413,7 +413,9 @@ export function createCodexProviderAdapter(options = {}) {
         ...options,
         ...context,
       }),
+      // Spawning the app-server just to read usage is opt-in unless a client is already live.
       readUsage: async (context = {}) => {
+        if (!context.client && context.usageOptIn !== true) return null;
         const { readCodexUsage } = await import("./codex-usage.mjs");
         return readCodexUsage(context.config || {}, { ...options, ...context });
       },
