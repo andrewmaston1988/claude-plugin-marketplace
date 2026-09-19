@@ -10,6 +10,7 @@ import { usageFromCache } from "./ollama-usage.mjs";
 import { provenanceBanner, formatResetTime } from "./usage.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
 import { validateSchemaShape } from "./schema.mjs";
+import { TEMPLATE_RE } from "./coverage.mjs";
 
 export class ValidationError extends Error {
   constructor(errors) {
@@ -24,7 +25,6 @@ export const DEFAULT_TOOLS = "Read,Grep,Glob";
 const WRITE_TOOLS = new Set(["edit", "write", "bash", "notebookedit"]);
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 const CLONE_ID_RE = /\[\d+\]$/;
 const ITEM_TEMPLATE_RE = /\{\{(item(?:\.[^}]*)?|index)\}\}/;
 const ITEM_TEMPLATE_RE_G = new RegExp(ITEM_TEMPLATE_RE.source, "g");
@@ -717,11 +717,10 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
   }
 }
 
-// mustRead shape validation only (Decision 6/11) — the runner check is a
+// mustRead shape validation only — the runner check is a
 // separate platform-independent pass. Entries are string paths, {path,lines?}
 // or {index,lane?}; {{resultPath:<id>}} is the only template, and its id must
 // be a declared dependency, the same rule prompts obey.
-const MUST_READ_TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 function validateMustRead(rawTasks, errors, label) {
   for (const t of rawTasks) {
     if (t.mustRead === undefined) continue;
@@ -742,7 +741,7 @@ function validateMustRead(rawTasks, errors, label) {
     }
     const deps = new Set(t.after || []);
     const checkTemplate = (s, what) => {
-      for (const m of String(s).matchAll(MUST_READ_TEMPLATE_RE)) {
+      for (const m of String(s).matchAll(TEMPLATE_RE)) {
         if (m[1] !== "resultPath") {
           errors.push(`${l}: only {{resultPath:<id>}} is substituted in mustRead — '${m[0]}' is not honoured`);
         } else if (!deps.has(m[2])) {
@@ -796,7 +795,7 @@ function validateMustRead(rawTasks, errors, label) {
 // so a task on any other runner can never be checked. Takes `io` for signature
 // parity with checkCommandLineLengths but deliberately does NOT gate on
 // io.platform — a codex task with mustRead must be rejected on every platform,
-// not just Windows (f-engine#4).
+// not just Windows.
 function validateMustReadRunners(tasks, cfg, io, errors, label) {
   for (const t of tasks) {
     if (!Array.isArray(t.mustRead)) continue;

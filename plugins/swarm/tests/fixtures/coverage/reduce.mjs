@@ -1,15 +1,6 @@
-// Builds the committed coverage fixtures from the REAL stage4 review transcripts.
-// Run once by hand; the outputs (*.assistant.jsonl, stage4-index.json) are committed
-// and are the only things the test reads. Re-run only to refresh from a new run dir.
-//
-//   node plugins/swarm/tests/fixtures/coverage/reduce.mjs
-//
-// For each leaf it keeps every `assistant` event (text blocks emptied, every
-// tool_use block whole) AND every `user` event's tool_result blocks (content
-// emptied, tool_use_id + is_error kept) — the pairing parseReadCalls needs to
-// decide a Read actually returned. stage4-index.json is that run's changed-file
-// list (from the leaf's own pre-flight scope) paged at 1000 lines using real
-// line counts at the reviewed base commit, plus the two maintainability principle files.
+// One-off builder for the committed coverage fixtures, from real stage4 review transcripts:
+// `node plugins/swarm/tests/fixtures/coverage/reduce.mjs`. Keeps tool_use blocks and each
+// tool_result's id/is_error (the pairing parseReadCalls needs); empties all text.
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
@@ -72,7 +63,7 @@ function pageEntry(absPath, n, page = 1000) {
 function buildIndex() {
   // The changed-file scope the leaves actually reviewed, read from the run's
   // pre-flight (base commit + changed list). Absolute paths under the review cwd
-  // (Decision 13: an index expanded across leaves' cwds must be absolute).
+  // (an index expanded across leaves' cwds must be absolute).
   const preflight = {
     scope: "d97a3f1",
     changed: [

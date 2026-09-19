@@ -66,14 +66,10 @@ export function buildDispatch(task, prompt, cfg) {
   };
 }
 
-// The runner whose transcript a leaf produces. Only "claude" writes the
-// stream-json coverage.mjs (mustRead) understands; any other value fails closed
-// at validate. Master dispatches every model through the claude CLI — Claude
-// models plainly, non-Claude models via the env-mode proxy — both emitting
-// claude stream-json. The one opaque path is a launch-mode provider whose
-// wrapper binary isn't claude: its stdout shape is unknown, so its runner is
-// the wrapper's name (the rejection trigger). Master has no codex runner; a
-// codex transcript would surface here the same way if one existed.
+// The runner whose transcript a leaf produces; only "claude" stream-json is
+// understood by mustRead, anything else fails closed at validate. Every model runs
+// through the claude CLI except a launch-mode wrapper that isn't claude — its
+// stdout is unknown, so the wrapper's name is returned to trigger the rejection.
 export function runnerOf(task, cfg) {
   if (isClaudeModel(task.model)) return "claude";
   if (cfg?.provider?.mode === "launch") {

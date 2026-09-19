@@ -1,14 +1,6 @@
-// Engine-checked leaf read coverage. The third mechanical guarantee, beside
-// `returns` (schema.mjs) and citations (citations.mjs): proof from the leaf's OWN
-// transcript that it actually Read what a task's `mustRead` declared. Zero tokens.
-//
-// Only the claude stream-json transcript is understood (which also covers :cloud
-// models — they run through the claude CLI). Every other runner fails closed:
-// parseReadCalls returns null and the caller records a total miss. Only `Read`
-// tool calls count — a Bash cat/sed, a Grep, an MCP read do not (the harness
-// truncates large Bash output to a 2KB preview, and only Read carries the
-// offset/limit that makes paging checkable). Pure + injectable fs; mirrors
-// citations.mjs.
+// Proof from a leaf's own transcript that it Read what `mustRead` declared.
+// Only claude stream-json is understood; any other runner fails closed (null → total miss).
+// Only `Read` counts: Bash output is truncated to a preview, and only Read carries offset/limit.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -205,8 +197,9 @@ export function coverageErrorLines(gaps, { indexErrors = [] } = {}) {
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
-const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
-// Only {{resultPath:<id>}} is honoured in a mustRead path/index (Decision 6);
+// The one definition of a result template; manifest.mjs and scheduler.mjs import it.
+export const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
+// Only {{resultPath:<id>}} is honoured in a mustRead path/index;
 // {{result:}} or anything else is an authoring error, recorded and the entry dropped.
 function applySubstitute(rawPath, substitute, errors) {
   if (typeof rawPath !== "string" || !rawPath) {

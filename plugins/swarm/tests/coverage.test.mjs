@@ -558,6 +558,32 @@ test("integration: mustRead WITHOUT returns still runs the contract (re-ask fire
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("integration: a coverage re-ask on a task with no returns never demands JSON", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const spawn = fakeSpawnFactory((call, i) => ({ output: leafOut([{ file: F, offset: 1, limit: 2000 }], { sid: `s-${i + 1}`, result: "prose answer" }) }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F] })]); // no returns: a prose leaf
+    await runPlan(p, iCfg, io);
+    const rp = promptOf(spawn.calls[1]);
+    ok(rp.includes("You did not read everything this task requires"), rp);
+    ok(!/JSON/.test(rp), `a prose leaf was told to answer in JSON:\n${rp}`); // mutation: unconditional JSON line → fails
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: a coverage re-ask on a task WITH returns still demands the corrected JSON", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const spawn = fakeSpawnFactory((call, i) => ({ output: leafOut([{ file: F, offset: 1, limit: 2000 }], { sid: `s-${i + 1}`, result: "{\"ok\":true}" }) }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F], returns: { type: "object" } })]);
+    await runPlan(p, iCfg, io);
+    ok(promptOf(spawn.calls[1]).includes("Reply with ONLY the corrected JSON"), promptOf(spawn.calls[1])); // mutation: drop the JSON line entirely → fails
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("integration: resume opens the transcript with flags:a — a --force run truncates", async () => {
   const dir = tmp();
   try {

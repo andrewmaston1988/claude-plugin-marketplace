@@ -14,7 +14,7 @@ import {
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
   renderProvenance, touchHeartbeat, stopPath, recordedSessionIds, transcriptPath,
 } from "./results.mjs";
-import { parseReadCalls, computeCoverage, coverageErrorLines } from "./coverage.mjs";
+import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
   createStreamParser, createUsageAccumulator, pickFinalTokens,
@@ -32,7 +32,6 @@ import * as defaultWorktree from "./worktree.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const OK_STATES = new Set(["ok", "skipped"]);
-const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 
 // Default io: real spawn (with Windows .cmd resolution), real fetch/clock,
 // roster snapshots + closing lines to stdout. Every part is injectable so
@@ -132,15 +131,9 @@ function tryParseJson(output) {
   return undefined;
 }
 
-// Enforce a leaf's contract — schema (`returns`), citations (N3) and read
-// coverage (`mustRead`) — in ONE assess → ONE corrective re-ask → ONE re-assess.
-// The three classes share the single corrective turn: whatever combination
-// missed, the leaf is told all of it at once and re-answers through its own
-// resumed session (it still holds its reads and reasoning, so the fix costs one
-// turn, not a re-run). After the re-ask a schema miss is still fatal (unusable
-// output); a refuted citation and a coverage shortfall both annotate and keep
-// `ok` — the checker may be wrong and the consumer, not this gate, rules. Runs
-// before worktree collection so the corrective turn executes in the leaf's cwd.
+// Schema, citations and read coverage share ONE corrective re-ask through the leaf's
+// resumed session. Afterwards a schema miss is fatal; a refuted citation or coverage
+// shortfall only annotates (the checker may be wrong). Runs before worktree collection.
 async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks) {
   const runner = runnerOf(task, cfg);
   // Coverage is proven from the leaf's OWN transcript: parse its Read calls and
@@ -239,9 +232,13 @@ async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks)
     `Some citations in your output could not be verified against the actual files:\n  - ${citationErrorLines(a1.cite.refuted).join("\n  - ")}`,
   );
   if (covMiss1) blocks.push(
-    `You did not read everything this task requires. Read each of the following with the Read tool, exactly as stated, then reply with ONLY the corrected JSON:\n  - ${coverageErrorLines(a1.cov.gaps, { indexErrors: a1.cov.errors }).join("\n  - ")}`,
+    `You did not read everything this task requires. Read each of the following with the Read tool, exactly as stated, then give your corrected answer:\n  - ${coverageErrorLines(a1.cov.gaps, { indexErrors: a1.cov.errors }).join("\n  - ")}`,
   );
-  const retryPrompt = `${blocks.join("\n\n")}\nReply with ONLY the corrected JSON — no prose, no fences.`;
+  // A mustRead-only task may be a prose leaf: demanding JSON there would replace its answer.
+  const closing = task.returns
+    ? "Reply with ONLY the corrected JSON — no prose, no fences."
+    : "Reply with your complete corrected answer, in the same form the task originally asked for.";
+  const retryPrompt = `${blocks.join("\n\n")}\n${closing}`;
   const leafLog = createWriteStream(join(resultsDir, "results", `${task.id}.log`), { flags: "a" });
   const r2 = await runTask({ ...task, cwd: taskCwd, resume: r.sessionId }, retryPrompt, cfg, io, leafLog, hooks);
 
@@ -1003,7 +1000,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     // {{result:local}} / {{resultPath:local}} references to sibling child tasks are
     // rewritten to the spliced ids — in the prompt AND in each mustRead entry's
     // path/index string, so a verifier's `mustRead: ["{{resultPath:finder}}"]`
-    // resolves to the remapped id at check time (f-engine#3).
+    // resolves to the remapped id at check time.
     const remapRefs = (s) => s.replace(TEMPLATE_RE, (whole, kind, id) => (locals.has(id) ? `{{${kind}:${remap(id)}}}` : whole));
     const remapMustRead = (entries) => entries.map((e) =>
       typeof e === "string" ? remapRefs(e)
@@ -1156,7 +1153,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       }
       // Resume appends: a resumed leaf's session holds every earlier Read, so its
       // transcript must too (coverage checks the whole attempt history). A fresh
-      // run (or --force) truncates. See coverage Decision 10.
+      // run (or --force) truncates.
       const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`), resumeId ? { flags: "a" } : {});
       let r = await runTask({ ...task, cwd: taskCwd, ...(resumeId && { resume: resumeId }) }, prompt, cfg, io, leafLog, streamHooks(task));
       if ((task.returns || task.mustRead) && r.ok) {
