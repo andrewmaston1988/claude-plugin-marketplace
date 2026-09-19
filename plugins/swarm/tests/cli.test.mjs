@@ -9,8 +9,11 @@ import { runCli, runCliAsync, CLI } from "./helpers/cli.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
 
+// A git-init'd dir: runs are filed under the dispatching repo, so a non-repo cwd is refused.
 function tmp() {
-  return mkdtempSync(join(tmpdir(), "swarm-cli-"));
+  const dir = mkdtempSync(join(tmpdir(), "swarm-cli-"));
+  spawnSync("git", ["init", "-q"], { cwd: dir, windowsHide: true });
+  return dir;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
