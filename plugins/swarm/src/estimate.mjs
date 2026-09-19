@@ -21,7 +21,7 @@ const push = (map, key, v) => {
   map.get(key).push(v);
 };
 
-// Walk runsRoot/<encoded-cwd>/<run>/summary.json (two fixed levels, cross-
+// Walk runsRoot/<encoded-repo-toplevel>/<run>/summary.json (two fixed levels, cross-
 // project — per-model cost is a property of the model, not the repo). Rows
 // need state ok + a real model + tokens; pre-D1 summaries lack `model` and
 // simply don't contribute. Every read is best-effort.
