@@ -9,6 +9,9 @@ import {
   discoverModels, writeModelsCache, scrapeDiscoverCmd,
   deriveCloudName, enrichWithShow, sortModelsBySize,
   collapseFamilies, visibleModels, removeCachedModel, probeTopModels,
+  createOllamaProviderAdapter, discoverOllamaModels, mergeProviderModelCaches,
+  normalizeOllamaModelDescriptor, readModelsCache, refreshModelsCache,
+  writeCompositeModelsCache,
 } from "../src/discovery.mjs";
 
 // User-confirmed live schema of the recommendations endpoint (2026-07-07),
@@ -466,6 +469,57 @@ test("removeCachedModel deletes the row atomically; missing cache/entry are no-o
     removeCachedModel("kimi-k3:cloud", env);
     ok(!existsSync(p + ".tmp"));
     deepEqual(JSON.parse(readFileSync(p, "utf8")).models.map((m) => m.model), ["glm-5.2:cloud"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Ollama provider discovery returns canonical model descriptors", async () => {
+  const fakeFetch = async (url) => {
+    if (url.endsWith("/api/experimental/model-recommendations")) {
+      return { ok: true, json: async () => ({ recommendations: [{ model: "glm-5.2:cloud", description: "Frontier" }] }) };
+    }
+    if (url.endsWith("/api/show")) return { ok: true, json: async () => ({}) };
+    throw new Error("WAN disabled");
+  };
+  const config = cfg("http://local.test:11434");
+  const models = await discoverOllamaModels(config, { fetchImpl: fakeFetch });
+  deepEqual(models, [{ provider: "ollama", model: "glm-5.2:cloud", runner: "claude", displayName: "Frontier" }]);
+  const adapter = createOllamaProviderAdapter({ fetchImpl: fakeFetch });
+  equal(adapter.id, "ollama");
+  equal((await adapter.capabilities.discoverModels({ config })).at(0).runner, "claude");
+  deepEqual(normalizeOllamaModelDescriptor({ model: "x:cloud", efforts: ["high"] }), {
+    provider: "ollama", model: "x:cloud", runner: "claude", efforts: ["high"],
+  });
+});
+
+test("provider-qualified model caches merge and preserve failed-provider rows", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-composite-cache-"));
+  try {
+    const env = { SWARM_HOME: dir };
+    deepEqual(mergeProviderModelCaches([[{ model: "same" }], [{ provider: "codex", model: "same" }]]), [
+      { model: "same", provider: "ollama" },
+      { provider: "codex", model: "same" },
+    ]);
+    writeCompositeModelsCache([
+      { provider: "ollama", model: "old:cloud" },
+      { provider: "codex", model: "gpt-5-codex" },
+    ], env);
+    const refreshed = await refreshModelsCache({
+      env,
+      providers: ["ollama", "codex"],
+      discoverers: {
+        ollama: async () => [{ model: "new:cloud" }],
+        codex: async () => { throw new Error("offline"); },
+      },
+    });
+    deepEqual(refreshed.models, [
+      { model: "new:cloud", provider: "ollama" },
+      { provider: "codex", model: "gpt-5-codex" },
+    ]);
+    equal(refreshed.errors.codex, "offline");
+    deepEqual(readModelsCache(env).models, refreshed.models);
+    ok(!existsSync(join(dir, "models-cache.json.tmp")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

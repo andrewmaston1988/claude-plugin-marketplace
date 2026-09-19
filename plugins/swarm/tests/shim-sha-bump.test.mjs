@@ -36,6 +36,9 @@ const runBashShim = (shimPath, env) =>
   spawnSync("bash", [shimPath], { encoding: "utf8", timeout: 30000, windowsHide: true, env: { ...process.env, ...env } });
 const runCmdShim = (shimPath, env) =>
   spawnSync("cmd", ["/c", shimPath], { encoding: "utf8", timeout: 30000, windowsHide: true, env: { ...process.env, ...env } });
+const runInstalledShim = (userBin, env) => process.platform === "win32"
+  ? runCmdShim(join(userBin, "swarm.cmd"), env)
+  : runBashShim(join(userBin, "swarm"), env);
 
 test("row 2: the identical installed wrapper reaches a NEW engine after a sha bump — no re-install, no re-copy", () => {
   const dir = tmp();
@@ -52,7 +55,7 @@ test("row 2: the identical installed wrapper reaches a NEW engine after a sha bu
 
     const reg = join(dir, "installed_plugins.json");
     writeRegistry(reg, [{ scope: "user", installPath: oldInstall, lastUpdated: "2026-09-08T00:00:00Z" }]);
-    const first = runBashShim(bashShim, { SWARM_PLUGIN_REGISTRY: reg });
+    const first = runInstalledShim(userBin, { SWARM_PLUGIN_REGISTRY: reg });
     assert.equal(first.status, 0, first.stderr);
     assert.ok(first.stdout.includes("engine-OLD"), `the wrapper must reach the registry's install: ${first.stdout}`);
 
@@ -65,7 +68,7 @@ test("row 2: the identical installed wrapper reaches a NEW engine after a sha bu
     assert.ok(readFileSync(resolverCopy).equals(resolverBefore), "no re-copy of the resolver");
 
     // The IDENTICAL wrapper invocation, new registry.
-    const second = runBashShim(bashShim, { SWARM_PLUGIN_REGISTRY: reg });
+    const second = runInstalledShim(userBin, { SWARM_PLUGIN_REGISTRY: reg });
     assert.equal(second.status, 0, second.stderr);
     assert.ok(second.stdout.includes("engine-NEW"), `the same command must reach the new engine: ${second.stdout}`);
     assert.ok(!second.stdout.includes("engine-OLD"), "a shim still on the old install has fixed nothing — that is the defect this plan exists to kill");
@@ -96,7 +99,7 @@ test("row 2 (scope tie-break): a user-scope entry beats a newer non-user entry",
       { scope: "project", installPath: projectInstall, lastUpdated: "2026-09-10T00:00:00Z" },
       { scope: "user", installPath: userInstall, lastUpdated: "2026-09-01T00:00:00Z" },
     ]);
-    const out = runBashShim(bashShim, { SWARM_PLUGIN_REGISTRY: reg });
+    const out = runInstalledShim(join(home, ".local", "bin"), { SWARM_PLUGIN_REGISTRY: reg });
     assert.equal(out.status, 0, out.stderr);
     assert.ok(out.stdout.includes("engine-USER"), `user scope must win over a newer non-user entry: ${out.stdout}`);
   } finally {

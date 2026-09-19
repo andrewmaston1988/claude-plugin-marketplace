@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { swarmHome } from "./config.mjs";
+import { modelDescriptor } from "./contracts.mjs";
 
 // Model discovery — the ollama cloud catalog ONLY: recommendations ∪ /api/tags,
 // enriched free via /api/show, family-collapsed, size-ordered. `ollama list` and
@@ -287,3 +288,136 @@ export async function probeTopModels(models, base, fetchImpl = globalThis.fetch,
   }
   return live;
 }
+
+function ollamaConfig(config = {}) {
+  if (config.provider) return config;
+  return { ...config, provider: config.providers?.ollama || config };
+}
+
+export function normalizeOllamaModelDescriptor(row) {
+  const model = typeof row === "string" ? row : row?.model;
+  if (!model) throw new Error("Ollama discovery row requires a model");
+  const descriptor = {
+    provider: "ollama",
+    model,
+    runner: "claude",
+  };
+  const source = typeof row === "object" ? row : {};
+  for (const field of ["displayName", "efforts", "modalities", "isDefault", "availability"]) {
+    if (source[field] !== undefined) descriptor[field] = source[field];
+  }
+  if (descriptor.displayName === undefined && source.description) descriptor.displayName = source.description;
+  return modelDescriptor(descriptor);
+}
+
+// Concrete provider-facing discovery. The legacy discoverModels() above keeps
+// returning Ollama's rich raw rows for the existing CLI and cache consumers.
+export async function discoverOllamaModels(config = {}, options = {}) {
+  const raw = await discoverModels(
+    ollamaConfig(config),
+    options.fetchImpl || globalThis.fetch,
+    { spawnImpl: options.spawnImpl },
+  );
+  return raw.map(normalizeOllamaModelDescriptor);
+}
+
+export function createOllamaProviderAdapter(options = {}) {
+  return {
+    id: "ollama",
+    runnerId: "claude",
+    enabled(config = {}) {
+      const value = config.providers?.ollama?.enabled;
+      return typeof value === "boolean" ? value : true;
+    },
+    matchModel(model) {
+      return /(:|-)cloud$/i.test(String(model || "")) ? { provider: "ollama", model } : null;
+    },
+    validateTask() {
+      return [];
+    },
+    capabilities: {
+      discoverModels(context = {}) {
+        return discoverOllamaModels(context.config || context.cfg || options.config || {}, {
+          ...options,
+          ...context,
+        });
+      },
+    },
+  };
+}
+
+export function readModelsCache(env = process.env) {
+  try {
+    return JSON.parse(readFileSync(join(swarmHome(env), "models-cache.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export function providerQualifiedModels(provider, models = []) {
+  return models.map((row) => ({
+    ...(typeof row === "object" && row ? row : { model: row }),
+    provider,
+  }));
+}
+
+export function mergeProviderModelCaches(caches = []) {
+  const merged = new Map();
+  for (const cache of caches) {
+    for (const row of cache || []) {
+      if (!row?.model) continue;
+      const provider = row.provider || "ollama";
+      merged.set(`${provider}\u0000${row.model}`, { ...row, provider });
+    }
+  }
+  return [...merged.values()];
+}
+
+export const qualifyProviderModels = providerQualifiedModels;
+export const mergeModelCaches = mergeProviderModelCaches;
+
+export function writeCompositeModelsCache(models, env = process.env) {
+  const dir = swarmHome(env);
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, "models-cache.json");
+  const qualified = mergeProviderModelCaches([models]);
+  writeFileSync(p + ".tmp", JSON.stringify({ updated: new Date().toISOString(), models: qualified }, null, 2) + "\n");
+  renameSync(p + ".tmp", p);
+  return p;
+}
+
+// Refresh only the providers named by discoverers. A failed provider keeps its
+// previous rows while successful providers are replaced atomically in one file.
+export async function refreshModelsCache({
+  config = {},
+  env = process.env,
+  providers = ["ollama"],
+  discoverers = {},
+  fetchImpl,
+  spawnImpl,
+} = {}) {
+  const cached = readModelsCache(env);
+  const existing = Array.isArray(cached?.models) ? cached.models : [];
+  const byProvider = new Map();
+  for (const row of existing) {
+    const provider = row?.provider || "ollama";
+    if (!byProvider.has(provider)) byProvider.set(provider, []);
+    byProvider.get(provider).push({ ...row, provider });
+  }
+  const errors = {};
+  for (const provider of providers) {
+    const discover = discoverers[provider] || (provider === "ollama" ? (context) => discoverOllamaModels(context.config, context) : null);
+    if (!discover) continue;
+    try {
+      const rows = await discover({ config, env, fetchImpl, spawnImpl });
+      byProvider.set(provider, providerQualifiedModels(provider, rows));
+    } catch (error) {
+      errors[provider] = error?.message || String(error);
+    }
+  }
+  const models = mergeProviderModelCaches([...byProvider.values()]);
+  const path = writeCompositeModelsCache(models, env);
+  return { models, path, errors };
+}
+
+export const writeProviderModelsCache = writeCompositeModelsCache;

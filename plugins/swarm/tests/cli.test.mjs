@@ -1783,7 +1783,7 @@ test("config init: writes every shipped key into ~/.swarm/config.json, keeps set
   const dir = tmp();
   try {
     const home = join(dir, "home");
-    let r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home } });
+    let r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes(join(home, "config.json")), r.stdout);
     ok(/created/.test(r.stdout), r.stdout);
@@ -1792,13 +1792,13 @@ test("config init: writes every shipped key into ~/.swarm/config.json, keeps set
     on.providers.ollama.allowedRoots = ["C:/code"];
     delete on.dashboard.port;
     writeFileSync(join(home, "config.json"), JSON.stringify(on));
-    r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home } });
+    r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
     equal(r.status, 0, r.stderr);
     ok(/added 1 key.*dashboard.port/.test(r.stdout), r.stdout);
     const after = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
     deepEqual(after.providers.ollama.allowedRoots, ["C:/code"]);
     equal(after.dashboard.port, 7331);
-    r = runCli(["config"], { cwd: dir, env: { SWARM_HOME: home } });
+    r = runCli(["config"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
     equal(r.status, 1, "bare config is not a verb");
   } finally {
     rmSync(dir, { recursive: true, force: true });

@@ -9,6 +9,7 @@ export const SHIMS = fileURLToPath(new URL("../shims", import.meta.url));
 
 // POSIX shim needs the exec bit; harmless no-op on Windows.
 try { chmodSync(join(SHIMS, "claude"), 0o755); } catch { /* windows */ }
+try { chmodSync(join(SHIMS, "codex"), 0o755); } catch { /* windows */ }
 
 export function runCli(args, { cwd, env = {}, quotaPreflight = false } = {}) {
   let configDir;
