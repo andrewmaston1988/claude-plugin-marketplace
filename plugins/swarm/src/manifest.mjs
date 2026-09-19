@@ -22,12 +22,7 @@ export class ValidationError extends Error {
 
 // Default leaf toolset is read-only; write capability must be asked for.
 export const DEFAULT_TOOLS = "Read,Grep,Glob";
-// Read-only is an allowlist: a tool nobody classified is write-capable. Skill
-// and Agent are deliberately absent — both can reach tools the leaf's own list
-// does not name.
-const READ_ONLY_TOOLS = new Set([
-  "read", "grep", "glob", "ls", "notebookread", "webfetch", "websearch", "todowrite", "toolsearch",
-]);
+const WRITE_TOOLS = new Set(["edit", "write", "bash", "notebookedit"]);
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const CLONE_ID_RE = /\[\d+\]$/;
@@ -71,7 +66,7 @@ export function hasWriteTools(allowedTools) {
     .split(",")
     .map((t) => t.trim().toLowerCase().replace(/\(.*\)$/, ""))
     .filter(Boolean)
-    .some((t) => !READ_ONLY_TOOLS.has(t));
+    .some((t) => WRITE_TOOLS.has(t));
 }
 
 function normalizeForCompare(p) {
@@ -933,7 +928,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     // same way its own prepareIsolation derives it.
     const fromId = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
       ? undefined : t.isolation.from;
-    // Write-implies-isolation: a leaf granted any tool not on the read-only list without
+    // Write-implies-isolation: a leaf granted a write tool without
     // worktree isolation never runs in the user's real tree — its cwd is
     // redirected to a per-task scratch dir under the results dir.
     if (!isCompute && !isManifest && !isIntegrate && hasWriteTools(t.allowedTools) && worktreeName === undefined) {

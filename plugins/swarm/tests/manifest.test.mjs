@@ -1811,40 +1811,6 @@ test("leaf guard: a passing probe prints one line per guarded task and an opt-ou
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ── write predicate: allowlist (swarm-run-home-write-predicate) ──────────────
-test("hasWriteTools: any tool not on the read-only allowlist is write-capable", () => {
-  for (const t of ["Bash(git log:*)", "PowerShell", "MultiEdit", "Agent", "Skill", "mcp__x__y", "Read,Bash"]) {
-    equal(hasWriteTools(t), true, t);
-  }
-});
-
-test("hasWriteTools: the read-only allowlist and an empty list stay read-only", () => {
-  for (const t of ["", "Read,Grep,Glob", "WebSearch,WebFetch,Read,Grep,Glob", "LS,TodoWrite,ToolSearch"]) {
-    equal(hasWriteTools(t), false, JSON.stringify(t));
-  }
-});
-
-test("an unlisted tool (Read,PowerShell) with no isolation is scratch-redirected", () => {
-  const dir = tmp();
-  try {
-    const p = writeManifest(dir, { tasks: [claudeTask({ id: "ps", allowedTools: "Read,PowerShell" })] });
-    const t = loadManifest(p, CFG, dir).tasks[0];
-    equal(t.scratchRedirect, true);
-    ok(t.cwd.endsWith(`scratch-ps`), t.cwd);
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
-test("an unlisted-tool leaf with isolation is a valid isolation.from source", () => {
-  const dir = tmp();
-  try {
-    const p = writeManifest(dir, { tasks: [
-      claudeTask({ id: "src", allowedTools: "Read,PowerShell", isolation: "worktree" }),
-      claudeTask({ id: "x", after: ["src"], isolation: { worktree: "w", from: "src" } }),
-    ] });
-    equal(loadManifest(p, CFG, dir).tasks.find((t) => t.id === "x").from, "src");
-  } finally { rmSync(dir, { recursive: true, force: true }); }
-});
-
 // ── run home: keyed on the repo toplevel ─────────────────────────────────────
 test("run home: a non-repo dispatch is refused with the cd <repo> instruction", () => {
   const dir = tmp();

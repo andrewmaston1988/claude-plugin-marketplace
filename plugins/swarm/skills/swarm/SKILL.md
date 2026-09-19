@@ -260,7 +260,7 @@ a second manifest is almost never needed. Invoke it before drafting, alongside
 | Generation | `outputDir`; no isolation field needed |
 | Implementation | `isolation: "worktree"` — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the two required lines below |
 
-Write-capable tools (any tool not on the read-only allowlist: read, grep, glob, ls, notebookread, webfetch, websearch, todowrite, toolsearch — so PowerShell, MultiEdit, Agent, Skill and `mcp__*` tools all count, as do Edit/Write/Bash) without `isolation: "worktree"` get the leaf's cwd auto-redirected to a scratch dir — a leaf never writes in the real tree unless explicitly worktree-isolated.
+Write-capable tools (Edit/Write/Bash) without `isolation: "worktree"` get the leaf's cwd auto-redirected to a scratch dir — a leaf never writes in the real tree unless explicitly worktree-isolated.
 
 ### Two lines every Bash-running leaf's prompt carries, verbatim
 
