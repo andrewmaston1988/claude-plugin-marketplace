@@ -10,7 +10,8 @@ import { notableLines } from '../src/usage.mjs';
 
 const CONFIG = path.join(os.homedir(), '.swarm', 'config.json');
 
-export const MODE_CLOUD = '[:cloud tier preferred]';
+// Kept as a named export for hook consumers; the label is now provider-neutral.
+export const MODE_CLOUD = '[configured provider models preferred]';
 export const MODE_ANTHROPIC = '[Anthropic orchestration only]';
 
 // Headroom lines print OUTSIDE the standing block: the mode bracket says which
@@ -41,7 +42,10 @@ export function standingBlock(mode) {
 // cwd under any allowed root -> alternative models are launchable here. Lazy import:
 // manifest.mjs is the governance source of truth but heavy for a per-prompt hook.
 export async function modeFor({ cwd, config }) {
-  const roots = config?.provider?.allowedRoots ?? [];
+  const roots = [...new Set((Object.entries(config?.providers || {})
+    .filter(([id, block]) => id !== 'claude' && block?.enabled !== false && Array.isArray(block?.allowedRoots))
+    .flatMap(([, block]) => block.allowedRoots))
+    .concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
   if (!roots.length || !cwd) return MODE_ANTHROPIC;
   const { isUnderRoot } = await import('../src/manifest.mjs');
   return roots.some((r) => isUnderRoot(cwd, r)) ? MODE_CLOUD : MODE_ANTHROPIC;
@@ -75,12 +79,13 @@ async function main() {
   const event = String(payload.hook_event_name || '');
   const config = readJSON(CONFIG);
   const { readCachedUsage } = await import('../src/usage.mjs');
+  const { defaultProviderRegistry } = await import('../src/default-providers.mjs');
   const ctx = await decide({
     event,
     prompt: String(payload.prompt || ''),
     cwd: payload.cwd || process.cwd(),
     config,
-    usage: await readCachedUsage(config),
+    usage: await readCachedUsage(config, { providerRegistry: defaultProviderRegistry() }),
   });
   if (!ctx) process.exit(0);
 

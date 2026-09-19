@@ -299,6 +299,15 @@ const AGES_OUT = new Set(["ok", "skipped"]);
 const finishedMs = (t) =>
   t.startedMs != null && t.durationMs != null ? t.startedMs + t.durationMs : -Infinity;
 
+// Provider is part of the durable identity, but repeating it on every unique
+// row makes the compact roster harder to scan. Qualify only the model ids that
+// would otherwise be ambiguous in this view.
+export function displayIdentity(value, roster = []) {
+  const model = String(value?.model || "?");
+  const providers = new Set(roster.filter((row) => row?.model === model && row?.provider).map((row) => row.provider));
+  return providers.size > 1 && value?.provider ? `${value.provider}/${model}` : model;
+}
+
 // Full-run snapshot. tasks: [{ id, model, state, durationMs?, startedMs?,
 // tokens?, activity?, lastEventMs? }] — durationMs for terminal states,
 // startedMs for running (elapsed ticks against `now`), tokens in the
@@ -312,7 +321,7 @@ const finishedMs = (t) =>
 // watching keep their rows and the rest collapse into one count line. Header
 // and footer are never dropped, and the footer counts EVERY leaf, shown or not.
 export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLines }) {
-  const all = tasks.map((t) => ({ ...t, model: t.model || "?" }));
+  const all = tasks.map((t) => ({ ...t, model: displayIdentity(t, tasks) }));
   // Under a budget the blank spacers always go: the windowed view renders them
   // inconsistently, so keeping them makes the rendered height unpredictable for
   // the very budget we are rendering to. Layout is then exactly
@@ -463,7 +472,7 @@ export function renderProvenance({ tasks = [], truncations = [] }) {
   };
   const bits = tasks.map((t) => {
     const dur = t.durationMs != null ? ` (${compactDur(t.durationMs)})` : "";
-    return `${t.id} ${t.model || "?"}${dur}`;
+    return `${t.id} ${displayIdentity(t, tasks)}${dur}`;
   });
   lines.push(`*Run: ${bits.join(" · ")}*`);
   return lines.join("\n") + "\n";

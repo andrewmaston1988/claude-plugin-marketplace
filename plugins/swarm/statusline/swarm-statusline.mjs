@@ -54,6 +54,11 @@ const encodeCwd = (p) => String(p).replace(/[\\/:]/g, "-"); // same rule as the 
 
 const listDir = (p) => { try { return readdirSync(p); } catch { return []; } };
 
+export function identityLabel(task) {
+  const model = String(task?.model || "").replace(/:cloud$/, "");
+  return task?.provider ? `${task.provider}/${model}` : model;
+}
+
 export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), session = sessionInfo() } = {}) {
   const runsRoot = join(home, "runs");
   const out = [];
@@ -71,8 +76,11 @@ export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), s
       const running = rr.tasks.filter((t) => t.state === "running" || t.state === "retrying").map((t) => t.id);
       let ok = 0, failed = 0, quiet = 0;
       const model = new Map();
+      const providerTokens = new Map();
       for (const t of rr.tasks) {
-        model.set(t.id, String(t.model || "").replace(/:cloud$/, ""));
+        model.set(t.id, identityLabel(t));
+        const provider = t.provider || "unknown";
+        providerTokens.set(provider, (providerTokens.get(provider) || 0) + tokenTotal(t.tokens));
         if (t.state === "ok" || t.state === "skipped") ok++;
         // "failed:timeout" and a stopped-mid-run leaf both count as failed here.
         else if (t.state === "failed" || t.state === "failed:timeout" || t.state === "failed:stopped" || t.state === "blocked") failed++;
@@ -80,7 +88,7 @@ export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), s
       }
       const total = rr.tasks.length;
       const { tokens, launcher } = runMeta(join(rd, "run.log"));
-      out.push({ run, ok, failed, total, running, quiet, model, tokens, mine: mine(cwdDir, launcher) });
+      out.push({ run, ok, failed, total, running, quiet, model, tokens, providerTokens, mine: mine(cwdDir, launcher) });
     }
   }
   return out;

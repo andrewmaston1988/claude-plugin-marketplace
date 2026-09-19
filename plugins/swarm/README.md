@@ -1,9 +1,9 @@
 # swarm — alternative-model fan-out engine
 
-A Claude Code session authors a JSON manifest; swarm dispatches each task via CLI —
-capable `:cloud` models (GLM, MiniMax, qwen, …) through your provider, Claude models via
-plain `claude -p` — runs the dependency graph in the background, and compresses results
-through a digest so the session never swallows raw output.
+A Claude Code session authors a JSON manifest; swarm dispatches each task via the enabled
+provider registry — capable Ollama `:cloud` models, opt-in Codex app-server models, or Claude
+models via plain `claude -p` — runs the dependency graph in the background, and compresses
+results through a digest so the session never swallows raw output.
 
 Widest shape: **quality from group-think** — many independent perspectives, redundant
 attempts, diverse-lens judging, near-opus quality on alternative models at interactive
@@ -19,19 +19,22 @@ leaves in sequence on one shared branch — the plumbing is the same either way.
 The shipped `config.default.json` is overwritten on every plugin update — your own config
 is the only durable copy; re-run `swarm config init` after an update to pick up new keys.
 
-The one key you must set to arm alternative models:
+The provider-specific key you must set to arm an alternative provider:
 
 ```json
-{ "provider": { "allowedRoots": ["C:/personal-projects"] } }
+{ "providers": { "ollama": { "allowedRoots": ["C:/personal-projects"] } } }
 ```
+
+Provider identity is canonical under `providers`; legacy provider-shaped config is read for
+compatibility and does not change the public manifest identity.
 
 **Why (data governance):** your org may have a data agreement with Anthropic but not with
 other model providers, so non-Claude dispatch is **deny-by-default** — a task whose
 effective `cwd` isn't under a listed root fails validation. Default `[]` still runs fine
 with Claude models only; list only roots cleared to leave for your provider.
 
-Every other key (`provider.url`, `provider.mode`, `concurrency`, `timeoutMs`,
-`worktreeBranchPrefix`, `modelDenylist`, `provider.cloud.ollama.*`, `notifyCmd`,
+Every other key (`providers.<name>.*`, `concurrency`, `timeoutMs`,
+`worktreeBranchPrefix`, `modelDenylist`, `providers.ollama.cloud.ollama.*`, `notifyCmd`,
 `grading.enabled`, `dashboard.*`, `swarm.always`) is documented inline in
 `config.default.json` with its default — `setup` walks the ones worth touching. Swarm
 never manages credentials; auth is your provider app's ambient sign-in.
@@ -66,8 +69,9 @@ see it. Each guard is probed once at `validate` with a harmless payload, so a br
 fails the manifest before any leaf spends. A task opts out with `"leafGuard": false`
 only — nothing in `env`/`settings.env` can forge or clear the guard.
 
-**Requirements:** Node, `claude` on PATH, and (for `:cloud` models) ollama recent enough
-to serve `/api/experimental/model-recommendations` (~v0.23+).
+**Requirements:** Node and `claude` on PATH for Claude leaves. Ollama `:cloud` rows need a
+recent Ollama with `/api/experimental/model-recommendations` (~v0.23+); Codex rows are opt-in
+and need the configured `codex` app-server command.
 
 ## Install
 
@@ -81,14 +85,15 @@ Working in a clone of this marketplace, run instead: `node plugins/swarm/scripts
 ## Usage
 
 ```bash
-swarm models              # discover launchable :cloud models + Claude aliases — run first
+swarm models              # discover launchable rows from enabled providers — run first
 swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
 swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
 swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
 swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
 swarm quota                # Anthropic utilization per limit window
+swarm usage [--provider X] # live usage from enabled provider capabilities
 swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
-swarm grade --init <resultsDir>   # write grades.json — one skeleton row per :cloud leaf
+swarm grade --init <resultsDir>   # write grades.json — one skeleton row per provider leaf
 swarm grade --file <grades.json>  # validate the filled batch and append it to the score store
 swarm perf [--aspect X] [--model Y] [--domain D]   # aspect x model table with sample counts
 ```
@@ -157,12 +162,13 @@ tools, budget-driven control flow, or you simply want zero setup.
 
 ## Model discovery
 
-Covers the **ollama cloud catalog only**. `models` unions the curated recommendations
-endpoint with the full `/api/tags` catalog, enriches each candidate free via `/api/show`
-(capabilities, context length, parameter count), and prints the roster largest-first —
-`glm-5.2:cloud — Frontier open model (756B, 1.0M ctx)`. Claude tiers (`haiku`/`sonnet`/
-`opus`) are a static always-available alias list appended after — never discovered, and no
-non-ollama provider ever is.
+`models` asks the enabled provider registry for launchable rows and keeps the provider identity
+on every row. The Ollama adapter unions the curated recommendations endpoint with `/api/tags`,
+enriches candidates through `/api/show`, and prints the roster largest-first —
+`ollama/glm-5.2:cloud — Frontier open model (756B, 1.0M ctx)`. Claude tiers (`haiku`/`sonnet`/
+`opus`) remain static aliases; an enabled Codex adapter discovers its account-visible models
+through app-server `model/list`. When the same model id exists under multiple providers, the
+provider-qualified label is required.
 
 An entry superseded by a strictly-newer same-lineage sibling is hidden behind it
 (`swarm models --all` shows the hidden rows). Entitlement is handled by removal, not
@@ -373,7 +379,8 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
   recovers. An engine with nothing else running still starts one leaf — degrades to serial
   rather than stalling.
 
-`swarm quota` answers *can I dispatch right now, and on what* for every provider at once:
+`swarm quota` reports Anthropic utilization and the legacy Ollama cloud cache. Use
+`swarm usage` for live readings from every enabled provider capability:
 
 ```
 anthropic session: 42% — resets Sun 6 Sep, 19:00
@@ -382,8 +389,9 @@ ollama session: 12% — resets Sun 6 Sep, 13:00
 ollama weekly: 87% — resets Tue 8 Sep, 01:00
 ```
 
-Anthropic is fetched live; a cloud provider reads from cache (its cookie needs a human, so
-`quota` must not stall on one). Exit code 1 means **Anthropic** exhausted specifically.
+`quota` fetches Anthropic live and reads the legacy Ollama cloud cache (its cookie needs a
+human, so it must not stall on one). `usage` asks enabled provider adapters for live
+readings. Exit code 1 means **Anthropic** exhausted specifically.
 
 **`swarm ollama-usage`** owns the `:cloud` side's fetch and cookie — zero-dependency,
 independent of your provider app's own tooling. First run: `swarm ollama-usage --cookie
@@ -392,7 +400,7 @@ falls back to cache when the cookie is expired or missing.
 
 Both commands share `src/usage.mjs`, also consulted by the ultraswarm hook, so a reading
 reads identically everywhere. Nothing arms itself — a provider is read only when
-`provider.cloud.<name>.enabled` is `true`. A provider that can't take work now gets one
+`providers.<name>.enabled` is `true`. A provider that can't take work now gets one
 line beside the standing-mode block; a healthy provider says nothing.
 
 ## Model capability scores
@@ -474,7 +482,7 @@ one cheap fluke leaf outrank a well-evidenced model.
 **Best value is a threshold, never a ratio.** The card names the *cheapest* model still
 worth seating: on the frontier, within `valueMargin` (default `0.5`) of the best frontier
 quality, and not thin — the margin used is printed, so the pick is judgeable. Cost bands
-(`provider.cloud.ollama.costBands`, default `[2, 5]`) render `💲`/`💲💲`/`💲💲💲` on the
+(`providers.ollama.cloud.ollama.costBands`, default `[2, 5]`) render `💲`/`💲💲`/`💲💲💲` on the
 dashboard and model detail views; unmeasured renders `—`, never a blank that would read as
 dominated. Badges never appear on leaf/run rows (the terminal keeps plain `$`/`$$`/`$$$`).
 

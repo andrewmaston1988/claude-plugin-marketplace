@@ -19,6 +19,9 @@ Provider-specific roots and enabled state are checked during validation and agai
 dispatch. Codex tasks reject Claude-only \`settings\` and configured project leaf
 guards unless the task explicitly sets \`"leafGuard": false\`.
 
+The public provider registry supplies discovery, usage, and runner capabilities. Pin
+\`provider\` explicitly when the same model id is available from more than one provider.
+
 ### Prompt length on Windows
 
 A leaf's `prompt` is measured through the CreateProcess-quoted command line at `swarm validate` time; a prompt over ~32k characters on Windows fails validation — point the leaf at a file holding its instructions instead of inlining it.

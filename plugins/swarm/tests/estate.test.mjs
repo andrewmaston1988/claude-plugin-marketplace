@@ -13,6 +13,10 @@ const HEARTBEAT_MS = 15_000;
 const QUIET_WARN_MS = 60_000;
 const GOLDEN = JSON.parse(readFileSync(fileURLToPath(new URL("./fixtures/estate-golden.json", import.meta.url)), "utf8"));
 
+function withoutProviderProjection(rows) {
+  return rows.map(({ providers, providerTokens, ...row }) => row);
+}
+
 function seedFinished(home, project, name, ageHours) {
   const d = join(home, "runs", project, name);
   buildFixture(d);
@@ -82,11 +86,13 @@ test("E3: filterRuns over the snapshot matches the pre-change handler's captured
     const snapshot = buildSnapshot(home, cache, { now: NOW, heartbeatMs: HEARTBEAT_MS, quietWarnMs: QUIET_WARN_MS });
 
     const plain = filterRuns(snapshot.rows, { finishedPerProject: 3, expanded: new Set() });
-    assert.deepEqual(plain.rows, GOLDEN.plain.runs, "unexpanded rows match the captured handler output");
+    assert.deepEqual(withoutProviderProjection(plain.rows), GOLDEN.plain.runs, "unexpanded rows match the captured handler output");
+    assert.deepEqual(plain.rows[0].providers, ["ollama", "claude"]);
+    assert.deepEqual(plain.rows[0].providerTokens, { claude: 17000, ollama: 307100, unknown: 0 });
     assert.deepEqual(plain.finishedTotals, GOLDEN.plain.finishedTotals);
 
     const expanded = filterRuns(snapshot.rows, { finishedPerProject: 3, expanded: new Set(["C--code-alpha"]) });
-    assert.deepEqual(expanded.rows, GOLDEN.expanded.runs, "expand=C--code-alpha matches the captured handler output");
+    assert.deepEqual(withoutProviderProjection(expanded.rows), GOLDEN.expanded.runs, "expand=C--code-alpha matches the captured handler output");
     assert.deepEqual(expanded.finishedTotals, GOLDEN.expanded.finishedTotals);
   } finally { rmSync(home, { recursive: true, force: true }); }
 });

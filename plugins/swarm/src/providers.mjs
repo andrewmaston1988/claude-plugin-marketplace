@@ -118,7 +118,7 @@ async function preflightClaude({ config: cfg = {}, fetch, now, io, env, tasks = 
   return { ok: true, usage: q };
 }
 
-export function defaultProviderAdapters({ codexAdapter } = {}) {
+export function defaultProviderAdapters({ codexAdapter, ollamaCapabilities = {} } = {}) {
   return [
     descriptor({
       id: "claude",
@@ -132,7 +132,7 @@ export function defaultProviderAdapters({ codexAdapter } = {}) {
       runnerId: "claude",
       defaultEnabled: true,
       matchModel: (model) => /(:|-)cloud$/i.test(String(model || "")) ? { provider: "ollama", model } : null,
-      capabilities: { preflight: pingOllamaEndpoint },
+      capabilities: { preflight: pingOllamaEndpoint, ...ollamaCapabilities },
     }),
     codexAdapter || descriptor({
       id: "codex",
@@ -145,8 +145,10 @@ export function defaultProviderAdapters({ codexAdapter } = {}) {
   ];
 }
 
-export function createDefaultProviderRegistry({ codexAdapter } = {}) {
-  return createProviderRegistry(defaultProviderAdapters({ codexAdapter }));
+export function createDefaultProviderRegistry({ codexAdapter, ollamaCapabilities, additionalProviders = [] } = {}) {
+  const registry = createProviderRegistry(defaultProviderAdapters({ codexAdapter, ollamaCapabilities }));
+  for (const adapter of additionalProviders) registry.register(adapter);
+  return registry;
 }
 
 export function createProviderRegistry(initial = []) {

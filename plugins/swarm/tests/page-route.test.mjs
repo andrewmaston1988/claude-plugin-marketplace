@@ -564,7 +564,7 @@ test("cost view: the fifth pill routes, the server's screen draws, and the foot 
   await P.flush();
   assert.ok(P.screenText().includes("the cards and the list"), "the perf.js widget rendered");
   assert.equal(activeSegLabel(P.main), "cost", "the cost pill is the selected view");
-  assert.ok(P.screenText().includes("provider.cloud.ollama.costBands"), "the foot names the config key");
+  assert.ok(P.screenText().includes("providers.ollama.cloud.ollama.costBands"), "the foot names the config key");
 });
 
 // ── the perf view switcher ────────────────────────────────────────────────

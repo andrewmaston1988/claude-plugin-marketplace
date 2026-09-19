@@ -116,6 +116,25 @@ export function normalizeCodex(reading, options = {}) {
   };
 }
 
+export function normalizeProviderUsage(provider, reading) {
+  if (!reading) return null;
+  if (provider === "ollama") return normalizeOllama(reading);
+  if (provider === "codex") return normalizeCodex(reading);
+  const limits = Array.isArray(reading.limits) ? reading.limits : (reading.buckets || [])
+    .filter((bucket) => typeof bucket?.percent === "number" || typeof bucket?.usedPercent === "number")
+    .map((bucket) => limit(bucket.kind || "usage", bucket.percent ?? bucket.usedPercent, bucket.resetsAt ?? bucket.resets_at, bucket.scope ?? null));
+  return {
+    ...snapshot(provider, reading.buckets || [], {
+      source: reading.source || `${provider}-usage`,
+      provenance: reading.provenance || "unknown",
+      asOf: reading.asOf,
+    }),
+    provider,
+    state: reading.state || (limits.some((entry) => entry.percent >= 100) ? "exhausted" : limits.length ? "ok" : "unknown"),
+    limits,
+  };
+}
+
 // Anthropic's cache is a TTL cache the CLI refills on demand, so an EXPIRED one
 // is `unknown`, never bannered: the next `quota` call refreshes it unprompted
 // and a warning here would be noise the reader can do nothing about. Ollama is
@@ -137,8 +156,25 @@ function readAnthropicCache(cfg, now, cachePath) {
 
 // Every provider, in one array, cache-only. Callers that can afford a fetch (the
 // `quota` subcommand) fetch first and normalize the fresher reading themselves.
-export async function readCachedUsage(cfg = {}, { env = process.env, now = Date.now(), cachePath, _ollama, _codex } = {}) {
+export async function readCachedUsage(cfg = {}, { env = process.env, now = Date.now(), cachePath, _ollama, _codex, providerRegistry } = {}) {
   const out = [readAnthropicCache(cfg, now, cachePath)];
+  if (providerRegistry) {
+    for (const adapter of providerRegistry.list()) {
+      if (adapter.id === "claude" || !adapter.enabled(cfg)) continue;
+      const readUsage = adapter.capabilities.readUsage;
+      if (!readUsage) continue;
+      try {
+        const reading = await readUsage({ config: cfg, env, now, usageOptIn: false });
+        const normalized = normalizeProviderUsage(adapter.id, reading);
+        if (normalized) out.push(normalized);
+      } catch {
+        // A standing hook must remain cache-only and best-effort. A provider
+        // that cannot answer is represented only when its adapter can name it.
+        out.push(normalizeProviderUsage(adapter.id, null) || none(adapter.id));
+      }
+    }
+    return out;
+  }
   const ollamaEnabled = cfg?.providers?.ollama?.cloud?.ollama?.enabled === true || cfg?.provider?.cloud?.ollama?.enabled === true;
   if (ollamaEnabled) {
     const { usageFromCache } = _ollama || (await import("./ollama-usage.mjs"));
@@ -222,7 +258,11 @@ const REASON_TITLES = {
 export function provenanceBanner(usage) {
   if (!usage?.provenance || usage.provenance === "live" || !usage.reason) return [];
   const title = REASON_TITLES[usage.reason] ?? "Usage Unread";
-  const refresh = `    Refresh: swarm ollama-usage --cookie '<value>'${usage.cookiePath ? `   (writes ${usage.cookiePath})` : ""}`;
+  // Legacy headroom callers pass the raw Ollama reading before normalization.
+  const provider = usage.provider || "ollama";
+  const refresh = provider === "ollama"
+    ? `    Refresh: swarm ollama-usage --cookie '<value>'${usage.cookiePath ? `   (writes ${usage.cookiePath})` : ""}`
+    : `    Refresh: swarm usage --provider ${provider}`;
   if (usage.provenance === "cached") {
     const lastSeen = usage.lastSeen ? `  last seen: ${new Date(usage.lastSeen).toISOString()}` : "";
     return [`/!\\ ${title} — figures below are cached.${lastSeen}`, refresh];

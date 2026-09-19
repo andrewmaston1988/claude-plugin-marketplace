@@ -317,7 +317,7 @@ export function band(mult, bands = DEFAULT_COST_BANDS) {
 }
 
 // The band boundaries are arbitrary numbers, so they are config
-// (`provider.cloud.ollama.costBands`), not constants. Anything malformed falls
+// (`providers.ollama.cloud.ollama.costBands`), not constants. Anything malformed falls
 // back to the default rather than inventing an edge out of a string.
 export function resolveValueMargin(value, fallback = DEFAULT_VALUE_MARGIN) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;

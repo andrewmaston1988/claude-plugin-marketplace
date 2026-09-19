@@ -17,6 +17,8 @@ wait for. Both precede drafting; neither restates the other.
 Work through it in order. Every step produces a value the manifest carries or the gate
 consumes.
 
+Pin `provider` per leaf.
+
 ## The Iron Law
 
 ```

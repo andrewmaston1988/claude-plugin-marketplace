@@ -245,13 +245,14 @@ export const ENTITLEMENT_RE = /uses extra usage only|extra usage balance is empt
 // roster then simply doesn't offer it — no funding-state claim is recorded,
 // and the next refresh restores it if the probe/dispatch stops 402ing.
 // Missing cache or entry is a silent no-op.
-export function removeCachedModel(model, env = process.env) {
+export function removeCachedModel(model, env = process.env, provider) {
   const p = join(swarmHome(env), "models-cache.json");
   let cache;
   try { cache = JSON.parse(readFileSync(p, "utf8")); } catch { return; }
   const models = Array.isArray(cache?.models) ? cache.models : [];
-  if (!models.some((m) => m?.model === model)) return;
-  cache.models = models.filter((m) => m?.model !== model);
+  const matches = (row) => row?.model === model && (!provider || !row.provider || row.provider === provider);
+  if (!models.some(matches)) return;
+  cache.models = models.filter((m) => !matches(m));
   writeFileSync(p + ".tmp", JSON.stringify(cache, null, 2) + "\n");
   renameSync(p + ".tmp", p);
 }
@@ -262,7 +263,7 @@ export function removeCachedModel(model, env = process.env) {
 // resurface elders into the top 3, so the slice re-derives, capped at maxProbes.
 // Non-cloud names occupy their slot but are NEVER probed (local generate forbidden).
 export async function probeTopModels(models, base, fetchImpl = globalThis.fetch, {
-  env = process.env, isDenylisted, timeoutMs = 15000, maxProbes = 6,
+  env = process.env, isDenylisted, timeoutMs = 15000, maxProbes = 6, provider,
 } = {}) {
   let live = [...models];
   const probed = new Set();
@@ -279,7 +280,7 @@ export async function probeTopModels(models, base, fetchImpl = globalThis.fetch,
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok && ENTITLEMENT_RE.test(await res.text())) {
-        removeCachedModel(next.model, env);
+        removeCachedModel(next.model, env, provider);
         live = live.filter((m) => m.model !== next.model);
       }
     } catch {
@@ -318,7 +319,13 @@ export async function discoverOllamaModels(config = {}, options = {}) {
     options.fetchImpl || globalThis.fetch,
     { spawnImpl: options.spawnImpl },
   );
-  return raw.map(normalizeOllamaModelDescriptor);
+  return raw.map((row) => {
+    const descriptor = normalizeOllamaModelDescriptor(row);
+    // The registry contract is deliberately compact. Operator surfaces may
+    // request the discovery metadata that makes the catalogue useful without
+    // making every provider expose a legacy-shaped row.
+    return options.rich ? { ...row, ...descriptor } : descriptor;
+  });
 }
 
 export function createOllamaProviderAdapter(options = {}) {
@@ -326,7 +333,7 @@ export function createOllamaProviderAdapter(options = {}) {
     id: "ollama",
     runnerId: "claude",
     enabled(config = {}) {
-      const value = config.providers?.ollama?.enabled;
+      const value = config.providers?.ollama?.enabled ?? config.provider?.enabled;
       return typeof value === "boolean" ? value : true;
     },
     matchModel(model) {
@@ -341,6 +348,15 @@ export function createOllamaProviderAdapter(options = {}) {
           ...options,
           ...context,
         });
+      },
+      // Scheduler and hooks need a bounded, cache-only read. A live provider
+      // fetch remains an explicit operator action (`ollama-usage`).
+      async readUsage(context = {}) {
+        const cfg = context.config || context.cfg || options.config || {};
+        const meter = cfg.providers?.ollama?.cloud?.ollama || cfg.provider?.cloud?.ollama;
+        if (meter && meter.enabled !== true) return null;
+        const { usageFromCache } = await import("./ollama-usage.mjs");
+        return usageFromCache(cfg, context.env || process.env);
       },
     },
   };
@@ -391,10 +407,12 @@ export function writeCompositeModelsCache(models, env = process.env) {
 export async function refreshModelsCache({
   config = {},
   env = process.env,
-  providers = ["ollama"],
+  providers,
+  registry,
   discoverers = {},
   fetchImpl,
   spawnImpl,
+  rich = false,
 } = {}) {
   const cached = readModelsCache(env);
   const existing = Array.isArray(cached?.models) ? cached.models : [];
@@ -405,11 +423,16 @@ export async function refreshModelsCache({
     byProvider.get(provider).push({ ...row, provider });
   }
   const errors = {};
-  for (const provider of providers) {
-    const discover = discoverers[provider] || (provider === "ollama" ? (context) => discoverOllamaModels(context.config, context) : null);
+  const targets = providers || (registry
+    ? registry.list().filter((adapter) => adapter.enabled(config) && adapter.capabilities.discoverModels).map((adapter) => adapter.id)
+    : ["ollama"]);
+  for (const provider of targets) {
+    const discover = discoverers[provider]
+      || (registry ? registry.capability(provider, "discoverModels") : null)
+      || (provider === "ollama" ? (context) => discoverOllamaModels(context.config, context) : null);
     if (!discover) continue;
     try {
-      const rows = await discover({ config, env, fetchImpl, spawnImpl });
+      const rows = await discover({ config, env, fetchImpl, spawnImpl, rich });
       byProvider.set(provider, providerQualifiedModels(provider, rows));
     } catch (error) {
       errors[provider] = error?.message || String(error);

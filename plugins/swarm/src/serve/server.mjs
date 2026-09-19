@@ -17,6 +17,7 @@ import { coverage, reliability, leaders, costView } from "./perf-views.mjs";
 import { projectGrouping } from "./grouping.mjs";
 import { buildSnapshot, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
+import { providerConfig } from "../providers.mjs";
 
 const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
 const PERF_JS = fileURLToPath(new URL("./perf.js", import.meta.url));
@@ -328,8 +329,9 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const live = dedupe(rows);
     const domains = [...new Set(live.map((r) => r.domain).filter(Boolean))].sort();
     const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
-    const bands = resolveBands(cfg.provider?.cloud?.ollama?.costBands);
-    const valueMargin = cfg.provider?.cloud?.ollama?.valueMargin;
+    const ollama = providerConfig(cfg, "ollama");
+    const bands = resolveBands(ollama?.cloud?.ollama?.costBands);
+    const valueMargin = ollama?.cloud?.ollama?.valueMargin;
     send(res, 200, {
       grading, path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
       aspects: ASPECTS, universals: UNIVERSAL, domains,
@@ -426,8 +428,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       try { r = JSON.parse(readFileSync(file, "utf8")); } catch { return notFound(res); }
       // `prompt` is exposed deliberately — the leaf view renders it as a collapsed
       // accordion, and it is the one field that says what the leaf was actually asked.
-      const { id, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd } = r;
-      return send(res, 200, { id, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd });
+      const { id, provider, runner, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd } = r;
+      return send(res, 200, { id, provider, runner, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd });
     }
     return notFound(res);
   };

@@ -912,10 +912,10 @@ function checkHeadroom(provider, model, l, headroom, errors, warnings) {
   }
 }
 
-function resolveProvider(task, cfg, cache, l, errors) {
+function resolveProvider(task, cfg, cache, l, errors, providerRegistry = PROVIDERS) {
   try {
-    const identity = PROVIDERS.resolve(task, { cache, config: cfg });
-    const adapter = PROVIDERS.get(identity.provider);
+    const identity = providerRegistry.resolve(task, { cache, config: cfg });
+    const adapter = providerRegistry.get(identity.provider);
     const problems = adapter.validateTask({ ...task, ...identity }, { config: cfg });
     for (const problem of problems || []) errors.push(`${l}: ${problem}`);
     return identity;
@@ -925,7 +925,7 @@ function resolveProvider(task, cfg, cache, l, errors) {
   }
 }
 
-function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings, cache = [], io = defaultManifestIo(), probedGuards = new Set() }) {
+function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings, cache = [], io = defaultManifestIo(), probedGuards = new Set(), providerRegistry = PROVIDERS }) {
 
   return rawTasks.map((t) => {
     const l = label(t);
@@ -938,7 +938,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     let provider;
     let fallbackProvider;
     if (!isCompute && !isManifest && !isIntegrate) {
-      const primary = resolveProvider({ ...t }, cfg, cache, l, errors);
+      const primary = resolveProvider({ ...t }, cfg, cache, l, errors, providerRegistry);
       provider = primary.provider;
       checkGovernance(provider, t.model, originalCwd, l, cfg, errors);
       checkDenylist(t.model, l, cfg, errors);
@@ -950,7 +950,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
           // The fallback is a real dispatch target — resolve its provider
           // independently; a Claude primary must not force a Codex/Ollama fallback.
           const { provider: _primaryProvider, ...fallbackTask } = t;
-          const fallback = resolveProvider({ ...fallbackTask, model: t.fallbackModel }, cfg, cache, `${l} fallback`, errors);
+          const fallback = resolveProvider({ ...fallbackTask, model: t.fallbackModel }, cfg, cache, `${l} fallback`, errors, providerRegistry);
           fallbackProvider = fallback.provider;
           checkGovernance(fallbackProvider, t.fallbackModel, originalCwd, `${l} fallback`, cfg, errors);
           checkDenylist(t.fallbackModel, `${l} fallback`, cfg, errors);
@@ -1038,7 +1038,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
 // into the run by the scheduler. The child inherits the parent run's cwd and
 // resultsDir; it may not steer the run itself.
 
-function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, cache = [], io, probedGuards } = {}) {
+function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, cache = [], io, probedGuards, providerRegistry = PROVIDERS } = {}) {
   const nodeLabel = `task '${node.id}'`;
   // A registry-resolved parent references its children relative to itself — a
   // saved manifest must work from any cwd. Plain-path parents keep cwd
@@ -1080,6 +1080,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
   const tasks = normalizeTasks(raw.tasks, {
     cwd, resultsDir, cfg, errors, label, cache, io, probedGuards,
+    providerRegistry,
     defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, io, errors, label);
@@ -1098,7 +1099,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
 // `await getUsage(cfg)` — so callers that can fetch inject it and tests can
 // inject a fake; the default is the cache-only usageFromCache, which never
 // touches the network, so validation stays offline unless the caller fetches).
-export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, cache = [], io, headroom = usageFromCache(cfg) } = {}) {
+export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, cache = [], io, headroom = usageFromCache(cfg), providerRegistry = PROVIDERS } = {}) {
   const errors = [];
   const warnings = [];
   const resolvedIo = { ...defaultManifestIo(), ...io };
@@ -1178,7 +1179,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const childPlans = new Map();
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
-      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, cache, io: resolvedIo, probedGuards });
+      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, cache, io: resolvedIo, probedGuards, providerRegistry });
       if (child) childPlans.set(t.id, child);
     }
   }
@@ -1192,7 +1193,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   }
 
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, label, childPlans, cache, headroom, warnings, io: resolvedIo, probedGuards,
+    cwd, resultsDir, cfg, errors, label, childPlans, cache, headroom, warnings, io: resolvedIo, probedGuards, providerRegistry,
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
@@ -1206,7 +1207,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
       const digestIdentity = resolveProvider({
         model: raw.digest.model,
         ...(raw.digest.provider !== undefined && { provider: raw.digest.provider }),
-      }, cfg, cache, "digest", errors);
+      }, cfg, cache, "digest", errors, providerRegistry);
       checkGovernance(digestIdentity.provider, raw.digest.model, cwd, "digest", cfg, errors);
       checkDenylist(raw.digest.model, "digest", cfg, errors);
       checkHeadroom(digestIdentity.provider, raw.digest.model, "digest", headroom, errors, warnings);
