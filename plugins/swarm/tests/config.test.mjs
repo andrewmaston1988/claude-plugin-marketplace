@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { loadConfig, deepMerge, swarmHome, DEFAULT_TIMEOUT_MS } from "../src/config.mjs";
-import { loadManifest } from "../src/manifest.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
 import { buildDispatch, toSpawnable, windowsCommandLineLength } from "../src/dispatch.mjs";
 
 function tmp() {

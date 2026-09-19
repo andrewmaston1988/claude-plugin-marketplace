@@ -22,7 +22,12 @@ export class ValidationError extends Error {
 
 // Default leaf toolset is read-only; write capability must be asked for.
 export const DEFAULT_TOOLS = "Read,Grep,Glob";
-const WRITE_TOOLS = new Set(["edit", "write", "bash", "notebookedit"]);
+// Read-only is an allowlist: a tool nobody classified is write-capable. Skill
+// and Agent are deliberately absent — both can reach tools the leaf's own list
+// does not name.
+const READ_ONLY_TOOLS = new Set([
+  "read", "grep", "glob", "ls", "notebookread", "webfetch", "websearch", "todowrite", "toolsearch",
+]);
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const CLONE_ID_RE = /\[\d+\]$/;
@@ -64,8 +69,9 @@ const LEAF_GUARD_ENV_KEYS = ["SWARM_LEAF", "SWARM_LEAF_GUARD", "SWARM_LEAF_GUARD
 export function hasWriteTools(allowedTools) {
   return String(allowedTools || "")
     .split(",")
-    .map((t) => t.trim().toLowerCase())
-    .some((t) => WRITE_TOOLS.has(t));
+    .map((t) => t.trim().toLowerCase().replace(/\(.*\)$/, ""))
+    .filter(Boolean)
+    .some((t) => !READ_ONLY_TOOLS.has(t));
 }
 
 function normalizeForCompare(p) {
@@ -182,16 +188,16 @@ export function argsFingerprint(args) {
   return createHash("sha1").update(JSON.stringify(canonicalize(args))).digest("hex").slice(0, 8);
 }
 
-// Default resultsDir: ~/.swarm/runs/<encoded-cwd>/<manifest-stem>-<n> — run
+// Default resultsDir: ~/.swarm/runs/<encoded-repo-toplevel>/<manifest-stem>-<n> — run
 // artefacts live in the user's home, never inside a code dir. Reuse the
 // highest-numbered existing dir so a bare re-run resumes into the same run
 // (resume skips ok results); first run gets -1. An explicit resultsDir in the
 // manifest is always used verbatim (resolved against cwd). With --args the
 // stem carries the args fingerprint — a differently-parameterized run must
 // never resume into another parameterization's dir.
-function defaultResultsDir(manifestPath, cwd, argsFp) {
+function defaultResultsDir(manifestPath, toplevel, argsFp) {
   const stem = basename(manifestPath).replace(/\.json$/i, "") + (argsFp ? `.${argsFp}` : "");
-  const base = join(swarmHome(), "runs", cwd.replace(/[\\/:]/g, "-"));
+  const base = join(swarmHome(), "runs", toplevel.replace(/[\\/:]/g, "-"));
   let n = 0;
   if (existsSync(base)) {
     const re = new RegExp(`^${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-(\\d+)$`);
@@ -927,7 +933,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     // same way its own prepareIsolation derives it.
     const fromId = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
       ? undefined : t.isolation.from;
-    // Write-implies-isolation: a leaf granted write-capable tools without
+    // Write-implies-isolation: a leaf granted any tool not on the read-only list without
     // worktree isolation never runs in the user's real tree — its cwd is
     // redirected to a per-task scratch dir under the results dir.
     if (!isCompute && !isManifest && !isIntegrate && hasWriteTools(t.allowedTools) && worktreeName === undefined) {
@@ -1079,9 +1085,21 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     raw.goal = carrier.prompt;
   }
 
+  // Runs are filed under the dispatching repo, so a cwd outside any repo has no home.
+  const toplevel = resolvedIo.repoToplevel(cwd);
+  if (!toplevel) {
+    throw new ValidationError([
+      `swarm: '${cwd}' is not inside a git repository, so this run has no project to be filed under. Run from the repo the work belongs to and pass the manifest by absolute path: cd <repo>; swarm run "<abs manifest path>"`,
+    ]);
+  }
+  const allowedRoots = cfg.provider?.allowedRoots;
+  if (Array.isArray(allowedRoots) && allowedRoots.length && !allowedRoots.some((r) => isUnderRoot(toplevel, r))) {
+    errors.push(`swarm: this run's repo '${toplevel}' is not under any provider.allowedRoots entry — dispatch from a repo under ${allowedRoots.join(", ")}, or add its root to provider.allowedRoots in ~/.swarm/config.json`);
+  }
+
   const resultsDir = raw.resultsDir
     ? resolve(cwd, raw.resultsDir)
-    : defaultResultsDir(manifestPath, cwd, argsFingerprint(args));
+    : defaultResultsDir(manifestPath, toplevel, argsFingerprint(args));
 
   // config.concurrency is a ceiling: the machine paying for the sessions sets
   // it, and a manifest may run narrower but never wider.

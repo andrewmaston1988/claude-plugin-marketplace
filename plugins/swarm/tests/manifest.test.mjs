@@ -3,7 +3,8 @@ import { equal, ok, deepEqual, throws } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { loadManifest, ValidationError, DEFAULT_TOOLS, isUnderRoot, hasWriteTools, guardFor } from "../src/manifest.mjs";
+import { ValidationError, DEFAULT_TOOLS, isUnderRoot, hasWriteTools, guardFor } from "../src/manifest.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
 import { getUsage, resetUsageMemo, saveCookie } from "../src/ollama-usage.mjs";
 import { integrateCaps } from "../src/estimate.mjs";
 
@@ -263,13 +264,13 @@ test("governance: task.cwd (not process cwd) is what's checked", () => {
       tasks: [{ id: "o", prompt: "p", model: "minimax-m3:cloud", cwd: inside }],
     });
     const cfg = { ...CFG, provider: { allowedRoots: [join(dir, "allowed")] } };
-    const plan = loadManifest(p, cfg, dir);
+    const plan = loadManifest(p, cfg, inside);
     equal(plan.tasks[0].cwd, inside);
 
     const outside = writeManifest(dir, {
       tasks: [{ id: "o", prompt: "p", model: "minimax-m3:cloud", cwd: dir }],
     }, "outside.json");
-    const errs = errorsOf(() => loadManifest(outside, cfg, dir));
+    const errs = errorsOf(() => loadManifest(outside, cfg, inside));
     ok(errs.some((e) => e.includes("data governance")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -644,7 +645,7 @@ test("governance checks the ORIGINAL cwd, not the scratch redirect", () => {
 
 // ── resultsDir default ────────────────────────────────────────────────────────
 
-test("default resultsDir is <home>/runs/<encoded-cwd>/<stem>-1, reusing highest existing n for resume", () => {
+test("default resultsDir is <home>/runs/<encoded-repo-toplevel>/<stem>-1, reusing highest existing n for resume", () => {
   const dir = tmp();
   const prevHome = process.env.SWARM_HOME;
   process.env.SWARM_HOME = join(dir, "home");
@@ -1692,11 +1693,9 @@ test("F8: integrateCaps names the forEach cap an integrate node folds in", () =>
 
 // ── leaf guards (swarm-leaf-guard-no-cargo) ────────────────────────────────────
 // A stub io skips the real spawnSync/git — the probe/print/match machinery is
-// under test, not any actual guard command or repo. repoToplevel defaults to
-// null (git fails) so guardFor falls back to basename(cwd) — every test dir
-// here is a bare tmpdir, never a real git repo.
+// under test, not any actual guard command or repo.
 function stubIo(over = {}) {
-  return { spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, repoToplevel: () => null, ...over };
+  return { spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, ...over };
 }
 
 test("normalizeTasks: a task under a projects entry matching its repo name carries leafGuard; false opts out; any other value errors", () => {
@@ -1728,7 +1727,7 @@ test("normalizeTasks: the repo name is resolved via io.repoToplevel (git seam), 
   try {
     // repoToplevel reports a DIFFERENT path than dir; the project name must
     // match that reported repo's basename, not dir's own basename.
-    const cfg = { ...CFG, provider: { allowedRoots: [dir] }, projects: [{ name: "reported-repo", hooks: { preToolUse: "guard-cmd" } }] };
+    const cfg = { ...CFG, provider: { allowedRoots: [dir, join(dir, "..", "reported-repo")] }, projects: [{ name: "reported-repo", hooks: { preToolUse: "guard-cmd" } }] };
     const p = writeManifest(dir, { tasks: [claudeTask({ cwd: "." })] });
     const plan = loadManifest(p, cfg, dir, { io: stubIo({ repoToplevel: () => join(dir, "..", "reported-repo") }) });
     deepEqual(plan.tasks[0].leafGuard, { name: "reported-repo", command: "guard-cmd" });
@@ -1809,5 +1808,121 @@ test("leaf guard: a passing probe prints one line per guarded task and an opt-ou
     loadManifest(p, cfg, dir, { io });
     ok(lines.includes(`leaf guard: ${name} → guard-cmd`));
     ok(lines.includes("leaf guard: off (task opt-out)"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── write predicate: allowlist (swarm-run-home-write-predicate) ──────────────
+test("hasWriteTools: any tool not on the read-only allowlist is write-capable", () => {
+  for (const t of ["Bash(git log:*)", "PowerShell", "MultiEdit", "Agent", "Skill", "mcp__x__y", "Read,Bash"]) {
+    equal(hasWriteTools(t), true, t);
+  }
+});
+
+test("hasWriteTools: the read-only allowlist and an empty list stay read-only", () => {
+  for (const t of ["", "Read,Grep,Glob", "WebSearch,WebFetch,Read,Grep,Glob", "LS,TodoWrite,ToolSearch"]) {
+    equal(hasWriteTools(t), false, JSON.stringify(t));
+  }
+});
+
+test("an unlisted tool (Read,PowerShell) with no isolation is scratch-redirected", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ id: "ps", allowedTools: "Read,PowerShell" })] });
+    const t = loadManifest(p, CFG, dir).tasks[0];
+    equal(t.scratchRedirect, true);
+    ok(t.cwd.endsWith(`scratch-ps`), t.cwd);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("an unlisted-tool leaf with isolation is a valid isolation.from source", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "src", allowedTools: "Read,PowerShell", isolation: "worktree" }),
+      claudeTask({ id: "x", after: ["src"], isolation: { worktree: "w", from: "src" } }),
+    ] });
+    equal(loadManifest(p, CFG, dir).tasks.find((t) => t.id === "x").from, "src");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── run home: keyed on the repo toplevel ─────────────────────────────────────
+test("run home: a non-repo dispatch is refused with the cd <repo> instruction", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask()] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir, { io: { repoToplevel: () => null } }));
+    ok(errs.some((e) => e.includes("is not inside a git repository") && e.includes('swarm run "')), errs.join("\n"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("run home: a non-repo dispatch is refused for a registry manifest too", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask()] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir, { fromRegistry: true, io: { repoToplevel: () => null } }));
+    ok(errs.some((e) => e.includes("is not inside a git repository")), errs.join("\n"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+function withHome(dir, fn) {
+  const prev = process.env.SWARM_HOME;
+  process.env.SWARM_HOME = join(dir, "home");
+  try { fn(); } finally {
+    if (prev === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prev;
+  }
+}
+
+test("run home: a subdirectory dispatch is filed under the repo toplevel's key", () => {
+  const dir = tmp();
+  try {
+    withHome(dir, () => {
+      const sub = join(dir, "sub");
+      mkdirSync(sub);
+      const p = writeManifest(dir, { tasks: [claudeTask()] }, "m.json");
+      const plan = loadManifest(p, CFG, sub, { io: { repoToplevel: () => "C:/proj/repo" } });
+      equal(plan.resultsDir, join(dir, "home", "runs", "C--proj-repo", "m-1"));
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("run home: dispatches from the toplevel and a subdirectory resume the same run", () => {
+  const dir = tmp();
+  try {
+    withHome(dir, () => {
+      const sub = join(dir, "sub");
+      mkdirSync(sub);
+      mkdirSync(join(dir, "home", "runs", "C--proj-repo", "m-1"), { recursive: true });
+      const p = writeManifest(dir, { tasks: [claudeTask()] }, "m.json");
+      const io = { repoToplevel: () => "C:/proj/repo" };
+      const want = join(dir, "home", "runs", "C--proj-repo", "m-1");
+      equal(loadManifest(p, CFG, dir, { io }).resultsDir, want);
+      equal(loadManifest(p, CFG, sub, { io }).resultsDir, want);
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("run home: allowedRoots bounds the repo for a Claude-only manifest too", () => {
+  const dir = tmp();
+  try {
+    withHome(dir, () => {
+      const cfg = { ...CFG, provider: { allowedRoots: [join(dir, "root")] } };
+      const p = writeManifest(dir, { tasks: [claudeTask()] });
+      const outside = join(dir, "elsewhere");
+      const errs = errorsOf(() => loadManifest(p, cfg, dir, { io: { repoToplevel: () => outside } }));
+      ok(errs.some((e) => e.includes(outside) && e.includes("provider.allowedRoots") && e.includes(join(dir, "root"))), errs.join("\n"));
+      loadManifest(p, cfg, dir, { io: { repoToplevel: () => join(dir, "root", "repo") } });
+    });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("run home: absent or empty allowedRoots leaves the roots gate inert", () => {
+  const dir = tmp();
+  try {
+    withHome(dir, () => {
+      const p = writeManifest(dir, { tasks: [claudeTask()] });
+      const io = { repoToplevel: () => join(dir, "anywhere") };
+      loadManifest(p, { ...CFG, provider: {} }, dir, { io });
+      loadManifest(p, { ...CFG, provider: { allowedRoots: [] } }, dir, { io });
+    });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

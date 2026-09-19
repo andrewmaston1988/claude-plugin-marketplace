@@ -2,6 +2,7 @@
 // its enforceLeafContract/manifest/CLI integration live in this one file.
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
@@ -10,7 +11,8 @@ import {
 } from "../src/citations.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
-import { loadManifest, effectivePlanDoc, ValidationError } from "../src/manifest.mjs";
+import { effectivePlanDoc, ValidationError } from "../src/manifest.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
 import { runCli } from "./helpers/cli.mjs";
 
@@ -496,6 +498,7 @@ test("manifest: effectivePlanDoc round-trips verifyCitations false", () => {
 
 test("validate CLI: announces mechanical citation verification; opt-out omits the task", () => {
   const dir = tmp();
+  spawnSync("git", ["init", "-q"], { cwd: dir, windowsHide: true });
   try {
     const p = join(dir, "m.json");
     writeFileSync(p, JSON.stringify({
