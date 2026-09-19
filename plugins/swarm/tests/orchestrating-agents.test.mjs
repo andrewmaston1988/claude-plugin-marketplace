@@ -220,8 +220,8 @@ test("T13 — skill follows the Superpowers discipline-skill structure", () => {
   ok(/FAN-OUT/.test(law) && /FIRST/.test(law), "law states the fan-out precondition");
   match(iron, /\*\*No exceptions:\*\*/);
   // Bulletproofing sections named as the family names them
-  ok(/^## Common Rationalizations$/m.test(content), "## Common Rationalizations heading present");
-  ok(/^## Red Flags - STOP$/m.test(content), "## Red Flags - STOP heading present");
+  ok(/^## Rationalisations — rejected$/m.test(content), "## Rationalisations — rejected heading present");
+  ok(/^## Red Flags — STOP$/m.test(content), "## Red Flags — STOP heading present");
 });
 
 // ---- T14: the resume carve-out spells out the mechanics agents spin on ----
