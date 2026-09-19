@@ -265,6 +265,12 @@ async function cmdValidate(rest) {
   if (cited.length) {
     out(`citations verified mechanically: ${cited.map((t) => t.id).join(", ")} (file/line/quote checked against the task cwd; refuted citations get one corrective re-ask, then fail)`);
   }
+  // Read coverage is approval-surface too, and independent of returns: name the
+  // tasks whose transcript will be checked against their mustRead declaration.
+  const mustRead = plan.tasks.filter((t) => t.mustRead);
+  if (mustRead.length) {
+    out(`must-read enforced: ${mustRead.map((t) => t.id).join(", ")} (transcript checked against mustRead; a shortfall gets one corrective re-ask, then is recorded — never fails the leaf)`);
+  }
   // The consent line: worst-case leaves × historical per-model medians.
   out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));
   for (const line of await seatBlock(plan, cfg)) out(line);

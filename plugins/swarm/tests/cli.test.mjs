@@ -1471,6 +1471,28 @@ test("run: default resultsDir lands under <home>/runs/<encoded-cwd>/<stem>-1 wit
   }
 });
 
+test("validate: mustRead tasks are announced, gated on mustRead not returns", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "mr.json");
+    writeFileSync(p, JSON.stringify({
+      tasks: [
+        { id: "withret", prompt: "x", model: "haiku", returns: { type: "object", required: ["answer"], properties: { answer: { type: "string" } } }, mustRead: ["README.md"] },
+        { id: "noret", prompt: "y", model: "haiku", mustRead: ["README.md"] },
+        { id: "plain", prompt: "z", model: "haiku" },
+      ],
+    }));
+    const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    equal(v.status, 0, v.stderr);
+    const line = v.stdout.split("\n").find((l) => l.includes("must-read enforced"));
+    ok(line, v.stdout);
+    ok(line.includes("withret") && line.includes("noret"), line); // mutation: gated on returns → noret dropped
+    ok(!line.includes("plain"), line); // a task with no mustRead is not announced
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validate: returns schemas join the approval preview; malformed ones exit 1", () => {
   const dir = tmp();
   try {
