@@ -269,7 +269,12 @@ async function cmdValidate(rest) {
   // tasks whose transcript will be checked against their mustRead declaration.
   const mustRead = plan.tasks.filter((t) => t.mustRead);
   if (mustRead.length) {
-    out(`must-read enforced: ${mustRead.map((t) => t.id).join(", ")} (transcript checked against mustRead; a shortfall gets one corrective re-ask, then is recorded — never fails the leaf)`);
+    const describe = (t) => {
+      const n = t.mustRead.length;
+      const index = t.mustRead.some((e) => e && typeof e === "object" && e.index !== undefined);
+      return `${t.id} (${n} ${n === 1 ? "entry" : "entries"}${index ? ", index" : ""})`;
+    };
+    out(`must-read enforced: ${mustRead.map(describe).join(", ")} (transcript checked against mustRead; a shortfall gets one corrective re-ask, then is recorded — never fails the leaf)`);
   }
   // The consent line: worst-case leaves × historical per-model medians.
   out(formatEstimate(estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")))));

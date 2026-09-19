@@ -1478,7 +1478,8 @@ test("validate: mustRead tasks are announced, gated on mustRead not returns", ()
     writeFileSync(p, JSON.stringify({
       tasks: [
         { id: "withret", prompt: "x", model: "haiku", returns: { type: "object", required: ["answer"], properties: { answer: { type: "string" } } }, mustRead: ["README.md"] },
-        { id: "noret", prompt: "y", model: "haiku", mustRead: ["README.md"] },
+        { id: "noret", prompt: "y", model: "haiku", mustRead: ["README.md", "b.md"] },
+        { id: "idx", prompt: "w", model: "haiku", mustRead: [{ index: "i.json" }] },
         { id: "plain", prompt: "z", model: "haiku" },
       ],
     }));
@@ -1488,6 +1489,8 @@ test("validate: mustRead tasks are announced, gated on mustRead not returns", ()
     ok(line, v.stdout);
     ok(line.includes("withret") && line.includes("noret"), line); // mutation: gated on returns → noret dropped
     ok(!line.includes("plain"), line); // a task with no mustRead is not announced
+    // RED: ids alone — the approval surface never shows how much each leaf must read.
+    ok(line.includes("withret (1 entry)") && line.includes("noret (2 entries)") && line.includes("idx (1 entry, index)"), line);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
