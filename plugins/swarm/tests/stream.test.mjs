@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { equal, deepEqual } from "node:assert/strict";
 import {
   createStreamParser, createUsageAccumulator, describeToolUse,
-  usageTokens, addTokens, tokenTotal, pickFinalTokens, emptyTokens,
+  usageTokens, addTokens, tokenTotal, pickFinalTokens, emptyTokens, createRunnerParser,
 } from "../src/stream.mjs";
 
 const asst = (id, usage) => JSON.stringify({ type: "assistant", message: { id, role: "assistant", usage } });
@@ -125,4 +125,13 @@ test("pickFinalTokens: result-event usage is authoritative when present", () => 
   // absent or empty usage falls back to the live accumulation
   deepEqual(pickFinalTokens(undefined, accumulated), accumulated);
   deepEqual(pickFinalTokens({}, accumulated), accumulated);
+});
+
+test("runner parser registry: Codex raw JSONL without a terminal event is not a success", () => {
+  const parser = createRunnerParser("codex");
+  parser.feed('{"type":"thread.started","thread_id":"t-1"}\n{"type":"response.output_text.delta","delta":"partial"}\n');
+  parser.end();
+  equal(parser.result().terminal, true);
+  equal(parser.result().error.code, "missing_terminal");
+  equal(parser.result().output, "partial");
 });

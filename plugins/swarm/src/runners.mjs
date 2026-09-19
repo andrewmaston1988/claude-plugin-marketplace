@@ -6,8 +6,8 @@ function descriptorShape(descriptor) {
   return descriptor;
 }
 
-export function defaultRunnerDescriptors() {
-  return [{ id: "claude" }, { id: "codex" }];
+export function defaultRunnerDescriptors({ codexAdapter } = {}) {
+  return [{ id: "claude" }, codexAdapter || { id: "codex" }];
 }
 
 export function createRunnerRegistry(initial = [], {

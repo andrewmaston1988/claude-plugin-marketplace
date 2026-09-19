@@ -67,6 +67,32 @@ test("effectivePlanDoc: resolved strip shape — set fields kept, empties omitte
   }
 });
 
+test("effectivePlanDoc: provider identity survives primary, fallback, child, and digest persistence", () => {
+  const dir = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, allowedRoots: [dir] },
+        codex: { enabled: true, allowedRoots: [dir] },
+      },
+    };
+    const path = join(dir, "provider-plan.json");
+    writeFileSync(path, JSON.stringify({
+      tasks: [{ id: "a", prompt: "inspect", model: "gpt-5-codex", provider: "codex", fallbackModel: "haiku" }],
+      digest: { model: "gpt-5-codex", provider: "codex" },
+    }));
+    const plan = loadManifest(path, cfg, dir);
+    const doc = effectivePlanDoc(plan);
+    equal(doc.tasks[0].provider, "codex");
+    equal(doc.tasks[0].fallbackProvider, "claude");
+    equal(doc.digest.provider, "codex");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("effectivePlanDoc: records the run's cwd — prune's repo-resolution fallback when no worktree survives to ask", () => {
   const dir = tmp();
   try {

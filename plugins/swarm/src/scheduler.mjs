@@ -1090,7 +1090,14 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         // prior.model is what actually ran (post-fallback) and what askLeaf's
         // governance gate checked — task.model is only the manifest's ask.
         const model = ask.model || prior.model;
-        const r = await runTask({ ...task, cwd: prior.cwd, model, resume: prior.sessionId }, ask.question, cfg, io, null, streamHooks(task));
+        const r = await runTask({
+          ...task,
+          cwd: prior.cwd,
+          originalCwd: prior.originalCwd || task.originalCwd || prior.cwd,
+          model,
+          ...(ask.provider || task.provider || prior.provider ? { provider: ask.provider || task.provider || prior.provider } : {}),
+          resume: prior.sessionId,
+        }, ask.question, cfg, io, null, streamHooks(task));
         appendFileSync(join(plan.resultsDir, "results", `${task.id}.ask.log`), `Q: ${ask.question}\nA: ${r.output}\n\n`);
         const askEntry = {
           question: ask.question,

@@ -58,6 +58,73 @@ test("fallbackModel: governed like the primary; passes through to the task", () 
   }
 });
 
+test("provider identity: explicit and cache-qualified Codex models persist, but gpt prefixes do not infer Codex", () => {
+  const dir = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, allowedRoots: [dir] },
+        codex: { enabled: true, allowedRoots: [dir] },
+      },
+    };
+    const explicitPath = writeManifest(dir, {
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex", fallbackModel: "haiku" }],
+      digest: { model: "gpt-5-codex", provider: "codex" },
+    }, "explicit.json");
+    const explicit = loadManifest(explicitPath, cfg, dir);
+    equal(explicit.tasks[0].provider, "codex");
+    equal(explicit.tasks[0].fallbackProvider, "claude");
+    equal(explicit.digest.provider, "codex");
+
+    const cachedPath = writeManifest(dir, {
+      tasks: [{ id: "cached", prompt: "inspect", model: "gpt-5-codex" }],
+    }, "cached.json");
+    const cached = loadManifest(cachedPath, cfg, dir, {
+      cache: [{ provider: "codex", model: "gpt-5-codex" }],
+    });
+    equal(cached.tasks[0].provider, "codex");
+
+    const legacyPath = writeManifest(dir, {
+      tasks: [{ id: "legacy", prompt: "inspect", model: "gpt-5-codex" }],
+    }, "legacy.json");
+    const legacy = loadManifest(legacyPath, cfg, dir);
+    equal(legacy.tasks[0].provider, "ollama");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("provider policy: Codex rejects Claude settings and configured leaf guards unless opted out", () => {
+  const dir = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      providers: { claude: { enabled: true }, ollama: { enabled: true, allowedRoots: [] }, codex: { enabled: true, allowedRoots: [dir] } },
+      projects: [{ name: basename(dir), hooks: { preToolUse: "guard-cmd" } }],
+    };
+    const guarded = writeManifest(dir, {
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex", settings: { env: { X: "1" } } }],
+    }, "guarded.json");
+    const errs = errorsOf(() => loadManifest(guarded, cfg, dir, {
+      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, platform: process.platform },
+    }));
+    ok(errs.some((e) => /Codex tasks do not accept Claude-only settings/.test(e)), errs.join("\n"));
+    ok(errs.some((e) => /leaf guard/i.test(e) && /codex/i.test(e)), errs.join("\n"));
+
+    const optedOut = writeManifest(dir, {
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex", leafGuard: false }],
+    }, "opted-out.json");
+    const plan = loadManifest(optedOut, cfg, dir, {
+      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, platform: process.platform },
+    });
+    equal(plan.tasks[0].provider, "codex");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("fully valid manifest normalizes with defaults", () => {
   const dir = tmp();
   try {

@@ -8,6 +8,15 @@ const PROVIDER_CAPABILITIES = new Set([
   "costObservations",
 ]);
 
+export function providerConfig(config = {}, id) {
+  const canonical = config?.providers?.[id];
+  if (canonical && typeof canonical === "object" && !Array.isArray(canonical)) return canonical;
+  if (id === "ollama" && config?.provider && typeof config.provider === "object") return config.provider;
+  if (id === "codex" && config?.codex && typeof config.codex === "object") return config.codex;
+  if (id === "codex" && !config?.providers && !config?.provider && !config?.codex) return config;
+  return {};
+}
+
 function adapterShape(adapter) {
   if (!adapter || typeof adapter !== "object") throw new Error("provider adapter must be an object");
   for (const field of ["id", "runnerId"]) {
@@ -29,7 +38,7 @@ function adapterShape(adapter) {
 }
 
 function configured(config, id, fallback) {
-  const block = config?.providers?.[id];
+  const block = providerConfig(config, id);
   return typeof block?.enabled === "boolean" ? block.enabled : fallback;
 }
 
@@ -44,7 +53,7 @@ function descriptor({ id, runnerId, defaultEnabled, matchModel }) {
   };
 }
 
-export function defaultProviderAdapters() {
+export function defaultProviderAdapters({ codexAdapter } = {}) {
   return [
     descriptor({
       id: "claude",
@@ -58,7 +67,7 @@ export function defaultProviderAdapters() {
       defaultEnabled: true,
       matchModel: (model) => /(:|-)cloud$/i.test(String(model || "")) ? { provider: "ollama", model } : null,
     }),
-    descriptor({
+    codexAdapter || descriptor({
       id: "codex",
       runnerId: "codex",
       defaultEnabled: false,
@@ -67,6 +76,10 @@ export function defaultProviderAdapters() {
         : null,
     }),
   ];
+}
+
+export function createDefaultProviderRegistry({ codexAdapter } = {}) {
+  return createProviderRegistry(defaultProviderAdapters({ codexAdapter }));
 }
 
 export function createProviderRegistry(initial = []) {

@@ -4,6 +4,11 @@ import { dirname, sep, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { isClaudeModel } from "./models.mjs";
 import { deepMerge } from "./config.mjs";
+import { createDefaultProviderRegistry, providerConfig } from "./providers.mjs";
+import { createRunnerRegistry } from "./runners.mjs";
+import { defaultCodexProviderAdapter, defaultCodexRunnerAdapter } from "./codex.mjs";
+import { isUnderRoot } from "./roots.mjs";
+import { RUNNER_PARSER_FACTORIES } from "./stream.mjs";
 
 // Build the argv + env for one task dispatch. Pure — no process interaction.
 //
@@ -24,12 +29,13 @@ export function mcpTools(_read = () => readFileSync(join(homedir(), ".claude.jso
   } catch { return []; }
 }
 
-export function buildDispatch(task, prompt, cfg, _mcpTools = mcpTools) {
+function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpTools) {
   const claudePath = cfg.claudePath || "claude";
+  const ollama = providerConfig(cfg, "ollama");
   // disable1mContext: false means the CONFIG default is the 1M window; a task's
   // own `settings` still wins (deepMerge, task second) so a leaf can opt back
   // out (or in) regardless of the operator's default.
-  const base = isClaudeModel(task.model) && cfg.disable1mContext === false
+  const base = providerId === "claude" && isClaudeModel(task.model) && cfg.disable1mContext === false
     ? { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "0" } }
     : null;
   const settings = base || task.settings ? deepMerge(base || {}, task.settings || {}) : null;
@@ -51,29 +57,108 @@ export function buildDispatch(task, prompt, cfg, _mcpTools = mcpTools) {
     "--output-format", "stream-json", "--verbose",
   ];
 
-  if (isClaudeModel(task.model)) {
-    return { argv: [claudePath, ...claudeArgs], env: {} };
+  if (providerId === "claude") {
+    return { argv: [claudePath, ...claudeArgs], env: {}, runner: "claude", parser: "claude" };
   }
 
-  if (cfg.provider?.mode === "launch") {
+  if (ollama.mode === "launch") {
     // Template like "ollama launch claude --model {model} -- {args}":
     // {model} substitutes in place; the {args} token splices the claude args.
     const argv = [];
-    for (const token of String(cfg.provider.launchCmd).split(/\s+/).filter(Boolean)) {
+    for (const token of String(ollama.launchCmd).split(/\s+/).filter(Boolean)) {
       if (token === "{args}") argv.push(...claudeArgs);
       else argv.push(token.replaceAll("{model}", task.model));
     }
-    return { argv, env: {} };
+    return { argv, env: {}, runner: "claude", parser: "claude" };
   }
 
   // env mode: model name passes through verbatim (`minimax-m3:cloud`-style).
   return {
     argv: [claudePath, ...claudeArgs],
     env: {
-      ANTHROPIC_BASE_URL: cfg.provider.url,
-      ANTHROPIC_API_KEY: cfg.provider.authToken,
+      ANTHROPIC_BASE_URL: ollama.url,
+      ANTHROPIC_API_KEY: ollama.authToken,
       ANTHROPIC_MODEL: task.model,
     },
+    runner: "claude",
+    parser: "claude",
+  };
+}
+
+function dispatchRunners(providerRegistry) {
+  return createRunnerRegistry([
+    { id: "claude", buildInvocation: (task, prompt, context = {}) => buildClaudeInvocation(task, prompt, context.config || {}, context.provider || "claude", context.mcpTools) },
+    defaultCodexRunnerAdapter,
+  ], { providerRegistry });
+}
+
+export function createDispatchRegistry({ providerRegistry, runnerRegistry } = {}) {
+  const providers = providerRegistry || createDefaultProviderRegistry({ codexAdapter: defaultCodexProviderAdapter });
+  return {
+    providerRegistry: providers,
+    runnerRegistry: runnerRegistry || dispatchRunners(providers),
+  };
+}
+
+function dispatchCache(task, cfg, options) {
+  if (Array.isArray(options?.cache)) return options.cache;
+  if (Array.isArray(cfg?.modelCache)) return cfg.modelCache;
+  if (Array.isArray(cfg?.models)) return cfg.models;
+  return [];
+}
+
+function validateDispatchPolicy(task, identity, adapter, cfg) {
+  const problems = adapter.validateTask({ ...task, ...identity }, { config: cfg, task });
+  if (Array.isArray(problems) && problems.length) {
+    throw new Error(`provider '${identity.provider}' rejected task: ${problems.join("; ")}`);
+  }
+  if (identity.provider === "codex" && task.leafGuard && task.leafGuard !== false) {
+    throw new Error("provider 'codex' cannot run a configured leaf guard; set leafGuard: false for this task");
+  }
+  const roots = providerConfig(cfg, identity.provider).allowedRoots;
+  // Legacy hand-built configs predate canonical provider blocks. Keep their
+  // Ollama dispatch byte-compatible, while canonical and Codex configs always
+  // opt into the fail-closed root gate.
+  const rootGate = identity.provider === "codex" || Array.isArray(roots);
+  const cwd = task.originalCwd || task.cwd;
+  if (rootGate && identity.provider !== "claude" && (!cwd || !Array.isArray(roots) || !roots.some((root) => isUnderRoot(cwd, root)))) {
+    throw new Error(
+      `governance: provider '${identity.provider}' model '${identity.model}' cannot dispatch from '${cwd}' — ` +
+      `cwd is not under any providers.${identity.provider}.allowedRoots entry`
+    );
+  }
+}
+
+// Build the provider-aware invocation + runner/parser identity for one task.
+// Pure — no process interaction. The scheduler still consumes only argv/env;
+// Stage 4 can switch its stream loop to the returned runner/parser directly.
+export function buildDispatch(task, prompt, cfg = {}, options = {}) {
+  const { providerRegistry, runnerRegistry } = createDispatchRegistry(options);
+  const identity = providerRegistry.resolve(task, {
+    cache: dispatchCache(task, cfg, options),
+    config: cfg,
+  });
+  const adapter = providerRegistry.get(identity.provider);
+  validateDispatchPolicy(task, identity, adapter, cfg);
+  const provider = { ...identity, runnerId: adapter.runnerId };
+  const runner = runnerRegistry.resolve(provider);
+  if (typeof runner.buildInvocation !== "function") {
+    throw new Error(`runner '${runner.id}' does not provide buildInvocation()`);
+  }
+  const invocation = runner.buildInvocation(
+    { ...task, ...identity }, prompt,
+    // _mcpTools is the test seam: options is where it rides now that the 4th
+    // positional belongs to the provider registry.
+    { config: cfg, provider: identity.provider, mcpTools: options._mcpTools }
+  );
+  const parser = runner.parser || runner.parserId || runner.id;
+  if (!RUNNER_PARSER_FACTORIES.has(String(parser).toLowerCase())) {
+    throw new Error(`runner '${runner.id}' has no registered parser '${parser}'`);
+  }
+  return {
+    ...invocation,
+    runner: runner.id,
+    parser,
   };
 }
 

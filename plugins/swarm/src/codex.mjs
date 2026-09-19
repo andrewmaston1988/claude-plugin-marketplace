@@ -1,16 +1,13 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { modelDescriptor, runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
+import { providerConfig } from "./providers.mjs";
 
 const DEFAULT_CLIENT_INFO = {
   name: "swarm",
   title: "swarm",
   version: "0.1.0",
 };
-
-function providerConfig(config = {}) {
-  return config?.providers?.codex || config?.codex || config || {};
-}
 
 function asError(value, fallback = "Codex app-server request failed") {
   if (value instanceof Error) return value;
@@ -268,7 +265,7 @@ function nextCursor(result) {
 
 async function makeClient(config, options) {
   if (options.client) return { client: options.client, owned: false };
-  const cfg = providerConfig(config);
+  const cfg = providerConfig(config, "codex");
   const factory = options.clientFactory || options._clientFactory;
   if (factory) {
     const client = await factory({ config, provider: cfg, ...options });
@@ -326,7 +323,7 @@ function writeEffortArg(args, effort) {
 }
 
 function writeSandboxArg(args, task, context) {
-  const cfg = providerConfig(context?.config || context?.cfg || {});
+  const cfg = providerConfig(context?.config || context?.cfg || {}, "codex");
   const writeCapable = task.write === true || task.writeCapable === true || task.isolation ||
     /(?:^|,)(?:Write|Edit|Bash)(?:,|$)/.test(String(task.allowedTools || ""));
   const sandbox = task.sandbox || (writeCapable ? (cfg.sandbox || "workspace-write") : "read-only");
@@ -338,7 +335,7 @@ function writeSandboxArg(args, task, context) {
 
 /** Build native `codex exec --json` argv; dispatch activation remains Stage 3. */
 export function buildCodexInvocation(task, prompt, context = {}) {
-  const cfg = providerConfig(context.config || context.cfg || {});
+  const cfg = providerConfig(context.config || context.cfg || {}, "codex");
   const executable = context.executable || cfg.path || "codex";
   const sessionId = task.resume || task.sessionId;
   const args = ["exec", "--json"];
@@ -399,7 +396,7 @@ export function createCodexProviderAdapter(options = {}) {
   return {
     id: "codex",
     runnerId: "codex",
-    enabled: (config) => providerConfig(config).enabled === true,
+    enabled: (config) => providerConfig(config, "codex").enabled === true,
     matchModel: (model, cache = []) => cache.some((row) => row?.provider === "codex" && row?.model === model)
       ? { provider: "codex", model }
       : null,
@@ -408,7 +405,7 @@ export function createCodexProviderAdapter(options = {}) {
       if (typeof task?.model !== "string" || !task.model.trim()) problems.push("Codex tasks require a non-empty model");
       if (task?.sandbox === "danger-full-access") problems.push("Codex tasks cannot use danger-full-access");
       if (task?.settings !== undefined) problems.push("Codex tasks do not accept Claude-only settings");
-      if (context.config && !providerConfig(context.config).enabled) problems.push("Codex provider is disabled");
+      if (context.config && !providerConfig(context.config, "codex").enabled) problems.push("Codex provider is disabled");
       return problems;
     },
     capabilities: {

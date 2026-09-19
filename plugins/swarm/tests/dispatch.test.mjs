@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { equal, deepEqual, ok } from "node:assert/strict";
+import { equal, deepEqual, ok, throws } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -133,6 +133,43 @@ test("disable1mContext: false on a non-Claude model injects nothing", () => {
 test("cfg.claudePath overrides the executable", () => {
   const d = buildDispatch(task(), "p", { ...CFG, claudePath: "X:/bin/claude.exe" }, NO_MCP);
   equal(d.argv[0], "X:/bin/claude.exe");
+});
+
+test("Codex dispatch: provider registry selects exact fresh argv, runner, and parser", () => {
+  const root = process.cwd();
+  const cfg = {
+    providers: {
+      claude: { enabled: true },
+      ollama: { enabled: true, allowedRoots: [root] },
+      codex: { enabled: true, path: "codex", sandbox: "workspace-write", allowedRoots: [root] },
+    },
+  };
+  const d = buildDispatch({
+    provider: "codex", model: "gpt-5-codex", effort: "high", allowedTools: "Read,Edit,Bash",
+    cwd: root, originalCwd: root, additionalDirs: ["C:/repo/shared"],
+  }, "inspect the tree", cfg);
+  deepEqual(d.argv, [
+    "codex", "exec", "--json", "--model", "gpt-5-codex", "-c", 'model_reasoning_effort="high"',
+    "--sandbox", "workspace-write", "--add-dir", "C:/repo/shared", "inspect the tree",
+  ]);
+  equal(d.runner, "codex");
+  equal(d.parser, "codex");
+  deepEqual(d.env, {});
+});
+
+test("Codex dispatch: resume is native and safety gates run before invocation construction", () => {
+  const root = process.cwd();
+  const base = {
+    provider: "codex", model: "gpt-5-codex", allowedTools: "Read", cwd: root, originalCwd: root,
+  };
+  const cfg = { providers: { codex: { enabled: true, path: "codex", allowedRoots: [root] } } };
+  const resumed = buildDispatch({ ...base, resume: "thread-1" }, "follow up", cfg);
+  equal(resumed.argv[resumed.argv.indexOf("--sandbox") + 1], "read-only");
+  equal(resumed.argv[resumed.argv.indexOf("resume") + 1], "thread-1");
+  equal(resumed.argv.at(-1), "follow up");
+
+  throws(() => buildDispatch(base, "blocked", { providers: { codex: { enabled: false, allowedRoots: [root] } } }), /disabled/i);
+  throws(() => buildDispatch({ ...base, cwd: "C:/outside", originalCwd: "C:/outside" }, "blocked", cfg), /allowedRoots|governance/i);
 });
 
 // ── windows spawn resolution ──────────────────────────────────────────────────

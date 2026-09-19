@@ -104,6 +104,69 @@ test("askLeaf: --model override to an open model re-runs the governance gate", a
   }
 });
 
+test("askLeaf: explicit provider override reaches the provider runner", async () => {
+  const dir = setup();
+  try {
+    const root = tmpdir();
+    const cfg = {
+      ...CFG,
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, allowedRoots: [] },
+        codex: { enabled: true, path: "codex", allowedRoots: [root] },
+      },
+    };
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", model: "gpt-5-codex", provider: "codex", cfg, io: makeIo(spawn) });
+    equal(spawn.calls[0].cmd, "codex");
+    ok(!spawn.calls[0].opts.env.ANTHROPIC_MODEL, "Codex ask must not use the Ollama env route");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("askLeaf: an unmodified Codex leaf reuses the provider persisted in the manifest snapshot", async () => {
+  const dir = setup({ model: "gpt-5-codex" });
+  try {
+    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [{ id: "leaf", model: "gpt-5-codex", provider: "codex" }] });
+    const cfg = {
+      ...CFG,
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, allowedRoots: [] },
+        codex: { enabled: true, path: "codex", allowedRoots: [tmpdir()] },
+      },
+    };
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", cfg, io: makeIo(spawn) });
+    equal(spawn.calls[0].cmd, "codex");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("askLeaf: disabled provider override fails before any spawn", async () => {
+  const dir = setup();
+  try {
+    const cfg = {
+      ...CFG,
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, allowedRoots: [] },
+        codex: { enabled: false, allowedRoots: [tmpdir()] },
+      },
+    };
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await rejects(
+      () => askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", model: "gpt-5-codex", provider: "codex", cfg, io: makeIo(spawn) }),
+      /disabled/i,
+    );
+    equal(spawn.calls.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("askLeaf: governance gates on originalCwd for scratch-redirected leaves", async () => {
   // a write-capable open-model leaf runs in a scratch dir (never under
   // allowedRoots) but was approved against its ORIGINAL cwd — ask must honor

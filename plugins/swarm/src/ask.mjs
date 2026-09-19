@@ -7,11 +7,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { readResult } from "./results.mjs";
-import { isClaudeModel } from "./models.mjs";
-import { isUnderRoot } from "./manifest.mjs";
+import { isUnderRoot } from "./roots.mjs";
+import { createDefaultProviderRegistry, providerConfig } from "./providers.mjs";
+import { defaultCodexProviderAdapter } from "./codex.mjs";
 import { runPlan, makeDefaultIo } from "./scheduler.mjs";
 
-export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = makeDefaultIo() }) {
+const PROVIDERS = createDefaultProviderRegistry({ codexAdapter: defaultCodexProviderAdapter });
+
+export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo() }) {
   const prior = readResult(resultsDir, taskId);
   if (!prior) throw new Error(`no result for '${taskId}' under ${resultsDir}`);
   if (!prior.sessionId) {
@@ -22,16 +25,26 @@ export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = m
     throw new Error(`leaf cwd '${cwd}' no longer exists (removed worktree?) — the session cannot be resumed`);
   }
   const askModel = model || prior.model;
+  const manifest = JSON.parse(readFileSync(join(resultsDir, "manifest.json"), "utf8"));
+  const recordedTask = manifest.tasks.find((t) => t.id === taskId);
+  const recordedProvider = !model ? (prior.provider || recordedTask?.provider) : undefined;
+  const identity = PROVIDERS.resolve(
+    { model: askModel, ...(provider || recordedProvider ? { provider: provider || recordedProvider } : {}) },
+    { config: cfg },
+  );
+  const adapter = PROVIDERS.get(identity.provider);
+  const problems = adapter.validateTask({ model: askModel, provider: identity.provider }, { config: cfg });
+  if (problems?.length) throw new Error(`provider '${identity.provider}' rejected ask: ${problems.join("; ")}`);
   // Same deny-by-default gate as the manifest: a non-Claude model may only see
   // code under an allow-listed root, whether it got here by override or not.
   // Checked against the leaf's ORIGINAL cwd — the identity the manifest gate
   // approved — not the scratch/worktree redirect it executed in.
-  if (!isClaudeModel(askModel)) {
+  if (identity.provider !== "claude") {
     const govCwd = prior.originalCwd || cwd;
-    const roots = cfg?.provider?.allowedRoots || [];
+    const roots = providerConfig(cfg, identity.provider).allowedRoots || [];
     if (!roots.some((root) => isUnderRoot(govCwd, root))) {
       throw new Error(
-        `governance: model '${askModel}' is not a Claude model and '${govCwd}' is not under any provider.allowedRoots entry`
+        `governance: provider '${identity.provider}' model '${askModel}' and '${govCwd}' is not under any allowedRoots entry`
       );
     }
   }
@@ -41,7 +54,6 @@ export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = m
   // entirely) — not input-ready. Every task needs `after` back so the
   // scheduling loop can read it; the target additionally needs the dispatch
   // fields the snapshot never carried, sourced from its own last result.
-  const manifest = JSON.parse(readFileSync(join(resultsDir, "manifest.json"), "utf8"));
   const isTopLevel = manifest.tasks.some((t) => t.id === taskId);
   // A forEach clone (`fix[0]`) or manifest child (`node~child`) never appears in
   // manifest.tasks — it joined the roster mid-run via an expand event. Its own
@@ -49,13 +61,14 @@ export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = m
   // ask task from that instead of requiring a manifest entry that doesn't exist.
   const tasks = isTopLevel
     ? manifest.tasks.map((t) => (t.id === taskId
-        ? { ...t, after: t.after || [], allowedTools: prior.allowedTools || "Read,Grep,Glob", timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
+        ? { ...t, after: t.after || [], provider: identity.provider, allowedTools: prior.allowedTools || "Read,Grep,Glob", timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
         : { ...t, after: t.after || [] }))
     : [
         ...manifest.tasks.map((t) => ({ ...t, after: t.after || [] })),
         {
           id: taskId,
           model: prior.model,
+          provider: identity.provider,
           cwd: prior.cwd,
           originalCwd: prior.originalCwd || prior.cwd,
           allowedTools: prior.allowedTools || "Read,Grep,Glob",
@@ -67,7 +80,9 @@ export async function askLeaf({ resultsDir, taskId, question, model, cfg, io = m
   // An ask is a one-off answer, not a monitored run: no roster/live-view
   // frames, only the CLI's own answer + tokens line. Suppressing io.snapshot
   // is what runPlan's paint() checks before rendering anything.
-  await runPlan({ ...manifest, tasks, concurrency: 1 }, cfg, { ...io, snapshot: undefined }, { ask: { taskId, question, model } });
+  await runPlan({ ...manifest, tasks, concurrency: 1 }, cfg, { ...io, snapshot: undefined }, {
+    ask: { taskId, question, model: askModel, provider: identity.provider },
+  });
 
   const updated = readResult(resultsDir, taskId);
   const askEntry = updated.asks[updated.asks.length - 1];
