@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
@@ -112,16 +112,20 @@ const rf = (files) => (p) => {
   return files[key];
 };
 
+// A relative entry resolves against cwd with the host's path rules, so cwd must be
+// absolute on this platform — "C:/w" is relative on Linux and the lookup misses.
+const W = resolve("/w");
+
 test("resolveMustRead: string entry → [[1,n]], trailing newline not counted", () => {
-  const cwd = "C:/w";
-  const { required } = resolveMustRead(["a.md"], { cwd, readFile: rf({ "C:/w/a.md": "a\nb\n" }) });
+  const { required } = resolveMustRead(["a.md"], { cwd: W, readFile: rf({ [join(W, "a.md")]: "a\nb\n" }) });
   equal(required.length, 1);
   deepEqual(required[0].ranges, [[1, 2]]); // mutation: naive split("\n").length → 3
   equal(required[0].whole, true);
 });
 
 test("resolveMustRead: empty file → no required range", () => {
-  const { required } = resolveMustRead(["e.md"], { cwd: "C:/w", readFile: rf({ "C:/w/e.md": "" }) });
+  const { required, errors } = resolveMustRead(["e.md"], { cwd: W, readFile: rf({ [join(W, "e.md")]: "" }) });
+  deepEqual(errors, []); // an unreadable file also yields no range — this pins that it was read
   equal(required.length, 0);
 });
 
