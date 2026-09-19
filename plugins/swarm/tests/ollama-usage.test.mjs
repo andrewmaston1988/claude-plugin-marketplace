@@ -358,14 +358,14 @@ test("initConfig: P7 — materialises provider.cloud.ollama DISABLED, real leave
   try {
     const configPath = join(home, "config.json");
     const { added } = initConfig(configPath, { SWARM_HOME: home });
-    ok(added.includes("provider.cloud.ollama.enabled"));
-    ok(added.includes("provider.cloud.ollama.cookiePath"));
-    ok(added.includes("provider.usageTimeoutMs"));
+    ok(added.includes("providers.ollama.cloud.ollama.enabled"));
+    ok(added.includes("providers.ollama.cloud.ollama.cookiePath"));
+    ok(added.includes("providers.ollama.usageTimeoutMs"));
 
     const written = JSON.parse(readFileSync(configPath, "utf8"));
-    equal(written.provider.cloud.ollama.enabled, false);
-    equal(written.provider.cloud.ollama.cookiePath, null);
-    equal(written.provider.usageTimeoutMs, 5000);
+    equal(written.providers.ollama.cloud.ollama.enabled, false);
+    equal(written.providers.ollama.cloud.ollama.cookiePath, null);
+    equal(written.providers.ollama.usageTimeoutMs, 5000);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

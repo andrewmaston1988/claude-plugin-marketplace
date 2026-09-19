@@ -72,13 +72,66 @@ export function deepMerge(base, override) {
   return out;
 }
 
+export function normalizeConfigInput(input) {
+  if (!isPlainObject(input)) throw new Error("swarm config must be an object");
+  const user = input;
+  for (const key of ["providers", "provider", "codex"]) {
+    if (Object.hasOwn(user, key) && !isPlainObject(user[key])) {
+      throw new Error(`${key} must be an object`);
+    }
+  }
+  const normalized = {};
+  for (const [key, value] of Object.entries(user)) {
+    if (key !== "provider" && key !== "codex" && key !== "providers") normalized[key] = value;
+  }
+  const canonical = isPlainObject(user.providers) ? user.providers : {};
+  normalized.providers = { ...canonical };
+  if (isPlainObject(user.provider)) {
+    normalized.providers.ollama = deepMerge(user.provider, canonical.ollama || {});
+  }
+  if (isPlainObject(user.codex)) {
+    normalized.providers.codex = deepMerge(user.codex, canonical.codex || {});
+  }
+  return normalized;
+}
+
+function legacyConfigWarnings(input) {
+  const warnings = [];
+  if (isPlainObject(input?.provider)) warnings.push("swarm config key 'provider' is deprecated; move it to 'providers.ollama'");
+  if (isPlainObject(input?.codex)) warnings.push("swarm config key 'codex' is deprecated; move it to 'providers.codex'");
+  return warnings;
+}
+
+function validateProviderConfig(cfg) {
+  if (!isPlainObject(cfg.providers)) throw new Error('providers must be an object — e.g. "providers": {"codex": {"enabled": false}}');
+  for (const [id, provider] of Object.entries(cfg.providers)) {
+    if (!isPlainObject(provider)) throw new Error(`providers.${id} must be an object`);
+    if (typeof provider.enabled !== "boolean") throw new Error(`providers.${id}.enabled must be true or false`);
+    if (provider.allowedRoots !== undefined && (!Array.isArray(provider.allowedRoots) || provider.allowedRoots.some((root) => typeof root !== "string" || !root))) {
+      throw new Error(`providers.${id}.allowedRoots must be an array of non-empty path strings`);
+    }
+  }
+}
+
+function addLegacyProviderView(cfg) {
+  Object.defineProperty(cfg, "provider", {
+    enumerable: false,
+    configurable: false,
+    get: () => cfg.providers.ollama,
+  });
+  return cfg;
+}
+
 // Merged config: config.default.json <- ~/.swarm/config.json (or explicit overridePath).
 // A missing user config is fine; a malformed one is a hard error (silent fallback
 // would arm/disarm the governance gate without the user noticing).
-export function loadConfig(overridePath, env = process.env) {
+export function loadConfig(overridePath, env = process.env, { warn = (message) => process.emitWarning(message, "DeprecationWarning") } = {}) {
   const defaults = JSON.parse(readFileSync(DEFAULTS_PATH, "utf8"));
   const userPath = overridePath || join(swarmHome(env), "config.json");
-  const cfg = existsSync(userPath) ? deepMerge(defaults, parseUser(userPath)) : defaults;
+  const user = existsSync(userPath) ? parseUser(userPath) : null;
+  for (const warning of legacyConfigWarnings(user)) warn(warning);
+  const cfg = user ? deepMerge(defaults, normalizeConfigInput(user)) : defaults;
+  validateProviderConfig(cfg);
   if (typeof cfg.disable1mContext !== "boolean") {
     throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
   }
@@ -90,7 +143,7 @@ export function loadConfig(overridePath, env = process.env) {
   if (cfg.minFreeMemMb > 0 && cfg.valveFreeMemMb > cfg.minFreeMemMb) {
     throw new Error(`valveFreeMemMb (${cfg.valveFreeMemMb}) must not exceed minFreeMemMb (${cfg.minFreeMemMb}) — the valve would fire before the spawn floor ever parks a leaf; lower valveFreeMemMb or raise minFreeMemMb in ~/.swarm/config.json`);
   }
-  return cfg;
+  return addLegacyProviderView(cfg);
 }
 
 // ---- the /swarm:swarm setup surface ---------------------------------------------
@@ -158,15 +211,15 @@ export function initConfig(overridePath, env = process.env) {
   const path = userConfigPath(overridePath, env);
   const defaults = readDefaults();
   const created = !existsSync(path);
-  const user = created ? {} : parseUser(path);
+  const raw = created ? {} : parseUser(path);
+  const migrated = !created && legacyConfigWarnings(raw).length > 0;
+  const user = normalizeConfigInput(raw);
   const added = [];
   for (const key of leafKeys(defaults)) {
     if (getPath(user, key).found) continue;
     setPath(user, key, getPath(defaults, key).value);
     added.push(key);
   }
-  if (created || added.length) writeAtomic(path, user);
-  return { path, created, added };
+  if (created || migrated || added.length) writeAtomic(path, user);
+  return { path, created, migrated, added };
 }
-
-
