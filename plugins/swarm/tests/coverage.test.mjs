@@ -12,7 +12,8 @@ import {
   parseReadCalls, resolveMustRead, checkCoverage, computeCoverage,
   coverageErrorLines, READ_DEFAULT_LINES, mergeIntervals,
 } from "../src/coverage.mjs";
-import { loadManifest, effectivePlanDoc, ValidationError, MUST_READ_MAX_ENTRIES } from "../src/manifest.mjs";
+import { effectivePlanDoc, ValidationError, MUST_READ_MAX_ENTRIES } from "../src/manifest.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
 import { runnerOf } from "../src/dispatch.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult, transcriptPath } from "../src/results.mjs";

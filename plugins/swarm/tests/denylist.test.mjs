@@ -4,7 +4,8 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
-import { loadManifest, matchDenylist, ValidationError } from "../src/manifest.mjs";
+import { matchDenylist, ValidationError } from "../src/manifest.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
 import { runCliAsync } from "./helpers/cli.mjs";
 
 function tmp() {

@@ -6,7 +6,8 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { prepareIsolation, collect, integrate } from "../src/worktree.mjs";
 import { runPlan } from "../src/scheduler.mjs";
-import { loadManifest, ValidationError } from "../src/manifest.mjs";
+import { ValidationError } from "../src/manifest.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 
 const CFG = {
