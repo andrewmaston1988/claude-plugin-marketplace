@@ -1,4 +1,4 @@
-// Runs are keyed by their encoded cwd. A worktree (`<root>-.worktrees-<repo>-<branch>`,
+// Runs are keyed by their dispatching repo's encoded git toplevel. A worktree (`<root>-.worktrees-<repo>-<branch>`,
 // `<repo>-.claude-worktrees-<branch>`) belongs to its repo, and the label is the key
 // with the prefix every plain repo shares stripped — nothing machine-specific is assumed.
 export const projectGrouping = (keys) => {

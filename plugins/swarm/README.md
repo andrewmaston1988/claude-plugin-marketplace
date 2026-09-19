@@ -289,7 +289,7 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
 ## Results layout
 
 ```
-<resultsDir>/                # default ~/.swarm/runs/<encoded-cwd>/<stem>-<n>/ — outside the repo
+<resultsDir>/                # default ~/.swarm/runs/<encoded-repo-toplevel>/<stem>-<n>/ — outside the repo
   manifest.json              # the effective plan at dispatch (args substituted) — runs record their own intent
   results/<id>.json          # { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, sessionId?, prompt?, cwd, allowedTools, output, outputJson?, citations?, worktree? }
   results/<id>.log           # the leaf's raw stream-json events — tail one leaf's tool calls live
