@@ -626,3 +626,38 @@ test("integration: swarm ask on a mustRead leaf runs no contract — no coverage
     equal(logEvents(p.resultsDir).filter((l) => l.event === "coverage").length, covEventsBefore); // no new coverage event
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ── Docs — the field reference and skill stay truthful ────────────────────────
+
+const SKILLS = fileURLToPath(new URL("../skills/", import.meta.url));
+// Body of a markdown section: header line to the next same-or-higher header.
+function sectionBody(md, header) {
+  const i = md.indexOf(header);
+  if (i < 0) return null;
+  const after = md.slice(i + header.length);
+  const end = after.search(/\n#{1,3} /);
+  return end < 0 ? after : after.slice(0, end);
+}
+
+test("docs: manifest-fields.md mustRead example validates verbatim", () => {
+  const md = readFileSync(join(SKILLS, "swarm/manifest-fields.md"), "utf8");
+  const body = sectionBody(md, "### Proven read coverage — `mustRead`");
+  const fence = body && body.match(/```json\s*([\s\S]*?)```/);
+  ok(fence, "no ```json example under the mustRead section");
+  const parsed = JSON.parse(fence[1]); // the doc's fence must be real JSON
+  const dir = tmp();
+  try {
+    const p = writeMan(dir, parsed);
+    const plan = loadManifest(p, manCfg, dir); // must not throw ValidationError
+    const t = plan.tasks.find((x) => Array.isArray(x.mustRead));
+    ok(t && t.mustRead.length === 2, JSON.stringify(t)); // string + paged entry carried through
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("docs: swarm/SKILL.md adversarial-review states the tier rule, not 'different model family'", () => {
+  const md = readFileSync(join(SKILLS, "swarm/SKILL.md"), "utf8");
+  const sec = sectionBody(md, "### Adversarial review");
+  ok(sec, "adversarial-review section not found in swarm/SKILL.md");
+  ok(!/different model family/i.test(sec), "still says 'different model family' — reconcile to the tier rule");
+  ok(/different tier/i.test(sec), "expected the Claude-verifier tier rule in the section");
+});
