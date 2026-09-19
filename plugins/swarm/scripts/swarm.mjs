@@ -371,6 +371,7 @@ async function cmdRun(rest) {
     worktreesKept: r.worktreesKept,
     truncations: r.summary.truncations,
     refutations: r.summary.refutations,
+    coverageGaps: r.summary.coverageGaps,
     estimate: plan.estimate,
     resultsDir: plan.resultsDir,
     engine: fileURLToPath(import.meta.url),
