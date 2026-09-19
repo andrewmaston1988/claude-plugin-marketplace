@@ -66,6 +66,24 @@ export function buildDispatch(task, prompt, cfg) {
   };
 }
 
+// The runner whose transcript a leaf produces. Only "claude" writes the
+// stream-json coverage.mjs (mustRead) understands; any other value fails closed
+// at validate. Master dispatches every model through the claude CLI — Claude
+// models plainly, non-Claude models via the env-mode proxy — both emitting
+// claude stream-json. The one opaque path is a launch-mode provider whose
+// wrapper binary isn't claude: its stdout shape is unknown, so its runner is
+// the wrapper's name (the rejection trigger). Master has no codex runner; a
+// codex transcript would surface here the same way if one existed.
+export function runnerOf(task, cfg) {
+  if (isClaudeModel(task.model)) return "claude";
+  if (cfg?.provider?.mode === "launch") {
+    const first = String(cfg.provider.launchCmd || "").trim().split(/\s+/).filter(Boolean)[0] || "";
+    const bin = first.replace(/\.(exe|cmd|bat|com)$/i, "").split(/[\\/]/).pop();
+    return bin.toLowerCase() === "claude" ? "claude" : (bin || "unknown");
+  }
+  return "claude"; // env mode dispatches the claude CLI verbatim
+}
+
 // ── Windows spawn resolution ──────────────────────────────────────────────────
 // Node's spawn() rejects .bat/.cmd directly (EINVAL), and shell:true would let
 // cmd.exe re-parse the args — mangling any prompt containing quotes. Following

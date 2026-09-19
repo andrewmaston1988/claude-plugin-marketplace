@@ -4,7 +4,7 @@ import { resolve, join, basename, dirname, sep } from "node:path";
 import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
-import { buildDispatch, toSpawnable, windowsCommandLineLength } from "./dispatch.mjs";
+import { buildDispatch, toSpawnable, windowsCommandLineLength, runnerOf } from "./dispatch.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
 import { provenanceBanner, formatResetTime } from "./usage.mjs";
@@ -45,13 +45,17 @@ const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
   "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
+  "mustRead",
 ]);
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
 const MANIFEST_BANNED_KEYS = [
   "prompt", "model", "compute", "returns", "isolation", "allowedTools",
-  "outputDir", "effort", "fallbackModel",
+  "outputDir", "effort", "fallbackModel", "mustRead",
 ];
+// More `mustRead` entries than this is an authoring mistake — use an index entry.
+export const MUST_READ_MAX_ENTRIES = 500;
+const KNOWN_MUST_READ_KEYS = new Set(["path", "lines", "index", "lane"]);
 // The scheduler spreads these last so a task's own `env` can't override them;
 // `--settings`' env block is a second, higher-precedence path to the same
 // leaf process and must be closed the same way.
@@ -713,6 +717,98 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
   }
 }
 
+// mustRead shape validation only (Decision 6/11) — the runner check is a
+// separate platform-independent pass. Entries are string paths, {path,lines?}
+// or {index,lane?}; {{resultPath:<id>}} is the only template, and its id must
+// be a declared dependency, the same rule prompts obey.
+const MUST_READ_TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
+function validateMustRead(rawTasks, errors, label) {
+  for (const t of rawTasks) {
+    if (t.mustRead === undefined) continue;
+    const l = label(t);
+    // A manifest node is already reported by MANIFEST_BANNED_KEYS; compute and
+    // integrate nodes spawn no leaf either, so there is no transcript to check.
+    if (t.compute !== undefined || t.integrate !== undefined) {
+      errors.push(`${l}: mustRead needs a leaf — this node spawns none`);
+      continue;
+    }
+    if (t.manifest !== undefined) continue; // banned-key path owns the message
+    if (!Array.isArray(t.mustRead)) {
+      errors.push(`${l}: mustRead must be an array of entries — e.g. ["src/a.mjs", {"path": "b.mjs", "lines": [[1, 200]]}]`);
+      continue;
+    }
+    if (t.mustRead.length > MUST_READ_MAX_ENTRIES) {
+      errors.push(`${l}: mustRead has ${t.mustRead.length} entries, over the ${MUST_READ_MAX_ENTRIES} limit — declare an index entry ({"index": "<path>"}) the engine expands at check time instead`);
+    }
+    const deps = new Set(t.after || []);
+    const checkTemplate = (s, what) => {
+      for (const m of String(s).matchAll(MUST_READ_TEMPLATE_RE)) {
+        if (m[1] !== "resultPath") {
+          errors.push(`${l}: only {{resultPath:<id>}} is substituted in mustRead — '${m[0]}' is not honoured`);
+        } else if (!deps.has(m[2])) {
+          errors.push(`${l}: mustRead ${what} references {{resultPath:${m[2]}}} but '${m[2]}' is not a declared dependency — add '${m[2]}' to after`);
+        }
+      }
+    };
+    const checkLines = (lines) => {
+      if (!Array.isArray(lines)) { errors.push(`${l}: mustRead lines must be an array of [start, end] integer pairs`); return; }
+      for (const pair of lines) {
+        if (!Array.isArray(pair) || pair.length !== 2 || !Number.isInteger(pair[0]) || !Number.isInteger(pair[1])) {
+          errors.push(`${l}: mustRead lines must be [start, end] integer pairs (got ${JSON.stringify(pair)})`);
+        } else if (pair[0] > pair[1]) {
+          errors.push(`${l}: mustRead range [${pair[0]}, ${pair[1]}] has start > end`);
+        }
+      }
+    };
+    for (const entry of t.mustRead) {
+      if (typeof entry === "string") {
+        if (!entry) errors.push(`${l}: mustRead path must be a non-empty string`);
+        else checkTemplate(entry, "path");
+        continue;
+      }
+      if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+        errors.push(`${l}: mustRead entry must be a string path or a {path}/{index} object (got ${JSON.stringify(entry)})`);
+        continue;
+      }
+      for (const k of Object.keys(entry)) {
+        if (!KNOWN_MUST_READ_KEYS.has(k)) errors.push(`${l}: unknown key '${k}' in mustRead entry — known keys: ${[...KNOWN_MUST_READ_KEYS].join(", ")}`);
+      }
+      if (entry.path !== undefined && entry.index !== undefined) {
+        errors.push(`${l}: a mustRead entry has both path and index — use one`);
+      } else if (entry.path !== undefined) {
+        if (typeof entry.path !== "string" || !entry.path) errors.push(`${l}: mustRead path must be a non-empty string`);
+        else checkTemplate(entry.path, "path");
+        if (entry.lines !== undefined) checkLines(entry.lines);
+      } else if (entry.index !== undefined) {
+        if (typeof entry.index !== "string" || !entry.index) errors.push(`${l}: mustRead index must be a non-empty path string`);
+        else checkTemplate(entry.index, "index");
+        if (entry.lane !== undefined && (!Number.isInteger(entry.lane) || entry.lane < 0)) {
+          errors.push(`${l}: mustRead lane must be a non-negative integer (got ${JSON.stringify(entry.lane)})`);
+        }
+      } else {
+        errors.push(`${l}: a mustRead entry must name a path or an index`);
+      }
+    }
+  }
+}
+
+// The runner check: mustRead is proven from the claude stream-json transcript,
+// so a task on any other runner can never be checked. Takes `io` for signature
+// parity with checkCommandLineLengths but deliberately does NOT gate on
+// io.platform — a codex task with mustRead must be rejected on every platform,
+// not just Windows (f-engine#4).
+function validateMustReadRunners(tasks, cfg, io, errors, label) {
+  for (const t of tasks) {
+    if (!Array.isArray(t.mustRead)) continue;
+    const runner = runnerOf(t, cfg);
+    if (runner !== "claude") {
+      errors.push(
+        `${label(t)}: mustRead is checked from the claude stream-json transcript; runner '${runner}' is not supported — ` +
+        `run this task on a Claude or :cloud model, or drop mustRead`);
+    }
+  }
+}
+
 // ── shared normalization ──────────────────────────────────────────────────────
 // Governance gate — deny-by-default for non-Claude models. The employer's
 // data agreement covers Anthropic only; open-model tasks may run only under
@@ -864,6 +960,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ...whenBlock,
       ...forEachBlock,
       ...(!isCompute && !isManifest && t.returns && typeof t.returns === "object" && !Array.isArray(t.returns) && { returns: t.returns }),
+      ...(!isCompute && !isManifest && !isIntegrate && Array.isArray(t.mustRead) && { mustRead: t.mustRead }),
       ...(typeof t.verifyCitations === "boolean" && { verifyCitations: t.verifyCitations }),
       ...(!isCompute && !isManifest && !isIntegrate && t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && { settings: t.settings }),
       ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),
@@ -914,6 +1011,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   // {{item}} in a child task without its own forEach is legal only when the
   // parent node fans out — the parent substitutes into child prompts per item.
   validateTaskRelations(raw.tasks, errors, label, { itemAllowed: node.forEach !== undefined });
+  validateMustRead(raw.tasks, errors, label);
   validateWorktreeGroups(raw.tasks, errors, label);
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
@@ -922,6 +1020,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
     defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, io, errors, label);
+  validateMustReadRunners(tasks, cfg, io, errors, label);
   return { tasks };
 }
 
@@ -994,6 +1093,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const label = (t) => (t?.id ? `task '${t.id}'` : "task with missing id");
   validateTaskShapes(raw.tasks, errors, label);
   validateTaskRelations(raw.tasks, errors, label);
+  validateMustRead(raw.tasks, errors, label);
   validateWorktreeGroups(raw.tasks, errors, label);
 
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
@@ -1020,6 +1120,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
+  validateMustReadRunners(tasks, cfg, resolvedIo, errors, label);
 
   let digest;
   if (raw.digest !== undefined) {
@@ -1073,7 +1174,7 @@ export function effectivePlanDoc(plan) {
   const strip = (t) => {
     const o = { id: t.id, model: t.model };
     if (t.prompt) o.prompt = t.prompt;
-    for (const k of ["effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "isolation", "outputDir"]) {
+    for (const k of ["effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "isolation", "outputDir", "mustRead"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
     if (t.childPlan) o.child = t.childPlan.tasks.map(strip);

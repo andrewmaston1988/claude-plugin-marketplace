@@ -12,6 +12,8 @@ import {
   parseReadCalls, resolveMustRead, checkCoverage, computeCoverage,
   coverageErrorLines, READ_DEFAULT_LINES, mergeIntervals,
 } from "../src/coverage.mjs";
+import { loadManifest, effectivePlanDoc, ValidationError, MUST_READ_MAX_ENTRIES } from "../src/manifest.mjs";
+import { runnerOf } from "../src/dispatch.mjs";
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/coverage/", import.meta.url));
 const fixture = (f) => readFileSync(join(FIXTURES, f), "utf8");
@@ -288,4 +290,116 @@ test("coverageErrorLines: one Read line per uncovered range; a >2000 range split
   ok(lines.some((l) => l === "C:/b.mjs lines 1-2000: Read offset 1 limit 2000"));
   ok(lines.some((l) => l === "C:/b.mjs lines 2001-4000: Read offset 2001 limit 2000"));
   ok(lines.some((l) => l === "C:/b.mjs lines 4001-4500: Read offset 4001 limit 500"));
+});
+
+// ── runnerOf (dispatch) ───────────────────────────────────────────────────────
+
+test("runnerOf: a Claude model → claude; env-mode non-claude (proxied through claude CLI) → claude", () => {
+  equal(runnerOf({ model: "haiku" }, {}), "claude");
+  equal(runnerOf({ model: "glm-4.6:cloud" }, { provider: { mode: "env", url: "x", authToken: "y" } }), "claude");
+});
+
+test("runnerOf: launch-mode wrapper whose binary isn't claude → that binary name (the rejection trigger)", () => {
+  const cfg = { provider: { mode: "launch", launchCmd: "ollama launch claude --model {model} -- {args}" } };
+  equal(runnerOf({ model: "glm-4.6:cloud" }, cfg), "ollama"); // mutation: return "claude" for launch mode → nothing is ever rejected
+  // a launch template that IS a direct claude invocation stays claude
+  equal(runnerOf({ model: "sonnet" }, { provider: { mode: "launch", launchCmd: "claude {args}" } }), "claude");
+});
+
+// ── manifest: mustRead shape validation, normalisation, effectivePlanDoc ───────
+
+const manCfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 600000, resultInlineCap: 4000 };
+function writeMan(dir, body, name = "plan.json") { const p = join(dir, name); writeFileSync(p, JSON.stringify(body)); return p; }
+function manErrors(fn) {
+  try { fn(); } catch (e) { ok(e instanceof ValidationError, `expected ValidationError, got ${e}`); return e.errors; }
+  throw new Error("expected loadManifest to throw");
+}
+
+test("mustRead: string, paged, index+lane, {{resultPath:<dep>}} all accepted and carried through normalisation + effectivePlanDoc", () => {
+  const dir = tmp();
+  try {
+    const mr = ["README.md", { path: "a.mjs", lines: [[1, 50]] }, { index: "idx.json", lane: 0 }];
+    const p = writeMan(dir, { tasks: [
+      { id: "finder", prompt: "find", model: "haiku" },
+      { id: "vf", prompt: "verify", model: "haiku", after: ["finder"], mustRead: [...mr, "{{resultPath:finder}}"] },
+    ] });
+    const plan = loadManifest(p, manCfg, dir);
+    const vf = plan.tasks.find((t) => t.id === "vf");
+    deepEqual(vf.mustRead, [...mr, "{{resultPath:finder}}"]); // normalisation carries it
+    const doc = effectivePlanDoc(plan);
+    const vfDoc = doc.tasks.find((t) => t.id === "vf");
+    deepEqual(vfDoc.mustRead, [...mr, "{{resultPath:finder}}"]); // effectivePlanDoc keeps it
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("mustRead: rejected on compute / integrate / manifest nodes — needs a leaf", () => {
+  const dir = tmp();
+  try {
+    const p = writeMan(dir, { tasks: [
+      { id: "a", prompt: "x", model: "haiku" },
+      { id: "c", compute: "deps['a'].y", after: ["a"], mustRead: ["README.md"] },
+    ] });
+    const errs = manErrors(() => loadManifest(p, manCfg, dir));
+    ok(errs.some((e) => /mustRead needs a leaf/.test(e)), errs.join("\n"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("mustRead: KNOWN_TASK_KEYS advertises it (a typo'd sibling key still reports); MANIFEST_BANNED_KEYS rejects it on a manifest node", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "child.json"), JSON.stringify({ tasks: [{ id: "k", prompt: "x", model: "haiku" }] }));
+    const p = writeMan(dir, { tasks: [{ id: "m", manifest: "child.json", mustRead: ["README.md"] }] });
+    const errs = manErrors(() => loadManifest(p, manCfg, dir));
+    ok(errs.some((e) => /manifest task is an agentless container/.test(e) && /mustRead/.test(e)), errs.join("\n"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("mustRead: per-error teaching for lines-not-pairs, start>end, negative lane, unknown key, both path+index", () => {
+  const dir = tmp();
+  try {
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku", mustRead: [
+      { path: "a.mjs", lines: [[1]] },
+      { path: "b.mjs", lines: [[50, 10]] },
+      { index: "i.json", lane: -1 },
+      { path: "c.mjs", limit: 5 },
+      { path: "d.mjs", index: "e.json" },
+    ] }] });
+    const errs = manErrors(() => loadManifest(p, manCfg, dir));
+    ok(errs.some((e) => /pairs/.test(e)), "lines-not-pairs");
+    ok(errs.some((e) => /start > end/.test(e)), "start>end");
+    ok(errs.some((e) => /lane/.test(e) && /non-negative/.test(e)), "negative lane");
+    ok(errs.some((e) => /unknown key 'limit' in mustRead/.test(e)), "unknown key");
+    ok(errs.some((e) => /both path and index/.test(e)), "both path+index");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("mustRead: {{resultPath:x}} where x ∉ after → error; {{result:x}} anywhere → error", () => {
+  const dir = tmp();
+  try {
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku", mustRead: ["{{resultPath:ghost}}", "{{result:a}}"] }] });
+    const errs = manErrors(() => loadManifest(p, manCfg, dir));
+    ok(errs.some((e) => /ghost/.test(e) && /declared dependency/.test(e)), "resultPath dep");
+    ok(errs.some((e) => /only \{\{resultPath:<id>\}\} is substituted/.test(e)), "non-resultPath template");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("mustRead: over MUST_READ_MAX_ENTRIES → error suggesting an index", () => {
+  const dir = tmp();
+  try {
+    const many = Array.from({ length: MUST_READ_MAX_ENTRIES + 1 }, (_, i) => `f${i}.md`);
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku", mustRead: many }] });
+    const errs = manErrors(() => loadManifest(p, manCfg, dir));
+    ok(errs.some((e) => new RegExp(`over the ${MUST_READ_MAX_ENTRIES}`).test(e) && /index/.test(e)), errs.join("\n"));
+    equal(MUST_READ_MAX_ENTRIES, 500); // source literal
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("mustRead: a non-claude runner task is rejected naming the runner, with NO win32 guard (io.platform linux still rejects)", () => {
+  const dir = tmp();
+  try {
+    const cfg = { ...manCfg, provider: { mode: "launch", launchCmd: "ollama launch claude --model {model} -- {args}", allowedRoots: [dir] } };
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "glm-4.6:cloud", mustRead: ["README.md"] }] });
+    const errs = manErrors(() => loadManifest(p, cfg, dir, { io: { platform: "linux" } }));
+    ok(errs.some((e) => /runner 'ollama' is not supported/.test(e)), errs.join("\n")); // mutation: win32 guard → passes on linux
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
