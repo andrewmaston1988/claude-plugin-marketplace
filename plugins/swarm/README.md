@@ -148,6 +148,7 @@ dominates:
 | Predictive cost consent — estimate at approval, one projection warn, actual-vs-estimate close | ✅ | ❌ reactive only |
 | Weak-model authorability — fill-in-the-blanks JSON; validation errors teach | ✅ | ⚠️ JS bar |
 | Mechanical citation verification — `{file, line, quote}` returns string-matched against real files before any verifier spawns | ✅ zero tokens | ❌ |
+| Transcript-proven read coverage — a leaf proves from its own transcript it `Read` the files/ranges it declared, one corrective re-ask then recorded | ✅ `mustRead`, zero tokens | ❌ |
 
 Rule of thumb: bounded fan-out — sweeps, judge panels, generation, mechanical
 implementation, discover-then-map — is swarm's shape, especially with alternative models

@@ -34,6 +34,29 @@ Supported keywords: `type` (`string|number|integer|boolean|array|object|null`), 
 
 **Finder-prompt guidance: quote a SHORT distinctive fragment (10–40 chars), not the whole line.** The check matches a substring of the cited line, so a fragment of a 200-char decompiled line verifies where a reformatted full-line quote would refute. Tell finders to cite the smallest span that identifies the code, and to omit any finding whose quote they cannot vouch for — the gate is the backstop, the finder prompt is the front line.
 
+### Proven read coverage — `mustRead`
+
+A leaf with `mustRead` must prove, from its OWN transcript, that it `Read` the files/ranges it declares. After the run the engine parses the leaf's stream-json for `Read` tool calls and checks each required range against them; a shortfall shares the same ONE corrective re-ask as `returns`/citations (the re-ask names each uncovered range with a ready-to-paste `Read offset <a> limit <n>`), then — still short — **is recorded, never fails the leaf** (same warn-not-destroy discipline as citations: the checker can be wrong, the consumer rules). The result carries `coverage: { status, required, read, missed }`, `run.log` a `{event:"coverage"}` line, `mechanicalOf` a `coverage` column, and the closing block a loud line. Put it on a reviewer or verifier that MUST have seen the principle doc / diff shard before it opines.
+
+```json
+{
+  "tasks": [
+    {
+      "id": "review-arch",
+      "prompt": "Review the scheduler for architectural defects.",
+      "model": "opus",
+      "allowedTools": "Read,Grep,Glob",
+      "mustRead": [
+        "plugins/swarm/src/scheduler.mjs",
+        { "path": "plugins/swarm/src/coverage.mjs", "lines": [[1, 120], [200, 260]] }
+      ]
+    }
+  ]
+}
+```
+
+Entry forms: a bare string (whole file — the engine reads it to count lines, an empty file requires nothing); `{ "path", "lines": [[a, b], …] }` (exactly those ranges); `{ "index": "<file>", "lane": <n>? }` (a JSON `{ entries, lanes? }` doc whose entries expand to requirements — one level, no nesting). A `{{resultPath:<dep>}}` in a `path`/`index` resolves to the dep's result file (dep must be in `after`; only `resultPath`, never `{{result:}}`). Rules: leaf-only (never `compute`/`integrate`/`manifest` nodes); on a `forEach` task it copies to every clone unchanged (same lane per clone); relative paths resolve against the leaf's cwd, absolutes stand (principle files and shards live outside the worktree); Read paths compare case-insensitively on Windows; only the `Read` tool counts (a Bash `cat`/`sed`, a Grep, an MCP read do not — they carry no checkable offset/limit and the harness truncates Bash output). Only a claude stream-json transcript is understood (which covers `:cloud` models through the claude CLI); any other runner fails closed — the whole requirement is recorded missed. Cap: 500 entries (use an index above that). `validate` announces enforced tasks.
+
 ### Child manifests — a reusable sub-pipeline as one node
 
 A task with `"manifest": "<path>"` runs that child manifest as one node — the child's tasks join the run under `<node>~<childId>` ids, and the node's output is a JSON object of the child's terminal tasks (`{"<taskId>": <output>, …}`). Combine with `forEach` for the core case: a tuned multi-stage pipeline executed once per item. One nesting level; the child's worst-case leaves multiply into `validate`'s preview and estimate.
