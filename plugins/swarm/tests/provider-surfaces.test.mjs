@@ -51,7 +51,9 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
   const root = join(home, "repo");
   mkdirSync(root, { recursive: true });
   const manifest = join(root, "manifest.json");
-  writeFileSync(manifest, JSON.stringify({ tasks: [{ id: "inspect", model: FIXTURE_MODEL, prompt: "inspect" }] }));
+  // loadManifest takes no env, so without an explicit resultsDir the run home
+  // resolves against the real ~/.swarm.
+  writeFileSync(manifest, JSON.stringify({ resultsDir: join(home, "run"), tasks: [{ id: "inspect", model: FIXTURE_MODEL, prompt: "inspect" }] }));
   const cfg = config(root);
   const env = { ...process.env, SWARM_HOME: home };
   const registry = fixtureRegistry();
