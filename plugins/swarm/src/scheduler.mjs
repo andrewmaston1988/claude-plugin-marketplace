@@ -2,7 +2,7 @@ import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync, 
 import { freemem } from "node:os";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
-import { buildDispatch, toSpawnable } from "./dispatch.mjs";
+import { buildDispatch, toSpawnable, runnerOf } from "./dispatch.mjs";
 import { isClaudeModel } from "./models.mjs";
 import {
   buildDigestTask, DIGEST_ID,
@@ -12,8 +12,9 @@ import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from 
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary, readSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
-  renderProvenance, touchHeartbeat, stopPath, recordedSessionIds,
+  renderProvenance, touchHeartbeat, stopPath, recordedSessionIds, transcriptPath,
 } from "./results.mjs";
+import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
   createStreamParser, createUsageAccumulator, pickFinalTokens,
@@ -31,7 +32,6 @@ import * as defaultWorktree from "./worktree.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const OK_STATES = new Set(["ok", "skipped"]);
-const TEMPLATE_RE = /\{\{(result|resultPath):([^}]*)\}\}/g;
 
 // Default io: real spawn (with Windows .cmd resolution), real fetch/clock,
 // roster snapshots + closing lines to stdout. Every part is injectable so
@@ -131,49 +131,76 @@ function tryParseJson(output) {
   return undefined;
 }
 
-// Enforce a task's `returns` schema on a completed leaf. Valid output passes
-// through untouched. Invalid output gets exactly ONE corrective turn through
-// the leaf's own resumed session (the `ask` pattern — the leaf still holds its
-// reads and reasoning, so the fix costs one turn, not a re-run); still-invalid
-// output fails the task with the validator's teaching errors. Runs before
-// worktree collection so the corrective turn executes in the leaf's real cwd.
-async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
+// Schema, citations and read coverage share ONE corrective re-ask through the leaf's
+// resumed session. Afterwards a schema miss is fatal; a refuted citation or coverage
+// shortfall only annotates (the checker may be wrong). Runs before worktree collection.
+async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks) {
+  const runner = runnerOf(task, cfg);
+  // Coverage is proven from the leaf's OWN transcript: parse its Read calls and
+  // check them against `mustRead`. The transcript on disk already holds the full
+  // attempt history of the session (resume appends, D10), so a re-ask's reads are
+  // seen on re-assessment. A missing/unreadable transcript → parseReadCalls sees
+  // no assistant events → null → a total miss (fail closed).
+  const coverageOf = () => {
+    if (!task.mustRead) return null;
+    let text = "";
+    try { text = readFileSync(transcriptPath(resultsDir, task.id), "utf8"); } catch { /* unparseable */ }
+    const reads = parseReadCalls(text, runner);
+    return computeCoverage(task.mustRead, reads, {
+      cwd: taskCwd,
+      substitute: (s) => substituteTemplates(s, resultsDir, cfg.resultInlineCap ?? 4000).prompt,
+    });
+  };
   // Schema first; when the shape holds, mechanically verify any citation-shaped
-  // instances (N3) against the leaf's cwd. A schema miss is unusable output and
-  // still fails the leaf; a refuted citation NEVER does — the finding may be
-  // sound and the CHECKER may be the thing that is wrong (decompiled/minified
-  // lines defeat whitespace-normalised matching), so Stage 1 annotates in place
-  // and lets the verifier wave, an LLM that reads the file, rule on it.
+  // instances (N3). A task with `mustRead` but no `returns` skips schema entirely
+  // (`parsed` undefined is fine — `finish` then leaves the output untouched).
   const assess = (output) => {
-    const parsed = tryParseJson(output);
-    if (parsed === undefined) {
-      return { parsed: undefined, schemaErrs: ["output is not JSON — reply with a single JSON value matching the schema"] };
+    let parsed, schemaErrs, cite;
+    if (task.returns) {
+      parsed = tryParseJson(output);
+      if (parsed === undefined) {
+        schemaErrs = ["output is not JSON — reply with a single JSON value matching the schema"];
+      } else {
+        const errs = validateValue(parsed, task.returns);
+        if (errs.length) schemaErrs = errs;
+        else if (task.verifyCitations !== false) {
+          const cits = extractCitations(parsed, task.returns);
+          if (cits.length) cite = verifyCitations(cits, { cwds: [taskCwd, task.originalCwd] });
+        }
+      }
     }
-    const schemaErrs = validateValue(parsed, task.returns);
-    if (schemaErrs.length) return { parsed, schemaErrs };
-    if (task.verifyCitations === false) return { parsed };
-    const cits = extractCitations(parsed, task.returns);
-    if (!cits.length) return { parsed };
-    return { parsed, cite: verifyCitations(cits, { cwds: [taskCwd, task.originalCwd] }) };
+    return { parsed, schemaErrs, cite, cov: coverageOf() };
   };
   const failText = (errs) => `returns validation failed:\n  - ${errs.join("\n  - ")}`;
   const logCitations = (cite) => appendRunLog(resultsDir, {
     ts: new Date().toISOString(), event: "citations", id: task.id,
     checked: cite.checked, drifted: cite.drifted.length, refuted: cite.refuted.length,
   });
+  const logCoverage = (cov, retried) => appendRunLog(resultsDir, {
+    ts: new Date().toISOString(), event: "coverage", id: task.id,
+    status: cov.status, required: cov.required, read: cov.read, missed: cov.missed, retried,
+  });
   // A schema-clean result: annotate every citation in place, re-serialize the
-  // annotated output, and attach loud stats. Refutations never fail the leaf.
-  const finish = (res, a) => {
-    if (!a.cite) return res;
-    const cite = a.cite;
-    annotateCitations(cite);
-    logCitations(cite);
-    const out = {
-      ...res,
-      output: JSON.stringify(a.parsed),
-      citations: { checked: cite.checked, drifted: cite.drifted.length, refuted: cite.refuted.length },
-    };
-    if (cite.refuted.length) out.citationRefuted = cite.refuted.map((c) => ({ path: c.path, reason: c.reason }));
+  // annotated output, and attach loud stats. Then stamp coverage. Refutations and
+  // coverage shortfalls never fail the leaf — both are recorded, and the caller
+  // surfaces an incomplete `coverage` in the closing block.
+  const finish = (res, a, retried = false) => {
+    let out = res;
+    if (a.cite) {
+      const cite = a.cite;
+      annotateCitations(cite);
+      logCitations(cite);
+      out = {
+        ...out,
+        output: JSON.stringify(a.parsed),
+        citations: { checked: cite.checked, drifted: cite.drifted.length, refuted: cite.refuted.length },
+      };
+      if (cite.refuted.length) out.citationRefuted = cite.refuted.map((c) => ({ path: c.path, reason: c.reason }));
+    }
+    if (a.cov) {
+      logCoverage(a.cov, retried);
+      out = { ...out, coverage: { status: a.cov.status, required: a.cov.required, read: a.cov.read, missed: a.cov.missed } };
+    }
     return out;
   };
   const failSchema = (res, errs, suffix = "") => ({
@@ -183,24 +210,35 @@ async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
   const a1 = assess(r.output);
   const schema1 = a1.schemaErrs?.length ? a1.schemaErrs : null;
   const refuted1 = a1.cite?.refuted.length || 0;
+  const covMiss1 = a1.cov && a1.cov.status !== "complete";
 
-  // Clean, or only-refuted-with-no-session: annotate and finish (never fail).
-  if (!schema1 && !refuted1) return finish(r, a1);
+  // Clean, or only-annotatable-with-no-session: record and finish (never fail).
+  if (!schema1 && !refuted1 && !covMiss1) return finish(r, a1, false);
   if (!r.sessionId) {
     if (schema1) return failSchema(r, schema1, "\n(no session id — re-ask unavailable)");
-    return finish(r, a1);
+    return finish(r, a1, false);
   }
 
-  appendRunLog(resultsDir, { ts: new Date().toISOString(), event: "schema-retry", id: task.id });
-  // Schema misses carry the schema itself, not just the errors — the original
-  // prompt may have underspecified the shape, and "expected object" alone
-  // doesn't name fields. Citation refutations already name file/line/fix.
-  const retryPrompt = schema1
-    ? `Your output did not match the task's returns schema:\n  - ${schema1.join("\n  - ")}\n` +
-      `The required schema is:\n${JSON.stringify(task.returns, null, 2)}\n` +
-      `Reply with ONLY the corrected JSON — no prose, no fences.`
-    : `Some citations in your output could not be verified against the actual files:\n  - ${citationErrorLines(a1.cite.refuted).join("\n  - ")}\n` +
-      `Reply with ONLY the corrected JSON — no prose, no fences.`;
+  appendRunLog(resultsDir, { ts: new Date().toISOString(), event: "leaf-contract-retry", id: task.id });
+  // One retry prompt carries every class that fired, in order: schema (carries the
+  // schema itself — "expected object" alone doesn't name fields), citations (name
+  // file/line/fix), then coverage (name each unread range as a literal Read call).
+  const blocks = [];
+  if (schema1) blocks.push(
+    `Your output did not match the task's returns schema:\n  - ${schema1.join("\n  - ")}\n` +
+    `The required schema is:\n${JSON.stringify(task.returns, null, 2)}`,
+  );
+  if (refuted1) blocks.push(
+    `Some citations in your output could not be verified against the actual files:\n  - ${citationErrorLines(a1.cite.refuted).join("\n  - ")}`,
+  );
+  if (covMiss1) blocks.push(
+    `You did not read everything this task requires. Read each of the following with the Read tool, exactly as stated, then give your corrected answer:\n  - ${coverageErrorLines(a1.cov.gaps, { indexErrors: a1.cov.errors }).join("\n  - ")}`,
+  );
+  // A mustRead-only task may be a prose leaf: demanding JSON there would replace its answer.
+  const closing = task.returns
+    ? "Reply with ONLY the corrected JSON — no prose, no fences."
+    : "Reply with your complete corrected answer, in the same form the task originally asked for.";
+  const retryPrompt = `${blocks.join("\n\n")}\n${closing}`;
   const leafLog = createWriteStream(join(resultsDir, "results", `${task.id}.log`), { flags: "a" });
   const r2 = await runTask({ ...task, cwd: taskCwd, resume: r.sessionId }, retryPrompt, cfg, io, leafLog, hooks);
 
@@ -212,16 +250,16 @@ async function enforceReturns(task, r, taskCwd, resultsDir, cfg, io, hooks) {
     sessionId: r2.sessionId ?? r.sessionId,
     schemaRetried: true,
   };
-  // Re-ask process itself failed: a schema miss is still fatal; a citation
-  // correction that never ran falls back to annotating the ORIGINAL output —
-  // a failed correction must not destroy findings the first pass produced.
+  // Re-ask process itself failed: a schema miss is still fatal; a citation/coverage
+  // correction that never ran falls back to the ORIGINAL output and its first-pass
+  // annotations — a failed correction must not destroy findings the first pass made.
   if (!r2.ok) {
     if (schema1) return failSchema(combined, [`re-ask failed (exit ${r2.exit}): ${r2.output.slice(0, 200)}`]);
-    return finish({ ...combined, output: r.output }, a1);
+    return finish({ ...combined, output: r.output }, a1, true);
   }
   const a2 = assess(r2.output);
   if (a2.schemaErrs?.length) return failSchema(combined, a2.schemaErrs);
-  return finish({ ...combined, ok: true, output: r2.output }, a2);
+  return finish({ ...combined, ok: true, output: r2.output }, a2, true);
 }
 
 // Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
@@ -794,6 +832,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
   // Citation refutations that Stage 1 kept — surfaced loud in the closing block,
   // the same register as a truncation: coverage the reader must not mistake for full.
   const refutations = [];
+  // Coverage shortfalls kept (D9), surfaced in the same loud closing channel.
+  const coverageGaps = [];
 
   // Both truncation paths share one loud channel: run.log event, stdout warning,
   // run-summary field, closing block. A cut only the engine knows about is how an
@@ -957,14 +997,28 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
     const locals = new Set(node.childPlan.tasks.map((c) => c.id));
     const remap = (id) => `${node.id}~${id}`;
     const hasItem = node.manifestItem !== undefined;
+    // {{result:local}} / {{resultPath:local}} references to sibling child tasks are
+    // rewritten to the spliced ids — in the prompt AND in each mustRead entry's
+    // path/index string, so a verifier's `mustRead: ["{{resultPath:finder}}"]`
+    // resolves to the remapped id at check time.
+    const remapRefs = (s) => s.replace(TEMPLATE_RE, (whole, kind, id) => (locals.has(id) ? `{{${kind}:${remap(id)}}}` : whole));
+    const remapMustRead = (entries) => entries.map((e) =>
+      typeof e === "string" ? remapRefs(e)
+      : e && typeof e === "object" ? {
+          ...e,
+          ...(typeof e.path === "string" && { path: remapRefs(e.path) }),
+          ...(typeof e.index === "string" && { index: remapRefs(e.index) }),
+        }
+      : e);
     const spliced = node.childPlan.tasks.map((c) => {
-      let prompt = c.prompt.replace(TEMPLATE_RE, (whole, kind, id) => (locals.has(id) ? `{{${kind}:${remap(id)}}}` : whole));
+      let prompt = remapRefs(c.prompt);
       // a child task with its own forEach keeps its {{item}} for its own clones
       if (hasItem && c.forEach === undefined) prompt = substituteItems(prompt, node.manifestItem, node.manifestIndex);
       return {
         ...c,
         id: remap(c.id),
         prompt,
+        ...(Array.isArray(c.mustRead) && { mustRead: remapMustRead(c.mustRead) }),
         // Worktree names are remapped with the ids: two nodes splicing the same
         // child would otherwise resolve to one path, and an un-remapped name is
         // absent from the group maps entirely (never collected, never reset).
@@ -1097,10 +1151,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
         promptTruncations = sub.truncations;
         notePromptTruncations(task, promptTruncations);
       }
-      const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`));
+      // Resume appends: a resumed leaf's session holds every earlier Read, so its
+      // transcript must too (coverage checks the whole attempt history). A fresh
+      // run (or --force) truncates.
+      const leafLog = createWriteStream(join(plan.resultsDir, "results", `${task.id}.log`), resumeId ? { flags: "a" } : {});
       let r = await runTask({ ...task, cwd: taskCwd, ...(resumeId && { resume: resumeId }) }, prompt, cfg, io, leafLog, streamHooks(task));
-      if (task.returns && r.ok) {
-        r = await enforceReturns(task, r, taskCwd, plan.resultsDir, cfg, io, streamHooks(task));
+      if ((task.returns || task.mustRead) && r.ok) {
+        r = await enforceLeafContract(task, r, taskCwd, plan.resultsDir, cfg, io, streamHooks(task));
       }
 
       // Claude leaves record the REAL model id (from the init event) with the
@@ -1136,6 +1193,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       if (r.citationRefuted?.length) {
         result.citationRefuted = r.citationRefuted;
         refutations.push({ id: task.id, refuted: r.citationRefuted.length, total: r.citations.checked + r.citations.refuted });
+      }
+      // Coverage rides the same rail as refutations: recorded on the result, and —
+      // when short — pushed to the run-level list the closing block prints loud.
+      if (r.coverage) {
+        result.coverage = r.coverage;
+        if (r.coverage.status !== "complete") coverageGaps.push({ id: task.id, ...r.coverage });
       }
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
@@ -1398,6 +1461,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), { force = false, 
       totalTokens: [...tokensMap.values()].reduce(addTokens, emptyTokens()),
       ...(truncations.length && { truncations }),
       ...(refutations.length && { refutations }),
+      ...(coverageGaps.length && { coverageGaps }),
       ...(plan.estimate !== undefined && { estimate: plan.estimate }),
       ...(costWarnFired && { costWarnFired: true }),
     };

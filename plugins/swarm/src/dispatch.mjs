@@ -66,6 +66,20 @@ export function buildDispatch(task, prompt, cfg) {
   };
 }
 
+// The runner whose transcript a leaf produces; only "claude" stream-json is
+// understood by mustRead, anything else fails closed at validate. Every model runs
+// through the claude CLI except a launch-mode wrapper that isn't claude — its
+// stdout is unknown, so the wrapper's name is returned to trigger the rejection.
+export function runnerOf(task, cfg) {
+  if (isClaudeModel(task.model)) return "claude";
+  if (cfg?.provider?.mode === "launch") {
+    const first = String(cfg.provider.launchCmd || "").trim().split(/\s+/).filter(Boolean)[0] || "";
+    const bin = first.replace(/\.(exe|cmd|bat|com)$/i, "").split(/[\\/]/).pop();
+    return bin.toLowerCase() === "claude" ? "claude" : (bin || "unknown");
+  }
+  return "claude"; // env mode dispatches the claude CLI verbatim
+}
+
 // ── Windows spawn resolution ──────────────────────────────────────────────────
 // Node's spawn() rejects .bat/.cmd directly (EINVAL), and shell:true would let
 // cmd.exe re-parse the args — mangling any prompt containing quotes. Following

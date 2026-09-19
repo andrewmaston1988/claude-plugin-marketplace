@@ -10,7 +10,9 @@ import { readRun } from "./runlog.mjs";
 //   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
 //                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
-//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, worktree?, asks? }
+//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks? }
+//                       (coverage = { status: "complete"|"incomplete"|"unparseable", required, read, missed[] }
+//                        when the task declared mustRead — a shortfall is recorded, never fails the leaf)
 //                       (asks = [{question, answer, ok, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
 //                        the leaf's own ok/output never change because a later ask failed)
 //   results/<id>.ask.log  plain-text Q/A transcript, appended on every ask against this leaf
@@ -31,8 +33,9 @@ import { readRun } from "./runlog.mjs";
 //                         { ts, event: "expand-manifest", id, children: [{id, model}] }    child-manifest splice
 //                       (child-manifest task ids are namespaced "<node>~<childId>")
 //                         { ts, event: "truncate-prompt", id, depId, kept, total }   {{result:}} cut to the inline cap
-//                         { ts, event: "schema-retry", id }         returns re-ask fired
+//                         { ts, event: "leaf-contract-retry", id }   the single corrective re-ask (schema/citation/coverage) fired
 //                         { ts, event: "citations", id, checked, drifted, refuted }   N3 mechanical verification
+//                         { ts, event: "coverage", id, status, required, read, missed, retried }   mustRead read-coverage check
 //                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn
 //   grade-waiver.json   { waivedAt, reason } — written by `swarm grade --waive`; excuses the run from
 //                       ungradedRuns/the grading nudges without ever counting as a grade
@@ -99,6 +102,7 @@ export function mechanicalOf(result) {
     numTurns: result.numTurns ?? null,
     schemaRetried: result.schemaRetried ?? false,
     citations: result.citations ?? null,
+    coverage: result.coverage ?? null,
   };
 }
 
@@ -447,7 +451,7 @@ export function gradeFooter({ count, resultsDir, cli }) {
   ].join("\n");
 }
 
-export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], estimate, gradeable, resultsDir, engine, memoryParks = 0 }) {
+export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], coverageGaps = [], estimate, gradeable, resultsDir, engine, memoryParks = 0 }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -463,6 +467,16 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
   // The finding is KEPT and annotated — the verifier wave, not this gate, rules on it.
   for (const rf of refutations) {
     lines.push(`${yellow("⚠")} ${bold(rf.id)}: ${rf.refuted} of ${rf.total} citations could not be verified against the source — the findings are KEPT and annotated; the verifier wave rules on them, not this gate`);
+  }
+  // Same register again: a read-coverage shortfall the leaf did not close. The
+  // output is KEPT (D9) — this line only tells the reader how much it read and
+  // what it missed (first 3, then a count).
+  for (const cg of coverageGaps) {
+    const missed = cg.missed || [];
+    const shown = missed.slice(0, 3).join(", ");
+    const more = missed.length > 3 ? `, +${missed.length - 3} more` : "";
+    const tail = missed.length ? `; missed: ${shown}${more}` : "";
+    lines.push(`${yellow("⚠")} ${bold(cg.id)}: read ${cg.read} of ${cg.required} required items — coverage ${cg.status}${tail}`);
   }
   if (digestPath) lines.push(`${bold("digest:")} ${green(digestPath)}`);
   else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);

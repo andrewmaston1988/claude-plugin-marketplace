@@ -348,7 +348,7 @@ prose. That is why the law above is a law.
 
 | Excuse | Reality |
 |---|---|
-| "The verifier can just be part of the consumer leaf." | A leaf checking its own input is not verification — it has every incentive the finder had. The verifier is its own task, `after` the finder, fed `{{resultPath:}}`, on a different model family. **Observed: a verifier wave folded into its consumer.** |
+| "The verifier can just be part of the consumer leaf." | A leaf checking its own input is not verification — it has every incentive the finder had. The verifier is its own task, `after` the finder, fed `{{resultPath:}}`, on a different model — a Claude verifier on a different tier from its finder, a non-Claude one on a different family. **Observed: a verifier wave folded into its consumer.** |
 | "I know there are six items — I'll write the six leaves out." | If the list comes from a dependency's *output*, the count is a runtime fact and hand-expanding it hardcodes today's answer. `forEach` clones from the actual result. **Observed: hand-expanded static leaves.** |
 | "The branches will merge fine, an integrate node is ceremony." | Sibling private trees never see each other. Without the node the merge silently becomes the next leaf's job, and nothing announces it. **Observed: a dropped integrate node.** |
 | "Clone ids don't exist until runtime, I'll hand-list the leaves I expect." | `integrate.from` accepts the `forEach` task's own id and resolves to every clone that expanded, in order. Hand-listing hardcodes today's count. |

@@ -7,7 +7,7 @@ import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary,
   writeDigestMd, appendRunLog, formatTokens, renderRoster, renderStatus, formatClosing,
   heartbeatPath, stopPath, touchHeartbeat, readHeartbeat,
-  gradeFooter,
+  gradeFooter, mechanicalOf,
 } from "../src/results.mjs";
 
 function tmp() {
@@ -368,6 +368,28 @@ test("formatClosing renders a loud refutation line, kept-not-deleted", () => {
   ok(out.includes("1 of 39"), out);
   ok(/verif/i.test(out), "must say the findings are for the verifier to rule on: " + out);
   ok(!/deleted|removed|dropped/i.test(out), "must not imply the findings were destroyed: " + out);
+});
+
+// A coverage shortfall is the third loud-not-fatal line, same register as a
+// refuted citation: the leaf kept its output, the reader is told how much it read.
+test("formatClosing renders a loud coverage-gap line, kept-not-failed", () => {
+  const out = formatClosing({
+    summaryPath: "S/summary.json", digestPath: "d",
+    coverageGaps: [{ id: "rv-arch", status: "incomplete", required: 5, read: 2, missed: ["a.mjs:1-40", "b.mjs:1-90", "c.mjs", "d.mjs"] }],
+  });
+  ok(out.includes("rv-arch"), out);
+  ok(out.includes("read 2 of 5 required items"), out); // test-plan row 78 literal
+  ok(out.includes("incomplete"), out);
+  ok(/a\.mjs:1-40/.test(out) && /\+1 more/.test(out), "first 3 missed + overflow count: " + out);
+  ok(!/failed|deleted/i.test(out), "a shortfall never reads as a failed leaf: " + out);
+});
+
+// mechanicalOf is a projection a grade row copies — coverage must ride along so
+// `swarm grade --init` rows carry it; a resultless value is null, never dropped.
+test("mechanicalOf carries coverage, null when absent", () => {
+  const cov = { status: "incomplete", required: 5, read: 2, missed: ["a.mjs:1-40"] };
+  deepEqual(mechanicalOf({ ok: true, coverage: cov }).coverage, cov);
+  equal(mechanicalOf({ ok: true }).coverage, null);
 });
 
 // A record with no kind is a legacy forEach record — must not vanish silently.

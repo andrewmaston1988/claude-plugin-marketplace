@@ -1,5 +1,5 @@
 // N3 mechanical citation verification — all tests for src/citations.mjs and
-// its enforceReturns/manifest/CLI integration live in this one file.
+// its enforceLeafContract/manifest/CLI integration live in this one file.
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
@@ -254,7 +254,7 @@ test("verifyCitations: a fragment of a 200-char decompiled line verifies (false-
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// ── enforceReturns integration (runPlan + fake io) ────────────────────────────
+// ── enforceLeafContract integration (runPlan + fake io) ───────────────────────
 
 const CFG = {
   provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },

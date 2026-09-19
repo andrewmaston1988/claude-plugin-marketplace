@@ -258,7 +258,7 @@ test("pickNewestRunning: picks the later-started running id", () => {
 });
 
 // VALVE RACE: `state` stays "running" until the terminal record() call, which
-// lands after settle() → enforceReturns → collect() → writeResult — a leaf
+// lands after settle() → enforceLeafContract → collect() → writeResult — a leaf
 // whose child has already exited (settle ran, record() hasn't caught up) must
 // never be the valve's pick just because `state` hasn't caught up yet.
 test("pickNewestRunning: a dead child is skipped even though its state still reads 'running'", () => {
@@ -1946,7 +1946,7 @@ test("returns: invalid output gets one teaching re-ask via session resume, then 
     deepEqual(res.tokens, { input: 150, output: 15, cacheCreation: 0, cacheRead: 0 });
 
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-    ok(logLines.some((l) => l.event === "schema-retry" && l.id === "a"), "expected schema-retry in run.log");
+    ok(logLines.some((l) => l.event === "leaf-contract-retry" && l.id === "a"), "expected leaf-contract-retry in run.log");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
