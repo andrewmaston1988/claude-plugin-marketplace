@@ -1946,7 +1946,7 @@ test("returns: invalid output gets one teaching re-ask via session resume, then 
     deepEqual(res.tokens, { input: 150, output: 15, cacheCreation: 0, cacheRead: 0 });
 
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-    ok(logLines.some((l) => l.event === "schema-retry" && l.id === "a"), "expected schema-retry in run.log");
+    ok(logLines.some((l) => l.event === "leaf-contract-retry" && l.id === "a"), "expected leaf-contract-retry in run.log");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

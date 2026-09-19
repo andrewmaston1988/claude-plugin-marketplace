@@ -14,6 +14,9 @@ import {
 } from "../src/coverage.mjs";
 import { loadManifest, effectivePlanDoc, ValidationError, MUST_READ_MAX_ENTRIES } from "../src/manifest.mjs";
 import { runnerOf } from "../src/dispatch.mjs";
+import { runPlan } from "../src/scheduler.mjs";
+import { readResult, transcriptPath } from "../src/results.mjs";
+import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/coverage/", import.meta.url));
 const fixture = (f) => readFileSync(join(FIXTURES, f), "utf8");
@@ -401,5 +404,225 @@ test("mustRead: a non-claude runner task is rejected naming the runner, with NO 
     const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "glm-4.6:cloud", mustRead: ["README.md"] }] });
     const errs = manErrors(() => loadManifest(p, cfg, dir, { io: { platform: "linux" } }));
     ok(errs.some((e) => /runner 'ollama' is not supported/.test(e)), errs.join("\n")); // mutation: win32 guard → passes on linux
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── enforceLeafContract integration (runPlan + fake io) ───────────────────────
+
+const iCfg = {
+  provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "x", allowedRoots: [] },
+  concurrency: 4, timeoutMs: 600000, resultInlineCap: 4000, worktreeBranchPrefix: "swarm/",
+};
+const iTask = (id, cwd, over = {}) => ({
+  id, prompt: `do ${id}`, model: "haiku", allowedTools: "Read,Grep,Glob",
+  cwd, originalCwd: cwd, scratchRedirect: false, timeoutMs: 5000, after: [], ...over,
+});
+const iPlan = (dir, tasks) => ({ cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, tasks, goal: "" });
+// One claude leaf's stdout: an init (session id), Read turns, and a success result.
+// withAsst:false omits the assistant event entirely — the unparseable case.
+const leafOut = (reads, { sid = "s-1", result = "done", withInit = true } = {}) => [
+  ...(withInit ? [JSON.stringify({ type: "system", subtype: "init", session_id: sid })] : []),
+  ...(reads.length ? readTurns(reads) : []),
+  JSON.stringify({ type: "result", subtype: "success", is_error: false, result }),
+].join("\n") + "\n";
+const noAsstOut = ({ sid = "s-1", result = "done" } = {}) => [
+  JSON.stringify({ type: "system", subtype: "init", session_id: sid }),
+  JSON.stringify({ type: "result", subtype: "success", is_error: false, result }),
+].join("\n") + "\n";
+const logEvents = (dir) => readFileSync(join(dir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+const writeLines = (dir, name, n) => { const p = join(dir, name); writeFileSync(p, "x\n".repeat(n)); return p; };
+const ANSWER_SCHEMA = { type: "object", required: ["answer"], properties: { answer: { type: "string" } } };
+
+test("integration: mustRead complete on first pass → no re-ask; coverage complete; run.log coverage retried:false", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 3);
+    const spawn = fakeSpawnFactory(() => ({ output: leafOut([{ file: F, offset: 1, limit: 2000 }]) }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F] })]);
+    await runPlan(p, iCfg, io);
+    equal(spawn.calls.length, 1);
+    const res = readResult(p.resultsDir, "a");
+    deepEqual(
+      { status: res.coverage.status, required: res.coverage.required, read: res.coverage.read },
+      { status: "complete", required: 1, read: 1 },
+    );
+    ok(logEvents(p.resultsDir).some((l) => l.event === "coverage" && l.id === "a" && l.status === "complete" && l.retried === false));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: incomplete first pass → ONE re-ask naming the gap; appended reads → complete; schemaRetried", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const spawn = fakeSpawnFactory((call, i) => ({
+      output: leafOut([{ file: F, offset: i === 0 ? 1 : 2001, limit: i === 0 ? 2000 : 500 }], { sid: `s-${i + 1}` }),
+    }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F] })]);
+    await runPlan(p, iCfg, io);
+    equal(spawn.calls.length, 2);
+    ok(promptOf(spawn.calls[1]).includes("Read offset 2001 limit 500"), promptOf(spawn.calls[1]));
+    const res = readResult(p.resultsDir, "a");
+    equal(res.coverage.status, "complete");
+    equal(res.schemaRetried, true);
+    ok(logEvents(p.resultsDir).some((l) => l.event === "coverage" && l.retried === true && l.status === "complete"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: schema miss AND coverage miss → ONE combined retry carrying both blocks, one spawn", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const spawn = fakeSpawnFactory((call, i) => ({
+      output: leafOut(
+        [{ file: F, offset: i === 0 ? 1 : 2001, limit: i === 0 ? 2000 : 500 }],
+        { sid: `s-${i + 1}`, result: i === 0 ? "{}" : JSON.stringify({ answer: "x" }) },
+      ),
+    }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { returns: ANSWER_SCHEMA, mustRead: [F] })]);
+    await runPlan(p, iCfg, io);
+    equal(spawn.calls.length, 2);
+    const rp = promptOf(spawn.calls[1]);
+    ok(rp.includes("returns schema"), rp);
+    ok(rp.includes("You did not read everything this task requires"), rp);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true);
+    equal(res.coverage.status, "complete");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: still incomplete after the re-ask → leaf ok, output intact, coverage incomplete, summary.coverageGaps", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    // both passes only ever read the first 2000 lines → the 2001-2500 gap survives
+    const spawn = fakeSpawnFactory((call, i) => ({ output: leafOut([{ file: F, offset: 1, limit: 2000 }], { sid: `s-${i + 1}`, result: "kept" }) }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F] })]);
+    const r = await runPlan(p, iCfg, io);
+    equal(spawn.calls.length, 2);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true);
+    equal(res.output, "kept");
+    equal(res.coverage.status, "incomplete");
+    ok(res.coverage.missed.some((m) => /2001-2500/.test(m)), res.coverage.missed.join());
+    ok(r.summary.coverageGaps?.some((g) => g.id === "a" && g.status === "incomplete"), JSON.stringify(r.summary.coverageGaps));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: unparseable transcript on an ok leaf → status unparseable, all items missed, re-ask fires", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 3);
+    const spawn = fakeSpawnFactory(() => ({ output: noAsstOut() }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F] })]);
+    await runPlan(p, iCfg, io);
+    equal(spawn.calls.length, 2); // the re-ask still fires on an unparseable first pass
+    ok(promptOf(spawn.calls[1]).includes("You did not read everything this task requires"));
+    const res = readResult(p.resultsDir, "a");
+    equal(res.coverage.status, "unparseable");
+    deepEqual(res.coverage.missed, [F]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: no session id → no re-ask; coverage annotated from the first pass", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const spawn = fakeSpawnFactory(() => ({ output: leafOut([{ file: F, offset: 1, limit: 2000 }], { withInit: false }) }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F] })]);
+    await runPlan(p, iCfg, io);
+    equal(spawn.calls.length, 1);
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true);
+    equal(res.coverage.status, "incomplete");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: mustRead WITHOUT returns still runs the contract (re-ask fires, output untouched)", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    const spawn = fakeSpawnFactory((call, i) => ({ output: leafOut([{ file: F, offset: 1, limit: 2000 }], { sid: `s-${i + 1}`, result: "prose answer" }) }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F] })]); // no returns
+    await runPlan(p, iCfg, io);
+    equal(spawn.calls.length, 2); // mutation: gate on task.returns → no re-ask, one spawn
+    const res = readResult(p.resultsDir, "a");
+    equal(res.output, "prose answer");
+    ok(res.coverage);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: resume opens the transcript with flags:a — a --force run truncates", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "big.mjs", 2500);
+    // run 1: the leaf FAILS (exit 1) but records a session and a first-2000 Read
+    const spawn1 = fakeSpawnFactory(() => ({ exit: 1, output: [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s-1" }),
+      ...readTurns([{ file: F, offset: 1, limit: 2000 }]),
+    ].join("\n") + "\n" }));
+    const io1 = makeIo(spawn1);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F] })]);
+    await runPlan(p, iCfg, io1);
+    equal(readResult(p.resultsDir, "a").ok, false);
+
+    // run 2: resume (not --force). Its Read of 2001-2500 must APPEND to run 1's log,
+    // so the combined transcript covers the whole file.
+    const spawn2 = fakeSpawnFactory(() => ({ output: leafOut([{ file: F, offset: 2001, limit: 500 }], { sid: "s-2" }) }));
+    const io2 = makeIo(spawn2);
+    await runPlan(p, iCfg, io2);
+    const log = readFileSync(transcriptPath(p.resultsDir, "a"), "utf8");
+    ok(/"offset":1[,}]/.test(log) && /"offset":2001/.test(log), "both attempts' Reads present"); // mutation: always truncate → only 2001 present
+    equal(readResult(p.resultsDir, "a").coverage.status, "complete");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: a child manifest's mustRead {{resultPath:local}} is remapped by expandManifest", async () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "child.json"), JSON.stringify({
+      tasks: [
+        { id: "finder", prompt: "find", model: "haiku", allowedTools: "Read" },
+        { id: "vf", prompt: "verify {{result:finder}}", model: "haiku", allowedTools: "Read", after: ["finder"], mustRead: ["{{resultPath:finder}}"] },
+      ],
+    }));
+    const spawn = fakeSpawnFactory(() => ({ output: leafOut([], { result: "x" }) }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [{ ...iTask("node", dir), childPlan: { tasks: [
+      { id: "finder", prompt: "find", model: "haiku", allowedTools: "Read", after: [] },
+      { id: "vf", prompt: "verify {{result:finder}}", model: "haiku", allowedTools: "Read", after: ["finder"], mustRead: ["{{resultPath:finder}}"] },
+    ] } }]);
+    await runPlan(p, iCfg, io);
+    const res = readResult(p.resultsDir, "node~vf");
+    ok(res.coverage, "vf carries coverage");
+    // remap: {{resultPath:finder}} → the finder's REAL result file (node~finder.json, which
+    // exists) — a whole-file entry the leaf read nothing of, so it lands in missed by name.
+    // mutation (un-remapped): {{resultPath:finder}} → a nonexistent finder.json → unreadable.
+    ok(res.coverage.missed.some((m) => m.includes("node~finder.json")), JSON.stringify(res.coverage));
+    ok(!res.coverage.missed.some((m) => /unreadable/.test(m)), JSON.stringify(res.coverage));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: swarm ask on a mustRead leaf runs no contract — no coverage event, coverage unchanged", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 3);
+    const spawn = fakeSpawnFactory(() => ({ output: leafOut([{ file: F, offset: 1, limit: 2000 }]) }));
+    const io = makeIo(spawn);
+    const p = iPlan(dir, [iTask("a", dir, { mustRead: [F] })]);
+    await runPlan(p, iCfg, io);
+    const before = readResult(p.resultsDir, "a").coverage;
+    const covEventsBefore = logEvents(p.resultsDir).filter((l) => l.event === "coverage").length;
+    const io2 = makeIo(fakeSpawnFactory(() => ({ output: leafOut([], { sid: "s-9", result: "an answer" }) })));
+    await runPlan(p, iCfg, io2, { ask: { taskId: "a", question: "why?" } });
+    const after = readResult(p.resultsDir, "a");
+    deepEqual(after.coverage, before); // the ask never re-checks
+    equal(logEvents(p.resultsDir).filter((l) => l.event === "coverage").length, covEventsBefore); // no new coverage event
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
