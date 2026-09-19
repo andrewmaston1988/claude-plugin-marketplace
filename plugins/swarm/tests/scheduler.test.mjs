@@ -258,7 +258,7 @@ test("pickNewestRunning: picks the later-started running id", () => {
 });
 
 // VALVE RACE: `state` stays "running" until the terminal record() call, which
-// lands after settle() → enforceReturns → collect() → writeResult — a leaf
+// lands after settle() → enforceLeafContract → collect() → writeResult — a leaf
 // whose child has already exited (settle ran, record() hasn't caught up) must
 // never be the valve's pick just because `state` hasn't caught up yet.
 test("pickNewestRunning: a dead child is skipped even though its state still reads 'running'", () => {

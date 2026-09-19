@@ -386,6 +386,16 @@ test("mustRead: {{resultPath:x}} where x ∉ after → error; {{result:x}} anywh
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("mustRead: an empty array is an error, never a vacuous complete", () => {
+  // RED: no length check — required 0 stamps coverage complete and validate announces enforcement.
+  const dir = tmp();
+  try {
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku", mustRead: [] }] });
+    const errs = manErrors(() => loadManifest(p, manCfg, dir));
+    ok(errs.some((e) => /'a': mustRead is empty/.test(e)), errs.join("\n"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("mustRead: over MUST_READ_MAX_ENTRIES → error suggesting an index", () => {
   const dir = tmp();
   try {

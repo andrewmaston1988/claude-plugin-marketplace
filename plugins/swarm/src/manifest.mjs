@@ -736,6 +736,10 @@ function validateMustRead(rawTasks, errors, label) {
       errors.push(`${l}: mustRead must be an array of entries — e.g. ["src/a.mjs", {"path": "b.mjs", "lines": [[1, 200]]}]`);
       continue;
     }
+    if (t.mustRead.length === 0) {
+      errors.push(`${l}: mustRead is empty — it would prove nothing yet read as complete; list the files the leaf must Read, or drop the field`);
+      continue;
+    }
     if (t.mustRead.length > MUST_READ_MAX_ENTRIES) {
       errors.push(`${l}: mustRead has ${t.mustRead.length} entries, over the ${MUST_READ_MAX_ENTRIES} limit — declare an index entry ({"index": "<path>"}) the engine expands at check time instead`);
     }
