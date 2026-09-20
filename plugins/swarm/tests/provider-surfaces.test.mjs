@@ -3,6 +3,7 @@ import { deepEqual, equal, ok } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import http from "node:http";
 import { fixtureRegistry, fixtureRunner, FIXTURE_MODEL } from "./fixtures/fourth-provider.mjs";
 import { refreshModelsCache, readModelsCache, writeCompositeModelsCache } from "../src/discovery.mjs";
@@ -50,6 +51,8 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
   const home = mkdtempSync(join(tmpdir(), "swarm-fourth-provider-"));
   const root = join(home, "repo");
   mkdirSync(root, { recursive: true });
+  // Runs are filed under the dispatching repo's toplevel, so a non-repo cwd is refused.
+  spawnSync("git", ["init", "-q"], { cwd: root, windowsHide: true });
   const manifest = join(root, "manifest.json");
   // loadManifest takes no env, so without an explicit resultsDir the run home
   // resolves against the real ~/.swarm.

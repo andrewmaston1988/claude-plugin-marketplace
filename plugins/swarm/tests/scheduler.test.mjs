@@ -2028,7 +2028,7 @@ test("a schema correction turn resumes the same Codex thread and logs its identi
     equal(spawn.calls.length, 2);
     ok(spawn.calls[1].args.includes("resume") && spawn.calls[1].args.includes("thread-fix"));
     const log = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-    ok(log.some((e) => e.event === "schema-retry" && e.provider === "codex" && e.runner === "codex"));
+    ok(log.some((e) => e.event === "leaf-contract-retry" && e.provider === "codex" && e.runner === "codex"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
