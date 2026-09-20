@@ -344,24 +344,89 @@ test("template ref to a non-dependency id rejected", () => {
   }
 });
 
-test("Claude-tier effort matrix enforced; open-model effort passes through", () => {
+test("effort resolves from the manifest, provider declaration, or medium", () => {
   const dir = tmp();
   try {
-    const bad = writeManifest(dir, {
-      tasks: [claudeTask({ effort: "max" })], // haiku has no max
-    }, "bad.json");
-    const errs = errorsOf(() => loadManifest(bad, CFG, dir));
-    ok(errs.some((e) => e.includes("effort 'max'") && e.includes("haiku")), errs.join("|"));
-
-    const cfgAllowed = { ...CFG, provider: { allowedRoots: [dir] } };
+    const cfg = {
+      ...CFG,
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, allowedRoots: [dir] },
+        codex: { enabled: true, allowedRoots: [dir] },
+      },
+    };
     const good = writeManifest(dir, {
       tasks: [
-        { id: "o", prompt: "p", provider: "ollama", model: "glm-4.6:cloud", effort: "xhigh" },
-        claudeTask({ id: "s", provider: "claude", model: "claude-sonnet-5", effort: "max" }),
+        { id: "c", prompt: "p", model: "gpt-5.5", provider: "codex", isolation: "none" },
+        { id: "s", prompt: "p", model: "claude-sonnet-5", provider: "claude", effort: "xhigh", isolation: "none" },
+        { id: "h", prompt: "p", model: "claude-haiku-4-5-20251001", provider: "claude", effort: "max", isolation: "none" },
+        { id: "u", prompt: "p", model: "claude-opus-4-8", provider: "claude", effort: "max", isolation: "none" },
       ],
     }, "good.json");
-    const plan = loadManifest(good, cfgAllowed, dir);
-    equal(plan.tasks[0].effort, "xhigh");
+    const plan = loadManifest(good, cfg, dir, {
+      cache: [
+        { provider: "codex", model: "gpt-5.5", efforts: ["low", "medium", "high", "xhigh"] },
+        { provider: "claude", model: "claude-sonnet-5", efforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "high" },
+        { provider: "claude", model: "claude-haiku-4-5-20251001", defaultEffort: undefined },
+      ],
+    });
+    equal(plan.tasks.find((t) => t.id === "c").effort, "medium");
+    equal(plan.tasks.find((t) => t.id === "s").effort, "xhigh");
+    equal(plan.tasks.find((t) => t.id === "h").effort, "max");
+    equal(plan.tasks.find((t) => t.id === "u").effort, "max");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("declared effort contradictions name the model and allowed values, including fallback", () => {
+  const dir = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, allowedRoots: [dir] },
+        codex: { enabled: true, allowedRoots: [dir] },
+      },
+    };
+    const cache = [{ provider: "codex", model: "gpt-5.5", efforts: ["low", "medium", "high", "xhigh"] }];
+    const path = writeManifest(dir, {
+      tasks: [claudeTask({ model: "claude-sonnet-5", effort: "max", fallbackModel: "gpt-5.5", fallbackProvider: "codex", isolation: "none" })],
+    });
+    const errors = errorsOf(() => loadManifest(path, cfg, dir, { cache }));
+    ok(errors.some((e) => e.includes("gpt-5.5") && e.includes("low, medium, high, xhigh")), errors.join("\n"));
+
+    const xhigh = writeManifest(dir, {
+      tasks: [{ id: "g", prompt: "p", model: "gpt-5.5", provider: "codex", effort: "xhigh", isolation: "none" }],
+    }, "xhigh.json");
+    equal(loadManifest(xhigh, cfg, dir, { cache }).tasks[0].effort, "xhigh");
+
+    const empty = writeManifest(dir, {
+      tasks: [claudeTask({ effort: "", isolation: "none" })],
+    }, "empty.json");
+    ok(errorsOf(() => loadManifest(empty, cfg, dir)).some((e) => /effort must be a non-empty string/.test(e)));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("compute, manifest, and integrate nodes carry no effort", () => {
+  const dir = tmp();
+  try {
+    const child = writeManifest(dir, { tasks: [claudeTask({ id: "child", isolation: "none" })] }, "child.json");
+    const path = writeManifest(dir, {
+      tasks: [
+        { id: "compute", compute: "1 == 1" },
+        { id: "writer", prompt: "write", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit", isolation: "worktree" },
+        { id: "integrate", after: ["writer"], integrate: { into: "feat", from: ["writer"] } },
+        { id: "manifest", manifest: child },
+      ],
+    }, "agentless.json");
+    const plan = loadManifest(path, CFG, dir);
+    equal(plan.tasks.find((t) => t.id === "compute").effort, undefined);
+    equal(plan.tasks.find((t) => t.id === "integrate").effort, undefined);
+    equal(plan.tasks.find((t) => t.id === "manifest").effort, undefined);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

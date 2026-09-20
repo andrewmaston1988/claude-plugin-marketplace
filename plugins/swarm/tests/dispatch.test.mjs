@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { buildDispatch, toSpawnable, resolveExecutable, windowsCommandLineLength, mcpTools } from "../src/dispatch.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
 
 // The MCP roster is the operator's own machine; pin it out of argv assertions.
 const NO_MCP = () => [];
@@ -18,7 +19,7 @@ const CFG = {
 };
 
 const task = (over = {}) => ({
-  id: "t", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob", ...over,
+  id: "t", provider: "claude", model: "claude-haiku-4-5-20251001", effort: "medium", allowedTools: "Read,Grep,Glob", ...over,
 });
 
 // Every dispatch asks for stream-json so the engine can extract the final
@@ -31,14 +32,14 @@ test("claude model: exact argv, no env overrides", () => {
   deepEqual(d.env, {});
 });
 
-test("claude model without effort omits --effort", () => {
+test("claude model with the normalized default carries --effort", () => {
   const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
 });
 
 test("open model env mode: same argv plus exact env trio, model verbatim", () => {
   const d = buildDispatch(task({ provider: "ollama", model: "minimax-m3:cloud" }), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "minimax-m3:cloud", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "minimax-m3:cloud", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {
     ANTHROPIC_BASE_URL: "http://localhost:11434",
     ANTHROPIC_API_KEY: "ollama",
@@ -48,7 +49,7 @@ test("open model env mode: same argv plus exact env trio, model verbatim", () =>
 
 test("contextWindow 1m suffixes only the CLI model name, keeping the provider model bare", () => {
   const d = buildDispatch(task({ provider: "ollama", model: "glm-5.3:cloud", contextWindow: "1m" }), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "glm-5.3:cloud[1m]", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "glm-5.3:cloud[1m]", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {
     ANTHROPIC_BASE_URL: "http://localhost:11434",
     ANTHROPIC_API_KEY: "ollama",
@@ -115,7 +116,7 @@ test("task.settings adds --settings <json> right after --allowedTools", () => {
 
 test("no settings key: exact argv, no --settings", () => {
   const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   ok(!d.argv.includes("--settings"));
 });
 
@@ -131,7 +132,7 @@ test("disable1mContext: false + Claude model injects --settings with the 1M env 
 test("disable1mContext: true + no task settings → no --settings (byte-identical to the shipped-default argv)", () => {
   const cfg = { ...CFG, disable1mContext: true };
   const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5" }), "p", cfg, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-sonnet-5", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-sonnet-5", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   ok(!d.argv.includes("--settings"));
 });
 
@@ -173,6 +174,31 @@ test("Codex dispatch: provider registry selects exact fresh argv, runner, and pa
   equal(d.runner, "codex");
   equal(d.parser, "codex");
   deepEqual(d.env, {});
+});
+
+test("Codex leaf with no manifest effort dispatches medium", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-dispatch-effort-"));
+  try {
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5.5", provider: "codex", isolation: "none" }],
+    }));
+    const cfg = {
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, allowedRoots: [dir] },
+        codex: { enabled: true, path: "codex", allowedRoots: [dir] },
+      },
+    };
+    const plan = loadManifest(manifest, cfg, dir, {
+      cache: [{ provider: "codex", model: "gpt-5.5", efforts: ["low", "medium", "high", "xhigh"] }],
+    });
+    equal(plan.tasks[0].effort, "medium");
+    const d = buildDispatch({ ...plan.tasks[0], effort: undefined }, "inspect", cfg);
+    equal(d.argv[d.argv.indexOf("model_reasoning_effort=\"medium\"") - 1], "-c");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("Codex dispatch refuses contextWindow instead of ignoring it", () => {

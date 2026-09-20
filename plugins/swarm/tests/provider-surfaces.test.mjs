@@ -62,7 +62,9 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
   // resolves against the real ~/.swarm.
   writeFileSync(manifest, JSON.stringify({ resultsDir: join(home, "run"), tasks: [{ id: "inspect", provider: "fixture", model: FIXTURE_MODEL, prompt: "inspect" }] }));
   const cfg = config(root);
-  const env = { ...process.env, SWARM_HOME: home };
+  // HOME too, not just SWARM_HOME: the claude adapter's discoverModels reads
+  // ~/.claude/cache/model-catalog, so a real one would add rows this roster asserts against.
+  const env = { ...process.env, SWARM_HOME: home, HOME: home, USERPROFILE: home };
   const registry = fixtureRegistry();
   try {
     const refreshed = await refreshModelsCache({ config: cfg, env, registry, providers: ["fixture"] });
@@ -174,7 +176,9 @@ test("CLI roster hides disabled/denylisted cached providers", async () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-fourth-provider-roster-"));
   const root = join(home, "repo");
   mkdirSync(root, { recursive: true });
-  const env = { ...process.env, SWARM_HOME: home };
+  // HOME too, not just SWARM_HOME: the claude adapter's discoverModels reads
+  // ~/.claude/cache/model-catalog, so a real one would add rows this roster asserts against.
+  const env = { ...process.env, SWARM_HOME: home, HOME: home, USERPROFILE: home };
   const registry = fixtureRegistry({ model: "claude-haiku-4-5-20251001" });
   const cfg = config(root);
   try {

@@ -309,7 +309,7 @@ export function normalizeOllamaModelDescriptor(row) {
     runner: "claude",
   };
   const source = typeof row === "object" ? row : {};
-  for (const field of ["displayName", "efforts", "modalities", "isDefault", "availability"]) {
+  for (const field of ["displayName", "efforts", "defaultEffort", "modalities", "isDefault", "availability"]) {
     if (source[field] !== undefined) descriptor[field] = source[field];
   }
   if (descriptor.displayName === undefined && source.description) descriptor.displayName = source.description;
@@ -442,4 +442,3 @@ export async function refreshModelsCache({
   const path = writeCompositeModelsCache(models, env);
   return { models, path, errors };
 }
-

@@ -49,7 +49,7 @@ function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpToo
   const claudeArgs = [
     "-p", prompt,
     "--model", cliModel,
-    ...(task.effort ? ["--effort", task.effort] : []),
+    "--effort", task.effort ?? "medium",
     // MCP goes to every leaf: the roster is the operator's own, and a leaf that loses
     // scout falls back to grepping the tree.
     "--allowedTools", [task.allowedTools, ..._mcpTools()].filter(Boolean).join(","),

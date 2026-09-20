@@ -56,15 +56,20 @@ function writeFinishedRun(resultsDir, worktreesKept) {
 test("validate: bad manifest exits 1 with readable errors", () => {
   const dir = tmp();
   try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "models-cache.json"), JSON.stringify({ models: [
+      { provider: "claude", model: "claude-sonnet-5", efforts: ["low", "medium", "high", "xhigh"] },
+    ] }));
     const p = join(dir, "bad.json");
     writeFileSync(p, JSON.stringify({
       tasks: [
         { id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" },
-        { id: "a", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001", effort: "max" },
+        { id: "a", prompt: "y", provider: "claude", model: "claude-sonnet-5", effort: "max" },
         { id: "b", prompt: "{{result:ghost}}", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 1);
     ok(r.stderr.includes("duplicate id"), r.stderr);
     ok(r.stderr.includes("effort 'max'"), r.stderr);
@@ -243,6 +248,11 @@ test("validate: the store is read once for the block, and not at all while silen
 test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
   const dir = tmp();
   try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "models-cache.json"), JSON.stringify({ models: [
+      { provider: "claude", model: "claude-sonnet-5", efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "high" },
+    ] }));
     const shimLog = join(dir, "shim.log");
     const manifest = join(dir, "sweep.json");
     writeFileSync(manifest, JSON.stringify({
@@ -258,7 +268,7 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     const r = runCli(["run", manifest], {
       cwd: dir,
       quotaPreflight: false,
-      env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "leaf-output-text" },
+      env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "leaf-output-text" },
     });
     equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
 
@@ -299,6 +309,8 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     equal(calls.length, 4);
     const scanB = calls.find((c) => c.argv[c.argv.indexOf("-p") + 1] === "look b");
     equal(scanB.argv[scanB.argv.indexOf("--effort") + 1], "high");
+    const scanC = calls.find((c) => c.argv[c.argv.indexOf("-p") + 1] === "look c");
+    equal(scanC.argv[scanC.argv.indexOf("--effort") + 1], "high");
     const digestCall = calls.find((c) => c.argv[c.argv.indexOf("-p") + 1].includes("digest stage"));
     ok(digestCall, "digest dispatched via claude");
     // MCP is appended to every leaf; pin the digest's own tool, not the whole string.

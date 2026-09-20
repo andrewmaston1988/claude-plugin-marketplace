@@ -340,7 +340,7 @@ export function buildCodexInvocation(task, prompt, context = {}) {
   const sessionId = task.resume || task.sessionId;
   const args = ["exec", "--json"];
   if (task.model) args.push("--model", task.model);
-  writeEffortArg(args, task.effort || task.reasoningEffort);
+  writeEffortArg(args, task.effort ?? task.reasoningEffort ?? "medium");
   writeSandboxArg(args, task, context);
   const addDirs = task.additionalDirs || context.additionalDirs || cfg.additionalDirs || [];
   for (const dir of Array.isArray(addDirs) ? addDirs : [addDirs]) {
