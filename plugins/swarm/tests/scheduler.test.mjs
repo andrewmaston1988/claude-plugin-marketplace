@@ -33,7 +33,6 @@ function task(id, over = {}) {
     allowedTools: "Read,Grep,Glob",
     cwd: over.cwd || tmpdir(),
     originalCwd: over.cwd || tmpdir(),
-    scratchRedirect: false,
     timeoutMs: 5000,
     after: [],
     ...over,
@@ -1150,19 +1149,34 @@ test("open-model dispatch passes env trio through real spawn (shim log)", async 
   }
 });
 
-test("scratch-redirected task gets its cwd created before spawn", async () => {
+test("a private-mode leaf spawns at the same depth inside its worktree; an explicit worktree leaf at the root", async () => {
+  const repo = initGitRepo();
   const dir = tmp();
   try {
-    let seenCwd;
-    const spawn = fakeSpawnFactory((call) => { seenCwd = call.opts.cwd; return {}; });
-    const io = makeIo(spawn);
-    const scratch = join(dir, "run", "scratch-gen");
-    const p = plan(dir, [task("gen", { cwd: scratch, scratchRedirect: true, allowedTools: "Write" })]);
-    await runPlan(p, CFG, io);
-    equal(seenCwd, scratch);
-    ok(existsSync(scratch));
+    mkdirSync(join(repo, "sub"));
+    writeFileSync(join(repo, "sub", "y.txt"), "y\n");
+    commitAllInRepo(repo, "sub");
+    const cwds = [];
+    const spawn2 = fakeSpawnFactory((call) => { cwds.push(call.opts.cwd); return {}; });
+    const sub = join(repo, "sub");
+    const p = plan(repo, [
+      task("gen", { cwd: sub, originalCwd: sub, allowedTools: "Bash", isolationMode: "private", isolation: "worktree",
+        worktreeName: "gen", branchScope: "scope1", repoToplevel: repo }),
+    ], { resultsDir: join(dir, "run"), concurrency: 1 });
+    await runPlan(p, CFG, makeIo(spawn2));
+    equal(cwds.length, 1);
+    equal(cwds[0], join(dir, "run", "wt-gen", "sub"));
+
+    const cwds2 = [];
+    const spawn3 = fakeSpawnFactory((call) => { cwds2.push(call.opts.cwd); return {}; });
+    const p2 = plan(repo, [
+      task("expl", { cwd: sub, originalCwd: sub, allowedTools: "Bash", isolation: "worktree", worktreeName: "expl" }),
+    ], { resultsDir: join(dir, "run2"), concurrency: 1 });
+    await runPlan(p2, CFG, makeIo(spawn3));
+    equal(cwds2[0], join(dir, "run2", "wt-expl"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
   }
 });
 
@@ -2436,7 +2450,7 @@ test("child compute reads deps by local id through aliases", async () => {
       model: "manifest", prompt: "",
       childPlan: childPlanOf(
         task("get", { prompt: "list" }),
-        { id: "dedupe", model: "compute", prompt: "", allowedTools: "", cwd: tmpdir(), originalCwd: tmpdir(), scratchRedirect: false, timeoutMs: 5000, after: ["get"], compute: "unique_by(filter(deps['get'].xs, item > 0), '')" },
+        { id: "dedupe", model: "compute", prompt: "", allowedTools: "", cwd: tmpdir(), originalCwd: tmpdir(), timeoutMs: 5000, after: ["get"], compute: "unique_by(filter(deps['get'].xs, item > 0), '')" },
       ),
     });
     // unique_by needs objects; keep it simple: sum instead

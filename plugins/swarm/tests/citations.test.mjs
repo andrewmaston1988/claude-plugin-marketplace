@@ -274,7 +274,7 @@ const streamOut = (text, sid) => [
 function task(id, cwd, over = {}) {
   return {
     id, prompt: `do ${id}`, model: "haiku", allowedTools: "Read,Grep,Glob",
-    cwd, originalCwd: cwd, scratchRedirect: false, timeoutMs: 5000, after: [],
+    cwd, originalCwd: cwd, timeoutMs: 5000, after: [],
     ...over,
   };
 }

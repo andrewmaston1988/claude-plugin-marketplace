@@ -695,9 +695,9 @@ test("headroom: T6 five :cloud seats fetch the meter exactly once — the memo c
   }
 });
 
-// ── write-implies-isolation ───────────────────────────────────────────────────
+// ── default isolation ─────────────────────────────────────────────────────────
 
-test("write tools without isolation redirect cwd to scratch dir under resultsDir", () => {
+test("write tools without isolation get a private tree, cwd unchanged, no scratch dir", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
@@ -711,25 +711,31 @@ test("write tools without isolation redirect cwd to scratch dir under resultsDir
     });
     const plan = loadManifest(p, CFG, dir);
     const byId = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
-    equal(byId.gen.cwd, join(dir, "res", "scratch-gen"));
-    equal(byId.gen.scratchRedirect, true);
-    equal(byId.bash.cwd, join(dir, "res", "scratch-bash"));
-    equal(byId.impl.cwd, dir);                 // worktree isolation: no redirect
-    equal(byId.impl.scratchRedirect, false);
-    equal(byId.ro.cwd, dir);                   // read-only: no redirect
+    equal(byId.gen.isolationMode, "private");
+    equal(byId.gen.isolation, "worktree");
+    equal(byId.gen.worktreeName, "gen");
+    equal(byId.gen.cwd, dir);
+    equal(byId.bash.isolationMode, "private");
+    equal(byId.bash.worktreeName, "bash");
+    equal(byId.bash.cwd, dir);
+    equal(byId.impl.isolationMode, undefined); // explicit isolation: no mode, no scope
+    equal(byId.impl.branchScope, undefined);
+    equal(byId.impl.cwd, dir);
+    equal(byId.ro.isolationMode, "snapshot");
+    equal(byId.ro.cwd, dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("governance checks the ORIGINAL cwd, not the scratch redirect", () => {
+test("governance checks the ORIGINAL cwd, not the worktree the leaf runs in", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
       tasks: [{ id: "o", prompt: "p", model: "glm-4.6:cloud", allowedTools: "Write" }],
     });
-    // scratch redirect lands under resultsDir which is under dir — but the
-    // original cwd (dir) is outside allowedRoots, so it must still be denied.
+    // the worktree lands under resultsDir — but the original cwd (dir)
+    // is outside allowedRoots, so it must still be denied.
     const errs = errorsOf(() => loadManifest(p, CFG, dir));
     ok(errs.some((e) => e.includes("data governance")));
   } finally {
@@ -1442,14 +1448,16 @@ test("isolation object form rejects an empty or non-filename-safe worktree name"
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("a shared worktree suppresses the scratch redirect for write-capable leaves", () => {
+test("a shared worktree gets no default mode for write-capable leaves", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [
       claudeTask({ id: "p1", isolation: { worktree: "feat" }, allowedTools: "Read,Write" }),
     ] });
     const t = loadManifest(p, CFG, dir).tasks[0];
-    equal(t.scratchRedirect, false, "a named worktree is real isolation, not a scratch case");
+    equal(t.isolationMode, undefined, "an explicit named worktree is not a default-isolated leaf");
+    equal(t.branchScope, undefined);
+    equal(t.worktreeName, "feat");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

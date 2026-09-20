@@ -28,7 +28,7 @@ const streamOut = (text, sid) => [
 
 const leaf = (id, cwd, over = {}) => ({
   id, prompt: `do ${id}`, model: "glm-5.2:cloud", allowedTools: "Read",
-  cwd, originalCwd: cwd, scratchRedirect: false, timeoutMs: 5000, after: [],
+  cwd, originalCwd: cwd, timeoutMs: 5000, after: [],
   ...over,
 });
 

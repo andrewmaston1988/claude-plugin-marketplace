@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { effectivePlanDoc, argsFingerprint } from "../src/manifest.mjs";
@@ -22,9 +23,20 @@ function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-persist-"));
 }
 
+// Read-only leaves default to a snapshot tree, which needs a repo with a commit.
+function gitInit(dir) {
+  if (existsSync(join(dir, ".git"))) return;
+  const g = (a) => spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", ...a], { cwd: dir, windowsHide: true });
+  g(["init", "-q", "-b", "main"]);
+  writeFileSync(join(dir, "seed.txt"), "seed\n");
+  g(["add", "seed.txt"]);
+  g(["commit", "-q", "-m", "init"]);
+}
+
 // A loadManifest-built plan: normalized tasks, args substituted, explicit
 // resultsDir so nothing lands in the real swarm home.
 function loadPlan(dir, body, { args, ref } = {}) {
+  gitInit(dir);
   const p = join(dir, "plan.json");
   writeFileSync(p, JSON.stringify({ resultsDir: join(dir, "run"), ...body }));
   return loadManifest(p, CFG, dir, {

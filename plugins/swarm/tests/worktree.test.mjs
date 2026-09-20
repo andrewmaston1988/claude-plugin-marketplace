@@ -430,7 +430,7 @@ test("scheduler resume: a failed isolated leaf re-enters its kept worktree AND r
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
       tasks: [{
         id: "impl", prompt: "do it", model: "haiku", allowedTools: "Read,Edit,Bash",
-        cwd: repo, originalCwd: repo, scratchRedirect: false, isolation: "worktree", timeoutMs: 5000, after: [],
+        cwd: repo, originalCwd: repo, isolation: "worktree", timeoutMs: 5000, after: [],
       }],
     };
     const first = await runPlan(p, CFG, io);
@@ -468,7 +468,7 @@ test("scheduler integration: isolation task runs IN the worktree; summary lists 
       goal: "",
       tasks: [{
         id: "impl", prompt: "implement", model: "haiku", allowedTools: "Read,Edit,Bash",
-        cwd: repo, originalCwd: repo, scratchRedirect: false, isolation: "worktree",
+        cwd: repo, originalCwd: repo, isolation: "worktree",
         timeoutMs: 5000, after: [],
       }],
     };

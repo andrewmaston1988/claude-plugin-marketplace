@@ -430,7 +430,7 @@ const iCfg = {
 };
 const iTask = (id, cwd, over = {}) => ({
   id, prompt: `do ${id}`, model: "haiku", allowedTools: "Read,Grep,Glob",
-  cwd, originalCwd: cwd, scratchRedirect: false, timeoutMs: 5000, after: [], ...over,
+  cwd, originalCwd: cwd, timeoutMs: 5000, after: [], ...over,
 });
 const iPlan = (dir, tasks) => ({ cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, tasks, goal: "" });
 // One claude leaf's stdout: an init (session id), Read turns, and a success result.
