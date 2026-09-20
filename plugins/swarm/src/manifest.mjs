@@ -979,9 +979,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       if (provider) {
         primaryDeclared = declaredEfforts(t.model, provider, cache);
         resolvedEffort = effortFor(t, primaryDeclared);
-        if (t.effort !== undefined || resolvedEffort !== undefined) {
-          validateEffort(t.model, provider, resolvedEffort, primaryDeclared, l, errors);
-        }
+        validateEffort(t.model, provider, resolvedEffort, primaryDeclared, l, errors);
       }
       if (t.contextWindow === CONTEXT_WINDOW_1M && provider === "ollama" && providerConfig(cfg, "ollama").mode === "launch") {
         errors.push(`${l}: contextWindow "1m" is unsupported with Ollama launch mode because the launcher rejects [1m] model names — use env mode or remove contextWindow`);

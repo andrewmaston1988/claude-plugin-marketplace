@@ -1,7 +1,6 @@
 // Claude-family detection and provider-declared effort capabilities.
 
-import { identityKey, isClaudeModel, OLLAMA_CLOUD_RE } from "./contracts.mjs";
-import { createProviderRegistry, defaultProviderAdapters } from "./providers.mjs";
+import { identityKey, OLLAMA_CLOUD_RE } from "./contracts.mjs";
 
 export { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
 

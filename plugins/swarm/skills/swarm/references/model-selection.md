@@ -52,10 +52,8 @@ Swarm has no fixed roles: you invent the cast per manifest, so **derive each lea
 
 ### Provider-declared effort levels
 
-Every dispatching leaf receives an explicit effort. The manifest's `effort` wins;
-otherwise swarm uses the model's declared default, or `medium` when the model has no
-declared default. `swarm validate` rejects a value only when the model's own provider
-declares a list that omits it.
+Every dispatching leaf receives an explicit effort; `manifest-fields.md` → "Effort"
+owns how one is resolved and when `swarm validate` rejects it.
 
 Claude reads its levels and default from Claude Code's model catalog. Codex reads the
 effort list from its model cache and uses `medium` because the cache declares no
