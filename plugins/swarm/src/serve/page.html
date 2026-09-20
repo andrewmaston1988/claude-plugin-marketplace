@@ -249,7 +249,8 @@
   // ago()/elapsed/quiet rules live once, in live.js, behind window.swarmLive — pinned
   // by tests/live.test.mjs so the page and the test share the same copy.
   const ago = (ms) => window.swarmLive.agoText(ms, Date.now());
-  const tokTotal = (t) => t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
+  // Mirrors stream.mjs tokenTotal (processed total, cache reads included) — the browser cannot import it; serve.test.mjs pins the two together.
+  const tokTotal = (t) => t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) + (t.cacheRead || 0) : 0;
   // The server groups runs (grouping.mjs) and labels every row; the page only draws.
   // shortProject falls back to the raw key so an old payload still renders.
   // `let`: a runs build computes the next label map as a value; commitView swaps it in.

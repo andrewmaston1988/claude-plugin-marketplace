@@ -117,12 +117,12 @@ test("renderRoster: header, aligned rows, counts footer with total tokens", () =
   equal(lines[0], "swarm · demo-1 · 3 tasks · 4m12s");
   equal(lines[1], "");
   match(lines[2], /^ {2}✓ {2}alpha\s+glm-5\.2:cloud\s+71s\s+18\.2k$/);
-  match(lines[3], /^ {2}◐ {2}beta-long-id\s+haiku\s+252s\s+12\.4k$/);
+  match(lines[3], /^ {2}◐ {2}beta-long-id\s+haiku\s+252s\s+17\.4k$/);
   match(lines[4], /^ {2}· {2}digest\s+minimax-m3:cloud\s+—\s+—$/);
   // token cells right-align: rows with the same cell widths have equal length
   equal(lines[2].length, lines[3].length);
   equal(lines[5], "");
-  equal(lines[6], "  1 ok · 1 running · 1 pending · 30.6k tokens");
+  equal(lines[6], "  1 ok · 1 running · 1 pending · 35.6k tokens");
 });
 
 test("renderRoster: running rows show activity; stale rows warn quiet", () => {
@@ -277,9 +277,9 @@ test("renderStatus: rebuilds the roster from run.log with live tokens and elapse
     const out = renderStatus(rd, NOW);
     ok(out.includes(`run: ${rd}`), out);
     match(out, /✓ {2}a\s+haiku\s+30s\s+1\.5k/);
-    match(out, /◐ {2}b\s+glm-5\.2:cloud\s+42s\s+7\.3k {2}Grep src\/auth/); // live activity from run.log
+    match(out, /◐ {2}b\s+glm-5\.2:cloud\s+42s\s+7\.4k {2}Grep src\/auth/); // live activity from run.log
     match(out, /· {2}c\s+haiku\s+—\s+—/);
-    ok(out.includes("1 ok · 1 running · 1 pending · 8.8k tokens"), out);
+    ok(out.includes("1 ok · 1 running · 1 pending · 8.9k tokens"), out);
     ok(out.includes(`results: ${join(rd, "results")}`), out);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -414,7 +414,7 @@ test("formatClosing covers digest present, absent, failed, and total tokens", ()
   ok(withWt.includes("impl: swarm/impl at R/wt-impl"));
   ok(formatClosing(base).includes("summary: S/summary.json"));
   const withTok = formatClosing({ ...base, totalTokens: { input: 100000, output: 60200, cacheCreation: 0, cacheRead: 999 } });
-  ok(withTok.includes("tokens: 160.2k (input 100k · output 60.2k)"), withTok);
+  ok(withTok.includes("tokens: 161.2k (input 100k · output 60.2k · cache read 999)"), withTok);
   ok(!formatClosing(base).includes("tokens:"), "no tokens line when nothing counted");
 });
 

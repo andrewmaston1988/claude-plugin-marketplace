@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, readdirSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
-import { tokenTotal } from "./stream.mjs";
+import { tokenTotal, workTokens } from "./stream.mjs";
 import { isSentinelModel } from "./manifest.mjs";
 import { readRun } from "./runlog.mjs";
 import { inferStoredIdentity } from "./contracts.mjs";
@@ -559,10 +559,10 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
   lines.push(`${bold("summary:")} ${summaryPath}`);
   if (totalTokens && tokenTotal(totalTokens) > 0) {
     const input = formatTokens(totalTokens.input + totalTokens.cacheCreation);
-    let line = `${bold("tokens:")} ${formatTokens(tokenTotal(totalTokens))} (input ${input} · output ${formatTokens(totalTokens.output)})`;
+    let line = `${bold("tokens:")} ${formatTokens(tokenTotal(totalTokens))} (input ${input} · output ${formatTokens(totalTokens.output)}${totalTokens.cacheRead ? ` · cache read ${formatTokens(totalTokens.cacheRead)}` : ""})`;
     // actual-vs-estimate closes the consent loop and audits the corpus
     if (estimate?.tokens) {
-      const actual = tokenTotal(totalTokens);
+      const actual = workTokens(totalTokens);
       const pct = Math.round((actual / estimate.tokens - 1) * 100);
       const verdict = pct === 0 ? "on target" : pct > 0 ? `${pct}% over` : `${-pct}% under`;
       line += dim(` · estimate was ~${formatTokens(estimate.tokens)} (${verdict})`);

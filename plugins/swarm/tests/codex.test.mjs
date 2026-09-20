@@ -92,7 +92,7 @@ test("Codex parser normalizes JSONL text, usage, and terminal failure", () => {
     sessionId: "thread-1",
     realModel: "gpt-5-codex",
     output: "hello",
-    usage: { input: 20, output: 5, cacheCreation: 0, cacheRead: 3 },
+    usage: { input: 17, output: 5, cacheCreation: 0, cacheRead: 3 },
     terminal: true,
   });
   equal(events.filter((event) => event.terminal === true).length, 1);

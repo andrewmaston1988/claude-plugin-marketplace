@@ -43,7 +43,7 @@ test("fleet bar: shows this session's live run — done/total, live symbol, seat
     assert.match(line, /swarm/);
     assert.match(line, /sweep 1\/2 ◐/, line);
     assert.match(line, /minimax-m3/, "the model on the running leaf");
-    assert.match(line, /2\.5k/, "900+100+1000+500, cacheRead ignored");
+    assert.match(line, /7\.5k/, "900+100+5000+1000+500, cacheRead counted");
     assert.equal(renderFleet({ home, now, session: { session_id: "someone-else" } }), "", "another session's run is not ours");
   } finally {
     rmSync(home, { recursive: true, force: true });

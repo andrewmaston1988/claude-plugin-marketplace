@@ -1,8 +1,8 @@
 import { test } from "node:test";
-import { equal, deepEqual } from "node:assert/strict";
+import { equal, deepEqual, ok } from "node:assert/strict";
 import {
   createStreamParser, createUsageAccumulator, describeToolUse,
-  usageTokens, addTokens, tokenTotal, pickFinalTokens, emptyTokens, createRunnerParser,
+  usageTokens, addTokens, tokenTotal, workTokens, pickFinalTokens, emptyTokens, createRunnerParser,
 } from "../src/stream.mjs";
 
 const asst = (id, usage) => JSON.stringify({ type: "assistant", message: { id, role: "assistant", usage } });
@@ -86,9 +86,53 @@ test("usageTokens tolerates missing fields; addTokens and tokenTotal math", () =
   deepEqual(usageTokens(undefined), emptyTokens());
   const t = addTokens(usageTokens({ input_tokens: 1, output_tokens: 2 }), usageTokens({ cache_creation_input_tokens: 3, cache_read_input_tokens: 4 }));
   deepEqual(t, { input: 1, output: 2, cacheCreation: 3, cacheRead: 4 });
-  // Headline total counts work tokens (input + output + cache writes), not cache reads.
-  equal(tokenTotal(t), 6);
+  // Headline total is the processed total — cache reads included; workTokens omits them.
+  equal(tokenTotal(t), 10);
+  equal(workTokens(t), 6);
   equal(tokenTotal(null), 0);
+  equal(workTokens(null), 0);
+  equal(tokenTotal({ input: 1, output: 2 }), 3, "partial shape must not go NaN");
+});
+
+const codexTokens = (usage) => {
+  const parser = createRunnerParser("codex");
+  parser.feed(JSON.stringify({ type: "turn.completed", usage }) + "\n");
+  parser.end();
+  return parser.result().usage;
+};
+// Real payloads from swarm-three-plans-1 (2026-09-20).
+const IMPL_1M = { input_tokens: 8995634, cached_input_tokens: 8769280, output_tokens: 33404 };
+const IMPL_FOLLOWUP = { input_tokens: 100, cache_creation_input_tokens: 110812, cache_read_input_tokens: 4578463, output_tokens: 20747 };
+
+test("a Codex payload counts its cached input once", () => {
+  const u = codexTokens({ input_tokens: 1000, cached_input_tokens: 900, output_tokens: 50 });
+  equal(u.input, 100);
+  equal(u.cacheRead, 900);
+  equal(tokenTotal(u), 1050);
+});
+
+test("Codex payload without cached_input_tokens keeps input as reported", () => {
+  const u = codexTokens({ input_tokens: 1000, output_tokens: 50 });
+  deepEqual(u, { input: 1000, output: 50, cacheCreation: 0, cacheRead: 0 });
+});
+
+test("Codex cached > input clamps input to zero, never negative", () => {
+  const u = codexTokens({ input_tokens: 100, cached_input_tokens: 900, output_tokens: 5 });
+  equal(u.input, 0);
+  equal(u.cacheRead, 900);
+});
+
+test("the headline includes cache reads; workTokens keeps the old figure", () => {
+  const u = usageTokens(IMPL_FOLLOWUP);
+  equal(tokenTotal(u), 4710122);
+  equal(workTokens(u), 131659);
+});
+
+test("real Claude and Codex payloads land within an order of magnitude", () => {
+  const codex = tokenTotal(codexTokens(IMPL_1M));
+  const claude = tokenTotal(usageTokens(IMPL_FOLLOWUP));
+  equal(codex, 9029038);
+  ok(codex / claude < 10 && claude / codex < 10, `codex ${codex} vs claude ${claude}`);
 });
 
 test("parser: tool_use blocks in assistant events surface as activity", () => {
