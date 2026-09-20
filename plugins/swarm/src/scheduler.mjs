@@ -913,13 +913,6 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     }
     return cur;
   };
-  const truncations = [];
-  // Refuted citations that were kept — surfaced loud in the closing block,
-  // the same register as a truncation: coverage the reader must not mistake for full.
-  const refutations = [];
-  // Coverage shortfalls kept (D9), surfaced in the same loud closing channel.
-  const coverageGaps = [];
-
   // Both truncation paths share one loud channel: run.log event, stdout warning,
   // run-summary field, closing block. A cut only the engine knows about is how an
   // unverified finding ends up reported as verified.
