@@ -397,9 +397,6 @@ export function createCodexProviderAdapter(options = {}) {
     id: "codex",
     runnerId: "codex",
     enabled: (config) => providerConfig(config, "codex").enabled === true,
-    matchModel: (model, cache = []) => cache.some((row) => row?.provider === "codex" && row?.model === model)
-      ? { provider: "codex", model }
-      : null,
     validateTask(task, context = {}) {
       const problems = [];
       if (typeof task?.model !== "string" || !task.model.trim()) problems.push("Codex tasks require a non-empty model");

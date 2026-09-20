@@ -49,7 +49,7 @@ export const FOREACH_ITEM_MAX = 4000;
 // The isolation object's own allowlist — KNOWN_TASK_KEYS only gates top-level keys.
 const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch", "from"]);
 const KNOWN_TASK_KEYS = new Set([
-  "id", "prompt", "model", "provider", "fallbackModel", "effort", "allowedTools", "cwd",
+  "id", "prompt", "model", "provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
   "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
   "mustRead", "contextWindow",
@@ -319,6 +319,9 @@ function validateTaskShapes(rawTasks, errors, label) {
     }
     if (t.provider !== undefined && (typeof t.provider !== "string" || !/^[a-z][a-z0-9-]*$/.test(t.provider))) {
       errors.push(`${l}: provider must be a canonical lowercase identifier (e.g. \"codex\")`);
+    }
+    if (t.fallbackProvider !== undefined && (typeof t.fallbackProvider !== "string" || !/^[a-z][a-z0-9-]*$/.test(t.fallbackProvider))) {
+      errors.push(`${l}: fallbackProvider must be a canonical lowercase identifier (e.g. \"claude\")`);
     }
     if (t.isolation !== undefined) {
       const iso = t.isolation;
@@ -939,7 +942,7 @@ function resolveProvider(task, cfg, cache, l, errors, providerRegistry = PROVIDE
     return identity;
   } catch (e) {
     errors.push(`${l}: ${e.message}`);
-    return { provider: task.provider || "ollama", model: task.model };
+    return null;
   }
 }
 
@@ -966,29 +969,36 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     let fallbackProvider;
     if (!isCompute && !isManifest && !isIntegrate) {
       const primary = resolveProvider({ ...t }, cfg, cache, l, errors, providerRegistry);
-      provider = primary.provider;
+      provider = primary?.provider;
       if (t.contextWindow === CONTEXT_WINDOW_1M && provider === "ollama" && providerConfig(cfg, "ollama").mode === "launch") {
         errors.push(`${l}: contextWindow "1m" is unsupported with Ollama launch mode because the launcher rejects [1m] model names — use env mode or remove contextWindow`);
       }
       if (t.contextWindow !== undefined && provider === "codex") {
         errors.push(`${l}: Codex tasks do not support contextWindow; "1m" is a Claude CLI model-name suffix`);
       }
-      checkGovernance(provider, t.model, originalCwd, l, cfg, errors);
+      if (provider) checkGovernance(provider, t.model, originalCwd, l, cfg, errors);
       checkDenylist(t.model, l, cfg, errors);
-      checkHeadroom(provider, t.model, l, headroom, errors, warnings);
+      if (provider) checkHeadroom(provider, t.model, l, headroom, errors, warnings);
       if (t.fallbackModel !== undefined) {
         if (typeof t.fallbackModel !== "string" || !t.fallbackModel) {
           errors.push(`${l}: fallbackModel must be a model name string`);
         } else {
-          // The fallback is a real dispatch target — resolve its provider
-          // independently; a Claude primary must not force a Codex/Ollama fallback.
-          const { provider: _primaryProvider, ...fallbackTask } = t;
-          const fallback = resolveProvider({ ...fallbackTask, model: t.fallbackModel }, cfg, cache, `${l} fallback`, errors, providerRegistry);
-          fallbackProvider = fallback.provider;
-          checkGovernance(fallbackProvider, t.fallbackModel, originalCwd, `${l} fallback`, cfg, errors);
+          // The fallback is a real dispatch target with its own provider — a Claude
+          // primary must not force a Codex/Ollama fallback, and nothing is inferred.
+          if (t.fallbackProvider === undefined) {
+            errors.push(`${l}: fallbackModel \x27${t.fallbackModel}\x27 has no "fallbackProvider" — add it beside "fallbackModel", e.g. "fallbackModel": "claude-haiku-4-5-20251001", "fallbackProvider": "claude"`);
+          } else {
+            const fallback = resolveProvider({ model: t.fallbackModel, provider: t.fallbackProvider }, cfg, cache, `${l} fallback`, errors, providerRegistry);
+            fallbackProvider = fallback?.provider;
+            if (fallbackProvider) {
+              checkGovernance(fallbackProvider, t.fallbackModel, originalCwd, `${l} fallback`, cfg, errors);
+              checkHeadroom(fallbackProvider, t.fallbackModel, `${l} fallback`, headroom, errors, warnings);
+            }
+          }
           checkDenylist(t.fallbackModel, `${l} fallback`, cfg, errors);
-          checkHeadroom(fallbackProvider, t.fallbackModel, `${l} fallback`, headroom, errors, warnings);
         }
+      } else if (t.fallbackProvider !== undefined) {
+        errors.push(`${l}: fallbackProvider without fallbackModel — remove it, or add the "fallbackModel" it belongs to`);
       }
     }
     // compute/manifest/integrate spawn no leaf, so no guard applies. An opted-out
@@ -1276,16 +1286,18 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
         model: raw.digest.model,
         ...(raw.digest.provider !== undefined && { provider: raw.digest.provider }),
       }, cfg, cache, "digest", errors, providerRegistry);
-      checkGovernance(digestIdentity.provider, raw.digest.model, cwd, "digest", cfg, errors);
+      if (digestIdentity) {
+        checkGovernance(digestIdentity.provider, raw.digest.model, cwd, "digest", cfg, errors);
+        checkHeadroom(digestIdentity.provider, raw.digest.model, "digest", headroom, errors, warnings);
+      }
       checkDenylist(raw.digest.model, "digest", cfg, errors);
-      checkHeadroom(digestIdentity.provider, raw.digest.model, "digest", headroom, errors, warnings);
       const report = raw.digest.report;
       if (report !== undefined && report !== true && report !== false && typeof report !== "string") {
         errors.push("digest.report must be true, false, or a steering string for the report body");
       }
       digest = {
         model: raw.digest.model,
-        provider: digestIdentity.provider,
+        provider: digestIdentity?.provider,
         instructions: raw.digest.instructions || "",
         ...(report && { report }),
       };

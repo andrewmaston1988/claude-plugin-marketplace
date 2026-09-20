@@ -35,20 +35,21 @@ function errorsOf(fn) {
   throw new Error("expected loadManifest to throw");
 }
 
-const claudeTask = (over = {}) => ({ id: "a", prompt: "do it", model: "haiku", ...over });
+const claudeTask = (over = {}) => ({ id: "a", prompt: "do it", provider: "claude", model: "claude-haiku-4-5-20251001", ...over });
 
 test("fallbackModel: governed like the primary; passes through to the task", () => {
   const dir = tmp();
   try {
     // open-model fallback outside allowedRoots -> validation error
-    const p1 = writeManifest(dir, { tasks: [claudeTask({ fallbackModel: "glm-4.6:cloud" })] });
+    const p1 = writeManifest(dir, { tasks: [claudeTask({ fallbackProvider: "ollama", fallbackModel: "glm-4.6:cloud" })] });
     const errs = errorsOf(() => loadManifest(p1, CFG, dir));
     ok(errs.some((e) => e.includes("fallback") && e.includes("governance")), errs.join("\n"));
 
     // claude fallback is fine anywhere and lands on the normalized task
-    const p2 = writeManifest(dir, { tasks: [claudeTask({ model: "sonnet", fallbackModel: "haiku" })] }, "ok.json");
+    const p2 = writeManifest(dir, { tasks: [claudeTask({ provider: "claude", model: "claude-sonnet-5", fallbackProvider: "claude", fallbackModel: "claude-haiku-4-5-20251001" })] }, "ok.json");
     const plan = loadManifest(p2, CFG, dir);
-    equal(plan.tasks[0].fallbackModel, "haiku");
+    equal(plan.tasks[0].fallbackModel, "claude-haiku-4-5-20251001");
+    equal(plan.tasks[0].fallbackProvider, "claude");
 
     // non-string fallback rejected
     const p3 = writeManifest(dir, { tasks: [claudeTask({ fallbackModel: 42 })] }, "bad.json");
@@ -58,7 +59,7 @@ test("fallbackModel: governed like the primary; passes through to the task", () 
   }
 });
 
-test("provider identity: explicit and cache-qualified Codex models persist, but gpt prefixes do not infer Codex", () => {
+test("provider identity: an explicit provider persists; nothing is inferred from the model name or the cache", () => {
   const dir = tmp();
   try {
     const cfg = {
@@ -70,7 +71,7 @@ test("provider identity: explicit and cache-qualified Codex models persist, but 
       },
     };
     const explicitPath = writeManifest(dir, {
-      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex", fallbackModel: "haiku" }],
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex", fallbackProvider: "claude", fallbackModel: "claude-haiku-4-5-20251001" }],
       digest: { model: "gpt-5-codex", provider: "codex" },
     }, "explicit.json");
     const explicit = loadManifest(explicitPath, cfg, dir);
@@ -78,19 +79,18 @@ test("provider identity: explicit and cache-qualified Codex models persist, but 
     equal(explicit.tasks[0].fallbackProvider, "claude");
     equal(explicit.digest.provider, "codex");
 
-    const cachedPath = writeManifest(dir, {
-      tasks: [{ id: "cached", prompt: "inspect", model: "gpt-5-codex" }],
-    }, "cached.json");
-    const cached = loadManifest(cachedPath, cfg, dir, {
-      cache: [{ provider: "codex", model: "gpt-5-codex" }],
-    });
-    equal(cached.tasks[0].provider, "codex");
+    // A discovery-cache row no longer stands in for the field: naming the model alone is refused.
+    const bareCodexPath = writeManifest(dir, {
+      tasks: [{ id: "bare", prompt: "inspect", model: "gpt-5-codex" }],
+    }, "bare.json");
+    const bareErrs = errorsOf(() => loadManifest(bareCodexPath, cfg, dir, { cache: [{ provider: "codex", model: "gpt-5-codex" }] }));
+    ok(bareErrs.some((e) => e.includes("task 'bare'") && e.includes("no \"provider\"")), bareErrs.join("\n"));
 
-    const legacyPath = writeManifest(dir, {
-      tasks: [{ id: "legacy", prompt: "inspect", model: "gpt-5-codex" }],
-    }, "legacy.json");
-    const legacy = loadManifest(legacyPath, cfg, dir);
-    equal(legacy.tasks[0].provider, "ollama");
+    // ...and a model no provider has heard of is no longer swept onto Ollama.
+    const typoPath = writeManifest(dir, {
+      tasks: [{ id: "typo", prompt: "inspect", model: "sonnet-4-5-typo" }],
+    }, "typo.json");
+    ok(errorsOf(() => loadManifest(typoPath, cfg, dir)).some((e) => e.includes("no \"provider\"")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -158,11 +158,11 @@ test("fully valid manifest normalizes with defaults", () => {
     const p = writeManifest(dir, {
       resultsDir: "out",
       tasks: [
-        { id: "scan-a", prompt: "look", model: "haiku" },
-        { id: "scan-b", prompt: "look more", model: "sonnet", effort: "max" },
-        { id: "join", prompt: "combine {{result:scan-a}} and {{resultPath:scan-b}}", model: "opus", after: ["scan-a", "scan-b"] },
+        { id: "scan-a", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "scan-b", prompt: "look more", provider: "claude", model: "claude-sonnet-5", effort: "max" },
+        { id: "join", prompt: "combine {{result:scan-a}} and {{resultPath:scan-b}}", provider: "claude", model: "claude-opus-5", after: ["scan-a", "scan-b"] },
       ],
-      digest: { model: "haiku", instructions: "focus on X" },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "focus on X" },
     });
     const plan = loadManifest(p, CFG, dir);
     equal(plan.resultsDir, join(dir, "out"));
@@ -172,7 +172,7 @@ test("fully valid manifest normalizes with defaults", () => {
     equal(plan.tasks[0].cwd, dir);
     equal(plan.tasks[0].timeoutMs, 600000);
     deepEqual(plan.tasks[2].after, ["scan-a", "scan-b"]);
-    equal(plan.digest.model, "haiku");
+    equal(plan.digest.model, "claude-haiku-4-5-20251001");
     equal(plan.digest.instructions, "focus on X");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -199,13 +199,13 @@ test("contextWindow accepts only 1m and stays on the normalized task", () => {
   try {
     const cfg = { ...CFG, provider: { allowedRoots: [dir] } };
     const okPath = writeManifest(dir, {
-      tasks: [{ id: "cloud", prompt: "inspect", model: "glm-5.3:cloud", contextWindow: "1m" }],
+      tasks: [{ id: "cloud", prompt: "inspect", provider: "ollama", model: "glm-5.3:cloud", contextWindow: "1m" }],
     }, "ok.json");
     const plan = loadManifest(okPath, cfg, dir);
     equal(plan.tasks[0].contextWindow, "1m");
 
     const badPath = writeManifest(dir, {
-      tasks: [{ id: "cloud", prompt: "inspect", model: "glm-5.3:cloud", contextWindow: "512k" }],
+      tasks: [{ id: "cloud", prompt: "inspect", provider: "ollama", model: "glm-5.3:cloud", contextWindow: "512k" }],
     }, "bad.json");
     const errs = errorsOf(() => loadManifest(badPath, cfg, dir));
     ok(errs.some((e) => e.includes("contextWindow") && e.includes('"1m"') && e.includes('"contextWindow": "1m"')), errs.join("\n"));
@@ -222,7 +222,7 @@ test("contextWindow refuses Ollama launch mode and Codex tasks", () => {
       provider: { allowedRoots: [dir], mode: "launch", launchCmd: "ollama launch claude --model {model} -- {args}" },
     };
     const launchPath = writeManifest(dir, {
-      tasks: [{ id: "cloud", prompt: "inspect", model: "glm-5.3:cloud", contextWindow: "1m" }],
+      tasks: [{ id: "cloud", prompt: "inspect", provider: "ollama", model: "glm-5.3:cloud", contextWindow: "1m" }],
     }, "launch.json");
     const launchErrs = errorsOf(() => loadManifest(launchPath, launchCfg, dir));
     ok(launchErrs.some((e) => e.includes("contextWindow") && e.includes("launch mode") && e.includes("[1m]")), launchErrs.join("\n"));
@@ -356,8 +356,8 @@ test("Claude-tier effort matrix enforced; open-model effort passes through", () 
     const cfgAllowed = { ...CFG, provider: { allowedRoots: [dir] } };
     const good = writeManifest(dir, {
       tasks: [
-        { id: "o", prompt: "p", model: "glm-4.6:cloud", effort: "xhigh" },
-        claudeTask({ id: "s", model: "sonnet", effort: "max" }),
+        { id: "o", prompt: "p", provider: "ollama", model: "glm-4.6:cloud", effort: "xhigh" },
+        claudeTask({ id: "s", provider: "claude", model: "claude-sonnet-5", effort: "max" }),
       ],
     }, "good.json");
     const plan = loadManifest(good, cfgAllowed, dir);
@@ -373,7 +373,7 @@ test("governance: open-model task outside allowedRoots rejected with data govern
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
-      tasks: [{ id: "o", prompt: "p", model: "minimax-m3:cloud" }],
+      tasks: [{ id: "o", prompt: "p", provider: "ollama", model: "minimax-m3:cloud" }],
     });
     const errs = errorsOf(() => loadManifest(p, CFG, dir)); // allowedRoots: []
     ok(errs.some((e) => e.includes("data governance")), errs.join("|"));
@@ -386,7 +386,7 @@ test("governance: open-model task under an allowed root passes", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
-      tasks: [{ id: "o", prompt: "p", model: "minimax-m3:cloud" }],
+      tasks: [{ id: "o", prompt: "p", provider: "ollama", model: "minimax-m3:cloud" }],
     });
     const cfg = { ...CFG, provider: { allowedRoots: [dir] } };
     const plan = loadManifest(p, cfg, dir);
@@ -402,14 +402,14 @@ test("governance: task.cwd (not process cwd) is what's checked", () => {
     const inside = join(dir, "allowed", "repo");
     mkdirSync(inside, { recursive: true });
     const p = writeManifest(dir, {
-      tasks: [{ id: "o", prompt: "p", model: "minimax-m3:cloud", cwd: inside }],
+      tasks: [{ id: "o", prompt: "p", provider: "ollama", model: "minimax-m3:cloud", cwd: inside }],
     });
     const cfg = { ...CFG, provider: { allowedRoots: [join(dir, "allowed")] } };
     const plan = loadManifest(p, cfg, inside);
     equal(plan.tasks[0].cwd, inside);
 
     const outside = writeManifest(dir, {
-      tasks: [{ id: "o", prompt: "p", model: "minimax-m3:cloud", cwd: dir }],
+      tasks: [{ id: "o", prompt: "p", provider: "ollama", model: "minimax-m3:cloud", cwd: dir }],
     }, "outside.json");
     const errs = errorsOf(() => loadManifest(outside, cfg, inside));
     ok(errs.some((e) => e.includes("data governance")));
@@ -423,8 +423,8 @@ test("governance: Claude task anywhere passes with empty allowedRoots", () => {
   try {
     const p = writeManifest(dir, {
       tasks: [
-        claudeTask({ id: "h", model: "haiku" }),
-        claudeTask({ id: "c", model: "claude-opus-4-8" }),
+        claudeTask({ id: "h", provider: "claude", model: "claude-haiku-4-5-20251001" }),
+        claudeTask({ id: "c", provider: "claude", model: "claude-opus-4-8" }),
       ],
     });
     const plan = loadManifest(p, CFG, dir);
@@ -439,13 +439,13 @@ test("digest.report: true and a steering string both survive to the plan", () =>
   try {
     const p = writeManifest(dir, {
       tasks: [claudeTask()],
-      digest: { model: "haiku", report: true },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", report: true },
     });
     equal(loadManifest(p, CFG, dir).digest.report, true);
 
     const p2 = writeManifest(dir, {
       tasks: [claudeTask()],
-      digest: { model: "haiku", report: "Lead with the security findings." },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", report: "Lead with the security findings." },
     }, "plan2.json");
     equal(loadManifest(p2, CFG, dir).digest.report, "Lead with the security findings.");
   } finally {
@@ -458,7 +458,7 @@ test("digest.report rejects a non-boolean, non-string value", () => {
   try {
     const p = writeManifest(dir, {
       tasks: [claudeTask()],
-      digest: { model: "haiku", report: 3 },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", report: 3 },
     });
     const errs = errorsOf(() => loadManifest(p, CFG, dir));
     ok(errs.some((e) => e.includes("digest.report")), errs.join("|"));
@@ -490,7 +490,7 @@ test("args substitute into the digest.report steering string", () => {
   try {
     const p = writeManifest(dir, {
       tasks: [claudeTask({ prompt: "look at {{args.area}}" })],
-      digest: { model: "haiku", report: "Lead with {{args.area}}." },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", report: "Lead with {{args.area}}." },
     });
     const plan = loadManifest(p, CFG, dir, { args: { area: "auth" } });
     equal(plan.digest.report, "Lead with auth.");
@@ -504,7 +504,7 @@ test("governance: non-Claude digest model outside roots rejected", () => {
   try {
     const p = writeManifest(dir, {
       tasks: [claudeTask()],
-      digest: { model: "glm-4.6:cloud" },
+      digest: { provider: "ollama", model: "glm-4.6:cloud" },
     });
     const errs = errorsOf(() => loadManifest(p, CFG, dir));
     ok(errs.some((e) => e.startsWith("digest") && e.includes("data governance")), errs.join("|"));
@@ -523,7 +523,7 @@ test("win32 command-line check: oversized digest.instructions fails validation n
     const cfg = { ...CFG, claudePath: "C:\\fake\\claude.exe" };
     const p = writeManifest(dir, {
       tasks: [claudeTask()],
-      digest: { model: "haiku", instructions: "x".repeat(32000) },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "x".repeat(32000) },
     });
     throws(
       () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
@@ -540,7 +540,7 @@ test("win32 command-line check: digest.instructions just under the cap passes", 
     const cfg = { ...CFG, claudePath: "C:\\fake\\claude.exe" };
     const p = writeManifest(dir, {
       tasks: [claudeTask()],
-      digest: { model: "haiku", instructions: "x".repeat(2000) },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "x".repeat(2000) },
     });
     const plan = loadManifest(p, cfg, dir, { io: { platform: "win32" } });
     equal(plan.digest.instructions.length, 2000);
@@ -586,7 +586,7 @@ test("headroom: M1 a LIVE exhausted meter rejects a :cloud seat, naming task, mo
   const prevTz = process.env.TZ;
   process.env.TZ = "Europe/London";
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
     const errs = errorsOf(() => loadManifest(p, cfg, dir, {
       headroom: liveHeadroom({ state: "exhausted", weeklyPctUsed: 100, resetsAt: "2026-09-07T00:00:00Z" }),
@@ -604,7 +604,7 @@ test("headroom: M1 a LIVE exhausted meter rejects a :cloud seat, naming task, mo
 test("headroom: M2 false-positive guard — Claude-only manifests are untouched by an exhausted meter", () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [claudeTask({ model: "sonnet" }), claudeTask({ id: "b", model: "haiku" })] });
+    const p = writeManifest(dir, { tasks: [claudeTask({ provider: "claude", model: "claude-sonnet-5" }), claudeTask({ id: "b", provider: "claude", model: "claude-haiku-4-5-20251001" })] });
     const cfg = { ...CFG, provider: { allowedRoots: [], cloud: { ollama: { enabled: true } } } };
     withHeadroom(dir, { weeklyPctUsed: 100 }, () => {
       const plan = loadManifest(p, cfg, dir);
@@ -618,7 +618,7 @@ test("headroom: M2 false-positive guard — Claude-only manifests are untouched 
 test("headroom: M3 false-positive guard — a LIVE healthy meter passes with no new output", () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
     const plan = loadManifest(p, cfg, dir, { headroom: liveHeadroom({ weeklyPctUsed: 42 }) });
     equal(plan.tasks[0].model, "glm-5.3:cloud");
@@ -631,7 +631,7 @@ test("headroom: M3 false-positive guard — a LIVE healthy meter passes with no 
 test("headroom: M4 no configured cookie (unknown) does not fail a manifest", () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
     // cloud.ollama.enabled left off entirely -> usageFromCache is "unknown" with no cache file needed.
     const cfg = { ...CFG, provider: { allowedRoots: [dir] } };
     const plan = loadManifest(p, cfg, dir);
@@ -648,7 +648,7 @@ test("headroom: M4 no configured cookie (unknown) does not fail a manifest", () 
 test("headroom: M5 a cached figure warns with its banner (last-seen stamp, the refresh command), does not fail", () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
     withHeadroom(dir, { weeklyPctUsed: 42, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 86_400_000 } }, () => {
       const plan = loadManifest(p, cfg, dir);
@@ -667,7 +667,7 @@ test("headroom: M5 a cached figure warns with its banner (last-seen stamp, the r
 test("headroom: M7 governance is reported before the headroom rejection", () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
     // allowedRoots empty -> cwd is outside every allowed root
     const cfg = { ...CFG, provider: { allowedRoots: [], cloud: { ollama: { enabled: true } } } };
     const errs = errorsOf(() => loadManifest(p, cfg, dir, {
@@ -688,7 +688,7 @@ test("headroom: M7 governance is reported before the headroom rejection", () => 
 test("headroom: T5 a live 100% fails; a cached 100% succeeds with the banner in its warning", async () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", model: "glm-5.3:cloud" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
 
     const liveErrs = errorsOf(() => loadManifest(p, cfg, dir, {
@@ -724,7 +724,7 @@ test("headroom: T6 five :cloud seats fetch the meter exactly once — the memo c
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
-      tasks: ["a", "b", "c", "d", "e"].map((id) => ({ id, prompt: "p", model: "glm-5.3:cloud", cwd: dir })),
+      tasks: ["a", "b", "c", "d", "e"].map((id) => ({ id, prompt: "p", provider: "ollama", model: "glm-5.3:cloud", cwd: dir })),
     });
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
     let fetches = 0;
@@ -779,7 +779,7 @@ test("governance checks the ORIGINAL cwd, not the worktree the leaf runs in", ()
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
-      tasks: [{ id: "o", prompt: "p", model: "glm-4.6:cloud", allowedTools: "Write" }],
+      tasks: [{ id: "o", prompt: "p", provider: "ollama", model: "glm-4.6:cloud", allowedTools: "Write" }],
     });
     // the worktree lands under resultsDir — but the original cwd (dir)
     // is outside allowedRoots, so it must still be denied.
@@ -864,7 +864,7 @@ test("compute: agentless — model/prompt rejected, forEach mutually exclusive, 
     const p = writeManifest(dir, {
       tasks: [
         claudeTask({ id: "scan" }),
-        { id: "c1", after: ["scan"], compute: "count(deps.scan.xs)", model: "haiku", prompt: "p" },
+        { id: "c1", after: ["scan"], compute: "count(deps.scan.xs)", provider: "claude", model: "claude-haiku-4-5-20251001", prompt: "p" },
         { id: "c2", after: ["scan"], compute: "count(deps.scan.xs)", forEach: { from: "scan", maxItems: 2 } },
         { id: "c3", after: ["scan"], compute: 42 },
       ],
@@ -1211,8 +1211,8 @@ test("the unknown-key message now lists returns (typo teaching)", () => {
 
 const CHILD = {
   tasks: [
-    { id: "scan", prompt: "look at {{item}}", model: "haiku" },
-    { id: "sum", prompt: "compress {{result:scan}}", model: "haiku", after: ["scan"] },
+    { id: "scan", prompt: "look at {{item}}", provider: "claude", model: "claude-haiku-4-5-20251001" },
+    { id: "sum", prompt: "compress {{result:scan}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["scan"] },
   ],
 };
 
@@ -1244,7 +1244,7 @@ test("manifest task: agentless container — leaf keys on the node are rejected"
     writeFileSync(join(dir, "child.json"), JSON.stringify(CHILD));
     const p = writeManifest(dir, {
       tasks: [{
-        id: "audit", manifest: "child.json", model: "haiku", prompt: "x",
+        id: "audit", manifest: "child.json", provider: "claude", model: "claude-haiku-4-5-20251001", prompt: "x",
         returns: { type: "object" }, after: [],
       }],
     });
@@ -1261,7 +1261,7 @@ test("child manifests may not set resultsDir/concurrency/digest — the parent o
   const dir = tmp();
   try {
     writeFileSync(join(dir, "child.json"), JSON.stringify({
-      ...CHILD, resultsDir: "out", concurrency: 2, digest: { model: "haiku" },
+      ...CHILD, resultsDir: "out", concurrency: 2, digest: { provider: "claude", model: "claude-haiku-4-5-20251001" },
     }));
     const p = writeManifest(dir, { tasks: [{ id: "audit", manifest: "child.json" }] });
     const errs = errorsOf(() => loadManifest(p, CFG, dir));
@@ -1292,7 +1292,7 @@ test("child task errors surface in the parent's validate output, prefixed", () =
   const dir = tmp();
   try {
     writeFileSync(join(dir, "child.json"), JSON.stringify({
-      tasks: [{ id: "scan", model: "haiku" }], // missing prompt
+      tasks: [{ id: "scan", provider: "claude", model: "claude-haiku-4-5-20251001" }], // missing prompt
     }));
     const p = writeManifest(dir, { tasks: [{ id: "audit", manifest: "child.json" }] });
     const errs = errorsOf(() => loadManifest(p, CFG, dir));
@@ -1327,7 +1327,7 @@ test("governance gates child tasks exactly like inline tasks", () => {
   const dir = tmp();
   try {
     writeFileSync(join(dir, "child.json"), JSON.stringify({
-      tasks: [{ id: "scan", prompt: "x", model: "glm-4.6:cloud" }],
+      tasks: [{ id: "scan", prompt: "x", provider: "ollama", model: "glm-4.6:cloud" }],
     }));
     const p = writeManifest(dir, { tasks: [{ id: "audit", manifest: "child.json" }] });
     const errs = errorsOf(() => loadManifest(p, CFG, dir));
@@ -1348,7 +1348,7 @@ test("args: substitute into prompts and digest instructions; substituteItems val
     const p = writeManifest(dir, {
       resultsDir: "out",
       tasks: [claudeTask({ prompt: "review {{args.base}} count {{args.n}} cfg {{args.cfg}}" })],
-      digest: { model: "haiku", instructions: "focus on {{args.base}}" },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "focus on {{args.base}}" },
     });
     const plan = loadManifest(p, CFG, dir, { args: { base: "master", n: 7, cfg: { deep: true } } });
     equal(plan.tasks[0].prompt, 'review master count 7 cfg {"deep":true}');
@@ -1407,14 +1407,14 @@ test("args: smuggled {{result:}} in an arg value hits template validation and di
 test("args: child manifest prompts participate; unused check spans parent+children; child errors labelled", () => {
   const dir = tmp();
   try {
-    writeManifest(dir, { tasks: [{ id: "c1", prompt: "scan {{args.base}}", model: "haiku" }] }, "child.json");
+    writeManifest(dir, { tasks: [{ id: "c1", prompt: "scan {{args.base}}", provider: "claude", model: "claude-haiku-4-5-20251001" }] }, "child.json");
     const p = writeManifest(dir, { resultsDir: "out", tasks: [{ id: "outer", manifest: "child.json" }] });
     // key used only inside the child -> substituted there, no unused error
     const plan = loadManifest(p, CFG, dir, { args: { base: "master" } });
     equal(plan.tasks[0].childPlan.tasks[0].prompt, "scan master");
 
     // unknown key inside the child -> error carries the child label
-    writeManifest(dir, { tasks: [{ id: "c1", prompt: "scan {{args.nope}}", model: "haiku" }] }, "child2.json");
+    writeManifest(dir, { tasks: [{ id: "c1", prompt: "scan {{args.nope}}", provider: "claude", model: "claude-haiku-4-5-20251001" }] }, "child2.json");
     const p2 = writeManifest(dir, { resultsDir: "out", tasks: [{ id: "outer", manifest: "child2.json" }] }, "plan2.json");
     const errs = errorsOf(() => loadManifest(p2, CFG, dir, { args: {} }));
     ok(errs.some((e) => e.includes("child") && e.includes("{{args.nope}}")), errs.join("|"));
@@ -1427,7 +1427,7 @@ test("registry-sourced parent resolves child manifest paths against the parent's
   const dirA = tmp(); // where the saved manifest + its child live
   const dirB = tmp(); // the invoking cwd
   try {
-    writeManifest(dirA, { tasks: [{ id: "c1", prompt: "scan", model: "haiku" }] }, "child.json");
+    writeManifest(dirA, { tasks: [{ id: "c1", prompt: "scan", provider: "claude", model: "claude-haiku-4-5-20251001" }] }, "child.json");
     const parent = writeManifest(dirA, { resultsDir: "out", tasks: [{ id: "outer", manifest: "child.json" }] }, "parent.json");
     // registry-sourced: child found next to the parent
     const plan = loadManifest(parent, CFG, dirB, { fromRegistry: true });
@@ -1737,7 +1737,7 @@ test("integrate node: agentless, validated, normalized onto its target worktree"
   try {
     const agentic = writeManifest(dir, { tasks: [
       claudeTask({ id: "x", isolation: "worktree" }),
-      { id: "join", after: ["x"], model: "haiku", prompt: "merge it",
+      { id: "join", after: ["x"], provider: "claude", model: "claude-haiku-4-5-20251001", prompt: "merge it",
         integrate: { into: "feat", from: ["x"] } },
     ] }, "agentic.json");
     ok(errorsOf(() => loadManifest(agentic, CFG, dir))
@@ -1856,7 +1856,7 @@ test("F2: integrate.from over a forEach parent still rejects when-gated / no-wri
 
 test("F8: integrateCaps names the forEach cap an integrate node folds in", () => {
   const tasks = [
-    { id: "src", model: "haiku" },
+    { id: "src", provider: "claude", model: "claude-haiku-4-5-20251001" },
     { id: "fix", forEach: { from: "src", path: "", maxItems: 5 } },
     { id: "join", integrate: { into: "feat", from: ["fix"] } },
     { id: "plain", isolation: "worktree" },
@@ -2114,7 +2114,7 @@ test("realRepoToplevel: outside a repo is null", () => {
 import { effectiveIsolation, effectivePlanDoc } from "../src/manifest.mjs";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
 
-const bashTask = (over = {}) => ({ id: "impl", prompt: "p", model: "haiku", allowedTools: "Read,Bash", ...over });
+const bashTask = (over = {}) => ({ id: "impl", prompt: "p", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Bash", ...over });
 const inDir = (dir, body, name, opts) => loadManifest(writeManifest(dir, body, name), CFG, dir, opts);
 
 test("branchScope: a default-private writer carries the run-scoped key; explicit worktree and readers carry none", () => {
@@ -2398,6 +2398,30 @@ test("tasks sharing a cwd ask git for its toplevel once, not once per task", () 
     inDir(dir, { tasks }, "memo.json", { io });
     equal(calls.filter((d) => d === sub).length, 1,
       "no memo means one `git rev-parse` per leaf at normalise time — slow, and invisible to every other test");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("provider is required: fallback, digest, unknown ids and aliases are each refused; compute steps stay exempt", () => {
+  const dir = tmp();
+  try {
+    const errs = (body) => errorsOf(() => loadManifest(writeManifest(dir, body), CFG, dir));
+    const has = (list, ...needles) => ok(list.some((e) => needles.every((n) => e.includes(n))), list.join("\n"));
+
+    has(errs({ tasks: [{ id: "a", prompt: "x", model: "claude-opus-5" }] }), "task 'a'", "no \"provider\"");
+    has(errs({ tasks: [claudeTask({ fallbackModel: "claude-sonnet-5" })] }), "fallbackModel", "fallbackProvider");
+    has(errs({ tasks: [claudeTask({ fallbackProvider: "claude" })] }), "fallbackProvider", "fallbackModel");
+    has(errs({ tasks: [claudeTask(), claudeTask({ id: "b" })], digest: { model: "claude-haiku-4-5-20251001" } }), "digest", "no \"provider\"");
+    has(errs({ tasks: [claudeTask({ provider: "nope" })] }), "unknown provider 'nope'", "registered: claude, ollama, codex");
+    has(errs({ tasks: [claudeTask({ model: "sonnet" })] }), "Claude alias");
+    has(errs({ tasks: [claudeTask({ fallbackModel: "haiku", fallbackProvider: "claude" })] }), "Claude alias");
+
+    // compute nodes dispatch nothing, so they carry neither model nor provider.
+    const plan = loadManifest(writeManifest(dir, {
+      tasks: [claudeTask({ id: "scan" }), { id: "dedupe", after: ["scan"], compute: "deps['scan']" }],
+    }), CFG, dir);
+    equal(plan.tasks.find((t) => t.id === "dedupe").compute, "deps['scan']");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

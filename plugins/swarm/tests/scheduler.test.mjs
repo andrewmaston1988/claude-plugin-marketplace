@@ -29,7 +29,7 @@ function task(id, over = {}) {
   return {
     id,
     prompt: `do ${id}`,
-    model: "haiku",
+    provider: "claude", model: "claude-haiku-4-5-20251001",
     allowedTools: "Read,Grep,Glob",
     cwd: over.cwd || tmpdir(),
     originalCwd: over.cwd || tmpdir(),
@@ -65,7 +65,7 @@ test("fan-out: all tasks run, results + summary + run.log written", async () => 
     equal(logLines.length, 7); // run-start + (running + terminal) per task
     equal(logLines[0].event, "run-start");
     deepEqual(logLines[0].tasks, [
-      { id: "a", model: "haiku" }, { id: "b", model: "haiku" }, { id: "c", model: "haiku" },
+      { id: "a", provider: "claude", runner: "claude", model: "claude-haiku-4-5-20251001" }, { id: "b", provider: "claude", runner: "claude", model: "claude-haiku-4-5-20251001" }, { id: "c", provider: "claude", runner: "claude", model: "claude-haiku-4-5-20251001" },
     ]);
     ok(existsSync(join(p.resultsDir, ".gitignore")));
   } finally {
@@ -606,19 +606,19 @@ test("fallback: quota leaf re-dispatches immediately on its declared fallbackMod
   const dir = tmp();
   try {
     const spawn = fakeSpawnFactory((call) =>
-      call.args[call.args.indexOf("--model") + 1] === "sonnet"
+      call.args[call.args.indexOf("--model") + 1] === "claude-sonnet-5"
         ? { exit: 1, output: "Claude AI usage limit reached|1751210400" }
         : { output: "fallback did it" });
     const io = makeIo(spawn);
-    const p = plan(dir, [task("judge", { model: "sonnet", fallbackModel: "haiku" })]);
+    const p = plan(dir, [task("judge", { provider: "claude", model: "claude-sonnet-5", fallbackProvider: "claude", fallbackModel: "claude-haiku-4-5-20251001" })]);
     const r = await runPlan(p, { ...CFG, retry: { backoffMs: 10 } }, io);
     equal(spawn.calls.length, 2);
-    equal(spawn.calls[1].args[spawn.calls[1].args.indexOf("--model") + 1], "haiku");
+    equal(spawn.calls[1].args[spawn.calls[1].args.indexOf("--model") + 1], "claude-haiku-4-5-20251001");
     equal(r.summary.tasks[0].state, "ok");
     equal(readResult(p.resultsDir, "judge").output, "fallback did it");
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     const fb = logLines.find((l) => l.event === "fallback");
-    deepEqual({ from: fb.from, to: fb.to }, { from: "sonnet", to: "haiku" });
+    deepEqual({ from: fb.from, to: fb.to }, { from: "claude-sonnet-5", to: "claude-haiku-4-5-20251001" });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -630,9 +630,9 @@ test("quota fail-fast: first Claude quota pre-emptively marks pending Claude lea
     const spawn = fakeSpawnFactory(() => ({ exit: 1, output: "usage limit reached — resets at 3pm" }));
     const io = makeIo(spawn);
     const p = plan(dir, [
-      task("first", { model: "sonnet" }),
-      task("second", { model: "haiku" }),
-      task("saved", { model: "opus", fallbackModel: "haiku" }),
+      task("first", { provider: "claude", model: "claude-sonnet-5" }),
+      task("second", { provider: "claude", model: "claude-haiku-4-5-20251001" }),
+      task("saved", { provider: "claude", model: "claude-opus-5", fallbackProvider: "claude", fallbackModel: "claude-haiku-4-5-20251001" }),
     ], { concurrency: 1 });
     const r = await runPlan(p, CFG, io);
     const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
@@ -670,7 +670,7 @@ test("preflight: a scoped-bucket exhaustion grounds only that model's leaves", a
 
     // Sonnet/Opus/Haiku draw from the unscoped buckets → they must dispatch.
     const io1 = mkIo(home);
-    const p1 = plan(dir, [task("s", { model: "sonnet" }), task("o", { model: "opus" }), task("h", { model: "haiku" })]);
+    const p1 = plan(dir, [task("s", { provider: "claude", model: "claude-sonnet-5" }), task("o", { provider: "claude", model: "claude-opus-5" }), task("h", { provider: "claude", model: "claude-haiku-4-5-20251001" })]);
     await runPlan(p1, CFG, io1);
     equal(io1.spawn.calls.length, 3, "non-scoped Claude models must still dispatch");
 
@@ -678,7 +678,7 @@ test("preflight: a scoped-bucket exhaustion grounds only that model's leaves", a
     const home2 = join(dir, "home2");
     mkdirSync(home2, { recursive: true });
     const io2 = mkIo(home2);
-    const p2 = plan(dir, [task("f", { model: "claude-fable-5" })]);
+    const p2 = plan(dir, [task("f", { provider: "claude", model: "claude-fable-5" })]);
     await rejects(() => runPlan(p2, CFG, io2), /Fable-scoped limit is at 100%/i);
     equal(io2.spawn.calls.length, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -701,7 +701,7 @@ test("preflight: a multi-word scope name still matches its model family", async 
       fetch: async () => ({ ok: true, status: 200, json: async () => usage }),
       env: { PATH: process.env.PATH, SWARM_HOME: home, SWARM_CREDENTIALS: join(home, "creds.json") },
     });
-    await rejects(() => runPlan(plan(dir, [task("s", { model: "sonnet" })]), CFG, io), /Sonnet.*scoped limit/i);
+    await rejects(() => runPlan(plan(dir, [task("s", { provider: "claude", model: "claude-sonnet-5" })]), CFG, io), /Sonnet.*scoped limit/i);
     equal(io.spawn.calls.length, 0, "an exhausted Sonnet bucket must ground Sonnet leaves");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -718,7 +718,7 @@ test("preflight: exhausted quota aborts before dispatch when Claude leaves lack 
       fetch: async () => ({ ok: true, status: 200, json: async () => usage }),
       env: { PATH: process.env.PATH, SWARM_HOME: home, SWARM_CREDENTIALS: join(home, "creds.json") },
     });
-    const p = plan(dir, [task("c", { model: "sonnet" })]);
+    const p = plan(dir, [task("c", { provider: "claude", model: "claude-sonnet-5" })]);
     await rejects(() => runPlan(p, CFG, io), /usage exhausted|cannot dispatch/i);
     equal(spawn.calls.length, 0);
 
@@ -731,7 +731,7 @@ test("preflight: exhausted quota aborts before dispatch when Claude leaves lack 
       fetch: async () => ({ ok: true, status: 200, json: async () => usage80 }),
       env: { PATH: process.env.PATH, SWARM_HOME: home2, SWARM_CREDENTIALS: join(home, "creds.json") },
     });
-    const p2 = plan(dir, [task("c2", { model: "sonnet" })], { resultsDir: join(dir, "run2") });
+    const p2 = plan(dir, [task("c2", { provider: "claude", model: "claude-sonnet-5" })], { resultsDir: join(dir, "run2") });
     const r2 = await runPlan(p2, CFG, io2);
     equal(r2.summary.tasks[0].state, "ok");
     ok(io2.lines.some((l) => l.includes("85%")), io2.lines.join("|"));
@@ -912,13 +912,13 @@ test("resume: a dependent whose upstream re-runs is invalidated, and the digest 
     const p = plan(dir, [
       task("find"),
       task("verify", { prompt: "check {{result:find}}", after: ["find"] }),
-    ], { digest: { model: "haiku" } });
+    ], { digest: { provider: "claude", model: "claude-haiku-4-5-20251001" } });
     initResultsDir(p.resultsDir);
     // prior pass: find FAILED, but verify and the digest succeeded against the
     // findings of a still-earlier pass.
-    writeResult(p.resultsDir, "find", { id: "find", model: "haiku", ok: false, exit: 1, durationMs: 5, output: "boom" });
-    writeResult(p.resultsDir, "verify", { id: "verify", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "STALE-verdict" });
-    writeResult(p.resultsDir, DIGEST_ID, { id: DIGEST_ID, model: "haiku", ok: true, exit: 0, durationMs: 5, output: "STALE-digest" });
+    writeResult(p.resultsDir, "find", { id: "find", provider: "claude", model: "claude-haiku-4-5-20251001", ok: false, exit: 1, durationMs: 5, output: "boom" });
+    writeResult(p.resultsDir, "verify", { id: "verify", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5, output: "STALE-verdict" });
+    writeResult(p.resultsDir, DIGEST_ID, { id: DIGEST_ID, provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5, output: "STALE-digest" });
     writeDigestMd(p.resultsDir, "STALE-digest");
 
     const spawn = fakeSpawnFactory((call) => {
@@ -956,8 +956,8 @@ test("resume: invalidation is transitive across the dependency chain", async () 
       task("c", { prompt: "c uses {{result:b}}", after: ["b"] }),
     ]);
     initResultsDir(p.resultsDir);
-    writeResult(p.resultsDir, "b", { id: "b", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "old-b" });
-    writeResult(p.resultsDir, "c", { id: "c", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "old-c" });
+    writeResult(p.resultsDir, "b", { id: "b", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5, output: "old-b" });
+    writeResult(p.resultsDir, "c", { id: "c", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5, output: "old-c" });
     // a has no result at all → re-runs → b stale → c stale (c never mentions a)
 
     const spawn = fakeSpawnFactory(() => ({ output: "fresh" }));
@@ -983,7 +983,7 @@ test("resume: an independent cached leaf is still skipped when an unrelated leaf
       task("d"), // independent of a and b
     ]);
     initResultsDir(p.resultsDir);
-    writeResult(p.resultsDir, "d", { id: "d", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "cached-d" });
+    writeResult(p.resultsDir, "d", { id: "d", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5, output: "cached-d" });
 
     const spawn = fakeSpawnFactory(() => ({ output: "fresh" }));
     const io = makeIo(spawn);
@@ -1026,7 +1026,7 @@ test("resume skips ok results; --force reruns everything", async () => {
     const p = plan(dir, [task("a"), task("b", { prompt: "use {{result:a}}", after: ["a"] })]);
     initResultsDir(p.resultsDir);
     writeResult(p.resultsDir, "a", {
-      id: "a", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "prior-a",
+      id: "a", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5, output: "prior-a",
       tokens: { input: 500, output: 40, cacheCreation: 0, cacheRead: 0 },
     });
 
@@ -1055,7 +1055,7 @@ test("resume does NOT skip failed or rate-limited results", async () => {
   try {
     const p = plan(dir, [task("a")]);
     initResultsDir(p.resultsDir);
-    writeResult(p.resultsDir, "a", { id: "a", model: "haiku", ok: false, exit: 1, output: "rate limit" });
+    writeResult(p.resultsDir, "a", { id: "a", provider: "claude", model: "claude-haiku-4-5-20251001", ok: false, exit: 1, output: "rate limit" });
     const spawn = fakeSpawnFactory(() => ({ output: "recovered" }));
     const r = await runPlan(p, CFG, makeIo(spawn));
     equal(spawn.calls.length, 1);
@@ -1071,7 +1071,7 @@ test("digest: synthesized last, engine writes digest.md from leaf output", async
     const spawn = fakeSpawnFactory((call) =>
       promptOf(call).includes("digest stage") ? { output: "# The Digest\nheadlines" } : { output: "leaf" });
     const io = makeIo(spawn);
-    const p = plan(dir, [task("a"), task("b")], { digest: { model: "haiku", instructions: "" } });
+    const p = plan(dir, [task("a"), task("b")], { digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "" } });
     const r = await runPlan(p, CFG, io);
     equal(spawn.calls.length, 3);
     const digestCall = spawn.calls[2];
@@ -1091,7 +1091,7 @@ test("digest failure: run completes, digestFailed flagged, no digest.md", async 
     const spawn = fakeSpawnFactory((call) =>
       promptOf(call).includes("digest stage") ? { exit: 1, output: "digest broke" } : { output: "leaf" });
     const io = makeIo(spawn);
-    const p = plan(dir, [task("a")], { digest: { model: "haiku" } });
+    const p = plan(dir, [task("a")], { digest: { provider: "claude", model: "claude-haiku-4-5-20251001" } });
     const r = await runPlan(p, CFG, io);
     equal(r.digestFailed, true);
     equal(r.digestPath, null);
@@ -1110,7 +1110,7 @@ test("health check: open-model plan fails fast when provider unreachable; claude
     let fetched = 0;
     const ioDown = makeIo(spawn, { fetch: async () => { fetched++; throw new Error("ECONNREFUSED"); } });
     const cfgAllowed = { ...CFG, provider: { ...CFG.provider, allowedRoots: [tmpdir()] } };
-    const openPlan = plan(dir, [task("o", { model: "glm-4.6:cloud" })]);
+    const openPlan = plan(dir, [task("o", { provider: "ollama", model: "glm-4.6:cloud" })]);
     await rejects(() => runPlan(openPlan, cfgAllowed, ioDown), /unreachable/);
     equal(fetched, 1);
     equal(spawn.calls.length, 0); // nothing dispatched
@@ -1133,7 +1133,7 @@ test("open-model dispatch passes env trio through real spawn (shim log)", async 
     );
     const cfgAllowed = { ...CFG, provider: { ...CFG.provider, allowedRoots: [tmpdir()], url: "http://127.0.0.1:65500" } };
     const workCwd = mkdtempSync(join(tmpdir(), "swarm-cwd-"));
-    const p = plan(dir, [task("o", { model: "minimax-m3:cloud", cwd: workCwd })]);
+    const p = plan(dir, [task("o", { provider: "ollama", model: "minimax-m3:cloud", cwd: workCwd })]);
     const r = await runPlan(p, cfgAllowed, io);
     const entry = JSON.parse(readFileSync(shimLog, "utf8").trim());
     equal(entry.env.ANTHROPIC_MODEL, "minimax-m3:cloud");
@@ -1190,8 +1190,8 @@ test("stdout contract: roster snapshots per state change, never raw output", asy
     equal(io.lines.length, 0); // the engine paints snapshots; the CLI owns the closing block
     ok(io.snapshots.length >= 3, `one paint per state change, got ${io.snapshots.length}`);
     const last = io.snapshots.at(-1);
-    ok(/✓ {2}a\s+haiku/.test(last), last);
-    ok(/✓ {2}b\s+haiku/.test(last), last);
+    ok(/✓ {2}a\s+claude-haiku-4-5-20251001/.test(last), last);
+    ok(/✓ {2}b\s+claude-haiku-4-5-20251001/.test(last), last);
     ok(last.includes("2 ok"), last);
     ok(last.startsWith("swarm · run · 2 tasks"), last);
     ok(!io.snapshots.some((s) => s.includes("SECRET-RAW-OUTPUT")));
@@ -1636,7 +1636,7 @@ test("forEach: expands clones with {{item}}/{{index}}, parent aggregates for dep
     equal(parent.clones, 2);
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     const expand = logLines.find((l) => l.event === "expand");
-    deepEqual({ id: expand.id, clones: expand.clones, model: expand.model }, { id: "fix", clones: 2, model: "haiku" });
+    deepEqual({ id: expand.id, clones: expand.clones, model: expand.model }, { id: "fix", clones: 2, model: "claude-haiku-4-5-20251001" });
     const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
     deepEqual(states, { src: "ok", dedupe: "ok", fix: "ok", "fix[0]": "ok", "fix[1]": "ok", sink: "ok" });
   } finally {
@@ -1744,7 +1744,7 @@ test("forEach: clones inherit model and fallbackModel; fallback fires per clone"
   const dir = tmp();
   try {
     const spawn = fakeSpawnFactory((call) =>
-      call.args[call.args.indexOf("--model") + 1] === "sonnet"
+      call.args[call.args.indexOf("--model") + 1] === "claude-sonnet-5"
         ? { exit: 1, output: "Claude AI usage limit reached|1751210400" }
         : { output: promptOf(call) === "do src" ? '{"sites":[{"f":"a"}]}' : "recovered" });
     const io = makeIo(spawn);
@@ -1752,14 +1752,14 @@ test("forEach: clones inherit model and fallbackModel; fallback fires per clone"
       task("src"),
       task("fix", {
         after: ["src"], forEach: { from: "src", path: "sites", maxItems: 5 },
-        prompt: "fix {{item.f}}", model: "sonnet", fallbackModel: "haiku",
+        prompt: "fix {{item.f}}", provider: "claude", model: "claude-sonnet-5", fallbackProvider: "claude", fallbackModel: "claude-haiku-4-5-20251001",
       }),
     ]);
     const r = await runPlan(p, { ...CFG, retry: { backoffMs: 10 } }, io);
     const cloneCalls = spawn.calls.filter((c) => promptOf(c) === "fix a");
     equal(cloneCalls.length, 2);
-    equal(cloneCalls[0].args[cloneCalls[0].args.indexOf("--model") + 1], "sonnet");
-    equal(cloneCalls[1].args[cloneCalls[1].args.indexOf("--model") + 1], "haiku");
+    equal(cloneCalls[0].args[cloneCalls[0].args.indexOf("--model") + 1], "claude-sonnet-5");
+    equal(cloneCalls[1].args[cloneCalls[1].args.indexOf("--model") + 1], "claude-haiku-4-5-20251001");
     const states = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
     equal(states["fix[0]"], "ok");
     equal(states.fix, "ok");
@@ -1799,8 +1799,8 @@ test("forEach: resume skips clones with prior ok results", async () => {
       task("fix", { after: ["src"], forEach: { from: "src", path: "sites", maxItems: 5 }, prompt: "fix {{item.f}}" }),
     ]);
     initResultsDir(p.resultsDir);
-    writeResult(p.resultsDir, "src", { id: "src", model: "haiku", ok: true, exit: 0, durationMs: 5, output: '{"sites":[{"f":"a"},{"f":"b"}]}', outputJson: { sites: [{ f: "a" }, { f: "b" }] } });
-    writeResult(p.resultsDir, "fix[0]", { id: "fix[0]", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "prior" });
+    writeResult(p.resultsDir, "src", { id: "src", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5, output: '{"sites":[{"f":"a"},{"f":"b"}]}', outputJson: { sites: [{ f: "a" }, { f: "b" }] } });
+    writeResult(p.resultsDir, "fix[0]", { id: "fix[0]", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5, output: "prior" });
     const r = await runPlan(p, CFG, io);
     equal(spawn.calls.length, 1); // only fix[1]
     equal(promptOf(spawn.calls[0]), "fix b");
@@ -1866,8 +1866,8 @@ test("quota fail-fast never dooms pending compute steps", async () => {
     // open-model quota storm (family=false): a pending compute step must not be
     // swept up just because its sentinel model is also non-Claude
     const p = plan(dir, [
-      task("o", { model: "glm-4.6:cloud" }),
-      task("slow", { model: "haiku" }),
+      task("o", { provider: "ollama", model: "glm-4.6:cloud" }),
+      task("slow", { provider: "claude", model: "claude-haiku-4-5-20251001" }),
       computeTask("c", "deps['slow'].n == 1", ["slow"]),
     ]);
     const r = await runPlan(p, cfgAllowed, io);
@@ -1961,13 +1961,13 @@ test("a Claude quota failure does not fail-fast an unrelated provider", async ()
     };
     const spawn = fakeSpawnFactory((call) => {
       const model = call.args[call.args.indexOf("--model") + 1];
-      return model === "sonnet" || model === "haiku"
+      return model === "claude-sonnet-5" || model === "claude-haiku-4-5-20251001"
         ? { exit: 1, output: "usage limit reached" }
         : { output: "open provider completed" };
     });
     const p = plan(dir, [
-      task("claude-first", { model: "sonnet", provider: "claude", cwd, originalCwd: cwd }),
-      task("claude-second", { model: "haiku", provider: "claude", cwd, originalCwd: cwd }),
+      task("claude-first", { model: "claude-sonnet-5", provider: "claude", cwd, originalCwd: cwd }),
+      task("claude-second", { model: "claude-haiku-4-5-20251001", provider: "claude", cwd, originalCwd: cwd }),
       task("ollama-leaf", { model: "glm-5.2:cloud", provider: "ollama", cwd, originalCwd: cwd }),
     ], { concurrency: 1 });
     const r = await runPlan(p, cfg, makeIo(spawn));
@@ -2006,7 +2006,7 @@ test("a mixed Claude/Ollama/Codex DAG runs on two runners and persists each iden
     const cwd = tmpdir();
     const spawn = fakeSpawnFactory((call) => (isCodexCall(call) ? { output: CODEX_STREAM } : { output: "claude-runner answer" }));
     const p = plan(dir, [
-      task("c", { model: "sonnet", provider: "claude", cwd, originalCwd: cwd }),
+      task("c", { model: "claude-sonnet-5", provider: "claude", cwd, originalCwd: cwd }),
       task("o", { model: "glm-5.2:cloud", provider: "ollama", cwd, originalCwd: cwd }),
       task("x", { model: "gpt-5-codex", provider: "codex", cwd, originalCwd: cwd, after: ["c", "o"] }),
     ]);
@@ -2054,7 +2054,7 @@ test("a quota fallback re-resolves provider and runner for the target model", as
     const cwd = tmpdir();
     const spawn = fakeSpawnFactory((call) => (isCodexCall(call) ? { output: CODEX_STREAM } : { exit: 1, output: "usage limit reached" }));
     const p = plan(dir, [task("fb", {
-      model: "sonnet", provider: "claude", fallbackModel: "gpt-5-codex", fallbackProvider: "codex", cwd, originalCwd: cwd,
+      model: "claude-sonnet-5", provider: "claude", fallbackModel: "gpt-5-codex", fallbackProvider: "codex", cwd, originalCwd: cwd,
     })]);
     const r = await runPlan(p, MIXED_CFG(cwd), makeIo(spawn));
     equal(r.summary.tasks[0].state, "ok");
@@ -2077,10 +2077,10 @@ test("a rejected fallback ends only its own leaf; the run and its siblings conti
     cfg.providers.codex.enabled = false;
     const spawn = fakeSpawnFactory((call) => {
       const model = call.args[call.args.indexOf("--model") + 1];
-      return model === "sonnet" ? { exit: 1, output: "usage limit reached" } : { output: "open provider completed" };
+      return model === "claude-sonnet-5" ? { exit: 1, output: "usage limit reached" } : { output: "open provider completed" };
     });
     const p = plan(dir, [
-      task("fb", { model: "sonnet", provider: "claude", fallbackModel: "gpt-5-codex", fallbackProvider: "codex", cwd, originalCwd: cwd }),
+      task("fb", { model: "claude-sonnet-5", provider: "claude", fallbackModel: "gpt-5-codex", fallbackProvider: "codex", cwd, originalCwd: cwd }),
       task("sib", { model: "glm-5.2:cloud", provider: "ollama", cwd, originalCwd: cwd }),
     ], { concurrency: 1 });
     const r = await runPlan(p, cfg, makeIo(spawn));
@@ -2256,11 +2256,11 @@ test("summary task rows carry model, and costUsd only for real-key leaves; summa
       ? { output: streamOut("done", "s-1", { input_tokens: 100, output_tokens: 10 }, 0.25, "ANTHROPIC_API_KEY") }
       : { output: streamOut("done", "s-2", { input_tokens: 100, output_tokens: 10 }, 0.25, "none") });
     const io = makeIo(spawn);
-    const est = { tokens: 1234, counted: [{ model: "haiku", leaves: 1, perLeaf: 1234 }], unknown: [] };
+    const est = { tokens: 1234, counted: [{ provider: "claude", model: "claude-haiku-4-5-20251001", leaves: 1, perLeaf: 1234 }], unknown: [] };
     const p = plan(dir, [task("a"), task("b")], { estimate: est });
     const r = await runPlan(p, CFG, io);
     const rowA = r.summary.tasks.find((t) => t.id === "a");
-    equal(rowA.model, "haiku");
+    equal(rowA.model, "claude-haiku-4-5-20251001");
     equal(rowA.costUsd, 0.25);
     const rowB = r.summary.tasks.find((t) => t.id === "b");
     equal(rowB.costUsd, undefined);
@@ -2397,7 +2397,7 @@ test("manifest node: children run namespaced, sinks aggregate as the node's outp
 
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     const expand = logLines.find((l) => l.event === "expand-manifest");
-    deepEqual(expand.children, [{ id: "audit~scan", model: "haiku" }, { id: "audit~sum", model: "haiku" }]);
+    deepEqual(expand.children, [{ id: "audit~scan", provider: "claude", runner: "claude", model: "claude-haiku-4-5-20251001" }, { id: "audit~sum", provider: "claude", runner: "claude", model: "claude-haiku-4-5-20251001" }]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -2503,8 +2503,8 @@ test("entitlement failure removes the model from the cache; classification stays
   try {
     const spawn = fakeSpawnFactory(() => ({ exit: 1, output: ENTITLEMENT_BODY }));
     const io = makeIo(spawn);
-    const cachePath = seedModelsCache(io, [{ model: "kimi-k3:cloud" }, { model: "glm-5.2:cloud" }]);
-    const r = await runPlan(plan(dir, [task("a", { model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
+    const cachePath = seedModelsCache(io, [{ provider: "ollama", model: "kimi-k3:cloud" }, { provider: "ollama", model: "glm-5.2:cloud" }]);
+    const r = await runPlan(plan(dir, [task("a", { provider: "ollama", model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
     equal(r.summary.tasks[0].state, "failed"); // not quota, not rate-limited
     deepEqual(JSON.parse(readFileSync(cachePath, "utf8")).models.map((m) => m.model), ["glm-5.2:cloud"]);
   } finally {
@@ -2542,9 +2542,9 @@ test("ordinary failure leaves the models cache untouched", async () => {
   try {
     const spawn = fakeSpawnFactory(() => ({ exit: 1, output: "boom" }));
     const io = makeIo(spawn);
-    const cachePath = seedModelsCache(io, [{ model: "kimi-k3:cloud" }]);
+    const cachePath = seedModelsCache(io, [{ provider: "ollama", model: "kimi-k3:cloud" }]);
     const before = readFileSync(cachePath, "utf8");
-    const r = await runPlan(plan(dir, [task("a", { model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
+    const r = await runPlan(plan(dir, [task("a", { provider: "ollama", model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
     equal(r.summary.tasks[0].state, "failed");
     equal(readFileSync(cachePath, "utf8"), before);
   } finally {
@@ -2557,9 +2557,9 @@ test("success leaves the models cache untouched", async () => {
   try {
     const spawn = fakeSpawnFactory(() => ({ output: "fine" }));
     const io = makeIo(spawn);
-    const cachePath = seedModelsCache(io, [{ model: "kimi-k3:cloud" }]);
+    const cachePath = seedModelsCache(io, [{ provider: "ollama", model: "kimi-k3:cloud" }]);
     const before = readFileSync(cachePath, "utf8");
-    const r = await runPlan(plan(dir, [task("a", { model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
+    const r = await runPlan(plan(dir, [task("a", { provider: "ollama", model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
     equal(r.summary.tasks[0].state, "ok");
     equal(readFileSync(cachePath, "utf8"), before);
   } finally {
@@ -2880,24 +2880,24 @@ test("a caller's own CORRELATION_ID is kept on the leaf", async () => {
 });
 
 // Red input for the real-model stamp: the CLI's stream-json init event names
-// the model that actually ran (claude-sonnet-5), while task.model is the
-// alias (sonnet). Without the stamp the result records only the alias and
+// the model that actually ran (claude-sonnet-5-20260101), while task.model is the
+// family id (claude-sonnet-5). Without the stamp the result records only the alias and
 // every generation (opus 4.8 vs 5) collapses into one perf row.
 test("result stamps the init event's real model id; alias kept as modelAlias", async () => {
   const dir = tmp();
   try {
     const stream = [
-      JSON.stringify({ type: "system", subtype: "init", model: "claude-sonnet-5", session_id: "s1" }),
+      JSON.stringify({ type: "system", subtype: "init", provider: "claude", model: "claude-sonnet-5-20260101", session_id: "s1" }),
       JSON.stringify({ type: "result", subtype: "success", result: "hi", session_id: "s1" }),
       "",
     ].join("\n");
     const spawn = fakeSpawnFactory(() => ({ output: stream }));
     const io = makeIo(spawn);
-    const p = plan(dir, [task("a", { model: "sonnet" })]);
+    const p = plan(dir, [task("a", { provider: "claude", model: "claude-sonnet-5" })]);
     await runPlan(p, CFG, io);
     const res = readResult(p.resultsDir, "a");
-    equal(res.model, "claude-sonnet-5");
-    equal(res.modelAlias, "sonnet");
+    equal(res.model, "claude-sonnet-5-20260101");
+    equal(res.modelAlias, "claude-sonnet-5");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -2916,7 +2916,7 @@ test("non-Claude leaf keeps its manifest model; no modelAlias", async () => {
     ].join("\n");
     const spawn = fakeSpawnFactory(() => ({ output: stream }));
     const io = makeIo(spawn);
-    const p = plan(dir, [task("a", { model: "glm-5.2:cloud", cwd: tmpdir(), originalCwd: tmpdir() })]);
+    const p = plan(dir, [task("a", { provider: "ollama", model: "glm-5.2:cloud", cwd: tmpdir(), originalCwd: tmpdir() })]);
     await runPlan(p, { ...CFG, provider: { ...CFG.provider, allowedRoots: [tmpdir()] } }, io);
     const res = readResult(p.resultsDir, "a");
     equal(res.model, "glm-5.2:cloud");
@@ -3116,7 +3116,7 @@ function commitAllInRepo(cwd, msg) {
 
 function integrateLeaf(id, over) {
   return {
-    id, prompt: "p", model: "haiku", allowedTools: "Read,Edit,Bash",
+    id, prompt: "p", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
     timeoutMs: 5000, after: [], ...over,
   };
 }
@@ -3548,7 +3548,7 @@ test("spawn env marks the child as a swarm leaf, whatever the model or provider 
     // One Claude-tier leaf and one :cloud leaf. There is a single spawn site
     // (runTask), so this also covers `launch` mode — buildDispatch varies argv,
     // never the env merge.
-    const p = plan(dir, [task("claude-leaf", { model: "haiku", cwd: dir, originalCwd: dir }), task("cloud-leaf", { model: "glm-5.3:cloud", cwd: dir, originalCwd: dir })]);
+    const p = plan(dir, [task("claude-leaf", { provider: "claude", model: "claude-haiku-4-5-20251001", cwd: dir, originalCwd: dir }), task("cloud-leaf", { provider: "ollama", model: "glm-5.3:cloud", cwd: dir, originalCwd: dir })]);
     await runPlan(p, { ...CFG, provider: { ...CFG.provider, allowedRoots: [dir] } }, io);
     equal(spawn.calls.length, 2);
     for (const c of spawn.calls) {
@@ -3626,7 +3626,7 @@ test("resume: a leaf the dead engine never settled resumes its recorded session"
   const dir = tmp();
   try {
     const p = plan(dir, [task("a")]);
-    deadEngineLog(p, [{ event: "run-start", tasks: [{ id: "a", model: "haiku" }] }, { id: "a", state: "running" }, { id: "a", event: "session", sessionId: "s-dead" }]);
+    deadEngineLog(p, [{ event: "run-start", tasks: [{ id: "a", provider: "claude", model: "claude-haiku-4-5-20251001" }] }, { id: "a", state: "running" }, { id: "a", event: "session", sessionId: "s-dead" }]);
     const spawn = fakeSpawnFactory(() => ({ output: streamOut("back", "s-dead") }));
     await runPlan(p, CFG, makeIo(spawn));
     equal(resumeArg(spawn.calls[0]), "s-dead");
@@ -3637,8 +3637,8 @@ test("resume: a failed result without a session id falls back to the recorded on
   const dir = tmp();
   try {
     const p = plan(dir, [task("a")]);
-    deadEngineLog(p, [{ event: "run-start", tasks: [{ id: "a", model: "haiku" }] }, { id: "a", event: "session", sessionId: "s-early" }]);
-    writeResult(p.resultsDir, "a", { id: "a", model: "haiku", ok: false, exit: null, output: "spawn died" });
+    deadEngineLog(p, [{ event: "run-start", tasks: [{ id: "a", provider: "claude", model: "claude-haiku-4-5-20251001" }] }, { id: "a", event: "session", sessionId: "s-early" }]);
+    writeResult(p.resultsDir, "a", { id: "a", provider: "claude", model: "claude-haiku-4-5-20251001", ok: false, exit: null, output: "spawn died" });
     const spawn = fakeSpawnFactory(() => ({ output: streamOut("back", "s-early") }));
     await runPlan(p, CFG, makeIo(spawn));
     equal(resumeArg(spawn.calls[0]), "s-early");
@@ -3649,7 +3649,7 @@ test("resume: --force starts fresh even with a recorded session", async () => {
   const dir = tmp();
   try {
     const p = plan(dir, [task("a")]);
-    deadEngineLog(p, [{ event: "run-start", tasks: [{ id: "a", model: "haiku" }] }, { id: "a", event: "session", sessionId: "s-dead" }]);
+    deadEngineLog(p, [{ event: "run-start", tasks: [{ id: "a", provider: "claude", model: "claude-haiku-4-5-20251001" }] }, { id: "a", event: "session", sessionId: "s-dead" }]);
     const spawn = fakeSpawnFactory(() => ({ output: streamOut("fresh", "s-new") }));
     await runPlan(p, CFG, makeIo(spawn), { force: true });
     equal(resumeArg(spawn.calls[0]), null);

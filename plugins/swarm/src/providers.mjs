@@ -1,4 +1,4 @@
-import { isClaudeModel, OLLAMA_CLOUD_RE } from "./contracts.mjs";
+import { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
 import { join } from "node:path";
 import { checkQuota } from "./quota.mjs";
 import { swarmHome } from "./config.mjs";
@@ -27,7 +27,7 @@ function adapterShape(adapter) {
       throw new Error(`provider adapter ${field} must be a canonical lowercase identifier`);
     }
   }
-  for (const method of ["enabled", "matchModel", "validateTask"]) {
+  for (const method of ["enabled", "validateTask"]) {
     if (typeof adapter[method] !== "function") throw new Error(`provider '${adapter.id}' requires ${method}()`);
   }
   if (!adapter.capabilities || typeof adapter.capabilities !== "object" || Array.isArray(adapter.capabilities)) {
@@ -45,13 +45,15 @@ function configured(config, id, fallback) {
   return typeof block?.enabled === "boolean" ? block.enabled : fallback;
 }
 
-function descriptor({ id, runnerId, defaultEnabled, matchModel, capabilities = {} }) {
+function descriptor({ id, runnerId, defaultEnabled, validateModel = () => null, capabilities = {} }) {
   return {
     id,
     runnerId,
     enabled: (config) => configured(config, id, defaultEnabled),
-    matchModel,
-    validateTask: () => [],
+    validateTask: (task) => {
+      const problem = validateModel(String(task?.model || ""));
+      return problem ? [problem] : [];
+    },
     capabilities,
   };
 }
@@ -124,23 +126,20 @@ export function defaultProviderAdapters({ codexAdapter, ollamaCapabilities = {} 
       id: "claude",
       runnerId: "claude",
       defaultEnabled: true,
-      matchModel: (model) => isClaudeModel(model) ? { provider: "claude", model } : null,
+      validateModel: (model) => isClaudeModel(model) ? null : `model '${model}' is not a Claude model — provider "claude" needs a full id such as "claude-opus-5"`,
       capabilities: { preflight: preflightClaude },
     }),
     descriptor({
       id: "ollama",
       runnerId: "claude",
       defaultEnabled: true,
-      matchModel: (model) => OLLAMA_CLOUD_RE.test(String(model || "")) ? { provider: "ollama", model } : null,
+      validateModel: (model) => isClaudeModel(model) ? `model '${model}' is a Claude model — use "provider": "claude"` : null,
       capabilities: { preflight: pingOllamaEndpoint, ...ollamaCapabilities },
     }),
     codexAdapter || descriptor({
       id: "codex",
       runnerId: "codex",
       defaultEnabled: false,
-      matchModel: (model, cache = []) => cache.some((row) => row?.provider === "codex" && row?.model === model)
-        ? { provider: "codex", model }
-        : null,
     }),
   ];
 }
@@ -165,7 +164,7 @@ export function createProviderRegistry(initial = []) {
 
   function get(id) {
     const adapter = adapters.get(String(id || "").toLowerCase());
-    if (!adapter) throw new Error(`unknown provider '${id}'`);
+    if (!adapter) throw new Error(`unknown provider '${id}' (registered: ${[...adapters.keys()].join(", ")})`);
     return adapter;
   }
 
@@ -174,36 +173,20 @@ export function createProviderRegistry(initial = []) {
     return { provider: adapter.id, model };
   }
 
-  function resolve(task, { cache = [], config = {}, allowDisabled = false } = {}) {
+  function resolve(task, { config = {}, allowDisabled = false } = {}) {
     const authoredModel = task?.model;
     if (typeof authoredModel !== "string" || !authoredModel.trim()) throw new Error("provider resolution requires a non-empty model");
     const model = authoredModel.trim();
-    if (task.provider !== undefined) return identity(get(task.provider), model, config, allowDisabled);
-
-    const cacheProviders = [...new Set(cache
-      .filter((row) => row?.model === model && typeof row?.provider === "string")
-      .map((row) => row.provider.toLowerCase()))];
-    if (cacheProviders.length > 1) {
-      throw new Error(`model '${model}' exists under multiple providers (${cacheProviders.join(", ")}) — set provider explicitly`);
+    if (typeof task.provider !== "string" || !task.provider.trim()) {
+      throw new Error(
+        `model '${model}' has no "provider" — every leaf names one and nothing is inferred. ` +
+        `Add "provider" beside "model" (registered: ${[...adapters.keys()].join(", ")}), e.g. { "provider": "claude", "model": "claude-opus-5" }`
+      );
     }
-    if (cacheProviders.length === 1) return identity(get(cacheProviders[0]), model, config, allowDisabled);
-
-    const matches = [];
-    for (const adapter of adapters.values()) {
-      const match = adapter.matchModel(model, cache);
-      if (match) matches.push({ adapter, match });
+    if (CLAUDE_ALIASES.has(model.toLowerCase())) {
+      throw new Error(`model '${model}' is a Claude alias, and aliases are not accepted — name the full model id, e.g. "claude-opus-5" with "provider": "claude"`);
     }
-    if (matches.length > 1) {
-      throw new Error(`model '${model}' matches multiple providers (${matches.map(({ adapter }) => adapter.id).join(", ")}) — set provider explicitly`);
-    }
-    if (matches.length === 1) {
-      const { adapter, match } = matches[0];
-      if (match.provider !== adapter.id || match.model !== model) {
-        throw new Error(`provider '${adapter.id}' matchModel() returned a mismatched identity`);
-      }
-      return identity(adapter, model, config, allowDisabled);
-    }
-    return identity(get("ollama"), model, config, allowDisabled);
+    return identity(get(task.provider), model, config, allowDisabled);
   }
 
   return {

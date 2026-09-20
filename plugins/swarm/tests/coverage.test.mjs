@@ -303,13 +303,13 @@ test("coverageErrorLines: one Read line per uncovered range; a >2000 range split
 // ── runnerOf (dispatch) ───────────────────────────────────────────────────────
 
 test("runnerOf: a Claude model → claude; env-mode non-claude (proxied through claude CLI) → claude", () => {
-  equal(runnerOf({ model: "haiku" }, {}), "claude");
+  equal(runnerOf({ provider: "claude", model: "claude-haiku-4-5-20251001" }, {}), "claude");
   equal(runnerOf({ model: "glm-4.6:cloud" }, { provider: { mode: "env", url: "x", authToken: "y" } }), "claude");
 });
 
 test("runnerOf: launch-mode wrapper whose binary isn't claude → that binary name (the rejection trigger)", () => {
   const cfg = { provider: { mode: "launch", launchCmd: "ollama launch claude --model {model} -- {args}" } };
-  equal(runnerOf({ model: "glm-4.6:cloud" }, cfg), "ollama"); // mutation: return "claude" for launch mode → nothing is ever rejected
+  equal(runnerOf({ provider: "ollama", model: "glm-4.6:cloud" }, cfg), "ollama"); // mutation: return "claude" for launch mode → nothing is ever rejected
   // a launch template that IS a direct claude invocation stays claude
   equal(runnerOf({ model: "sonnet" }, { provider: { mode: "launch", launchCmd: "claude {args}" } }), "claude");
 });
@@ -328,8 +328,8 @@ test("mustRead: string, paged, index+lane, {{resultPath:<dep>}} all accepted and
   try {
     const mr = ["README.md", { path: "a.mjs", lines: [[1, 50]] }, { index: "idx.json", lane: 0 }];
     const p = writeMan(dir, { tasks: [
-      { id: "finder", prompt: "find", model: "haiku" },
-      { id: "vf", prompt: "verify", model: "haiku", after: ["finder"], mustRead: [...mr, "{{resultPath:finder}}"] },
+      { id: "finder", prompt: "find", provider: "claude", model: "claude-haiku-4-5-20251001" },
+      { id: "vf", prompt: "verify", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["finder"], mustRead: [...mr, "{{resultPath:finder}}"] },
     ] });
     const plan = loadManifest(p, manCfg, dir);
     const vf = plan.tasks.find((t) => t.id === "vf");
@@ -344,7 +344,7 @@ test("mustRead: rejected on compute / integrate / manifest nodes — needs a lea
   const dir = tmp();
   try {
     const p = writeMan(dir, { tasks: [
-      { id: "a", prompt: "x", model: "haiku" },
+      { id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" },
       { id: "c", compute: "deps['a'].y", after: ["a"], mustRead: ["README.md"] },
     ] });
     const errs = manErrors(() => loadManifest(p, manCfg, dir));
@@ -355,7 +355,7 @@ test("mustRead: rejected on compute / integrate / manifest nodes — needs a lea
 test("mustRead: KNOWN_TASK_KEYS advertises it (a typo'd sibling key still reports); MANIFEST_BANNED_KEYS rejects it on a manifest node", () => {
   const dir = tmp();
   try {
-    writeFileSync(join(dir, "child.json"), JSON.stringify({ tasks: [{ id: "k", prompt: "x", model: "haiku" }] }));
+    writeFileSync(join(dir, "child.json"), JSON.stringify({ tasks: [{ id: "k", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const p = writeMan(dir, { tasks: [{ id: "m", manifest: "child.json", mustRead: ["README.md"] }] });
     const errs = manErrors(() => loadManifest(p, manCfg, dir));
     ok(errs.some((e) => /manifest task is an agentless container/.test(e) && /mustRead/.test(e)), errs.join("\n"));
@@ -365,7 +365,7 @@ test("mustRead: KNOWN_TASK_KEYS advertises it (a typo'd sibling key still report
 test("mustRead: per-error teaching for lines-not-pairs, start>end, negative lane, unknown key, both path+index", () => {
   const dir = tmp();
   try {
-    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku", mustRead: [
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", mustRead: [
       { path: "a.mjs", lines: [[1]] },
       { path: "b.mjs", lines: [[50, 10]] },
       { index: "i.json", lane: -1 },
@@ -384,7 +384,7 @@ test("mustRead: per-error teaching for lines-not-pairs, start>end, negative lane
 test("mustRead: {{resultPath:x}} where x ∉ after → error; {{result:x}} anywhere → error", () => {
   const dir = tmp();
   try {
-    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku", mustRead: ["{{resultPath:ghost}}", "{{result:a}}"] }] });
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", mustRead: ["{{resultPath:ghost}}", "{{result:a}}"] }] });
     const errs = manErrors(() => loadManifest(p, manCfg, dir));
     ok(errs.some((e) => /ghost/.test(e) && /declared dependency/.test(e)), "resultPath dep");
     ok(errs.some((e) => /only \{\{resultPath:<id>\}\} is substituted/.test(e)), "non-resultPath template");
@@ -395,7 +395,7 @@ test("mustRead: an empty array is an error, never a vacuous complete", () => {
   // RED: no length check — required 0 stamps coverage complete and validate announces enforcement.
   const dir = tmp();
   try {
-    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku", mustRead: [] }] });
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", mustRead: [] }] });
     const errs = manErrors(() => loadManifest(p, manCfg, dir));
     ok(errs.some((e) => /'a': mustRead is empty/.test(e)), errs.join("\n"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -405,7 +405,7 @@ test("mustRead: over MUST_READ_MAX_ENTRIES → error suggesting an index", () =>
   const dir = tmp();
   try {
     const many = Array.from({ length: MUST_READ_MAX_ENTRIES + 1 }, (_, i) => `f${i}.md`);
-    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku", mustRead: many }] });
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", mustRead: many }] });
     const errs = manErrors(() => loadManifest(p, manCfg, dir));
     ok(errs.some((e) => new RegExp(`over the ${MUST_READ_MAX_ENTRIES}`).test(e) && /index/.test(e)), errs.join("\n"));
     equal(MUST_READ_MAX_ENTRIES, 500); // source literal
@@ -416,7 +416,7 @@ test("mustRead: a non-claude runner task is rejected naming the runner, with NO 
   const dir = tmp();
   try {
     const cfg = { ...manCfg, provider: { mode: "launch", launchCmd: "ollama launch claude --model {model} -- {args}", allowedRoots: [dir] } };
-    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", model: "glm-4.6:cloud", mustRead: ["README.md"] }] });
+    const p = writeMan(dir, { tasks: [{ id: "a", prompt: "x", provider: "ollama", model: "glm-4.6:cloud", mustRead: ["README.md"] }] });
     const errs = manErrors(() => loadManifest(p, cfg, dir, { io: { platform: "linux" } }));
     ok(errs.some((e) => /runner 'ollama' is not supported/.test(e)), errs.join("\n")); // mutation: win32 guard → passes on linux
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -429,7 +429,7 @@ const iCfg = {
   concurrency: 4, timeoutMs: 600000, resultInlineCap: 4000, worktreeBranchPrefix: "swarm/",
 };
 const iTask = (id, cwd, over = {}) => ({
-  id, prompt: `do ${id}`, model: "haiku", allowedTools: "Read,Grep,Glob",
+  id, prompt: `do ${id}`, provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob",
   cwd, originalCwd: cwd, timeoutMs: 5000, after: [], ...over,
 });
 const iPlan = (dir, tasks) => ({ cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, tasks, goal: "" });
@@ -629,15 +629,15 @@ test("integration: a child manifest's mustRead {{resultPath:local}} is remapped 
   try {
     writeFileSync(join(dir, "child.json"), JSON.stringify({
       tasks: [
-        { id: "finder", prompt: "find", model: "haiku", allowedTools: "Read" },
-        { id: "vf", prompt: "verify {{result:finder}}", model: "haiku", allowedTools: "Read", after: ["finder"], mustRead: ["{{resultPath:finder}}"] },
+        { id: "finder", prompt: "find", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read" },
+        { id: "vf", prompt: "verify {{result:finder}}", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read", after: ["finder"], mustRead: ["{{resultPath:finder}}"] },
       ],
     }));
     const spawn = fakeSpawnFactory(() => ({ output: leafOut([], { result: "x" }) }));
     const io = makeIo(spawn);
     const p = iPlan(dir, [{ ...iTask("node", dir), childPlan: { tasks: [
-      { id: "finder", prompt: "find", model: "haiku", allowedTools: "Read", after: [] },
-      { id: "vf", prompt: "verify {{result:finder}}", model: "haiku", allowedTools: "Read", after: ["finder"], mustRead: ["{{resultPath:finder}}"] },
+      { id: "finder", prompt: "find", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read", after: [] },
+      { id: "vf", prompt: "verify {{result:finder}}", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read", after: ["finder"], mustRead: ["{{resultPath:finder}}"] },
     ] } }]);
     await runPlan(p, iCfg, io);
     const res = readResult(p.resultsDir, "node~vf");

@@ -27,7 +27,7 @@ const streamOut = (text, sid) => [
 ].join("\n") + "\n";
 
 const leaf = (id, cwd, over = {}) => ({
-  id, prompt: `do ${id}`, model: "glm-5.2:cloud", allowedTools: "Read",
+  id, prompt: `do ${id}`, provider: "ollama", model: "glm-5.2:cloud", allowedTools: "Read",
   cwd, originalCwd: cwd, timeoutMs: 5000, after: [],
   ...over,
 });
@@ -39,7 +39,7 @@ function planWith(dir, report) {
   const p = {
     cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, tasks,
     goal: "find every caller of frobnicate",
-    digest: { model: "haiku", instructions: "", ...(report && { report }) },
+    digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "", ...(report && { report }) },
   };
   p.tasks = [...tasks, buildDigestTask(p)];
   return p;

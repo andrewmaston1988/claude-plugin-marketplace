@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
-import { isClaudeModel, modelProvider, tierFromModel, isValidEffort, TIER_EFFORTS } from "../src/models.mjs";
+import { isClaudeModel, tierFromModel, isValidEffort, TIER_EFFORTS } from "../src/models.mjs";
 
 test("isClaudeModel matrix", () => {
   for (const m of ["haiku", "sonnet", "opus", "fable", "Sonnet", "claude-haiku-4-5", "claude-opus-4-8-20260101"]) {
@@ -45,12 +45,4 @@ test("isValidEffort: open models accept any effort (pass-through)", () => {
 test("isValidEffort: absent effort always valid; unclassifiable claude-* accepts any", () => {
   equal(isValidEffort("haiku", undefined), true);
   equal(isValidEffort("claude-newtier-9", "max"), true);
-});
-
-test("modelProvider never infers Codex from a broad namespace prefix", () => {
-  equal(modelProvider("gpt-oss:20b-cloud"), "ollama");
-  equal(modelProvider("gpt-oss:120b-cloud"), "ollama");
-  equal(modelProvider("gpt-5"), "ollama");
-  equal(modelProvider("gpt-5", { cache: [{ provider: "codex", model: "gpt-5" }] }), "codex");
-  equal(modelProvider("gpt-5", { provider: "codex" }), "codex");
 });

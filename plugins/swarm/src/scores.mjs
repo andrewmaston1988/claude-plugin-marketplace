@@ -8,7 +8,7 @@ import { appendFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { UNIVERSAL, ASPECTS, OUTCOMES, GRADED_OUTCOMES } from "./aspects.mjs";
-import { isCloudModel, isClaudeModel } from "./models.mjs";
+import { isCloudModel, isClaudeModel, CLAUDE_ALIASES } from "./models.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
 import { identityOf, identityKey } from "./contracts.mjs";
 import { isSentinelModel } from "./manifest.mjs";
@@ -56,10 +56,12 @@ export function validateRow(row) {
   if (row.provider !== undefined && !provider) {
     errs.push("provider: must be a non-empty provider identifier when present");
   }
-  if (typeof row.model !== "string" || !row.model.trim() || isSentinelModel(row.model) || (!provider && !(isCloudModel(row.model) || isClaudeModel(row.model)))) {
+  if (typeof row.model === "string" && CLAUDE_ALIASES.has(row.model.trim().toLowerCase())) {
+    errs.push(`model: ${JSON.stringify(row.model)} is a Claude alias — grade under the full model id, e.g. "claude-sonnet-5" (the leaf result records it)`);
+  } else if (typeof row.model !== "string" || !row.model.trim() || isSentinelModel(row.model) || (!provider && !(isCloudModel(row.model) || isClaudeModel(row.model)))) {
     errs.push(provider
       ? `model: must be a real provider model, not a sentinel (got ${JSON.stringify(row.model)})`
-      : `model: must be a :cloud model name or a Claude tier (got ${JSON.stringify(row.model)}) — e.g. "glm-5.2:cloud" or "sonnet"`);
+      : `model: must be a :cloud model name or a full Claude model id (got ${JSON.stringify(row.model)}) — e.g. "glm-5.2:cloud" or "claude-sonnet-5"`);
   }
   if (typeof row.domain !== "string" || !row.domain.trim() || PLACEHOLDER_RE.test(row.domain.trim())) {
     errs.push(`domain: required, ${DOMAIN_HINT}`);

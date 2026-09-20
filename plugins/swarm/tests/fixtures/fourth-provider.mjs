@@ -11,7 +11,6 @@ export function fixtureProvider(model = FIXTURE_MODEL) {
     id: "fixture",
     runnerId: "fixture",
     enabled: (config = {}) => config.providers?.fixture?.enabled === true,
-    matchModel: (candidate) => candidate === model ? { provider: "fixture", model: candidate } : null,
     validateTask: () => [],
     capabilities: {
       discoverModels: async () => [modelDescriptor({ provider: "fixture", model, runner: "fixture", displayName: "Fixture model" })],

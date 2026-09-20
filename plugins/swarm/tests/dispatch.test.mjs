@@ -18,7 +18,7 @@ const CFG = {
 };
 
 const task = (over = {}) => ({
-  id: "t", model: "haiku", allowedTools: "Read,Grep,Glob", ...over,
+  id: "t", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob", ...over,
 });
 
 // Every dispatch asks for stream-json so the engine can extract the final
@@ -26,18 +26,18 @@ const task = (over = {}) => ({
 const STREAM_FLAGS = ["--output-format", "stream-json", "--verbose"];
 
 test("claude model: exact argv, no env overrides", () => {
-  const d = buildDispatch(task({ model: "haiku", effort: "high" }), "the prompt", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "the prompt", "--model", "haiku", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  const d = buildDispatch(task({ provider: "claude", model: "claude-haiku-4-5-20251001", effort: "high" }), "the prompt", CFG, { _mcpTools: NO_MCP });
+  deepEqual(d.argv, ["claude", "-p", "the prompt", "--model", "claude-haiku-4-5-20251001", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {});
 });
 
 test("claude model without effort omits --effort", () => {
   const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "haiku", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
 });
 
 test("open model env mode: same argv plus exact env trio, model verbatim", () => {
-  const d = buildDispatch(task({ model: "minimax-m3:cloud" }), "p", CFG, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "ollama", model: "minimax-m3:cloud" }), "p", CFG, { _mcpTools: NO_MCP });
   deepEqual(d.argv, ["claude", "-p", "p", "--model", "minimax-m3:cloud", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {
     ANTHROPIC_BASE_URL: "http://localhost:11434",
@@ -47,7 +47,7 @@ test("open model env mode: same argv plus exact env trio, model verbatim", () =>
 });
 
 test("contextWindow 1m suffixes only the CLI model name, keeping the provider model bare", () => {
-  const d = buildDispatch(task({ model: "glm-5.3:cloud", contextWindow: "1m" }), "p", CFG, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "ollama", model: "glm-5.3:cloud", contextWindow: "1m" }), "p", CFG, { _mcpTools: NO_MCP });
   deepEqual(d.argv, ["claude", "-p", "p", "--model", "glm-5.3:cloud[1m]", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {
     ANTHROPIC_BASE_URL: "http://localhost:11434",
@@ -57,7 +57,7 @@ test("contextWindow 1m suffixes only the CLI model name, keeping the provider mo
 });
 
 test("open model: effort passes through", () => {
-  const d = buildDispatch(task({ model: "glm-4.6:cloud", effort: "xhigh" }), "p", CFG, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "ollama", model: "glm-4.6:cloud", effort: "xhigh" }), "p", CFG, { _mcpTools: NO_MCP });
   ok(d.argv.includes("--effort"));
   equal(d.argv[d.argv.indexOf("--effort") + 1], "xhigh");
 });
@@ -67,24 +67,24 @@ test("task.resume adds --resume <sessionId> for any model family", () => {
   const i = d.argv.indexOf("--resume");
   ok(i > 0, d.argv.join(" "));
   equal(d.argv[i + 1], "s-123");
-  const open = buildDispatch(task({ model: "glm-4.6:cloud", resume: "s-9" }), "q", CFG, { _mcpTools: NO_MCP });
+  const open = buildDispatch(task({ provider: "ollama", model: "glm-4.6:cloud", resume: "s-9" }), "q", CFG, { _mcpTools: NO_MCP });
   ok(open.argv.includes("--resume"));
   equal(open.env.ANTHROPIC_MODEL, "glm-4.6:cloud");
 });
 
 test("no --max-budget-usd for any model family", () => {
-  for (const m of ["haiku", "claude-opus-4-8", "glm-4.6:cloud"]) {
-    const d = buildDispatch(task({ model: m }), "p", CFG, { _mcpTools: NO_MCP });
+  for (const [provider, m] of [["claude", "claude-haiku-4-5-20251001"], ["claude", "claude-opus-4-8"], ["ollama", "glm-4.6:cloud"]]) {
+    const d = buildDispatch(task({ provider, model: m }), "p", CFG, { _mcpTools: NO_MCP });
     ok(!d.argv.includes("--max-budget-usd"), `--max-budget-usd leaked for ${m}`);
   }
   const launchCfg = { provider: { ...CFG.provider, mode: "launch" } };
-  const d = buildDispatch(task({ model: "glm-4.6:cloud" }), "p", launchCfg, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "ollama", model: "glm-4.6:cloud" }), "p", launchCfg, { _mcpTools: NO_MCP });
   ok(!d.argv.includes("--max-budget-usd"));
 });
 
 test("launch mode: template split with {model} substitution and {args} splice", () => {
   const cfg = { provider: { ...CFG.provider, mode: "launch" } };
-  const d = buildDispatch(task({ model: "qwen3-coder:cloud", effort: "high" }), "the prompt", cfg, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "ollama", model: "qwen3-coder:cloud", effort: "high" }), "the prompt", cfg, { _mcpTools: NO_MCP });
   deepEqual(d.argv, [
     "ollama", "launch", "claude", "--model", "qwen3-coder:cloud", "--",
     "-p", "the prompt", "--model", "qwen3-coder:cloud", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS,
@@ -95,27 +95,27 @@ test("launch mode: template split with {model} substitution and {args} splice", 
 test("launch mode refuses contextWindow because the launcher rejects suffixed model names", () => {
   const cfg = { provider: { ...CFG.provider, mode: "launch" } };
   throws(
-    () => buildDispatch(task({ model: "glm-5.3:cloud", contextWindow: "1m" }), "p", cfg, { _mcpTools: NO_MCP }),
+    () => buildDispatch(task({ provider: "ollama", model: "glm-5.3:cloud", contextWindow: "1m" }), "p", cfg, { _mcpTools: NO_MCP }),
     /contextWindow "1m".*launch mode.*rejects \[1m\]/i
   );
 });
 
 test("launch mode applies only to non-Claude models", () => {
   const cfg = { provider: { ...CFG.provider, mode: "launch" } };
-  const d = buildDispatch(task({ model: "sonnet" }), "p", cfg, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5" }), "p", cfg, { _mcpTools: NO_MCP });
   equal(d.argv[0], "claude");
   deepEqual(d.env, {});
 });
 
 test("task.settings adds --settings <json> right after --allowedTools", () => {
-  const d = buildDispatch(task({ model: "sonnet", settings: { env: { X: "0" } } }), "p", CFG, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5", settings: { env: { X: "0" } } }), "p", CFG, { _mcpTools: NO_MCP });
   const i = d.argv.indexOf("--allowedTools");
   deepEqual(d.argv.slice(i, i + 4), ["--allowedTools", "Read,Grep,Glob", "--settings", '{"env":{"X":"0"}}']);
 });
 
 test("no settings key: exact argv, no --settings", () => {
   const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "haiku", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   ok(!d.argv.includes("--settings"));
 });
 
@@ -123,28 +123,28 @@ test("no settings key: exact argv, no --settings", () => {
 
 test("disable1mContext: false + Claude model injects --settings with the 1M env var right after --allowedTools", () => {
   const cfg = { ...CFG, disable1mContext: false };
-  const d = buildDispatch(task({ model: "sonnet" }), "p", cfg, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5" }), "p", cfg, { _mcpTools: NO_MCP });
   const i = d.argv.indexOf("--allowedTools");
   deepEqual(d.argv.slice(i, i + 4), ["--allowedTools", "Read,Grep,Glob", "--settings", '{"env":{"CLAUDE_CODE_DISABLE_1M_CONTEXT":"0"}}']);
 });
 
 test("disable1mContext: true + no task settings → no --settings (byte-identical to the shipped-default argv)", () => {
   const cfg = { ...CFG, disable1mContext: true };
-  const d = buildDispatch(task({ model: "sonnet" }), "p", cfg, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "sonnet", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5" }), "p", cfg, { _mcpTools: NO_MCP });
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-sonnet-5", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   ok(!d.argv.includes("--settings"));
 });
 
 test("task settings.env.CLAUDE_CODE_DISABLE_1M_CONTEXT wins over the config default; other task settings keys survive the merge", () => {
   const cfg = { ...CFG, disable1mContext: false };
-  const d = buildDispatch(task({ model: "sonnet", settings: { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "1", OTHER: "x" } } }), "p", cfg, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5", settings: { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "1", OTHER: "x" } } }), "p", cfg, { _mcpTools: NO_MCP });
   const i = d.argv.indexOf("--settings");
   deepEqual(JSON.parse(d.argv[i + 1]), { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "1", OTHER: "x" } });
 });
 
 test("disable1mContext: false on a non-Claude model injects nothing", () => {
   const cfg = { ...CFG, disable1mContext: false };
-  const d = buildDispatch(task({ model: "minimax-m3:cloud" }), "p", cfg, { _mcpTools: NO_MCP });
+  const d = buildDispatch(task({ provider: "ollama", model: "minimax-m3:cloud" }), "p", cfg, { _mcpTools: NO_MCP });
   ok(!d.argv.includes("--settings"));
 });
 
@@ -247,7 +247,7 @@ test("toSpawnable passes .exe and pathless resolution through untouched", { skip
 // ── windowsCommandLineLength (CreateProcess quoting) ───────────────────────────
 
 test("windowsCommandLineLength: plain args join with single spaces, no quoting", () => {
-  equal(windowsCommandLineLength(["claude", "-p", "hello", "--model", "haiku"]), "claude -p hello --model haiku".length);
+  equal(windowsCommandLineLength(["claude", "-p", "hello", "--model", "claude-haiku-4-5-20251001"]), "claude -p hello --model claude-haiku-4-5-20251001".length);
 });
 
 test("windowsCommandLineLength: an arg with a space is wrapped in quotes", () => {
@@ -288,12 +288,12 @@ test("mcpTools is empty when the file is missing, unreadable or has no servers",
 
 test("every leaf's allowedTools carries the MCP servers", () => {
   const fake = () => ["mcp__scout"];
-  const d = buildDispatch({ model: "sonnet", allowedTools: "Read,Grep" }, "p", CFG, { _mcpTools: fake });
+  const d = buildDispatch({ provider: "claude", model: "claude-sonnet-5", allowedTools: "Read,Grep" }, "p", CFG, { _mcpTools: fake });
   equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "Read,Grep,mcp__scout");
 });
 
 test("a leaf with no allowedTools still gets MCP, with no leading comma", () => {
   const fake = () => ["mcp__scout"];
-  const d = buildDispatch({ model: "sonnet", allowedTools: "" }, "p", CFG, { _mcpTools: fake });
+  const d = buildDispatch({ provider: "claude", model: "claude-sonnet-5", allowedTools: "" }, "p", CFG, { _mcpTools: fake });
   equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "mcp__scout");
 });

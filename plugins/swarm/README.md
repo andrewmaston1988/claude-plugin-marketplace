@@ -165,8 +165,7 @@ tools, budget-driven control flow, or you simply want zero setup.
 `models` asks the enabled provider registry for launchable rows and keeps the provider identity
 on every row. The Ollama adapter unions the curated recommendations endpoint with `/api/tags`,
 enriches candidates through `/api/show`, and prints the roster largest-first —
-`ollama/glm-5.2:cloud — Frontier open model (756B, 1.0M ctx)`. Claude tiers (`haiku`/`sonnet`/
-`opus`) remain static aliases; an enabled Codex adapter discovers its account-visible models
+`ollama/glm-5.2:cloud — Frontier open model (756B, 1.0M ctx)`. Claude models are not listed (their aliases are refused; name the full id with `"provider": "claude"`); an enabled Codex adapter discovers its account-visible models
 through app-server `model/list`. When the same model id exists under multiple providers, the
 provider-qualified label is required.
 
@@ -184,24 +183,24 @@ again.
   "tasks": [
     {
       "id": "auth",
-      "model": "minimax-m3:cloud",
+      "provider": "ollama", "model": "minimax-m3:cloud",
       "prompt": "Your single job: where is session token expiry enforced?\nFile scope: src/auth/**\nReturn your findings as ≤10 bullet points: name, file path, line number, one-line description. No prose. If you cannot find the answer, say so in one line — do not expand scope."
     },
     {
       "id": "session",
-      "model": "minimax-m3:cloud",
+      "provider": "ollama", "model": "minimax-m3:cloud",
       "prompt": "Your single job: how are sessions persisted and evicted?\nFile scope: src/session/**\n(same return contract)"
     },
     {
       "id": "verdict",
-      "model": "sonnet",
+      "provider": "claude", "model": "claude-sonnet-5",
       "effort": "high",
       "after": ["auth", "session"],
       "prompt": "Read {{resultPath:auth}} and {{resultPath:session}}. Do the expiry and eviction paths agree? Return a verdict with file:line evidence."
     }
   ],
   "digest": {
-    "model": "glm-5.2:cloud",
+    "provider": "ollama", "model": "glm-5.2:cloud",
     "instructions": "must_be_sure: the expiry enforcement point. PROVEN/OPEN ledger required."
   }
 }
@@ -215,12 +214,12 @@ worst-case leaf count.
 
 ```json
 { "tasks": [
-    { "id": "find-sites", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: {\"sites\":[…]}" },
+    { "id": "find-sites", "provider": "ollama", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: {\"sites\":[…]}" },
     { "id": "dedupe", "after": ["find-sites"], "compute": "unique_by(deps['find-sites'].sites, 'file')" },
     { "id": "fix", "after": ["dedupe"], "forEach": { "from": "dedupe", "path": "", "maxItems": 30 },
-      "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}" },
+      "provider": "ollama", "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}" },
     { "id": "escalate", "after": ["fix", "dedupe"], "when": { "from": "dedupe", "expr": "length(value) > 20" },
-      "model": "sonnet", "prompt": "…{{result:fix}}…" }
+      "provider": "claude", "model": "claude-sonnet-5", "prompt": "…{{result:fix}}…" }
   ] }
 ```
 
@@ -244,20 +243,20 @@ back:
 
 ```json
 { "tasks": [
-    { "id": "helper", "model": "glm-5.2:cloud", "isolation": { "worktree": "feat" },
+    { "id": "helper", "provider": "ollama", "model": "glm-5.2:cloud", "isolation": { "worktree": "feat" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…write the helper. Commit before you finish." },
 
-    { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper"],
+    { "id": "migrate-x", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["helper"],
       "isolation": { "worktree": "migrate-x", "from": "helper" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…Commit before you finish." },
-    { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper"],
+    { "id": "migrate-y", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["helper"],
       "isolation": { "worktree": "migrate-y", "from": "helper" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…Commit before you finish." },
 
     { "id": "join", "after": ["migrate-x", "migrate-y"],
       "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
 
-    { "id": "cleanup", "model": "glm-5.2:cloud", "after": ["join"],
+    { "id": "cleanup", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["join"],
       "isolation": { "worktree": "feat" }, "prompt": "…resolve {{result:join}}, run the suite. Commit." }
   ] }
 ```
@@ -279,9 +278,9 @@ merges, in index order:
 
 ```json
 { "tasks": [
-    { "id": "find-sites", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: {\"sites\":[…]}" },
+    { "id": "find-sites", "provider": "ollama", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: {\"sites\":[…]}" },
     { "id": "fix", "after": ["find-sites"], "forEach": { "from": "find-sites", "path": "sites", "maxItems": 30 },
-      "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
+      "provider": "ollama", "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
 
     { "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
   ] }
