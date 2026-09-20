@@ -1043,6 +1043,34 @@ test("snapshot: a stale index lock is cleared and nothing is left behind", () =>
   } finally { cleanup(repo, o.resultsDir); }
 });
 
+test("snapshot: the temp index and its lock are scrubbed after success and after a mid-build throw", () => {
+  const repo = initRepo(); const o = snapEnv();
+  const idx = join(o.resultsDir, `snapshot-${o.repoKey}.index`);
+  try {
+    writeFileSync(join(repo, "n.txt"), "x\n");
+    snapshotCommit(repo, o);
+    equal(existsSync(idx), false, "index left after success");
+    equal(existsSync(idx + ".lock"), false, "lock left after success");
+
+    // Fail after `add -A` has populated the temp index, so the file exists when the throw lands.
+    let indexAtFailure = null;
+    const failing = (args, cwd, opts) => {
+      if (args[0] === "write-tree") {
+        indexAtFailure = existsSync(idx);
+        writeFileSync(idx + ".lock", "");
+        return { status: 1, stdout: "", stderr: "injected" };
+      }
+      return realGit(args, cwd, opts);
+    };
+    let msg = "";
+    try { snapshotCommit(repo, { ...o, _git: failing }); } catch (e) { msg = e.message; }
+    ok(msg.includes("write-tree failed"), msg);
+    equal(indexAtFailure, true, "sanity: the temp index existed when the build failed");
+    equal(existsSync(idx), false, "index left after a throw");
+    equal(existsSync(idx + ".lock"), false, "lock left after a throw");
+  } finally { cleanup(repo, o.resultsDir); }
+});
+
 test("snapshot: a skip-worktree file absent from disk is still in the snapshot", () => {
   const repo = initRepo(); const o = snapEnv();
   try {
