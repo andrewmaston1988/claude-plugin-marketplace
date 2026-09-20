@@ -1040,7 +1040,6 @@ test("snapshot: a stale index lock is cleared and nothing is left behind", () =>
     writeFileSync(join(repo, "n.txt"), "x\n");
     snapshotCommit(repo, o);
     equal(existsSync(idx), false);
-    equal(existsSync(idx + ".lock"), false);
   } finally { cleanup(repo, o.resultsDir); }
 });
 

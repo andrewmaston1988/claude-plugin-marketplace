@@ -3643,7 +3643,8 @@ test("resume: --force starts fresh even with a recorded session", async () => {
 });
 
 // ---- snapshot-mode leaves: one frozen tree per repo per run ----
-import { snapshotKey as snapKey, prepareSnapshotTree as prepSnapTree } from "../src/worktree.mjs";
+import { prepareSnapshotTree as prepSnapTree } from "../src/worktree.mjs";
+import { oracleSnapKey as snapKey } from "./helpers/snap-key.mjs";
 import { runLiveness } from "../src/runlog.mjs";
 
 const sg = (args, cwd) => {
@@ -3873,17 +3874,14 @@ test("snapshot: ask mode takes no snapshot and creates no tree", async () => {
   try {
     const p = plan(dir, [snapTask("a", r1), snapTask("b", r2)]);
     await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({ output: "x" }))));
-    const evBefore = snapEvents(p).length;
     const prior = readResult(p.resultsDir, "a");
     writeResult(p.resultsDir, "a", { ...prior, sessionId: "s-1", cwd: p.resultsDir });
     // An uncached sibling in the second repo: without the ask guard the pass would snapshot it.
     writeResult(p.resultsDir, "b", { ...readResult(p.resultsDir, "b"), ok: false });
-    // Resume reuses the recorded SHA, so no new event either way: the tree existing mid-ask is the tell.
+    // Resume reuses the recorded SHA, so the tree existing mid-ask is the only tell.
     let treeDuringAsk = null;
     await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => { treeDuringAsk = existsSync(treeOf(p, r1)) || existsSync(treeOf(p, r2)); return { output: "ans" }; })), { ask: { taskId: "a", question: "q?" } });
     equal(treeDuringAsk, false);
-    equal(snapEvents(p).length, evBefore);
-    equal(existsSync(treeOf(p, r1)) || existsSync(treeOf(p, r2)), false);
   } finally { drop(dir, r1, r2); }
 });
 

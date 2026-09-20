@@ -12,6 +12,7 @@ import {
 import { runLiveness, readRun } from "../src/runlog.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import * as defaultWorktree from "../src/worktree.mjs";
+import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
 
 const CFG = {
@@ -535,7 +536,7 @@ function snapAskSetup() {
   const sha = g(["rev-parse", "HEAD"]).stdout.trim();
   const dir = mkdtempSync(join(tmpdir(), "swarm-ask-snap-"));
   initResultsDir(dir);
-  const repoKey = defaultWorktree.snapshotKey(repo);
+  const repoKey = oracleSnapKey(repo);
   const tree = join(dir, "wt-snapshot-" + repoKey);
   writeResult(dir, "leaf", {
     id: "leaf", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "original", sessionId: "s-1",
@@ -594,6 +595,20 @@ test("askLeaf snapshot: the tree is removed even when the ask throws after re-ad
       /governance/,
     );
     equal(existsSync(s.tree), false, "finally must remove the re-added tree");
+    equal(s.registered(), false);
+  } finally {
+    snapAskDrop(s);
+  }
+});
+
+test("askLeaf snapshot: a result with no originalCwd errors clearly and still removes the re-added tree", async () => {
+  const s = snapAskSetup();
+  try {
+    writeResult(s.dir, "leaf", { ...readResult(s.dir, "leaf"), originalCwd: undefined });
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await rejects(askLeaf({ resultsDir: s.dir, taskId: "leaf", question: "q", cfg: CFG, io: makeIo(spawn) }), /cannot re-create the snapshot this leaf read/);
+    equal(spawn.calls.length, 0);
+    equal(existsSync(s.tree), false, "tree must not leak when snapshotCwd throws");
     equal(s.registered(), false);
   } finally {
     snapAskDrop(s);

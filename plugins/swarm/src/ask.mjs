@@ -30,6 +30,7 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
       readdedTree = prepareSnapshotTree(prior.repoToplevel, prior.snapshotSha, resultsDir, prior.repoKey);
       cwd = snapshotCwd(readdedTree, prior.repoToplevel, prior.originalCwd);
     } catch (e) {
+      if (readdedTree) removeSnapshotTree(readdedTree, prior.repoToplevel);
       throw new Error(`cannot re-create the snapshot this leaf read: ${e.message} — re-run the leaf to ask it again`);
     }
   }
