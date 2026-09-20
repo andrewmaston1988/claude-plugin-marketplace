@@ -1,10 +1,13 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { prepareIsolation, collect, integrate } from "../src/worktree.mjs";
+import {
+  prepareIsolation, collect, integrate,
+  snapshotKey, snapshotCommit, prepareSnapshotTree, removeSnapshotTree, snapshotCwd,
+} from "../src/worktree.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
@@ -901,4 +904,306 @@ test("prepareIsolation re-enters a registered worktree named with different case
 
     dropWorktree(repo, first.path);
   } finally { cleanup(repo, results); }
+});
+
+// ---- snapshot helpers ----
+
+function realGit(args, cwd, { timeout, env } = {}) {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout, env: env ? { ...process.env, ...env } : process.env });
+  return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+}
+
+function snapEnv() {
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-snap-res-"));
+  return { resultsDir, runKey: "a".repeat(12), repoKey: "b".repeat(12), label: "t" };
+}
+
+function snapDrop(repo, ...paths) {
+  for (const p of paths) spawnSync("git", ["worktree", "remove", "-f", "-f", p], { cwd: repo, windowsHide: true });
+}
+
+const HEXKEY = /^[0-9a-f]{12}$/;
+const NOSTAMP = ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false"];
+
+test("snapshot: commit holds modified, staged and untracked files at working-tree content, parented on HEAD", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    writeFileSync(join(repo, "a.txt"), "changed\n");
+    writeFileSync(join(repo, "staged.txt"), "staged\n");
+    git(["add", "staged.txt"], repo);
+    writeFileSync(join(repo, "untracked.txt"), "loose\n");
+    const { sha, clean } = snapshotCommit(repo, o);
+    equal(clean, false);
+    equal(git(["rev-parse", `${sha}^`], repo), git(["rev-parse", "HEAD"], repo));
+    equal(git(["show", `${sha}:a.txt`], repo), "changed");
+    equal(git(["show", `${sha}:staged.txt`], repo), "staged");
+    equal(git(["show", `${sha}:untracked.txt`], repo), "loose");
+  } finally { cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: the operator's status and index are byte-identical after snapshotCommit", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    writeFileSync(join(repo, "a.txt"), "changed\n");
+    writeFileSync(join(repo, "untracked.txt"), "loose\n");
+    const before = [git(["status", "--porcelain"], repo), git(["diff", "--cached"], repo), git(["ls-files", "-s"], repo)];
+    snapshotCommit(repo, o);
+    deepEqual([git(["status", "--porcelain"], repo), git(["diff", "--cached"], repo), git(["ls-files", "-s"], repo)], before);
+    ok(before[0].includes("?? untracked.txt"), "sanity: still untracked");
+  } finally { cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: a clean repo snapshots as HEAD itself with no new commit", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    const head = git(["rev-parse", "HEAD"], repo);
+    const before = git(["rev-list", "--all", "--count"], repo);
+    deepEqual(snapshotCommit(repo, o), { sha: head, clean: true });
+    equal(git(["rev-list", "--all", "--count"], repo), before);
+  } finally { cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: succeeds with no git identity anywhere", () => {
+  const repo = initRepo(); const o = snapEnv();
+  const saved = { g: process.env.GIT_CONFIG_GLOBAL, s: process.env.GIT_CONFIG_NOSYSTEM };
+  try {
+    git(["config", "user.useConfigOnly", "true"], repo);
+    const emptyCfg = join(o.resultsDir, "empty.gitconfig");
+    writeFileSync(emptyCfg, "");
+    process.env.GIT_CONFIG_GLOBAL = emptyCfg;
+    process.env.GIT_CONFIG_NOSYSTEM = "1";
+    writeFileSync(join(repo, "n.txt"), "x\n");
+    const { sha, clean } = snapshotCommit(repo, o);
+    equal(clean, false);
+    ok(/^[0-9a-f]{40}$/.test(sha));
+  } finally {
+    for (const [k, v] of [["GIT_CONFIG_GLOBAL", saved.g], ["GIT_CONFIG_NOSYSTEM", saved.s]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    cleanup(repo, o.resultsDir);
+  }
+});
+
+test("snapshot: a repo with no commits throws a teaching error", () => {
+  const repo = mkdtempSync(join(tmpdir(), "swarm-snap-unborn-")); const o = snapEnv();
+  try {
+    spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo, windowsHide: true });
+    writeFileSync(join(repo, "f.txt"), "x\n");
+    let msg = "";
+    try { snapshotCommit(repo, o); } catch (e) { msg = e.message; }
+    ok(msg.includes("has no commits yet"), msg);
+  } finally { cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: works when the process cwd is outside any repo (index path resolved against the repo)", () => {
+  const repo = initRepo(); const o = snapEnv();
+  const outside = mkdtempSync(join(tmpdir(), "swarm-snap-outside-"));
+  const cwd = process.cwd();
+  try {
+    writeFileSync(join(repo, "sparse.txt"), "kept\n");
+    commitAll(repo, "add sparse");
+    // Only a copy of the real index preserves the skip-worktree bit: a missing copy (wrong
+    // path) silently rebuilds the index from the working tree and snapshots this as deleted.
+    git(["update-index", "--skip-worktree", "sparse.txt"], repo);
+    rmSync(join(repo, "sparse.txt"));
+    writeFileSync(join(repo, "u.txt"), "u\n");
+    process.chdir(outside);
+    const { sha } = snapshotCommit(repo, o);
+    equal(git(["show", `${sha}:u.txt`], repo), "u");
+    equal(git(["show", `${sha}:sparse.txt`], repo), "kept");
+  } finally { process.chdir(cwd); cleanup(repo, o.resultsDir, outside); }
+});
+
+test("snapshot: a linked worktree's own staged file is in the snapshot", () => {
+  const repo = initRepo(); const o = snapEnv();
+  const link = join(o.resultsDir, "linked");
+  try {
+    writeFileSync(join(repo, "sparse.txt"), "kept\n");
+    commitAll(repo, "add sparse");
+    git(["worktree", "add", "--detach", link], repo);
+    writeFileSync(join(link, "only-here.txt"), "linked\n");
+    git(["add", "only-here.txt"], link);
+    // The skip-worktree bit lives only in the linked worktree's own index.
+    git(["update-index", "--skip-worktree", "sparse.txt"], link);
+    rmSync(join(link, "sparse.txt"));
+    const { sha } = snapshotCommit(link, o);
+    equal(git(["show", `${sha}:only-here.txt`], link), "linked");
+    equal(git(["show", `${sha}:sparse.txt`], link), "kept");
+  } finally { snapDrop(repo, link); cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: a stale index lock is cleared and nothing is left behind", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    const idx = join(o.resultsDir, `snapshot-${o.repoKey}.index`);
+    writeFileSync(idx + ".lock", "");
+    writeFileSync(join(repo, "n.txt"), "x\n");
+    snapshotCommit(repo, o);
+    equal(existsSync(idx), false);
+    equal(existsSync(idx + ".lock"), false);
+  } finally { cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: a skip-worktree file absent from disk is still in the snapshot", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    writeFileSync(join(repo, "sparse.txt"), "kept\n");
+    commitAll(repo, "add sparse");
+    git(["update-index", "--skip-worktree", "sparse.txt"], repo);
+    rmSync(join(repo, "sparse.txt"));
+    writeFileSync(join(repo, "n.txt"), "x\n");
+    const { sha } = snapshotCommit(repo, o);
+    equal(git(["show", `${sha}:sparse.txt`], repo), "kept");
+  } finally { cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: a resultsDir with a space and a tilde still yields a ref-safe name", () => {
+  const repo = initRepo();
+  const base = mkdtempSync(join(tmpdir(), "swarm-snap-base-"));
+  const resultsDir = join(base, "my review~1"); mkdirSync(resultsDir);
+  try {
+    const runKey = snapshotKey(resultsDir);
+    snapshotCommit(repo, { resultsDir, runKey, repoKey: snapshotKey(repo), label: "t" });
+    const refs = git(["for-each-ref", "--format=%(refname)", "refs/swarm/snapshots/"], repo).split(/\r?\n/);
+    equal(refs.length, 1);
+    ok(/^refs\/swarm\/snapshots\/[0-9a-f]{12}\/[0-9a-f]{12}$/.test(refs[0]), refs[0]);
+  } finally { cleanup(repo, base); }
+});
+
+test("snapshot: a clean snapshot's ref resolves to HEAD before any tree exists", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    snapshotCommit(repo, o);
+    equal(git(["rev-parse", `refs/swarm/snapshots/${o.runKey}/${o.repoKey}`], repo), git(["rev-parse", "HEAD"], repo));
+    equal(existsSync(join(o.resultsDir, `wt-snapshot-${o.repoKey}`)), false);
+  } finally { cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: snapshotKey ignores case on win32", { skip: process.platform !== "win32" && "the case rule is win32-only" }, () => {
+  ok(HEXKEY.test(snapshotKey("C:\\code\\claude")));
+  equal(snapshotKey("C:\\code\\claude"), snapshotKey("c:/CODE/claude"));
+});
+
+test("snapshot: snapshotKey is 12 lowercase hex and distinguishes paths", () => {
+  ok(HEXKEY.test(snapshotKey(tmpdir())));
+  ok(snapshotKey(join(tmpdir(), "a-b")) !== snapshotKey(join(tmpdir(), "a", "b")));
+});
+
+test("snapshot: prepareSnapshotTree makes a detached tree at the SHA and re-uses it", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    const { sha } = snapshotCommit(repo, o);
+    const path = prepareSnapshotTree(repo, sha, o.resultsDir, o.repoKey);
+    equal(path, resolve(o.resultsDir, `wt-snapshot-${o.repoKey}`));
+    equal(git(["rev-parse", "HEAD"], path), sha);
+    ok(spawnSync("git", ["symbolic-ref", "-q", "HEAD"], { cwd: path, windowsHide: true }).status !== 0, "detached");
+    const calls = [];
+    const spy = (args, cwd, opts) => { calls.push(args.join(" ")); return realGit(args, cwd, opts); };
+    equal(prepareSnapshotTree(repo, sha, o.resultsDir, o.repoKey, { _git: spy }), path);
+    ok(!calls.some((c) => c.includes("worktree add")), calls.join("|"));
+  } finally { snapDrop(repo, join(o.resultsDir, `wt-snapshot-${o.repoKey}`)); cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: a damaged tree at the right SHA is rebuilt", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    const { sha } = snapshotCommit(repo, o);
+    const path = prepareSnapshotTree(repo, sha, o.resultsDir, o.repoKey);
+    rmSync(join(path, "a.txt"));
+    equal(prepareSnapshotTree(repo, sha, o.resultsDir, o.repoKey), path);
+    ok(existsSync(join(path, "a.txt")));
+  } finally { snapDrop(repo, join(o.resultsDir, `wt-snapshot-${o.repoKey}`)); cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: a tree at SHA A called with SHA B moves to B", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    const a = snapshotCommit(repo, o).sha;
+    const path = prepareSnapshotTree(repo, a, o.resultsDir, o.repoKey);
+    writeFileSync(join(repo, "n.txt"), "x\n");
+    const b = snapshotCommit(repo, o).sha;
+    ok(a !== b);
+    equal(prepareSnapshotTree(repo, b, o.resultsDir, o.repoKey), path);
+    equal(git(["rev-parse", "HEAD"], path), b);
+  } finally { snapDrop(repo, join(o.resultsDir, `wt-snapshot-${o.repoKey}`)); cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: a timed-out, locked worktree add is fully removed and the next call builds the tree", () => {
+  const repo = initRepo(); const o = snapEnv();
+  const path = resolve(o.resultsDir, `wt-snapshot-${o.repoKey}`);
+  try {
+    const { sha } = snapshotCommit(repo, o);
+    const killed = (args, cwd, opts) => {
+      const r = realGit(args, cwd, opts);
+      if (args.includes("worktree") && args.includes("add")) {
+        realGit(["worktree", "lock", "--reason", "initializing", path], cwd, opts);
+        return { status: null, stdout: "", stderr: "killed" };
+      }
+      return r;
+    };
+    let msg = "";
+    try { prepareSnapshotTree(repo, sha, o.resultsDir, o.repoKey, { _git: killed }); } catch (e) { msg = e.message; }
+    ok(msg.includes("killed"), msg);
+    equal(existsSync(path), false);
+    ok(!git(["worktree", "list", "--porcelain"], repo).toLowerCase().includes("wt-snapshot"), "still registered");
+    equal(prepareSnapshotTree(repo, sha, o.resultsDir, o.repoKey), path);
+  } finally { snapDrop(repo, path); cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: a SHA that does not resolve throws 'no longer exists' and runs no worktree add", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    const calls = [];
+    const spy = (args, cwd, opts) => { calls.push(args.join(" ")); return realGit(args, cwd, opts); };
+    let msg = "";
+    try { prepareSnapshotTree(repo, "1".repeat(40), o.resultsDir, o.repoKey, { _git: spy }); } catch (e) { msg = e.message; }
+    ok(msg.includes("no longer exists"), msg);
+    ok(!calls.some((c) => c.includes("worktree add")), calls.join("|"));
+  } finally { cleanup(repo, o.resultsDir); }
+});
+
+const HAS_LFS = spawnSync("git", ["lfs", "version"], { windowsHide: true }).status === 0;
+test("snapshot: an LFS-tracked file arrives as its pointer text", { skip: !HAS_LFS && "git lfs is not installed" }, () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    git(["lfs", "install", "--local"], repo);
+    writeFileSync(join(repo, ".gitattributes"), "*.bin filter=lfs diff=lfs merge=lfs -text\n");
+    writeFileSync(join(repo, "big.bin"), "real payload\n");
+    git(["add", "."], repo);
+    git([...NOSTAMP, "commit", "-q", "-m", "lfs"], repo);
+    const { sha } = snapshotCommit(repo, o);
+    const path = prepareSnapshotTree(repo, sha, o.resultsDir, o.repoKey);
+    ok(readFileSync(join(path, "big.bin"), "utf8").startsWith("version https://git-lfs"), "expected the pointer");
+  } finally { snapDrop(repo, join(o.resultsDir, `wt-snapshot-${o.repoKey}`)); cleanup(repo, o.resultsDir); }
+});
+
+test("snapshot: snapshotCwd offsets into the tree, creates it, and refuses a cwd outside the repo", () => {
+  const base = mkdtempSync(join(tmpdir(), "swarm-snap-cwd-"));
+  try {
+    const tree = join(base, "tree"); const repo = join(base, "repo"); mkdirSync(tree);
+    equal(snapshotCwd(tree, repo, join(repo, "sub")), join(tree, "sub"));
+    ok(existsSync(join(tree, "sub")));
+    equal(snapshotCwd(tree, repo, repo), tree);
+    let threw = false;
+    try { snapshotCwd(tree, repo, join(base, "elsewhere")); } catch { threw = true; }
+    ok(threw, "outside cwd must throw");
+  } finally { cleanup(base); }
+});
+
+test("snapshot: add -A, write-tree and worktree add all run with the 600 s timeout", () => {
+  const repo = initRepo(); const o = snapEnv();
+  try {
+    const seen = {};
+    const spy = (args, cwd, opts) => {
+      const k = args.includes("worktree") && args.includes("add") ? "worktree add" : args.slice(0, 2).join(" ");
+      seen[k] = opts.timeout;
+      return realGit(args, cwd, opts);
+    };
+    writeFileSync(join(repo, "n.txt"), "x\n");
+    const { sha } = snapshotCommit(repo, { ...o, _git: spy });
+    prepareSnapshotTree(repo, sha, o.resultsDir, o.repoKey, { _git: spy });
+    equal(seen["add -A"], 600000);
+    equal(seen["write-tree"], 600000);
+    equal(seen["worktree add"], 600000);
+  } finally { snapDrop(repo, join(o.resultsDir, `wt-snapshot-${o.repoKey}`)); cleanup(repo, o.resultsDir); }
 });
