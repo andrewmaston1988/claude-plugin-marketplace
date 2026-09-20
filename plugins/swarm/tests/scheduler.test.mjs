@@ -3876,7 +3876,12 @@ test("snapshot: ask mode takes no snapshot and creates no tree", async () => {
     const evBefore = snapEvents(p).length;
     const prior = readResult(p.resultsDir, "a");
     writeResult(p.resultsDir, "a", { ...prior, sessionId: "s-1", cwd: p.resultsDir });
-    await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({ output: "ans" }))), { ask: { taskId: "a", question: "q?" } });
+    // An uncached sibling in the second repo: without the ask guard the pass would snapshot it.
+    writeResult(p.resultsDir, "b", { ...readResult(p.resultsDir, "b"), ok: false });
+    // Resume reuses the recorded SHA, so no new event either way: the tree existing mid-ask is the tell.
+    let treeDuringAsk = null;
+    await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => { treeDuringAsk = existsSync(treeOf(p, r1)) || existsSync(treeOf(p, r2)); return { output: "ans" }; })), { ask: { taskId: "a", question: "q?" } });
+    equal(treeDuringAsk, false);
     equal(snapEvents(p).length, evBefore);
     equal(existsSync(treeOf(p, r1)) || existsSync(treeOf(p, r2)), false);
   } finally { drop(dir, r1, r2); }
