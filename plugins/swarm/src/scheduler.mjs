@@ -1292,7 +1292,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       if (r.costUsd != null) result.costUsd = r.costUsd;
       if (r.numTurns != null) result.numTurns = r.numTurns;
       // interrogation fields: `swarm ask` resumes this session in this cwd;
-      // originalCwd (pre scratch/worktree redirect) is the governance identity
+      // originalCwd (pre worktree redirect) is the governance identity
       if (r.sessionId) result.sessionId = r.sessionId;
       if (r.schemaRetried) result.schemaRetried = true;
       if (r.schemaErrors) result.schemaErrors = r.schemaErrors;

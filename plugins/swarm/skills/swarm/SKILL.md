@@ -51,7 +51,7 @@ A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the
 
 ## Data governance — read this first
 
-Non-Claude dispatch is **deny-by-default**. `providers.<name>.allowedRoots` in `~/.swarm/config.json` lists the directory roots where that provider's tasks may run; a non-Claude task whose effective `cwd` is not under its provider root **fails validation**, because the employer's data agreement covers Anthropic only — code outside those roots must never reach another provider. Claude-model tasks run anywhere. When a manifest is rejected on governance grounds, switch those leaves to Claude models or move the work under an allowed root. Never work around the gate.
+Non-Claude dispatch is **deny-by-default**. `providers.<name>.allowedRoots` in `~/.swarm/config.json` lists the directory roots where that provider's tasks may run; a non-Claude task whose effective `cwd` is not under its provider root **fails validation**, because the employer's data agreement covers Anthropic only — code outside those roots must never reach another provider. Claude-model tasks run anywhere, with one exception: `"isolation": "none"` reads its `cwd` in the live checkout rather than a tree, so it is root-gated for every model, Claude included. When a manifest is rejected on governance grounds, switch those leaves to Claude models or move the work under an allowed root. Never work around the gate.
 
 ## Routing — when to swarm
 

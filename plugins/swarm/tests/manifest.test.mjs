@@ -2068,7 +2068,7 @@ import { effectiveIsolation, effectivePlanDoc } from "../src/manifest.mjs";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
 
 const bashTask = (over = {}) => ({ id: "impl", prompt: "p", model: "haiku", allowedTools: "Read,Bash", ...over });
-const inDir = (dir, body, name) => loadManifest(writeManifest(dir, body, name), CFG, dir);
+const inDir = (dir, body, name, opts) => loadManifest(writeManifest(dir, body, name), CFG, dir, opts);
 
 test("branchScope: a default-private writer carries the run-scoped key; explicit worktree and readers carry none", () => {
   const dir = tmp();
@@ -2289,6 +2289,68 @@ test("integrate.from: a none source has no branch to merge; a default-private wr
       { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] } },
     ] }, "ok.json");
     deepEqual(plan.tasks.find((t) => t.id === "join").integrate.from, ["x"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadManifest records the dispatching repo on the plan: repoToplevel and its key", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [claudeTask()] });
+    equal(plan.repoToplevel, dir, "the digest snapshots this tree; without it it has no repo");
+    equal(plan.repoKey, oracleSnapKey(dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a default read-only task carries the repo identity its snapshot is keyed on, not just the mode", () => {
+  const dir = tmp();
+  try {
+    const t = inDir(dir, { tasks: [claudeTask({ id: "ro" })] }).tasks[0];
+    equal(t.isolationMode, "snapshot");
+    equal(t.repoToplevel, dir);
+    equal(t.repoKey, oracleSnapKey(dir));
+    equal(t.worktreeName, undefined);
+    equal(t.isolation, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a task cwd in a second repo keys on THAT repo, while the run stays filed under the dispatching one", () => {
+  const dir = tmp(), other = tmp();
+  try {
+    mkdirSync(join(dir, "sub"), { recursive: true });
+    // Two real repos: the dispatch cwd and the task's own.
+    const io = { repoToplevel: (d) => (String(d).startsWith(other) ? other : dir) };
+    const plan = inDir(dir, { tasks: [
+      claudeTask({ id: "here" }),
+      claudeTask({ id: "there", cwd: other }),
+    ] }, "two.json", { io });
+    const by = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
+    equal(by.here.repoKey, oracleSnapKey(dir));
+    equal(by.there.repoKey, oracleSnapKey(other));
+    notEqual(by.there.repoKey, by.here.repoKey, "one key for both repos snapshots the wrong tree");
+    equal(plan.repoKey, oracleSnapKey(dir), "the run is filed under the dispatching repo, not the task's");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test("tasks sharing a cwd ask git for its toplevel once, not once per task", () => {
+  const dir = tmp();
+  try {
+    const sub = join(dir, "sub");
+    mkdirSync(sub, { recursive: true });
+    const calls = [];
+    const io = { repoToplevel: (d) => { calls.push(String(d)); return dir; } };
+    const tasks = Array.from({ length: 10 }, (_, i) => claudeTask({ id: `t${i}`, cwd: "sub" }));
+    inDir(dir, { tasks }, "memo.json", { io });
+    equal(calls.filter((d) => d === sub).length, 1,
+      "no memo means one `git rev-parse` per leaf at normalise time — slow, and invisible to every other test");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

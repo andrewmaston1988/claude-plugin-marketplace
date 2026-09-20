@@ -390,12 +390,9 @@ export function resolveWorktreeName(t) {
   return typeof t.isolation === "object" ? t.isolation.worktree : t.id;
 }
 
-// The isolation a RAW task ends up with once normalisation applies its defaults:
-// an explicit value stands, a write-capable leaf gets a private tree, everything
-// else (read-only leaves, `"none"`, nodes that spawn no leaf) has none. Raw-task
-// validation reads isolation through this so it sees what normalisation will
-// synthesise. resolveWorktreeName deliberately does NOT learn the write default:
-// the scheduler also calls it on hand-built plans that must run as written.
+// What normalisation WILL synthesise, so raw-task validation sees it too.
+// resolveWorktreeName deliberately stays ignorant of the write default (pinned by
+// "resolveWorktreeName: isolation none owns no tree").
 export function effectiveIsolation(t) {
   if (t.compute !== undefined || t.integrate !== undefined || t.manifest !== undefined) return undefined;
   if (t.isolation === "none") return undefined;
