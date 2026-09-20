@@ -9,7 +9,7 @@ import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createRunnerRegistry } from "./runners.mjs";
 import { defaultCodexRunnerAdapter } from "./codex.mjs";
 import { isUnderRoot } from "./roots.mjs";
-import { RUNNER_PARSER_FACTORIES } from "./stream.mjs";
+import { runnerParserFactories } from "./stream.mjs";
 
 // Build the argv + env for one task dispatch. Pure — no process interaction.
 //
@@ -133,8 +133,8 @@ function validateDispatchPolicy(task, identity, adapter, cfg) {
 }
 
 // Build the provider-aware invocation + runner/parser identity for one task.
-// Pure — no process interaction. The scheduler still consumes only argv/env;
-// Stage 4 can switch its stream loop to the returned runner/parser directly.
+// Pure — no process interaction. The scheduler still consumes only argv/env; a
+// caller may drive its stream loop from the returned runner/parser directly.
 export function buildDispatch(task, prompt, cfg = {}, options = {}) {
   const { providerRegistry, runnerRegistry } = createDispatchRegistry(options);
   const identity = providerRegistry.resolve(task, {
@@ -155,7 +155,7 @@ export function buildDispatch(task, prompt, cfg = {}, options = {}) {
     { config: cfg, provider: identity.provider, mcpTools: options._mcpTools }
   );
   const parser = runner.parser || runner.parserId || runner.id;
-  if (!RUNNER_PARSER_FACTORIES.has(String(parser).toLowerCase())) {
+  if (!runnerParserFactories.has(String(parser).toLowerCase())) {
     throw new Error(`runner '${runner.id}' has no registered parser '${parser}'`);
   }
   return {

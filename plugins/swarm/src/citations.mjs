@@ -90,8 +90,8 @@ export function verifyCitations(citations, { cwds, readFile = (p) => readFileSyn
   return { checked, drifted, refuted, verdicts };
 }
 
-// Stamp each citation's live node with its verdict — the annotation Stage 1
-// leaves in place of deletion, so the verifier and digest see what the checker
+// Stamp each citation's live node with its verdict — an annotation left in place
+// of deletion, so the verifier and digest see what the checker
 // doubted without any finding being lost.
 export function annotateCitations(cite) {
   for (const v of cite.verdicts) {

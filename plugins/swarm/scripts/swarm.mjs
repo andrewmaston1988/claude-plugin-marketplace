@@ -12,7 +12,8 @@ import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, inferStoredIdentity, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
+import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
+import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
@@ -102,19 +103,6 @@ function modelLine(m) {
   return `${line} (${[size, ...(m.contextLength > 0 ? [fmtCtx(m.contextLength)] : [])].join(", ")})`;
 }
 
-function identityOf(value) {
-  const model = typeof value?.model === "string" ? value.model.trim() : value?.model;
-  const explicit = typeof value?.provider === "string" && value.provider.trim()
-    ? value.provider.trim().toLowerCase()
-    : null;
-  const inferred = explicit ? {} : inferStoredIdentity(model);
-  return { provider: explicit || inferred.provider || null, model };
-}
-
-const identityKey = (value) => {
-  const identity = identityOf(value);
-  return JSON.stringify([identity.provider, identity.model]);
-};
 
 // The single ollama usage entry point for the CLI — getUsage memoises per
 // process, so validate/run/models share one fetch however many seats.
@@ -154,7 +142,7 @@ export async function readProviderUsage(cfg, { registry = defaultProviderRegistr
         ? await getUsage(cfg, { gate: false, env, _fetch: fetchImpl })
         : await readUsage({ config: cfg, env, fetch: fetchImpl, usageOptIn: live });
       if (reading == null) continue;
-      usages.push(adapter.id === "ollama" ? normalizeOllama(reading) : adapter.id === "codex" ? normalizeCodex(reading) : normalizeProviderUsage(adapter.id, reading));
+      usages.push(normalizeProviderUsage(adapter.id, reading));
     } catch (error) {
       errors[adapter.id] = error?.message || String(error);
     }
@@ -1418,8 +1406,8 @@ async function main() {
         if (q) usages.push(normalizeAnthropic(q));
         else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
 
-        if (cfg?.provider?.cloud?.ollama?.enabled === true) {
-          const { usageFromCache } = await import("../src/ollama-usage.mjs");
+        const { usageFromCache, ollamaCloudConfig } = await import("../src/ollama-usage.mjs");
+        if (ollamaCloudConfig(cfg).enabled === true) {
           const reading = usageFromCache(cfg);
           if (reading.state === "unknown") out("ollama: no reading yet — run `swarm ollama-usage --cookie '<value>'`");
           else usages.push(normalizeOllama(reading));
@@ -1437,9 +1425,9 @@ async function main() {
         return q?.exhausted ? 1 : 0;
       }
       case "ollama-usage": {
-        const { saveCookie, loadCookie, getUsage } = await import("../src/ollama-usage.mjs");
+        const { saveCookie, loadCookie, getUsage, ollamaCloudConfig } = await import("../src/ollama-usage.mjs");
         const cfg = getConfig();
-        const cookiePath = cfg?.provider?.cloud?.ollama?.cookiePath || join(swarmHome(), "ollama-cookie.json");
+        const cookiePath = ollamaCloudConfig(cfg).cookiePath || join(swarmHome(), "ollama-cookie.json");
         const cookieFlag = getFlag("cookie", rest);
         if (cookieFlag !== undefined) saveCookie(cookiePath, cookieFlag);
 

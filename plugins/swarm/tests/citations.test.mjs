@@ -215,7 +215,7 @@ test("citationErrorLines: caps at 10 with an …and-N-more tail", () => {
   ok(lines[10].includes("4 more"), lines[10]);
 });
 
-// Stage 1 annotates each finding in place — verifyCitations must classify EVERY
+// The checker annotates each finding in place — verifyCitations must classify EVERY
 // citation (verified/drift/refuted) and hand back a node reference to annotate.
 test("verifyCitations: verdicts classify every citation and carry the node to annotate", () => {
   const lines = ["pad", "const exact = 1;", "pad", "const drift = 2;", "pad", "pad"];
@@ -331,7 +331,7 @@ test("integration: fabricated citation — teaching re-ask, corrected output pas
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// Stage 1: a refuted citation NEVER fails the leaf and NEVER deletes a finding.
+// A refuted citation NEVER fails the leaf and NEVER deletes a finding.
 // The one corrective re-ask still fires; a survivor is annotated, the leaf is ok.
 test("integration: still-refuted after re-ask — leaf STILL ok, finding annotated, never failed", async () => {
   const dir = tmp();
@@ -378,7 +378,7 @@ test("integration: schema re-ask consumes the one turn; a still-refuted citation
 
 // The regression this plan exists to prevent: a finder returns many findings,
 // ONE citation is unfixable after the re-ask. Under all-or-nothing (or deletion)
-// the whole leaf — all N findings — would be lost. Stage 1 keeps every one.
+// the whole leaf — all N findings — would be lost. Every one is kept.
 test("integration: N findings, one refuted — leaf ok, ALL findings survive, only the suspect annotated refuted", async () => {
   const dir = tmp();
   try {
@@ -404,7 +404,7 @@ test("integration: N findings, one refuted — leaf ok, ALL findings survive, on
 });
 
 // The nemotron shape: every citation refuted. Loud, but never fatal — under
-// Stage 1 the verifier (an LLM reading the file), not this gate, rules on them.
+// The verifier (an LLM reading the file), not this gate, rules on them.
 test("integration: ALL citations refuted — leaf STILL ok, all findings intact and annotated refuted", async () => {
   const dir = tmp();
   try {

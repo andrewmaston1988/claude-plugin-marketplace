@@ -1,6 +1,6 @@
 // Claude-family detection and per-tier effort matrices.
 
-import { isClaudeModel } from "./contracts.mjs";
+import { isClaudeModel, OLLAMA_CLOUD_RE } from "./contracts.mjs";
 import { createProviderRegistry, defaultProviderAdapters } from "./providers.mjs";
 
 export { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
@@ -9,7 +9,7 @@ export { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
 // bare tags, and the entitlement probe matches either. Single home: the score
 // store and the run-enumeration helper must agree on which leaves are gradeable.
 export function isCloudModel(model) {
-  return /(:|-)cloud$/i.test(String(model || ""));
+  return OLLAMA_CLOUD_RE.test(String(model || ""));
 }
 
 // Valid --effort levels per Claude tier. Open models accept any effort —

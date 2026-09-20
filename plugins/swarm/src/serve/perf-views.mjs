@@ -2,7 +2,7 @@
 // server-side so the page never re-derives a count it could get wrong.
 import { OUTCOMES } from "../aspects.mjs";
 import { overall } from "../scores.mjs";
-import { inferStoredIdentity } from "../results.mjs";
+import { identityOf } from "../contracts.mjs";
 import { band, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
 
 const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
@@ -11,15 +11,6 @@ const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
 // scored on at all (n=0) — absence is evidence the grid must still draw.
 // JSON-encoded tuple, not a joined string — a plain delimiter (space, ":") collides
 // whenever an aspect or model name itself contains that delimiter.
-function identityOf(value) {
-  const model = typeof value?.model === "string" ? value.model : value?.model;
-  const explicit = typeof value?.provider === "string" && value.provider.trim()
-    ? value.provider.trim().toLowerCase()
-    : null;
-  const inferred = explicit ? {} : inferStoredIdentity(model);
-  return { provider: explicit || inferred.provider || null, model, explicit: Boolean(explicit) };
-}
-
 function providersOf(value) {
   const providers = Array.isArray(value?.providers) ? [...value.providers] : [];
   const identity = identityOf(value);

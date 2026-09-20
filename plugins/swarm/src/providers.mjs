@@ -1,4 +1,4 @@
-import { isClaudeModel } from "./contracts.mjs";
+import { isClaudeModel, OLLAMA_CLOUD_RE } from "./contracts.mjs";
 import { join } from "node:path";
 import { checkQuota } from "./quota.mjs";
 import { swarmHome } from "./config.mjs";
@@ -131,7 +131,7 @@ export function defaultProviderAdapters({ codexAdapter, ollamaCapabilities = {} 
       id: "ollama",
       runnerId: "claude",
       defaultEnabled: true,
-      matchModel: (model) => /(:|-)cloud$/i.test(String(model || "")) ? { provider: "ollama", model } : null,
+      matchModel: (model) => OLLAMA_CLOUD_RE.test(String(model || "")) ? { provider: "ollama", model } : null,
       capabilities: { preflight: pingOllamaEndpoint, ...ollamaCapabilities },
     }),
     codexAdapter || descriptor({

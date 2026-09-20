@@ -233,7 +233,7 @@ test("derivation is pure: inputs untouched, equal output on repeat", () => {
   equal(JSON.stringify(rows), rowsBefore);
 });
 
-test("Stage 5 RED: incompatible provider cost units never share a multiplier floor", () => {
+test("incompatible provider cost units never share a multiplier floor", () => {
   const rows = multipliers([
     { provider: "ollama", model: "same-model", unit: "meter-points", classification: "unpriced", ptsPerReq: 2, measuredRequests: 400, requests: 400, weeks: 1, measuredWeeks: 1 },
     { provider: "codex", model: "same-model", unit: "usd", classification: "api-equivalent estimate", ptsPerReq: 0.01, measuredRequests: 400, requests: 400, weeks: 1, measuredWeeks: 1 },
@@ -242,7 +242,7 @@ test("Stage 5 RED: incompatible provider cost units never share a multiplier flo
   equal(rows.find((row) => row.provider === "codex").mult, null, "USD/API estimates are not Ollama meter weights");
 });
 
-test("Stage 5: cost observations carry canonical provenance and Codex billing stays explicitly unpriced", () => {
+test("cost observations carry canonical provenance and Codex billing stays explicitly unpriced", () => {
   deepEqual(normalizeCostObservation({
     provider: "codex", model: "same-model", unit: "usd", source: "pricing-table",
     classification: "api-equivalent estimate", asOf: "2026-09-19",
@@ -256,7 +256,7 @@ test("Stage 5: cost observations carry canonical provenance and Codex billing st
   });
 });
 
-test("Stage 5: provider-local rate-card weights use an explicit Codex base model", () => {
+test("provider-local rate-card weights use an explicit Codex base model", () => {
   const rows = relativeCostRows([
     { provider: "codex", model: "gpt-5.6-sol", unit: "codex-plan-relative", source: "codex-rate-card", classification: "unpriced", value: 12 },
     { provider: "codex", model: "gpt-5.6-luna", unit: "codex-plan-relative", source: "codex-rate-card", classification: "unpriced", value: 3 },

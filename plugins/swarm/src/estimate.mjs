@@ -7,8 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tokenTotal } from "./stream.mjs";
 import { formatTokens } from "./results.mjs";
-import { inferStoredIdentity } from "./results.mjs";
-import { modelKey } from "./contracts.mjs";
+import { modelKey, identityOf } from "./contracts.mjs";
 import { isAgentless } from "./manifest.mjs";
 
 export function median(nums) {
@@ -41,17 +40,6 @@ class ProviderModelMap extends Map {
     if (super.has(key)) return true;
     return this.get(key) !== undefined;
   }
-}
-
-function identityOf(record) {
-  const model = typeof record?.model === "string" ? record.model.trim() : record?.model;
-  const explicit = typeof record?.provider === "string" && record.provider.trim();
-  const inferred = explicit ? {} : inferStoredIdentity(model);
-  return {
-    provider: (explicit ? record.provider.trim() : inferred.provider) || null,
-    model,
-    explicit: Boolean(explicit),
-  };
 }
 
 function keyOf(identity) {
@@ -87,7 +75,10 @@ export function loadCorpus(runsRoot) {
         // fiction, and feeding it to the estimator would fabricate the cost the
         // operator consents against. Tokens (above) are real for every model.
         const billed = row.costClassification === "billed" || row.costObservation?.classification === "billed";
-        if (Number.isFinite(row.costUsd) && ((identity.provider === "claude" && !row.provider) || billed)) {
+        // identity.provider already resolves "claude" whether the row recorded it or the
+        // model name implies it; an extra !row.provider would exclude the recorded case,
+        // which is every row a normalised manifest writes.
+        if (Number.isFinite(row.costUsd) && (identity.provider === "claude" || billed)) {
           push(costUsd, keyOf(identity), row.costUsd);
         }
       }

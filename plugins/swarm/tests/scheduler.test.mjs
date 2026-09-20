@@ -1867,7 +1867,7 @@ test("quota fail-fast never dooms pending compute steps", async () => {
   }
 });
 
-test("Stage 4: Codex canonical completion persists provider, runner, session, and usage", async () => {
+test("Codex canonical completion persists provider, runner, session, and usage", async () => {
   const dir = tmp();
   try {
     const cwd = tmpdir();
@@ -1903,7 +1903,7 @@ test("Stage 4: Codex canonical completion persists provider, runner, session, an
   }
 });
 
-test("Stage 4: a Claude-shaped stream cannot complete a Codex runner", async () => {
+test("a Claude-shaped stream cannot complete a Codex runner", async () => {
   const stream = [
     JSON.stringify({ type: "system", subtype: "init", session_id: "wrong-protocol" }),
     JSON.stringify({ type: "result", subtype: "success", result: "not a Codex terminal" }),
@@ -1923,7 +1923,7 @@ test("Stage 4: a Claude-shaped stream cannot complete a Codex runner", async () 
   match(r.output, /terminal/i);
 });
 
-test("Stage 4: a Claude terminal is_error is reported as a runner error, not a dead session", async () => {
+test("a Claude terminal is_error is reported as a runner error, not a dead session", async () => {
   const stream = [
     JSON.stringify({ type: "system", subtype: "init", session_id: "s-err" }),
     JSON.stringify({ type: "result", subtype: "success", is_error: true, result: "API Error: overloaded" }),
@@ -1933,7 +1933,7 @@ test("Stage 4: a Claude terminal is_error is reported as a runner error, not a d
   match(r.output, /^leaf ended with a runner error: API Error: overloaded/);
 });
 
-test("Stage 4: a Claude quota failure does not fail-fast an unrelated provider", async () => {
+test("a Claude quota failure does not fail-fast an unrelated provider", async () => {
   const dir = tmp();
   try {
     const cwd = tmpdir();
@@ -1986,7 +1986,7 @@ const CODEX_STREAM = [
 ].join("\n") + "\n";
 const isCodexCall = (call) => call.args.includes("exec");
 
-test("Stage 4: a mixed Claude/Ollama/Codex DAG runs on two runners and persists each identity", async () => {
+test("a mixed Claude/Ollama/Codex DAG runs on two runners and persists each identity", async () => {
   const dir = tmp();
   try {
     const cwd = tmpdir();
@@ -2009,7 +2009,7 @@ test("Stage 4: a mixed Claude/Ollama/Codex DAG runs on two runners and persists 
   }
 });
 
-test("Stage 4: a schema correction turn resumes the same Codex thread and logs its identity", async () => {
+test("a schema correction turn resumes the same Codex thread and logs its identity", async () => {
   const dir = tmp();
   try {
     const cwd = tmpdir();
@@ -2034,7 +2034,7 @@ test("Stage 4: a schema correction turn resumes the same Codex thread and logs i
   }
 });
 
-test("Stage 4: a quota fallback re-resolves provider and runner for the target model", async () => {
+test("a quota fallback re-resolves provider and runner for the target model", async () => {
   const dir = tmp();
   try {
     const cwd = tmpdir();
@@ -2055,7 +2055,7 @@ test("Stage 4: a quota fallback re-resolves provider and runner for the target m
   }
 });
 
-test("Stage 4: a rejected fallback ends only its own leaf; the run and its siblings continue", async () => {
+test("a rejected fallback ends only its own leaf; the run and its siblings continue", async () => {
   const dir = tmp();
   try {
     const cwd = tmpdir();
@@ -2493,6 +2493,31 @@ test("entitlement failure removes the model from the cache; classification stays
     const r = await runPlan(plan(dir, [task("a", { model: "kimi-k3:cloud", cwd: dir })]), CFG, io);
     equal(r.summary.tasks[0].state, "failed"); // not quota, not rate-limited
     deepEqual(JSON.parse(readFileSync(cachePath, "utf8")).models.map((m) => m.model), ["glm-5.2:cloud"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("entitlement failure evicts only the failing provider's row of a shared model id", async () => {
+  // RED (drop task.provider from the removeCachedModel call): both rows go, and the roster
+  // silently loses a model the account is still entitled to run.
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ exit: 1, output: ENTITLEMENT_BODY }));
+    const io = makeIo(spawn);
+    const cachePath = seedModelsCache(io, [
+      { model: "shared-id:cloud", provider: "ollama" },
+      { model: "shared-id:cloud", provider: "codex" },
+    ]);
+    const r = await runPlan(
+      plan(dir, [task("a", { model: "shared-id:cloud", provider: "ollama", cwd: dir })]),
+      CFG, io,
+    );
+    equal(r.summary.tasks[0].state, "failed");
+    deepEqual(
+      JSON.parse(readFileSync(cachePath, "utf8")).models.map((m) => m.provider),
+      ["codex"],
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

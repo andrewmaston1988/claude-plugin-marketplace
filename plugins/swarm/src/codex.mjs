@@ -39,7 +39,7 @@ function modelModalities(row) {
   return [...new Set(values.filter((value) => typeof value === "string" && value.trim()).map((value) => value.trim()))];
 }
 
-/** Normalize one app-server model/list row into the Stage 1 model contract. */
+/** Normalize one app-server model/list row into the canonical model descriptor. */
 export function normalizeCodexModel(row) {
   const model = row?.id ?? row?.model ?? row?.modelId;
   if (typeof model !== "string" || !model.trim()) return null;
@@ -333,7 +333,7 @@ function writeSandboxArg(args, task, context) {
   args.push("--sandbox", sandbox);
 }
 
-/** Build native `codex exec --json` argv; dispatch activation remains Stage 3. */
+/** Build native `codex exec --json` argv. */
 export function buildCodexInvocation(task, prompt, context = {}) {
   const cfg = providerConfig(context.config || context.cfg || {}, "codex");
   const executable = context.executable || cfg.path || "codex";
@@ -370,7 +370,7 @@ export function classifyCodexExit(exit = {}, parsed = {}, task = {}) {
   });
 }
 
-/** Concrete Codex runner adapter for Stage 1's runner contract. */
+/** Concrete Codex runner adapter for the runner contract. */
 export function createCodexRunnerAdapter(options = {}) {
   const cancelled = new WeakSet();
   return {

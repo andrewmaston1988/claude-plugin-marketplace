@@ -9,7 +9,32 @@ import {
   providerUsageSnapshot,
   runResult,
   runnerEvent,
+  identityOf,
+  identityKey,
 } from "../src/contracts.mjs";
+
+test("identityOf reads a stored row's provider, or infers it from the model", () => {
+  deepEqual(identityOf({ provider: "codex", model: "gpt-5" }), { provider: "codex", model: "gpt-5", explicit: true });
+  // A legacy row recorded no provider; the model name still names one.
+  equal(identityOf({ model: "glm-5.2:cloud" }).provider, "ollama");
+  equal(identityOf({ model: "glm-5.2:cloud" }).explicit, false);
+  equal(identityOf({ model: "sonnet" }).provider, "claude");
+  // A bare string is a model with no provider recorded.
+  equal(identityOf("sonnet").model, "sonnet");
+  // Neither recorded nor inferable.
+  equal(identityOf({ model: "mystery" }).provider, null);
+  deepEqual(identityOf(undefined), { provider: null, model: undefined, explicit: false });
+});
+
+test("identityOf normalises surrounding space and provider case, so one model has one key", () => {
+  // The six copies of this function disagreed: two lowercased the provider and three did
+  // not, so the same row keyed two ways and a model's history split in half.
+  equal(identityKey({ provider: "Codex", model: "gpt-5" }), identityKey({ provider: "codex", model: "gpt-5" }));
+  equal(identityKey({ provider: " codex ", model: " gpt-5 " }), identityKey({ provider: "codex", model: "gpt-5" }));
+  equal(identityKey({ provider: "codex", model: "gpt-5" }), '["codex","gpt-5"]');
+  // Distinct providers still cannot collide.
+  equal(identityKey({ provider: "ollama", model: "same" }) === identityKey({ provider: "codex", model: "same" }), false);
+});
 
 test("provider/model identity keys cannot collide", () => {
   equal(modelKey("ollama", "same"), '["ollama","same"]');

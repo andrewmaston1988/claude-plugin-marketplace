@@ -84,9 +84,9 @@ test("Codex runner invocation is sandboxed, resumable, and contract-valid", () =
 test("Codex parser normalizes JSONL text, usage, and terminal failure", () => {
   const events = [];
   const parser = createCodexStreamParser({ emit: (event) => events.push(event) });
-  parser.push('{"type":"thread.started","thread_id":"thread-1"}\n');
-  parser.push('{"type":"response.output_text.delta","item_id":"m1","delta":"hel"}\n{"type":"response.output_text.delta","item_id":"m1","delta":"lo"}\n');
-  parser.push('{"type":"turn.completed","model":"gpt-5-codex","usage":{"input_tokens":20,"output_tokens":5,"cached_input_tokens":3}}\n');
+  parser.feed('{"type":"thread.started","thread_id":"thread-1"}\n');
+  parser.feed('{"type":"response.output_text.delta","item_id":"m1","delta":"hel"}\n{"type":"response.output_text.delta","item_id":"m1","delta":"lo"}\n');
+  parser.feed('{"type":"turn.completed","model":"gpt-5-codex","usage":{"input_tokens":20,"output_tokens":5,"cached_input_tokens":3}}\n');
   parser.end();
   deepEqual(parser.result(), {
     sessionId: "thread-1",
@@ -99,7 +99,7 @@ test("Codex parser normalizes JSONL text, usage, and terminal failure", () => {
   equal(events.filter((event) => event.type === "text").map((event) => event.text).join(""), "hello");
 
   const finalOnly = createCodexStreamParser();
-  finalOnly.push('{"type":"turn.completed","output_text":"final-only"}\n');
+  finalOnly.feed('{"type":"turn.completed","output_text":"final-only"}\n');
   finalOnly.end();
   equal(finalOnly.result().output, "final-only");
 
@@ -111,7 +111,7 @@ test("Codex parser normalizes JSONL text, usage, and terminal failure", () => {
     onError: (event) => errors.push(event),
     onComplete: (event) => completions.push(event),
   });
-  incomplete.push('{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"partial"}}\n');
+  incomplete.feed('{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"partial"}}\n');
   incomplete.end();
   equal(failed.at(-1).type, "error");
   equal(errors.length, 1);
@@ -124,7 +124,7 @@ test("Codex parser normalizes JSONL text, usage, and terminal failure", () => {
 
 test("Codex parser output is the final agent message, never reasoning or interim items", () => {
   const parser = createCodexStreamParser();
-  parser.push([
+  parser.feed([
     '{"type":"thread.started","thread_id":"thread-2"}',
     '{"type":"item.completed","item":{"id":"r1","type":"reasoning","text":"**Planning the scan**"}}',
     '{"type":"item.completed","item":{"id":"m1","type":"agent_message","text":"I will read the file first."}}',

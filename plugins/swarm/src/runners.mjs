@@ -1,3 +1,5 @@
+import { createProviderRegistry, defaultProviderAdapters } from "./providers.mjs";
+
 function descriptorShape(descriptor) {
   if (!descriptor || typeof descriptor !== "object") throw new Error("runner descriptor must be an object");
   if (typeof descriptor.id !== "string" || !/^[a-z][a-z0-9-]*$/.test(descriptor.id)) {
@@ -45,4 +47,3 @@ export function createRunnerRegistry(initial = [], {
 
   return { register, get, list: () => [...descriptors.values()], resolve };
 }
-import { createProviderRegistry, defaultProviderAdapters } from "./providers.mjs";

@@ -66,7 +66,24 @@ test("loadCorpus drops costUsd from non-Claude (:cloud) rows — subscription do
   }
 });
 
-test("Stage 5 RED: estimate corpus separates the same model id by provider", () => {
+test("a Claude row that RECORDS its provider still feeds the usd corpus", () => {
+  // RED (re-add `&& !row.provider`): the corpus comes back empty. Every task a normalised
+  // manifest writes carries an explicit provider, so that clause excluded every real row and
+  // the offer gate's dollar figure went permanently dark. The older tests missed it because
+  // they all seed provider-less rows.
+  const root = mkdtempSync(join(tmpdir(), "swarm-est-claude-provider-"));
+  try {
+    seedRun(root, "project", "run-1", [
+      { id: "a", state: "ok", provider: "claude", model: "haiku", tokens: tok(100), costUsd: 0.5 },
+    ]);
+    const corpus = loadCorpus(root);
+    deepEqual([...corpus.costUsd.values()], [[0.5]]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("estimate corpus separates the same model id by provider", () => {
   const root = mkdtempSync(join(tmpdir(), "swarm-est-provider-"));
   try {
     seedRun(root, "project", "run-1", [

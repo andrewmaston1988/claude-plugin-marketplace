@@ -4,6 +4,7 @@ import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal } from "./stream.mjs";
 import { isSentinelModel } from "./manifest.mjs";
 import { readRun } from "./runlog.mjs";
+import { inferStoredIdentity } from "./contracts.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -19,7 +20,7 @@ import { readRun } from "./runlog.mjs";
 //                       (prompt = the exact final string sent to the leaf; absent on compute/aggregate rows)
 //                       (citations = { checked, drifted, refuted } when N3 verified them; each cited finding is
 //                        annotated citation:"verified"|"drift"|"refuted" in output. citationRefuted = [{path,reason}]
-//                        for the kept-but-unverified findings — Stage 1 never fails a leaf over a citation)
+//                        for the kept-but-unverified findings — a citation never fails a leaf)
 //   digest.md           when a digest block is present
 //   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens, estimate?, costWarnFired? }
 //                       task rows: { id, provider?, runner?, model, state, durationMs, tokens, costUsd?, resultPath }
@@ -51,18 +52,9 @@ export function resultPath(dir, id) {
   return join(dir, "results", `${id}.json`);
 }
 
-// Legacy runs stored only model. Infer the provider on read when the model name
-// is unambiguous; unknown model-only records stay intentionally unqualified.
-// This keeps old corpora readable without rewriting history or guessing a route.
-export function inferStoredIdentity(model) {
-  if (typeof model !== "string" || !model.trim()) return {};
-  const value = model.trim();
-  if (/^(haiku|sonnet|opus|fable)$/i.test(value) || /^claude(?:-|$)/i.test(value)) {
-    return { provider: "claude", runner: "claude" };
-  }
-  if (/(:|-)cloud$/i.test(value)) return { provider: "ollama", runner: "claude" };
-  return {};
-}
+// Re-exported from contracts.mjs, which owns identity, so the existing import sites
+// do not all have to move.
+export { inferStoredIdentity };
 
 export function normalizeStoredIdentity(record) {
   if (!record || typeof record !== "object") return record;

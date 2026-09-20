@@ -51,7 +51,7 @@ test("normalizeOllama: G3 session AND weekly both survive normalisation", () => 
   equal(u.limits[1].resetsAt, "2026-09-12T08:00:00Z");
 });
 
-test("Stage 5: Codex normalization preserves every rate-limit id and separates account usage", () => {
+test("Codex normalization preserves every rate-limit id and separates account usage", () => {
   const u = normalizeCodex({
     provider: "codex",
     buckets: [
@@ -185,7 +185,7 @@ test("readCachedUsage: G10 ollama appears only when enabled", async () => {
   });
 });
 
-test("Stage 5: readCachedUsage accepts canonical Ollama config and an injected Codex snapshot", async () => {
+test("readCachedUsage accepts canonical Ollama config and an injected Codex snapshot", async () => {
   await withHome(async (home) => {
     const codex = { readUsage: async () => normalizeCodex({
       provider: "codex",

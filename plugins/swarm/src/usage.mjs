@@ -116,10 +116,17 @@ export function normalizeCodex(reading, options = {}) {
   };
 }
 
+// Providers whose reading needs its own shape read. Anything absent here takes the
+// generic path below, so a registry-only provider is normalized without a code change.
+const PROVIDER_NORMALIZERS = {
+  ollama: (reading) => normalizeOllama(reading),
+  codex: (reading) => normalizeCodex(reading),
+};
+
 export function normalizeProviderUsage(provider, reading) {
   if (!reading) return null;
-  if (provider === "ollama") return normalizeOllama(reading);
-  if (provider === "codex") return normalizeCodex(reading);
+  const own = PROVIDER_NORMALIZERS[provider];
+  if (own) return own(reading);
   const limits = Array.isArray(reading.limits) ? reading.limits : (reading.buckets || [])
     .filter((bucket) => typeof bucket?.percent === "number" || typeof bucket?.usedPercent === "number")
     .map((bucket) => limit(bucket.kind || "usage", bucket.percent ?? bucket.usedPercent, bucket.resetsAt ?? bucket.resets_at, bucket.scope ?? null));

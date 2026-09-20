@@ -16,7 +16,9 @@ const USAGE_CACHE_FILENAME = "ollama-usage.json";
 const DEFAULT_TIMEOUT_MS = 5000;
 const METER_POINTS_UNIT = "meter-points";
 
-function ollamaConfig(cfg = {}) {
+// Exported: the CLI read the legacy shape only, so a canonical-config operator saw
+// ollama reported as disabled.
+export function ollamaCloudConfig(cfg = {}) {
   return cfg?.providers?.ollama?.cloud?.ollama || cfg?.provider?.cloud?.ollama || {};
 }
 
@@ -265,7 +267,7 @@ export async function getUsage(cfg, { env = process.env, _fetch = fetch, _now = 
 }
 
 async function computeUsage(cfg, { env, _fetch, _now, gate }) {
-  const cloud = ollamaConfig(cfg);
+  const cloud = ollamaCloudConfig(cfg);
   const provider = ollamaProviderConfig(cfg);
   if (gate && cloud.enabled !== true) return { state: "unknown" };
 
@@ -338,7 +340,7 @@ async function computeUsage(cfg, { env, _fetch, _now, gate }) {
 // hook cannot fetch, so it reports what the last fetching command stored.
 // Never throws. Absent config => absent feature.
 export function usageFromCache(cfg, env = process.env) {
-  const cloud = ollamaConfig(cfg);
+  const cloud = ollamaCloudConfig(cfg);
   if (cloud.enabled !== true) return { state: "unknown" };
 
   let text;

@@ -873,7 +873,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     return cur;
   };
   const truncations = [];
-  // Citation refutations that Stage 1 kept — surfaced loud in the closing block,
+  // Refuted citations that were kept — surfaced loud in the closing block,
   // the same register as a truncation: coverage the reader must not mistake for full.
   const refutations = [];
   // Coverage shortfalls kept (D9), surfaced in the same loud closing channel.
@@ -1252,7 +1252,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       if (r.schemaRetried) result.schemaRetried = true;
       if (r.schemaErrors) result.schemaErrors = r.schemaErrors;
       if (r.citations) result.citations = r.citations;
-      // Stage 1: refuted citations are KEPT and annotated, never a failure. Loud
+      // Refuted citations are KEPT and annotated, never a failure. Loud
       // per-leaf (in the result) and run-level (the closing block) — a kept-but-
       // unverified finding must read as exactly that, never as verified.
       if (r.citationRefuted?.length) {
@@ -1302,7 +1302,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       // classification stays "failed" — entitlement is roster metadata, not a
       // retry class — and the next `models` refresh restores the row if the
       // probe stops 402ing.
-      if (!r.ok && ENTITLEMENT_RE.test(r.raw || "")) removeCachedModel(task.model, io.env);
+      if (!r.ok && ENTITLEMENT_RE.test(r.raw || "")) removeCachedModel(task.model, io.env, task.provider);
       const parsed = tryParseJson(r.output);
       if (parsed !== undefined) result.outputJson = parsed;
 

@@ -2,7 +2,8 @@ import { mkdirSync, writeFileSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { swarmHome } from "./config.mjs";
-import { modelDescriptor } from "./contracts.mjs";
+import { modelDescriptor, OLLAMA_CLOUD_RE } from "./contracts.mjs";
+import { providerConfig } from "./providers.mjs";
 
 // Model discovery — the ollama cloud catalog ONLY: recommendations ∪ /api/tags,
 // enriched free via /api/show, family-collapsed, size-ordered. `ollama list` and
@@ -269,7 +270,7 @@ export async function probeTopModels(models, base, fetchImpl = globalThis.fetch,
   const probed = new Set();
   while (probed.size < maxProbes) {
     const top = visibleModels(live, { isDenylisted }).filter((m) => !isDenylisted?.(m.model)).slice(0, 3);
-    const next = top.find((m) => !probed.has(m.model) && /(:|-)cloud$/.test(m.model));
+    const next = top.find((m) => !probed.has(m.model) && OLLAMA_CLOUD_RE.test(m.model));
     if (!next) break;
     probed.add(next.model);
     try {
@@ -290,9 +291,13 @@ export async function probeTopModels(models, base, fetchImpl = globalThis.fetch,
   return live;
 }
 
+// One reading of where the ollama block lives, shared with providerConfig. The early
+// return this replaced treated a config carrying BOTH shapes as legacy-only, so
+// providers.ollama was silently ignored here while every other module read it.
 function ollamaConfig(config = {}) {
-  if (config.provider) return config;
-  return { ...config, provider: config.providers?.ollama || config };
+  const block = providerConfig(config, "ollama");
+  // Neither shape present: the bare config IS the block, as it always was.
+  return { ...config, provider: Object.keys(block).length ? block : config };
 }
 
 export function normalizeOllamaModelDescriptor(row) {
@@ -337,7 +342,7 @@ export function createOllamaProviderAdapter(options = {}) {
       return typeof value === "boolean" ? value : true;
     },
     matchModel(model) {
-      return /(:|-)cloud$/i.test(String(model || "")) ? { provider: "ollama", model } : null;
+      return OLLAMA_CLOUD_RE.test(String(model || "")) ? { provider: "ollama", model } : null;
     },
     validateTask() {
       return [];
@@ -389,8 +394,6 @@ export function mergeProviderModelCaches(caches = []) {
   return [...merged.values()];
 }
 
-export const qualifyProviderModels = providerQualifiedModels;
-export const mergeModelCaches = mergeProviderModelCaches;
 
 export function writeCompositeModelsCache(models, env = process.env) {
   const dir = swarmHome(env);
@@ -443,4 +446,3 @@ export async function refreshModelsCache({
   return { models, path, errors };
 }
 
-export const writeProviderModelsCache = writeCompositeModelsCache;

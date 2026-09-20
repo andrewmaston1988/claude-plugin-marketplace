@@ -16,8 +16,8 @@ export function assertRunnerAdapterContract(adapter, {
   ok(invocation.env && typeof invocation.env === "object", "buildInvocation must return env");
   const events = [];
   const parser = adapter.createParser((event) => events.push(event), context);
-  ok(parser && typeof parser.push === "function" && typeof parser.end === "function", "createParser must return push/end parser");
-  parser.push("fixture chunk");
+  ok(parser && typeof parser.feed === "function" && typeof parser.end === "function", "createParser must return feed/end parser");
+  parser.feed("fixture chunk");
   parser.end();
   ok(events.length > 0, "parser must emit canonical events");
   for (const event of events) deepEqual(event, runnerEvent(event), "runner event must not leak raw protocol fields");

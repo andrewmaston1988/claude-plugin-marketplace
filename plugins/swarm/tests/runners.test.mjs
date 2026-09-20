@@ -9,7 +9,7 @@ function fixtureRunner(overrides = {}) {
   return {
     id: "fixture",
     buildInvocation: (task, prompt) => ({ argv: ["fixture", task.model, prompt, ...(task.sessionId ? ["--resume", task.sessionId] : [])], env: {} }),
-    createParser: (emit) => ({ push: () => emit({ type: "activity", activity: { phase: "running" } }), end: () => emit({ type: "completed", terminal: true }) }),
+    createParser: (emit) => ({ feed: () => emit({ type: "activity", activity: { phase: "running" } }), end: () => emit({ type: "completed", terminal: true }) }),
     classifyExit: (_exit, parsed) => parsed,
     cancel: (child) => {
       if (cancelled.has(child)) return;
@@ -58,10 +58,10 @@ test("runner contract helper rejects broken adapters and accepts a conforming fa
 
 test("runner contract helper rejects protocol leakage, double settlement, lost resume, and missed cancellation", () => {
   throws(() => assertRunnerAdapterContract(fixtureRunner({
-    createParser: (emit) => ({ push: () => emit({ type: "activity", raw: {} }), end: () => emit({ type: "completed", terminal: true }) }),
+    createParser: (emit) => ({ feed: () => emit({ type: "activity", raw: {} }), end: () => emit({ type: "completed", terminal: true }) }),
   })), /raw protocol/);
   throws(() => assertRunnerAdapterContract(fixtureRunner({
-    createParser: (emit) => ({ push: () => emit({ type: "completed", terminal: true }), end: () => emit({ type: "completed", terminal: true }) }),
+    createParser: (emit) => ({ feed: () => emit({ type: "completed", terminal: true }), end: () => emit({ type: "completed", terminal: true }) }),
   })), /settle exactly once/);
   throws(() => assertRunnerAdapterContract(fixtureRunner({
     buildInvocation: (task, prompt) => ({ argv: ["fixture", task.model, prompt], env: {} }),

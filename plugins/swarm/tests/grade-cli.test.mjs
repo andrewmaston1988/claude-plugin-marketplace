@@ -43,7 +43,7 @@ test("grade --init: one row per model leaf, Claude leaves included", () => {
   }
 });
 
-test("Stage 5: grade skeletons and stored rows preserve provider identity", () => {
+test("grade skeletons and stored rows preserve provider identity", () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);

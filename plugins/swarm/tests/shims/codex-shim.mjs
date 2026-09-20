@@ -1,5 +1,5 @@
 // Fake `codex` for adapter tests. It implements the two JSONL surfaces used by
-// Stage 2: app-server stdio and `codex exec --json`.
+// Covers app-server stdio and `codex exec --json`.
 import { appendFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 

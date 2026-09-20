@@ -11,17 +11,22 @@ export const SHIMS = fileURLToPath(new URL("../shims", import.meta.url));
 try { chmodSync(join(SHIMS, "claude"), 0o755); } catch { /* windows */ }
 try { chmodSync(join(SHIMS, "codex"), 0o755); } catch { /* windows */ }
 
-export function runCli(args, { cwd, env = {}, quotaPreflight = false } = {}) {
-  let configDir;
+// Writes a throwaway config carrying `quotaPreflight` unless the caller pinned
+// SWARM_CONFIG itself. Returns the dir so the caller can remove it when the child exits.
+function configOverlay(env, quotaPreflight) {
   const childEnv = { ...env };
-  if (quotaPreflight !== undefined && childEnv.SWARM_CONFIG === undefined) {
-    configDir = mkdtempSync(join(tmpdir(), "swarm-cli-config-"));
-    const configPath = join(configDir, "config.json");
-    const sourcePath = childEnv.SWARM_HOME && join(childEnv.SWARM_HOME, "config.json");
-    const source = sourcePath && existsSync(sourcePath) ? JSON.parse(readFileSync(sourcePath, "utf8")) : {};
-    writeFileSync(configPath, JSON.stringify({ ...source, quotaPreflight }), "utf8");
-    childEnv.SWARM_CONFIG = configPath;
-  }
+  if (childEnv.SWARM_CONFIG !== undefined) return { configDir: undefined, childEnv };
+  const configDir = mkdtempSync(join(tmpdir(), "swarm-cli-config-"));
+  const configPath = join(configDir, "config.json");
+  const sourcePath = childEnv.SWARM_HOME && join(childEnv.SWARM_HOME, "config.json");
+  const source = sourcePath && existsSync(sourcePath) ? JSON.parse(readFileSync(sourcePath, "utf8")) : {};
+  writeFileSync(configPath, JSON.stringify({ ...source, quotaPreflight }), "utf8");
+  childEnv.SWARM_CONFIG = configPath;
+  return { configDir, childEnv };
+}
+
+export function runCli(args, { cwd, env = {}, quotaPreflight = false } = {}) {
+  const { configDir, childEnv } = configOverlay(env, quotaPreflight);
   try {
     return spawnSync(process.execPath, [CLI, ...args], {
       cwd,
@@ -46,16 +51,7 @@ export function runCli(args, { cwd, env = {}, quotaPreflight = false } = {}) {
 // Async variant for tests that host a stub HTTP server in THIS process:
 // spawnSync would block the event loop and the server could never respond.
 export function runCliAsync(args, { cwd, env = {}, quotaPreflight = false } = {}) {
-  let configDir;
-  const childEnv = { ...env };
-  if (quotaPreflight !== undefined && childEnv.SWARM_CONFIG === undefined) {
-    configDir = mkdtempSync(join(tmpdir(), "swarm-cli-config-"));
-    const configPath = join(configDir, "config.json");
-    const sourcePath = childEnv.SWARM_HOME && join(childEnv.SWARM_HOME, "config.json");
-    const source = sourcePath && existsSync(sourcePath) ? JSON.parse(readFileSync(sourcePath, "utf8")) : {};
-    writeFileSync(configPath, JSON.stringify({ ...source, quotaPreflight }), "utf8");
-    childEnv.SWARM_CONFIG = configPath;
-  }
+  const { configDir, childEnv } = configOverlay(env, quotaPreflight);
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd,

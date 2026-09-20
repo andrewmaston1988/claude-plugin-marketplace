@@ -335,9 +335,6 @@ export function createCodexStreamParser({ emit: emitCallback, onEvent, onSession
         buf = buf.slice(i + 1);
       }
     },
-    push(chunk) {
-      this.feed(chunk);
-    },
     end() {
       if (ended) return this;
       if (buf) handleLine(buf);
@@ -359,9 +356,6 @@ export function createCodexStreamParser({ emit: emitCallback, onEvent, onSession
         ...(error ? { error } : {}),
       };
     },
-    state() {
-      return this.result();
-    },
   };
 }
 
@@ -373,6 +367,7 @@ export function createClaudeRunnerParser(options = {}) {
   let sessionId;
   let realModel;
   let usage = emptyTokens();
+  const acc = createUsageAccumulator();
   let output = "";
   let stopReason;
   let costUsd;
@@ -396,8 +391,10 @@ export function createClaudeRunnerParser(options = {}) {
       if (reason) stopReason = reason;
     },
     onUsage(id, value) {
-      const next = usageTokens(value);
-      usage = addTokens(usage, next);
+      // Latest usage per message id, never a running sum: stream-json re-emits an
+      // assistant message as its content blocks complete.
+      acc.record(id, value);
+      usage = acc.totals();
       send({ type: "usage", ...(sessionId ? { sessionId: String(sessionId) } : {}), usage });
     },
     onActivity(activity) {
@@ -438,9 +435,6 @@ export function createClaudeRunnerParser(options = {}) {
     feed(chunk) {
       parser.feed(chunk);
     },
-    push(chunk) {
-      parser.feed(chunk);
-    },
     end() {
       parser.end();
       if (!terminal) {
@@ -465,7 +459,6 @@ export function createClaudeRunnerParser(options = {}) {
 }
 
 export const runnerParserFactories = new Map();
-export const RUNNER_PARSER_FACTORIES = runnerParserFactories;
 
 export function registerRunnerParser(runner, factory) {
   if (typeof runner !== "string" || !runner.trim()) throw new Error("runner must be a non-empty string");

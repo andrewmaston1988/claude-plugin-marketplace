@@ -28,6 +28,9 @@ const RECORD_FIELDS = {
 export const CLAUDE_ALIASES = new Set(["haiku", "sonnet", "opus", "fable"]);
 export const COST_CLASSIFICATIONS = new Set(["billed", "api-equivalent estimate", "unpriced"]);
 export const AVAILABILITY_STATES = new Set(["available", "unavailable", "unknown"]);
+// What makes an ollama model a cloud one. Discovery and the provider descriptor each
+// carried their own copy of this.
+export const OLLAMA_CLOUD_RE = /(:|-)cloud$/i;
 
 function nonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
@@ -173,6 +176,35 @@ export function availabilityVerdict(value) {
   requireTimestamp(out.asOf, "AvailabilityVerdict field 'asOf'");
   if (out.reason !== undefined) requireString(out.reason, "AvailabilityVerdict field 'reason'");
   return out;
+}
+
+// Legacy runs stored only model. Infer the provider on read when the model name
+// is unambiguous; unknown model-only records stay intentionally unqualified.
+// This keeps old corpora readable without rewriting history or guessing a route.
+export function inferStoredIdentity(model) {
+  if (typeof model !== "string" || !model.trim()) return {};
+  const value = model.trim();
+  if (/^(haiku|sonnet|opus|fable)$/i.test(value) || /^claude(?:-|$)/i.test(value)) {
+    return { provider: "claude", runner: "claude" };
+  }
+  if (OLLAMA_CLOUD_RE.test(value)) return { provider: "ollama", runner: "claude" };
+  return {};
+}
+
+// The one reading of a stored row's identity. Six modules held their own copy and
+// they had already diverged on case and trimming, so the same row keyed two ways
+// and a model's history split between them.
+export function identityOf(value) {
+  const raw = typeof value === "string" ? value : value?.model;
+  const model = typeof raw === "string" ? raw.trim() : raw;
+  const declared = typeof value?.provider === "string" ? value.provider.trim().toLowerCase() : "";
+  const inferred = declared ? {} : inferStoredIdentity(model);
+  return { provider: declared || inferred.provider || null, model, explicit: Boolean(declared) };
+}
+
+export function identityKey(value) {
+  const identity = value && "explicit" in Object(value) ? value : identityOf(value);
+  return JSON.stringify([identity.provider ?? null, identity.model]);
 }
 
 export function modelKey(provider, model) {

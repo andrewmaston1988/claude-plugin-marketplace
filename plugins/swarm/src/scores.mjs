@@ -10,7 +10,7 @@ import { swarmHome } from "./config.mjs";
 import { UNIVERSAL, ASPECTS, OUTCOMES, GRADED_OUTCOMES } from "./aspects.mjs";
 import { isCloudModel, isClaudeModel } from "./models.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
-import { inferStoredIdentity } from "./results.mjs";
+import { identityOf, identityKey } from "./contracts.mjs";
 import { isSentinelModel } from "./manifest.mjs";
 
 export function scoresPath(env = process.env) {
@@ -34,17 +34,6 @@ const DOMAIN_HINT = 'one lowercase token naming the language or ecosystem the le
 
 function explicitProvider(row) {
   return typeof row?.provider === "string" && row.provider.trim() ? row.provider.trim().toLowerCase() : null;
-}
-
-function identityOf(row) {
-  const model = typeof row?.model === "string" ? row.model.trim() : row?.model;
-  const provider = explicitProvider(row);
-  const inferred = provider ? {} : inferStoredIdentity(model);
-  return { provider: provider || inferred.provider || null, model, explicit: Boolean(provider) };
-}
-
-function identityKey(identity) {
-  return JSON.stringify([identity.provider, identity.model]);
 }
 
 function displayIdentity(identity) {

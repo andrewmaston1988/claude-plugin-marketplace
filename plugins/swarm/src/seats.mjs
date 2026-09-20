@@ -7,7 +7,7 @@
 
 import { aggregate, frontier } from "./scores.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
-import { inferStoredIdentity } from "./results.mjs";
+import { identityOf, identityKey } from "./contracts.mjs";
 
 // The seating canon: 20 graded runs per model per capability slot. Under it a
 // grade is not a verdict — printed as n<20, the rule's own term, which reads as
@@ -30,17 +30,6 @@ const colPart = (label, cell) =>
 // with the most rows: an alias means the tier's current model, which is the one
 // still being graded. Non-alias names never take this path.
 const CLAUDE_ALIAS_RE = /^(fable|opus|sonnet|haiku)$/i;
-
-function identityOf(value) {
-  const model = typeof value === "string" ? value : value?.model;
-  const explicit = typeof value?.provider === "string" && value.provider.trim();
-  const inferred = explicit ? {} : inferStoredIdentity(model);
-  return { provider: (explicit ? value.provider.trim() : inferred.provider) || null, model, explicit: Boolean(explicit) };
-}
-
-function identityKey(identity) {
-  return JSON.stringify([identity.provider, identity.model]);
-}
 
 function shown(identity) {
   return identity.explicit && identity.provider ? `${identity.provider}/${identity.model}` : identity.model;
