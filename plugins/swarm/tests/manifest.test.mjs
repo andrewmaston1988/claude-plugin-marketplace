@@ -2402,3 +2402,27 @@ test("tasks sharing a cwd ask git for its toplevel once, not once per task", () 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("provider is required: fallback, digest, unknown ids and aliases are each refused; compute steps stay exempt", () => {
+  const dir = tmp();
+  try {
+    const errs = (body) => errorsOf(() => loadManifest(writeManifest(dir, body), CFG, dir));
+    const has = (list, ...needles) => ok(list.some((e) => needles.every((n) => e.includes(n))), list.join("\n"));
+
+    has(errs({ tasks: [{ id: "a", prompt: "x", model: "claude-opus-5" }] }), "task 'a'", "no \"provider\"");
+    has(errs({ tasks: [claudeTask({ fallbackModel: "claude-sonnet-5" })] }), "fallbackModel", "fallbackProvider");
+    has(errs({ tasks: [claudeTask({ fallbackProvider: "claude" })] }), "fallbackProvider", "fallbackModel");
+    has(errs({ tasks: [claudeTask(), claudeTask({ id: "b" })], digest: { model: "claude-haiku-4-5-20251001" } }), "digest", "no \"provider\"");
+    has(errs({ tasks: [claudeTask({ provider: "nope" })] }), "unknown provider 'nope'", "registered: claude, ollama, codex");
+    has(errs({ tasks: [claudeTask({ model: "sonnet" })] }), "Claude alias");
+    has(errs({ tasks: [claudeTask({ fallbackModel: "haiku", fallbackProvider: "claude" })] }), "Claude alias");
+
+    // compute nodes dispatch nothing, so they carry neither model nor provider.
+    const plan = loadManifest(writeManifest(dir, {
+      tasks: [claudeTask({ id: "scan" }), { id: "dedupe", after: ["scan"], compute: "deps['scan']" }],
+    }), CFG, dir);
+    equal(plan.tasks.find((t) => t.id === "dedupe").compute, "deps['scan']");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

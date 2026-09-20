@@ -188,9 +188,9 @@ test("validate: the seats block sits between the existing lines and never distur
     ok(iManifest >= 0 && iSeats > iManifest && iResults > iSeats, r.stdout);
     // the CLI fed the seam: seated leaf ids, the never-graded digest seat, and
     // the unseated roster model the store has a record for.
-    ok(r.stdout.includes("glm-5.2:cloud (lane) · overall"), r.stdout);
-    ok(r.stdout.includes("haiku (audit, __digest) · never graded"), r.stdout);
-    ok(r.stdout.includes("launchable, not seated: glm-5.3-flash:cloud n=1"), r.stdout);
+    ok(r.stdout.includes("ollama/glm-5.2:cloud (lane) · overall"), r.stdout);
+    ok(r.stdout.includes("claude/claude-haiku-4-5-20251001 (audit, __digest) · never graded"), r.stdout);
+    ok(r.stdout.includes("launchable, not seated: ollama/glm-5.3-flash:cloud n=1"), r.stdout);
 
     // a bad manifest keeps its existing failure: the plan never loads, so the
     // block cannot have printed, and the errors are the manifest's own.
@@ -288,8 +288,8 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     equal(readFileSync(join(resultsDir, ".gitignore"), "utf8"), "*\n");
 
     // stdout contract: roster snapshots + closing block, never raw output beyond digest path
-    ok(/✓ {2}scan-a\s+haiku/.test(r.stdout), r.stdout);
-    ok(/✓ {2}__digest\s+haiku/.test(r.stdout), r.stdout);
+    ok(/✓ {2}scan-a\s+claude-haiku-4-5-20251001/.test(r.stdout), r.stdout);
+    ok(/✓ {2}__digest\s+claude-haiku-4-5-20251001/.test(r.stdout), r.stdout);
     ok(r.stdout.includes("4 ok"), r.stdout);
     ok(r.stdout.includes(`digest: ${join(resultsDir, "digest.md")}`), r.stdout);
     ok(r.stdout.includes(`summary: ${join(resultsDir, "summary.json")}`), r.stdout);
@@ -322,8 +322,8 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_EXIT: "1", SWARM_SHIM_OUTPUT: "boom" };
     const r1 = runCli(["run", manifest], { cwd: dir, env, quotaPreflight: false });
     equal(r1.status, 1);
-    ok(/✗ {2}a\s+haiku.*\[failed\]/.test(r1.stdout), r1.stdout);
-    ok(/⊘ {2}b\s+haiku.*\[blocked\]/.test(r1.stdout), r1.stdout);
+    ok(/✗ {2}a\s+claude-haiku-4-5-20251001.*\[failed\]/.test(r1.stdout), r1.stdout);
+    ok(/⊘ {2}b\s+claude-haiku-4-5-20251001.*\[blocked\]/.test(r1.stdout), r1.stdout);
     ok(r1.stdout.includes("FAILED tasks:"), r1.stdout);
     ok(r1.stdout.includes("a [failed]"), r1.stdout);
     ok(r1.stdout.includes("b [blocked]"), r1.stdout);
@@ -934,7 +934,7 @@ test("run: an all-skipped replay still exits 0 but says NOTHING RE-EXECUTED", ()
   }
 });
 
-test("models: stub server + SWARM_HOME config -> names with descriptions, aliases, cache", async () => {
+test("models: stub server + SWARM_HOME config -> names with descriptions, no aliases, cache", async () => {
   const dir = tmp();
   const server = createServer((req, res) => {
     if (req.url === "/api/experimental/model-recommendations") {
@@ -966,9 +966,7 @@ test("models: stub server + SWARM_HOME config -> names with descriptions, aliase
     // the stub 404s /api/generate, so this also pins probe fail-open end to end.
     ok(r.stdout.includes("glm-5.2:cloud — Frontier open model (size unreported, 1.0M ctx)"), r.stdout);
     ok(!r.stdout.includes("not-cloud:480b"), r.stdout);
-    for (const alias of ["haiku", "sonnet", "opus"]) {
-      ok(r.stdout.includes(alias), `missing alias ${alias}`);
-    }
+    ok(!/(haiku|sonnet|opus)/.test(r.stdout), `Claude aliases must not be offered: ${r.stdout}`);
     const cache = JSON.parse(readFileSync(join(home, "models-cache.json"), "utf8"));
     deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud"]);
   } finally {
@@ -1313,8 +1311,8 @@ test("status: renders the roster with counts, elapsed, tokens from a synthetic r
     const r = runCli(["status", rd], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("1 ok · 1 failed · 1 rate-limited · 1 blocked · 1 running · 1 pending"), r.stdout);
-    ok(/✓ {2}a\s+haiku\s+30s\s+1\.5k/.test(r.stdout), r.stdout);
-    ok(/◐ {2}d\s+haiku\s+\d+s\s+2\.1k/.test(r.stdout), r.stdout); // live elapsed + live tokens
+    ok(/✓ {2}a\s+claude-haiku-4-5-20251001\s+30s\s+1\.5k/.test(r.stdout), r.stdout);
+    ok(/◐ {2}d\s+claude-haiku-4-5-20251001\s+\d+s\s+2\.1k/.test(r.stdout), r.stdout); // live elapsed + live tokens
     ok(r.stdout.includes("3.6k tokens"), r.stdout);
     ok(r.stdout.includes(`results: ${join(rd, "results")}`), r.stdout);
   } finally {
@@ -1347,7 +1345,7 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
       equal(res.costUsd, 0.01);
     }
     // roster shows per-leaf 1.5k and total 3k; closing block totals in/out
-    ok(/✓ {2}t1\s+haiku\s+\d+s\s+1\.5k/.test(r.stdout), r.stdout);
+    ok(/✓ {2}t1\s+claude-haiku-4-5-20251001\s+\d+s\s+1\.5k/.test(r.stdout), r.stdout);
     ok(r.stdout.includes("3k tokens"), r.stdout);
     ok(r.stdout.includes("tokens: 3k (input 2.4k · output 600)"), r.stdout);
     const summary = JSON.parse(readFileSync(join(dir, "out", "summary.json"), "utf8"));

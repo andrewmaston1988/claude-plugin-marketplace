@@ -131,7 +131,7 @@ test("askLeaf: explicit provider override reaches the provider runner", async ()
 });
 
 test("askLeaf: an unmodified Codex leaf reuses the provider persisted in the manifest snapshot", async () => {
-  const dir = setup({ model: "gpt-5-codex" });
+  const dir = setup({ provider: undefined, model: "gpt-5-codex" });
   try {
     writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [{ id: "leaf", model: "gpt-5-codex", provider: "codex" }] });
     const cfg = {
@@ -366,8 +366,8 @@ test("Q5: the ask resumes the recorded sessionId, even though the prior result i
 });
 
 test("Q9: with no ask.model override, the ask spawns with the leaf's actual result.model, not its manifest model", async () => {
-  // the leaf's manifest model is "haiku", but its dispatch fell back to
-  // "sonnet" before it ran — result.model is the model that actually ran,
+  // the leaf's manifest model is claude-haiku-4-5-20251001, but its dispatch fell back to
+  // claude-sonnet-5 before it ran — result.model is the model that actually ran,
   // and governance already checked THAT one.
   const { dir, plan: p } = await finishedRun([schedTask("a")]);
   try {
@@ -376,7 +376,7 @@ test("Q9: with no ask.model override, the ask spawns with the leaf's actual resu
     const spawn2 = fakeSpawnFactory(() => ({ output: STREAM }));
     await runPlan(p, SCHED_CFG, makeIo(spawn2), { ask: { taskId: "a", question: "?" } });
     const args = spawn2.calls[0].args;
-    equal(args[args.indexOf("--model") + 1], "sonnet");
+    equal(args[args.indexOf("--model") + 1], "claude-sonnet-5");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
