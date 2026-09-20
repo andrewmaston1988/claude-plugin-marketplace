@@ -522,3 +522,80 @@ test("Q7: a failed ask leaves the leaf ok, records the failure in asks[]", async
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- snapshot-mode asks: the run's end removed the tree, ask re-adds it and removes it again ---
+
+function snapAskSetup() {
+  const repo = mkdtempSync(join(tmpdir(), "swarm-ask-snaprepo-"));
+  const g = (args) => spawnSync("git", args, { cwd: repo, encoding: "utf8", windowsHide: true });
+  g(["init", "-q", "-b", "main"]);
+  writeFileSync(join(repo, "a.txt"), "hello\n");
+  g(["add", "."]);
+  g(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"]);
+  const sha = g(["rev-parse", "HEAD"]).stdout.trim();
+  const dir = mkdtempSync(join(tmpdir(), "swarm-ask-snap-"));
+  initResultsDir(dir);
+  const repoKey = defaultWorktree.snapshotKey(repo);
+  const tree = join(dir, "wt-snapshot-" + repoKey);
+  writeResult(dir, "leaf", {
+    id: "leaf", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "original", sessionId: "s-1",
+    cwd: tree, originalCwd: repo, allowedTools: "Read,Grep",
+    isolationMode: "snapshot", repoToplevel: repo, repoKey, snapshotSha: sha,
+  });
+  writeManifestSnapshot(dir, { cwd: repo, resultsDir: dir, tasks: [{ id: "leaf", model: "haiku" }] });
+  const registered = () => g(["worktree", "list", "--porcelain"]).stdout.toLowerCase().includes(tree.replace(/\\/g, "/").toLowerCase());
+  return { repo, dir, tree, sha, g, registered };
+}
+
+const snapAskDrop = (s) => {
+  rmSync(s.dir, { recursive: true, force: true });
+  rmSync(s.repo, { recursive: true, force: true });
+};
+
+test("askLeaf snapshot: re-adds the tree at the recorded sha, resumes inside it, removes it after", async () => {
+  const s = snapAskSetup();
+  try {
+    equal(existsSync(s.tree), false);
+    let treeAtSpawn = null;
+    const spawn = fakeSpawnFactory((call) => {
+      treeAtSpawn = existsSync(join(s.tree, "a.txt"));
+      return { output: STREAM };
+    });
+    const r = await askLeaf({ resultsDir: s.dir, taskId: "leaf", question: "q", cfg: CFG, io: makeIo(spawn) });
+    equal(r.answer, "the follow-up answer");
+    equal(spawn.calls[0].opts.cwd, s.tree);
+    equal(treeAtSpawn, true, "tree populated when the leaf resumed");
+    equal(existsSync(s.tree), false, "tree removed after the ask");
+    equal(s.registered(), false, "tree deregistered after the ask");
+  } finally {
+    snapAskDrop(s);
+  }
+});
+
+test("askLeaf snapshot: a pruned snapshot commit is a clear error, not a spawn in a missing cwd", async () => {
+  const s = snapAskSetup();
+  try {
+    writeResult(s.dir, "leaf", { ...readResult(s.dir, "leaf"), snapshotSha: "0".repeat(40) });
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await rejects(askLeaf({ resultsDir: s.dir, taskId: "leaf", question: "q", cfg: CFG, io: makeIo(spawn) }), /cannot re-create the snapshot this leaf read/);
+    equal(spawn.calls.length, 0);
+    equal(existsSync(s.tree), false);
+  } finally {
+    snapAskDrop(s);
+  }
+});
+
+test("askLeaf snapshot: the tree is removed even when the ask throws after re-adding it", async () => {
+  const s = snapAskSetup();
+  try {
+    // governance rejects a non-Claude override AFTER the tree was re-added
+    await rejects(
+      askLeaf({ resultsDir: s.dir, taskId: "leaf", question: "q", model: "glm-5:cloud", cfg: CFG, io: makeIo(fakeSpawnFactory(() => ({ output: STREAM }))) }),
+      /governance/,
+    );
+    equal(existsSync(s.tree), false, "finally must remove the re-added tree");
+    equal(s.registered(), false);
+  } finally {
+    snapAskDrop(s);
+  }
+});

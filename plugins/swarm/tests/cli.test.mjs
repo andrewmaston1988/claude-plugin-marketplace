@@ -1979,3 +1979,70 @@ test("serve restart: a live daemon on the current version is killed and replaced
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- prune over snapshot runs ---
+
+function snapPruneFixture() {
+  const repo = initPruneRepo();
+  const dir = tmp();
+  const resultsDir = join(dir, "out");
+  mkdirSync(resultsDir, { recursive: true });
+  const sha = gitOut(["rev-parse", "HEAD"], repo);
+  const runKey = "runkey000001";
+  const repoKey = "repokey00001";
+  const ref = `refs/swarm/snapshots/${runKey}/${repoKey}`;
+  spawnSync("git", ["update-ref", ref, sha], { cwd: repo, windowsHide: true });
+  return { repo, dir, resultsDir, sha, runKey, repoKey, ref, tree: join(resultsDir, "wt-snapshot-" + repoKey) };
+}
+
+function writeSnapRun(f, { summary }) {
+  const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
+  writeFileSync(join(f.resultsDir, "run.log"),
+    line({ event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }) +
+    line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
+    line({ event: "run-aborted", reason: "killed" }));
+  if (summary) writeFileSync(join(f.resultsDir, "summary.json"), JSON.stringify({ started: new Date().toISOString(), finished: new Date().toISOString(), tasks: [], blocked: [], worktreesKept: [], totalTokens: null }));
+}
+
+const snapRefs = (f) => gitOut(["for-each-ref", "refs/swarm/snapshots/"], f.repo);
+const dropSnapPrune = (f) => {
+  rmSync(f.dir, { recursive: true, force: true });
+  rmSync(f.repo, { recursive: true, force: true });
+};
+
+test("prune: a run that ended normally still has its snapshot ref deleted — refs go before the nothing-to-prune exit", () => {
+  const f = snapPruneFixture();
+  try {
+    writeSnapRun(f, { summary: true });
+    ok(snapRefs(f).includes(f.ref));
+    const env = { SWARM_HOME: join(f.dir, "home") };
+    const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env });
+    equal(dry.status, 0, dry.stdout + dry.stderr);
+    ok(dry.stdout.includes(f.ref), dry.stdout);
+    ok(snapRefs(f).includes(f.ref), "dry-run keeps the ref");
+    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
+    equal(r.status, 0, r.stdout + r.stderr);
+    equal(snapRefs(f), "", "ref deleted");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
+
+test("prune: a killed run's leftover snapshot tree (no summary.json) is removed without a branch delete, and no summary is invented", () => {
+  const f = snapPruneFixture();
+  try {
+    spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
+    ok(existsSync(f.tree));
+    writeSnapRun(f, { summary: false });
+    const branchesBefore = gitOut(["branch", "--list"], f.repo);
+    const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
+    equal(r.status, 0, r.stdout + r.stderr);
+    ok(r.stdout.includes("(detached snapshot)"), r.stdout);
+    ok(!existsSync(f.tree), "tree removed");
+    equal(snapRefs(f), "");
+    equal(gitOut(["branch", "--list"], f.repo), branchesBefore, "no branch touched");
+    ok(!existsSync(join(f.resultsDir, "summary.json")), "prune must not write a summary.json the run never had");
+  } finally {
+    dropSnapPrune(f);
+  }
+});
