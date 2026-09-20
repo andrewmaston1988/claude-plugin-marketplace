@@ -2062,3 +2062,161 @@ test("realRepoToplevel: outside a repo is null", () => {
     equal(realRepoToplevel(dir), null);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ---- default isolation: rows pinned to literals / the independent snapshot-key oracle ----
+import { effectiveIsolation, effectivePlanDoc } from "../src/manifest.mjs";
+import { oracleSnapKey } from "./helpers/snap-key.mjs";
+
+const bashTask = (over = {}) => ({ id: "impl", prompt: "p", model: "haiku", allowedTools: "Read,Bash", ...over });
+const inDir = (dir, body, name) => loadManifest(writeManifest(dir, body, name), CFG, dir);
+
+test("branchScope: a default-private writer carries the run-scoped key; explicit worktree and readers carry none", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [
+      bashTask(),
+      claudeTask({ id: "rd" }),
+      bashTask({ id: "ex", isolation: "worktree" }),
+    ] });
+    const by = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
+    ok(/^[0-9a-f]{12}$/.test(by.impl.branchScope), by.impl.branchScope);
+    equal(by.impl.branchScope, oracleSnapKey(plan.resultsDir));
+    equal(by.impl.branchName, undefined);
+    equal(by.rd.branchScope, undefined);
+    equal(by.ex.branchScope, undefined);
+    equal(by.ex.isolationMode, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("branchScope: a forEach writer synthesises worktreeName so clones can be renamed, and no fixed branchName", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [
+      claudeTask({ id: "src" }),
+      bashTask({ id: "fe", after: ["src"], forEach: { from: "src", path: "sites", maxItems: 2 } }),
+    ] });
+    const fe = plan.tasks.find((t) => t.id === "fe");
+    equal(fe.worktreeName, "fe");
+    equal(fe.branchName, undefined);
+    equal(fe.branchScope, oracleSnapKey(plan.resultsDir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("effectiveIsolation: literal answers per task shape", () => {
+  equal(effectiveIsolation({ id: "a", allowedTools: "Read,Bash" }), "worktree");
+  equal(effectiveIsolation({ id: "a" }), undefined);
+  equal(effectiveIsolation({ id: "a", allowedTools: "Read,Bash", isolation: "none" }), undefined);
+  equal(effectiveIsolation({ id: "a", allowedTools: "Bash", compute: "1" }), undefined);
+  equal(effectiveIsolation({ id: "a", allowedTools: "Bash", isolation: "worktree" }), "worktree");
+  deepEqual(effectiveIsolation({ id: "a", isolation: { worktree: "w" } }), { worktree: "w" });
+});
+
+test("resolveWorktreeName: isolation none owns no tree, worktree shorthand is the id", () => {
+  equal(resolveWorktreeName({ id: "a", isolation: "none" }), undefined);
+  equal(resolveWorktreeName({ id: "a", isolation: "worktree" }), "a");
+  equal(resolveWorktreeName({ id: "a" }), undefined);
+});
+
+test("a default-private writer beside a { worktree } of the same name is a collision; a none task is not", () => {
+  const dir = tmp();
+  try {
+    const errs = errorsOf(() => inDir(dir, { tasks: [
+      bashTask(),
+      claudeTask({ id: "other", isolation: { worktree: "impl" } }),
+    ] }));
+    ok(errs.some((e) => e.includes("collides with task 'impl'")), errs.join("\n"));
+    const plan = inDir(dir, { tasks: [
+      claudeTask({ id: "impl", isolation: "none" }),
+      claudeTask({ id: "other", isolation: { worktree: "impl" } }),
+    ] }, "ok.json");
+    equal(plan.tasks.length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolation none: normalised to isolationMode none with no isolation, cwd kept", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [claudeTask({ isolation: "none" })] });
+    equal(plan.tasks[0].isolationMode, "none");
+    equal(plan.tasks[0].isolation, undefined);
+    equal(plan.tasks[0].worktreeName, undefined);
+    equal(plan.tasks[0].repoToplevel, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolation none: refused for a write-capable leaf, and the allowlist error lists the none form", () => {
+  const dir = tmp();
+  try {
+    const w = errorsOf(() => inDir(dir, { tasks: [bashTask({ isolation: "none" })] }));
+    ok(w.some((e) => e.includes("is for read-only leaves")), w.join("\n"));
+    const b = errorsOf(() => inDir(dir, { tasks: [claudeTask({ isolation: "banana" })] }, "b.json"));
+    ok(b.some((e) => e.includes('isolation must be') && e.includes('"isolation": "none"')), b.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolation none: cwd outside allowedRoots is refused for Claude too; inside loads; no roots is inert", () => {
+  const dir = tmp();
+  const root = join(dir, "root");
+  const inside = join(root, "sub");
+  const outside = join(dir, "elsewhere");
+  mkdirSync(inside, { recursive: true });
+  mkdirSync(outside, { recursive: true });
+  const cfg = { ...CFG, provider: { allowedRoots: [root] } };
+  try {
+    const p1 = writeManifest(root, { tasks: [claudeTask({ isolation: "none", cwd: outside })] });
+    const errs = errorsOf(() => loadManifest(p1, cfg, root));
+    ok(errs.some((e) => e.includes("not under any provider.allowedRoots")), errs.join("\n"));
+    const p2 = writeManifest(root, { tasks: [claudeTask({ isolation: "none", cwd: inside })] }, "in.json");
+    equal(loadManifest(p2, cfg, root).tasks[0].isolationMode, "none");
+    const p3 = writeManifest(dir, { tasks: [claudeTask({ isolation: "none", cwd: outside })] }, "inert.json");
+    equal(loadManifest(p3, CFG, dir).tasks[0].isolationMode, "none");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a task cwd outside any repo: refused with the none hint; isolation none loads it", () => {
+  const dir = tmp();
+  const bare = join(dir, "bare");
+  mkdirSync(bare);
+  const io = { repoToplevel: (c) => (c === bare ? null : dir) };
+  try {
+    const p1 = writeManifest(dir, { tasks: [claudeTask({ cwd: bare })] });
+    const errs = errorsOf(() => loadManifest(p1, CFG, dir, { io }));
+    ok(errs.some((e) => e.includes("is not inside a git repository") && e.includes('"isolation": "none"') && e.includes("point cwd into a repo")), errs.join("\n"));
+    const p2 = writeManifest(dir, { tasks: [claudeTask({ cwd: bare, isolation: "none" })] }, "ok.json");
+    equal(loadManifest(p2, CFG, dir, { io }).tasks[0].isolationMode, "none");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("effectivePlanDoc records the authored isolation: none omitted for defaults, none and worktree kept, no isolationMode", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [
+      claudeTask({ id: "rd" }),
+      bashTask({ id: "wr" }),
+      claudeTask({ id: "nn", isolation: "none" }),
+      bashTask({ id: "ex", isolation: "worktree" }),
+    ] });
+    const by = Object.fromEntries(effectivePlanDoc(plan).tasks.map((t) => [t.id, t]));
+    equal("isolation" in by.rd, false);
+    equal("isolation" in by.wr, false);
+    equal(by.nn.isolation, "none");
+    equal(by.ex.isolation, "worktree");
+    for (const t of Object.values(by)) equal("isolationMode" in t, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

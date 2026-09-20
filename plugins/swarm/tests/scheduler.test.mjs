@@ -3924,3 +3924,22 @@ test("snapshot: the result records the snapshot fields and the effective cwd", a
     equal(res.cwd, cwd);
   } finally { drop(dir, repo); }
 });
+
+test("a private-mode leaf persists isolationMode and lands on the run-scoped literal branch", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => { writeFileSync(join(call.opts.cwd, "out.txt"), "x\n"); return {}; });
+    const p = plan(repo, [
+      task("gen", { cwd: repo, originalCwd: repo, allowedTools: "Bash", isolationMode: "private", isolation: "worktree",
+        worktreeName: "gen", branchScope: "scope1", repoToplevel: repo }),
+    ], { resultsDir: join(dir, "run"), concurrency: 1 });
+    await runPlan(p, CFG, makeIo(spawn));
+    equal(readResult(p.resultsDir, "gen").isolationMode, "private");
+    ok(spawnSync("git", ["branch", "--list", "swarm/scope1/gen"], { cwd: repo, encoding: "utf8" }).stdout.includes("swarm/scope1/gen"));
+    equal(spawnSync("git", ["branch", "--list", "swarm/gen"], { cwd: repo, encoding: "utf8" }).stdout.trim(), "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});

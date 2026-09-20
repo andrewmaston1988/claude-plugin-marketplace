@@ -614,3 +614,13 @@ test("askLeaf snapshot: a result with no originalCwd errors clearly and still re
     snapAskDrop(s);
   }
 });
+
+test("askLeaf: a private-mode leaf whose tree was swept gets the teaching message, not the generic one", async () => {
+  const dir = setup();
+  try {
+    writeResult(dir, "swept", { id: "swept", model: "haiku", ok: true, output: "x", sessionId: "s-9", isolationMode: "private", cwd: join(tmpdir(), "swarm-nonexistent-wt-xyz") });
+    await rejects(() => askLeaf({ resultsDir: dir, taskId: "swept", question: "?", cfg: CFG, io: makeIo(fakeSpawnFactory()) }), /removed because it changed nothing/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

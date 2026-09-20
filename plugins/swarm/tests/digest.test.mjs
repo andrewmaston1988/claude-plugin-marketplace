@@ -218,3 +218,26 @@ test("missing goal falls back to an explicit placeholder", () => {
   const t = buildDigestTask(plan({ goal: "" }));
   ok(t.prompt.includes("(no goal line provided in the manifest)"));
 });
+
+test("read-only digest runs in the run's snapshot tree: mode, repoKey and repoToplevel from the plan", () => {
+  const t = buildDigestTask(plan({ repoKey: "abc123abc123", repoToplevel: "C:/work" }));
+  equal(t.isolationMode, "snapshot");
+  equal(t.repoKey, "abc123abc123");
+  equal(t.repoToplevel, "C:/work");
+  equal(t.cwd, "C:/work");
+  equal("scratchRedirect" in t, false);
+});
+
+test("report digest sits in scratch-__digest and never joins the snapshot tree", () => {
+  const t = buildDigestTask(plan({ repoKey: "abc123abc123", repoToplevel: "C:/work", digest: { model: "haiku", report: true } }));
+  equal(t.isolationMode, undefined);
+  equal(t.repoKey, undefined);
+  equal(t.cwd, scratchPath("C:/work/.swarm/run-1"));
+  ok(t.cwd.endsWith("scratch-__digest"), t.cwd);
+});
+
+test("a hand-built plan with no repoKey gives the digest no mode", () => {
+  const t = buildDigestTask(plan());
+  equal("isolationMode" in t, false);
+  equal("repoKey" in t, false);
+});
