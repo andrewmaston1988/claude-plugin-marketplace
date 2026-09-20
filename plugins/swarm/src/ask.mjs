@@ -36,6 +36,9 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   }
   try {
   if (!cwd || !existsSync(cwd)) {
+    if (prior.isolationMode === "private") {
+      throw new Error(`the leaf's worktree was removed because it changed nothing; re-run the leaf, or give it explicit isolation to keep its tree`);
+    }
     throw new Error(`leaf cwd '${cwd}' no longer exists (removed worktree?) — the session cannot be resumed`);
   }
   const askModel = model || prior.model;
@@ -86,7 +89,6 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
           cwd: prior.cwd,
           originalCwd: prior.originalCwd || prior.cwd,
           allowedTools: prior.allowedTools || "Read,Grep,Glob",
-          scratchRedirect: false,
           timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           after: [],
         },

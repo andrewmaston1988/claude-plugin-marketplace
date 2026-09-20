@@ -695,9 +695,9 @@ test("headroom: T6 five :cloud seats fetch the meter exactly once — the memo c
   }
 });
 
-// ── write-implies-isolation ───────────────────────────────────────────────────
+// ── default isolation ─────────────────────────────────────────────────────────
 
-test("write tools without isolation redirect cwd to scratch dir under resultsDir", () => {
+test("write tools without isolation get a private tree, cwd unchanged, no scratch dir", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
@@ -711,25 +711,31 @@ test("write tools without isolation redirect cwd to scratch dir under resultsDir
     });
     const plan = loadManifest(p, CFG, dir);
     const byId = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
-    equal(byId.gen.cwd, join(dir, "res", "scratch-gen"));
-    equal(byId.gen.scratchRedirect, true);
-    equal(byId.bash.cwd, join(dir, "res", "scratch-bash"));
-    equal(byId.impl.cwd, dir);                 // worktree isolation: no redirect
-    equal(byId.impl.scratchRedirect, false);
-    equal(byId.ro.cwd, dir);                   // read-only: no redirect
+    equal(byId.gen.isolationMode, "private");
+    equal(byId.gen.isolation, "worktree");
+    equal(byId.gen.worktreeName, "gen");
+    equal(byId.gen.cwd, dir);
+    equal(byId.bash.isolationMode, "private");
+    equal(byId.bash.worktreeName, "bash");
+    equal(byId.bash.cwd, dir);
+    equal(byId.impl.isolationMode, undefined); // explicit isolation: no mode, no scope
+    equal(byId.impl.branchScope, undefined);
+    equal(byId.impl.cwd, dir);
+    equal(byId.ro.isolationMode, "snapshot");
+    equal(byId.ro.cwd, dir);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("governance checks the ORIGINAL cwd, not the scratch redirect", () => {
+test("governance checks the ORIGINAL cwd, not the worktree the leaf runs in", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
       tasks: [{ id: "o", prompt: "p", model: "glm-4.6:cloud", allowedTools: "Write" }],
     });
-    // scratch redirect lands under resultsDir which is under dir — but the
-    // original cwd (dir) is outside allowedRoots, so it must still be denied.
+    // the worktree lands under resultsDir — but the original cwd (dir)
+    // is outside allowedRoots, so it must still be denied.
     const errs = errorsOf(() => loadManifest(p, CFG, dir));
     ok(errs.some((e) => e.includes("data governance")));
   } finally {
@@ -1442,14 +1448,16 @@ test("isolation object form rejects an empty or non-filename-safe worktree name"
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("a shared worktree suppresses the scratch redirect for write-capable leaves", () => {
+test("a shared worktree gets no default mode for write-capable leaves", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [
       claudeTask({ id: "p1", isolation: { worktree: "feat" }, allowedTools: "Read,Write" }),
     ] });
     const t = loadManifest(p, CFG, dir).tasks[0];
-    equal(t.scratchRedirect, false, "a named worktree is real isolation, not a scratch case");
+    equal(t.isolationMode, undefined, "an explicit named worktree is not a default-isolated leaf");
+    equal(t.branchScope, undefined);
+    equal(t.worktreeName, "feat");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -2053,4 +2061,297 @@ test("realRepoToplevel: outside a repo is null", () => {
   try {
     equal(realRepoToplevel(dir), null);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- default isolation: rows pinned to literals / the independent snapshot-key oracle ----
+import { effectiveIsolation, effectivePlanDoc } from "../src/manifest.mjs";
+import { oracleSnapKey } from "./helpers/snap-key.mjs";
+
+const bashTask = (over = {}) => ({ id: "impl", prompt: "p", model: "haiku", allowedTools: "Read,Bash", ...over });
+const inDir = (dir, body, name, opts) => loadManifest(writeManifest(dir, body, name), CFG, dir, opts);
+
+test("branchScope: a default-private writer carries the run-scoped key; explicit worktree and readers carry none", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [
+      bashTask(),
+      claudeTask({ id: "rd" }),
+      bashTask({ id: "ex", isolation: "worktree" }),
+    ] });
+    const by = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
+    ok(/^[0-9a-f]{12}$/.test(by.impl.branchScope), by.impl.branchScope);
+    equal(by.impl.branchScope, oracleSnapKey(plan.resultsDir));
+    equal(by.impl.branchName, undefined);
+    equal(by.rd.branchScope, undefined);
+    equal(by.ex.branchScope, undefined);
+    equal(by.ex.isolationMode, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("branchScope: a forEach writer synthesises worktreeName so clones can be renamed, and no fixed branchName", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [
+      claudeTask({ id: "src" }),
+      bashTask({ id: "fe", after: ["src"], forEach: { from: "src", path: "sites", maxItems: 2 } }),
+    ] });
+    const fe = plan.tasks.find((t) => t.id === "fe");
+    equal(fe.worktreeName, "fe");
+    equal(fe.branchName, undefined);
+    equal(fe.branchScope, oracleSnapKey(plan.resultsDir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("effectiveIsolation: literal answers per task shape", () => {
+  equal(effectiveIsolation({ id: "a", allowedTools: "Read,Bash" }), "worktree");
+  equal(effectiveIsolation({ id: "a" }), undefined);
+  equal(effectiveIsolation({ id: "a", allowedTools: "Read,Bash", isolation: "none" }), undefined);
+  equal(effectiveIsolation({ id: "a", allowedTools: "Bash", compute: "1" }), undefined);
+  equal(effectiveIsolation({ id: "a", allowedTools: "Bash", isolation: "worktree" }), "worktree");
+  deepEqual(effectiveIsolation({ id: "a", isolation: { worktree: "w" } }), { worktree: "w" });
+});
+
+test("resolveWorktreeName: isolation none owns no tree, worktree shorthand is the id", () => {
+  equal(resolveWorktreeName({ id: "a", isolation: "none" }), undefined);
+  equal(resolveWorktreeName({ id: "a", isolation: "worktree" }), "a");
+  equal(resolveWorktreeName({ id: "a" }), undefined);
+});
+
+test("a default-private writer beside a { worktree } of the same name is a collision; a none task is not", () => {
+  const dir = tmp();
+  try {
+    const errs = errorsOf(() => inDir(dir, { tasks: [
+      bashTask(),
+      claudeTask({ id: "other", isolation: { worktree: "impl" } }),
+    ] }));
+    ok(errs.some((e) => e.includes("collides with task 'impl'")), errs.join("\n"));
+    const plan = inDir(dir, { tasks: [
+      claudeTask({ id: "impl", isolation: "none" }),
+      claudeTask({ id: "other", isolation: { worktree: "impl" } }),
+    ] }, "ok.json");
+    equal(plan.tasks.length, 2);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolation none: normalised to isolationMode none with no isolation, cwd kept", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [claudeTask({ isolation: "none" })] });
+    equal(plan.tasks[0].isolationMode, "none");
+    equal(plan.tasks[0].isolation, undefined);
+    equal(plan.tasks[0].worktreeName, undefined);
+    equal(plan.tasks[0].repoToplevel, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolation none: refused for a write-capable leaf, and the allowlist error lists the none form", () => {
+  const dir = tmp();
+  try {
+    const w = errorsOf(() => inDir(dir, { tasks: [bashTask({ isolation: "none" })] }));
+    ok(w.some((e) => e.includes("is for read-only leaves")), w.join("\n"));
+    const b = errorsOf(() => inDir(dir, { tasks: [claudeTask({ isolation: "banana" })] }, "b.json"));
+    ok(b.some((e) => e.includes('isolation must be') && e.includes('"isolation": "none"')), b.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolation none: cwd outside allowedRoots is refused for Claude too; inside loads; no roots is inert", () => {
+  const dir = tmp();
+  const root = join(dir, "root");
+  const inside = join(root, "sub");
+  const outside = join(dir, "elsewhere");
+  mkdirSync(inside, { recursive: true });
+  mkdirSync(outside, { recursive: true });
+  const cfg = { ...CFG, provider: { allowedRoots: [root] } };
+  try {
+    const p1 = writeManifest(root, { tasks: [claudeTask({ isolation: "none", cwd: outside })] });
+    const errs = errorsOf(() => loadManifest(p1, cfg, root));
+    ok(errs.some((e) => e.includes("not under any provider.allowedRoots")), errs.join("\n"));
+    const p2 = writeManifest(root, { tasks: [claudeTask({ isolation: "none", cwd: inside })] }, "in.json");
+    equal(loadManifest(p2, cfg, root).tasks[0].isolationMode, "none");
+    const p3 = writeManifest(dir, { tasks: [claudeTask({ isolation: "none", cwd: outside })] }, "inert.json");
+    equal(loadManifest(p3, CFG, dir).tasks[0].isolationMode, "none");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a task cwd outside any repo: refused with the none hint; isolation none loads it", () => {
+  const dir = tmp();
+  const bare = join(dir, "bare");
+  mkdirSync(bare);
+  const io = { repoToplevel: (c) => (c === bare ? null : dir) };
+  try {
+    const p1 = writeManifest(dir, { tasks: [claudeTask({ cwd: bare })] });
+    const errs = errorsOf(() => loadManifest(p1, CFG, dir, { io }));
+    ok(errs.some((e) => e.includes("is not inside a git repository") && e.includes('"isolation": "none"') && e.includes("point cwd into a repo")), errs.join("\n"));
+    const p2 = writeManifest(dir, { tasks: [claudeTask({ cwd: bare, isolation: "none" })] }, "ok.json");
+    equal(loadManifest(p2, CFG, dir, { io }).tasks[0].isolationMode, "none");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("effectivePlanDoc records the authored isolation: none omitted for defaults, none and worktree kept, no isolationMode", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [
+      claudeTask({ id: "rd" }),
+      bashTask({ id: "wr" }),
+      claudeTask({ id: "nn", isolation: "none" }),
+      bashTask({ id: "ex", isolation: "worktree" }),
+    ] });
+    const by = Object.fromEntries(effectivePlanDoc(plan).tasks.map((t) => [t.id, t]));
+    equal("isolation" in by.rd, false);
+    equal("isolation" in by.wr, false);
+    equal(by.nn.isolation, "none");
+    equal(by.ex.isolation, "worktree");
+    for (const t of Object.values(by)) equal("isolationMode" in t, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("two default readers with no after: neither owns a worktree name, so they are not an ordered group", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [claudeTask({ id: "r1" }), claudeTask({ id: "r2" })] });
+    const by = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
+    for (const id of ["r1", "r2"]) {
+      equal(by[id].isolationMode, "snapshot");
+      equal("worktreeName" in by[id], false, "a shared name would make two parallel readers a chain");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a default-private forEach writer's clone names collide with a { worktree } sibling", () => {
+  const dir = tmp();
+  try {
+    const errs = errorsOf(() => inDir(dir, { tasks: [
+      claudeTask({ id: "src", prompt: "…return JSON list" }),
+      bashTask({ id: "fix", after: ["src"], forEach: { from: "src", path: "", maxItems: 2 },
+        prompt: "fix {{item}}" }),
+      claudeTask({ id: "other", isolation: { worktree: "fix-1" } }),
+    ] }));
+    ok(errs.some((e) => e.includes('forEach clone worktree "fix-1" would collide')), errs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolation.from: a default-private writer is a valid base; a default reader and a none task are not", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [
+      bashTask({ id: "helper" }),
+      bashTask({ id: "follow", after: ["helper"], isolation: { worktree: "follow", from: "helper" } }),
+    ] }, "ok.json");
+    equal(plan.tasks.find((t) => t.id === "follow").from, "helper");
+
+    const reader = errorsOf(() => inDir(dir, { tasks: [
+      claudeTask({ id: "helper" }),
+      bashTask({ id: "follow", after: ["helper"], isolation: { worktree: "follow", from: "helper" } }),
+    ] }, "reader.json"));
+    ok(reader.some((e) => e.includes("isolation.from 'helper' has no worktree")), reader.join("\n"));
+
+    const none = errorsOf(() => inDir(dir, { tasks: [
+      claudeTask({ id: "helper", isolation: "none" }),
+      bashTask({ id: "follow", after: ["helper"], isolation: { worktree: "follow", from: "helper" } }),
+    ] }, "none.json"));
+    ok(none.some((e) => e.includes("isolation.from 'helper' has no worktree")), none.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integrate.from: a none source has no branch to merge; a default-private writer does", () => {
+  const dir = tmp();
+  try {
+    const errs = errorsOf(() => inDir(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "none" }),
+      { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] } },
+    ] }));
+    ok(errs.some((e) => e.includes("integrate.from 'x' has no worktree")), errs.join("\n"));
+
+    const plan = inDir(dir, { tasks: [
+      bashTask({ id: "x" }),
+      { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] } },
+    ] }, "ok.json");
+    deepEqual(plan.tasks.find((t) => t.id === "join").integrate.from, ["x"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadManifest records the dispatching repo on the plan: repoToplevel and its key", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [claudeTask()] });
+    equal(plan.repoToplevel, dir, "the digest snapshots this tree; without it it has no repo");
+    equal(plan.repoKey, oracleSnapKey(dir));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a default read-only task carries the repo identity its snapshot is keyed on, not just the mode", () => {
+  const dir = tmp();
+  try {
+    const t = inDir(dir, { tasks: [claudeTask({ id: "ro" })] }).tasks[0];
+    equal(t.isolationMode, "snapshot");
+    equal(t.repoToplevel, dir);
+    equal(t.repoKey, oracleSnapKey(dir));
+    equal(t.worktreeName, undefined);
+    equal(t.isolation, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a task cwd in a second repo keys on THAT repo, while the run stays filed under the dispatching one", () => {
+  const dir = tmp(), other = tmp();
+  try {
+    mkdirSync(join(dir, "sub"), { recursive: true });
+    // Two real repos: the dispatch cwd and the task's own.
+    const io = { repoToplevel: (d) => (String(d).startsWith(other) ? other : dir) };
+    const plan = inDir(dir, { tasks: [
+      claudeTask({ id: "here" }),
+      claudeTask({ id: "there", cwd: other }),
+    ] }, "two.json", { io });
+    const by = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
+    equal(by.here.repoKey, oracleSnapKey(dir));
+    equal(by.there.repoKey, oracleSnapKey(other));
+    notEqual(by.there.repoKey, by.here.repoKey, "one key for both repos snapshots the wrong tree");
+    equal(plan.repoKey, oracleSnapKey(dir), "the run is filed under the dispatching repo, not the task's");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
+test("tasks sharing a cwd ask git for its toplevel once, not once per task", () => {
+  const dir = tmp();
+  try {
+    const sub = join(dir, "sub");
+    mkdirSync(sub, { recursive: true });
+    const calls = [];
+    const io = { repoToplevel: (d) => { calls.push(String(d)); return dir; } };
+    const tasks = Array.from({ length: 10 }, (_, i) => claudeTask({ id: `t${i}`, cwd: "sub" }));
+    inDir(dir, { tasks }, "memo.json", { io });
+    equal(calls.filter((d) => d === sub).length, 1,
+      "no memo means one `git rev-parse` per leaf at normalise time — slow, and invisible to every other test");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -1,7 +1,66 @@
 # Manifest field reference — schemas, child manifests, named runs, integrate.from
 
-Deep reference for five manifest features. Read when you are actually writing one of
+Deep reference for six manifest features. Read when you are actually writing one of
 these fields; the decision of *whether* to use them lives in SKILL.md.
+
+### Where a leaf runs — `isolation`
+
+Every leaf that spawns a session gets a tree. `isolation` only says *which*; omitting it
+does not mean "run in the operator's checkout".
+
+| `isolation` | The leaf runs in | `isolationMode` |
+|---|---|---|
+| omitted, read-only tools | one frozen snapshot of its repo, shared with the run's other readers | `snapshot` |
+| omitted, write-capable tools | its own worktree, on `swarm/<runKey>/<id>` | `private` |
+| `"worktree"` | its own worktree, on `swarm/<id>` | — |
+| `{ "worktree": "feat" }` | a worktree shared with every other link naming `feat`, which must be totally ordered by `after` | — |
+| `"none"` | its `cwd`, in place | `none` |
+
+"Write-capable" is `allowedTools` containing a write tool; the default `"Read,Grep,Glob"`
+is not. So granting `Bash` to a leaf silently moves it from the shared snapshot to a
+private worktree with its own branch — intended, and worth knowing when you add the tool.
+
+A snapshot holds the operator's uncommitted work: a reader sees the tree as it was at run
+start, including edits and untracked files, and cannot be disturbed by later ones. A
+private worktree bases on HEAD instead, so a leaf's branch never carries a synthetic
+commit of somebody's half-finished work.
+
+`"none"` is the opt-out, and it is narrow:
+
+- **Read-only only.** A leaf holding a write tool is refused at validation — a leaf that
+  can write always gets a tree.
+- **Root-gated for every model, Claude included.** When `provider.allowedRoots` is
+  non-empty and the leaf's `cwd` is outside all of them, it is refused. With no roots
+  configured the gate is inert.
+
+Reach for it to read something outside any repo, or gitignored content a snapshot would
+not carry: dispatch from a repo and give the task `"isolation": "none"` with a `cwd`
+elsewhere under a root.
+
+A task `cwd` that is not inside a git repository is refused, because there is no repo to
+snapshot or branch from. The error names `"none"` as the way out. `compute`, `integrate`
+and `manifest` nodes spawn no leaf, so none of this applies to them.
+
+The object form takes two more optional keys: `"branch"` names the branch explicitly
+instead of deriving it, and `"from"` bases the tree on another task's branch rather than
+repo HEAD — that task must be one that WRITES, since a read-only task owns no branch. A
+default-private writer is a valid `from` source; a reader and a `"none"` task are not.
+
+```json
+{
+  "tasks": [
+    { "id": "survey", "model": "haiku", "prompt": "…" },
+    { "id": "impl", "model": "sonnet", "allowedTools": "Read,Edit,Bash", "prompt": "…" },
+    { "id": "follow", "model": "sonnet", "after": ["impl"], "allowedTools": "Read,Edit,Bash",
+      "isolation": { "worktree": "follow", "from": "impl" }, "prompt": "…" },
+    { "id": "read-logs", "model": "haiku", "cwd": "C:/logs", "isolation": "none", "prompt": "…" }
+  ]
+}
+```
+
+`survey` gets the run's shared snapshot; `impl` gets a private worktree on a run-scoped
+branch without asking; `follow` branches off `impl`'s work; `read-logs` reads a directory
+that is not a repo at all.
 
 ### Provider identity
 

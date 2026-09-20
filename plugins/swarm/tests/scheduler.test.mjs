@@ -33,7 +33,6 @@ function task(id, over = {}) {
     allowedTools: "Read,Grep,Glob",
     cwd: over.cwd || tmpdir(),
     originalCwd: over.cwd || tmpdir(),
-    scratchRedirect: false,
     timeoutMs: 5000,
     after: [],
     ...over,
@@ -1150,19 +1149,34 @@ test("open-model dispatch passes env trio through real spawn (shim log)", async 
   }
 });
 
-test("scratch-redirected task gets its cwd created before spawn", async () => {
+test("a private-mode leaf spawns at the same depth inside its worktree; an explicit worktree leaf at the root", async () => {
+  const repo = initGitRepo();
   const dir = tmp();
   try {
-    let seenCwd;
-    const spawn = fakeSpawnFactory((call) => { seenCwd = call.opts.cwd; return {}; });
-    const io = makeIo(spawn);
-    const scratch = join(dir, "run", "scratch-gen");
-    const p = plan(dir, [task("gen", { cwd: scratch, scratchRedirect: true, allowedTools: "Write" })]);
-    await runPlan(p, CFG, io);
-    equal(seenCwd, scratch);
-    ok(existsSync(scratch));
+    mkdirSync(join(repo, "sub"));
+    writeFileSync(join(repo, "sub", "y.txt"), "y\n");
+    commitAllInRepo(repo, "sub");
+    const cwds = [];
+    const spawn2 = fakeSpawnFactory((call) => { cwds.push(call.opts.cwd); return {}; });
+    const sub = join(repo, "sub");
+    const p = plan(repo, [
+      task("gen", { cwd: sub, originalCwd: sub, allowedTools: "Bash", isolationMode: "private", isolation: "worktree",
+        worktreeName: "gen", branchScope: "scope1", repoToplevel: repo }),
+    ], { resultsDir: join(dir, "run"), concurrency: 1 });
+    await runPlan(p, CFG, makeIo(spawn2));
+    equal(cwds.length, 1);
+    equal(cwds[0], join(dir, "run", "wt-gen", "sub"));
+
+    const cwds2 = [];
+    const spawn3 = fakeSpawnFactory((call) => { cwds2.push(call.opts.cwd); return {}; });
+    const p2 = plan(repo, [
+      task("expl", { cwd: sub, originalCwd: sub, allowedTools: "Bash", isolation: "worktree", worktreeName: "expl" }),
+    ], { resultsDir: join(dir, "run2"), concurrency: 1 });
+    await runPlan(p2, CFG, makeIo(spawn3));
+    equal(cwds2[0], join(dir, "run2", "wt-expl"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
   }
 });
 
@@ -2436,7 +2450,7 @@ test("child compute reads deps by local id through aliases", async () => {
       model: "manifest", prompt: "",
       childPlan: childPlanOf(
         task("get", { prompt: "list" }),
-        { id: "dedupe", model: "compute", prompt: "", allowedTools: "", cwd: tmpdir(), originalCwd: tmpdir(), scratchRedirect: false, timeoutMs: 5000, after: ["get"], compute: "unique_by(filter(deps['get'].xs, item > 0), '')" },
+        { id: "dedupe", model: "compute", prompt: "", allowedTools: "", cwd: tmpdir(), originalCwd: tmpdir(), timeoutMs: 5000, after: ["get"], compute: "unique_by(filter(deps['get'].xs, item > 0), '')" },
       ),
     });
     // unique_by needs objects; keep it simple: sum instead
@@ -3643,7 +3657,7 @@ test("resume: --force starts fresh even with a recorded session", async () => {
 });
 
 // ---- snapshot-mode leaves: one frozen tree per repo per run ----
-import { prepareSnapshotTree as prepSnapTree } from "../src/worktree.mjs";
+import { prepareSnapshotTree as prepSnapTree, branchNameFor as realBranchNameFor } from "../src/worktree.mjs";
 import { oracleSnapKey as snapKey } from "./helpers/snap-key.mjs";
 import { runLiveness } from "../src/runlog.mjs";
 
@@ -3909,4 +3923,152 @@ test("snapshot: the result records the snapshot fields and the effective cwd", a
     equal(res.snapshotSha, snapEvents(p)[0].sha);
     equal(res.cwd, cwd);
   } finally { drop(dir, repo); }
+});
+
+test("a private-mode leaf persists isolationMode and lands on the run-scoped literal branch", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => { writeFileSync(join(call.opts.cwd, "out.txt"), "x\n"); return {}; });
+    const p = plan(repo, [
+      task("gen", { cwd: repo, originalCwd: repo, allowedTools: "Bash", isolationMode: "private", isolation: "worktree",
+        worktreeName: "gen", branchScope: "scope1", repoToplevel: repo }),
+    ], { resultsDir: join(dir, "run"), concurrency: 1 });
+    await runPlan(p, CFG, makeIo(spawn));
+    equal(readResult(p.resultsDir, "gen").isolationMode, "private");
+    ok(spawnSync("git", ["branch", "--list", "swarm/scope1/gen"], { cwd: repo, encoding: "utf8" }).stdout.includes("swarm/scope1/gen"));
+    equal(spawnSync("git", ["branch", "--list", "swarm/gen"], { cwd: repo, encoding: "utf8" }).stdout.trim(), "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// A leaf normalizeTasks defaulted to a private tree, as the scheduler sees it.
+function privateLeaf(id, repo, over = {}) {
+  return task(id, {
+    cwd: repo, originalCwd: repo, allowedTools: "Bash",
+    isolationMode: "private", isolation: "worktree", worktreeName: id,
+    repoToplevel: repo, ...over,
+  });
+}
+
+const writingSpawn = () => fakeSpawnFactory((call) => {
+  writeFileSync(join(call.opts.cwd, "out.txt"), "x\n");
+  return {};
+});
+
+test("a default-private child of a manifest node lands on a branch git accepts", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const childPlan = { tasks: [privateLeaf("impl", repo, { branchScope: "scope1" })] };
+    const p = plan(repo, [task("node", { model: "manifest", prompt: "", childPlan, cwd: repo, originalCwd: repo })],
+      { resultsDir: join(dir, "run"), concurrency: 1 });
+    await runPlan(p, CFG, makeIo(writingSpawn()));
+
+    const res = readResult(p.resultsDir, "node~impl");
+    ok(res.ok, res.output);
+    const branches = spawnSync("git", ["branch", "--list"], { cwd: repo, encoding: "utf8" }).stdout;
+    ok(branches.includes("swarm/scope1/node-impl"),
+      `the remapped name's ~ must be sanitised or worktree add refuses it — got:\n${branches}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("two runs of one manifest in a repo: run-scoped branches keep the second off the first's kept tree", async () => {
+  const repo = initGitRepo();
+  const dir1 = tmp(), dir2 = tmp();
+  try {
+    const mk = (resultsDir) => plan(repo, [privateLeaf("gen", repo, { branchScope: snapKey(resultsDir) })],
+      { resultsDir, concurrency: 1 });
+    const spawn = fakeSpawnFactory((call) => {
+      writeFileSync(join(call.opts.cwd, "untracked.txt"), "x\n");
+      return {};
+    });
+    const r1 = await runPlan(mk(join(dir1, "run")), CFG, makeIo(spawn));
+    equal(r1.worktreesKept.length, 1, "an untracked file keeps run one's tree and its branch");
+
+    const p2 = mk(join(dir2, "run"));
+    await runPlan(p2, CFG, makeIo(spawn));
+    const res = readResult(p2.resultsDir, "gen");
+    ok(res.ok, `an unscoped branch would already be checked out in run one's tree — got:\n${res.output}`);
+  } finally {
+    rmSync(dir1, { recursive: true, force: true });
+    rmSync(dir2, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("forEach clones of a default-private writer each get their own run-scoped branch", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      if (promptOf(call) === "do src") return { output: '["a","b"]' };
+      writeFileSync(join(call.opts.cwd, "out.txt"), "x\n");
+      return {};
+    });
+    const p = plan(repo, [
+      task("src", { cwd: repo, originalCwd: repo }),
+      privateLeaf("fix", repo, {
+        after: ["src"], branchScope: "scope1", prompt: "fix {{item}}",
+        forEach: { from: "src", path: "", maxItems: 2 },
+      }),
+    ], { resultsDir: join(dir, "run"), concurrency: 1 });
+    await runPlan(p, CFG, makeIo(spawn));
+
+    const branches = spawnSync("git", ["branch", "--list"], { cwd: repo, encoding: "utf8" }).stdout;
+    for (const b of ["swarm/scope1/fix-0", "swarm/scope1/fix-1"]) {
+      ok(branches.includes(b), `one fixed branch for both clones races them — got:\n${branches}`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("a hand-built isolation none task spawns in its own cwd and is never given a tree", async () => {
+  const dir = tmp();
+  try {
+    let spawnCwd;
+    const spawn = fakeSpawnFactory((call) => { spawnCwd = call.opts.cwd; return {}; });
+    const collectCalls = [];
+    const base = fakeWorktree(collectCalls);
+    let prepared = 0;
+    const worktree = { ...base, prepareIsolation: (...a) => { prepared++; return base.prepareIsolation(...a); } };
+    const p = plan(dir, [task("ro", { isolation: "none", cwd: dir, originalCwd: dir })]);
+    await runPlan(p, CFG, makeIo(spawn, { worktree }));
+
+    equal(spawnCwd, dir, "isolation none runs in the cwd it was approved for");
+    equal(prepared, 0, "a none task that resolves to a worktree name silently gets a tree");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolation.from over a default-private source bases the follower on the SOURCE's run-scoped branch", async () => {
+  const dir = tmp();
+  try {
+    const calls = [];
+    const base = fakeWorktree([]);
+    const worktree = {
+      ...base, branchNameFor: realBranchNameFor,
+      prepareIsolation: (t, cfg, rd, o) => { calls.push({ id: t.id, baseRef: t.baseRef }); return base.prepareIsolation(t, cfg, rd, o); },
+    };
+    const priv = (id, over) => task(id, {
+      allowedTools: "Bash", isolationMode: "private", isolation: "worktree",
+      worktreeName: id, branchScope: "scope1", cwd: dir, originalCwd: dir, repoToplevel: dir, ...over,
+    });
+    const p = plan(dir, [priv("helper"), priv("follow", { after: ["helper"], from: "helper" })]);
+    await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({})), { worktree }));
+
+    equal(calls.find((c) => c.id === "helper").baseRef, undefined);
+    equal(calls.find((c) => c.id === "follow").baseRef, "swarm/scope1/helper",
+      "an unscoped or self-derived base silently branches the follower off the wrong ref");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -172,8 +172,8 @@ test("askLeaf: disabled provider override fails before any spawn", async () => {
   }
 });
 
-test("askLeaf: governance gates on originalCwd for scratch-redirected leaves", async () => {
-  // a write-capable open-model leaf runs in a scratch dir (never under
+test("askLeaf: governance gates on originalCwd when the leaf runs elsewhere than it was approved", async () => {
+  // a write-capable open-model leaf runs in its tree (never under
   // allowedRoots) but was approved against its ORIGINAL cwd — ask must honor
   // the same pair the manifest gate approved
   const dir = setup({ cwd: tmpdir(), originalCwd: join(tmpdir(), "approved-root") });
@@ -238,7 +238,7 @@ function schedTask(id, over = {}) {
   return {
     id, prompt: `do ${id}`, model: "haiku", allowedTools: "Read,Grep,Glob",
     cwd: over.cwd || tmpdir(), originalCwd: over.cwd || tmpdir(),
-    scratchRedirect: false, timeoutMs: 5000, after: [], ...over,
+    timeoutMs: 5000, after: [], ...over,
   };
 }
 
@@ -395,7 +395,7 @@ test("Q6: ask in a kept worktree reuses it without calling prepareIsolation", as
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 2, goal: "",
       tasks: [{
         id: "impl", prompt: "implement", model: "haiku", allowedTools: "Read,Edit,Bash",
-        cwd: repo, originalCwd: repo, scratchRedirect: false, isolation: "worktree",
+        cwd: repo, originalCwd: repo, isolation: "worktree",
         timeoutMs: 5000, after: [],
       }],
     };
@@ -439,7 +439,7 @@ test("Q8: ask preserves the prior summary and status for every other task, inclu
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 4, goal: "",
       tasks: [
-        { id: "wt", prompt: "do wt", model: "haiku", allowedTools: "Read,Edit,Bash", cwd: repo, originalCwd: repo, scratchRedirect: false, isolation: "worktree", timeoutMs: 5000, after: [] },
+        { id: "wt", prompt: "do wt", model: "haiku", allowedTools: "Read,Edit,Bash", cwd: repo, originalCwd: repo, isolation: "worktree", timeoutMs: 5000, after: [] },
         schedTask("b"),
         schedTask("c"),
       ],
@@ -612,5 +612,15 @@ test("askLeaf snapshot: a result with no originalCwd errors clearly and still re
     equal(s.registered(), false);
   } finally {
     snapAskDrop(s);
+  }
+});
+
+test("askLeaf: a private-mode leaf whose tree was swept gets the teaching message, not the generic one", async () => {
+  const dir = setup();
+  try {
+    writeResult(dir, "swept", { id: "swept", model: "haiku", ok: true, output: "x", sessionId: "s-9", isolationMode: "private", cwd: join(tmpdir(), "swarm-nonexistent-wt-xyz") });
+    await rejects(() => askLeaf({ resultsDir: dir, taskId: "swept", question: "?", cfg: CFG, io: makeIo(fakeSpawnFactory()) }), /removed because it changed nothing/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

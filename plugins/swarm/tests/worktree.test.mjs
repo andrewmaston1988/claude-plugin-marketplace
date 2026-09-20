@@ -5,7 +5,7 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
-  prepareIsolation, collect, integrate,
+  prepareIsolation, collect, integrate, branchNameFor,
   snapshotKey, snapshotCommit, prepareSnapshotTree, removeSnapshotTree, snapshotCwd,
 } from "../src/worktree.mjs";
 import { runPlan } from "../src/scheduler.mjs";
@@ -430,7 +430,7 @@ test("scheduler resume: a failed isolated leaf re-enters its kept worktree AND r
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
       tasks: [{
         id: "impl", prompt: "do it", model: "haiku", allowedTools: "Read,Edit,Bash",
-        cwd: repo, originalCwd: repo, scratchRedirect: false, isolation: "worktree", timeoutMs: 5000, after: [],
+        cwd: repo, originalCwd: repo, isolation: "worktree", timeoutMs: 5000, after: [],
       }],
     };
     const first = await runPlan(p, CFG, io);
@@ -468,7 +468,7 @@ test("scheduler integration: isolation task runs IN the worktree; summary lists 
       goal: "",
       tasks: [{
         id: "impl", prompt: "implement", model: "haiku", allowedTools: "Read,Edit,Bash",
-        cwd: repo, originalCwd: repo, scratchRedirect: false, isolation: "worktree",
+        cwd: repo, originalCwd: repo, isolation: "worktree",
         timeoutMs: 5000, after: [],
       }],
     };
@@ -1205,4 +1205,22 @@ test("snapshot: add -A, write-tree and worktree add all run with the 600 s timeo
     equal(seen["write-tree"], 600000);
     equal(seen["worktree add"], 600000);
   } finally { snapDrop(repo, join(o.resultsDir, `wt-snapshot-${o.repoKey}`)); cleanup(repo, o.resultsDir); }
+});
+
+test("branchNameFor: a child tree name's ~ is sanitised to a ref git accepts", () => {
+  const b = branchNameFor({ id: "x", worktreeName: "n~build", branchScope: "abc123abc123" }, CFG);
+  equal(b, "swarm/abc123abc123/n-build");
+  equal(spawnSync("git", ["check-ref-format", "--branch", b]).status, 0);
+});
+
+test("branchNameFor: .. and a trailing .lock map to -", () => {
+  equal(branchNameFor({ id: "x", worktreeName: "a..b.lock" }, CFG), "swarm/a-b-");
+});
+
+test("branchNameFor: an explicit branchName wins over scope and sanitising", () => {
+  equal(branchNameFor({ id: "x", branchName: "swarm/eco-p3", branchScope: "k" }, CFG), "swarm/eco-p3");
+});
+
+test("branchNameFor: no branchScope keeps today's swarm/<name>", () => {
+  equal(branchNameFor({ id: "x", worktreeName: "x" }, CFG), "swarm/x");
 });

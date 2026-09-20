@@ -25,13 +25,25 @@ function unlandedCount(base, branch, repo) {
   return c.stdout.split(/\r?\n/).filter((l) => l.trim().startsWith("+")).length;
 }
 
+// Maps every ref-illegal sequence to "-". expandManifest names a child's tree `<node>~<child>`,
+// and `git check-ref-format` rejects "~".
+function sanitiseRef(name) {
+  return String(name)
+    .replace(/[~^:?*[\\\s]/g, "-")
+    .replace(/\.\.+/g, "-")
+    .replace(/@\{/g, "-")
+    .replace(/(\.lock|\.)$/, "-");
+}
+
 // The one rule for a task's branch name: an explicit `isolation.branch` wins,
-// else the worktree name under the configured prefix. Exported so the scheduler
-// resolves `from` / `integrate` sources the same way prepareIsolation creates
-// them — three copies of this formula is how they drift apart.
+// else the worktree name under the configured prefix (and the run's `branchScope`
+// for a default-private tree). Exported so the scheduler resolves `from` /
+// `integrate` sources the same way prepareIsolation creates them — three copies
+// of this formula is how they drift apart.
 export function branchNameFor(task, cfg) {
-  const name = task.worktreeName || task.id;
-  return task.branchName || `${cfg.worktreeBranchPrefix || "swarm/"}${name}`;
+  if (task.branchName) return task.branchName;
+  const name = sanitiseRef(task.worktreeName || task.id);
+  return `${cfg.worktreeBranchPrefix || "swarm/"}${task.branchScope ? task.branchScope + "/" : ""}${name}`;
 }
 
 // True when `path` is already a registered worktree of `repo` — the kept tree

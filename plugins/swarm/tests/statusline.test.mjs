@@ -212,7 +212,7 @@ test("row 10: a run dispatched by the real scheduler is attributed to its sessio
     const rd = join(home, "runs", "C--code-x", "prod-1");
     const p = {
       cwd: scratch, resultsDir: rd, concurrency: 4, goal: "",
-      tasks: [{ id: "a", prompt: "do a", model: "haiku", allowedTools: "Read,Grep,Glob", cwd: tmpdir(), originalCwd: tmpdir(), scratchRedirect: false, timeoutMs: 5000, after: [] }],
+      tasks: [{ id: "a", prompt: "do a", model: "haiku", allowedTools: "Read,Grep,Glob", cwd: tmpdir(), originalCwd: tmpdir(), timeoutMs: 5000, after: [] }],
     };
     await withSessionEnv("prod-sess", () => runPlan(p, SCHED_CFG, makeIo(fakeSpawnFactory(() => ({ output: "leaf done" })))));
     // A completed run is by definition not live — remove the terminal summary and

@@ -9,10 +9,12 @@ import { runCli, runCliAsync, CLI } from "./helpers/cli.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
 
-// A git-init'd dir: runs are filed under the dispatching repo, so a non-repo cwd is refused.
+// A git repo with one commit: runs are filed under the dispatching repo, and read-only leaves snapshot it.
 function tmp() {
   const dir = mkdtempSync(join(tmpdir(), "swarm-cli-"));
   spawnSync("git", ["init", "-q"], { cwd: dir, windowsHide: true });
+  writeFileSync(join(dir, "seed.txt"), "seed\n");
+  commitAll(dir, "init");
   return dir;
 }
 
@@ -274,10 +276,10 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     ok(summary.started && summary.finished);
     deepEqual(summary.tasks.map((t) => t.state), ["ok", "ok", "ok", "ok"]);
     deepEqual(summary.blocked, []);
-    // run.log is JSONL: run-start + 2 lines per task
+    // run.log is JSONL: run-start + one snapshot event + 2 lines per task
     const logLines = readFileSync(join(resultsDir, "run.log"), "utf8").trim().split("\n");
-    equal(logLines.length, 9);
-    for (const l of logLines) JSON.parse(l);
+    equal(logLines.length, 10);
+    equal(logLines.map((l) => JSON.parse(l)).filter((e) => e.event === "snapshot").length, 1);
     // progressive per-leaf logs
     for (const id of ["scan-a", "scan-b", "scan-c", "__digest"]) {
       equal(readFileSync(join(resultsDir, "results", `${id}.log`), "utf8"), "leaf-output-text");
@@ -601,15 +603,19 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
       tasks: [{ id: "slow", prompt: "x", model: "haiku" }],
     }));
     const resultsDir = join(dir, "out");
+    const shimLog = join(dir, "stop-shim.log");
 
     runPromise = runCliAsync(["run", manifest], {
       cwd: dir,
-      env: { SWARM_HOME: home, SWARM_SHIM_SLEEP_MS: "2000" },
+      env: { SWARM_HOME: home, SWARM_SHIM_SLEEP_MS: "2000", SWARM_SHIM_LOG: shimLog },
     });
 
     const deadline = Date.now() + 10000;
     while (!existsSync(join(resultsDir, "heartbeat")) && Date.now() < deadline) await sleep(20);
     ok(existsSync(join(resultsDir, "heartbeat")), "engine must have started ticking before stop is issued");
+    // Snapshot prep runs git synchronously and starves the stop responder; wait until the leaf has spawned.
+    while (!existsSync(shimLog) && Date.now() < deadline) await sleep(20);
+    ok(existsSync(shimLog), "the leaf must have spawned before stop is issued");
 
     const stopResult = runCli(["stop", resultsDir], { cwd: dir, env: { SWARM_HOME: home } });
     equal(stopResult.status, 0, stopResult.stdout + stopResult.stderr);

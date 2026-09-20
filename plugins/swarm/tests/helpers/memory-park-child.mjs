@@ -15,8 +15,8 @@ const start = Date.now();
 // second to park), then recovered — proves the redrive fires off the engine's
 // own ref'd heartbeat tick, not a park-side timer.
 const io = makeIo(spawn, { freeMemMb: () => (Date.now() - start > 150 ? 99999 : 10) });
-const a = { id: "a", prompt: "do a", model: "haiku", allowedTools: "Read", cwd: dir, originalCwd: dir, scratchRedirect: false, timeoutMs: 5000, after: [] };
-const b = { id: "b", prompt: "do b", model: "haiku", allowedTools: "Read", cwd: dir, originalCwd: dir, scratchRedirect: false, timeoutMs: 5000, after: [] };
+const a = { id: "a", prompt: "do a", model: "haiku", allowedTools: "Read", cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [] };
+const b = { id: "b", prompt: "do b", model: "haiku", allowedTools: "Read", cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [] };
 const plan = { cwd: dir, resultsDir: join(dir, "run"), concurrency: 2, tasks: [a, b], goal: "" };
 const cfg = {
   provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "x", allowedRoots: [] },

@@ -51,7 +51,7 @@ A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the
 
 ## Data governance — read this first
 
-Non-Claude dispatch is **deny-by-default**. `providers.<name>.allowedRoots` in `~/.swarm/config.json` lists the directory roots where that provider's tasks may run; a non-Claude task whose effective `cwd` is not under its provider root **fails validation**, because the employer's data agreement covers Anthropic only — code outside those roots must never reach another provider. Claude-model tasks run anywhere. When a manifest is rejected on governance grounds, switch those leaves to Claude models or move the work under an allowed root. Never work around the gate.
+Non-Claude dispatch is **deny-by-default**. `providers.<name>.allowedRoots` in `~/.swarm/config.json` lists the directory roots where that provider's tasks may run; a non-Claude task whose effective `cwd` is not under its provider root **fails validation**, because the employer's data agreement covers Anthropic only — code outside those roots must never reach another provider. Claude-model tasks run anywhere, with one exception: `"isolation": "none"` reads its `cwd` in the live checkout rather than a tree, so it is root-gated for every model, Claude included. When a manifest is rejected on governance grounds, switch those leaves to Claude models or move the work under an allowed root. Never work around the gate.
 
 ## Routing — when to swarm
 
@@ -217,7 +217,8 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "effort": "medium",                        // optional; validated for Claude tiers
     "allowedTools": "Read,Grep,Glob",          // default: read-only set
     "cwd": "C:/code/somerepo",                 // default: manifest's cwd
-    "isolation": "worktree",                   // private tree (implementation leaves); OR
+    "isolation": "worktree",                   // private tree (implementation leaves); omit = default tree (see Leaf shapes); OR
+                                               //   "none" — read in place, read-only leaves only, cwd under allowedRoots; OR
                                                //   { "worktree": "feat" } — SHARED tree, phased chains — swarm:executing-swarms
                                                //   optional "branch": names the branch explicitly (default swarm/<worktree>)
                                                //   optional "from": base this tree on that task's branch, not repo HEAD
@@ -264,7 +265,9 @@ a second manifest is almost never needed. Invoke it before drafting, alongside
 | Generation | `outputDir`; no isolation field needed |
 | Implementation | `isolation: "worktree"` — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the two required lines below |
 
-Write-capable tools (Edit/Write/Bash) without `isolation: "worktree"` get the leaf's cwd auto-redirected to a scratch dir — a leaf never writes in the real tree unless explicitly worktree-isolated.
+Every leaf that spawns a session starts in a tree, never the live checkout. With no `isolation` field: a read-only leaf shares one frozen snapshot of the repo (it sees uncommitted work, not gitignored files); a write-capable leaf (Edit/Write/Bash) gets a private worktree on HEAD, on a run-scoped branch `swarm/<run>/<id>`. The task's `cwd` must be inside a git repo.
+
+To read in place instead (gitignored data, a path outside any repo) set `"isolation": "none"` with a `cwd`: read-only leaves only, and `cwd` must sit under `provider.allowedRoots` when roots are configured — for every model, Claude included.
 
 ### Two lines every Bash-running leaf's prompt carries, verbatim
 
