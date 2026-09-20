@@ -86,12 +86,26 @@ function namesEqual(a, b) {
   return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
-// `git rev-parse --show-toplevel` from the task's cwd, or null when git fails
-// (not a repo, git missing) — the real implementation behind io.repoToplevel.
-function realRepoToplevel(cwd) {
-  const result = nodeSpawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf8" });
+// The MAIN worktree of the repo containing `cwd`, or null when git fails (not a
+// repo, git missing) or the repo is bare — the real implementation behind
+// io.repoToplevel.
+//
+// NOT `rev-parse --show-toplevel`: a linked worktree answers that with ITSELF, so
+// dispatching from inside a leaf's worktree filed the run under the worktree and
+// nested run homes inside each other. `worktree list` names the main worktree
+// first by definition, and survives --separate-git-dir where stripping `.git`
+// off --git-common-dir would not.
+export function realRepoToplevel(cwd) {
+  const result = nodeSpawnSync("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
   if (result.status !== 0 || !result.stdout) return null;
-  return result.stdout.trim();
+  // Blocks are blank-line separated; only the first one describes the main worktree.
+  const block = result.stdout.trim().split(/\r?\n/);
+  const end = block.indexOf("");
+  const main = end === -1 ? block : block.slice(0, end);
+  // A bare repo has no checkout to file a run under; --show-toplevel failed here too.
+  if (main.includes("bare")) return null;
+  const match = /^worktree (.+)$/.exec(main[0] || "");
+  return match ? match[1].trim() : null;
 }
 
 // The leaf guard governing a task's cwd, or undefined if none applies. The

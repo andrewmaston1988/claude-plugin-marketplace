@@ -60,7 +60,7 @@ naming why: the guard fails closed. Use it to fence build/test commands to a ser
 block network or `git push`, require an edit marker, or keep a leaf off a secrets path —
 anything expressible from the payload is one `if` away.
 
-Matched by the task's repo basename (`git rev-parse --show-toplevel`, falling back to cwd;
+Matched by the task's repo basename (the repo's MAIN worktree, falling back to cwd;
 case-insensitive on Windows); an unmatched repo runs unguarded, interactive sessions never
 see it. Each guard is probed once at `validate` with a harmless payload, so a broken script
 fails the manifest before any leaf spends. A task opts out with `"leafGuard": false`
