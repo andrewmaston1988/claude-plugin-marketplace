@@ -53,6 +53,10 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
   mkdirSync(root, { recursive: true });
   // Runs are filed under the dispatching repo's toplevel, so a non-repo cwd is refused.
   spawnSync("git", ["init", "-q"], { cwd: root, windowsHide: true });
+  // A default read-only leaf snapshots its repo, and a commit-less repo cannot be snapshotted.
+  writeFileSync(join(root, "seed.txt"), "seed");
+  spawnSync("git", ["add", "."], { cwd: root, windowsHide: true });
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], { cwd: root, windowsHide: true });
   const manifest = join(root, "manifest.json");
   // loadManifest takes no env, so without an explicit resultsDir the run home
   // resolves against the real ~/.swarm.
