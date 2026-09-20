@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, throws } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { buildDispatch, toSpawnable, resolveExecutable, windowsCommandLineLength, mcpTools } from "../src/dispatch.mjs";
 
@@ -169,7 +169,10 @@ test("Codex dispatch: resume is native and safety gates run before invocation co
   equal(resumed.argv.at(-1), "follow up");
 
   throws(() => buildDispatch(base, "blocked", { providers: { codex: { enabled: false, allowedRoots: [root] } } }), /disabled/i);
-  throws(() => buildDispatch({ ...base, cwd: "C:/outside", originalCwd: "C:/outside" }, "blocked", cfg), /allowedRoots|governance/i);
+  // A sibling of root, not a drive-letter literal: "C:/outside" is RELATIVE on posix,
+  // so isUnderRoot resolves it under cwd and the gate never fires.
+  const outside = resolve(root, "..", "swarm-outside-root");
+  throws(() => buildDispatch({ ...base, cwd: outside, originalCwd: outside }, "blocked", cfg), /allowedRoots|governance/i);
 });
 
 // ── windows spawn resolution ──────────────────────────────────────────────────
