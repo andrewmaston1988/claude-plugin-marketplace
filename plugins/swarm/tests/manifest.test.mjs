@@ -1430,7 +1430,9 @@ test("an ordered chain of three passes validation", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-import { resolveWorktreeName } from "../src/manifest.mjs";
+import { resolveWorktreeName, realRepoToplevel } from "../src/manifest.mjs";
+import { realpathSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 
 test("resolveWorktreeName is the single rule every derivation site shares", () => {
   equal(resolveWorktreeName({ id: "a" }), undefined);
@@ -1890,5 +1892,48 @@ test("run home: absent or empty allowedRoots leaves the roots gate inert", () =>
       loadManifest(p, { ...CFG, provider: {} }, dir, { io });
       loadManifest(p, { ...CFG, provider: { allowedRoots: [] } }, dir, { io });
     });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Real git, not the io stub: the stub IS realRepoToplevel's replacement, so only a
+// genuine linked worktree can turn this red. Under `rev-parse --show-toplevel` the
+// worktree answers with itself and the run home nests inside a previous run's tree.
+test("realRepoToplevel: a linked worktree resolves to the MAIN worktree, not itself", () => {
+  const dir = realpathSync(tmp());
+  try {
+    const repo = join(dir, "repo");
+    mkdirSync(repo);
+    const git = (args, cwd = repo) => {
+      const r = spawnSync("git", args, { cwd, encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`git ${args.join(" ")}: ${r.stderr}`);
+      return r.stdout;
+    };
+    git(["init", "-q", "-b", "main"]);
+    git(["config", "user.email", "t@t"]);
+    git(["config", "user.name", "t"]);
+    writeFileSync(join(repo, "a.txt"), "a\n");
+    git(["add", "-A"]);
+    git(["commit", "-qm", "init"]);
+
+    const wt = join(dir, "wt");
+    git(["worktree", "add", "-q", "-b", "side", wt]);
+
+    const norm = (p) => p.split("\\").join("/");
+    equal(norm(realRepoToplevel(wt)), norm(repo));
+    equal(norm(realRepoToplevel(repo)), norm(repo));
+
+    // A nested dir inside the linked worktree resolves the same way.
+    const deep = join(wt, "sub");
+    mkdirSync(deep);
+    equal(norm(realRepoToplevel(deep)), norm(repo));
+
+    git(["worktree", "remove", "--force", wt]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("realRepoToplevel: outside a repo is null", () => {
+  const dir = realpathSync(tmp());
+  try {
+    equal(realRepoToplevel(dir), null);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
