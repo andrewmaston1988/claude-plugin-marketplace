@@ -44,6 +44,8 @@
     return Math.round((now - task.lastEventMs) / 1000);
   }
 
+  const identityLabel = (task) => task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || "");
+
   // page.html's existing ago() thresholds, verbatim, with `now` injected in place
   // of Date.now() — the boundaries (59s/61s/3601s/86401s) are pinned by test L5.
   function agoText(ms, now) {
@@ -295,5 +297,5 @@
     return n;
   };
 
-  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges, stateOfGroup, railPitch, railRows, railLayout };
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, identityLabel, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges, stateOfGroup, railPitch, railRows, railLayout };
 })();

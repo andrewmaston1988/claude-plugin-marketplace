@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // PreToolUse hook on the Workflow tool: once per session, when swarm's
-// alternative-model path is armed (provider.allowedRoots non-empty), block the
+// alternative-model path is armed (an enabled provider has allowedRoots), block the
 // first Workflow call with a "consider swarm instead" reason. A retry passes
 // straight through — this is a speed bump, not a wall. Silent (exit 0) when:
 // swarm isn't armed, the nudge already fired this session, CORRELATION_ID is
@@ -18,24 +18,29 @@ function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
 
+function allowedRoots(config) {
+  const canonical = Object.entries(config?.providers || {})
+    .filter(([id, block]) => id !== 'claude' && block?.enabled !== false && Array.isArray(block?.allowedRoots))
+    .flatMap(([, block]) => block.allowedRoots);
+  return [...new Set(canonical.concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
+}
+
 // Pure decision: should this call be nudged?
 export function decideNudge({ config, seen, sessionId, correlationId }) {
   if (correlationId) return false;
   if (!sessionId) return false;
   if (config?.swarm?.workflowNudge === false) return false;
-  const roots = config?.provider?.allowedRoots;
-  if (!Array.isArray(roots) || roots.length === 0) return false; // not armed — Workflow is the only game
+  if (allowedRoots(config).length === 0) return false; // not armed — Workflow is the only game
   return !(seen && seen[sessionId]);
 }
 
 export function nudgeReason() {
   return 'Swarm nudge (fires once per session): alternative models are armed on this machine — '
     + 'consider a swarm manifest instead of Workflow for this fan-out. Swarm runs the leaves on '
-    + 'capable :cloud models (GLM/MiniMax-class) with zero Anthropic usage, in the background, '
-    + 'digest-compressed. Invoke the **swarm** skill and offer it via the question box. '
-    + 'Swarm leaves are full headless Claude Code sessions — complete tool roster, so tooling is NOT '
-    + 'a reason to prefer Workflow. Workflow is genuinely right only when leaves need session-connected '
-    + 'MCP tools (interactive auth), schema-validated returns wired into deterministic script logic, or '
+    + 'the configured providers, in the background, digest-compressed. Invoke the **swarm** skill and '
+    + 'offer it via the question box. Provider runners and tool limits are explicit, so inspect the '
+    + 'manifest when a leaf needs session-connected MCP tools '
+    + '(interactive auth), schema-validated returns wired into deterministic script logic, or '
     + 'this session\'s in-context state. If so, simply call Workflow again — this reminder will not '
     + 'repeat this session.';
 }

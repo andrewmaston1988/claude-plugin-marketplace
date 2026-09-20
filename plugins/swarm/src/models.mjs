@@ -1,18 +1,15 @@
 // Claude-family detection and per-tier effort matrices.
 
-export const CLAUDE_ALIASES = new Set(["haiku", "sonnet", "opus", "fable"]);
+import { isClaudeModel, OLLAMA_CLOUD_RE } from "./contracts.mjs";
+import { createProviderRegistry, defaultProviderAdapters } from "./providers.mjs";
 
-export function isClaudeModel(model) {
-  if (!model) return false;
-  const m = String(model).toLowerCase();
-  return m.startsWith("claude-") || CLAUDE_ALIASES.has(m);
-}
+export { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
 
 // Both separators occur in the roster — discovery derives `:cloud` names from
 // bare tags, and the entitlement probe matches either. Single home: the score
 // store and the run-enumeration helper must agree on which leaves are gradeable.
 export function isCloudModel(model) {
-  return /(:|-)cloud$/i.test(String(model || ""));
+  return OLLAMA_CLOUD_RE.test(String(model || ""));
 }
 
 // Valid --effort levels per Claude tier. Open models accept any effort —
@@ -45,4 +42,14 @@ export function isValidEffort(model, effort) {
   const tier = tierFromModel(model);
   if (!tier) return true;
   return TIER_EFFORTS[tier].includes(effort);
+}
+
+const PROVIDERS = createProviderRegistry(defaultProviderAdapters());
+
+export function modelProvider(model, { provider, cache = [], config } = {}) {
+  const resolved = PROVIDERS.resolve(
+    { model, ...(provider !== undefined ? { provider } : {}) },
+    { cache, config, allowDisabled: true },
+  );
+  return resolved.provider;
 }

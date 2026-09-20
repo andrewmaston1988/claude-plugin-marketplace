@@ -428,6 +428,7 @@
   }
   function runRow(r, done, labels = groupLabels) {
     const shortProject = (p) => labels.get(p) || p;
+    const providerMeta = Object.entries(r.providerTokens || {}).filter(([provider]) => provider !== "unknown").map(([provider, tokens]) => `${provider} ${fmtTok(tokens)}`).join(" · ");
     // Navigation is a data-href picked up by one delegated listener — never an inline
     // onclick, whose quoted string a run or leaf name could break out of.
     const href = `#/run/${enc(r.project)}/${enc(r.name)}`;
@@ -439,9 +440,9 @@
       // closed it (killed, crashed, machine slept). Say so rather than "done".
       const stale = !r.finishedMs && !r.stopped;
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
-      return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
+       return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${providerMeta ? ` · ${esc(providerMeta)}` : ""}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
     }
-    return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(st, st === "run")}<div class="body"><div class="head"><span class="name">${esc(r.name)}</span><span class="meta">${elapsed}</span></div><div class="sub">${countsHtml(r.byState)}<span class="meta">${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</span></div>${barHtml(r.byState, r.leaves)}</div></li>`;
+     return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(st, st === "run")}<div class="body"><div class="head"><span class="name">${esc(r.name)}</span><span class="meta">${elapsed}</span></div><div class="sub">${countsHtml(r.byState)}<span class="meta">${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}${providerMeta ? ` · ${esc(providerMeta)}` : ""}</span></div>${barHtml(r.byState, r.leaves)}</div></li>`;
   }
 
   // ── run view: rows + rail ──────────────────────────────────────────────
@@ -491,6 +492,7 @@
   const stateOfGroup = (kids) => window.swarmLive.stateOfGroup(kids);
   // A clone session reads `X[i] local`, the clone's id faint; the full id stays the key.
   const sessionName = (id) => { const tilde = id.lastIndexOf("~"); return tilde > 0 ? `<span class="faint">${esc(id.slice(0, tilde))}</span> ${esc(id.slice(tilde + 1))}` : esc(id); };
+  const identityName = (task) => window.swarmLive?.identityLabel ? window.swarmLive.identityLabel(task) : (task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || ""));
   const stripHtml = (kids, sq) => {
     const max = 40;
     const dots = kids.slice(0, max).map((k) => `<i class="${sq ? "sq " : ""}${cls(k.state)}"></i>`).join("");
@@ -546,14 +548,15 @@
         // screen, never flattened inline; its dot strip is the row's own summary.
         const t = r.task;
         const href = `#/run/${enc(run.project)}/${enc(run.name)}/node/${enc(t.id)}`;
-        html += `<li class="row leaf tap" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(t.model || "")} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
+         html += `<li class="row leaf tap" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(identityName(t))} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       const t = r.task;
       const quietSecs = window.swarmLive.quietSecs(t, now);
       const quiet = quietSecs != null && quietSecs * 1000 > quietWarn;
       const right = window.swarmLive.elapsedText(t, now) ?? t.state;
-      const sub = quiet ? `quiet ${quietSecs}s · ${esc(t.model)}` : t.state === "running" && t.activity ? `${esc(t.model)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(t.model || "");
+       const identity = identityName(t);
+       const sub = quiet ? `quiet ${quietSecs}s · ${esc(identity)}` : t.state === "running" && t.activity ? `${esc(identity)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(identity);
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
       html += `<li class="row leaf tap${quiet ? " quiet" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
@@ -693,10 +696,11 @@
     const now = Date.now();
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
     const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
-    const header = `${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(t.model || "agentless")}</small></div>${menuBtn}`;
+     const identity = identityName(t) || "agentless";
+     const header = `${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(identity)}</small></div>${menuBtn}`;
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
-    let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${esc(t.model)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${quietSecsVal}s</span>` : ""}</div>`;
+     let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${esc(identity)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${quietSecsVal}s</span>` : ""}</div>`;
     // What the leaf was actually asked, collapsed by default. Same section+chevron idiom
     // as every other toggle on the page, so the whole row is the target. Omitted entirely
     // for agentless compute/integrate nodes, which carry no prompt.
@@ -883,7 +887,7 @@
         : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
         : kind === "leaders" ? window.perfViews.leadersList(p.views.leaders, h)
         : window.perfViews.costScreen(p.views.cost, h);
-      if (kind === "cost") html += `<div class="foot">cost is a model's meter weight — the multiplier against the cheapest measured model, banked week over week. A hatched bar is thin evidence: under 200 measured requests. Bands are config (<code>provider.cloud.ollama.costBands</code>).</div>`;
+      if (kind === "cost") html += `<div class="foot">cost is a model's meter weight — the multiplier against the cheapest measured model, banked week over week. A hatched bar is thin evidence: under 200 measured requests. Bands are config (<code>providers.ollama.cloud.ollama.costBands</code>).</div>`;
       return { header, html };
     }
     {
@@ -896,8 +900,25 @@
     html += `<div style="height:12px"></div>`;
     // The badge's source: the server's cost points, plus the spread for a model
     // priced but graded nowhere (its cost is real; its quality is simply not compared).
-    const costOf = new Map(p.views.cost.points.map((x) => [x.model, x]));
-    for (const s of p.views.cost.spread) if (!costOf.has(s.model)) costOf.set(s.model, { multiplier: s.mult, band: s.band, onFrontier: false, dominatedBy: null, thin: s.thin });
+    const costByModel = new Map();
+    const costKey = (value) => JSON.stringify([value.provider || null, value.model]);
+    const pricedQualityKeys = new Set();
+    for (const x of p.views.cost.points) {
+      const list = costByModel.get(x.model) || [];
+      list.push(x);
+      costByModel.set(x.model, list);
+      pricedQualityKeys.add(costKey(x));
+    }
+    for (const s of p.views.cost.spread) {
+      if (pricedQualityKeys.has(costKey(s))) continue;
+      const list = costByModel.get(s.model) || [];
+      list.push({ multiplier: s.mult, band: s.band, onFrontier: false, dominatedBy: null, thin: s.thin });
+      costByModel.set(s.model, list);
+    }
+    // A quality row can have several provider-local cost entries. There is no
+    // honest single badge for that case; the cost screen below keeps those
+    // entries in their provider sections.
+    const costOf = new Map([...costByModel].filter(([, entries]) => entries.length === 1).map(([model, entries]) => [model, entries[0]]));
     if (model) {
       // One model as a dashboard: tiles, compressed aspect bars, its coverage row, its reliability bar.
       await loadPerfJs();

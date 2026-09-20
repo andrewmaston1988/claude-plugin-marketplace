@@ -561,8 +561,8 @@ test("perf: the score store ranked as scores.mjs ranks it — overall + every as
     await withServer({ home, cfg: { ...cfg(), grading: { enabled: true } } }, async ({ get }) => {
       const p = await get("/api/perf");
       assert.equal(p.status, 200);
-      assert.deepEqual(p.body.overall, overall(readRows(path)).cells, "overall is scores.mjs's ranking, untouched");
-      assert.deepEqual(p.body.report, aggregate(readRows(path)).aspects, "every aspect table rides along");
+      assert.deepEqual(p.body.overall, overall(readRows(path), { combineProviders: true }).cells, "overall is the collapsed performance ranking");
+      assert.deepEqual(p.body.report, aggregate(readRows(path), { combineProviders: true }).aspects, "every aspect table rides along");
       assert.equal(p.body.overall[0].model, "m-good");
       assert.deepEqual(p.body.domains, ["node"]);
       assert.equal(p.body.rows, 3);

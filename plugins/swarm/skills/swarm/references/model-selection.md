@@ -4,7 +4,7 @@ Every task in a swarm manifest pins a **model** and, optionally, an **effort**. 
 
 > Adapted from /deep's model-selection reference. Deep's Workflow/conductor dispatch split does not apply here — swarm dispatches every leaf via CLI, so per-task `effort` is always honoured. What carries over is the tier/effort reasoning, which is general.
 
-With grading enabled, `swarm perf` is the record and this guide covers only what it has not measured. Run `swarm models` first — it lists the `:cloud` models the account can launch right now, plus the always-available Claude aliases, each annotated with its meter weight and a `*` when it sits on the cost frontier.
+With grading enabled, `swarm perf` is the record and this guide covers only what it has not measured. Run `swarm models` first — it lists launchable rows from enabled providers, keeps provider identity visible, and annotates provider-local meter evidence where available.
 
 ## How to pick: read the frontier, never compute a ranking
 
@@ -25,12 +25,12 @@ A fresh install has no history: every model renders `—`, the frontier is empty
 
 ## Tier guide
 
-- **`:cloud` alternative models** — capable on bounded reasoning leaves. **The default for bounded leaf work**: investigation sweeps with a closed question, structured extraction, fixed-lens reviews, mechanical implementation, generation, digesting. This is what makes group-think patterns affordable to run wide — reserve Claude tiers for final synthesis and subtle judgement.
+- **Registered alternative models** — capable on bounded reasoning leaves. **The default for bounded leaf work**: investigation sweeps with a closed question, structured extraction, fixed-lens reviews, mechanical implementation, generation, digesting. This is what makes group-think patterns affordable to run wide — reserve Claude tiers for final synthesis and subtle judgement. Use the explicit provider when a model id is not unique.
 - **`haiku`** — existence checks, file listing, "does this symbol appear?", deterministic JSON extraction, one-line annotations. Fast, weak at independent reasoning. **Avoid when the leaf must synthesise or reason** — Haiku pattern-matches the prompt's examples instead of doing the work.
 - **`sonnet`** — the Claude floor for any leaf that must understand code, reason about patterns, trace a flow, or produce structured findings. Single-cluster judgement.
 - **`opus`** — cross-file architectural reasoning, behavioural-equivalence constraints, multi-branch impact assessment one leaf must hold in its head at once. The ceiling for cross-cutting questions. A leaf that genuinely needs Opus is often a sign the question wasn't decomposed enough — check before reaching for it.
 
-If you decomposed correctly, most leaves answer a *bounded, closed* question over one cluster — that's `:cloud`-model or sonnet territory. Within the Anthropic subscription the cost order is a consequence of the tier split (never the reason a leaf is picked): `:cloud` < `haiku` < `sonnet` < `opus`. Within the ollama meter there is no order to memorise — that is `swarm cost`'s job, and it changes as the history accumulates.
+If you decomposed correctly, most leaves answer a *bounded, closed* question over one cluster — that's an alternative-provider model or sonnet territory. Do not compare provider-local prices as one cross-provider order; within Ollama, `swarm cost` owns the changing meter evidence.
 
 ## Choosing effort given model
 
@@ -38,7 +38,7 @@ Swarm has no fixed roles: you invent the cast per manifest, so **derive each lea
 
 - **`sonnet`+max** often reasons better than **`opus`+low** when the bottleneck is reasoning depth, not raw capability.
 - **`haiku`+max** can match **`sonnet`+low** for mechanical-with-judgement work.
-- The same applies to sonnet-class `:cloud` models: raise their effort before promoting the leaf to a Claude tier.
+- The same applies to sonnet-class registered models: raise their effort before promoting the leaf to a Claude tier.
 
 **Key principle: escalate effort within a tier before jumping tiers.**
 

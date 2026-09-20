@@ -129,6 +129,7 @@ export function buildDigestTask(plan) {
     id: DIGEST_ID,
     prompt: digestPrompt(plan),
     model: plan.digest.model,
+    provider: plan.digest.provider,
     allowedTools: plan.digest.report ? DIGEST_TOOLS_REPORT : DIGEST_TOOLS,
     cwd: plan.cwd,
     originalCwd: plan.cwd,

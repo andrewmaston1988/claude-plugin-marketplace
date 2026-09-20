@@ -36,12 +36,19 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
     const run = hit && hit.key === key ? hit.run : _readRun(r.dir, { now, quietWarnMs, heartbeatMs });
     cache.set(r.dir, { key, run });
     const group = groupOf(r.project);
+    const providerTokens = {};
+    for (const task of run?.tasks || []) {
+      const provider = task.provider || "unknown";
+      providerTokens[provider] = (providerTokens[provider] || 0) + (task.tokens ? (task.tokens.input || 0) + (task.tokens.output || 0) + (task.tokens.cacheCreation || 0) : 0);
+    }
     return {
       project: r.project, name: r.name, active: r.active, aborted: r.aborted, stopped: r.stopped, mtimeMs: r.mtimeMs,
       group, groupLabel: labelOf(group),
       startedMs: run?.startedMs ?? null, finishedMs: run?.finishedMs ?? null,
       byState: run?.totals.byState ?? {}, leaves: run?.tasks.length ?? 0, waves: run?.waves.length ?? 0,
       tokens: run ? run.tasks.reduce((n, t) => n + (t.tokens ? (t.tokens.input || 0) + (t.tokens.output || 0) + (t.tokens.cacheCreation || 0) : 0), 0) : 0,
+      providers: [...new Set((run?.tasks || []).map((task) => task.provider).filter(Boolean))],
+      providerTokens,
       hasDigest: !!(run?.digestPath || run?.reportPath),
     };
   });

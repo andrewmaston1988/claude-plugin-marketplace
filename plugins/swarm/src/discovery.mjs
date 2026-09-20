@@ -2,6 +2,8 @@ import { mkdirSync, writeFileSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { swarmHome } from "./config.mjs";
+import { modelDescriptor, OLLAMA_CLOUD_RE } from "./contracts.mjs";
+import { providerConfig } from "./providers.mjs";
 
 // Model discovery — the ollama cloud catalog ONLY: recommendations ∪ /api/tags,
 // enriched free via /api/show, family-collapsed, size-ordered. `ollama list` and
@@ -244,13 +246,14 @@ export const ENTITLEMENT_RE = /uses extra usage only|extra usage balance is empt
 // roster then simply doesn't offer it — no funding-state claim is recorded,
 // and the next refresh restores it if the probe/dispatch stops 402ing.
 // Missing cache or entry is a silent no-op.
-export function removeCachedModel(model, env = process.env) {
+export function removeCachedModel(model, env = process.env, provider) {
   const p = join(swarmHome(env), "models-cache.json");
   let cache;
   try { cache = JSON.parse(readFileSync(p, "utf8")); } catch { return; }
   const models = Array.isArray(cache?.models) ? cache.models : [];
-  if (!models.some((m) => m?.model === model)) return;
-  cache.models = models.filter((m) => m?.model !== model);
+  const matches = (row) => row?.model === model && (!provider || !row.provider || row.provider === provider);
+  if (!models.some(matches)) return;
+  cache.models = models.filter((m) => !matches(m));
   writeFileSync(p + ".tmp", JSON.stringify(cache, null, 2) + "\n");
   renameSync(p + ".tmp", p);
 }
@@ -261,13 +264,13 @@ export function removeCachedModel(model, env = process.env) {
 // resurface elders into the top 3, so the slice re-derives, capped at maxProbes.
 // Non-cloud names occupy their slot but are NEVER probed (local generate forbidden).
 export async function probeTopModels(models, base, fetchImpl = globalThis.fetch, {
-  env = process.env, isDenylisted, timeoutMs = 15000, maxProbes = 6,
+  env = process.env, isDenylisted, timeoutMs = 15000, maxProbes = 6, provider,
 } = {}) {
   let live = [...models];
   const probed = new Set();
   while (probed.size < maxProbes) {
     const top = visibleModels(live, { isDenylisted }).filter((m) => !isDenylisted?.(m.model)).slice(0, 3);
-    const next = top.find((m) => !probed.has(m.model) && /(:|-)cloud$/.test(m.model));
+    const next = top.find((m) => !probed.has(m.model) && OLLAMA_CLOUD_RE.test(m.model));
     if (!next) break;
     probed.add(next.model);
     try {
@@ -278,7 +281,7 @@ export async function probeTopModels(models, base, fetchImpl = globalThis.fetch,
         signal: AbortSignal.timeout(timeoutMs),
       });
       if (!res.ok && ENTITLEMENT_RE.test(await res.text())) {
-        removeCachedModel(next.model, env);
+        removeCachedModel(next.model, env, provider);
         live = live.filter((m) => m.model !== next.model);
       }
     } catch {
@@ -287,3 +290,159 @@ export async function probeTopModels(models, base, fetchImpl = globalThis.fetch,
   }
   return live;
 }
+
+// One reading of where the ollama block lives, shared with providerConfig. The early
+// return this replaced treated a config carrying BOTH shapes as legacy-only, so
+// providers.ollama was silently ignored here while every other module read it.
+function ollamaConfig(config = {}) {
+  const block = providerConfig(config, "ollama");
+  // Neither shape present: the bare config IS the block, as it always was.
+  return { ...config, provider: Object.keys(block).length ? block : config };
+}
+
+export function normalizeOllamaModelDescriptor(row) {
+  const model = typeof row === "string" ? row : row?.model;
+  if (!model) throw new Error("Ollama discovery row requires a model");
+  const descriptor = {
+    provider: "ollama",
+    model,
+    runner: "claude",
+  };
+  const source = typeof row === "object" ? row : {};
+  for (const field of ["displayName", "efforts", "modalities", "isDefault", "availability"]) {
+    if (source[field] !== undefined) descriptor[field] = source[field];
+  }
+  if (descriptor.displayName === undefined && source.description) descriptor.displayName = source.description;
+  return modelDescriptor(descriptor);
+}
+
+// Concrete provider-facing discovery. The legacy discoverModels() above keeps
+// returning Ollama's rich raw rows for the existing CLI and cache consumers.
+export async function discoverOllamaModels(config = {}, options = {}) {
+  const raw = await discoverModels(
+    ollamaConfig(config),
+    options.fetchImpl || globalThis.fetch,
+    { spawnImpl: options.spawnImpl },
+  );
+  return raw.map((row) => {
+    const descriptor = normalizeOllamaModelDescriptor(row);
+    // The registry contract is deliberately compact. Operator surfaces may
+    // request the discovery metadata that makes the catalogue useful without
+    // making every provider expose a legacy-shaped row.
+    return options.rich ? { ...row, ...descriptor } : descriptor;
+  });
+}
+
+export function createOllamaProviderAdapter(options = {}) {
+  return {
+    id: "ollama",
+    runnerId: "claude",
+    enabled(config = {}) {
+      const value = config.providers?.ollama?.enabled ?? config.provider?.enabled;
+      return typeof value === "boolean" ? value : true;
+    },
+    matchModel(model) {
+      return OLLAMA_CLOUD_RE.test(String(model || "")) ? { provider: "ollama", model } : null;
+    },
+    validateTask() {
+      return [];
+    },
+    capabilities: {
+      discoverModels(context = {}) {
+        return discoverOllamaModels(context.config || context.cfg || options.config || {}, {
+          ...options,
+          ...context,
+        });
+      },
+      // Scheduler and hooks need a bounded, cache-only read. A live provider
+      // fetch remains an explicit operator action (`ollama-usage`).
+      async readUsage(context = {}) {
+        const cfg = context.config || context.cfg || options.config || {};
+        const meter = cfg.providers?.ollama?.cloud?.ollama || cfg.provider?.cloud?.ollama;
+        if (meter && meter.enabled !== true) return null;
+        const { usageFromCache } = await import("./ollama-usage.mjs");
+        return usageFromCache(cfg, context.env || process.env);
+      },
+    },
+  };
+}
+
+export function readModelsCache(env = process.env) {
+  try {
+    return JSON.parse(readFileSync(join(swarmHome(env), "models-cache.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+export function providerQualifiedModels(provider, models = []) {
+  return models.map((row) => ({
+    ...(typeof row === "object" && row ? row : { model: row }),
+    provider,
+  }));
+}
+
+export function mergeProviderModelCaches(caches = []) {
+  const merged = new Map();
+  for (const cache of caches) {
+    for (const row of cache || []) {
+      if (!row?.model) continue;
+      const provider = row.provider || "ollama";
+      merged.set(`${provider}\u0000${row.model}`, { ...row, provider });
+    }
+  }
+  return [...merged.values()];
+}
+
+
+export function writeCompositeModelsCache(models, env = process.env) {
+  const dir = swarmHome(env);
+  mkdirSync(dir, { recursive: true });
+  const p = join(dir, "models-cache.json");
+  const qualified = mergeProviderModelCaches([models]);
+  writeFileSync(p + ".tmp", JSON.stringify({ updated: new Date().toISOString(), models: qualified }, null, 2) + "\n");
+  renameSync(p + ".tmp", p);
+  return p;
+}
+
+// Refresh only the providers named by discoverers. A failed provider keeps its
+// previous rows while successful providers are replaced atomically in one file.
+export async function refreshModelsCache({
+  config = {},
+  env = process.env,
+  providers,
+  registry,
+  discoverers = {},
+  fetchImpl,
+  spawnImpl,
+  rich = false,
+} = {}) {
+  const cached = readModelsCache(env);
+  const existing = Array.isArray(cached?.models) ? cached.models : [];
+  const byProvider = new Map();
+  for (const row of existing) {
+    const provider = row?.provider || "ollama";
+    if (!byProvider.has(provider)) byProvider.set(provider, []);
+    byProvider.get(provider).push({ ...row, provider });
+  }
+  const errors = {};
+  const targets = providers || (registry
+    ? registry.list().filter((adapter) => adapter.enabled(config) && adapter.capabilities.discoverModels).map((adapter) => adapter.id)
+    : ["ollama"]);
+  for (const provider of targets) {
+    const discover = discoverers[provider]
+      || (registry ? registry.capability(provider, "discoverModels") : null)
+      || (provider === "ollama" ? (context) => discoverOllamaModels(context.config, context) : null);
+    if (!discover) continue;
+    try {
+      const rows = await discover({ config, env, fetchImpl, spawnImpl, rich });
+      byProvider.set(provider, providerQualifiedModels(provider, rows));
+    } catch (error) {
+      errors[provider] = error?.message || String(error);
+    }
+  }
+  const models = mergeProviderModelCaches([...byProvider.values()]);
+  const path = writeCompositeModelsCache(models, env);
+  return { models, path, errors };
+}
+

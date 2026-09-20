@@ -47,7 +47,16 @@ const runBashShim = (shimPath, env) =>
   spawnSync("bash", [shimPath], { encoding: "utf8", timeout: 30000, windowsHide: true, env: { ...process.env, ...env } });
 const runCmdShim = (shimPath, env) =>
   spawnSync("cmd", ["/c", shimPath], { encoding: "utf8", timeout: 30000, windowsHide: true, env: { ...process.env, ...env } });
-const bothShims = (shims, env) => shims.map((s) => (s.endsWith(".cmd") ? runCmdShim(s, env) : runBashShim(s, env)));
+const hasWorkingBash = (() => {
+  const probe = spawnSync("bash", ["-c", "exit 0"], { encoding: "utf8", timeout: 10000, windowsHide: true });
+  return !probe.error && probe.status === 0;
+})();
+const runInstalledShims = (bashShim, cmdShim, env) => {
+  const results = [];
+  if (process.platform !== "win32" || hasWorkingBash) results.push(runBashShim(bashShim, env));
+  if (process.platform === "win32") results.push(runCmdShim(cmdShim, env));
+  return results;
+};
 
 // Real `swarm install` into a fake home; returns the three installed paths.
 function installInto(dir) {
@@ -88,7 +97,7 @@ test("row 5 (end-to-end): `swarm install` leaves three working files; the resolv
     assert.ok(/PATH/.test(result.stdout), "install must name the ~/.local/bin-on-PATH precondition");
     const install = fixtureInstall(join(dir, "install"), "marker-row-5");
     const env = { SWARM_PLUGIN_REGISTRY: writeRegistry(join(dir, "installed_plugins.json"), [userEntry(install)]) };
-    const shims = process.platform === "win32" ? bothShims([bashShim, cmdShim], env) : bothShims([bashShim], env);
+    const shims = runInstalledShims(bashShim, cmdShim, env);
     for (const r of shims) {
       assert.equal(r.status, 0, `wrapper failed: ${r.stderr}`);
       assert.ok(r.stdout.includes("marker-row-5"), `wrapper must print the fixture engine's marker: ${r.stdout}`);
@@ -149,17 +158,18 @@ test("row 6: the real bin/swarm.mjs — not a fixture stand-in — dispatches th
 test("row 3: absent / unparseable / entryless registry → readable diagnostic naming the fix, exit 1", () => {
   const dir = tmp();
   try {
-    const { bashShim } = installInto(dir);
+    const { bashShim, cmdShim } = installInto(dir);
     const absent = join(dir, "absent.json");
     const bad = join(dir, "bad.json");
     writeFileSync(bad, "{ truncated");
     const empty = writeRegistry(join(dir, "empty.json"), []);
     for (const reg of [absent, bad, empty]) {
-      const r = runBashShim(bashShim, { SWARM_PLUGIN_REGISTRY: reg });
-      assert.equal(r.status, 1, `registry ${reg} must exit 1, got ${r.status}`);
-      assert.match(r.stderr, /swarm resolver:/, `registry ${reg} needs the diagnostic prefix`);
-      assert.ok(r.stderr.includes(reg) || r.stderr.includes("/reload-plugins"),
-        `diagnostic must name the registry path or the fix: ${r.stderr}`);
+      for (const r of runInstalledShims(bashShim, cmdShim, { SWARM_PLUGIN_REGISTRY: reg })) {
+        assert.equal(r.status, 1, `registry ${reg} must exit 1, got ${r.status}`);
+        assert.match(r.stderr, /swarm resolver:/, `registry ${reg} needs the diagnostic prefix`);
+        assert.ok(r.stderr.includes(reg) || r.stderr.includes("/reload-plugins"),
+          `diagnostic must name the registry path or the fix: ${r.stderr}`);
+      }
     }
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -169,21 +179,17 @@ test("row 3: absent / unparseable / entryless registry → readable diagnostic n
 test("row 7: an engine killed by signal exits the wrapper non-zero — never 0", () => {
   const dir = tmp();
   try {
-    const { bashShim } = installInto(dir);
+    const { bashShim, cmdShim } = installInto(dir);
     // Fixture engine that traps nothing and kills itself.
     const install = join(dir, "install");
     mkdirSync(join(install, "bin"), { recursive: true });
     writeFileSync(join(install, "bin", "swarm.mjs"), "#!/usr/bin/env node\nprocess.kill(process.pid, \"SIGTERM\");\n");
     const env = { SWARM_PLUGIN_REGISTRY: writeRegistry(join(dir, "installed_plugins.json"), [userEntry(install)]) };
-    const r = runBashShim(bashShim, env);
-    // POSIX RED: a signalled child leaves r.status null and the pre-fix
-    // resolver turned that into exit 0 — the defect D5 exists to close.
-    // win32 has no status-less death: TerminateProcess carries code 1
-    // (measured 2026-09-09: self-SIGTERM/SIGKILL → status 1, signal null), so
-    // this leg pins the same user-facing contract — a killed run never reports
-    // success — and the null-status branch is POSIX-only here. The other null
-    // source, spawn failure, cannot occur: the resolver spawns process.execPath.
-    assert.notEqual(r.status, 0, `a signal-killed engine must not exit the wrapper 0 (got ${r.status})`);
+    for (const r of runInstalledShims(bashShim, cmdShim, env)) {
+      // A signalled child leaves r.status null on POSIX; win32 reports code 1
+      // instead, so both legs pin the same contract: a killed run never exits 0.
+      assert.notEqual(r.status, 0, `a signal-killed engine must not exit the wrapper 0 (got ${r.status})`);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

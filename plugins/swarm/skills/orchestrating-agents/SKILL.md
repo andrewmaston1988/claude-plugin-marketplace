@@ -27,6 +27,9 @@ surface — the three legs, on the page, before any agent is spawned. The recomm
 wide at the default window — one agent per lane, merged only on shared surface; narrower is
 the operator's override, and a bigger window is a wall-clock purchase.
 
+Provider, model, and effort are one leaf pin; matching model ids do not erase provider-local
+roots, runners, or usage.
+
 *Measured once (2026-09-06, one plan, three shapes — the worked example below): under the
 default window eight leaves and a four-link chain cost the same — what a leaf pays to start,
 a chain pays back re-reading after compaction. Tokens do not decide grouping and nothing here
@@ -262,7 +265,7 @@ permitted. The description-and-rule route dissolves the problem instead, because
 knows its own intent before the call — and the expensive path is already guarded. Do not
 replace this with a hook.
 
-## Common Rationalizations
+## Rationalisations — rejected
 
 | Excuse | Reality |
 |--------|---------|
@@ -278,7 +281,7 @@ replace this with a hook.
 | "Same wave, so they can share a leaf" | A leaf has one pin. The wave is cut again by tier before batching. |
 | "It's only a small item, the cheap model will do" | Merging *down* is a capability decision, never a batching one. Never the session's call. |
 
-## Red Flags - STOP
+## Red Flags — STOP
 
 - "I'll eyeball the leaf count / note it in thinking" — the arithmetic is visible text.
 - "The plan already decided the grouping" — the plan decomposed by steps; §2 decomposes by

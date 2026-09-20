@@ -1,7 +1,8 @@
 // Read-models over scores.mjs's own aggregate/dedupe output, computed
 // server-side so the page never re-derives a count it could get wrong.
 import { OUTCOMES } from "../aspects.mjs";
-import { frontier } from "../scores.mjs";
+import { overall } from "../scores.mjs";
+import { identityOf } from "../contracts.mjs";
 import { band, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
 
 const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
@@ -10,21 +11,49 @@ const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
 // scored on at all (n=0) — absence is evidence the grid must still draw.
 // JSON-encoded tuple, not a joined string — a plain delimiter (space, ":") collides
 // whenever an aspect or model name itself contains that delimiter.
-const keyOf = (aspect, model) => JSON.stringify([aspect, model]);
+function providersOf(value) {
+  const providers = Array.isArray(value?.providers) ? [...value.providers] : [];
+  const identity = identityOf(value);
+  if (identity.provider) providers.push(identity.provider);
+  return [...new Set(providers.filter((p) => typeof p === "string" && p))].sort();
+}
+
+const displayOf = (identity) => identity.explicit && identity.provider
+  ? `${identity.provider}/${identity.model}`
+  : identity.model;
+const compareIdentity = (a, b) => displayOf(identityOf(a)).localeCompare(displayOf(identityOf(b)));
 
 export function coverage(report) {
   const aspects = report.aspects.map((a) => a.aspect);
-  const models = [...new Set(report.aspects.flatMap((a) => a.cells.map((c) => c.model)))].sort();
+  const modelProviders = new Map();
+  for (const a of report.aspects) for (const c of a.cells) {
+    const providers = modelProviders.get(c.model) || new Set();
+    for (const provider of providersOf(c)) providers.add(provider);
+    modelProviders.set(c.model, providers);
+  }
+  const models = [...modelProviders.keys()].sort();
+  const identities = models.map((model) => ({
+    model,
+    label: model,
+    providers: [...modelProviders.get(model)].sort(),
+  }));
   const byKey = new Map();
-  for (const a of report.aspects) for (const c of a.cells) byKey.set(keyOf(a.aspect, c.model), c);
+  for (const a of report.aspects) for (const c of a.cells) byKey.set(JSON.stringify([a.aspect, c.model]), c);
   const cells = [];
   for (const model of models) {
     for (const aspect of aspects) {
-      const c = byKey.get(keyOf(aspect, model));
-      cells.push({ model, aspect, n: c ? c.n : 0, provisional: c ? c.provisional : true });
+      const c = byKey.get(JSON.stringify([aspect, model]));
+      cells.push({
+        model,
+        label: model,
+        providers: [...modelProviders.get(model)].sort(),
+        aspect,
+        n: c ? c.n : 0,
+        provisional: c ? c.provisional : true,
+      });
     }
   }
-  return { aspects, models, cells };
+  return { aspects, models, identities, cells };
 }
 
 // Each deduped leaf (one row, however many aspects its grades cover) counts
@@ -33,71 +62,156 @@ export function coverage(report) {
 export function reliability(liveRows) {
   const byModel = new Map();
   for (const r of liveRows) {
-    if (!byModel.has(r.model)) byModel.set(r.model, { model: r.model, total: 0, byOutcome: blankOutcomes() });
-    const m = byModel.get(r.model);
+    const key = r.model;
+    if (!byModel.has(key)) byModel.set(key, {
+      model: r.model,
+      label: r.model,
+      providers: [],
+      total: 0,
+      byOutcome: blankOutcomes(),
+    });
+    const m = byModel.get(key);
+    for (const provider of providersOf(r)) {
+      if (!m.providers.includes(provider)) m.providers.push(provider);
+    }
+    m.providers.sort();
     m.total += 1;
     m.byOutcome[r.outcome] = (m.byOutcome[r.outcome] || 0) + 1;
   }
-  return [...byModel.values()].sort((a, b) => b.total - a.total || a.model.localeCompare(b.model));
+  return [...byModel.values()].sort((a, b) => b.total - a.total || compareIdentity(a, b));
 }
 
 // Top k by weighted score per aspect — the same ranking `swarm perf` shows,
 // just capped. A cell with no grade (outcomes only) has nothing to lead with.
 export function leaders(report, k = 3) {
   return report.aspects.map((a) => ({
-    aspect: a.aspect,
-    top: a.cells.filter((c) => c.weighted != null)
-      .slice().sort((x, y) => y.weighted - x.weighted || x.model.localeCompare(y.model))
+      aspect: a.aspect,
+      top: a.cells.filter((c) => c.weighted != null)
+      .slice().sort((x, y) => y.weighted - x.weighted || compareIdentity(x, y))
       .slice(0, k)
-      .map((c) => ({ model: c.model, weighted: c.weighted, n: c.n, provisional: c.provisional })),
+      .map((c) => ({
+        model: c.model,
+        label: c.model,
+        providers: providersOf(c),
+        weighted: c.weighted,
+        n: c.n,
+        provisional: c.provisional,
+      })),
   }));
 }
 
-// The cost read-model: the frontier's points (quality joined to cost) and the
-// log cost spread (every costed model, cheapest first). `rows` are the raw
-// score rows — the frontier needs overall()'s combined ranking, not the
-// per-aspect report — and `costRows` are `multipliers(costPerModel(snaps))`.
-// Cost itself is domain-blind (a request costs what it costs); only the
-// quality half is filtered, so the join stays honest under a domain filter.
-// A model with no multiplier is UNMEASURED, not free: it stays in `points`
-// with `multiplier: null` so the page can draw it as a void, never a 0×.
-export function costView(rows, costRows, { domain, bands = DEFAULT_COST_BANDS, valueMargin } = {}) {
+// The cost read-model: quality is collapsed by model, while every cost row
+// remains attached to its provider and compatible cost domain. A model with
+// no multiplier is UNMEASURED, not free: it stays in `points` with
+// `multiplier: null` so the page can draw it as a void, never a 0×.
+export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_COST_BANDS, valueMargin } = {}) {
   bands = resolveBands(bands, DEFAULT_COST_BANDS);
   const margin = resolveValueMargin(valueMargin);
-  const costs = costRows.map(({ model, mult }) => ({ model, mult }));
-  const thinOf = new Map(costRows.map((r) => [r.model, r.measuredRequests < THIN_REQUESTS]));
-  const points = frontier(rows, costs, { domain, bands })
-    .filter((e) => e.wtd != null)
-    .map(({ model, wtd, n, multiplier, band: b, onFrontier, dominatedBy }) => ({
-      model, wtd, n, multiplier, band: b, onFrontier, dominatedBy, thin: thinOf.get(model) ?? false,
-    }));
-  const spread = costRows
+  const costs = costRows.filter((row) => costDomain === undefined || row.costDomain === costDomain);
+  const providerKey = (value) => identityOf(value).provider || "unqualified";
+  const costFor = (model, provider) => {
+    const matches = costs.filter((r) => r.model === model && providerKey(r) === provider);
+    if (!matches.length) return null;
+    const domains = new Set(matches.map((r) => r.costDomain || "legacy"));
+    if (costDomain === undefined && domains.size > 1) return null;
+    return matches.find((r) => r.mult != null) || matches[0];
+  };
+  const isMeter = (r) => !r?.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
+  const quality = overall(rows, { domain, combineProviders: true }).cells.filter((c) => c.combined != null);
+  const points = quality.flatMap((cell) => {
+    const providers = new Set(providersOf(cell));
+    for (const cost of costs) if (cost.model === cell.model) providers.add(providerKey(cost));
+    if (!providers.size) providers.add("unqualified");
+    return [...providers].sort().map((provider) => {
+      const evidence = costFor(cell.model, provider);
+      const identity = provider === "unqualified"
+        ? { model: cell.model }
+        : { provider, model: cell.model };
+      return {
+        ...(provider !== "unqualified" ? { provider } : {}),
+        model: cell.model,
+        label: displayOf(identityOf(identity)),
+        wtd: cell.combined,
+        n: cell.n,
+        multiplier: evidence?.mult ?? null,
+        band: evidence?.mult == null ? null : band(evidence.mult, bands),
+        onFrontier: false,
+        dominatedBy: null,
+        thin: Boolean(evidence && isMeter(evidence) && evidence.measuredRequests < THIN_REQUESTS),
+        ...(evidence?.costDomain ? { costDomain: evidence.costDomain } : {}),
+        ...(evidence?.unit !== undefined ? { unit: evidence.unit } : {}),
+        ...(evidence?.source !== undefined ? { source: evidence.source } : {}),
+        ...(evidence?.classification !== undefined ? { classification: evidence.classification } : {}),
+        ...(evidence?.asOf !== undefined ? { asOf: evidence.asOf } : {}),
+        ...(evidence?.value !== undefined ? { value: evidence.value } : {}),
+        ...(evidence?.baseModel !== undefined ? { baseModel: evidence.baseModel } : {}),
+      };
+    });
+  });
+  const spread = costs
     .map((r) => ({
-      model: r.model, mult: r.mult, band: band(r.mult, bands),
+      ...(identityOf(r).provider ? { provider: identityOf(r).provider } : {}),
+      model: r.model, label: displayOf(identityOf(r)), mult: r.mult, band: band(r.mult, bands),
       requests: r.requests, measuredRequests: r.measuredRequests,
       weeks: r.weeks, measuredWeeks: r.measuredWeeks,
-      thin: r.measuredRequests < THIN_REQUESTS,
+      thin: isMeter(r) && r.measuredRequests < THIN_REQUESTS,
+      ...(r.costDomain !== undefined ? { costDomain: r.costDomain } : {}),
+      ...(r.unit !== undefined ? { unit: r.unit } : {}),
+      ...(r.source !== undefined ? { source: r.source } : {}),
+      ...(r.classification !== undefined ? { classification: r.classification } : {}),
+      ...(r.asOf !== undefined ? { asOf: r.asOf } : {}),
+      ...(r.value !== undefined ? { value: r.value } : {}),
+      ...(r.baseModel !== undefined ? { baseModel: r.baseModel } : {}),
     }))
-    .sort((a, z) => (a.mult ?? Infinity) - (z.mult ?? Infinity) || a.model.localeCompare(z.model));
-  // The two verdicts worth a card, decided here so the page never re-derives
-  // them. Neither is a quality-per-cost ratio — scores.mjs's frontier() rejects
-  // that outright, and domination is the only comparison it makes. So `best` is
-  // the highest-quality model nothing beats on BOTH axes, and `worst` the
-  // dearest model something does. frontier() only ever sets onFrontier or
-  // dominatedBy on a participant, so both carry a wtd and a multiplier by
-  // construction; the filters below are still explicit, because a `best` picked
-  // from all points would silently become "highest wtd overall".
-  // `best` answers "what would you actually seat", so it is the CHEAPEST model
-  // still worth seating — not the highest-quality one. Three bars, and a cheap
-  // fluke clears none of them: it must be undominated, within `margin` of the
-  // best candidate quality, and carry enough measured requests not to be thin.
-  // topWtd comes from the CANDIDATES, not all frontier members — otherwise a
-  // thin high scorer raises the bar and excludes the right pick.
-  const candidates = points.filter((p) => p.onFrontier && p.multiplier != null && !p.thin);
-  const topWtd = candidates.reduce((m, p) => (p.wtd > m ? p.wtd : m), -Infinity);
-  const best = candidates.filter((p) => p.wtd >= topWtd - margin)
-    .sort((a, z) => a.multiplier - z.multiplier || z.wtd - a.wtd || a.model.localeCompare(z.model))[0] ?? null;
-  const worst = points.filter((p) => p.dominatedBy != null)
-    .sort((a, z) => z.multiplier - a.multiplier || a.wtd - z.wtd || a.model.localeCompare(z.model))[0] ?? null;
-  return { points, spread, bands, valueMargin: margin, best, worst };
+    .sort((a, z) => (a.mult ?? Infinity) - (z.mult ?? Infinity) || compareIdentity(a, z));
+
+  // Verdicts are intentionally local. A single global best/worst would imply
+  // that (say) an Ollama meter point and a Codex plan-rate point share a cost
+  // axis, which they do not. When a caller asks for one provider/domain the
+  // legacy top-level cards remain useful; mixed views expose provider sections
+  // and leave the global cards null.
+  const verdicts = (sectionPoints, sectionSpread) => {
+    const domains = new Set(sectionSpread.map((row) => row.costDomain || "legacy"));
+    if (domains.size > 1) return { best: null, worst: null };
+    const candidates = sectionPoints.filter((p) => p.onFrontier && p.multiplier != null && !p.thin);
+    const topWtd = candidates.reduce((m, p) => (p.wtd > m ? p.wtd : m), -Infinity);
+    const best = candidates.filter((p) => p.wtd >= topWtd - margin)
+      .sort((a, z) => a.multiplier - z.multiplier || z.wtd - a.wtd || compareIdentity(a, z))[0] ?? null;
+    const worst = sectionPoints.filter((p) => p.dominatedBy != null)
+      .sort((a, z) => z.multiplier - a.multiplier || a.wtd - z.wtd || compareIdentity(a, z))[0] ?? null;
+    return { best, worst };
+  };
+  const providers = [...new Set([...points, ...costs].map(providerKey))].sort();
+  for (const sectionProvider of providers) {
+    const sectionPoints = points.filter((point) => providerKey(point) === sectionProvider);
+    const participants = sectionPoints.filter((point) => point.wtd != null && point.multiplier != null);
+    for (const point of participants) {
+      const dominator = participants.find((other) => other !== point
+        && other.costDomain === point.costDomain
+        && other.wtd > point.wtd
+        && other.multiplier < point.multiplier);
+      if (dominator) point.dominatedBy = displayOf(identityOf(dominator));
+      else point.onFrontier = true;
+    }
+  }
+  const sections = providers.map((key) => {
+    const sectionPoints = points.filter((point) => providerKey(point) === key);
+    const sectionSpread = spread.filter((row) => providerKey(row) === key);
+    const { best, worst } = verdicts(sectionPoints, sectionSpread);
+    return {
+      provider: key === "unqualified" ? null : key,
+      points: sectionPoints,
+      spread: sectionSpread,
+      costDomains: [...new Set(sectionSpread.map((row) => row.costDomain || "legacy"))].sort(),
+      best,
+      worst,
+    };
+  });
+  const global = providers.length === 1 ? verdicts(points, spread) : { best: null, worst: null };
+  return {
+    points, spread, sections, bands, valueMargin: margin,
+    ...(costDomain !== undefined && { costDomain }),
+    best: global.best,
+    worst: global.worst,
+  };
 }

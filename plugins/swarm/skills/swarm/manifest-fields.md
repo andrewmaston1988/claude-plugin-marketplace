@@ -3,6 +3,25 @@
 Deep reference for five manifest features. Read when you are actually writing one of
 these fields; the decision of *whether* to use them lives in SKILL.md.
 
+### Provider identity
+
+`provider` is optional task metadata. When it is omitted, swarm resolves the model
+from the provider-qualified cache and registered model matchers, then falls back to
+the legacy Ollama identity. A model prefix such as `gpt-5-codex` never selects Codex
+by itself; use `"provider": "codex"` or a cache row whose provider is `codex`.
+
+`fallbackModel` is resolved independently, so a fallback may change both the model
+and provider. Digest blocks accept the same optional `provider` field. The resolved
+primary/fallback/digest identities are retained in the run's effective manifest
+snapshot; `runner` is derived internally and is not manifest grammar.
+
+Provider-specific roots and enabled state are checked during validation and again at
+dispatch. Codex tasks reject Claude-only `settings` and configured project leaf
+guards unless the task explicitly sets `"leafGuard": false`.
+
+The public provider registry supplies discovery, usage, and runner capabilities. Pin
+`provider` explicitly when the same model id is available from more than one provider.
+
 ### Prompt length on Windows
 
 A leaf's `prompt` is measured through the CreateProcess-quoted command line at `swarm validate` time; a prompt over ~32k characters on Windows fails validation — point the leaf at a file holding its instructions instead of inlining it.

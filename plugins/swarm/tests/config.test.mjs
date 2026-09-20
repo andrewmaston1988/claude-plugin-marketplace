@@ -16,18 +16,91 @@ test("loadConfig returns shipped defaults when user config is missing", () => {
   const dir = tmp();
   try {
     const cfg = loadConfig(join(dir, "nope.json"));
-    equal(cfg.provider.name, "ollama");
-    equal(cfg.provider.mode, "env");
-    equal(cfg.provider.url, "http://localhost:11434");
-    equal(cfg.provider.authToken, "ollama");
-    equal(cfg.provider.cloudSuffix, ":cloud");
-    deepEqual(cfg.provider.allowedRoots, []);
+    equal(cfg.providers.claude.enabled, true);
+    equal(cfg.providers.ollama.enabled, true);
+    equal(cfg.providers.ollama.name, "ollama");
+    equal(cfg.providers.ollama.mode, "env");
+    equal(cfg.providers.ollama.url, "http://localhost:11434");
+    equal(cfg.providers.ollama.authToken, "ollama");
+    equal(cfg.providers.ollama.cloudSuffix, ":cloud");
+    deepEqual(cfg.providers.ollama.allowedRoots, []);
+    equal(cfg.providers.codex.enabled, false);
+    deepEqual(cfg.providers.codex.allowedRoots, []);
     equal(cfg.concurrency, 4);
     equal(cfg.timeoutMs, DEFAULT_TIMEOUT_MS);
     equal(cfg.resultInlineCap, 4000);
     equal(cfg.worktreeBranchPrefix, "swarm/");
     equal(cfg.disable1mContext, true);
     deepEqual(cfg.projects, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("legacy provider and prototype codex config normalize once into canonical providers", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({
+      provider: { allowedRoots: ["C:/ollama"], url: "http://legacy" },
+      codex: { enabled: true, allowedRoots: ["C:/codex"], path: "custom-codex" },
+    }));
+    const warnings = [];
+    const cfg = loadConfig(p, process.env, { warn: (message) => warnings.push(message) });
+    deepEqual(cfg.providers.ollama.allowedRoots, ["C:/ollama"]);
+    equal(cfg.providers.ollama.url, "http://legacy");
+    equal(cfg.providers.codex.enabled, true);
+    deepEqual(cfg.providers.codex.allowedRoots, ["C:/codex"]);
+    equal(cfg.providers.codex.path, "custom-codex");
+    equal(Object.hasOwn(cfg, "codex"), false);
+    equal(Object.keys(cfg).includes("provider"), false);
+    deepEqual(warnings, [
+      "swarm config key 'provider' is deprecated; move it to 'providers.ollama'",
+      "swarm config key 'codex' is deprecated; move it to 'providers.codex'",
+    ]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("canonical provider keys win conflicts while legacy fills absent leaves", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({
+      provider: { allowedRoots: ["C:/legacy"], url: "http://legacy" },
+      providers: { ollama: { allowedRoots: ["C:/canonical"] } },
+    }));
+    const cfg = loadConfig(p, process.env, { warn: () => {} });
+    deepEqual(cfg.providers.ollama.allowedRoots, ["C:/canonical"]);
+    equal(cfg.providers.ollama.url, "http://legacy");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("provider enabled flags and allowedRoots are validated independently", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ providers: { codex: { enabled: "yes" } } }));
+    throws(() => loadConfig(p), /providers\.codex\.enabled/);
+    writeFileSync(p, JSON.stringify({ providers: { ollama: { allowedRoots: "C:/code" } } }));
+    throws(() => loadConfig(p), /providers\.ollama\.allowedRoots/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("malformed provider containers are rejected before defaults or migration can hide them", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    for (const bad of [{ providers: [] }, { provider: "ollama" }, { codex: true }]) {
+      writeFileSync(p, JSON.stringify(bad));
+      throws(() => loadConfig(p), /providers|provider|codex.*object/);
+      throws(() => initConfig(p), /providers|provider|codex.*object/);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -323,27 +396,48 @@ test("initConfig materialises every shipped key into the user file, keeps set va
     writeFileSync(join(dir, "nope"), ""); // dir exists; home/ does not — init must mkdir
     const r1 = initConfig(p);
     equal(r1.created, true);
+    equal(r1.migrated, false);
     const on = JSON.parse(readFileSync(p, "utf8"));
-    equal(on.provider.mode, "env");
+    equal(on.providers.ollama.mode, "env");
     equal(on.dashboard.port, 7331);
     equal(on.swarm.always, false);            // shipped default now exists for swarm.always
     equal(on.disable1mContext, true);          // shipped default now exists for disable1mContext
     deepEqual(on.projects, []);                // shipped default now exists for projects
-    deepEqual(on.provider.allowedRoots, []);
-    on.provider.allowedRoots = ["C:/code"];
+    deepEqual(on.providers.ollama.allowedRoots, []);
+    on.providers.ollama.allowedRoots = ["C:/code"];
     on.timeoutMs = 5400000;
     delete on.dashboard.livenessPollMs;       // simulate a key added by a later plugin version
     writeFileSync(p, JSON.stringify(on));
     const r2 = initConfig(p);
     equal(r2.created, false);
+    equal(r2.migrated, false);
     deepEqual(r2.added, ["dashboard.livenessPollMs"]);
     const after = JSON.parse(readFileSync(p, "utf8"));
-    deepEqual(after.provider.allowedRoots, ["C:/code"]);
+    deepEqual(after.providers.ollama.allowedRoots, ["C:/code"]);
     equal(after.timeoutMs, 5400000);
     equal(after.dashboard.livenessPollMs, 10000);
     const r3 = initConfig(p);
     deepEqual(r3.added, []);
     equal(readdirSync(join(dir, "home")).some((f) => f.endsWith(".tmp")), false, "no tmp left behind");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("initConfig rewrites a fully populated legacy file even when no default leaf is missing", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    const defaults = loadConfig(join(dir, "missing.json"));
+    const legacy = JSON.parse(JSON.stringify(defaults));
+    legacy.provider = legacy.providers.ollama;
+    delete legacy.providers.ollama;
+    writeFileSync(p, JSON.stringify(legacy));
+    const result = initConfig(p);
+    equal(result.migrated, true);
+    const stored = JSON.parse(readFileSync(p, "utf8"));
+    equal(Object.hasOwn(stored, "provider"), false);
+    equal(stored.providers.ollama.mode, "env");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

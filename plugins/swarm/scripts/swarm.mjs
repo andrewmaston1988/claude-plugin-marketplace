@@ -2,22 +2,25 @@
 // swarm CLI — thin argv layer over src/. Subcommands: models | validate | run.
 // stdout carries status lines + paths only, never raw task output.
 import { join, resolve, dirname, basename, isAbsolute } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
-import { discoverModels, writeModelsCache, visibleModels, probeTopModels, deriveCloudName } from "../src/discovery.mjs";
+import { readModelsCache as readProviderModelsCache, refreshModelsCache, writeCompositeModelsCache, visibleModels, probeTopModels } from "../src/discovery.mjs";
+import { providerConfig } from "../src/providers.mjs";
+import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
+import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim } from "../src/ui.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
-  models [--all]             list launchable :cloud models (+ Claude aliases)
+  models [--all]             list launchable models from enabled providers (+ Claude aliases)
   list                       saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
   validate <manifest.json | name> [--args '<json>'] [--resolved]   lint; exit 1 with readable errors
   run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
@@ -27,7 +30,7 @@ const USAGE = `usage: swarm.mjs <command>
   prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
-  quota                      Anthropic subscription utilization per limit window (exit 1 when exhausted)
+  quota | usage              provider utilization per limit window (exit 1 when Anthropic is exhausted)
   ollama-usage [--cookie '<value>']   ollama.com :cloud weekly-allowance meter (exit 1 when exhausted)
   grade --init <resultsDir>  write grades.json — one skeleton row per model leaf (Claude tiers included), for you to fill in
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
@@ -93,75 +96,155 @@ function fmtCtx(n) {
 }
 
 function modelLine(m) {
-  const line = m.description ? `${m.model} — ${m.description}` : m.model;
+  const name = m.displayModel || m.model;
+  const line = m.description ? `${name} — ${m.description}` : name;
   if (!(m.parameterCount > 0) && !(m.contextLength > 0)) return line;
   const size = m.parameterCount > 0 ? fmtParams(m.parameterCount) : "size unreported";
   return `${line} (${[size, ...(m.contextLength > 0 ? [fmtCtx(m.contextLength)] : [])].join(", ")})`;
 }
 
+
 // The single ollama usage entry point for the CLI — getUsage memoises per
 // process, so validate/run/models share one fetch however many seats.
-async function usageHeadroom(cfg) {
-  return (await import("../src/ollama-usage.mjs")).getUsage(cfg);
+async function usageHeadroom(cfg, { env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  return (await import("../src/ollama-usage.mjs")).getUsage(cfg, { env, _fetch: fetchImpl });
 }
 
 // The banked cost rows for joining against roster/score names. The history
 // banks the meter's own names (the page's `data-model`); deriveCloudName is the
 // same mapping discovery uses — never a second rule. Both reads are cheap and
 // a missing file reads as empty, so a fresh install is simply "unmeasured".
-async function cloudCostRows() {
-  const { readSnapshots, costPerModel, multipliers, usageHistoryPath } = await import("../src/cost.mjs");
-  return multipliers(costPerModel(readSnapshots(usageHistoryPath())))
-    .map((r) => ({ ...r, model: deriveCloudName(r.model) }));
+async function cloudCostRows(env = process.env) {
+  const { ollamaCloudCostRows, readSnapshots, usageHistoryPath } = await import("../src/cost.mjs");
+  return ollamaCloudCostRows(readSnapshots(usageHistoryPath(env)));
 }
 
-// Band edges are config (`provider.cloud.ollama.costBands`), shared with the
+// Band edges are config (`providers.ollama.cloud.ollama.costBands`), shared with the
 // dashboard's server — one source, never two.
-async function costBands() {
+async function costBands(cfg = getConfig()) {
   const { resolveBands } = await import("../src/cost.mjs");
-  return resolveBands(getConfig()?.provider?.cloud?.ollama?.costBands);
+  return resolveBands(providerConfig(cfg, "ollama")?.cloud?.ollama?.costBands);
 }
 
-async function cmdModels(rest = []) {
-  const cfg = getConfig();
+// Read usage through registered provider capabilities. `live` is reserved for
+// the explicit operator command; hooks and validation use the cache-only path.
+export async function readProviderUsage(cfg, { registry = defaultProviderRegistry(), live = false, provider, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+  const { getUsage } = await import("../src/ollama-usage.mjs");
+  const { normalizeOllama, normalizeCodex, normalizeProviderUsage } = await import("../src/usage.mjs");
+  const usages = [];
+  const errors = {};
+  for (const adapter of registry.list()) {
+    if (adapter.id === "claude" || (provider && adapter.id !== provider) || !adapter.enabled(cfg)) continue;
+    const readUsage = registry.capability(adapter.id, "readUsage");
+    if (!readUsage) continue;
+    try {
+      const reading = live && adapter.id === "ollama"
+        ? await getUsage(cfg, { gate: false, env, _fetch: fetchImpl })
+        : await readUsage({ config: cfg, env, fetch: fetchImpl, usageOptIn: live });
+      if (reading == null) continue;
+      usages.push(normalizeProviderUsage(adapter.id, reading));
+    } catch (error) {
+      errors[adapter.id] = error?.message || String(error);
+    }
+  }
+  return { usages, errors };
+}
+
+function displayModel(value, roster = []) {
+  const model = value?.model || value;
+  const providers = new Set(roster.filter((row) => row?.model === model && row?.provider).map((row) => row.provider));
+  return providers.size > 1 && value?.provider ? `${value.provider}/${model}` : model;
+}
+
+function visibleProviderModels(rows, options) {
+  const groups = new Map();
+  for (const row of rows) {
+    const provider = row?.provider || "ollama";
+    if (!groups.has(provider)) groups.set(provider, []);
+    groups.get(provider).push(row);
+  }
+  return [...groups.values()].flatMap((group) => visibleModels(group, options));
+}
+
+function providerEnabled(registry, cfg, value) {
+  const provider = value?.provider || "ollama";
+  try { return registry.get(provider).enabled(cfg); } catch { return false; }
+}
+
+async function cmdModels(rest = [], {
+  cfg = getConfig(),
+  env = process.env,
+  fetchImpl = globalThis.fetch,
+  registry = defaultProviderRegistry(),
+  write = out,
+} = {}) {
   // Catalogue stays the catalogue (discovery.mjs is pure) — the meter is
   // annotated here, above the :cloud list, so it reads as a preflight rather
   // than a per-model property. The banner replaces the old stale line: a
   // reading that was not fetched now is marked, or not shown at all.
   const { provenanceBanner, formatResetTime } = await import("../src/usage.mjs");
-  const headroom = await usageHeadroom(cfg);
-  for (const line of provenanceBanner(headroom)) out(line);
+  const headroom = await usageHeadroom(cfg, { env, fetchImpl });
+  for (const line of provenanceBanner(headroom)) write(line);
   if (headroom.state === "exhausted") {
     const resets = formatResetTime(headroom.resetsAt) ?? headroom.resetsAt;
-    out(`⚠ :cloud weekly allowance exhausted (${headroom.weeklyPctUsed}%) — resets ${resets}. These models will not launch.`);
+    write(`⚠ :cloud weekly allowance exhausted (${headroom.weeklyPctUsed}%) — resets ${resets}. These models will not launch.`);
   }
   const showAll = rest.includes("--all");
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
-  const discovered = await discoverModels(cfg);
-  // Cache keeps the FULL roster — denylist and supersession filter at print,
-  // and the entitlement probe/scheduler removal need rows present to remove.
-  writeModelsCache(discovered);
-  const base = String(cfg.provider.url).replace(/\/+$/, "");
+  // The registry chooses every enabled provider with discovery capability. A
+  // failed provider is reported but its previous rows remain in the composite
+  // cache, so one offline account cannot erase another provider's roster.
+  const refreshed = await refreshModelsCache({
+    config: cfg,
+    env,
+    registry,
+    fetchImpl,
+    rich: true,
+  });
+  for (const [provider, message] of Object.entries(refreshed.errors)) {
+    write(`⚠ ${provider} model discovery unavailable — using cached rows (${message})`);
+  }
+  const roster = refreshed.models;
+  const ollamaRows = roster.filter((m) => (m.provider || "ollama") === "ollama");
+  const ollama = providerConfig(cfg, "ollama");
+  const base = String(ollama.url || "").replace(/\/+$/, "");
+  const ollamaEnabled = providerEnabled(registry, cfg, { provider: "ollama" });
   // Every models run re-discovers, so this is the one place the top-3
   // entitlement probe fires. 402 removals rewrite the cache just written.
-  const live = await probeTopModels(discovered, base, globalThis.fetch, { isDenylisted });
-  const visible = new Set(visibleModels(live, { isDenylisted }).map((m) => m.model));
-  const offered = live.filter((m) => !isDenylisted(m.model));
-  const shown = showAll ? offered : offered.filter((m) => visible.has(m.model));
+  const liveOllama = base && ollamaEnabled
+    ? await probeTopModels(ollamaRows, base, fetchImpl, { isDenylisted, provider: "ollama" })
+    : ollamaRows;
+  // Keep disabled-provider rows in the cache so re-enabling a provider can use
+  // its last successful roster, but never present those rows as launchable.
+  const cachedOllama = ollamaEnabled ? liveOllama : ollamaRows;
+  writeCompositeModelsCache([
+    ...roster.filter((m) => (m.provider || "ollama") !== "ollama"),
+    ...cachedOllama,
+  ], env);
+  const liveRoster = [
+    ...roster.filter((m) => (m.provider || "ollama") !== "ollama"),
+    ...liveOllama,
+  ].filter((m) => providerEnabled(registry, cfg, m) && !isDenylisted(m.model));
+  const claudeAliases = CLAUDE_ALIASES
+    .filter((a) => !isDenylisted(a.model))
+    .map((a) => ({ ...a, provider: "claude" }));
+  const identityRoster = [...liveRoster, ...claudeAliases];
+  const visible = new Set(visibleProviderModels(liveRoster, { isDenylisted }).map(identityKey));
+  const shown = showAll ? liveRoster : liveRoster.filter((m) => visible.has(identityKey(m)));
   const { readRows, scoresPath, frontier } = await import("../src/scores.mjs");
-  const costRows = await cloudCostRows();
+  const costRows = await cloudCostRows(env);
   const multOf = new Map(costRows.map((r) => [r.model, r.mult]));
-  const onFrontier = new Set(frontier(readRows(scoresPath()), costRows.map((r) => ({ model: r.model, mult: r.mult })), { bands: await costBands() })
+  const onFrontier = new Set(frontier(readRows(scoresPath(env)), costRows.map((r) => ({ model: r.model, mult: r.mult })), { bands: await costBands(cfg) })
     .filter((e) => e.onFrontier).map((e) => e.model));
-  for (const m of [...shown, ...CLAUDE_ALIASES.filter((a) => !isDenylisted(a.model))]) {
-    const mark = showAll && m.supersededBy && !visible.has(m.model) ? ` [superseded by ${m.supersededBy}]` : "";
+  for (const m of [...shown, ...claudeAliases]) {
+    const mark = showAll && m.supersededBy && !visible.has(identityKey(m)) ? ` [superseded by ${m.supersededBy}]` : "";
     const mult = multOf.get(m.model);
-    const cost = mult == null ? "—" : onFrontier.has(m.model) ? `* ${mult.toFixed(1)}x` : `${mult.toFixed(1)}x`;
-    out(modelLine(m) + mark + `  ${cost}`);
+    const cost = m.provider && m.provider !== "ollama" ? "—" : mult == null ? "—" : onFrontier.has(m.model) ? `* ${mult.toFixed(1)}x` : `${mult.toFixed(1)}x`;
+    write(modelLine({ ...m, displayModel: displayModel(m, identityRoster) }) + mark + `  ${cost}`);
   }
-  out(dim("* on the quality/cost frontier · N.Nx = meter weight vs the cheapest measured model (swarm cost) · — not yet measured"));
-  const hidden = offered.length - shown.length;
-  if (hidden) out(dim(`${hidden} superseded hidden — swarm models --all shows them`));
+  write(dim("* on the quality/cost frontier · N.Nx = meter weight vs the cheapest measured model (swarm cost) · — not yet measured"));
+  const hidden = liveRoster.length - shown.length;
+  if (hidden) write(dim(`${hidden} superseded hidden — swarm models --all shows them`));
   return 0;
 }
 
@@ -171,40 +254,42 @@ async function cmdModels(rest = []) {
 // exist yet at validate time.
 function seatedModels(plan) {
   const byModel = new Map();
-  const add = (model, leaf) => {
-    if (!model) return;
-    if (!byModel.has(model)) byModel.set(model, []);
-    byModel.get(model).push(leaf);
+  const add = (value, leaf) => {
+    const identity = identityOf(value);
+    if (!identity.model) return;
+    const key = identityKey(identity);
+    if (!byModel.has(key)) byModel.set(key, { identity, leaves: [] });
+    byModel.get(key).leaves.push(leaf);
   };
   for (const t of plan.tasks) {
     if (isAgentless(t)) continue;
     if (t.childPlan) {
       for (const c of t.childPlan.tasks) {
         if (isAgentless(c)) continue;
-        add(c.model, c.id);
+        add(c, c.id);
       }
       continue;
     }
-    add(t.model, t.id);
+    add(t, t.id);
   }
-  if (plan.digest?.model) add(plan.digest.model, "__digest");
-  return [...byModel].map(([model, leaves]) => ({ model, leaves }));
+  if (plan.digest?.model) add(plan.digest, "__digest");
+  return [...byModel.values()].map(({ identity, leaves }) => ({
+    ...(identity.provider ? { provider: identity.provider } : {}),
+    model: identity.model,
+    leaves,
+  }));
 }
 
 // The launchable roster `swarm models` prints, from the cache it wrote —
 // never a fresh probe: validate must not gain a network call. No cache yet
 // means the aliases alone, which are always launchable.
-async function launchableRoster(cfg) {
+async function launchableRoster(cfg, { env = process.env, registry = defaultProviderRegistry() } = {}) {
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
-  let cached = [];
-  try {
-    const { readFileSync } = await import("node:fs");
-    const cache = JSON.parse(readFileSync(join(swarmHome(), "models-cache.json"), "utf8"));
-    cached = cache?.models || [];
-  } catch { /* no cache yet — the aliases are still launchable */ }
-  const visible = new Set(visibleModels(cached, { isDenylisted }).map((m) => m.model));
-  const offered = cached.filter((m) => !isDenylisted(m.model));
-  return [...offered.filter((m) => visible.has(m.model)), ...CLAUDE_ALIASES.filter((a) => !isDenylisted(a.model))];
+  const cached = readProviderModelsCache(env)?.models || [];
+  const enabled = cached.filter((m) => providerEnabled(registry, cfg, m));
+  const visible = new Set(visibleProviderModels(enabled, { isDenylisted }).map(identityKey));
+  const offered = enabled.filter((m) => !isDenylisted(m.model));
+  return [...offered.filter((m) => visible.has(identityKey(m))), ...CLAUDE_ALIASES.filter((a) => !isDenylisted(a.model))];
 }
 
 // The seats block: the graded record for the manifest's seats, printed so the
@@ -582,6 +667,7 @@ async function cmdGradeInit(dir) {
     session: "<this session's id>",
     rows: leaves.map((l) => ({
       leaf: l.id,
+      ...(l.provider ? { provider: l.provider } : {}),
       model: l.model,
       read: { result: l.resultPath, transcript: l.transcriptPath },
       domain: "<one lowercase token: the language or ecosystem the leaf worked in — rust, godot, node, python, docs. Not the repo, not the task>",
@@ -646,13 +732,14 @@ async function cmdGradeFile(path) {
   }
   for (const r of batch.rows) {
     const result = readResult(dir, r.leaf);
-    const declared = cacheEntries.get(result.model);
+    const declared = cacheEntries.get(identityKey(result)) || cacheEntries.get(result.model);
     const { isClaudeModel } = await import("../src/models.mjs");
-    if (!declared && !isClaudeModel(result.model)) err(dim(`warning: ${result.model} is not in models-cache.json — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
+    if (!declared && !isClaudeModel(result.model)) err(dim(`warning: ${result.provider ? `${result.provider}/` : ""}${result.model} is not in models-cache.json — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
     rows.push({
       ts,
       resultsDir: dir,
       leaf: r.leaf,
+      ...(result.provider ? { provider: result.provider } : {}),
       model: result.model,
       effort: manifestTasks.get(r.leaf)?.effort ?? null,
       domain: r.domain,
@@ -702,11 +789,13 @@ async function readModelsCache() {
     const { readFileSync } = await import("node:fs");
     const cache = JSON.parse(readFileSync(join(swarmHome(), "models-cache.json"), "utf8"));
     for (const m of cache?.models || []) {
-      map.set(m.model, {
+      const declared = {
         capabilities: m.capabilities ?? null,
         contextLength: m.contextLength ?? null,
         parameterCount: m.parameterCount ?? null,
-      });
+      };
+      map.set(identityKey(m), declared);
+      if (!m.provider) map.set(m.model, declared);
     }
   } catch { /* no cache — declared stays null and the caller warns */ }
   return map;
@@ -731,7 +820,7 @@ async function cmdPerf(rest) {
   const domain = getFlag("domain", rest);
   const path = scoresPath();
   const rows = readRows(path);
-  const report = aggregate(rows, { aspect, model, domain });
+  const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
   const costs = await cloudCostRows();
   const bands = await costBands();
   // A model is dominated only when another is strictly better AND strictly
@@ -741,7 +830,16 @@ async function cmdPerf(rest) {
     cost: f && f.band != null ? "$".repeat(f.band) : "—",
     frontier: f ? (f.onFrontier ? "*" : f.dominatedBy ? `dom ${f.dominatedBy}` : "—") : "—",
   });
-  const LEGEND = "    cost $/$$/$$$ = meter weight band vs the cheapest measured model (swarm cost) · * on the quality/cost frontier · dom <model> = a better AND cheaper model exists · — not yet measured";
+  const byModel = (entries) => {
+    const grouped = new Map();
+    for (const entry of entries) {
+      const list = grouped.get(entry.model) || [];
+      list.push(entry);
+      grouped.set(entry.model, list);
+    }
+    return new Map([...grouped].map(([name, list]) => [name, list.length === 1 ? list[0] : { providerLocal: true }]));
+  };
+  const LEGEND = "    cost $/$$/$$$ = meter weight band vs the cheapest measured model (swarm cost) · * on the quality/cost frontier · dom <model> = a better AND cheaper model exists · provider-local = multiple providers for this model · — not yet measured";
   const filters = Object.entries(report.filters).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" · ");
   // Lines and rows differ after a re-grade: the store is append-only and the
   // newest row per (resultsDir, leaf) wins, so say both rather than let the raw
@@ -754,13 +852,16 @@ async function cmdPerf(rest) {
   if (rest.includes("--overall")) {
     // One table: models ranked on the mean of the four universal weighted
     // scores; per-aspect columns beside it so the average cannot hide a hole.
-    const o = overall(rows, { model, domain });
-    const byModel = new Map(frontier(rows, costs, { model, domain, bands }).map((e) => [e.model, e]));
+    const o = overall(rows, { model, domain, combineProviders: true });
+    const costByModel = byModel(frontier(rows, costs, { model, domain, bands }));
     const w = Math.max(5, ...o.cells.map((c) => c.model.length));
     out(`    ${"model".padEnd(w)}    n  overall  ${o.universals.map((a) => a.slice(0, 5).padStart(5)).join("  ")}  cost  frontier`);
     for (const c of o.cells) {
       const cols = o.universals.map((a) => (c.wtds[a] == null ? "—" : c.wtds[a].toFixed(2)).padStart(5)).join("  ");
-      const { cost, frontier: fm } = costCols(byModel.get(c.model));
+      const candidate = costByModel.get(c.model);
+      const { cost, frontier: fm } = candidate?.providerLocal
+        ? { cost: "—", frontier: "provider-local" }
+        : costCols(candidate);
       const flag = c.combined == null ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
       const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
       const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
@@ -778,12 +879,15 @@ async function cmdPerf(rest) {
       out(dim("    n=0 — no rows"));
       continue;
     }
-    const byModel = new Map(frontier(rows, costs, { aspect: a.aspect, model, domain, bands }).map((e) => [e.model, e]));
+    const costByModel = byModel(frontier(rows, costs, { aspect: a.aspect, model, domain, bands }));
     const w = Math.max(...a.cells.map((c) => c.model.length));
     for (const c of a.cells) {
       const mean = c.mean == null ? "—" : c.mean.toFixed(2);
       const wtd = c.weighted == null ? "—" : c.weighted.toFixed(2);
-      const { cost, frontier: fm } = costCols(byModel.get(c.model));
+      const candidate = costByModel.get(c.model);
+      const { cost, frontier: fm } = candidate?.providerLocal
+        ? { cost: "—", frontier: "provider-local" }
+        : costCols(candidate);
       const flag = c.n === 0 ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
       const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
       const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
@@ -836,6 +940,34 @@ async function cmdCost() {
   out("");
   out("Read beside `swarm perf` — that owns quality, this owns cost.");
   return 0;
+}
+
+async function cmdUsage(rest = [], {
+  cfg = getConfig(),
+  env = process.env,
+  fetchImpl = globalThis.fetch,
+  registry = defaultProviderRegistry(),
+  quotaCheck,
+  write = out,
+} = {}) {
+  const { checkQuota: defaultCheckQuota } = await import("../src/quota.mjs");
+  const { normalizeAnthropic, usageLines, notableLines } = await import("../src/usage.mjs");
+  const q = await (quotaCheck || defaultCheckQuota)({
+    cfg,
+    fetch: (...a) => fetchImpl(...a),
+    cachePath: join(swarmHome(env), "quota-cache.json"),
+    ...(env.SWARM_CREDENTIALS && { credentialsPath: env.SWARM_CREDENTIALS }),
+  });
+  const usages = [];
+  if (q) usages.push(normalizeAnthropic(q));
+  else write("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
+  const selected = getFlag("provider", rest);
+  const providerReading = await readProviderUsage(cfg, { registry, env, fetchImpl, live: true, ...(selected ? { provider: selected } : {}) });
+  usages.push(...providerReading.usages);
+  for (const [provider, message] of Object.entries(providerReading.errors)) write(`${provider}: unavailable (${message})`);
+  for (const line of usageLines(usages)) write(line);
+  for (const line of notableLines(usages)) write(line);
+  return q?.exhausted ? 1 : 0;
 }
 
 // serve — the LAN dashboard. Foreground by default; --daemon forks a detached
@@ -1254,6 +1386,8 @@ async function main() {
         return await cmdPerf(rest);
       case "cost":
         return await cmdCost();
+      case "usage":
+        return await cmdUsage(rest);
       case "quota": {
         // Anthropic is fetched (its credential renews itself); every cloud
         // provider is read from cache, because its cookie needs a human and
@@ -1272,8 +1406,8 @@ async function main() {
         if (q) usages.push(normalizeAnthropic(q));
         else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
 
-        if (cfg?.provider?.cloud?.ollama?.enabled === true) {
-          const { usageFromCache } = await import("../src/ollama-usage.mjs");
+        const { usageFromCache, ollamaCloudConfig } = await import("../src/ollama-usage.mjs");
+        if (ollamaCloudConfig(cfg).enabled === true) {
           const reading = usageFromCache(cfg);
           if (reading.state === "unknown") out("ollama: no reading yet — run `swarm ollama-usage --cookie '<value>'`");
           else usages.push(normalizeOllama(reading));
@@ -1291,9 +1425,9 @@ async function main() {
         return q?.exhausted ? 1 : 0;
       }
       case "ollama-usage": {
-        const { saveCookie, loadCookie, getUsage } = await import("../src/ollama-usage.mjs");
+        const { saveCookie, loadCookie, getUsage, ollamaCloudConfig } = await import("../src/ollama-usage.mjs");
         const cfg = getConfig();
-        const cookiePath = cfg?.provider?.cloud?.ollama?.cookiePath || join(swarmHome(), "ollama-cookie.json");
+        const cookiePath = ollamaCloudConfig(cfg).cookiePath || join(swarmHome(), "ollama-cookie.json");
         const cookieFlag = getFlag("cookie", rest);
         if (cookieFlag !== undefined) saveCookie(cookiePath, cookieFlag);
 
@@ -1326,7 +1460,12 @@ async function main() {
   }
 }
 
+export { main, cmdModels, cmdUsage, launchableRoster };
+
 // Delayed exit: undici's UV_ASYNC handle double-closes on immediate exit
-// after fetch on Windows (libuv UV_HANDLE_CLOSING assertion).
-const code = await main();
-setTimeout(() => process.exit(code), 150);
+// after fetch on Windows (libuv UV_HANDLE_CLOSING assertion). Keeping the
+// guard makes the CLI importable by the provider fixture and surface tests.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const code = await main();
+  setTimeout(() => process.exit(code), 150);
+}

@@ -8,6 +8,6 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test \"tests/**/*.test.mjs\""
+    "test": "node --import ./tests/helpers/isolate-home.mjs --test \"tests/**/*.test.mjs\""
   }
 }

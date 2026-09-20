@@ -1,23 +1,35 @@
 {
-  "provider": {
-    "name": "ollama",
-    "mode": "env",
-    "discoverCmd": "ollama launch claude",
-    "launchCmd": "ollama launch claude --model {model} -- {args}",
-    "cloudSuffix": ":cloud",
-    "allowedRoots": [],
-    "url": "http://localhost:11434",
-    "catalogUrl": "https://ollama.com",
-    "authToken": "ollama",
-    "cloud": {
-      "ollama": {
-        "enabled": false,
-        "cookiePath": null,
-        "costBands": [2, 5],
-        "valueMargin": 0.5
-      }
+  "providers": {
+    "claude": {
+      "enabled": true
     },
-    "usageTimeoutMs": 5000
+    "ollama": {
+      "enabled": true,
+      "name": "ollama",
+      "mode": "env",
+      "discoverCmd": "ollama launch claude",
+      "launchCmd": "ollama launch claude --model {model} -- {args}",
+      "cloudSuffix": ":cloud",
+      "allowedRoots": [],
+      "url": "http://localhost:11434",
+      "catalogUrl": "https://ollama.com",
+      "authToken": "ollama",
+      "cloud": {
+        "ollama": {
+          "enabled": false,
+          "cookiePath": null,
+          "costBands": [2, 5],
+          "valueMargin": 0.5
+        }
+      },
+      "usageTimeoutMs": 5000
+    },
+    "codex": {
+      "enabled": false,
+      "path": "codex",
+      "sandbox": "workspace-write",
+      "allowedRoots": []
+    }
   },
   "concurrency": 4,
   "timeoutMs": 3600000,

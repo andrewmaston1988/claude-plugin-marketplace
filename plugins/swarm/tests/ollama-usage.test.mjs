@@ -271,6 +271,12 @@ test("getUsage: 8b — a successful live fetch banks exactly one history line, s
     const banked = readSnapshots(usageHistoryPath({ SWARM_HOME: home }));
     equal(banked.length, 1, "one live fetch, one banked snapshot");
     deepEqual(banked[0], {
+      provider: "ollama",
+      runner: "claude",
+      unit: "meter-points",
+      source: "ollama-settings",
+      classification: "unpriced",
+      asOf: new Date(FIFTY).toISOString(),
       fetchedAt: FIFTY,
       weeklyPctUsed: 83.8,
       weeklyResetsAt: "2026-09-12T08:00:00.377418+00:00",
@@ -358,14 +364,14 @@ test("initConfig: P7 — materialises provider.cloud.ollama DISABLED, real leave
   try {
     const configPath = join(home, "config.json");
     const { added } = initConfig(configPath, { SWARM_HOME: home });
-    ok(added.includes("provider.cloud.ollama.enabled"));
-    ok(added.includes("provider.cloud.ollama.cookiePath"));
-    ok(added.includes("provider.usageTimeoutMs"));
+    ok(added.includes("providers.ollama.cloud.ollama.enabled"));
+    ok(added.includes("providers.ollama.cloud.ollama.cookiePath"));
+    ok(added.includes("providers.ollama.usageTimeoutMs"));
 
     const written = JSON.parse(readFileSync(configPath, "utf8"));
-    equal(written.provider.cloud.ollama.enabled, false);
-    equal(written.provider.cloud.ollama.cookiePath, null);
-    equal(written.provider.usageTimeoutMs, 5000);
+    equal(written.providers.ollama.cloud.ollama.enabled, false);
+    equal(written.providers.ollama.cloud.ollama.cookiePath, null);
+    equal(written.providers.ollama.usageTimeoutMs, 5000);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

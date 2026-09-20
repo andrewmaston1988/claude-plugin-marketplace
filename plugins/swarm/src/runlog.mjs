@@ -5,7 +5,7 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { DIGEST_ID } from "./digest.mjs";
-import { readHeartbeat } from "./results.mjs";
+import { readHeartbeat, inferStoredIdentity } from "./results.mjs";
 
 const CLONE_RE = /^(.+)\[(\d+)\]$/;
 
@@ -48,6 +48,17 @@ export function readRunLog(content, { now = Date.now() } = {}) {
   const lastEvent = new Map();
   const clones = new Map();   // parent -> count
   const children = new Map(); // node -> [ids]
+  const rosterTask = (task) => {
+    const row = typeof task === "string" ? { id: task, model: "?" } : { ...task };
+    const inferred = inferStoredIdentity(row.model);
+    return {
+      ...row,
+      ...(!row.provider && inferred.provider ? { provider: inferred.provider } : {}),
+      ...(!row.runner && inferred.runner ? { runner: inferred.runner } : {}),
+      ...(!row.provider && inferred.provider ? { providerInferred: true } : {}),
+      ...(!row.runner && inferred.runner ? { runnerInferred: true } : {}),
+    };
+  };
   for (const line of content.split("\n")) {
     if (!line.trim()) continue;
     let entry;
@@ -59,7 +70,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
     if (!entry || typeof entry !== "object") continue; // `null` parses; it is not an event
     if (entry.event === "run-start") {
       // pre-token logs recorded plain id strings
-      roster = (entry.tasks || []).map((t) => (typeof t === "string" ? { id: t, model: "?" } : t));
+      roster = (entry.tasks || []).map(rosterTask);
       startedMs = Date.parse(entry.ts) || now;
       enginePid = Number.isInteger(entry.pid) ? entry.pid : null;
       state.clear(); tokens.clear(); durations.clear(); runningSince.clear();
@@ -68,7 +79,11 @@ export function readRunLog(content, { now = Date.now() } = {}) {
     }
     if (entry.event === "expand") {
       // forEach clones join the roster directly under their parent
-      const rows = Array.from({ length: entry.clones || 0 }, (_, i) => ({ id: `${entry.id}[${i}]`, model: entry.model || "?" }));
+      const rows = Array.from({ length: entry.clones || 0 }, (_, i) => ({
+        id: `${entry.id}[${i}]`, model: entry.model || "?",
+        ...(entry.provider ? { provider: entry.provider } : {}),
+        ...(entry.runner ? { runner: entry.runner } : {}),
+      }));
       const idx = roster.findIndex((r) => r.id === entry.id);
       roster.splice(idx < 0 ? roster.length : idx + 1, 0, ...rows);
       clones.set(entry.id, entry.clones || 0);
@@ -76,13 +91,25 @@ export function readRunLog(content, { now = Date.now() } = {}) {
     }
     if (entry.event === "expand-manifest") {
       // spliced child tasks join under their node, each with its own model
-      const rows = (entry.children || []).map((c) => ({ id: c.id, model: c.model || "?" }));
+      const rows = (entry.children || []).map((c) => ({
+        id: c.id, model: c.model || "?",
+        ...(c.provider ? { provider: c.provider } : {}),
+        ...(c.runner ? { runner: c.runner } : {}),
+      }));
       const idx = roster.findIndex((r) => r.id === entry.id);
       roster.splice(idx < 0 ? roster.length : idx + 1, 0, ...rows);
       children.set(entry.id, rows.map((r) => r.id));
       continue;
     }
     if (!entry.id) continue;
+    const row = roster.find((item) => item.id === entry.id);
+    if (row) {
+      if (entry.provider) { row.provider = entry.provider; delete row.providerInferred; }
+      if (entry.runner) { row.runner = entry.runner; delete row.runnerInferred; }
+      const inferred = inferStoredIdentity(row.model);
+      if (!row.provider && inferred.provider) { row.provider = inferred.provider; row.providerInferred = true; }
+      if (!row.runner && inferred.runner) { row.runner = inferred.runner; row.runnerInferred = true; }
+    }
     lastEvent.set(entry.id, Date.parse(entry.ts) || now);
     if (entry.event === "tokens") {
       tokens.set(entry.id, entry.tokens);
@@ -95,11 +122,14 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       if (entry.tokens) tokens.set(entry.id, entry.tokens);
     }
   }
-  const tasks = roster.map(({ id, model }) => {
+  const tasks = roster.map(({ id, model, provider, runner, providerInferred, runnerInferred }) => {
     const st = state.get(id) || "pending";
     const last = lastEvent.get(id);
     return {
       id, model,
+      ...(provider ? { provider } : {}), ...(runner ? { runner } : {}),
+      ...(providerInferred ? { providerInferred: true } : {}),
+      ...(runnerInferred ? { runnerInferred: true } : {}),
       state: st,
       durationMs: durations.get(id),
       startedMs: runningSince.get(id),
@@ -164,7 +194,7 @@ export function topology(tasks, manifest) {
   const rows = tasks.map((t) => ({ ...t }));
   const present = new Set(rows.map((r) => r.id));
   for (const [id, d] of defs) {
-    if (!present.has(id)) rows.push({ id, model: d.model || "", state: "pending", after: undefined });
+    if (!present.has(id)) rows.push({ id, model: d.model || "", ...(d.provider ? { provider: d.provider } : {}), ...(d.runner ? { runner: d.runner } : {}), state: "pending", after: undefined });
   }
   const kindOf = (d) => (d.forEach ? "forEach" : d.child ? "manifest" : d.compute || d.integrate || !d.model ? "agentless" : "leaf");
   for (const r of rows) {

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { equal, deepEqual } from "node:assert/strict";
 import {
   createStreamParser, createUsageAccumulator, describeToolUse,
-  usageTokens, addTokens, tokenTotal, pickFinalTokens, emptyTokens,
+  usageTokens, addTokens, tokenTotal, pickFinalTokens, emptyTokens, createRunnerParser,
 } from "../src/stream.mjs";
 
 const asst = (id, usage) => JSON.stringify({ type: "assistant", message: { id, role: "assistant", usage } });
@@ -125,4 +125,28 @@ test("pickFinalTokens: result-event usage is authoritative when present", () => 
   // absent or empty usage falls back to the live accumulation
   deepEqual(pickFinalTokens(undefined, accumulated), accumulated);
   deepEqual(pickFinalTokens({}, accumulated), accumulated);
+});
+
+test("runner parser: a re-emitted Claude message id does not double-count its usage", () => {
+  // RED (sum instead of accumulate): the parser summed every onUsage call, so a message
+  // re-emitted as its content blocks complete was counted once per emission. The inflated
+  // total reached summary.json and the cost/estimate corpus whenever the run had no result
+  // event to override it.
+  const parser = createRunnerParser("claude");
+  const assistant = (id, input, output) =>
+    JSON.stringify({ type: "assistant", message: { id, usage: { input_tokens: input, output_tokens: output } } }) + "\n";
+  parser.feed(assistant("m1", 100, 50));
+  parser.feed(assistant("m1", 100, 50)); // same id re-emitted: replaces, never adds
+  parser.feed(assistant("m2", 20, 3));
+  parser.end();
+  deepEqual(parser.result().usage, { input: 120, output: 53, cacheCreation: 0, cacheRead: 0 });
+});
+
+test("runner parser registry: Codex raw JSONL without a terminal event is not a success", () => {
+  const parser = createRunnerParser("codex");
+  parser.feed('{"type":"thread.started","thread_id":"t-1"}\n{"type":"response.output_text.delta","delta":"partial"}\n');
+  parser.end();
+  equal(parser.result().terminal, true);
+  equal(parser.result().error.code, "missing_terminal");
+  equal(parser.result().output, "partial");
 });

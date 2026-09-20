@@ -48,24 +48,24 @@ to the plugin root, then run the engine under `scripts/` with the single argumen
 Never glob the plugin cache and never sort sha directories by name — that is the exact bug this
 whole command exists to remove, and it silently picks a stale build.
 
-### Stage 1 — where alternative models may run (`provider.allowedRoots`)
+### Stage 1 — where alternative models may run (`providers.<name>.allowedRoots`)
 
-Swarm can dispatch leaves to non-Anthropic models (`:cloud` tier via ollama). Code under a
-listed root may be sent to that provider; anything else fails validation, because the
-operator's data agreement may cover Anthropic only. Empty means Claude-only — swarm still
-works, the cheap tier never arms. Ask which roots, if any, are cleared to leave. Do not
-suggest a root; the operator names it.
+Swarm can dispatch leaves to non-Anthropic models through enabled provider adapters. Code
+under a provider's listed root may be sent to that provider; anything else fails validation,
+because the operator's data agreement may cover Anthropic only. Empty means Claude-only —
+swarm still works, the alternative tier never arms. Ask which roots, if any, are cleared to
+leave. Do not suggest a root; the operator names it.
 
-### Stage 1b — enable a cloud provider (`provider.cloud.*`)
+### Stage 1b — enable provider capabilities (`providers.<name>.*`)
 
 `:cloud` leaves (ollama) have no availability signal unless swarm can read the account's own
 usage meter — otherwise a dead weekly allowance looks identical to a healthy one until a
-dispatch wastes it. Today there is exactly one cloud provider, ollama; say so, don't imply
-others exist. One `AskUserQuestion`, `multiSelect: true`, options built from the known
-providers (`ollama`). **Leaving it unticked is a real, common answer** — swarm still works,
-Claude-only, with no meter to maintain.
+dispatch wastes it. The shipped cloud meter is Ollama; other providers may expose their own
+usage capability, with any live read explicitly opted in. One `AskUserQuestion`,
+`multiSelect: true`, options built from the known providers. **Leaving it unticked is a real,
+common answer** — swarm still works, Claude-only, with no meter to maintain.
 
-For each ticked provider (ollama today):
+For Ollama's meter:
 1. Explain how to get the token: browser devtools → Network tab → any request to
    `ollama.com` → copy the `Cookie` request header. The cookie is a live credential: it
    expires when the browser session does, and expiry is what the meter reports as
@@ -78,10 +78,13 @@ For each ticked provider (ollama today):
    it worked.
 3. **Never ask the operator to paste the token into this conversation** for you to write into
    a file — `--cookie` is the only path, so the credential never enters the transcript.
-4. Set `provider.cloud.ollama.enabled: true` in the config with the `Edit` tool. The meter is
+4. Set `providers.ollama.cloud.ollama.enabled: true` in the config with the `Edit` tool. The meter is
    inert until this flag is on, even once a cookie is saved — an operator who ticks the
    provider but whose `--cookie` run fails should still see it correctly report "no reading
-   yet" rather than silently doing nothing.
+    yet" rather than silently doing nothing.
+
+Codex is opt-in under `providers.codex.enabled` and uses its configured app-server command;
+its usage reader is explicit rather than a background preflight.
 
 ### Stage 2 — standing consent (`swarm.always`)
 
@@ -199,19 +202,20 @@ from the appendix. If no, close.
 
 | Key | Default | What it does |
 |---|---|---|
-| `provider.allowedRoots` | `[]` | Stage 1. |
-| `provider.url` | `http://localhost:11434` | Anthropic-format endpoint the leaves talk to; pinged before any run with a `:cloud` leaf, unreachable = refuse. |
-| `provider.mode` | `env` | `env` = plain `claude -p` with `ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` / `ANTHROPIC_MODEL` injected; `launch` = shell out through `launchCmd`. |
-| `provider.launchCmd` | `ollama launch claude --model {model} -- {args}` | Only in `launch` mode. |
-| `provider.discoverCmd` | `ollama launch claude` | Scraped by `models` to find what is launchable. |
-| `provider.catalogUrl` | `https://ollama.com` | Where `models` reads the cloud catalogue and recommendations. |
-| `provider.cloudSuffix` | `:cloud` | Which model names count as cloud tier. |
-| `provider.authToken` | `ollama` | Sent as the API key in `env` mode. Placeholder, not a secret. |
-| `provider.name` | `ollama` | Label only. |
-| `provider.cloud.ollama.enabled` | `false` | Stage 1b. Gates the whole meter: off, `models`/`validate`/`modeFor` never read the cache and the feature is invisible. |
-| `provider.cloud.ollama.cookiePath` | `null` | Stage 1b. Where `ollama-usage --cookie` writes the browser token; falls back to `~/.swarm/ollama-cookie.json` when unset. Never `config.json` itself. |
-| `provider.cloud.ollama.settingsUrl` | `https://ollama.com/settings` | Where the usage fetch reads the meter; a test hook like `quotaUsageUrl`. |
-| `provider.usageTimeoutMs` | `5000` | Bound on the usage fetch; a hung ollama.com times out into the cached reading (banner: `/!\ Fetch Timed Out`) instead of wedging `validate`. |
+| `providers.<name>.allowedRoots` | `[]` | Stage 1; roots are provider-specific. |
+| `providers.ollama.url` | `http://localhost:11434` | Ollama endpoint the `:cloud` leaves talk to; pinged before an Ollama run, unreachable = refuse. |
+| `providers.ollama.mode` | `env` | `env` = plain `claude -p` with the Ollama endpoint and model injected; `launch` = shell out through `launchCmd`. |
+| `providers.ollama.launchCmd` | `ollama launch claude --model {model} -- {args}` | Only in `launch` mode. |
+| `providers.ollama.discoverCmd` | `ollama launch claude` | Scraped by the Ollama adapter as a last-resort discovery source. |
+| `providers.ollama.catalogUrl` | `https://ollama.com` | Where the Ollama adapter reads the cloud catalogue and recommendations. |
+| `providers.ollama.cloudSuffix` | `:cloud` | Which Ollama model names count as cloud tier. |
+| `providers.ollama.authToken` | `ollama` | Sent as the API key in `env` mode. Placeholder, not a secret. |
+| `providers.ollama.name` | `ollama` | Label only. |
+| `providers.ollama.cloud.ollama.enabled` | `false` | Stage 1b. Gates the whole meter: off, `models`/`validate`/`modeFor` never read the cache and the feature is invisible. |
+| `providers.ollama.cloud.ollama.cookiePath` | `null` | Stage 1b. Where `ollama-usage --cookie` writes the browser token; falls back to `~/.swarm/ollama-cookie.json` when unset. Never `config.json` itself. |
+| `providers.ollama.cloud.ollama.settingsUrl` | `https://ollama.com/settings` | Where the usage fetch reads the meter; a test hook like `quotaUsageUrl`. |
+| `providers.ollama.usageTimeoutMs` | `5000` | Bound on the usage fetch; a hung ollama.com times out into the cached reading (banner: `/!\ Fetch Timed Out`) instead of wedging `validate`. |
+| `providers.codex.enabled` / `path` / `sandbox` | `false` / `codex` / `workspace-write` | Opt-in Codex app-server provider; model discovery uses `model/list`, and live usage is explicit. |
 | `concurrency` | `4` | Ceiling on leaves alive at once (each is a full headless `claude` session). A manifest may run narrower, never wider — asking for more fails `validate`. A rate-limited leaf frees its slot while it backs off. |
 | `timeoutMs` | `3600000` | Per-leaf wall clock; past it the leaf is `timeout`, slot freed. |
 | `disable1mContext` | `true` | Stage 6b. `false` gives every Claude leaf the 1M context window by default (a wall-clock lever, ~+45% cost, same quality); a task's own `settings` always wins. |

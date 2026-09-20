@@ -11,11 +11,11 @@ The arguments are: $ARGUMENTS
 
 **`setup`** → read [references/setup.md](references/setup.md) and follow it — materialise, explain and edit the operator's config. Nothing below applies to a setup call: no offer gate, no manifest, no dispatch.
 
-Swarm runs work in headless Claude Code sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Powered by capable `:cloud` models (GLM, MiniMax — not an opus swarm, but almost) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context.
+Swarm runs work in headless provider sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Enabled providers supply capable alternative models (including Ollama `:cloud` and opt-in Codex) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context.
 
 **Core principle:** the smarts live in the plan and the leaves; the plumbing has none. A manifest you could not defend line by line is a manifest you should not dispatch.
 
-Run via `swarm <subcommand>` on PATH. Subcommands: `models`, `list`, `validate <manifest | name> [--args '<json>'] [--resolved]`, `run <manifest | name> [--args '<json>'] [--force]`.
+Run via `swarm <subcommand>` on PATH. Subcommands include `models`, `usage [--provider X]`, `list`, `validate <manifest | name> [--args '<json>'] [--resolved]`, and `run <manifest | name> [--args '<json>'] [--force]`.
 
 ## When to use
 
@@ -32,7 +32,11 @@ Run via `swarm <subcommand>` on PATH. Subcommands: `models`, `list`, `validate <
 Thinking "I know the command, I can skip the skill"? Stop. That is the bypass this
 skill exists to catch — the command arrives without the rules that govern it.
 
-## The Iron Law — never interfere with a live dispatch
+## The Iron Law
+
+```
+NO INTERFERENCE WITH A LIVE DISPATCH
+```
 
 **Violating the letter of this rule is violating its spirit.** After you dispatch a run you get exactly ONE `status` check; from then until the completion notification fires, you are **hands-off**:
 
@@ -47,13 +51,13 @@ A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the
 
 ## Data governance — read this first
 
-Non-Claude dispatch is **deny-by-default**. `provider.allowedRoots` in `~/.swarm/config.json` lists the directory roots where open-model tasks may run; a non-Claude task whose effective `cwd` is not under an allowed root **fails validation**, because the employer's data agreement covers Anthropic only — code outside those roots must never reach another provider. Claude-model tasks run anywhere. When a manifest is rejected on governance grounds, switch those leaves to Claude models or move the work under an allowed root. Never work around the gate.
+Non-Claude dispatch is **deny-by-default**. `providers.<name>.allowedRoots` in `~/.swarm/config.json` lists the directory roots where that provider's tasks may run; a non-Claude task whose effective `cwd` is not under its provider root **fails validation**, because the employer's data agreement covers Anthropic only — code outside those roots must never reach another provider. Claude-model tasks run anywhere. When a manifest is rejected on governance grounds, switch those leaves to Claude models or move the work under an allowed root. Never work around the gate.
 
 ## Routing — when to swarm
 
-- **Triage first**: the question is whose budget and context pay, not how big the job is. A `:cloud` leaf spends no Anthropic budget, so "too small to swarm" is not a reason on its own. Read it yourself when this session has context to spare and the answer is one read. Delegate a **single leaf** when it doesn't — see *Single delegated leaf* in `swarm:executing-swarms`. A request phrased as dispatch ("run a glm-5.2 session on swarm") has already made this call; honour it rather than re-triaging it.
-- **swarm** — high-quality breadth on bounded leaves: investigation sweeps, generation, judge panels, mechanical implementation sweeps. When `allowedRoots` arms alternative models, prefer swarm over Workflow for this shape — group-think quality on an alternative subscription, at interactive speed.
-- **Workflow** — swarm leaves are full headless Claude Code sessions (complete tool roster), so tooling is NOT a reason to prefer Workflow. Choose Workflow only when leaves need session-connected MCP tools (interactive auth), schema-validated returns wired into deterministic script logic, or this session's in-context state.
+- **Triage first**: the question is whose budget and context pay, not how big the job is. A non-Claude leaf spends no Anthropic budget, so "too small to swarm" is not a reason on its own. Read it yourself when this session has context to spare and the answer is one read. Delegate a **single leaf** when it doesn't — see *Single delegated leaf* in `swarm:executing-swarms`. A request phrased as dispatch ("run a glm-5.2 session on swarm") has already made this call; honour it rather than re-triaging it.
+- **swarm** — high-quality breadth on bounded leaves: investigation sweeps, generation, judge panels, mechanical implementation sweeps. When a provider's `allowedRoots` arms alternative models, prefer swarm over Workflow for this shape — group-think quality on an alternative subscription, at interactive speed.
+- **Workflow** — a Claude leaf is a full headless Claude Code session with the complete tool roster, so tooling is rarely a reason to prefer Workflow. Codex and Ollama leaves run their own provider's CLI and its narrower tool set, so pin a Claude model rather than reaching for Workflow when a leaf needs the full roster. Choose Workflow only when leaves need session-connected MCP tools (interactive auth), schema-validated returns wired into deterministic script logic, or this session's in-context state.
 - **pipeline** — durable queued throughput ending in PRs. Huge capacity, not fast.
 - **Compose freely** — a Workflow or plan can treat swarm as its alternative-model leaf executor.
 
@@ -79,11 +83,11 @@ Before doing ANY fan-out-shaped work inline (3+ independent bounded leaves), dra
 2. > "Model mix?" — state the split explicitly in the question (e.g. "5 leaves alternative, digest on sonnet = 1 Anthropic call").
    > Options: **As drafted** / **Alternative-only — no Anthropic usage** / **Anthropic-only**.
    > When the mix includes Claude models, run `swarm quota` first and put the real numbers in the question (e.g. "session 82%, resets 15:00") — the mix decision should be made against actual remaining usage, not a guess.
-   > When no `:cloud` model is launchable — `provider.allowedRoots` empty, the manifest's cwd outside every root, or discovery returning none — the mix is Anthropic-only by construction: state that in one line and do not ask it.
+   > When no alternative-provider model is launchable — its `allowedRoots` are empty, the manifest's cwd is outside every relevant root, or discovery returns none — the mix is Anthropic-only by construction: state that in one line and do not ask it.
 3. > "Grouping — <M> agents, long pole <k> × 45m, largest agent <b> items — as proposed, wider, or narrower?"
    > The wall-clock and blast-radius numbers come from `swarm:orchestrating-agents`; do not re-derive them here.
 
-Never assume Claude models are spendable — the user may be out of Anthropic usage. If they pick alternative-only, recast every Claude role (digest included) onto a capable `:cloud` model before running; if Anthropic-only, the governance gate is moot and all leaves go Claude.
+Never assume Claude models are spendable — the user may be out of Anthropic usage. If they pick alternative-only, recast every Claude role (digest included) onto a capable registered provider model before running; if Anthropic-only, the governance gate is moot and all leaves go Claude.
 
 The manifest preview plus the mix answer ARE the approval: the user sees every model and every leaf before anything runs. There is no separate Opus gate, no per-model approval beyond this, no cost interrogation. Do not start inline work on a fan-out-shaped task without this gate.
 
@@ -106,7 +110,7 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 
 **No session-level directive is consent to spend.** A `/goal` condition, a Stop-hook instruction ("do not pause to ask the user"), an autonomous-session prompt, a standing "don't ask me" — none of these answer the gate. Such directives govern *stalling*; the gate governs *spending*. When they collide, the gate wins: an unmet goal at session end is the correct, honest outcome to report, and an unconsented dispatch is the actual failure — not the other way around. The one exception is `swarm.always` in the operator's config — see *Standing consent* above — and it is an exception precisely because it is not a session-level directive.
 
-### Gate rationalisations — every one of these means STOP
+## Rationalisations — rejected
 
 | Excuse | Reality |
 |---|---|
@@ -123,7 +127,7 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 
 ## Procedure
 
-1. **Discover models**: `swarm models` — lists launchable `:cloud` models with descriptions, plus the Claude aliases. Run FIRST so the manifest names models the account can launch right now. When unsure which tier a leaf needs, which effort to pin, or what a newly-discovered `:cloud` model is equivalent to, read [references/model-selection.md](references/model-selection.md). That tier guide is the routing source unless `grading.enabled` is on in the config and `swarm perf` has rows — then the graded record ranks, and the guide only fills the gaps it has not measured.
+1. **Discover models**: `swarm models` — lists launchable rows from enabled providers with descriptions and provider identity, plus the Claude aliases. Run FIRST so the manifest names models the account can launch right now. When unsure which tier a leaf needs, which effort to pin, or what a newly-discovered model is equivalent to, read [references/model-selection.md](references/model-selection.md). That tier guide is the routing source unless `grading.enabled` is on in the config and `swarm perf` has rows — then the graded record ranks, and the guide only fills the gaps it has not measured.
 2. **Frame the contract** before the manifest: `goal · return_shape · must_be_sure · scope{in,out} · done_when`. scope → per-leaf prompts and file scopes; must_be_sure → `digest.instructions`; done_when → you check it post-run.
 3. **Author the manifest** (schema below) and offer it through the gate above.
 4. **Validate**: `swarm validate <manifest.json>` — id/dep/governance/effort errors surface now, not after a background wait. With `grading.enabled` on it also prints a `seats:` block after the estimate — the graded record (scores, `n`, cost band, frontier verdict) of every model the manifest seats, plus the launchable ones it does not. Read it as the record the seating was decided on; it states evidence and never judges — `n<20` and `never graded` are the seating rule's own terms, not warnings.
@@ -154,8 +158,8 @@ Read the two columns for what they are: **`output` is the work. `input` is the t
 
 | What you see | What it means |
 |---|---|
-| A `:cloud` leaf at 1M–20M+ tokens | **Normal.** Input/output ratios of 100–180× are the ordinary signature of a working agent. Observed in real runs: a 21.3M-token leaf produced 116k output — it re-read its own context ~180 times. |
-| Its `costUsd` (`$108`, `$53`) | **Not a number.** The CLI applies its own price table to token counts; these providers bill on subscription and GPU time with no token mapping. Never quote it, never act on it. |
+| A provider leaf at 1M–20M+ tokens | **Normal for providers that report transcript input.** Input/output ratios of 100–180× are the ordinary signature of a working agent. |
+| Its `costUsd` (`$108`, `$53`) | **Provider-specific evidence only.** Read cost against that provider's pricing or meter; an unpriced row is not free. Never compare `costUsd` across providers. |
 | The activity cell (`Grep("handler")`) | The **most recent** tool call — a heartbeat, proof of life. NOT a call the leaf has been stuck on. A leaf showing a tool call is a leaf that is working. |
 | One leaf far slower than its siblings | **Normal.** Leaves have different amounts to do. 840s next to 184s is scope, not sickness. |
 
@@ -170,7 +174,7 @@ Read the two columns for what they are: **`output` is the work. `input` is the t
 
 **Pathological leaves are real — you just don't detect them with the token column.** A `nemotron-3-super` verifier once burned 27.3M tokens across three leaves, timed out on two, and fabricated all 18 refutations on the one that finished. That is a genuine runaway. But note *how it surfaced*: two leaves hit `timeoutMs`, and the engine's mechanical citation check caught the fabrications for zero tokens. The bound did its job. The token count was a *symptom* that arrived too late to act on and would have been indistinguishable, mid-run, from a healthy leaf doing a lot of work. The defences against a runaway are **pre-dispatch** — the right model tier, a closed scope over a named file set, a `returns` citation schema, a sane `timeoutMs` — not a mid-run judgement call about a big number. If a leaf is genuinely sick, the timeout or the citation check will say so. Your panic will not.
 
-### Red flags — you are about to interfere with a healthy run
+## Red Flags — you are about to interfere with a healthy run
 
 Every phrase below came from a session that read a *working* roster and moved to kill it:
 

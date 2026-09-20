@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { deepEqual, equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
 import { join, resolve, isAbsolute, basename } from "node:path";
 import { tmpdir } from "node:os";
@@ -38,6 +38,44 @@ test("grade --init: one row per model leaf, Claude leaves included", () => {
     for (const row of batch.rows) {
       for (const a of ASPECTS) equal(row.grades[a], null, `${row.leaf}.${a}`);
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("grade skeletons and stored rows preserve provider identity", () => {
+  const dir = tmp();
+  try {
+    const run = fakeRun(dir);
+    writeFileSync(join(run, "results", "same-ollama.json"), JSON.stringify({
+      id: "same-ollama", provider: "ollama", runner: "claude", model: "same-model",
+      ok: true, exit: 0, durationMs: 1000, output: "…",
+    }));
+    writeFileSync(join(run, "results", "same-codex.json"), JSON.stringify({
+      id: "same-codex", provider: "codex", runner: "codex", model: "same-model",
+      ok: true, exit: 0, durationMs: 1000, output: "…",
+    }));
+    const home = join(dir, "home");
+    const init = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(init.status, 0, init.stderr);
+    const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
+    const same = batch.rows.filter((r) => r.model === "same-model");
+    equal(same.length, 2);
+    equal(new Set(same.map((r) => r.provider)).size, 2);
+
+    const filled = {
+      resultsDir: run,
+      session: "abc123",
+      rows: same.map((r) => ({
+        leaf: r.leaf, provider: r.provider, domain: "node", outcome: "completed", note: "",
+        grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 },
+      })),
+    };
+    writeFileSync(join(run, "grades-provider.json"), JSON.stringify(filled));
+    const landed = runCli(["grade", "--file", join(run, "grades-provider.json")], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(landed.status, 0, landed.stderr);
+    const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    deepEqual(rows.filter((r) => r.model === "same-model").map((r) => r.provider).sort(), ["codex", "ollama"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

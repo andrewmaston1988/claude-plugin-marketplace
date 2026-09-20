@@ -14,6 +14,17 @@ export const SETTINGS_URL = "https://ollama.com/settings"; // like quota.mjs's D
 
 const USAGE_CACHE_FILENAME = "ollama-usage.json";
 const DEFAULT_TIMEOUT_MS = 5000;
+const METER_POINTS_UNIT = "meter-points";
+
+// Exported: the CLI read the legacy shape only, so a canonical-config operator saw
+// ollama reported as disabled.
+export function ollamaCloudConfig(cfg = {}) {
+  return cfg?.providers?.ollama?.cloud?.ollama || cfg?.provider?.cloud?.ollama || {};
+}
+
+function ollamaProviderConfig(cfg = {}) {
+  return cfg?.providers?.ollama || cfg?.provider || {};
+}
 
 export function usageCachePath(env = process.env) {
   return join(swarmHome(env), USAGE_CACHE_FILENAME);
@@ -256,17 +267,19 @@ export async function getUsage(cfg, { env = process.env, _fetch = fetch, _now = 
 }
 
 async function computeUsage(cfg, { env, _fetch, _now, gate }) {
-  if (gate && cfg?.provider?.cloud?.ollama?.enabled !== true) return { state: "unknown" };
+  const cloud = ollamaCloudConfig(cfg);
+  const provider = ollamaProviderConfig(cfg);
+  if (gate && cloud.enabled !== true) return { state: "unknown" };
 
-  const cookiePath = cfg?.provider?.cloud?.ollama?.cookiePath || join(swarmHome(env), "ollama-cookie.json");
+  const cookiePath = cloud.cookiePath || join(swarmHome(env), "ollama-cookie.json");
   const cachePath = usageCachePath(env);
   const fetched = await fetchUsage({
     cookie: loadCookie(cookiePath),
     cachePath,
-    url: cfg?.provider?.cloud?.ollama?.settingsUrl || SETTINGS_URL,
+    url: cloud.settingsUrl || SETTINGS_URL,
     _fetch,
     _now,
-    timeoutMs: cfg?.provider?.usageTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+    timeoutMs: provider.usageTimeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
 
   // One classifier for both provenances: the just-written cache is read back
@@ -280,6 +293,12 @@ async function computeUsage(cfg, { env, _fetch, _now, gate }) {
     try {
       if (fetched.weeklyModels?.length) {
         appendSnapshot({
+          provider: "ollama",
+          runner: "claude",
+          unit: METER_POINTS_UNIT,
+          source: "ollama-settings",
+          classification: "unpriced",
+          asOf: new Date(fetched.fetchedAt).toISOString(),
           fetchedAt: fetched.fetchedAt,
           weeklyPctUsed: fetched.weeklyPctUsed,
           weeklyResetsAt: fetched.weeklyResetsAt,
@@ -321,7 +340,8 @@ async function computeUsage(cfg, { env, _fetch, _now, gate }) {
 // hook cannot fetch, so it reports what the last fetching command stored.
 // Never throws. Absent config => absent feature.
 export function usageFromCache(cfg, env = process.env) {
-  if (cfg?.provider?.cloud?.ollama?.enabled !== true) return { state: "unknown" };
+  const cloud = ollamaCloudConfig(cfg);
+  if (cloud.enabled !== true) return { state: "unknown" };
 
   let text;
   try {
@@ -342,6 +362,6 @@ export function usageFromCache(cfg, env = process.env) {
     provenance: "cached",
     reason: cached.lastError ?? null,
     lastSeen: cached.fetchedAt ?? null,
-    cookiePath: cfg?.provider?.cloud?.ollama?.cookiePath || join(swarmHome(env), "ollama-cookie.json"),
+    cookiePath: cloud.cookiePath || join(swarmHome(env), "ollama-cookie.json"),
   };
 }

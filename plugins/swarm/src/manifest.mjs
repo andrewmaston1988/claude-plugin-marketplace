@@ -1,9 +1,9 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { spawnSync as nodeSpawnSync } from "node:child_process";
-import { resolve, join, basename, dirname, sep } from "node:path";
+import { resolve, join, basename, dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
-import { isClaudeModel, isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
+import { isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
 import { buildDispatch, toSpawnable, windowsCommandLineLength, runnerOf } from "./dispatch.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
@@ -11,6 +11,11 @@ import { provenanceBanner, formatResetTime } from "./usage.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
 import { validateSchemaShape } from "./schema.mjs";
 import { TEMPLATE_RE } from "./coverage.mjs";
+import { providerConfig } from "./providers.mjs";
+import { defaultProviderRegistry } from "./default-providers.mjs";
+import { isUnderRoot } from "./roots.mjs";
+
+export { isUnderRoot } from "./roots.mjs";
 
 export class ValidationError extends Error {
   constructor(errors) {
@@ -42,11 +47,13 @@ export const FOREACH_ITEM_MAX = 4000;
 // The isolation object's own allowlist — KNOWN_TASK_KEYS only gates top-level keys.
 const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch", "from"]);
 const KNOWN_TASK_KEYS = new Set([
-  "id", "prompt", "model", "fallbackModel", "effort", "allowedTools", "cwd",
+  "id", "prompt", "model", "provider", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
   "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
   "mustRead",
 ]);
+
+const PROVIDERS = defaultProviderRegistry();
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
 const MANIFEST_BANNED_KEYS = [
@@ -67,19 +74,6 @@ export function hasWriteTools(allowedTools) {
     .map((t) => t.trim().toLowerCase().replace(/\(.*\)$/, ""))
     .filter(Boolean)
     .some((t) => WRITE_TOOLS.has(t));
-}
-
-function normalizeForCompare(p) {
-  let n = resolve(p).replace(/[\\/]+/g, sep);
-  if (n.length > 1 && (n.endsWith("\\") || n.endsWith("/"))) n = n.slice(0, -1);
-  return process.platform === "win32" ? n.toLowerCase() : n;
-}
-
-// True when `dir` is `root` or lives underneath it (path-boundary aware).
-export function isUnderRoot(dir, root) {
-  const d = normalizeForCompare(dir);
-  const r = normalizeForCompare(root);
-  return d === r || d.startsWith(r + sep);
 }
 
 function namesEqual(a, b) {
@@ -321,6 +315,9 @@ function validateTaskShapes(rawTasks, errors, label) {
       if (!t.prompt || typeof t.prompt !== "string") errors.push(`${l}: prompt is required`);
       if (!t.model || typeof t.model !== "string") errors.push(`${l}: model is required`);
     }
+    if (t.provider !== undefined && (typeof t.provider !== "string" || !/^[a-z][a-z0-9-]*$/.test(t.provider))) {
+      errors.push(`${l}: provider must be a canonical lowercase identifier (e.g. \"codex\")`);
+    }
     if (t.isolation !== undefined) {
       const iso = t.isolation;
       const named = iso && typeof iso === "object" && !Array.isArray(iso);
@@ -439,7 +436,16 @@ function checkCommandLineLengths(tasks, cfg, io, errors, label) {
     // validateTaskShapes — measuring it here would dispatch garbage argv.
     if (typeof t.model !== "string" || !t.model || typeof t.prompt !== "string") continue;
     const prompt = measurablePrompt(t.prompt, cfg);
-    const { argv } = buildDispatch(t, prompt, cfg);
+    let dispatch;
+    try {
+      dispatch = buildDispatch(t, prompt, cfg);
+    } catch {
+      // Provider identity, enabled-state, governance, and task-policy errors
+      // are reported by normalization. They must not escape as an unlabelled
+      // dispatch exception while the validator is collecting all diagnostics.
+      continue;
+    }
+    const { argv } = dispatch;
     const { cmd, args } = toSpawnable(argv, { _platform: io.platform, _cache: resolveCache });
     const len = windowsCommandLineLength([cmd, ...args]);
     if (len > WIN_CMDLINE_MAX) {
@@ -867,14 +873,15 @@ function checkDenylist(model, l, cfg, errors) {
   }
 }
 
-function checkGovernance(model, effCwd, l, cfg, errors) {
-  if (isClaudeModel(model)) return;
-  const allowedRoots = cfg?.provider?.allowedRoots || [];
+function checkGovernance(provider, model, effCwd, l, cfg, errors) {
+  if (provider === "claude") return;
+  const allowedRoots = providerConfig(cfg, provider).allowedRoots || [];
+  const rootLabel = cfg?.providers?.[provider] ? `providers.${provider}.allowedRoots` : "provider.allowedRoots";
   if (!allowedRoots.some((root) => isUnderRoot(effCwd, root))) {
     errors.push(
-      `${l}: model '${model}' is not a Claude model and its cwd '${effCwd}' is not under any ` +
-      `provider.allowedRoots entry — blocked by data governance policy (only Anthropic is covered ` +
-      `by the data agreement). Configure provider.allowedRoots in ~/.swarm/config.json to permit open-model dispatch there.`
+      `${l}: provider '${provider}' model '${model}' and its cwd '${effCwd}' is not under any ` +
+      `${rootLabel} entry — blocked by data governance policy (only Anthropic is covered ` +
+      `by the data agreement). Configure ${rootLabel} in ~/.swarm/config.json to permit this provider there.`
     );
   }
 }
@@ -887,8 +894,8 @@ function checkGovernance(model, effCwd, l, cfg, errors) {
 // non-live reading (cached, none) WARNS with the banner text: the figure
 // still shows, but no reader mistakes it for a fetch that just happened.
 // Nothing on `unknown` without provenance (the provider is off).
-function checkHeadroom(model, l, headroom, errors, warnings) {
-  if (isClaudeModel(model)) return;
+function checkHeadroom(provider, model, l, headroom, errors, warnings) {
+  if (provider !== "ollama") return;
   if (headroom?.state === "exhausted" && headroom?.provenance === "live") {
     const resets = formatResetTime(headroom.resetsAt) ?? headroom.resetsAt;
     errors.push(
@@ -905,8 +912,20 @@ function checkHeadroom(model, l, headroom, errors, warnings) {
   }
 }
 
-function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings, io = defaultManifestIo(), probedGuards = new Set() }) {
-  const governanceCheck = (model, effCwd, l) => checkGovernance(model, effCwd, l, cfg, errors);
+function resolveProvider(task, cfg, cache, l, errors, providerRegistry = PROVIDERS) {
+  try {
+    const identity = providerRegistry.resolve(task, { cache, config: cfg });
+    const adapter = providerRegistry.get(identity.provider);
+    const problems = adapter.validateTask({ ...task, ...identity }, { config: cfg });
+    for (const problem of problems || []) errors.push(`${l}: ${problem}`);
+    return identity;
+  } catch (e) {
+    errors.push(`${l}: ${e.message}`);
+    return { provider: task.provider || "ollama", model: task.model };
+  }
+}
+
+function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings, cache = [], io = defaultManifestIo(), probedGuards = new Set(), providerRegistry = PROVIDERS }) {
 
   return rawTasks.map((t) => {
     const l = label(t);
@@ -916,17 +935,26 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     const originalCwd = t.cwd ? resolve(cwd, t.cwd) : cwd;
     // compute/manifest nodes spawn nothing themselves and no code leaves the
     // machine — no governance, no write-implies-isolation.
+    let provider;
+    let fallbackProvider;
     if (!isCompute && !isManifest && !isIntegrate) {
-      governanceCheck(t.model, originalCwd, l);
+      const primary = resolveProvider({ ...t }, cfg, cache, l, errors, providerRegistry);
+      provider = primary.provider;
+      checkGovernance(provider, t.model, originalCwd, l, cfg, errors);
       checkDenylist(t.model, l, cfg, errors);
-      checkHeadroom(t.model, l, headroom, errors, warnings);
+      checkHeadroom(provider, t.model, l, headroom, errors, warnings);
       if (t.fallbackModel !== undefined) {
         if (typeof t.fallbackModel !== "string" || !t.fallbackModel) {
           errors.push(`${l}: fallbackModel must be a model name string`);
         } else {
-          // the fallback is a real dispatch target — same governance as the primary
-          governanceCheck(t.fallbackModel, originalCwd, `${l} fallback`);
+          // The fallback is a real dispatch target — resolve its provider
+          // independently; a Claude primary must not force a Codex/Ollama fallback.
+          const { provider: _primaryProvider, ...fallbackTask } = t;
+          const fallback = resolveProvider({ ...fallbackTask, model: t.fallbackModel }, cfg, cache, `${l} fallback`, errors, providerRegistry);
+          fallbackProvider = fallback.provider;
+          checkGovernance(fallbackProvider, t.fallbackModel, originalCwd, `${l} fallback`, cfg, errors);
           checkDenylist(t.fallbackModel, `${l} fallback`, cfg, errors);
+          checkHeadroom(fallbackProvider, t.fallbackModel, `${l} fallback`, headroom, errors, warnings);
         }
       }
     }
@@ -938,6 +966,8 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       const resolved = guardFor(originalCwd, cfg, io);
       if (t.leafGuard === false) {
         if (resolved) io.stdout(`leaf guard: off (task opt-out)`);
+      } else if (resolved && provider === "codex") {
+        errors.push(`${l}: provider 'codex' cannot run a configured leaf guard; set leafGuard: false for this task`);
       } else if (resolved) {
         guard = resolved;
         probeGuard(guard, originalCwd, l, io, probedGuards, errors);
@@ -973,7 +1003,9 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       // nodes run inline in the engine (the scheduler excludes them from
       // preflights; a manifest node expands into its child's tasks).
       model: isManifest ? "manifest" : isCompute ? "compute" : isIntegrate ? "integrate" : t.model,
+      ...(!isCompute && !isManifest && !isIntegrate && { provider }),
       fallbackModel: !isCompute && !isManifest && typeof t.fallbackModel === "string" ? t.fallbackModel : undefined,
+      ...(!isCompute && !isManifest && !isIntegrate && fallbackProvider && { fallbackProvider }),
       effort: isCompute || isManifest ? undefined : t.effort,
       allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || DEFAULT_TOOLS,
       cwd: effCwd,
@@ -1006,7 +1038,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
 // into the run by the scheduler. The child inherits the parent run's cwd and
 // resultsDir; it may not steer the run itself.
 
-function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, io, probedGuards } = {}) {
+function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, cache = [], io, probedGuards, providerRegistry = PROVIDERS } = {}) {
   const nodeLabel = `task '${node.id}'`;
   // A registry-resolved parent references its children relative to itself — a
   // saved manifest must work from any cwd. Plain-path parents keep cwd
@@ -1047,7 +1079,8 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`${nodeLabel}: dependency cycle in child manifest: ${cycle.join(" -> ")}`);
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, label, io, probedGuards,
+    cwd, resultsDir, cfg, errors, label, cache, io, probedGuards,
+    providerRegistry,
     defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, io, errors, label);
@@ -1061,11 +1094,12 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
 // --args object, substituted as {{args.<key>}} before validation),
 // `fromRegistry` (child manifest paths then resolve against the parent's dir),
 // `ref` (the pre-resolution registry name, recorded on the plan for the
-// run dir snapshot), and `headroom` (an ALREADY-COMPUTED ollama reading —
+// run dir snapshot), `cache` (the provider-qualified model roster used for
+// identity resolution), and `headroom` (an ALREADY-COMPUTED ollama reading —
 // `await getUsage(cfg)` — so callers that can fetch inject it and tests can
 // inject a fake; the default is the cache-only usageFromCache, which never
 // touches the network, so validation stays offline unless the caller fetches).
-export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, io, headroom = usageFromCache(cfg) } = {}) {
+export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, cache = [], io, headroom = usageFromCache(cfg), providerRegistry = PROVIDERS } = {}) {
   const errors = [];
   const warnings = [];
   const resolvedIo = { ...defaultManifestIo(), ...io };
@@ -1145,7 +1179,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const childPlans = new Map();
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
-      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, io: resolvedIo, probedGuards });
+      const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, cache, io: resolvedIo, probedGuards, providerRegistry });
       if (child) childPlans.set(t.id, child);
     }
   }
@@ -1159,7 +1193,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   }
 
   const tasks = normalizeTasks(raw.tasks, {
-    cwd, resultsDir, cfg, errors, label, childPlans, headroom, warnings, io: resolvedIo, probedGuards,
+    cwd, resultsDir, cfg, errors, label, childPlans, cache, headroom, warnings, io: resolvedIo, probedGuards, providerRegistry,
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
@@ -1170,14 +1204,20 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     if (!raw.digest || typeof raw.digest !== "object" || !raw.digest.model) {
       errors.push("digest block must be an object with a 'model'");
     } else {
-      checkGovernance(raw.digest.model, cwd, "digest", cfg, errors);
+      const digestIdentity = resolveProvider({
+        model: raw.digest.model,
+        ...(raw.digest.provider !== undefined && { provider: raw.digest.provider }),
+      }, cfg, cache, "digest", errors, providerRegistry);
+      checkGovernance(digestIdentity.provider, raw.digest.model, cwd, "digest", cfg, errors);
       checkDenylist(raw.digest.model, "digest", cfg, errors);
+      checkHeadroom(digestIdentity.provider, raw.digest.model, "digest", headroom, errors, warnings);
       const report = raw.digest.report;
       if (report !== undefined && report !== true && report !== false && typeof report !== "string") {
         errors.push("digest.report must be true, false, or a steering string for the report body");
       }
       digest = {
         model: raw.digest.model,
+        provider: digestIdentity.provider,
         instructions: raw.digest.instructions || "",
         ...(report && { report }),
       };
@@ -1217,7 +1257,7 @@ export function effectivePlanDoc(plan) {
   const strip = (t) => {
     const o = { id: t.id, model: t.model };
     if (t.prompt) o.prompt = t.prompt;
-    for (const k of ["effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "isolation", "outputDir", "mustRead"]) {
+    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "isolation", "outputDir", "mustRead"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
     if (t.childPlan) o.child = t.childPlan.tasks.map(strip);

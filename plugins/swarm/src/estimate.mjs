@@ -7,7 +7,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tokenTotal } from "./stream.mjs";
 import { formatTokens } from "./results.mjs";
-import { isClaudeModel } from "./models.mjs";
+import { modelKey, identityOf } from "./contracts.mjs";
 import { isAgentless } from "./manifest.mjs";
 
 export function median(nums) {
@@ -21,13 +21,42 @@ const push = (map, key, v) => {
   map.get(key).push(v);
 };
 
+// New corpus entries use the canonical provider/model key. The compatibility
+// lookup lets old callers continue asking for `.get("sonnet")` when exactly
+// one qualified history exists, without storing a second copy that could
+// collide with a newly discovered provider.
+class ProviderModelMap extends Map {
+  get(key) {
+    const direct = super.get(key);
+    if (direct !== undefined || super.has(key)) return direct;
+    if (typeof key !== "string") return undefined;
+    const matches = [...super.entries()].filter(([candidate]) => {
+      try { return Array.isArray(JSON.parse(candidate)) && JSON.parse(candidate)[1] === key; } catch { return false; }
+    });
+    return matches.length === 1 ? matches[0][1] : undefined;
+  }
+
+  has(key) {
+    if (super.has(key)) return true;
+    return this.get(key) !== undefined;
+  }
+}
+
+function keyOf(identity) {
+  return identity.provider ? modelKey(identity.provider, identity.model) : JSON.stringify([null, identity.model]);
+}
+
+function shownIdentity(identity) {
+  return identity.explicit && identity.provider ? `${identity.provider}/${identity.model}` : identity.model;
+}
+
 // Walk runsRoot/<encoded-repo-toplevel>/<run>/summary.json (two fixed levels, cross-
 // project — per-model cost is a property of the model, not the repo). Rows
 // need state ok + a real model + tokens; pre-D1 summaries lack `model` and
 // simply don't contribute. Every read is best-effort.
 export function loadCorpus(runsRoot) {
-  const tokens = new Map();
-  const costUsd = new Map();
+  const tokens = new ProviderModelMap();
+  const costUsd = new ProviderModelMap();
   let l1 = [];
   try { l1 = readdirSync(runsRoot); } catch { return { tokens, costUsd }; }
   for (const a of l1) {
@@ -38,13 +67,20 @@ export function loadCorpus(runsRoot) {
       try { summary = JSON.parse(readFileSync(join(runsRoot, a, b, "summary.json"), "utf8")); } catch { continue; }
       for (const row of summary?.tasks || []) {
         if (row?.state !== "ok" || typeof row.model !== "string" || isAgentless(row) || !row.tokens) continue;
-        push(tokens, row.model, tokenTotal(row.tokens));
+        const identity = identityOf(row);
+        push(tokens, keyOf(identity), tokenTotal(row.tokens));
         // costUsd is real only for Anthropic-billed leaves. On a :cloud row the CLI
         // applies its own price table to token counts, but the provider bills on
         // subscription/GPU cycles with no token->$ mapping — that dollar figure is
         // fiction, and feeding it to the estimator would fabricate the cost the
         // operator consents against. Tokens (above) are real for every model.
-        if (Number.isFinite(row.costUsd) && isClaudeModel(row.model)) push(costUsd, row.model, row.costUsd);
+        const billed = row.costClassification === "billed" || row.costObservation?.classification === "billed";
+        // identity.provider already resolves "claude" whether the row recorded it or the
+        // model name implies it; an extra !row.provider would exclude the recorded case,
+        // which is every row a normalised manifest writes.
+        if (Number.isFinite(row.costUsd) && (identity.provider === "claude" || billed)) {
+          push(costUsd, keyOf(identity), row.costUsd);
+        }
       }
     }
   }
@@ -98,10 +134,37 @@ export function integrateCaps(tasks) {
 export function estimateRun(tasks, digest, corpus) {
   const counted = [];
   const unknown = [];
-  for (const [model, leaves] of leafCounts(tasks, digest)) {
-    const samples = corpus.tokens.get(model);
-    if (samples?.length) counted.push({ model, leaves, perLeaf: median(samples) });
-    else unknown.push({ model, leaves });
+  const counts = new Map();
+  const add = (task, leaves) => {
+    if (isAgentless(task)) return;
+    const identity = identityOf(task);
+    const key = keyOf(identity);
+    const current = counts.get(key);
+    if (current) current.leaves += leaves;
+    else counts.set(key, { ...identity, leaves });
+  };
+  for (const t of tasks) {
+    if (isAgentless(t)) continue;
+    const mult = t.forEach ? t.forEach.maxItems : 1;
+    if (t.childPlan) {
+      for (const c of t.childPlan.tasks) add(c, mult * (c.forEach ? c.forEach.maxItems : 1));
+    } else add(t, mult);
+  }
+  if (digest?.model) add(digest, 1);
+
+  const lookup = (map, identity) => {
+    const qualified = map?.get(keyOf(identity));
+    if (qualified !== undefined) return qualified;
+    // A model-only corpus supplied by an old caller is safe only for a
+    // model-only task. Explicit provider identity must never fall through and
+    // borrow another provider's samples.
+    return identity.explicit ? undefined : map?.get(identity.model);
+  };
+  for (const identity of counts.values()) {
+    const samples = lookup(corpus.tokens, identity);
+    const output = identity.explicit && identity.provider ? { provider: identity.provider, model: identity.model } : { model: identity.model };
+    if (samples?.length) counted.push({ ...output, leaves: identity.leaves, perLeaf: median(samples) });
+    else unknown.push({ ...output, leaves: identity.leaves });
   }
   if (!counted.length) return null;
   const est = {
@@ -109,8 +172,8 @@ export function estimateRun(tasks, digest, corpus) {
     counted,
     unknown,
   };
-  if (!unknown.length && counted.every((c) => corpus.costUsd.get(c.model)?.length)) {
-    est.usd = counted.reduce((n, c) => n + c.leaves * median(corpus.costUsd.get(c.model)), 0);
+  if (!unknown.length && counted.every((c) => lookup(corpus.costUsd, identityOf(c))?.length)) {
+    est.usd = counted.reduce((n, c) => n + c.leaves * median(lookup(corpus.costUsd, identityOf(c))), 0);
   }
   return est;
 }
@@ -128,7 +191,7 @@ export function formatEstimate(est) {
   if (est.usd != null) line += ` · ~$${est.usd.toFixed(2)}`;
   if (est.unknown.length) {
     const leaves = est.unknown.reduce((n, u) => n + u.leaves, 0);
-    line += ` (no history for: ${est.unknown.map((u) => u.model).join(", ")} — ${leaves} leaves uncounted)`;
+    line += ` (no history for: ${est.unknown.map((u) => u.provider ? `${u.provider}/${u.model}` : u.model).join(", ")} — ${leaves} leaves uncounted)`;
   }
   return line;
 }

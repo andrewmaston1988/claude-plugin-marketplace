@@ -4,33 +4,34 @@ import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal } from "./stream.mjs";
 import { isSentinelModel } from "./manifest.mjs";
 import { readRun } from "./runlog.mjs";
+import { inferStoredIdentity } from "./contracts.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
 //   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
 //                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
-//   results/<id>.json   { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks? }
+//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks? }
 //                       (coverage = { status: "complete"|"incomplete"|"unparseable", required, read, missed[] }
 //                        when the task declared mustRead — a shortfall is recorded, never fails the leaf)
-//                       (asks = [{question, answer, ok, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
+//                       (asks = [{question, answer, ok, provider?, runner?, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
 //                        the leaf's own ok/output never change because a later ask failed)
 //   results/<id>.ask.log  plain-text Q/A transcript, appended on every ask against this leaf
 //                       (prompt = the exact final string sent to the leaf; absent on compute/aggregate rows)
 //                       (citations = { checked, drifted, refuted } when N3 verified them; each cited finding is
 //                        annotated citation:"verified"|"drift"|"refuted" in output. citationRefuted = [{path,reason}]
-//                        for the kept-but-unverified findings — Stage 1 never fails a leaf over a citation)
+//                        for the kept-but-unverified findings — a citation never fails a leaf)
 //   digest.md           when a digest block is present
 //   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens, estimate?, costWarnFired? }
-//                       task rows: { id, model, state, durationMs, tokens, costUsd?, resultPath }
+//                       task rows: { id, provider?, runner?, model, state, durationMs, tokens, costUsd?, resultPath }
 //                       (costUsd only for real-key-billed leaves — these rows ARE the estimate corpus)
 //   run.log             JSONL, tailable mid-run:
-//                         { ts, event: "run-start", tasks: [{ id, model }], ask? }   ask = the interrogated task id
+//                         { ts, event: "run-start", tasks: [{ id, provider?, runner?, model }], ask? }   ask = the interrogated task id
 //                         { ts, id, state, durationMs?, tokens?, note? }   state changes
 //                         { ts, id, event: "tokens", tokens }       live usage ticks
-//                         { ts, id, event: "session", sessionId }   the leaf's session, as soon as its stream names it — resume reads it
-//                         { ts, event: "expand", id, model, clones, truncated?, total? }   forEach expansion
-//                         { ts, event: "expand-manifest", id, children: [{id, model}] }    child-manifest splice
+//                         { ts, id, event: "session", provider?, runner?, sessionId }   the leaf's session, as soon as its stream names it — resume reads it
+//                         { ts, event: "expand", id, provider?, runner?, model, clones, truncated?, total? }   forEach expansion
+//                         { ts, event: "expand-manifest", id, children: [{id, provider?, runner?, model}] }    child-manifest splice
 //                       (child-manifest task ids are namespaced "<node>~<childId>")
 //                         { ts, event: "truncate-prompt", id, depId, kept, total }   {{result:}} cut to the inline cap
 //                         { ts, event: "leaf-contract-retry", id }   the single corrective re-ask (schema/citation/coverage) fired
@@ -51,6 +52,26 @@ export function resultPath(dir, id) {
   return join(dir, "results", `${id}.json`);
 }
 
+// Re-exported from contracts.mjs, which owns identity, so the existing import sites
+// do not all have to move.
+export { inferStoredIdentity };
+
+export function normalizeStoredIdentity(record) {
+  if (!record || typeof record !== "object") return record;
+  const inferred = inferStoredIdentity(record.modelAlias || record.model);
+  const out = {
+    ...record,
+    ...(record.provider ? { provider: String(record.provider).toLowerCase() } : {}),
+    ...(record.runner ? { runner: record.runner } : {}),
+  };
+  // Inferred fields are readable migration metadata, not a rewrite of the
+  // legacy JSON shape. Keep them non-enumerable so byte-for-byte summary/result
+  // carry-forward remains possible during ask/resume.
+  if (!out.provider && inferred.provider) Object.defineProperty(out, "provider", { value: inferred.provider, enumerable: false });
+  if (!out.runner && inferred.runner) Object.defineProperty(out, "runner", { value: inferred.runner, enumerable: false });
+  return out;
+}
+
 export function writeResult(dir, id, obj) {
   const p = resultPath(dir, id);
   writeFileSync(p, JSON.stringify(obj, null, 2) + "\n");
@@ -61,7 +82,7 @@ export function readResult(dir, id) {
   const p = resultPath(dir, id);
   if (!existsSync(p)) return null;
   try {
-    return JSON.parse(readFileSync(p, "utf8"));
+    return normalizeStoredIdentity(JSON.parse(readFileSync(p, "utf8")));
   } catch {
     return null; // corrupt result — treat as absent so resume re-runs it
   }
@@ -83,7 +104,12 @@ export function listLeaves(dir, { gradeable = false } = {}) {
     .map((f) => {
       const id = f.slice(0, -".json".length);
       const result = readResult(dir, id);
-      return result && { id, model: result.model, result, resultPath: resultPath(dir, id), transcriptPath: transcriptPath(dir, id) };
+      return result && {
+         id, model: result.model,
+         ...(result.provider && { provider: result.provider }),
+         ...(result.runner && { runner: result.runner }),
+         result, resultPath: resultPath(dir, id), transcriptPath: transcriptPath(dir, id),
+       };
     })
     .filter((leaf) => leaf && (!gradeable || (leaf.model && !isSentinelModel(leaf.model))));
 }
@@ -118,11 +144,16 @@ export function writeSummary(dir, obj) {
   return p;
 }
 
-export function readSummary(dir) {
+export function readSummary(dir, { normalize = true } = {}) {
   const p = join(dir, "summary.json");
   if (!existsSync(p)) return null;
   try {
-    return JSON.parse(readFileSync(p, "utf8"));
+    const summary = JSON.parse(readFileSync(p, "utf8"));
+    if (!normalize) return summary;
+    return {
+      ...summary,
+      ...(Array.isArray(summary.tasks) && { tasks: summary.tasks.map((task) => normalizeStoredIdentity(task)) }),
+    };
   } catch {
     return null;
   }
@@ -142,8 +173,8 @@ export function appendRunLog(dir, obj) {
   appendFileSync(join(dir, "run.log"), JSON.stringify(obj) + "\n");
 }
 
-// id -> the last session id run.log recorded for it, across every generation.
-export function recordedSessionIds(dir) {
+// id -> the last provider/session identity run.log recorded for it, across every generation.
+export function recordedSessionRecords(dir) {
   const out = new Map();
   let text = "";
   try { text = readFileSync(join(dir, "run.log"), "utf8"); } catch { return out; }
@@ -151,10 +182,22 @@ export function recordedSessionIds(dir) {
     if (!line.includes('"event":"session"')) continue;
     try {
       const e = JSON.parse(line);
-      if (e.id && typeof e.sessionId === "string") out.set(e.id, e.sessionId);
+      if (e.id && typeof e.sessionId === "string") {
+        const inferred = normalizeStoredIdentity({ model: e.model, provider: e.provider, runner: e.runner });
+        out.set(e.id, {
+          sessionId: e.sessionId,
+          ...(e.provider ? { provider: e.provider } : inferred.provider ? { provider: inferred.provider } : {}),
+          ...(e.runner ? { runner: e.runner } : inferred.runner ? { runner: inferred.runner } : {}),
+        });
+      }
     } catch { /* torn tail */ }
   }
   return out;
+}
+
+// Backward-compatible string map for callers that only need --resume.
+export function recordedSessionIds(dir) {
+  return new Map([...recordedSessionRecords(dir)].map(([id, value]) => [id, value.sessionId]));
 }
 
 // ── liveness control files ────────────────────────────────────────────────────
@@ -248,6 +291,15 @@ const AGES_OUT = new Set(["ok", "skipped"]);
 const finishedMs = (t) =>
   t.startedMs != null && t.durationMs != null ? t.startedMs + t.durationMs : -Infinity;
 
+// Provider is part of the durable identity, but repeating it on every unique
+// row makes the compact roster harder to scan. Qualify only the model ids that
+// would otherwise be ambiguous in this view.
+export function displayIdentity(value, roster = []) {
+  const model = String(value?.model || "?");
+  const providers = new Set(roster.filter((row) => row?.model === model && row?.provider).map((row) => row.provider));
+  return providers.size > 1 && value?.provider ? `${value.provider}/${model}` : model;
+}
+
 // Full-run snapshot. tasks: [{ id, model, state, durationMs?, startedMs?,
 // tokens?, activity?, lastEventMs? }] — durationMs for terminal states,
 // startedMs for running (elapsed ticks against `now`), tokens in the
@@ -261,7 +313,7 @@ const finishedMs = (t) =>
 // watching keep their rows and the rest collapse into one count line. Header
 // and footer are never dropped, and the footer counts EVERY leaf, shown or not.
 export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLines }) {
-  const all = tasks.map((t) => ({ ...t, model: t.model || "?" }));
+  const all = tasks.map((t) => ({ ...t, model: displayIdentity(t, tasks) }));
   // Under a budget the blank spacers always go: the windowed view renders them
   // inconsistently, so keeping them makes the rendered height unpredictable for
   // the very budget we are rendering to. Layout is then exactly
@@ -412,7 +464,7 @@ export function renderProvenance({ tasks = [], truncations = [] }) {
   };
   const bits = tasks.map((t) => {
     const dur = t.durationMs != null ? ` (${compactDur(t.durationMs)})` : "";
-    return `${t.id} ${t.model || "?"}${dur}`;
+    return `${t.id} ${displayIdentity(t, tasks)}${dur}`;
   });
   lines.push(`*Run: ${bits.join(" · ")}*`);
   return lines.join("\n") + "\n";
