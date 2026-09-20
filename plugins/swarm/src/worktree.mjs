@@ -32,9 +32,12 @@ export function branchNameFor(task, cfg) {
 function isRegisteredWorktree(path, repo) {
   const list = git(["worktree", "list", "--porcelain"], repo);
   if (list.status !== 0) return false;
-  const want = resolve(path);
+  // Case-insensitive on win32: git records the case the filesystem reports, which need
+  // not match the one swarm derived, and a miss here re-creates a live tree.
+  const key = (p) => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
+  const want = key(path);
   return list.stdout.split("\n").some((l) =>
-    l.startsWith("worktree ") && resolve(l.slice("worktree ".length).trim()) === want);
+    l.startsWith("worktree ") && key(l.slice("worktree ".length).trim()) === want);
 }
 
 // Create — or re-enter — an isolated worktree for an implementation leaf:

@@ -1416,6 +1416,29 @@ test("a forEach task's future clone worktree cannot collide with a real task's o
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("links sharing a worktree must agree on their branch", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "impl", isolation: { worktree: "feat", branch: "autonomous/x" } }),
+      claudeTask({ id: "rev", after: ["impl"], isolation: { worktree: "feat" } }),
+    ] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir));
+    ok(errs.some((e) => /disagree on their branch/.test(e) && /autonomous\/x/.test(e)), JSON.stringify(errs));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("links sharing a worktree with the SAME explicit branch are fine", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "impl", isolation: { worktree: "feat", branch: "autonomous/x" } }),
+      claudeTask({ id: "rev", after: ["impl"], isolation: { worktree: "feat", branch: "autonomous/x" } }),
+    ] });
+    equal(loadManifest(p, CFG, dir).tasks.length, 2);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("an ordered chain of three passes validation", () => {
   const dir = tmp();
   try {
