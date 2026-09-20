@@ -4,7 +4,7 @@ import { resolve, join, basename, dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { CONTEXT_WINDOW_1M, CONTEXT_WINDOWS } from "./contracts.mjs";
-import { isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
+import { declaredEfforts, effortFor, isValidEffort } from "./models.mjs";
 import { buildDispatch, toSpawnable, windowsCommandLineLength, runnerOf } from "./dispatch.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
@@ -323,6 +323,9 @@ function validateTaskShapes(rawTasks, errors, label) {
     if (t.fallbackProvider !== undefined && (typeof t.fallbackProvider !== "string" || !/^[a-z][a-z0-9-]*$/.test(t.fallbackProvider))) {
       errors.push(`${l}: fallbackProvider must be a canonical lowercase identifier (e.g. \"claude\")`);
     }
+    if (t.effort !== undefined && (typeof t.effort !== "string" || !t.effort.trim())) {
+      errors.push(`${l}: effort must be a non-empty string — e.g. \"effort\": \"medium\"`);
+    }
     if (t.isolation !== undefined) {
       const iso = t.isolation;
       const named = iso && typeof iso === "object" && !Array.isArray(iso);
@@ -596,11 +599,6 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
         errors.push(`${l}: template {{${m[1]}:${m[2]}}} references '${m[2]}' which is not a declared dependency in after`);
       }
     }
-    if (t.compute === undefined && t.manifest === undefined && t.effort !== undefined && !isValidEffort(t.model, t.effort)) {
-      const tier = tierFromModel(t.model);
-      errors.push(`${l}: effort '${t.effort}' is not valid for ${tier} (allowed: ${TIER_EFFORTS[tier].join(", ")})`);
-    }
-
     // {{item}}/{{index}} substitute at clone time — outside a forEach task they
     // would reach the leaf as literal braces, which is always an authoring bug.
     if (t.forEach === undefined && !itemAllowed && ITEM_TEMPLATE_RE.test(String(t.prompt || ""))) {
@@ -946,6 +944,12 @@ function resolveProvider(task, cfg, cache, l, errors, providerRegistry = PROVIDE
   }
 }
 
+function validateEffort(model, provider, effort, declared, l, errors) {
+  if (!isValidEffort(model, effort, declared)) {
+    errors.push(`${l}: effort '${effort}' is not supported by ${model} (${provider} declares: ${declared.efforts.join(", ")})`);
+  }
+}
+
 function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings, cache = [], io = defaultManifestIo(), probedGuards = new Set(), providerRegistry = PROVIDERS }) {
   // Many tasks share a cwd; ask git once per directory.
   const tops = new Map();
@@ -967,9 +971,18 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     // machine — no governance, no isolation.
     let provider;
     let fallbackProvider;
+    let primaryDeclared;
+    let resolvedEffort;
     if (!isCompute && !isManifest && !isIntegrate) {
       const primary = resolveProvider({ ...t }, cfg, cache, l, errors, providerRegistry);
       provider = primary?.provider;
+      if (provider) {
+        primaryDeclared = declaredEfforts(t.model, provider, cache);
+        resolvedEffort = effortFor(t, primaryDeclared);
+        if (t.effort !== undefined || resolvedEffort !== undefined) {
+          validateEffort(t.model, provider, resolvedEffort, primaryDeclared, l, errors);
+        }
+      }
       if (t.contextWindow === CONTEXT_WINDOW_1M && provider === "ollama" && providerConfig(cfg, "ollama").mode === "launch") {
         errors.push(`${l}: contextWindow "1m" is unsupported with Ollama launch mode because the launcher rejects [1m] model names — use env mode or remove contextWindow`);
       }
@@ -986,11 +999,17 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
           // The fallback is a real dispatch target with its own provider — a Claude
           // primary must not force a Codex/Ollama fallback, and nothing is inferred.
           if (t.fallbackProvider === undefined) {
-            errors.push(`${l}: fallbackModel \x27${t.fallbackModel}\x27 has no "fallbackProvider" — add it beside "fallbackModel", e.g. "fallbackModel": "claude-haiku-4-5-20251001", "fallbackProvider": "claude"`);
+            errors.push(`${l}: fallbackModel '${t.fallbackModel}' has no "fallbackProvider" — add it beside "fallbackModel", e.g. "fallbackModel": "claude-haiku-4-5-20251001", "fallbackProvider": "claude"`);
           } else {
             const fallback = resolveProvider({ model: t.fallbackModel, provider: t.fallbackProvider }, cfg, cache, `${l} fallback`, errors, providerRegistry);
             fallbackProvider = fallback?.provider;
             if (fallbackProvider) {
+              // The effort pinned for the primary is sent to the fallback too, so it
+              // must satisfy whatever the fallback's own provider declares.
+              if (resolvedEffort !== undefined) {
+                validateEffort(t.fallbackModel, fallbackProvider, resolvedEffort,
+                  declaredEfforts(t.fallbackModel, fallbackProvider, cache), `${l} fallback`, errors);
+              }
               checkGovernance(fallbackProvider, t.fallbackModel, originalCwd, `${l} fallback`, cfg, errors);
               checkHeadroom(fallbackProvider, t.fallbackModel, `${l} fallback`, headroom, errors, warnings);
             }
@@ -1081,7 +1100,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ...(!isCompute && !isManifest && !isIntegrate && { provider }),
       fallbackModel: !isCompute && !isManifest && typeof t.fallbackModel === "string" ? t.fallbackModel : undefined,
       ...(!isCompute && !isManifest && !isIntegrate && fallbackProvider && { fallbackProvider }),
-      effort: isCompute || isManifest ? undefined : t.effort,
+      effort: isCompute || isManifest || isIntegrate ? undefined : resolvedEffort,
       allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || DEFAULT_TOOLS,
       cwd: originalCwd,
       originalCwd,

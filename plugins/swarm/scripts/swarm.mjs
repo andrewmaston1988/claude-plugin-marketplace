@@ -303,6 +303,7 @@ async function seatBlock(plan, cfg) {
 
 async function cmdValidate(rest) {
   const cfg = getConfig();
+  const env = process.env;
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
@@ -382,6 +383,7 @@ function refuseLiveEngine(dir, cfg, verb) {
 
 async function cmdRun(rest) {
   const cfg = getConfig();
+  const env = process.env;
   const force = rest.includes("--force");
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);

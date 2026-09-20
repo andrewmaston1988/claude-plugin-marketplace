@@ -1,7 +1,7 @@
 const RECORD_FIELDS = {
   ModelDescriptor: {
     required: ["provider", "model", "runner"],
-    optional: ["displayName", "efforts", "modalities", "isDefault", "availability"],
+    optional: ["displayName", "efforts", "defaultEffort", "modalities", "isDefault", "availability"],
   },
   ProviderUsageSnapshot: {
     required: ["provider", "buckets", "source", "provenance", "asOf"],
@@ -118,6 +118,7 @@ export function modelDescriptor(value) {
   out.runner = out.runner.trim().toLowerCase();
   if (out.displayName !== undefined) requireString(out.displayName, "ModelDescriptor field 'displayName'");
   if (out.efforts !== undefined) requireStringArray(out.efforts, "ModelDescriptor field 'efforts'");
+  if (out.defaultEffort !== undefined) requireString(out.defaultEffort, "ModelDescriptor field 'defaultEffort'");
   if (out.modalities !== undefined) requireStringArray(out.modalities, "ModelDescriptor field 'modalities'");
   if (out.isDefault !== undefined) requireBoolean(out.isDefault, "ModelDescriptor field 'isDefault'");
   if (out.availability !== undefined) requirePlainObject(out.availability, "ModelDescriptor field 'availability'");

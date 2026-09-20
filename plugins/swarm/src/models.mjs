@@ -1,6 +1,7 @@
-// Claude-family detection and per-tier effort matrices.
+// Claude-family detection and provider-declared effort capabilities.
 
-import { isClaudeModel, OLLAMA_CLOUD_RE } from "./contracts.mjs";
+import { identityKey, isClaudeModel, OLLAMA_CLOUD_RE } from "./contracts.mjs";
+import { createProviderRegistry, defaultProviderAdapters } from "./providers.mjs";
 
 export { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
 
@@ -10,15 +11,6 @@ export { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
 export function isCloudModel(model) {
   return OLLAMA_CLOUD_RE.test(String(model || ""));
 }
-
-// Valid --effort levels per Claude tier. Open models accept any effort —
-// it passes through to the proxy and is harmlessly ignored when unsupported.
-export const TIER_EFFORTS = {
-  haiku:  ["low", "medium", "high"],
-  sonnet: ["low", "medium", "high", "max"],
-  opus:   ["low", "medium", "high", "xhigh", "max"],
-  fable:  ["low", "medium", "high", "xhigh", "max"],
-};
 
 // Classify a Claude model string into a tier; tolerates dated ids
 // (claude-haiku-4-5-YYYYMMDD) and bare aliases. Null when unknown.
@@ -32,13 +24,29 @@ export function tierFromModel(model) {
   return null;
 }
 
-// Validate a (model, effort) pair. Open models: always valid. Claude models:
-// effort must be in the tier's matrix; an unclassifiable claude-* id accepts
-// any effort (future tiers must not fail validation).
-export function isValidEffort(model, effort) {
+// Validate only what the model's provider has declared. An absent declaration
+// cannot contradict an effort, so unknown and undeclared models pass through.
+export function isValidEffort(_model, effort, declared) {
   if (effort == null) return true;
-  if (!isClaudeModel(model)) return true;
-  const tier = tierFromModel(model);
-  if (!tier) return true;
-  return TIER_EFFORTS[tier].includes(effort);
+  const efforts = Array.isArray(declared) ? declared : declared?.efforts;
+  return !Array.isArray(efforts) || efforts.length === 0 || efforts.includes(effort);
+}
+
+export function effortFor(task, declared) {
+  return task.effort ?? declared?.defaultEffort ?? "medium";
+}
+
+export function declaredEfforts(model, provider, cache = []) {
+  const entries = new Map();
+  for (const row of cache || []) {
+    if (!row?.model) continue;
+    entries.set(identityKey(row), row);
+    entries.set(row.model, row);
+  }
+  const row = entries.get(identityKey({ model, provider })) || entries.get(model);
+  if (!row) return undefined;
+  const declared = {};
+  if (Array.isArray(row.efforts) && row.efforts.length) declared.efforts = row.efforts;
+  if (typeof row.defaultEffort === "string" && row.defaultEffort.trim()) declared.defaultEffort = row.defaultEffort;
+  return Object.keys(declared).length ? declared : undefined;
 }

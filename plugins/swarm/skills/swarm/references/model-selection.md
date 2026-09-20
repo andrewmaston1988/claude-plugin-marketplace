@@ -50,16 +50,17 @@ Swarm has no fixed roles: you invent the cast per manifest, so **derive each lea
 - **xhigh** — hard cases between high and max; rare
 - **max** — depth-bound reasoning; you've tried shallower and it wasn't enough
 
-### Per-tier supported effort levels
+### Provider-declared effort levels
 
-Claude tiers reject unsupported levels; `swarm validate` checks the pairing at manifest load, not runtime.
+Every dispatching leaf receives an explicit effort. The manifest's `effort` wins;
+otherwise swarm uses the model's declared default, or `medium` when the model has no
+declared default. `swarm validate` rejects a value only when the model's own provider
+declares a list that omits it.
 
-| Tier | Supported levels | Notes |
-|---|---|---|
-| `:cloud` models | any | `--effort` passes through; honoured where supported, harmlessly ignored upstream otherwise |
-| `haiku` | `low`, `medium`, `high` | no `xhigh`, no `max` |
-| `sonnet` | `low`, `medium`, `high`, `max` | no `xhigh` |
-| `opus` / `fable` | `low`, `medium`, `high`, `xhigh`, `max` | full scale |
+Claude reads its levels and default from Claude Code's model catalog. Codex reads the
+effort list from its model cache and uses `medium` because the cache declares no
+default. Ollama does not declare effort levels, so its values pass through to the
+upstream launcher.
 
 ## Context window
 

@@ -2,6 +2,7 @@ import { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
 import { join } from "node:path";
 import { checkQuota } from "./quota.mjs";
 import { swarmHome } from "./config.mjs";
+import { readClaudeCatalog } from "./claude-models.mjs";
 
 const PROVIDER_CAPABILITIES = new Set([
   "discoverModels",
@@ -127,7 +128,7 @@ export function defaultProviderAdapters({ codexAdapter, ollamaCapabilities = {} 
       runnerId: "claude",
       defaultEnabled: true,
       validateModel: (model) => isClaudeModel(model) ? null : `model '${model}' is not a Claude model — provider "claude" needs a full id such as "claude-opus-5"`,
-      capabilities: { preflight: preflightClaude },
+      capabilities: { preflight: preflightClaude, discoverModels: readClaudeCatalog },
     }),
     descriptor({
       id: "ollama",

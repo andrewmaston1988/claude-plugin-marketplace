@@ -214,7 +214,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "id": "scan-a",                            // unique, filename-safe
     "prompt": "…",
     "provider": "ollama", "model": "glm-5.2:cloud",                  // required; the full model id (claude-opus-5, never "opus")
-    "effort": "medium",                        // optional; validated for Claude tiers
+    "effort": "medium",                        // optional; defaults to the model's declared default or medium; validated when the provider declares levels
     "allowedTools": "Read,Grep,Glob",          // default: read-only set
     "cwd": "C:/code/somerepo",                 // default: manifest's cwd
     "isolation": "worktree",                   // private tree (implementation leaves); omit = default tree (see Leaf shapes); OR

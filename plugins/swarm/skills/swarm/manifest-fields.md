@@ -88,6 +88,13 @@ Provider-specific roots and enabled state are checked during validation and agai
 dispatch. Codex tasks reject Claude-only `settings` and configured project leaf
 guards unless the task explicitly sets `"leafGuard": false`.
 
+### Effort — `effort`
+
+`effort` is optional. Every dispatching leaf receives an explicit effort: the manifest
+value wins, otherwise the model's provider-declared default is used, otherwise swarm
+uses `"medium"`. When the provider declares an effort list, swarm rejects a value that
+is not in that list; undeclared models accept any non-empty effort.
+
 The public provider registry supplies discovery, usage, and runner capabilities.
 
 ### Context window — `contextWindow`
