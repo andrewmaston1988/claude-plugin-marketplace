@@ -2220,3 +2220,76 @@ test("effectivePlanDoc records the authored isolation: none omitted for defaults
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("two default readers with no after: neither owns a worktree name, so they are not an ordered group", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [claudeTask({ id: "r1" }), claudeTask({ id: "r2" })] });
+    const by = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
+    for (const id of ["r1", "r2"]) {
+      equal(by[id].isolationMode, "snapshot");
+      equal("worktreeName" in by[id], false, "a shared name would make two parallel readers a chain");
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a default-private forEach writer's clone names collide with a { worktree } sibling", () => {
+  const dir = tmp();
+  try {
+    const errs = errorsOf(() => inDir(dir, { tasks: [
+      claudeTask({ id: "src", prompt: "…return JSON list" }),
+      bashTask({ id: "fix", after: ["src"], forEach: { from: "src", path: "", maxItems: 2 },
+        prompt: "fix {{item}}" }),
+      claudeTask({ id: "other", isolation: { worktree: "fix-1" } }),
+    ] }));
+    ok(errs.some((e) => e.includes('forEach clone worktree "fix-1" would collide')), errs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("isolation.from: a default-private writer is a valid base; a default reader and a none task are not", () => {
+  const dir = tmp();
+  try {
+    const plan = inDir(dir, { tasks: [
+      bashTask({ id: "helper" }),
+      bashTask({ id: "follow", after: ["helper"], isolation: { worktree: "follow", from: "helper" } }),
+    ] }, "ok.json");
+    equal(plan.tasks.find((t) => t.id === "follow").from, "helper");
+
+    const reader = errorsOf(() => inDir(dir, { tasks: [
+      claudeTask({ id: "helper" }),
+      bashTask({ id: "follow", after: ["helper"], isolation: { worktree: "follow", from: "helper" } }),
+    ] }, "reader.json"));
+    ok(reader.some((e) => e.includes("isolation.from 'helper' has no worktree")), reader.join("\n"));
+
+    const none = errorsOf(() => inDir(dir, { tasks: [
+      claudeTask({ id: "helper", isolation: "none" }),
+      bashTask({ id: "follow", after: ["helper"], isolation: { worktree: "follow", from: "helper" } }),
+    ] }, "none.json"));
+    ok(none.some((e) => e.includes("isolation.from 'helper' has no worktree")), none.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("integrate.from: a none source has no branch to merge; a default-private writer does", () => {
+  const dir = tmp();
+  try {
+    const errs = errorsOf(() => inDir(dir, { tasks: [
+      claudeTask({ id: "x", isolation: "none" }),
+      { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] } },
+    ] }));
+    ok(errs.some((e) => e.includes("integrate.from 'x' has no worktree")), errs.join("\n"));
+
+    const plan = inDir(dir, { tasks: [
+      bashTask({ id: "x" }),
+      { id: "join", after: ["x"], integrate: { into: "feat", from: ["x"] } },
+    ] }, "ok.json");
+    deepEqual(plan.tasks.find((t) => t.id === "join").integrate.from, ["x"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
