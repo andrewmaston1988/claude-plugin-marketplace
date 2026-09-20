@@ -298,7 +298,8 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     equal(scanB.argv[scanB.argv.indexOf("--effort") + 1], "high");
     const digestCall = calls.find((c) => c.argv[c.argv.indexOf("-p") + 1].includes("digest stage"));
     ok(digestCall, "digest dispatched via claude");
-    equal(digestCall.argv[digestCall.argv.indexOf("--allowedTools") + 1], "Read");
+    // MCP is appended to every leaf; pin the digest's own tool, not the whole string.
+    ok(digestCall.argv[digestCall.argv.indexOf("--allowedTools") + 1].startsWith("Read"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

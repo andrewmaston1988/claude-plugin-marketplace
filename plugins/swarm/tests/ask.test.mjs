@@ -53,7 +53,8 @@ test("askLeaf resumes the leaf session with its own model, cwd, and tools", asyn
     const args = call.args;
     equal(args[args.indexOf("--resume") + 1], "s-1");
     equal(args[args.indexOf("--model") + 1], "haiku");
-    equal(args[args.indexOf("--allowedTools") + 1], "Read,Grep");
+    // MCP is appended to every leaf, so pin the propagation, not the whole string.
+    ok(args[args.indexOf("--allowedTools") + 1].startsWith("Read,Grep"));
     equal(call.opts.cwd, tmpdir());
 
     // thread continuity: next ask resumes the NEW session id
