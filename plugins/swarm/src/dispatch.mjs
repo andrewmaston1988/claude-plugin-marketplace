@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { dirname, sep, isAbsolute } from "node:path";
+import { homedir } from "node:os";
+import { dirname, sep, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { isClaudeModel } from "./models.mjs";
 import { deepMerge } from "./config.mjs";
@@ -15,7 +16,15 @@ import { deepMerge } from "./config.mjs";
 // through a proxy where real cost is $0 but Claude Code would still meter
 // Anthropic pricing on token counts and trip the ceiling mid-task; Claude
 // dispatch is interactive-supervised, so the manifest preview is the budget gate.
-export function buildDispatch(task, prompt, cfg) {
+// Every configured MCP server as an allow rule. Servers must be named: `mcp__*` is
+// skipped with a warning in an allow rule, so a wildcard grants nothing.
+export function mcpTools(_read = () => readFileSync(join(homedir(), ".claude.json"), "utf8")) {
+  try {
+    return Object.keys(JSON.parse(_read()).mcpServers || {}).map((s) => `mcp__${s}`);
+  } catch { return []; }
+}
+
+export function buildDispatch(task, prompt, cfg, _mcpTools = mcpTools) {
   const claudePath = cfg.claudePath || "claude";
   // disable1mContext: false means the CONFIG default is the 1M window; a task's
   // own `settings` still wins (deepMerge, task second) so a leaf can opt back
@@ -30,7 +39,9 @@ export function buildDispatch(task, prompt, cfg) {
     "-p", prompt,
     "--model", task.model,
     ...(task.effort ? ["--effort", task.effort] : []),
-    "--allowedTools", task.allowedTools,
+    // MCP goes to every leaf: the roster is the operator's own, and a leaf that loses
+    // scout falls back to grepping the tree.
+    "--allowedTools", [task.allowedTools, ..._mcpTools()].filter(Boolean).join(","),
     // A shell env var LOSES to the user's settings.json env block, and Claude Code
     // has no [1m] model alias — --settings is highest-precedence in the CLI's
     // settings chain, so it's the only route that overrides that block per-leaf.
