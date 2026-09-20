@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { resolve } from "node:path";
-import { plan, execute, formatPrune } from "../src/prune.mjs";
+import { plan, execute, formatPrune, snapshotRefs, deleteSnapshotRefs } from "../src/prune.mjs";
 
 test("plan: a live run short-circuits before any git call", () => {
   let gitCalled = false;
@@ -121,4 +121,30 @@ test("formatPrune: one line per row with size, then the freed/would-free closing
 
   const dry = formatPrune(rows, { dryRun: true });
   ok(/would free 1\.50 GB across 2 worktrees/.test(dry), dry);
+});
+
+test("execute: a branchless snapshot row is removed with -f -f and never gets a branch -D", () => {
+  const calls = [];
+  const git = (args, cwd) => { calls.push({ args, cwd }); return { status: 0, stdout: "", stderr: "" }; };
+  const fs = { existsSync: () => true, rmSync: () => {} };
+  execute([{ path: "/r/wt-snapshot-abc", branch: null, bytes: 1, repo: "/repo" }], git, fs);
+  deepEqual(calls, [{ args: ["worktree", "remove", "-f", "-f", "/r/wt-snapshot-abc"], cwd: "/repo" }]);
+});
+
+test("snapshotRefs lists only the run's refs; deleteSnapshotRefs update-ref -d's each; formatPrune labels a branchless row", () => {
+  const calls = [];
+  const git = (args, cwd) => {
+    calls.push({ args, cwd });
+    return { status: 0, stdout: "refs/swarm/snapshots/RK/aaa\n refs/swarm/snapshots/RK/bbb \n\n", stderr: "" };
+  };
+  const refs = snapshotRefs(git, "/repo", "RK");
+  deepEqual(refs, ["refs/swarm/snapshots/RK/aaa", "refs/swarm/snapshots/RK/bbb"]);
+  deepEqual(calls[0].args, ["for-each-ref", "--format=%(refname)", "refs/swarm/snapshots/RK/"]);
+  equal(snapshotRefs(() => ({ status: 1, stdout: "x", stderr: "" }), "/repo", "RK").length, 0);
+
+  calls.length = 0;
+  deleteSnapshotRefs(git, "/repo", refs);
+  deepEqual(calls.map((c) => c.args), [["update-ref", "-d", refs[0]], ["update-ref", "-d", refs[1]]]);
+
+  ok(formatPrune([{ path: "/r/wt-snapshot-abc", branch: null, bytes: 0, repo: "/repo" }]).includes("(detached snapshot)"));
 });

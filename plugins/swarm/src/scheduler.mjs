@@ -12,7 +12,7 @@ import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from 
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary, readSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
-  renderProvenance, touchHeartbeat, stopPath, recordedSessionRecords, transcriptPath,
+  renderProvenance, touchHeartbeat, stopPath, recordedSessionRecords, recordedSnapshots, heartbeatPath, transcriptPath,
 } from "./results.mjs";
 import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
@@ -818,6 +818,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // parked in backoff, since a reader must never mistake a resting engine for
   // a dead one — and repaint while anything runs so elapsed and live tokens
   // tick even between state changes. unref'd — never holds the process open.
+  // Declared above the try: the closing summary reads them after it.
+  const truncations = [];
+  // Citation refutations that Stage 1 kept — surfaced loud in the closing block,
+  // the same register as a truncation: coverage the reader must not mistake for full.
+  const refutations = [];
+  // Coverage shortfalls kept (D9), surfaced in the same loud closing channel.
+  const coverageGaps = [];
   const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
   touchHeartbeat(plan.resultsDir, started, process.pid);
   const heartbeat = setInterval(() => {
@@ -849,6 +856,40 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   }, heartbeatMs);
   if (heartbeat.unref) heartbeat.unref();
 
+  // repoKey -> { sha, tree, repo }: the snapshot trees this run owns, removed in the finally.
+  const snaps = new Map();
+  // The try (not re-indented, to keep the diff readable) closes after the stopped sweep. Its
+  // finally owns the heartbeat, the signal handlers and the snapshot trees on every exit path.
+  try {
+  // Run-start snapshot pass: every snapshot-mode leaf in the static leaf view, before anything
+  // spawns. Ask mode launches into the recorded cwd, so it does no snapshot work.
+  const snapLeaves = ask ? [] : leafView.filter((t) => t.isolationMode === "snapshot" && !cachedIds.has(t.id));
+  if (snapLeaves.length) {
+    const runKey = defaultWorktree.snapshotKey(plan.resultsDir);
+    const recorded = force ? new Map() : recordedSnapshots(plan.resultsDir);
+    const repos = new Map(snapLeaves.map((t) => [t.repoKey, t.repoToplevel]));
+    for (const [repoKey, repo] of repos) {
+      try {
+        touchHeartbeat(plan.resultsDir, new Date().toISOString(), process.pid);
+        let sha = recorded.get(repoKey)?.sha;
+        if (!sha) {
+          const snap = defaultWorktree.snapshotCommit(repo, { resultsDir: plan.resultsDir, runKey, repoKey, label: basename(plan.resultsDir) });
+          sha = snap.sha;
+          appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), event: "snapshot", repo, repoKey, runKey, sha, clean: snap.clean });
+        }
+        touchHeartbeat(plan.resultsDir, new Date().toISOString(), process.pid);
+        const tree = defaultWorktree.prepareSnapshotTree(repo, sha, plan.resultsDir, repoKey);
+        snaps.set(repoKey, { sha, tree, repo });
+      } catch (e) {
+        const reason = `snapshot failed for ${repo}: ${e.message} — fix the repo state git reported, or re-run with --force to take a fresh snapshot`;
+        appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), event: "run-refused", reason });
+        // No summary and no heartbeat: liveness reads the run as aborted at once, so a re-run is not refused.
+        rmSync(heartbeatPath(plan.resultsDir), { force: true });
+        throw new Error(reason);
+      }
+    }
+  }
+
   const depsSatisfied = (t) => t.after.every((d) => OK_STATES.has(state.get(d)));
   const depsDoomed = (t) => t.after.some((d) => {
     const s = state.get(d);
@@ -872,13 +913,6 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     }
     return cur;
   };
-  const truncations = [];
-  // Refuted citations that were kept — surfaced loud in the closing block,
-  // the same register as a truncation: coverage the reader must not mistake for full.
-  const refutations = [];
-  // Coverage shortfalls kept (D9), surfaced in the same loud closing channel.
-  const coverageGaps = [];
-
   // Both truncation paths share one loud channel: run.log event, stdout warning,
   // run-summary field, closing block. A cut only the engine knows about is how an
   // unverified finding ends up reported as verified.
@@ -1178,6 +1212,16 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
 
       let wt = null;
       let taskCwd = task.cwd;
+      if (task.isolationMode === "snapshot") {
+        try {
+          taskCwd = defaultWorktree.snapshotCwd(snaps.get(task.repoKey).tree, task.repoToplevel, task.originalCwd);
+        } catch (e) {
+          const result = { id: task.id, model: task.model, ok: false, exit: null, durationMs: 0, output: `worktree setup failed: ${e.message}` };
+          writeResult(plan.resultsDir, task.id, result);
+          record(task, "failed", 0);
+          return task.id;
+        }
+      }
       const wtName = nameOf(task);
       if (wtName !== undefined) {
         try {
@@ -1267,6 +1311,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       }
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
+      if (task.isolationMode === "snapshot") {
+        result.isolationMode = "snapshot";
+        result.repoKey = task.repoKey;
+        result.repoToplevel = task.repoToplevel;
+        result.snapshotSha = snaps.get(task.repoKey).sha;
+      }
       result.allowedTools = task.allowedTools;
 
       // returns-validation failures are semantic — the leaf itself ran fine.
@@ -1517,9 +1567,17 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       if (state.get(t.id) === "pending" || state.get(t.id) === "retrying") record(t, "failed:stopped", 0);
     }
   }
-  clearInterval(heartbeat);
-  process.off("SIGINT", sigintHandler);
-  process.off("SIGTERM", sigtermHandler);
+  } finally {
+    clearInterval(heartbeat);
+    process.off("SIGINT", sigintHandler);
+    process.off("SIGTERM", sigtermHandler);
+    // Best-effort: the ref stays (swarm ask re-creates the tree), and a tree that survives is prune's.
+    for (const s of snaps.values()) {
+      if (!defaultWorktree.removeSnapshotTree(s.tree, s.repo)) {
+        io.stdout(`⚠ snapshot tree ${s.tree} could not be removed — swarm prune ${plan.resultsDir} clears it`);
+      }
+    }
+  }
 
   // Ask mode changes exactly one row of a run the engine already finished: the
   // interrogated leaf gains duration/tokens from the ask on top of its prior

@@ -83,9 +83,24 @@ export function execute(rows, git, fs) {
       fs.rmSync(row.path, { recursive: true, force: true });
       continue;
     }
-    git(["worktree", "remove", "--force", row.path], row.repo);
-    git(["branch", "-D", row.branch], row.repo);
+    // A detached snapshot tree has no branch, and may be left locked by a killed `worktree add`.
+    if (row.branch) {
+      git(["worktree", "remove", "--force", row.path], row.repo);
+      git(["branch", "-D", row.branch], row.repo);
+    } else {
+      git(["worktree", "remove", "-f", "-f", row.path], row.repo);
+    }
   }
+}
+
+// The refs a run's snapshots pinned in `repo`. They can hold untracked secrets, so prune deletes them.
+export function snapshotRefs(git, repo, runKey) {
+  const r = git(["for-each-ref", "--format=%(refname)", `refs/swarm/snapshots/${runKey}/`], repo);
+  return r.status === 0 ? r.stdout.split("\n").map((s) => s.trim()).filter(Boolean) : [];
+}
+
+export function deleteSnapshotRefs(git, repo, refs) {
+  for (const ref of refs) git(["update-ref", "-d", ref], repo);
 }
 
 function gb(bytes) {
@@ -93,7 +108,7 @@ function gb(bytes) {
 }
 
 export function formatPrune(rows, { dryRun = false } = {}) {
-  const lines = rows.map((r) => `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch}`);
+  const lines = rows.map((r) => `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached snapshot)"}`);
   const total = rows.reduce((s, r) => s + r.bytes, 0);
   const verb = dryRun ? "would free" : "freed";
   lines.push(`${verb} ${gb(total)} GB across ${rows.length} worktree${rows.length === 1 ? "" : "s"}`);
