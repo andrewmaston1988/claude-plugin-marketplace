@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, sep, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { CONTEXT_WINDOW_1M } from "./contracts.mjs";
 import { isClaudeModel } from "./models.mjs";
 import { deepMerge } from "./config.mjs";
 import { providerConfig } from "./providers.mjs";
@@ -40,11 +41,14 @@ function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpToo
     ? { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "0" } }
     : null;
   const settings = base || task.settings ? deepMerge(base || {}, task.settings || {}) : null;
+  // `[1m]` is matched by the CLI on the model name; provider endpoints still need
+  // the bare id, so this suffix must never reach ANTHROPIC_MODEL.
+  const cliModel = task.contextWindow === CONTEXT_WINDOW_1M ? `${task.model}[1m]` : task.model;
   // stream-json lets the engine extract the final result text and per-turn
   // token usage from stdout; --verbose is mandatory with -p for this format.
   const claudeArgs = [
     "-p", prompt,
-    "--model", task.model,
+    "--model", cliModel,
     ...(task.effort ? ["--effort", task.effort] : []),
     // MCP goes to every leaf: the roster is the operator's own, and a leaf that loses
     // scout falls back to grepping the tree.
@@ -63,12 +67,15 @@ function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpToo
   }
 
   if (ollama.mode === "launch") {
+    if (task.contextWindow === CONTEXT_WINDOW_1M) {
+      throw new Error('contextWindow "1m" is unsupported with Ollama launch mode because the launcher rejects [1m] model names; use env mode or remove contextWindow');
+    }
     // Template like "ollama launch claude --model {model} -- {args}":
     // {model} substitutes in place; the {args} token splices the claude args.
     const argv = [];
     for (const token of String(ollama.launchCmd).split(/\s+/).filter(Boolean)) {
       if (token === "{args}") argv.push(...claudeArgs);
-      else argv.push(token.replaceAll("{model}", task.model));
+      else argv.push(token.replaceAll("{model}", cliModel));
     }
     return { argv, env: {}, runner: "claude", parser: "claude" };
   }
@@ -112,6 +119,9 @@ function validateDispatchPolicy(task, identity, adapter, cfg) {
   const problems = adapter.validateTask({ ...task, ...identity }, { config: cfg, task });
   if (Array.isArray(problems) && problems.length) {
     throw new Error(`provider '${identity.provider}' rejected task: ${problems.join("; ")}`);
+  }
+  if (identity.provider === "codex" && task.contextWindow !== undefined) {
+    throw new Error('provider \'codex\' rejected task: Codex tasks do not support contextWindow; "1m" is a Claude CLI model-name suffix');
   }
   if (identity.provider === "codex" && task.leafGuard && task.leafGuard !== false) {
     throw new Error("provider 'codex' cannot run a configured leaf guard; set leafGuard: false for this task");

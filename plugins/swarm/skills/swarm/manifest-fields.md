@@ -81,6 +81,34 @@ guards unless the task explicitly sets `"leafGuard": false`.
 The public provider registry supplies discovery, usage, and runner capabilities. Pin
 `provider` explicitly when the same model id is available from more than one provider.
 
+### Context window — `contextWindow`
+
+`contextWindow` is an opt-in per-leaf field for `:cloud` models whose real window is 1M:
+
+```json
+{ "id": "sweep", "provider": "ollama", "model": "glm-5.3:cloud",
+  "contextWindow": "1m", "prompt": "…" }
+```
+
+The only accepted value is `"1m"`. It asks Claude Code to take its 1M path by suffixing the
+CLI model name; swarm keeps the model identity itself bare, so score history, denylist
+matching and provider API calls still see `glm-5.3:cloud`, not `glm-5.3:cloud[1m]`.
+
+Known windows today: `glm-5.3:cloud`, `deepseek-v4.1-flash:cloud` and
+`glm-5.3-flash:cloud` have 1M windows; `minimax-m3:cloud` has 512k. Do not put
+`"contextWindow": "1m"` on a model whose real limit is lower: the leaf may avoid early
+compaction only to hit provider API errors past the true window.
+
+There is no partial-window manifest value for `:cloud` leaves. A 512k model such as
+`minimax-m3:cloud` cannot declare 512k through swarm today, and `CLAUDE_CODE_MAX_CONTEXT_TOKENS`
+does not reach `:cloud` models. The 1M route is also measured at about +45% `:cloud` meter
+cost for the same output, so treat it as supported rather than recommended.
+
+Claude-model leaves use the existing `disable1mContext` / `CLAUDE_CODE_DISABLE_1M_CONTEXT`
+path instead of this field. Codex tasks reject `contextWindow`, and Ollama `launch` mode
+rejects it because the launcher validates the suffixed model name before Claude Code can
+interpret `[1m]`.
+
 ### Prompt length on Windows
 
 A leaf's `prompt` is measured through the CreateProcess-quoted command line at `swarm validate` time; a prompt over ~32k characters on Windows fails validation — point the leaf at a file holding its instructions instead of inlining it.

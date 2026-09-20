@@ -194,6 +194,53 @@ test("settings must be a JSON object", () => {
   }
 });
 
+test("contextWindow accepts only 1m and stays on the normalized task", () => {
+  const dir = tmp();
+  try {
+    const cfg = { ...CFG, provider: { allowedRoots: [dir] } };
+    const okPath = writeManifest(dir, {
+      tasks: [{ id: "cloud", prompt: "inspect", model: "glm-5.3:cloud", contextWindow: "1m" }],
+    }, "ok.json");
+    const plan = loadManifest(okPath, cfg, dir);
+    equal(plan.tasks[0].contextWindow, "1m");
+
+    const badPath = writeManifest(dir, {
+      tasks: [{ id: "cloud", prompt: "inspect", model: "glm-5.3:cloud", contextWindow: "512k" }],
+    }, "bad.json");
+    const errs = errorsOf(() => loadManifest(badPath, cfg, dir));
+    ok(errs.some((e) => e.includes("contextWindow") && e.includes('"1m"') && e.includes('"contextWindow": "1m"')), errs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("contextWindow refuses Ollama launch mode and Codex tasks", () => {
+  const dir = tmp();
+  try {
+    const launchCfg = {
+      ...CFG,
+      provider: { allowedRoots: [dir], mode: "launch", launchCmd: "ollama launch claude --model {model} -- {args}" },
+    };
+    const launchPath = writeManifest(dir, {
+      tasks: [{ id: "cloud", prompt: "inspect", model: "glm-5.3:cloud", contextWindow: "1m" }],
+    }, "launch.json");
+    const launchErrs = errorsOf(() => loadManifest(launchPath, launchCfg, dir));
+    ok(launchErrs.some((e) => e.includes("contextWindow") && e.includes("launch mode") && e.includes("[1m]")), launchErrs.join("\n"));
+
+    const codexCfg = {
+      ...CFG,
+      providers: { claude: { enabled: true }, ollama: { enabled: true, allowedRoots: [dir] }, codex: { enabled: true, allowedRoots: [dir] } },
+    };
+    const codexPath = writeManifest(dir, {
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex", contextWindow: "1m" }],
+    }, "codex.json");
+    const codexErrs = errorsOf(() => loadManifest(codexPath, codexCfg, dir));
+    ok(codexErrs.some((e) => /Codex tasks do not support contextWindow/.test(e)), codexErrs.join("\n"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("settings.env cannot forge or clear the leaf guard vars", () => {
   const dir = tmp();
   try {

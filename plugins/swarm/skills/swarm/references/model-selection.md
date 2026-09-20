@@ -63,7 +63,7 @@ Claude tiers reject unsupported levels; `swarm validate` checks the pairing at m
 
 ## Context window
 
-The 1M context window (`disable1mContext: false` in config, or a task's `settings` override) is a wall-clock lever, not a quality one — measured ~+45% cost for the same output, same quality. Shipped default is off (200k).
+The 1M context window is a wall-clock lever, not a quality one — measured ~+45% cost for the same output, same quality. Shipped default is off (200k). For the `:cloud` manifest field and model caveats, read `manifest-fields.md` → `contextWindow`; Claude-model leaves use `disable1mContext` / `CLAUDE_CODE_DISABLE_1M_CONTEXT`.
 
 ## Approval
 
