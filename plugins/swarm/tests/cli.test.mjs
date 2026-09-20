@@ -65,7 +65,7 @@ test("validate: bad manifest exits 1 with readable errors", () => {
     writeFileSync(p, JSON.stringify({
       tasks: [
         { id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" },
-        { id: "a", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001", effort: "max" },
+        { id: "a", prompt: "y", provider: "claude", model: "claude-sonnet-5", effort: "max" },
         { id: "b", prompt: "{{result:ghost}}", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
@@ -251,7 +251,7 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "models-cache.json"), JSON.stringify({ models: [
-      { provider: "claude", model: "sonnet", efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "high" },
+      { provider: "claude", model: "claude-sonnet-5", efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "high" },
     ] }));
     const shimLog = join(dir, "shim.log");
     const manifest = join(dir, "sweep.json");
