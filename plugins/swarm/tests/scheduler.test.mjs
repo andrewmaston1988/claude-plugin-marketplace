@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, rejects, match } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, createWriteStream } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
@@ -3640,4 +3640,270 @@ test("resume: --force starts fresh even with a recorded session", async () => {
     await runPlan(p, CFG, makeIo(spawn), { force: true });
     equal(resumeArg(spawn.calls[0]), null);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ---- snapshot-mode leaves: one frozen tree per repo per run ----
+import { snapshotKey as snapKey, prepareSnapshotTree as prepSnapTree } from "../src/worktree.mjs";
+import { runLiveness } from "../src/runlog.mjs";
+
+const sg = (args, cwd) => {
+  const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
+  return { status: r.status, out: (r.stdout || "").trim() };
+};
+
+function snapRepo() {
+  const repo = mkdtempSync(join(tmpdir(), "swarm-snap-repo-"));
+  sg(["init", "-q", "-b", "main"], repo);
+  mkdirSync(join(repo, "sub"));
+  writeFileSync(join(repo, "a.txt"), "hello\n");
+  writeFileSync(join(repo, "sub", "x.txt"), "in-sub\n");
+  sg(["add", "."], repo);
+  sg(["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], repo);
+  return repo;
+}
+
+function snapTask(id, repo, over = {}) {
+  const cwd = over.cwd ?? repo;
+  return task(id, { isolationMode: "snapshot", repoToplevel: repo, repoKey: snapKey(repo), ...over, cwd, originalCwd: cwd });
+}
+
+const runLog = (p) => readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+const snapEvents = (p) => runLog(p).filter((e) => e.event === "snapshot");
+const treeOf = (p, repo) => resolve(p.resultsDir, "wt-snapshot-" + snapKey(repo));
+const registered = (repo, path) => sg(["worktree", "list", "--porcelain"], repo).out.toLowerCase().includes(path.replace(/\\/g, "/").toLowerCase());
+const drop = (...dirs) => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); };
+
+test("snapshot: two leaves in one repo share one snapshot and one tree", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    const spawn = fakeSpawnFactory(() => ({}));
+    const p = plan(dir, [snapTask("a", repo), snapTask("b", repo)]);
+    await runPlan(p, CFG, makeIo(spawn));
+    equal(snapEvents(p).length, 1);
+    deepEqual(spawn.calls.map((c) => resolve(c.opts.cwd)), [treeOf(p, repo), treeOf(p, repo)]);
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: leaves in two repos get two snapshots and two distinct trees", async () => {
+  const dir = tmp(), r1 = snapRepo(), r2 = snapRepo();
+  try {
+    const spawn = fakeSpawnFactory(() => ({}));
+    const p = plan(dir, [snapTask("a", r1), snapTask("b", r2)]);
+    await runPlan(p, CFG, makeIo(spawn));
+    const ev = snapEvents(p);
+    equal(ev.length, 2);
+    ok(ev[0].repoKey !== ev[1].repoKey);
+    equal(new Set(spawn.calls.map((c) => c.opts.cwd)).size, 2);
+  } finally { drop(dir, r1, r2); }
+});
+
+test("snapshot: an untracked file is readable in the tree; a live write mid-run is not", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    writeFileSync(join(repo, "new.txt"), "untracked\n");
+    const seen = [];
+    const spawn = fakeSpawnFactory((call, i) => {
+      seen.push({ new: existsSync(join(call.opts.cwd, "new.txt")), late: existsSync(join(call.opts.cwd, "late.txt")) });
+      if (i === 0) writeFileSync(join(repo, "late.txt"), "written during leaf 1\n");
+      return {};
+    });
+    const p = plan(dir, [snapTask("a", repo), snapTask("b", repo, { after: ["a"] })]);
+    await runPlan(p, CFG, makeIo(spawn));
+    deepEqual(seen, [{ new: true, late: false }, { new: true, late: false }]);
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: a manifest child in a second repo is snapshotted at run start, before any leaf runs", async () => {
+  const dir = tmp(), rA = snapRepo(), rB = snapRepo();
+  try {
+    const spawn = fakeSpawnFactory(() => ({}));
+    const node = task("audit", { model: "manifest", prompt: "", childPlan: { tasks: [snapTask("scan", rB)] } });
+    const p = plan(dir, [snapTask("top", rA), node]);
+    await runPlan(p, CFG, makeIo(spawn));
+    const log = runLog(p);
+    const firstRunning = log.findIndex((e) => e.state === "running");
+    const snapIdx = log.map((e, i) => (e.event === "snapshot" ? i : -1)).filter((i) => i >= 0);
+    equal(snapIdx.length, 2);
+    ok(snapIdx.every((i) => i < firstRunning));
+    ok(spawn.calls.some((c) => resolve(c.opts.cwd) === treeOf(p, rB)));
+  } finally { drop(dir, rA, rB); }
+});
+
+test("snapshot: forEach clones share the parent's snapshot", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    const spawn = fakeSpawnFactory((call) => (promptOf(call) === "do src" ? { output: '["x","y"]' } : {}));
+    const p = plan(dir, [
+      task("src"),
+      snapTask("fix", repo, { after: ["src"], forEach: { from: "src", path: "", maxItems: 5 }, prompt: "fix {{item}}" }),
+    ]);
+    await runPlan(p, CFG, makeIo(spawn));
+    equal(snapEvents(p).length, 1);
+    const clones = spawn.calls.filter((c) => promptOf(c).startsWith("fix "));
+    equal(clones.length, 2);
+    for (const c of clones) equal(resolve(c.opts.cwd), treeOf(p, repo));
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: a leaf under <repo>/sub spawns at <tree>/sub", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    let seen;
+    const spawn = fakeSpawnFactory((call) => { seen = { cwd: call.opts.cwd, x: existsSync(join(call.opts.cwd, "x.txt")) }; return {}; });
+    const p = plan(dir, [snapTask("a", repo, { cwd: join(repo, "sub") })]);
+    await runPlan(p, CFG, makeIo(spawn));
+    equal(resolve(seen.cwd), join(treeOf(p, repo), "sub"));
+    equal(seen.x, true);
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: a gitignored originalCwd is created empty in the tree", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    writeFileSync(join(repo, ".gitignore"), ".cache/\n");
+    mkdirSync(join(repo, ".cache"));
+    let seen;
+    const spawn = fakeSpawnFactory((call) => { seen = { cwd: call.opts.cwd, there: existsSync(call.opts.cwd) }; return {}; });
+    const p = plan(dir, [snapTask("a", repo, { cwd: join(repo, ".cache") })]);
+    await runPlan(p, CFG, makeIo(spawn));
+    equal(resolve(seen.cwd), join(treeOf(p, repo), ".cache"));
+    equal(seen.there, true);
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: after a normal end the tree is gone and unregistered, and the ref still resolves", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    const p = plan(dir, [snapTask("a", repo)]);
+    await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({}))));
+    equal(existsSync(treeOf(p, repo)), false);
+    equal(registered(repo, treeOf(p, repo)), false);
+    const ref = `refs/swarm/snapshots/${snapKey(p.resultsDir)}/${snapKey(repo)}`;
+    equal(sg(["rev-parse", ref], repo).out, snapEvents(p)[0].sha);
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: an engine error still removes the tree and the signal handlers", async () => {
+  const dir = tmp(), repo = snapRepo();
+  const before = process.listenerCount("SIGINT");
+  try {
+    const p = plan(dir, [snapTask("a", repo)]);
+    // runTask absorbs a throwing spawn, so throw from the roster paint when the leaf goes running.
+    const io = makeIo(fakeSpawnFactory(() => ({})), { snapshot: () => { throw new Error("boom"); } });
+    await rejects(() => runPlan(p, CFG, io), /boom/);
+    equal(existsSync(treeOf(p, repo)), false);
+    equal(process.listenerCount("SIGINT"), before);
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: resume re-uses the recorded snapshot and re-adds the tree", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    const p = plan(dir, [snapTask("a", repo)]);
+    await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({ exit: 1, output: "boom" }))));
+    const first = snapEvents(p)[0];
+    writeFileSync(join(repo, "later.txt"), "edited after run 1\n");
+    const spawn = fakeSpawnFactory(() => ({}));
+    await runPlan(p, CFG, makeIo(spawn));
+    equal(snapEvents(p).length, 1);
+    equal(readResult(p.resultsDir, "a").snapshotSha, first.sha);
+    equal(resolve(spawn.calls[0].opts.cwd), treeOf(p, repo));
+    equal(existsSync(join(treeOf(p, repo), "later.txt")), false);
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: --force takes a fresh snapshot at the same tree path, even over a tree left by a killed run", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    const p = plan(dir, [snapTask("a", repo)]);
+    await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({}))));
+    const first = snapEvents(p)[0];
+    // Simulate a run killed before its finally: the tree at SHA A is left registered.
+    prepSnapTree(repo, first.sha, p.resultsDir, snapKey(repo));
+    writeFileSync(join(repo, "edit.txt"), "post-run-1\n");
+    let seen;
+    const spawn = fakeSpawnFactory((call) => {
+      seen = { cwd: call.opts.cwd, edit: existsSync(join(call.opts.cwd, "edit.txt")), head: sg(["rev-parse", "HEAD"], call.opts.cwd).out };
+      return {};
+    });
+    await runPlan(p, CFG, makeIo(spawn), { force: true });
+    const ev = snapEvents(p);
+    equal(ev.length, 2);
+    ok(ev[1].sha !== first.sha);
+    equal(seen.edit, true);
+    equal(seen.head, ev[1].sha);
+    equal(resolve(seen.cwd), treeOf(p, repo));
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: an unsnapshottable repo refuses the run before any spawn, and a re-run is not blocked", async () => {
+  const dir = tmp(), good = snapRepo();
+  const bad = mkdtempSync(join(tmpdir(), "swarm-snap-empty-"));
+  const before = process.listenerCount("SIGINT");
+  try {
+    sg(["init", "-q", "-b", "main"], bad);
+    const spawn = fakeSpawnFactory(() => ({}));
+    const p = plan(dir, [snapTask("a", good), snapTask("b", bad)]);
+    await rejects(() => runPlan(p, CFG, makeIo(spawn)),
+      (e) => /snapshot failed for/.test(e.message) && /has no commits yet/.test(e.message) && /--force/.test(e.message));
+    equal(spawn.calls.length, 0);
+    ok(runLog(p).some((e) => e.event === "run-refused"));
+    equal(existsSync(treeOf(p, good)), false);
+    equal(process.listenerCount("SIGINT"), before);
+    ok(runLiveness(p.resultsDir, { heartbeatMs: 15000 }).abortedMs != null);
+  } finally { drop(dir, good, bad); }
+});
+
+test("snapshot: a leaf whose cwd is outside its repo fails alone; its sibling runs", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    const spawn = fakeSpawnFactory(() => ({}));
+    const p = plan(dir, [snapTask("bad", repo, { cwd: tmpdir() }), snapTask("good", repo)]);
+    await runPlan(p, CFG, makeIo(spawn));
+    const bad = readResult(p.resultsDir, "bad");
+    equal(bad.ok, false);
+    ok(bad.output.startsWith("worktree setup failed:"), bad.output);
+    equal(readResult(p.resultsDir, "good").ok, true);
+    equal(spawn.calls.length, 1);
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: ask mode takes no snapshot and creates no tree", async () => {
+  const dir = tmp(), r1 = snapRepo(), r2 = snapRepo();
+  try {
+    const p = plan(dir, [snapTask("a", r1), snapTask("b", r2)]);
+    await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({ output: "x" }))));
+    const evBefore = snapEvents(p).length;
+    const prior = readResult(p.resultsDir, "a");
+    writeResult(p.resultsDir, "a", { ...prior, sessionId: "s-1", cwd: p.resultsDir });
+    await runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({ output: "ans" }))), { ask: { taskId: "a", question: "q?" } });
+    equal(snapEvents(p).length, evBefore);
+    equal(existsSync(treeOf(p, r1)) || existsSync(treeOf(p, r2)), false);
+  } finally { drop(dir, r1, r2); }
+});
+
+test("snapshot: tasks never reach worktree.collect", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    const collectCalls = [];
+    const io = makeIo(fakeSpawnFactory(() => ({})), { worktree: fakeWorktree(collectCalls) });
+    await runPlan(plan(dir, [snapTask("a", repo)]), CFG, io);
+    equal(collectCalls.length, 0);
+  } finally { drop(dir, repo); }
+});
+
+test("snapshot: the result records the snapshot fields and the effective cwd", async () => {
+  const dir = tmp(), repo = snapRepo();
+  try {
+    let cwd;
+    const spawn = fakeSpawnFactory((call) => { cwd = call.opts.cwd; return {}; });
+    const p = plan(dir, [snapTask("a", repo)]);
+    await runPlan(p, CFG, makeIo(spawn));
+    const res = readResult(p.resultsDir, "a");
+    equal(res.isolationMode, "snapshot");
+    equal(res.repoKey, snapKey(repo));
+    equal(res.repoToplevel, repo);
+    equal(res.snapshotSha, snapEvents(p)[0].sha);
+    equal(res.cwd, cwd);
+  } finally { drop(dir, repo); }
 });

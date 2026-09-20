@@ -11,7 +11,7 @@ import { inferStoredIdentity } from "./contracts.mjs";
 //   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
 //                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
-//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks? }
+//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks?, isolationMode?, repoKey?, repoToplevel?, snapshotSha? }
 //                       (coverage = { status: "complete"|"incomplete"|"unparseable", required, read, missed[] }
 //                        when the task declared mustRead — a shortfall is recorded, never fails the leaf)
 //                       (asks = [{question, answer, ok, provider?, runner?, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
@@ -21,6 +21,8 @@ import { inferStoredIdentity } from "./contracts.mjs";
 //                       (citations = { checked, drifted, refuted } when N3 verified them; each cited finding is
 //                        annotated citation:"verified"|"drift"|"refuted" in output. citationRefuted = [{path,reason}]
 //                        for the kept-but-unverified findings — a citation never fails a leaf)
+//   wt-snapshot-<repoKey>/  detached snapshot tree shared by a repo's snapshot-mode leaves; removed at run end
+//   snapshot-<repoKey>.index  transient copy of the repo's index while the snapshot is built
 //   digest.md           when a digest block is present
 //   summary.json        { started, finished, tasks, blocked, worktreesKept, totalTokens, estimate?, costWarnFired? }
 //                       task rows: { id, provider?, runner?, model, state, durationMs, tokens, costUsd?, resultPath }
@@ -38,6 +40,8 @@ import { inferStoredIdentity } from "./contracts.mjs";
 //                         { ts, event: "citations", id, checked, drifted, refuted }   N3 mechanical verification
 //                         { ts, event: "coverage", id, status, required, read, missed, retried }   mustRead read-coverage check
 //                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn
+//                         { ts, event: "snapshot", repo, repoKey, runKey, sha, clean }   one per repo per run; a resume re-uses the sha
+//                         { ts, event: "run-refused", reason }   the run-start snapshot pass failed before any leaf spawned
 //   grade-waiver.json   { waivedAt, reason } — written by `swarm grade --waive`; excuses the run from
 //                       ungradedRuns/the grading nudges without ever counting as a grade
 
@@ -198,6 +202,21 @@ export function recordedSessionRecords(dir) {
 // Backward-compatible string map for callers that only need --resume.
 export function recordedSessionIds(dir) {
   return new Map([...recordedSessionRecords(dir)].map(([id, value]) => [id, value.sessionId]));
+}
+
+// repoKey -> the latest `snapshot` event run.log recorded for it ({ repo, runKey, sha, ... }).
+export function recordedSnapshots(dir) {
+  const out = new Map();
+  let text = "";
+  try { text = readFileSync(join(dir, "run.log"), "utf8"); } catch { return out; }
+  for (const line of text.split("\n")) {
+    if (!line.includes('"event":"snapshot"')) continue;
+    try {
+      const e = JSON.parse(line);
+      if (e.repoKey && e.sha) out.set(e.repoKey, e);
+    } catch { /* torn tail */ }
+  }
+  return out;
 }
 
 // ── liveness control files ────────────────────────────────────────────────────

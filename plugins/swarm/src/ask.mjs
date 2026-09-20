@@ -11,6 +11,7 @@ import { isUnderRoot } from "./roots.mjs";
 import { providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { runPlan, makeDefaultIo } from "./scheduler.mjs";
+import { prepareSnapshotTree, removeSnapshotTree, snapshotCwd } from "./worktree.mjs";
 
 const PROVIDERS = defaultProviderRegistry();
 
@@ -20,7 +21,19 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   if (!prior.sessionId) {
     throw new Error(`result for '${taskId}' has no sessionId — the run predates session capture; re-run the plan to enable interrogation`);
   }
-  const cwd = prior.cwd;
+  let cwd = prior.cwd;
+  // The run's end removed the snapshot tree; the leaf's session lives at that path, so put it back
+  // (at the SHA the leaf read) for the duration of the ask.
+  let readdedTree = null;
+  if (prior.isolationMode === "snapshot" && (!cwd || !existsSync(cwd))) {
+    try {
+      readdedTree = prepareSnapshotTree(prior.repoToplevel, prior.snapshotSha, resultsDir, prior.repoKey);
+      cwd = snapshotCwd(readdedTree, prior.repoToplevel, prior.originalCwd);
+    } catch (e) {
+      throw new Error(`cannot re-create the snapshot this leaf read: ${e.message} — re-run the leaf to ask it again`);
+    }
+  }
+  try {
   if (!cwd || !existsSync(cwd)) {
     throw new Error(`leaf cwd '${cwd}' no longer exists (removed worktree?) — the session cannot be resumed`);
   }
@@ -96,4 +109,7 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
     ...(askEntry.provider && { provider: askEntry.provider }),
     ...(askEntry.runner && { runner: askEntry.runner }),
   };
+  } finally {
+    if (readdedTree) removeSnapshotTree(readdedTree, prior.repoToplevel);
+  }
 }

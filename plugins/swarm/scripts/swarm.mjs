@@ -12,10 +12,10 @@ import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
+import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat, recordedSnapshots } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, snapshotRefs, deleteSnapshotRefs } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim } from "../src/ui.mjs";
 
@@ -543,7 +543,7 @@ async function recordDeadEngineStop(dir) {
   const { spawnSync } = await import("node:child_process");
   const repo = repoFromManifest(fs, dir);
   const worktreesKept = repo && fs.existsSync(repo)
-    ? registeredUnder(makeGit(spawnSync), repo, dir).map((r) => ({ name: basename(r.path), branch: r.branch, path: r.path }))
+    ? registeredUnder(makeGit(spawnSync), repo, dir).filter((r) => r.branch).map((r) => ({ name: basename(r.path), branch: r.branch, path: r.path }))
     : [];
 
   const summary = {
@@ -620,11 +620,20 @@ async function cmdPrune(rest) {
   }
 
   const { spawnSync } = await import("node:child_process");
-  const summary = JSON.parse(fs.readFileSync(join(dir, "summary.json"), "utf8"));
-  const worktreesKept = Array.isArray(summary.worktreesKept) ? summary.worktreesKept : [];
+  // A killed run wrote no summary.json; prune must tolerate that and never invent one.
+  const summaryFile = join(dir, "summary.json");
+  const hadSummary = fs.existsSync(summaryFile);
+  const summary = hadSummary ? JSON.parse(fs.readFileSync(summaryFile, "utf8")) : null;
+  const worktreesKept = Array.isArray(summary?.worktreesKept) ? summary.worktreesKept : [];
+  // Snapshot repos and run keys come from the run's own log: the refs live in each repo the run
+  // snapshotted, which need not be the manifest's cwd.
+  const snapshots = new Map();
+  for (const e of recordedSnapshots(dir).values()) snapshots.set(`${e.repo}|${e.runKey}`, e);
+  const snapEntries = [...snapshots.values()].filter((e) => fs.existsSync(e.repo));
 
   const repo = worktreesKept.map((wt) => repoOfWorktree(spawnSync, wt.path)).find(Boolean)
-    || repoFromManifest(fs, dir);
+    || repoFromManifest(fs, dir)
+    || snapEntries[0]?.repo;
   if (!repo) {
     err(`swarm: could not resolve the repo for ${dir} — no kept worktree survives and manifest.json has no cwd.`);
     return 1;
@@ -632,15 +641,25 @@ async function cmdPrune(rest) {
   const git = makeGit(spawnSync);
 
   const { rows } = planPrune({ live: false, repo, resultsDir: dir, worktreesKept }, git, fs);
-  if (!rows.length) {
+  const seenRepos = new Set([resolve(repo)]);
+  for (const e of snapEntries) {
+    if (seenRepos.has(resolve(e.repo))) continue;
+    seenRepos.add(resolve(e.repo));
+    rows.push(...planPrune({ live: false, repo: e.repo, resultsDir: dir, worktreesKept: [] }, git, fs).rows);
+  }
+  // Refs go before either "nothing to do" exit: a run that ended normally has no tree left but keeps them.
+  const refs = snapEntries.flatMap((e) => snapshotRefs(git, e.repo, e.runKey).map((ref) => ({ repo: e.repo, ref })));
+  if (!rows.length && !refs.length) {
     out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
     return 0;
   }
-  out(formatPrune(rows, { dryRun }));
+  if (rows.length) out(formatPrune(rows, { dryRun }));
+  for (const r of refs) out(`  ${r.ref}  (snapshot ref)`);
   if (!dryRun) {
     executePrune(rows, git, fs);
+    for (const e of snapEntries) deleteSnapshotRefs(git, e.repo, refs.filter((r) => r.repo === e.repo).map((r) => r.ref));
     // survivors: whatever wasn't just removed and wasn't already gone before we started
-    writeSummary(dir, { ...summary, worktreesKept: worktreesKept.filter((wt) => fs.existsSync(wt.path)) });
+    if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: worktreesKept.filter((wt) => fs.existsSync(wt.path)) });
   }
   return 0;
 }
