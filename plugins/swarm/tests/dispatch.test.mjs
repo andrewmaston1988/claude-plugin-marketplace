@@ -46,6 +46,16 @@ test("open model env mode: same argv plus exact env trio, model verbatim", () =>
   });
 });
 
+test("contextWindow 1m suffixes only the CLI model name, keeping the provider model bare", () => {
+  const d = buildDispatch(task({ model: "glm-5.3:cloud", contextWindow: "1m" }), "p", CFG, { _mcpTools: NO_MCP });
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "glm-5.3:cloud[1m]", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.env, {
+    ANTHROPIC_BASE_URL: "http://localhost:11434",
+    ANTHROPIC_API_KEY: "ollama",
+    ANTHROPIC_MODEL: "glm-5.3:cloud",
+  });
+});
+
 test("open model: effort passes through", () => {
   const d = buildDispatch(task({ model: "glm-4.6:cloud", effort: "xhigh" }), "p", CFG, { _mcpTools: NO_MCP });
   ok(d.argv.includes("--effort"));
@@ -80,6 +90,14 @@ test("launch mode: template split with {model} substitution and {args} splice", 
     "-p", "the prompt", "--model", "qwen3-coder:cloud", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS,
   ]);
   deepEqual(d.env, {});
+});
+
+test("launch mode refuses contextWindow because the launcher rejects suffixed model names", () => {
+  const cfg = { provider: { ...CFG.provider, mode: "launch" } };
+  throws(
+    () => buildDispatch(task({ model: "glm-5.3:cloud", contextWindow: "1m" }), "p", cfg, { _mcpTools: NO_MCP }),
+    /contextWindow "1m".*launch mode.*rejects \[1m\]/i
+  );
 });
 
 test("launch mode applies only to non-Claude models", () => {
@@ -155,6 +173,22 @@ test("Codex dispatch: provider registry selects exact fresh argv, runner, and pa
   equal(d.runner, "codex");
   equal(d.parser, "codex");
   deepEqual(d.env, {});
+});
+
+test("Codex dispatch refuses contextWindow instead of ignoring it", () => {
+  const root = process.cwd();
+  const cfg = {
+    providers: {
+      codex: { enabled: true, path: "codex", allowedRoots: [root] },
+    },
+  };
+  throws(
+    () => buildDispatch({
+      provider: "codex", model: "gpt-5-codex", contextWindow: "1m", allowedTools: "Read",
+      cwd: root, originalCwd: root,
+    }, "inspect", cfg),
+    /Codex tasks do not support contextWindow/
+  );
 });
 
 test("Codex dispatch: resume is native and safety gates run before invocation construction", () => {

@@ -3,6 +3,7 @@ import { spawnSync as nodeSpawnSync } from "node:child_process";
 import { resolve, join, basename, dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
+import { CONTEXT_WINDOW_1M, CONTEXT_WINDOWS } from "./contracts.mjs";
 import { isValidEffort, tierFromModel, TIER_EFFORTS } from "./models.mjs";
 import { buildDispatch, toSpawnable, windowsCommandLineLength, runnerOf } from "./dispatch.mjs";
 import { buildDigestTask } from "./digest.mjs";
@@ -51,7 +52,7 @@ const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "provider", "fallbackModel", "effort", "allowedTools", "cwd",
   "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
   "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
-  "mustRead",
+  "mustRead", "contextWindow",
 ]);
 
 const PROVIDERS = defaultProviderRegistry();
@@ -59,7 +60,7 @@ const PROVIDERS = defaultProviderRegistry();
 // leaf-shaped key on the node itself is an authoring mistake.
 const MANIFEST_BANNED_KEYS = [
   "prompt", "model", "compute", "returns", "isolation", "allowedTools",
-  "outputDir", "effort", "fallbackModel", "mustRead",
+  "outputDir", "effort", "fallbackModel", "mustRead", "contextWindow",
 ];
 // More `mustRead` entries than this is an authoring mistake — use an index entry.
 export const MUST_READ_MAX_ENTRIES = 500;
@@ -281,7 +282,7 @@ function validateTaskShapes(rawTasks, errors, label) {
     } else if (t.compute !== undefined) {
       // Agentless: a compute step never spawns a leaf, so leaf-only keys are
       // authoring mistakes worth naming individually.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "isolation", "outputDir"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "isolation", "outputDir", "contextWindow"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: compute tasks are agentless — remove ${agentKeys.join("/")}; the expression runs in the engine, no leaf is spawned`);
@@ -291,7 +292,7 @@ function validateTaskShapes(rawTasks, errors, label) {
       }
     } else if (t.integrate !== undefined) {
       // Agentless like compute: the engine merges, no leaf is spawned.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "outputDir"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "outputDir", "contextWindow"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: integrate tasks are agentless — remove ${agentKeys.join("/")}; the merge runs in the engine, no leaf is spawned`);
@@ -356,6 +357,9 @@ function validateTaskShapes(rawTasks, errors, label) {
     }
     if (t.timeoutMs !== undefined && (!Number.isInteger(t.timeoutMs) || t.timeoutMs < 1)) {
       errors.push(`${l}: timeoutMs must be a positive integer`);
+    }
+    if (t.contextWindow !== undefined && !CONTEXT_WINDOWS.has(t.contextWindow)) {
+      errors.push(`${l}: contextWindow only accepts "1m" — e.g. "contextWindow": "1m"`);
     }
     // Goes red on a string/array/null: `--settings` takes a JSON object and anything else would reach the CLI as a file path that does not exist.
     if (t.settings !== undefined && (!t.settings || typeof t.settings !== "object" || Array.isArray(t.settings))) {
@@ -963,6 +967,12 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     if (!isCompute && !isManifest && !isIntegrate) {
       const primary = resolveProvider({ ...t }, cfg, cache, l, errors, providerRegistry);
       provider = primary.provider;
+      if (t.contextWindow === CONTEXT_WINDOW_1M && provider === "ollama" && providerConfig(cfg, "ollama").mode === "launch") {
+        errors.push(`${l}: contextWindow "1m" is unsupported with Ollama launch mode because the launcher rejects [1m] model names — use env mode or remove contextWindow`);
+      }
+      if (t.contextWindow !== undefined && provider === "codex") {
+        errors.push(`${l}: Codex tasks do not support contextWindow; "1m" is a Claude CLI model-name suffix`);
+      }
       checkGovernance(provider, t.model, originalCwd, l, cfg, errors);
       checkDenylist(t.model, l, cfg, errors);
       checkHeadroom(provider, t.model, l, headroom, errors, warnings);
@@ -1081,6 +1091,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ...forEachBlock,
       ...(!isCompute && !isManifest && t.returns && typeof t.returns === "object" && !Array.isArray(t.returns) && { returns: t.returns }),
       ...(!isCompute && !isManifest && !isIntegrate && Array.isArray(t.mustRead) && { mustRead: t.mustRead }),
+      ...(!isCompute && !isManifest && !isIntegrate && t.contextWindow !== undefined && { contextWindow: t.contextWindow }),
       ...(typeof t.verifyCitations === "boolean" && { verifyCitations: t.verifyCitations }),
       ...(!isCompute && !isManifest && !isIntegrate && t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && { settings: t.settings }),
       ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),
@@ -1321,7 +1332,7 @@ export function effectivePlanDoc(plan) {
     // normalised away.
     const isolation = t.isolationMode === "none" ? "none" : t.isolationMode === "private" ? undefined : t.isolation;
     t = { ...t, isolation };
-    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "isolation", "outputDir", "mustRead"]) {
+    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "isolation", "outputDir", "mustRead", "contextWindow"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
     if (t.childPlan) o.child = t.childPlan.tasks.map(strip);

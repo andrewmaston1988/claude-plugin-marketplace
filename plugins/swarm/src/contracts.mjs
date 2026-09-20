@@ -26,6 +26,8 @@ const RECORD_FIELDS = {
 };
 
 export const CLAUDE_ALIASES = new Set(["haiku", "sonnet", "opus", "fable"]);
+export const CONTEXT_WINDOW_1M = "1m";
+export const CONTEXT_WINDOWS = new Set([CONTEXT_WINDOW_1M]);
 export const COST_CLASSIFICATIONS = new Set(["billed", "api-equivalent estimate", "unpriced"]);
 export const AVAILABILITY_STATES = new Set(["available", "unavailable", "unknown"]);
 // What makes an ollama model a cloud one. Discovery and the provider descriptor each
