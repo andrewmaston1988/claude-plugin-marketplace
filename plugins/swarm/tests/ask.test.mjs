@@ -573,6 +573,40 @@ test("askLeaf snapshot: re-adds the tree at the recorded sha, resumes inside it,
   }
 });
 
+test("askLeaf snapshot: a sub-offset leaf resumes at <tree>/sub, and the re-added tree is removed after", async () => {
+  const s = snapAskSetup();
+  try {
+    const sub = join(s.tree, "sub");
+    writeResult(s.dir, "leaf", { ...readResult(s.dir, "leaf"), cwd: sub, originalCwd: join(s.repo, "sub") });
+    equal(existsSync(s.tree), false);
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    const r = await askLeaf({ resultsDir: s.dir, taskId: "leaf", question: "q", cfg: CFG, io: makeIo(spawn) });
+    equal(r.answer, "the follow-up answer");
+    equal(spawn.calls[0].opts.cwd, sub);
+    equal(existsSync(s.tree), false, "tree removed after the ask");
+    equal(s.registered(), false);
+  } finally {
+    snapAskDrop(s);
+  }
+});
+
+test("askLeaf snapshot: a forEach clone (not in manifest.tasks) re-adds the tree from its own result", async () => {
+  const s = snapAskSetup();
+  try {
+    writeManifestSnapshot(s.dir, { cwd: s.repo, resultsDir: s.dir, tasks: [{ id: "fix", model: "haiku", forEach: { over: "{{x}}" } }] });
+    writeResult(s.dir, "fix[0]", { ...readResult(s.dir, "leaf"), id: "fix[0]" });
+    let treeAtSpawn = null;
+    const spawn = fakeSpawnFactory(() => { treeAtSpawn = existsSync(join(s.tree, "a.txt")); return { output: STREAM }; });
+    const r = await askLeaf({ resultsDir: s.dir, taskId: "fix[0]", question: "q", cfg: CFG, io: makeIo(spawn) });
+    equal(r.answer, "the follow-up answer");
+    equal(spawn.calls[0].opts.cwd, s.tree);
+    equal(treeAtSpawn, true, "tree populated when the clone resumed");
+    equal(existsSync(s.tree), false, "tree removed after the ask");
+  } finally {
+    snapAskDrop(s);
+  }
+});
+
 test("askLeaf snapshot: a pruned snapshot commit is a clear error, not a spawn in a missing cwd", async () => {
   const s = snapAskSetup();
   try {
