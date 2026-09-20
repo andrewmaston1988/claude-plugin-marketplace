@@ -503,6 +503,19 @@ function validateWorktreeGroups(rawTasks, errors, label) {
       }
     }
 
+    // One directory cannot hold two branches: a link naming isolation.branch beside
+    // siblings taking the derived one dies at `worktree add`, after the first committed.
+    const branches = new Set(shared.map((t) => t.isolation.branch ?? null));
+    if (branches.size > 1) {
+      const named = shared.find((t) => t.isolation.branch);
+      errors.push(
+        `tasks sharing worktree "${name}" disagree on their branch: ` +
+        shared.map((t) => `'${t.id}' → ${t.isolation.branch ? `"${t.isolation.branch}"` : "(derived)"}`).join(", ") + `.\n` +
+        `    Every link of a shared worktree runs in ONE directory on ONE branch.\n` +
+        `    Give them all the same branch, or drop it from all of them:\n` +
+        `        "isolation": { "worktree": "${name}", "branch": "${named.isolation.branch}" }`);
+    }
+
     // A shared name equal to another task's id resolves to the same wt-<name> path.
     if (!shared.length) continue;
     const clash = members.find((t) => t.id === name && typeof t.isolation === "string");
