@@ -122,18 +122,25 @@ Return the digest as your final response text. ${plan.digest?.report
 }
 
 // Synthesize the digest task: depends on every leaf, runs on the plan-named
-// model, read-only toolset, in the manifest's cwd.
+// model. The read-only digest reads the run's shared snapshot; the report digest
+// can write, so it never joins that tree — it sits in its own scratch dir and
+// reads leaf results through the absolute paths its prompt names. A hand-built
+// plan with no repoKey keeps no mode.
 export function buildDigestTask(plan) {
   const timeoutMs = Math.max(...plan.tasks.map((t) => t.timeoutMs || 0)) || DEFAULT_TIMEOUT_MS;
+  const report = Boolean(plan.digest.report);
+  const snapshot = !report && plan.repoKey
+    ? { isolationMode: "snapshot", repoToplevel: plan.repoToplevel, repoKey: plan.repoKey }
+    : {};
   return {
     id: DIGEST_ID,
     prompt: digestPrompt(plan),
     model: plan.digest.model,
     provider: plan.digest.provider,
-    allowedTools: plan.digest.report ? DIGEST_TOOLS_REPORT : DIGEST_TOOLS,
-    cwd: plan.cwd,
+    allowedTools: report ? DIGEST_TOOLS_REPORT : DIGEST_TOOLS,
+    cwd: report ? scratchPath(plan.resultsDir) : plan.cwd,
     originalCwd: plan.cwd,
-    scratchRedirect: false,
+    ...snapshot,
     timeoutMs,
     after: plan.tasks.map((t) => t.id),
     isDigest: true,

@@ -1195,7 +1195,6 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         record(task, "ok", r.durationMs, r.tokens, r.ok ? undefined : `ask failed: ${r.output}`);
         return task.id;
       }
-      if (task.scratchRedirect) mkdirSync(task.cwd, { recursive: true });
       if (task.outputDir) mkdirSync(task.outputDir, { recursive: true });
       // report mode drafts here; the prompt names it, so it must exist
       if (task.isDigest && plan.digest?.report) mkdirSync(digestScratchPath(plan.resultsDir), { recursive: true });
@@ -1231,7 +1230,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
           wt = worktree.prepareIsolation({ ...task, worktreeName: wtName, baseRef }, cfg, plan.resultsDir, {
             reset: force && groupFirst.get(wtName) === task.id,
           });
-          taskCwd = wt.path;
+          taskCwd = task.isolationMode === "private"
+            ? defaultWorktree.snapshotCwd(wt.path, task.repoToplevel, task.originalCwd)
+            : wt.path;
           if (wt.reused) appendRunLog(plan.resultsDir, {
             ts: new Date().toISOString(), event: "worktree-resume", id: task.id,
             reset: force, session: resumeId ? "resumed" : "fresh",
@@ -1311,8 +1312,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       }
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
+      if (task.isolationMode) result.isolationMode = task.isolationMode;
       if (task.isolationMode === "snapshot") {
-        result.isolationMode = "snapshot";
         result.repoKey = task.repoKey;
         result.repoToplevel = task.repoToplevel;
         result.snapshotSha = snaps.get(task.repoKey).sha;

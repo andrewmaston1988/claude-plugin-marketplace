@@ -14,6 +14,7 @@ import { TEMPLATE_RE } from "./coverage.mjs";
 import { providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
+import { snapshotKey } from "./worktree.mjs";
 
 export { isUnderRoot } from "./roots.mjs";
 
@@ -321,11 +322,12 @@ function validateTaskShapes(rawTasks, errors, label) {
     if (t.isolation !== undefined) {
       const iso = t.isolation;
       const named = iso && typeof iso === "object" && !Array.isArray(iso);
-      if (iso !== "worktree" && !named) {
+      if (iso !== "worktree" && iso !== "none" && !named) {
         errors.push(
-          `${l}: isolation must be "worktree" or { "worktree": "<name>" } (got ${JSON.stringify(iso)})\n` +
+          `${l}: isolation must be "worktree", { "worktree": "<name>" } or "none" (got ${JSON.stringify(iso)})\n` +
           `    private tree: "isolation": "worktree"\n` +
-          `    shared tree:  "isolation": { "worktree": "feat" }`);
+          `    shared tree:  "isolation": { "worktree": "feat" }\n` +
+          `    in place (read-only, under provider.allowedRoots): "isolation": "none"`);
       } else if (named && (typeof iso.worktree !== "string" || !iso.worktree)) {
         errors.push(`${l}: isolation.worktree must be a non-empty string naming the shared worktree — e.g. { "worktree": "feat" }`);
       } else if (named && !/^[A-Za-z0-9._-]+$/.test(iso.worktree)) {
@@ -383,8 +385,22 @@ function validateTaskShapes(rawTasks, errors, label) {
 // plans, pre-normalization validation) derive it here.
 export function resolveWorktreeName(t) {
   if (t.worktreeName !== undefined) return t.worktreeName;
+  if (t.isolation === "none") return undefined;
   if (t.isolation === undefined || t.isolation === null) return undefined;
   return typeof t.isolation === "object" ? t.isolation.worktree : t.id;
+}
+
+// The isolation a RAW task ends up with once normalisation applies its defaults:
+// an explicit value stands, a write-capable leaf gets a private tree, everything
+// else (read-only leaves, `"none"`, nodes that spawn no leaf) has none. Raw-task
+// validation reads isolation through this so it sees what normalisation will
+// synthesise. resolveWorktreeName deliberately does NOT learn the write default:
+// the scheduler also calls it on hand-built plans that must run as written.
+export function effectiveIsolation(t) {
+  if (t.compute !== undefined || t.integrate !== undefined || t.manifest !== undefined) return undefined;
+  if (t.isolation === "none") return undefined;
+  if (t.isolation !== undefined && t.isolation !== null) return t.isolation;
+  return hasWriteTools(t.allowedTools) ? "worktree" : undefined;
 }
 
 // Tasks sharing a worktree run in ONE directory, so they must form a single
@@ -473,7 +489,8 @@ export function makeReaches(tasks) {
   return reaches;
 }
 
-function validateWorktreeGroups(rawTasks, errors, label) {
+function validateWorktreeGroups(rawInput, errors, label) {
+  const rawTasks = rawInput.map((t) => ({ ...t, isolation: effectiveIsolation(t) }));
   const groups = new Map();
   for (const t of rawTasks) {
     const n = resolveWorktreeName(t);
@@ -695,7 +712,7 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
         errors.push(`${l}: isolation.from '${isoFrom}' must be a declared dependency — add '${isoFrom}' to after, or its branch may not exist when this leaf starts`);
       } else {
         const src = rawTasks.find((o) => o.id === isoFrom);
-        if (src && src.isolation === undefined) {
+        if (src && resolveWorktreeName({ ...src, isolation: effectiveIsolation(src) }) === undefined) {
           errors.push(
             `${l}: isolation.from '${isoFrom}' has no worktree, so it has no branch to base on — ` +
             `give '${isoFrom}' an isolation block, or drop from and branch from the repo instead`);
@@ -728,7 +745,7 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
           errors.push(`${l}: integrate.from '${srcId}' must be a declared dependency — add '${srcId}' to after, or its branch may not exist when the merge runs`);
         } else {
           const src = rawTasks.find((o) => o.id === srcId);
-          if (src && src.isolation === undefined) {
+          if (src && resolveWorktreeName({ ...src, isolation: effectiveIsolation(src) }) === undefined) {
             errors.push(`${l}: integrate.from '${srcId}' has no worktree, so it has no branch to merge — give '${srcId}' an isolation block`);
           } else if (src && src.when !== undefined) {
             errors.push(
@@ -926,6 +943,15 @@ function resolveProvider(task, cfg, cache, l, errors, providerRegistry = PROVIDE
 }
 
 function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, errors, label, childPlans, headroom, warnings, cache = [], io = defaultManifestIo(), probedGuards = new Set(), providerRegistry = PROVIDERS }) {
+  // Many tasks share a cwd; ask git once per directory.
+  const tops = new Map();
+  const repoTop = (dir) => {
+    if (!tops.has(dir)) tops.set(dir, io.repoToplevel(dir));
+    return tops.get(dir);
+  };
+  // In-place reading is gated on the generic root list, not the per-provider one:
+  // "none" is about what may be read from the live checkout, Claude included.
+  const allowedRoots = cfg?.provider?.allowedRoots || [];
 
   return rawTasks.map((t) => {
     const l = label(t);
@@ -934,7 +960,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     const isManifest = t.manifest !== undefined;
     const originalCwd = t.cwd ? resolve(cwd, t.cwd) : cwd;
     // compute/manifest nodes spawn nothing themselves and no code leaves the
-    // machine — no governance, no write-implies-isolation.
+    // machine — no governance, no isolation.
     let provider;
     let fallbackProvider;
     if (!isCompute && !isManifest && !isIntegrate) {
@@ -974,24 +1000,56 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
         io.stdout(`leaf guard: ${guard.name} → ${guard.command}`);
       }
     }
-    let effCwd = originalCwd;
-    let scratchRedirect = false;
     // Compute and manifest nodes spawn no leaf, so there is nothing to isolate.
+    // Every other leaf gets a tree by default: readers share a snapshot of the repo,
+    // writers a private worktree, and "none" (read-only, under a root) opts out.
+    // The default is decided HERE, before worktreeName, so a synthesised private
+    // tree carries a name exactly as an explicit "worktree" does.
+    let isolation = (isCompute || isManifest) ? undefined : t.isolation;
+    let isolationMode;
+    let repoToplevel;
+    let branchScope;
+    if (!isCompute && !isManifest && !isIntegrate) {
+      if (t.isolation === "none") {
+        isolation = undefined;
+        isolationMode = "none";
+        if (hasWriteTools(t.allowedTools)) {
+          errors.push(
+            `${l}: isolation "none" is for read-only leaves — a leaf that can write always gets a worktree. ` +
+            `Drop "isolation" (or use "worktree"), or remove the write tools from allowedTools — e.g. "allowedTools": "Read,Grep,Glob"`);
+        }
+        if (allowedRoots.length && !allowedRoots.some((r) => isUnderRoot(originalCwd, r))) {
+          errors.push(
+            `${l}: isolation "none" reads cwd '${originalCwd}' in place, and it is not under any provider.allowedRoots entry — ` +
+            `point cwd under one of ${allowedRoots.join(", ")}, or drop "isolation": "none" to read a snapshot of the repo instead`);
+        }
+      } else if (t.isolation === undefined) {
+        const top = repoTop(originalCwd);
+        if (!top) {
+          errors.push(
+            `${l}: task cwd '${originalCwd}' is not inside a git repository, so it cannot get a worktree — ` +
+            `set "isolation": "none" to read it in place (read-only, under provider.allowedRoots), or point cwd into a repo`);
+        } else {
+          repoToplevel = top;
+          if (hasWriteTools(t.allowedTools)) {
+            isolationMode = "private";
+            isolation = "worktree";
+            // Run-scoped branch: a kept tree from an earlier run of this manifest must not block this one.
+            branchScope = snapshotKey(resultsDir);
+          } else {
+            isolationMode = "snapshot";
+          }
+        }
+      }
+    }
     const worktreeName = isIntegrate ? t.integrate.into
-      : (isCompute || isManifest) ? undefined : resolveWorktreeName(t);
+      : (isCompute || isManifest) ? undefined : resolveWorktreeName({ ...t, isolation });
     const branchName = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
       ? undefined : t.isolation.branch;
     // `from` names a task; the tree bases on that task's BRANCH, resolved the
     // same way its own prepareIsolation derives it.
     const fromId = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
       ? undefined : t.isolation.from;
-    // Write-implies-isolation: a leaf granted a write tool without
-    // worktree isolation never runs in the user's real tree — its cwd is
-    // redirected to a per-task scratch dir under the results dir.
-    if (!isCompute && !isManifest && !isIntegrate && hasWriteTools(t.allowedTools) && worktreeName === undefined) {
-      effCwd = join(resultsDir, `scratch-${t.id}`);
-      scratchRedirect = true;
-    }
     const whenBlock = t.when && typeof t.when === "object" && !Array.isArray(t.when)
       ? { when: { from: t.when.from, expr: t.when.expr } } : {};
     const forEachBlock = !isCompute && t.forEach && typeof t.forEach === "object" && !Array.isArray(t.forEach)
@@ -1008,10 +1066,12 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ...(!isCompute && !isManifest && !isIntegrate && fallbackProvider && { fallbackProvider }),
       effort: isCompute || isManifest ? undefined : t.effort,
       allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || DEFAULT_TOOLS,
-      cwd: effCwd,
+      cwd: originalCwd,
       originalCwd,
-      scratchRedirect,
-      isolation: isCompute || isManifest ? undefined : t.isolation,
+      isolation,
+      ...(isolationMode !== undefined && { isolationMode }),
+      ...(repoToplevel !== undefined && { repoToplevel, repoKey: snapshotKey(repoToplevel) }),
+      ...(branchScope !== undefined && { branchScope }),
       ...(worktreeName !== undefined && { worktreeName }),
       ...(isIntegrate && { integrate: { into: t.integrate.into, from: [...t.integrate.from] } }),
       ...(branchName !== undefined && { branchName }),
@@ -1243,6 +1303,9 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     tasks,
     digest,
     goal: raw.goal || "",
+    // The dispatching repo: the read-only digest snapshots it.
+    repoToplevel: toplevel,
+    repoKey: snapshotKey(toplevel),
     ...(args && Object.keys(args).length && { args }),
     ...(ref && { ref }),
     ...(warnings.length && { warnings }),
@@ -1257,6 +1320,10 @@ export function effectivePlanDoc(plan) {
   const strip = (t) => {
     const o = { id: t.id, model: t.model };
     if (t.prompt) o.prompt = t.prompt;
+    // Record what the author wrote: a synthesised private tree is not authored, and "none" was
+    // normalised away.
+    const isolation = t.isolationMode === "none" ? "none" : t.isolationMode === "private" ? undefined : t.isolation;
+    t = { ...t, isolation };
     for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "isolation", "outputDir", "mustRead"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
