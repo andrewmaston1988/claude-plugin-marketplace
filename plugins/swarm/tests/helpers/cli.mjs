@@ -40,6 +40,9 @@ export function runCli(args, { cwd, env = {}, quotaPreflight = false } = {}) {
         // Pin the append-only stdout contract: the suite may itself be running
         // inside a repainting harness, whose CLAUDECODE would otherwise leak in.
         SWARM_REPAINT: "0",
+        // The child reads ~/.claude for Claude's model catalog; an unpinned home would
+        // read the developer's real machine and pass only where that dir is absent.
+        ...(childEnv.SWARM_HOME ? { HOME: childEnv.SWARM_HOME, USERPROFILE: childEnv.SWARM_HOME } : {}),
         ...childEnv,
       },
     });
@@ -61,6 +64,9 @@ export function runCliAsync(args, { cwd, env = {}, quotaPreflight = false } = {}
         PATH: SHIMS + delimiter + process.env.PATH,
         Path: SHIMS + delimiter + (process.env.Path || process.env.PATH),
         SWARM_REPAINT: "0",
+        // The child reads ~/.claude for Claude's model catalog; an unpinned home would
+        // read the developer's real machine and pass only where that dir is absent.
+        ...(childEnv.SWARM_HOME ? { HOME: childEnv.SWARM_HOME, USERPROFILE: childEnv.SWARM_HOME } : {}),
         ...childEnv,
       },
     });
