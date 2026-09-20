@@ -127,7 +127,7 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 
 ## Procedure
 
-1. **Discover models**: `swarm models` — lists launchable rows from enabled providers with descriptions and provider identity, plus the Claude aliases. Run FIRST so the manifest names models the account can launch right now. When unsure which tier a leaf needs, which effort to pin, or what a newly-discovered model is equivalent to, read [references/model-selection.md](references/model-selection.md). That tier guide is the routing source unless `grading.enabled` is on in the config and `swarm perf` has rows — then the graded record ranks, and the guide only fills the gaps it has not measured.
+1. **Discover models**: `swarm models` — lists launchable rows from enabled providers with descriptions and provider identity. Run FIRST so the manifest names models the account can launch right now. When unsure which tier a leaf needs, which effort to pin, or what a newly-discovered model is equivalent to, read [references/model-selection.md](references/model-selection.md). That tier guide is the routing source unless `grading.enabled` is on in the config and `swarm perf` has rows — then the graded record ranks, and the guide only fills the gaps it has not measured.
 2. **Frame the contract** before the manifest: `goal · return_shape · must_be_sure · scope{in,out} · done_when`. scope → per-leaf prompts and file scopes; must_be_sure → `digest.instructions`; done_when → you check it post-run.
 3. **Author the manifest** (schema below) and offer it through the gate above.
 4. **Validate**: `swarm validate <manifest.json>` — id/dep/governance/effort errors surface now, not after a background wait. With `grading.enabled` on it also prints a `seats:` block after the estimate — the graded record (scores, `n`, cost band, frontier verdict) of every model the manifest seats, plus the launchable ones it does not. Read it as the record the seating was decided on; it states evidence and never judges — `n<20` and `never graded` are the seating rule's own terms, not warnings.
@@ -213,7 +213,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
   "tasks": [{
     "id": "scan-a",                            // unique, filename-safe
     "prompt": "…",
-    "model": "glm-5.2:cloud",                  // :cloud name or claude alias/id
+    "provider": "ollama", "model": "glm-5.2:cloud",                  // required; the full model id (claude-opus-5, never "opus")
     "effort": "medium",                        // optional; validated for Claude tiers
     "allowedTools": "Read,Grep,Glob",          // default: read-only set
     "cwd": "C:/code/somerepo",                 // default: manifest's cwd
@@ -223,7 +223,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
                                                //   optional "branch": names the branch explicitly (default swarm/<worktree>)
                                                //   optional "from": base this tree on that task's branch, not repo HEAD
                                                //     (that task must WRITE — a read-only task owns no branch)
-    "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
+    "fallbackProvider": "ollama", "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 3600000,
     "settings": {"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}},   // optional; per-leaf override of disable1mContext (beats the config default and the user settings.json env block)
@@ -236,7 +236,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "mustRead": ["principles.md", { "path": "shard.diff", "lines": [[1, 1000]] }]  // engine proves the leaf Read these from its transcript (see manifest-fields.md)
   }],
   "digest": {
-    "model": "glm-5.2:cloud",                  // recommended ≥3 tasks
+    "provider": "ollama", "model": "glm-5.2:cloud",                  // recommended ≥3 tasks
     "instructions": "…",                       // must_be_sure — steers the DIGEST
     "report": true                             // opt-in; also writes report.md (see step 6)
   }                                            //   or a string to steer the report's BODY

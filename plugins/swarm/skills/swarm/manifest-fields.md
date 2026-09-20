@@ -49,11 +49,11 @@ default-private writer is a valid `from` source; a reader and a `"none"` task ar
 ```json
 {
   "tasks": [
-    { "id": "survey", "model": "haiku", "prompt": "…" },
-    { "id": "impl", "model": "sonnet", "allowedTools": "Read,Edit,Bash", "prompt": "…" },
-    { "id": "follow", "model": "sonnet", "after": ["impl"], "allowedTools": "Read,Edit,Bash",
+    { "id": "survey", "provider": "claude", "model": "claude-haiku-4-5-20251001", "prompt": "…" },
+    { "id": "impl", "provider": "claude", "model": "claude-sonnet-5", "allowedTools": "Read,Edit,Bash", "prompt": "…" },
+    { "id": "follow", "provider": "claude", "model": "claude-sonnet-5", "after": ["impl"], "allowedTools": "Read,Edit,Bash",
       "isolation": { "worktree": "follow", "from": "impl" }, "prompt": "…" },
-    { "id": "read-logs", "model": "haiku", "cwd": "C:/logs", "isolation": "none", "prompt": "…" }
+    { "id": "read-logs", "provider": "claude", "model": "claude-haiku-4-5-20251001", "cwd": "C:/logs", "isolation": "none", "prompt": "…" }
   ]
 }
 ```
@@ -64,22 +64,31 @@ that is not a repo at all.
 
 ### Provider identity
 
-`provider` is optional task metadata. When it is omitted, swarm resolves the model
-from the provider-qualified cache and registered model matchers, then falls back to
-the legacy Ollama identity. A model prefix such as `gpt-5-codex` never selects Codex
-by itself; use `"provider": "codex"` or a cache row whose provider is `codex`.
+`provider` is **required** on every leaf — Claude ones too — and nothing is inferred:
+not from the model name, not from the discovery cache, and there is no Ollama fallback.
+A leaf without it fails `validate` with the fix and an example. `provider` is one of
+`claude`, `ollama`, `codex` (or a registered provider). Compute, integrate and manifest
+nodes spawn no leaf and take none.
 
-`fallbackModel` is resolved independently, so a fallback may change both the model
-and provider. Digest blocks accept the same optional `provider` field. The resolved
-primary/fallback/digest identities are retained in the run's effective manifest
-snapshot; `runner` is derived internally and is not manifest grammar.
+```json
+{ "id": "a", "provider": "claude", "model": "claude-opus-5", "prompt": "…" }
+```
+
+Claude aliases (`haiku`, `sonnet`, `opus`, `fable`) are refused as model names under any
+provider — name the full id (`claude-opus-5`). Grades are filed under the model you author,
+so an alias would split one model into two score rows.
+
+`fallbackModel` needs its own `fallbackProvider` (a Claude primary cannot force a Codex
+fallback, and vice versa); `fallbackProvider` without `fallbackModel` is refused. The digest
+block requires `provider` too. The resolved primary/fallback/digest identities are retained
+in the run's effective manifest snapshot; `runner` is derived internally and is not
+manifest grammar.
 
 Provider-specific roots and enabled state are checked during validation and again at
 dispatch. Codex tasks reject Claude-only `settings` and configured project leaf
 guards unless the task explicitly sets `"leafGuard": false`.
 
-The public provider registry supplies discovery, usage, and runner capabilities. Pin
-`provider` explicitly when the same model id is available from more than one provider.
+The public provider registry supplies discovery, usage, and runner capabilities.
 
 ### Context window — `contextWindow`
 
@@ -118,7 +127,7 @@ A leaf's `prompt` is measured through the CreateProcess-quoted command line at `
 A task with `returns` gets its output validated against a JSON-Schema subset on completion. Invalid output triggers exactly ONE corrective re-ask through the leaf's own resumed session (the errors are field-precise teaching lines); still-invalid output fails the task with those errors. Put it on any leaf whose JSON feeds `forEach.from`, `compute`, `when`, or a chain link — guaranteed shape is what makes the deterministic-steps grammar reliable on model output.
 
 ```json
-{ "id": "find-sites", "model": "glm-5.2:cloud",
+{ "id": "find-sites", "provider": "ollama", "model": "glm-5.2:cloud",
   "prompt": "…return ONLY JSON: {\"sites\":[{\"file\":\"…\",\"line\":1,\"status\":\"dirty\"}]}",
   "returns": {
     "type": "object",
@@ -150,7 +159,7 @@ A leaf with `mustRead` must prove, from its OWN transcript, that it `Read` the f
     {
       "id": "review-arch",
       "prompt": "Review the scheduler for architectural defects.",
-      "model": "opus",
+      "provider": "claude", "model": "claude-opus-5",
       "allowedTools": "Read,Grep,Glob",
       "mustRead": [
         "plugins/swarm/src/scheduler.mjs",
@@ -169,7 +178,7 @@ A task with `"manifest": "<path>"` runs that child manifest as one node — the 
 
 ```json
 { "tasks": [
-    { "id": "repos", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: [\"repoA\", \"repoB\"]" },
+    { "id": "repos", "provider": "ollama", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: [\"repoA\", \"repoB\"]" },
     { "id": "audit", "manifest": "audit-one-repo.json", "after": ["repos"],
       "forEach": { "from": "repos", "path": "", "maxItems": 6 } }
   ] }

@@ -43,13 +43,6 @@ const USAGE = `usage: swarm.mjs <command>
   statusline install         write the self-resolving statusline shim to ~/.swarm/statusline.mjs and print the settings.json line
   install                    put swarm on PATH: bash + cmd wrappers and the resolver copy in ~/.local/bin (idempotent; never edits a shell profile)`;
 
-// Always-available Claude aliases, appended after discovered models.
-const CLAUDE_ALIASES = [
-  { model: "haiku", description: "Claude Haiku — always available" },
-  { model: "sonnet", description: "Claude Sonnet — always available" },
-  { model: "opus", description: "Claude Opus — always available" },
-];
-
 function out(line) {
   process.stdout.write(line + "\n");
 }
@@ -225,10 +218,6 @@ async function cmdModels(rest = [], {
     ...roster.filter((m) => (m.provider || "ollama") !== "ollama"),
     ...liveOllama,
   ].filter((m) => providerEnabled(registry, cfg, m) && !isDenylisted(m.model));
-  const claudeAliases = CLAUDE_ALIASES
-    .filter((a) => !isDenylisted(a.model))
-    .map((a) => ({ ...a, provider: "claude" }));
-  const identityRoster = [...liveRoster, ...claudeAliases];
   const visible = new Set(visibleProviderModels(liveRoster, { isDenylisted }).map(identityKey));
   const shown = showAll ? liveRoster : liveRoster.filter((m) => visible.has(identityKey(m)));
   const { readRows, scoresPath, frontier } = await import("../src/scores.mjs");
@@ -236,11 +225,11 @@ async function cmdModels(rest = [], {
   const multOf = new Map(costRows.map((r) => [r.model, r.mult]));
   const onFrontier = new Set(frontier(readRows(scoresPath(env)), costRows.map((r) => ({ model: r.model, mult: r.mult })), { bands: await costBands(cfg) })
     .filter((e) => e.onFrontier).map((e) => e.model));
-  for (const m of [...shown, ...claudeAliases]) {
+  for (const m of shown) {
     const mark = showAll && m.supersededBy && !visible.has(identityKey(m)) ? ` [superseded by ${m.supersededBy}]` : "";
     const mult = multOf.get(m.model);
     const cost = m.provider && m.provider !== "ollama" ? "—" : mult == null ? "—" : onFrontier.has(m.model) ? `* ${mult.toFixed(1)}x` : `${mult.toFixed(1)}x`;
-    write(modelLine({ ...m, displayModel: displayModel(m, identityRoster) }) + mark + `  ${cost}`);
+    write(modelLine({ ...m, displayModel: displayModel(m, liveRoster) }) + mark + `  ${cost}`);
   }
   write(dim("* on the quality/cost frontier · N.Nx = meter weight vs the cheapest measured model (swarm cost) · — not yet measured"));
   const hidden = liveRoster.length - shown.length;
@@ -281,15 +270,14 @@ function seatedModels(plan) {
 }
 
 // The launchable roster `swarm models` prints, from the cache it wrote —
-// never a fresh probe: validate must not gain a network call. No cache yet
-// means the aliases alone, which are always launchable.
+// never a fresh probe: validate must not gain a network call.
 async function launchableRoster(cfg, { env = process.env, registry = defaultProviderRegistry() } = {}) {
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
   const cached = readProviderModelsCache(env)?.models || [];
   const enabled = cached.filter((m) => providerEnabled(registry, cfg, m));
   const visible = new Set(visibleProviderModels(enabled, { isDenylisted }).map(identityKey));
   const offered = enabled.filter((m) => !isDenylisted(m.model));
-  return [...offered.filter((m) => visible.has(identityKey(m))), ...CLAUDE_ALIASES.filter((a) => !isDenylisted(a.model))];
+  return offered.filter((m) => visible.has(identityKey(m)));
 }
 
 // The seats block: the graded record for the manifest's seats, printed so the
@@ -318,7 +306,7 @@ async function cmdValidate(rest) {
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), ...(fromRegistry && { ref: rest[0] }) });
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: readProviderModelsCache(process.env)?.models || [], ...(fromRegistry && { ref: rest[0] }) });
   out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
   // The preview IS the approval: with forEach or composition in play, show the
   // worst-case leaf count the caps permit before anything runs.
@@ -398,7 +386,7 @@ async function cmdRun(rest) {
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), ...(fromRegistry && { ref: rest[0] }) });
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: readProviderModelsCache(process.env)?.models || [], ...(fromRegistry && { ref: rest[0] }) });
   // Fire-and-forget notification hook (e.g. "claude-slack notify --message {status}").
   // Mechanical plumbing only: substitute tokens, spawn detached, swallow errors.
   // Shared by the end-of-run status and the scheduler's single-shot cost warn.

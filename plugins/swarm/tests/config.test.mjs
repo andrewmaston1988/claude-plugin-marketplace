@@ -358,8 +358,8 @@ test("a task's own timeoutMs wins over manifest-level and config defaults", () =
     writeFileSync(p, JSON.stringify({
       timeoutMs: 100000, // manifest-level (raw) fallback
       tasks: [
-        { id: "a", prompt: "look", model: "haiku", timeoutMs: 2700000 }, // per-task override
-        { id: "b", prompt: "look more", model: "haiku" }, // no own timeout
+        { id: "a", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001", timeoutMs: 2700000 }, // per-task override
+        { id: "b", prompt: "look more", provider: "claude", model: "claude-haiku-4-5-20251001" }, // no own timeout
       ],
     }));
     const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000 };
@@ -453,11 +453,11 @@ test("config concurrency is a ceiling: a manifest may ask for less, asking for m
   try {
     const p = join(dir, "plan.json");
     const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000 };
-    writeFileSync(p, JSON.stringify({ concurrency: 2, tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    writeFileSync(p, JSON.stringify({ concurrency: 2, tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     equal(loadManifest(p, cfg, dir).concurrency, 2, "narrower is fine");
-    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     equal(loadManifest(p, cfg, dir).concurrency, 4, "unset → the ceiling");
-    writeFileSync(p, JSON.stringify({ concurrency: 8, tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    writeFileSync(p, JSON.stringify({ concurrency: 8, tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     throws(() => loadManifest(p, cfg, dir), (e) => /concurrency 8 exceeds the ceiling 4/.test(e.message) && /config\.json/.test(e.message));
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -475,7 +475,7 @@ test("win32 command-line check: a 40,000-char prompt fails, naming the task, its
   try {
     const p = join(dir, "plan.json");
     const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
-    writeFileSync(p, JSON.stringify({ tasks: [{ id: "long", prompt: "x".repeat(40000), model: "haiku" }] }));
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "long", prompt: "x".repeat(40000), provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     throws(
       () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
       (e) => /task 'long'/.test(e.message) && /command line/.test(e.message) &&
@@ -491,7 +491,7 @@ test("win32 command-line check: the same manifest loads fine on linux (platform 
   try {
     const p = join(dir, "plan.json");
     const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
-    writeFileSync(p, JSON.stringify({ tasks: [{ id: "long", prompt: "x".repeat(40000), model: "haiku" }] }));
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "long", prompt: "x".repeat(40000), provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const plan = loadManifest(p, cfg, dir, { io: { platform: "linux" } });
     equal(plan.tasks[0].id, "long");
   } finally {
@@ -506,7 +506,7 @@ test("win32 command-line check: a 31,000-char prompt plus a long allowedTools li
     const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
     const bigTools = Array.from({ length: 200 }, (_, i) => `Tool${i}`).join(",");
     writeFileSync(p, JSON.stringify({
-      tasks: [{ id: "combo", prompt: "x".repeat(31000), model: "haiku", allowedTools: bigTools }],
+      tasks: [{ id: "combo", prompt: "x".repeat(31000), provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: bigTools }],
     }));
     throws(
       () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
@@ -524,8 +524,8 @@ test("win32 command-line check: a {{result:x}} placeholder is measured at result
     const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 40000, claudePath: "C:\\fake\\claude.exe" };
     writeFileSync(p, JSON.stringify({
       tasks: [
-        { id: "a", prompt: "look", model: "haiku" },
-        { id: "b", prompt: "use {{result:a}}", model: "haiku", after: ["a"] },
+        { id: "a", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "b", prompt: "use {{result:a}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["a"] },
       ],
     }));
     throws(
@@ -542,7 +542,7 @@ test("win32 command-line check: a 20,000-char prompt of quote characters fails (
   try {
     const p = join(dir, "plan.json");
     const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
-    writeFileSync(p, JSON.stringify({ tasks: [{ id: "quotey", prompt: '"'.repeat(20000), model: "haiku" }] }));
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "quotey", prompt: '"'.repeat(20000), provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     throws(
       () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
       (e) => /task 'quotey'/.test(e.message) && /command line/.test(e.message)
@@ -558,7 +558,7 @@ test("win32 command-line check: with a .cmd launcher, the measured length includ
     const cmdPath = join(dir, "claude.cmd");
     writeFileSync(cmdPath, "@echo off\r\necho hello\r\n"); // opaque shim -> cmd /d /s /c fallback
     const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: cmdPath };
-    const baseTask = { id: "shim", model: "haiku", allowedTools: "Read,Grep,Glob" };
+    const baseTask = { id: "shim", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob" };
     // Find the prompt length where the WRAPPED command line just crosses the
     // cap but the bare (unwrapped) argv join would not — isolates that the
     // wrapper itself is what's being counted.

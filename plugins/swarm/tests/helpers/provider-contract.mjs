@@ -10,12 +10,11 @@ const CAPABILITIES = new Set([
   "costObservations",
 ]);
 
-export async function assertProviderAdapterContract(adapter, { config = {}, model = "fixture-model", cache = [], context = {} } = {}) {
+export async function assertProviderAdapterContract(adapter, { config = {}, model = "fixture-model", context = {} } = {}) {
   ok(adapter && typeof adapter === "object", "provider adapter must be an object");
   ok(typeof adapter.id === "string" && adapter.id.length > 0, "provider adapter requires a stable id");
   ok(typeof adapter.runnerId === "string" && adapter.runnerId.length > 0, "provider adapter requires runnerId");
   equal(typeof adapter.enabled, "function", "provider adapter requires enabled(config)");
-  equal(typeof adapter.matchModel, "function", "provider adapter requires matchModel(model, cache)");
   equal(typeof adapter.validateTask, "function", "provider adapter requires validateTask(task, context)");
   ok(adapter.capabilities && typeof adapter.capabilities === "object" && !Array.isArray(adapter.capabilities), "provider capabilities must be an object");
   for (const [name, capability] of Object.entries(adapter.capabilities)) {
@@ -26,8 +25,6 @@ export async function assertProviderAdapterContract(adapter, { config = {}, mode
   equal(typeof enabled, "boolean", "enabled(config) must return a boolean");
   const validation = await adapter.validateTask({ provider: adapter.id, model }, context);
   ok(Array.isArray(validation) && validation.every((problem) => typeof problem === "string"), "validateTask must return a scoped array of problem strings");
-  const match = adapter.matchModel(model, cache);
-  ok(match === null || (match.provider === adapter.id && match.model === model), "matchModel must return null or canonical provider/model identity");
 
   const registry = createProviderRegistry([adapter]);
   deepEqual(registry.resolve({ provider: adapter.id, model }, { config, allowDisabled: true }), { provider: adapter.id, model }, "provider identity must round-trip through the registry");

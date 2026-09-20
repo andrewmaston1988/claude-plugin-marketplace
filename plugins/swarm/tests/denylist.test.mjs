@@ -58,7 +58,7 @@ test("matchDenylist: empty or missing denylist never matches", () => {
 test("task model on the denylist fails validation with a teaching error", () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "v", prompt: "verify", model: "Nemotron-3-Super:cloud" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "v", prompt: "verify", provider: "ollama", model: "Nemotron-3-Super:cloud" }] });
     const errs = errorsOf(() => loadManifest(p, cfg(dir, ["nemotron"]), dir));
     ok(errs.some((e) => e.includes("Nemotron-3-Super:cloud") && e.includes("denylisted") && e.includes("nemotron") && e.includes("modelDenylist")), errs.join("\n"));
   } finally {
@@ -69,7 +69,7 @@ test("task model on the denylist fails validation with a teaching error", () => 
 test("fallbackModel on the denylist fails validation", () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "v", prompt: "verify", model: "haiku", fallbackModel: "nemotron-3-super:cloud" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "v", prompt: "verify", provider: "claude", model: "claude-haiku-4-5-20251001", fallbackProvider: "ollama", fallbackModel: "nemotron-3-super:cloud" }] });
     const errs = errorsOf(() => loadManifest(p, cfg(dir, ["nemotron"]), dir));
     ok(errs.some((e) => e.includes("fallback") && e.includes("denylisted")), errs.join("\n"));
   } finally {
@@ -81,8 +81,8 @@ test("digest model on the denylist fails validation", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
-      tasks: [{ id: "v", prompt: "verify", model: "haiku" }],
-      digest: { model: "nemotron-3-super:cloud", instructions: "wrap" },
+      tasks: [{ id: "v", prompt: "verify", provider: "claude", model: "claude-haiku-4-5-20251001" }],
+      digest: { provider: "ollama", model: "nemotron-3-super:cloud", instructions: "wrap" },
     });
     const errs = errorsOf(() => loadManifest(p, cfg(dir, ["nemotron"]), dir));
     ok(errs.some((e) => e.includes("digest") && e.includes("denylisted")), errs.join("\n"));
@@ -94,7 +94,7 @@ test("digest model on the denylist fails validation", () => {
 test("Claude aliases are not exempt from the denylist", () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "v", prompt: "verify", model: "haiku" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "v", prompt: "verify", provider: "claude", model: "claude-haiku-4-5-20251001" }] });
     const errs = errorsOf(() => loadManifest(p, cfg(dir, ["haiku"]), dir));
     ok(errs.some((e) => e.includes("denylisted")), errs.join("\n"));
   } finally {
@@ -105,7 +105,7 @@ test("Claude aliases are not exempt from the denylist", () => {
 test("empty denylist: the same manifest loads clean", () => {
   const dir = tmp();
   try {
-    const p = writeManifest(dir, { tasks: [{ id: "v", prompt: "verify", model: "nemotron-3-super:cloud" }] });
+    const p = writeManifest(dir, { tasks: [{ id: "v", prompt: "verify", provider: "ollama", model: "nemotron-3-super:cloud" }] });
     const plan = loadManifest(p, cfg(dir, []), dir);
     equal(plan.tasks[0].model, "nemotron-3-super:cloud");
   } finally {
@@ -131,8 +131,8 @@ test("swarm models: denylist filters at print only — absent from output, prese
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({
         recommendations: [
-          { model: "glm-5.2:cloud", description: "Frontier open model" },
-          { model: "nemotron-3-super:cloud", description: "Slow burn" },
+          { provider: "ollama", model: "glm-5.2:cloud", description: "Frontier open model" },
+          { provider: "ollama", model: "nemotron-3-super:cloud", description: "Slow burn" },
         ],
       }));
     });
@@ -150,7 +150,7 @@ test("swarm models: denylist filters at print only — absent from output, prese
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes("glm-5.2:cloud"), r.stdout);
     ok(!r.stdout.includes("nemotron"), r.stdout);
-    ok(r.stdout.includes("haiku"), r.stdout);
+    ok(!/haiku|sonnet|opus/.test(r.stdout), "Claude aliases are no longer offered as launchable models: " + r.stdout);
     // the cache keeps the full roster — the denylist is a display filter, not a discovery one
     const cache = JSON.parse(readFileSync(join(home, "models-cache.json"), "utf8"));
     deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud", "nemotron-3-super:cloud"]);

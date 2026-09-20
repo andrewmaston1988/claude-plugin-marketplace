@@ -273,7 +273,7 @@ const streamOut = (text, sid) => [
 
 function task(id, cwd, over = {}) {
   return {
-    id, prompt: `do ${id}`, model: "haiku", allowedTools: "Read,Grep,Glob",
+    id, prompt: `do ${id}`, provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob",
     cwd, originalCwd: cwd, timeoutMs: 5000, after: [],
     ...over,
   };
@@ -475,7 +475,7 @@ test("manifest: non-boolean verifyCitations is a teaching error", () => {
   try {
     const p = join(dir, "m.json");
     writeFileSync(p, JSON.stringify({
-      tasks: [{ id: "a", prompt: "x", model: "haiku", returns: SITES_SCHEMA, verifyCitations: "yes" }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", returns: SITES_SCHEMA, verifyCitations: "yes" }],
     }));
     const errs = errorsOf(() => loadManifest(p, CFG, dir));
     // must be the boolean teaching error, not the generic unknown-key error
@@ -488,7 +488,7 @@ test("manifest: effectivePlanDoc round-trips verifyCitations false", () => {
   try {
     const p = join(dir, "m.json");
     writeFileSync(p, JSON.stringify({
-      tasks: [{ id: "a", prompt: "x", model: "haiku", returns: SITES_SCHEMA, verifyCitations: false }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", returns: SITES_SCHEMA, verifyCitations: false }],
     }));
     const plan = loadManifest(p, CFG, dir);
     const doc = effectivePlanDoc(plan);
@@ -503,8 +503,8 @@ test("validate CLI: announces mechanical citation verification; opt-out omits th
     const p = join(dir, "m.json");
     writeFileSync(p, JSON.stringify({
       tasks: [
-        { id: "find", prompt: "x", model: "haiku", returns: SITES_SCHEMA },
-        { id: "loose", prompt: "y", model: "haiku", returns: SITES_SCHEMA, verifyCitations: false },
+        { id: "find", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", returns: SITES_SCHEMA },
+        { id: "loose", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001", returns: SITES_SCHEMA, verifyCitations: false },
       ],
     }));
     const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });

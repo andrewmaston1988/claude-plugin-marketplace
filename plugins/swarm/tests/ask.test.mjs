@@ -24,11 +24,11 @@ function setup(resultOver = {}) {
   const dir = mkdtempSync(join(tmpdir(), "swarm-ask-"));
   initResultsDir(dir);
   writeResult(dir, "leaf", {
-    id: "leaf", model: "haiku", ok: true, exit: 0, durationMs: 5,
+    id: "leaf", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5,
     output: "original finding", sessionId: "s-1", cwd: tmpdir(), allowedTools: "Read,Grep",
     ...resultOver,
   });
-  writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [{ id: "leaf", model: "haiku" }] });
+  writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [{ id: "leaf", provider: "claude", model: "claude-haiku-4-5-20251001" }] });
   return dir;
 }
 
@@ -53,7 +53,7 @@ test("askLeaf resumes the leaf session with its own model, cwd, and tools", asyn
     equal(promptOf(call), "why though?");
     const args = call.args;
     equal(args[args.indexOf("--resume") + 1], "s-1");
-    equal(args[args.indexOf("--model") + 1], "haiku");
+    equal(args[args.indexOf("--model") + 1], "claude-haiku-4-5-20251001");
     // MCP is appended to every leaf, so pin the propagation, not the whole string.
     ok(args[args.indexOf("--allowedTools") + 1].startsWith("Read,Grep"));
     equal(call.opts.cwd, tmpdir());
@@ -73,9 +73,9 @@ test("askLeaf: readable errors for unknown leaf, missing sessionId, vanished cwd
   const dir = setup();
   try {
     await rejects(() => askLeaf({ resultsDir: dir, taskId: "ghost", question: "?", cfg: CFG, io: makeIo(fakeSpawnFactory()) }), /no result/);
-    writeResult(dir, "old", { id: "old", model: "haiku", ok: true, output: "x", cwd: tmpdir() });
+    writeResult(dir, "old", { id: "old", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, output: "x", cwd: tmpdir() });
     await rejects(() => askLeaf({ resultsDir: dir, taskId: "old", question: "?", cfg: CFG, io: makeIo(fakeSpawnFactory()) }), /sessionId/);
-    writeResult(dir, "gone", { id: "gone", model: "haiku", ok: true, output: "x", sessionId: "s-9", cwd: join(tmpdir(), "swarm-nonexistent-wt-xyz") });
+    writeResult(dir, "gone", { id: "gone", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, output: "x", sessionId: "s-9", cwd: join(tmpdir(), "swarm-nonexistent-wt-xyz") });
     await rejects(() => askLeaf({ resultsDir: dir, taskId: "gone", question: "?", cfg: CFG, io: makeIo(fakeSpawnFactory()) }), /no longer exists/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -88,7 +88,7 @@ test("askLeaf: --model override to an open model re-runs the governance gate", a
     // cwd (tmpdir) not under allowedRoots -> refused before any spawn
     const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
     await rejects(
-      () => askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", model: "glm-4.6:cloud", cfg: CFG, io: makeIo(spawn) }),
+      () => askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", provider: "ollama", model: "glm-4.6:cloud", cfg: CFG, io: makeIo(spawn) }),
       /governance/i
     );
     equal(spawn.calls.length, 0);
@@ -97,7 +97,7 @@ test("askLeaf: --model override to an open model re-runs the governance gate", a
     const cfgAllowed = { ...CFG, provider: { ...CFG.provider, allowedRoots: [tmpdir()] } };
     const spawn2 = fakeSpawnFactory(() => ({ output: STREAM }));
     const io2 = makeIo(spawn2);
-    const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", model: "glm-4.6:cloud", cfg: cfgAllowed, io: io2 });
+    const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", provider: "ollama", model: "glm-4.6:cloud", cfg: cfgAllowed, io: io2 });
     equal(r.answer, "the follow-up answer");
     equal(spawn2.calls[0].opts.env.ANTHROPIC_MODEL, "glm-4.6:cloud");
   } finally {
@@ -180,7 +180,7 @@ test("askLeaf: governance gates on originalCwd when the leaf runs elsewhere than
   try {
     const cfgAllowed = { ...CFG, provider: { ...CFG.provider, allowedRoots: [join(tmpdir(), "approved-root")] } };
     const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
-    const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", model: "glm-4.6:cloud", cfg: cfgAllowed, io: makeIo(spawn) });
+    const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", provider: "ollama", model: "glm-4.6:cloud", cfg: cfgAllowed, io: makeIo(spawn) });
     equal(r.answer, "the follow-up answer");
     equal(spawn.calls[0].opts.cwd, tmpdir()); // resume still runs in the leaf's actual cwd
   } finally {
@@ -207,9 +207,9 @@ test("askLeaf: resumes a forEach clone whose id is not a top-level manifest task
     initResultsDir(dir);
     // "fix" is the forEach parent in the manifest; "fix[0]" only exists as an
     // expanded clone with its own result — never a key in manifest.tasks.
-    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [{ id: "fix", model: "haiku", forEach: { over: "{{x}}" } }] });
+    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [{ id: "fix", provider: "claude", model: "claude-haiku-4-5-20251001", forEach: { over: "{{x}}" } }] });
     writeResult(dir, "fix[0]", {
-      id: "fix[0]", model: "haiku", ok: true, exit: 0, durationMs: 5,
+      id: "fix[0]", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5,
       output: "clone finding", sessionId: "s-clone", cwd: tmpdir(), allowedTools: "Read,Grep",
     });
     const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
@@ -236,7 +236,7 @@ const SCHED_CFG = {
 
 function schedTask(id, over = {}) {
   return {
-    id, prompt: `do ${id}`, model: "haiku", allowedTools: "Read,Grep,Glob",
+    id, prompt: `do ${id}`, provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob",
     cwd: over.cwd || tmpdir(), originalCwd: over.cwd || tmpdir(),
     timeoutMs: 5000, after: [], ...over,
   };
@@ -314,7 +314,7 @@ test("Q2: mid-ask, runLiveness reports the run live (not finished)", async () =>
 test("Q3: only the asked leaf spawns; dependents and __digest keep their finished state", async () => {
   const { dir, plan: p } = await finishedRun(
     [schedTask("a"), schedTask("b", { after: ["a"] })],
-    { digest: { model: "haiku", instructions: "sum up" } }
+    { digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "sum up" } }
   );
   try {
     const spawn2 = fakeSpawnFactory(() => ({ output: STREAM }));
@@ -341,7 +341,7 @@ test("Q4: the leaf's output/ok is unchanged; asks[] gains an entry; .ask.log is 
     equal(after.asks.length, 1);
     equal(after.asks[0].question, "why though?");
     equal(after.asks[0].answer, "the follow-up answer");
-    equal(after.asks[0].model, "haiku");
+    equal(after.asks[0].model, "claude-haiku-4-5-20251001");
     ok(after.asks[0].tokens);
     equal(after.asks[0].sessionId, "s-2");
     const log = readFileSync(join(p.resultsDir, "results", "a.ask.log"), "utf8");
@@ -372,7 +372,7 @@ test("Q9: with no ask.model override, the ask spawns with the leaf's actual resu
   const { dir, plan: p } = await finishedRun([schedTask("a")]);
   try {
     const prior = readResult(p.resultsDir, "a");
-    writeResult(p.resultsDir, "a", { ...prior, model: "sonnet" });
+    writeResult(p.resultsDir, "a", { ...prior, provider: "claude", model: "claude-sonnet-5" });
     const spawn2 = fakeSpawnFactory(() => ({ output: STREAM }));
     await runPlan(p, SCHED_CFG, makeIo(spawn2), { ask: { taskId: "a", question: "?" } });
     const args = spawn2.calls[0].args;
@@ -394,7 +394,7 @@ test("Q6: ask in a kept worktree reuses it without calling prepareIsolation", as
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 2, goal: "",
       tasks: [{
-        id: "impl", prompt: "implement", model: "haiku", allowedTools: "Read,Edit,Bash",
+        id: "impl", prompt: "implement", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
         cwd: repo, originalCwd: repo, isolation: "worktree",
         timeoutMs: 5000, after: [],
       }],
@@ -439,7 +439,7 @@ test("Q8: ask preserves the prior summary and status for every other task, inclu
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 4, goal: "",
       tasks: [
-        { id: "wt", prompt: "do wt", model: "haiku", allowedTools: "Read,Edit,Bash", cwd: repo, originalCwd: repo, isolation: "worktree", timeoutMs: 5000, after: [] },
+        { id: "wt", prompt: "do wt", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash", cwd: repo, originalCwd: repo, isolation: "worktree", timeoutMs: 5000, after: [] },
         schedTask("b"),
         schedTask("c"),
       ],
@@ -539,11 +539,11 @@ function snapAskSetup() {
   const repoKey = oracleSnapKey(repo);
   const tree = join(dir, "wt-snapshot-" + repoKey);
   writeResult(dir, "leaf", {
-    id: "leaf", model: "haiku", ok: true, exit: 0, durationMs: 5, output: "original", sessionId: "s-1",
+    id: "leaf", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5, output: "original", sessionId: "s-1",
     cwd: tree, originalCwd: repo, allowedTools: "Read,Grep",
     isolationMode: "snapshot", repoToplevel: repo, repoKey, snapshotSha: sha,
   });
-  writeManifestSnapshot(dir, { cwd: repo, resultsDir: dir, tasks: [{ id: "leaf", model: "haiku" }] });
+  writeManifestSnapshot(dir, { cwd: repo, resultsDir: dir, tasks: [{ id: "leaf", provider: "claude", model: "claude-haiku-4-5-20251001" }] });
   const registered = () => g(["worktree", "list", "--porcelain"]).stdout.toLowerCase().includes(tree.replace(/\\/g, "/").toLowerCase());
   return { repo, dir, tree, sha, g, registered };
 }
@@ -593,7 +593,7 @@ test("askLeaf snapshot: a sub-offset leaf resumes at <tree>/sub, and the re-adde
 test("askLeaf snapshot: a forEach clone (not in manifest.tasks) re-adds the tree from its own result", async () => {
   const s = snapAskSetup();
   try {
-    writeManifestSnapshot(s.dir, { cwd: s.repo, resultsDir: s.dir, tasks: [{ id: "fix", model: "haiku", forEach: { over: "{{x}}" } }] });
+    writeManifestSnapshot(s.dir, { cwd: s.repo, resultsDir: s.dir, tasks: [{ id: "fix", provider: "claude", model: "claude-haiku-4-5-20251001", forEach: { over: "{{x}}" } }] });
     writeResult(s.dir, "fix[0]", { ...readResult(s.dir, "leaf"), id: "fix[0]" });
     let treeAtSpawn = null;
     const spawn = fakeSpawnFactory(() => { treeAtSpawn = existsSync(join(s.tree, "a.txt")); return { output: STREAM }; });
@@ -625,7 +625,7 @@ test("askLeaf snapshot: the tree is removed even when the ask throws after re-ad
   try {
     // governance rejects a non-Claude override AFTER the tree was re-added
     await rejects(
-      askLeaf({ resultsDir: s.dir, taskId: "leaf", question: "q", model: "glm-5:cloud", cfg: CFG, io: makeIo(fakeSpawnFactory(() => ({ output: STREAM }))) }),
+      askLeaf({ resultsDir: s.dir, taskId: "leaf", question: "q", provider: "ollama", model: "glm-5:cloud", cfg: CFG, io: makeIo(fakeSpawnFactory(() => ({ output: STREAM }))) }),
       /governance/,
     );
     equal(existsSync(s.tree), false, "finally must remove the re-added tree");
@@ -652,7 +652,7 @@ test("askLeaf snapshot: a result with no originalCwd errors clearly and still re
 test("askLeaf: a private-mode leaf whose tree was swept gets the teaching message, not the generic one", async () => {
   const dir = setup();
   try {
-    writeResult(dir, "swept", { id: "swept", model: "haiku", ok: true, output: "x", sessionId: "s-9", isolationMode: "private", cwd: join(tmpdir(), "swarm-nonexistent-wt-xyz") });
+    writeResult(dir, "swept", { id: "swept", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, output: "x", sessionId: "s-9", isolationMode: "private", cwd: join(tmpdir(), "swarm-nonexistent-wt-xyz") });
     await rejects(() => askLeaf({ resultsDir: dir, taskId: "swept", question: "?", cfg: CFG, io: makeIo(fakeSpawnFactory()) }), /removed because it changed nothing/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

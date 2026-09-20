@@ -11,7 +11,7 @@ let n = 0;
 const spawn = fakeSpawnFactory(() => (++n === 1 ? { exit: 1, output: "429 rate limit" } : { output: "recovered" }));
 const io = makeIo(spawn);
 const task = {
-  id: "flaky", prompt: "do flaky", model: "haiku", allowedTools: "Read",
+  id: "flaky", prompt: "do flaky", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read",
   cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [],
 };
 const plan = { cwd: dir, resultsDir: join(dir, "run"), concurrency: 2, tasks: [task], goal: "" };

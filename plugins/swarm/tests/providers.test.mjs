@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { deepEqual, equal, rejects, throws } from "node:assert/strict";
+import { deepEqual, equal, ok, rejects, throws } from "node:assert/strict";
 import { createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
 import { assertProviderAdapterContract } from "./helpers/provider-contract.mjs";
 
@@ -11,68 +11,63 @@ const config = {
   },
 };
 
-test("provider resolution order is explicit, cache, Claude identity, legacy Ollama", () => {
+test("resolve() reads the authored provider and infers nothing", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
   equal(registry.resolve({ provider: "codex", model: "gpt-5" }, { config, allowDisabled: true }).provider, "codex");
-  equal(registry.resolve({ model: "gpt-5" }, { config, cache: [{ provider: "codex", model: "gpt-5" }], allowDisabled: true }).provider, "codex");
-  equal(registry.resolve({ model: "sonnet" }, { config }).provider, "claude");
-  equal(registry.resolve({ model: "gpt-oss:20b-cloud" }, { config }).provider, "ollama");
-  equal(registry.resolve({ model: "gpt-oss:120b-cloud" }, { config }).provider, "ollama");
-  equal(registry.resolve({ model: "gpt-new-uncached" }, { config }).provider, "ollama");
+  equal(registry.resolve({ provider: "claude", model: "claude-sonnet-5" }, { config }).provider, "claude");
+  equal(registry.resolve({ provider: "ollama", model: "gpt-oss:20b-cloud" }, { config }).provider, "ollama");
+  // Formerly swallowed by the Ollama fallback; now the author must say so.
+  equal(registry.resolve({ provider: "ollama", model: "gpt-new-uncached" }, { config }).provider, "ollama");
 });
 
-test("ambiguous provider-qualified cache rows require explicit provider", () => {
+test("a model with no provider throws, even one the discovery cache knows", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
-  const cache = [
-    { provider: "ollama", model: "same-id" },
-    { provider: "codex", model: "same-id" },
-  ];
-  throws(() => registry.resolve({ model: "same-id" }, { config, cache }), /same-id.*provider/);
-  deepEqual(registry.resolve({ provider: "codex", model: "same-id" }, { config, cache, allowDisabled: true }), {
-    provider: "codex", model: "same-id",
-  });
+  throws(() => registry.resolve({ model: "gpt-new-uncached" }, { config }), /no "provider".*registered: claude, ollama, codex/);
+  throws(() => registry.resolve({ model: "gpt-5" }, { config, cache: [{ provider: "codex", model: "gpt-5" }], allowDisabled: true }), /no "provider"/);
+  throws(() => registry.resolve({ model: "gpt-oss:20b-cloud" }, { config }), /no "provider"/);
+  throws(() => registry.resolve({ model: "claude-opus-5", provider: "  " }, { config }), /no "provider"/);
 });
 
-test("disabled providers fail unless the caller is inspecting identity only", () => {
+test("an unknown provider id is refused, naming the registered ids", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
-  throws(() => registry.resolve({ provider: "codex", model: "gpt-5" }, { config }), /codex.*disabled/);
-  equal(registry.resolve({ provider: "codex", model: "gpt-5" }, { config, allowDisabled: true }).provider, "codex");
+  throws(() => registry.resolve({ provider: "nope", model: "x" }, { config }), /unknown provider 'nope' \(registered: claude, ollama, codex\)/);
+});
+
+test("Claude aliases are refused as model names, under any provider", () => {
+  const registry = createProviderRegistry(defaultProviderAdapters());
+  for (const alias of ["haiku", "sonnet", "opus", "fable", "Sonnet"]) {
+    throws(() => registry.resolve({ provider: "claude", model: alias }, { config }), /Claude alias.*claude-opus-5/, alias);
+    throws(() => registry.resolve({ provider: "ollama", model: alias }, { config }), /Claude alias/, alias);
+  }
+});
+
+test("a model that is valid but not for the named provider is refused by that provider's validateTask", () => {
+  const registry = createProviderRegistry(defaultProviderAdapters());
+  ok(registry.get("ollama").validateTask({ provider: "ollama", model: "claude-opus-5" })[0].includes("use \"provider\": \"claude\""));
+  ok(registry.get("claude").validateTask({ provider: "claude", model: "gpt-oss:20b-cloud" })[0].includes("not a Claude model"));
+  deepEqual(registry.get("claude").validateTask({ provider: "claude", model: "claude-opus-5" }), []);
+  deepEqual(registry.get("ollama").validateTask({ provider: "ollama", model: "gpt-oss:20b-cloud" }), []);
 });
 
 test("provider resolution rejects whitespace-only models and canonicalizes surrounding whitespace", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
-  throws(() => registry.resolve({ model: "   " }, { config }), /non-empty model/);
-  deepEqual(registry.resolve({ model: "  sonnet  " }, { config }), { provider: "claude", model: "sonnet" });
+  throws(() => registry.resolve({ model: "   ", provider: "claude" }, { config }), /non-empty model/);
+  deepEqual(registry.resolve({ provider: "claude", model: "  claude-sonnet-5  " }, { config }), { provider: "claude", model: "claude-sonnet-5" });
 });
 
-test("a registered fourth provider participates in inference without a production branch", () => {
+test("a registered fourth provider resolves by id without a production branch", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
   registry.register({
     id: "fixture",
     runnerId: "fixture-runner",
     enabled: () => true,
-    matchModel: (model) => model.startsWith("fixture-") ? { provider: "fixture", model } : null,
     validateTask: () => [],
     capabilities: {},
   });
-  deepEqual(registry.resolve({ model: "fixture-model" }, { config }), {
+  deepEqual(registry.resolve({ provider: "fixture", model: "fixture-model" }, { config }), {
     provider: "fixture", model: "fixture-model",
   });
-});
-
-test("multiple adapter matches are ambiguous and mismatched adapter identities are rejected", () => {
-  const matching = (id, returned = id) => ({
-    id,
-    runnerId: "claude",
-    enabled: () => true,
-    matchModel: (model) => ({ provider: returned, model }),
-    validateTask: () => [],
-    capabilities: {},
-  });
-  const ambiguous = createProviderRegistry([matching("one"), matching("two")]);
-  throws(() => ambiguous.resolve({ model: "x" }), /multiple providers.*one, two/);
-  const mismatched = createProviderRegistry([matching("one", "other")]);
-  throws(() => mismatched.resolve({ model: "x" }), /mismatched identity/);
+  throws(() => registry.resolve({ model: "fixture-model" }, { config }), /no "provider".*fixture/);
 });
 
 test("provider contract helper rejects broken adapters and accepts defaults", async () => {
@@ -87,7 +82,6 @@ test("provider contract helper enforces scoped validation and canonical discover
     id: "fixture",
     runnerId: "claude",
     enabled: () => true,
-    matchModel: (model) => ({ provider: "fixture", model }),
     validateTask: () => ["fixture-scoped problem"],
     capabilities: {
       discoverModels: async () => [{ provider: "fixture", model: "fixture-model", runner: "claude" }],
@@ -110,7 +104,6 @@ test("optional capabilities are explicit and unknown capabilities stay scoped", 
     id: "broken-capability",
     runnerId: "claude",
     enabled: () => true,
-    matchModel: () => null,
     validateTask: () => [],
     capabilities: { invented: () => {} },
   }), /unknown capability 'invented'/);
@@ -120,7 +113,6 @@ test("provider and runner identifiers reject mixed case and surrounding whitespa
   const base = {
     runnerId: "claude",
     enabled: () => true,
-    matchModel: () => null,
     validateTask: () => [],
     capabilities: {},
   };

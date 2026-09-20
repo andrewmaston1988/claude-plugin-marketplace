@@ -98,7 +98,7 @@ performs, applied one step later:
 
 ```json
 { "id": "fix", "after": ["find-sites"], "forEach": { "from": "find-sites", "path": "sites", "maxItems": 30 },
-  "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
+  "provider": "ollama", "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
 { "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
 ```
 

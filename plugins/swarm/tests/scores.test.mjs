@@ -383,8 +383,13 @@ test("scoresPath: derives from SWARM_HOME, never a hardcoded home", () => {
 // "out of scope". A baseline row whose model is a Claude tier must pass;
 // a junk model name must still fail (two families, not any string).
 test("validateRow: Claude tiers are accepted, junk models are not", () => {
-  for (const model of ["sonnet", "claude-haiku-4-5-20251001"]) {
+  for (const model of ["claude-sonnet-5", "claude-haiku-4-5-20251001"]) {
     deepEqual(validateRow(row({ model })), []);
+  }
+  // An alias files grades under a name the store already holds the full id for.
+  for (const model of ["sonnet", "Opus", "haiku", "fable"]) {
+    const aliasErrs = validateRow(row({ model }));
+    ok(aliasErrs.some((e) => e.startsWith("model:") && /Claude alias.*claude-sonnet-5/.test(e)), String(aliasErrs));
   }
   const errs = validateRow(row({ model: "not-a-model" }));
   ok(errs.some((e) => e.startsWith("model:")), String(errs));

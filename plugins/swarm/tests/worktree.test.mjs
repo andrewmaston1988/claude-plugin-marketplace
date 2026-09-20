@@ -429,7 +429,7 @@ test("scheduler resume: a failed isolated leaf re-enters its kept worktree AND r
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
       tasks: [{
-        id: "impl", prompt: "do it", model: "haiku", allowedTools: "Read,Edit,Bash",
+        id: "impl", prompt: "do it", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
         cwd: repo, originalCwd: repo, isolation: "worktree", timeoutMs: 5000, after: [],
       }],
     };
@@ -467,7 +467,7 @@ test("scheduler integration: isolation task runs IN the worktree; summary lists 
       concurrency: 2,
       goal: "",
       tasks: [{
-        id: "impl", prompt: "implement", model: "haiku", allowedTools: "Read,Edit,Bash",
+        id: "impl", prompt: "implement", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
         cwd: repo, originalCwd: repo, isolation: "worktree",
         timeoutMs: 5000, after: [],
       }],
@@ -633,10 +633,10 @@ test("scheduler integration: a from-based leaf starts from its dependency's comm
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
       tasks: [
-        { id: "helper", prompt: "h", model: "haiku", allowedTools: "Read,Edit,Bash",
+        { id: "helper", prompt: "h", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
           cwd: repo, originalCwd: repo, isolation: { worktree: "feat" }, worktreeName: "feat",
           timeoutMs: 5000, after: [] },
-        { id: "migrate", prompt: "m", model: "haiku", allowedTools: "Read,Edit,Bash",
+        { id: "migrate", prompt: "m", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
           cwd: repo, originalCwd: repo, isolation: { worktree: "migrate", from: "helper" },
           worktreeName: "migrate", from: "helper", timeoutMs: 5000, after: ["helper"] },
       ],
@@ -787,7 +787,7 @@ test("scheduler integration: an integrate node merges sibling branches into the 
     });
     const io = makeIo(spawn);
     const leaf = (id, over) => ({
-      id, prompt: "p", model: "haiku", allowedTools: "Read,Edit,Bash",
+      id, prompt: "p", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
       cwd: repo, originalCwd: repo, timeoutMs: 5000, after: [], ...over,
     });
     const p = {
@@ -828,7 +828,7 @@ test("groupFinal is the task nothing else in the group depends on, even across o
     });
     const io = makeIo(spawn);
     const leaf = (id, over) => ({
-      id, prompt: "p", model: "haiku", allowedTools: "Read,Edit,Bash",
+      id, prompt: "p", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
       cwd: repo, originalCwd: repo, timeoutMs: 5000, after: [], ...over,
     });
     // feat = [helper, cleanup]; cleanup reaches helper ONLY through mx, which is
@@ -862,10 +862,10 @@ test("I1: a when-gated isolation.from source is rejected at validate, and the ru
     const manifestPath = join(dir, "plan.json");
     writeFileSync(manifestPath, JSON.stringify({
       tasks: [
-        { id: "probe", prompt: "…return JSON", model: "haiku" },
-        { id: "a-surface", prompt: "survey", model: "haiku", after: ["probe"],
+        { id: "probe", prompt: "…return JSON", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "a-surface", prompt: "survey", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["probe"],
           when: { from: "probe", expr: "length(value) > 0" }, isolation: { worktree: "a-surface" } },
-        { id: "reader", prompt: "read", model: "haiku", after: ["a-surface"],
+        { id: "reader", prompt: "read", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["a-surface"],
           isolation: { worktree: "reader", from: "a-surface" } },
       ],
     }));

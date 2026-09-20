@@ -19,7 +19,7 @@ function fleetHome({ now, quietMs = 0, finished = false, launcher = "sess-1" }) 
   const aTs = new Date(now - quietMs - 30_000).toISOString();
   const bTs = new Date(now - quietMs).toISOString();
   writeFileSync(join(rd, "run.log"), [
-    JSON.stringify({ ts: startTs, event: "run-start", pid: 1, launcher, tasks: [{ id: "a", model: "glm-5.2:cloud" }, { id: "b", model: "minimax-m3:cloud" }] }),
+    JSON.stringify({ ts: startTs, event: "run-start", pid: 1, launcher, tasks: [{ id: "a", provider: "ollama", model: "glm-5.2:cloud" }, { id: "b", provider: "ollama", model: "minimax-m3:cloud" }] }),
     JSON.stringify({ ts: aTs, id: "a", state: "ok", tokens: { input: 900, output: 100, cacheCreation: 0, cacheRead: 5000 } }),
     JSON.stringify({ ts: bTs, id: "b", state: "running", tokens: { input: 1000, output: 500, cacheCreation: 0, cacheRead: 0 } }),
   ].join("\n") + "\n");
@@ -212,7 +212,7 @@ test("row 10: a run dispatched by the real scheduler is attributed to its sessio
     const rd = join(home, "runs", "C--code-x", "prod-1");
     const p = {
       cwd: scratch, resultsDir: rd, concurrency: 4, goal: "",
-      tasks: [{ id: "a", prompt: "do a", model: "haiku", allowedTools: "Read,Grep,Glob", cwd: tmpdir(), originalCwd: tmpdir(), timeoutMs: 5000, after: [] }],
+      tasks: [{ id: "a", prompt: "do a", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob", cwd: tmpdir(), originalCwd: tmpdir(), timeoutMs: 5000, after: [] }],
     };
     await withSessionEnv("prod-sess", () => runPlan(p, SCHED_CFG, makeIo(fakeSpawnFactory(() => ({ output: "leaf done" })))));
     // A completed run is by definition not live — remove the terminal summary and

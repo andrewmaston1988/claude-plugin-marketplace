@@ -60,7 +60,7 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
   const manifest = join(root, "manifest.json");
   // loadManifest takes no env, so without an explicit resultsDir the run home
   // resolves against the real ~/.swarm.
-  writeFileSync(manifest, JSON.stringify({ resultsDir: join(home, "run"), tasks: [{ id: "inspect", model: FIXTURE_MODEL, prompt: "inspect" }] }));
+  writeFileSync(manifest, JSON.stringify({ resultsDir: join(home, "run"), tasks: [{ id: "inspect", provider: "fixture", model: FIXTURE_MODEL, prompt: "inspect" }] }));
   const cfg = config(root);
   const env = { ...process.env, SWARM_HOME: home };
   const registry = fixtureRegistry();
@@ -170,18 +170,18 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
   }
 });
 
-test("CLI roster hides disabled/denylisted cached providers and qualifies Claude collisions", async () => {
+test("CLI roster hides disabled/denylisted cached providers", async () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-fourth-provider-roster-"));
   const root = join(home, "repo");
   mkdirSync(root, { recursive: true });
   const env = { ...process.env, SWARM_HOME: home };
-  const registry = fixtureRegistry({ model: "haiku" });
+  const registry = fixtureRegistry({ model: "claude-haiku-4-5-20251001" });
   const cfg = config(root);
   try {
     const lines = [];
     await cmdModels([], { cfg, env, registry, fetchImpl: async () => ({ ok: true }), write: (line) => lines.push(line) });
-    ok(lines.some((line) => line.startsWith("fixture/haiku")), lines.join("\n"));
-    ok(lines.some((line) => line.startsWith("claude/haiku")), lines.join("\n"));
+    ok(lines.some((line) => line.includes("claude-haiku-4-5-20251001")), lines.join("\n"));
+    ok(!lines.some((line) => line.startsWith("claude/")), lines.join("\n"));
 
     const denylisted = [];
     await cmdModels([], { cfg: { ...cfg, modelDenylist: [FIXTURE_MODEL] }, env, registry, fetchImpl: async () => ({ ok: true }), write: (line) => denylisted.push(line) });

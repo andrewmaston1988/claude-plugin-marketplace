@@ -41,7 +41,6 @@ test("a fourth provider resolves a registered fourth runner without a central ma
     id: "fixture",
     runnerId: "fixture-runner",
     enabled: () => true,
-    matchModel: (model) => ({ provider: "fixture", model }),
     validateTask: () => [],
     capabilities: {},
   });

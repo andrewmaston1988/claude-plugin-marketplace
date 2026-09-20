@@ -55,13 +55,13 @@ test("effectivePlanDoc: resolved strip shape — set fields kept, empties omitte
     const plan = loadPlan(dir, {
       goal: "audit the thing",
       tasks: [
-        { id: "a", prompt: "scan {{args.base}}", model: "haiku" },
+        { id: "a", prompt: "scan {{args.base}}", provider: "claude", model: "claude-haiku-4-5-20251001" },
         {
-          id: "b", prompt: "verify {{result:a}}", model: "sonnet", after: ["a"],
+          id: "b", prompt: "verify {{result:a}}", provider: "claude", model: "claude-sonnet-5", after: ["a"],
           returns: { type: "object", properties: { verdict: { type: "string" } }, required: ["verdict"] },
         },
       ],
-      digest: { model: "haiku", instructions: "summarize" },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "summarize" },
     }, { args: { base: "master" } });
     const doc = effectivePlanDoc(plan);
     equal(doc.goal, "audit the thing");
@@ -69,7 +69,7 @@ test("effectivePlanDoc: resolved strip shape — set fields kept, empties omitte
     equal(doc.tasks[0].prompt, "scan master"); // args substituted before the doc is built
     deepEqual(doc.tasks[1].after, ["a"]);
     equal(doc.tasks[1].returns.required[0], "verdict");
-    equal(doc.digest.model, "haiku");
+    equal(doc.digest.model, "claude-haiku-4-5-20251001");
     // normalized-empty fields never serialize
     ok(!("after" in doc.tasks[0]), "empty after omitted");
     ok(!("when" in doc.tasks[0]), "unset when omitted");
@@ -92,7 +92,7 @@ test("effectivePlanDoc: provider identity survives primary, fallback, child, and
     };
     const path = join(dir, "provider-plan.json");
     writeFileSync(path, JSON.stringify({
-      tasks: [{ id: "a", prompt: "inspect", model: "gpt-5-codex", provider: "codex", fallbackModel: "haiku" }],
+      tasks: [{ id: "a", prompt: "inspect", model: "gpt-5-codex", provider: "codex", fallbackProvider: "claude", fallbackModel: "claude-haiku-4-5-20251001" }],
       digest: { model: "gpt-5-codex", provider: "codex" },
     }));
     const plan = loadManifest(path, cfg, dir);
@@ -108,7 +108,7 @@ test("effectivePlanDoc: provider identity survives primary, fallback, child, and
 test("effectivePlanDoc: records the run's cwd — prune's repo-resolution fallback when no worktree survives to ask", () => {
   const dir = tmp();
   try {
-    const plan = loadPlan(dir, { tasks: [{ id: "a", prompt: "x", model: "haiku" }] });
+    const plan = loadPlan(dir, { tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] });
     const doc = effectivePlanDoc(plan);
     equal(doc.cwd, dir);
   } finally {
@@ -120,7 +120,7 @@ test("effectivePlanDoc: records args, argsFingerprint, and registry ref; all abs
   const dir = tmp();
   try {
     const args = { base: "master", n: 3 };
-    const plan = loadPlan(dir, { tasks: [{ id: "a", prompt: "diff {{args.base}} top {{args.n}}", model: "haiku" }] },
+    const plan = loadPlan(dir, { tasks: [{ id: "a", prompt: "diff {{args.base}} top {{args.n}}", provider: "claude", model: "claude-haiku-4-5-20251001" }] },
       { args, ref: "nightly-audit" });
     const doc = effectivePlanDoc(plan);
     deepEqual(doc.args, args);
@@ -129,7 +129,7 @@ test("effectivePlanDoc: records args, argsFingerprint, and registry ref; all abs
 
     const dir2 = tmp();
     try {
-      const bare = loadPlan(dir2, { tasks: [{ id: "a", prompt: "x", model: "haiku" }] });
+      const bare = loadPlan(dir2, { tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] });
       const doc2 = effectivePlanDoc(bare);
       ok(!("args" in doc2), "no args key for a bare run");
       ok(!("argsFingerprint" in doc2), "no fingerprint for a bare run");
@@ -147,7 +147,7 @@ test("effectivePlanDoc: child manifests nest under `child` with their resolved p
   try {
     const childPath = join(dir, "child.json");
     writeFileSync(childPath, JSON.stringify({
-      tasks: [{ id: "scan", prompt: "scan {{args.base}}", model: "haiku" }],
+      tasks: [{ id: "scan", prompt: "scan {{args.base}}", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const plan = loadPlan(dir, {
       tasks: [{ id: "node", manifest: "child.json" }],
@@ -163,7 +163,7 @@ test("loadManifest: returned plan exposes args and ref", () => {
   const dir = tmp();
   try {
     const args = { base: "master" };
-    const plan = loadPlan(dir, { tasks: [{ id: "a", prompt: "on {{args.base}}", model: "haiku" }] },
+    const plan = loadPlan(dir, { tasks: [{ id: "a", prompt: "on {{args.base}}", provider: "claude", model: "claude-haiku-4-5-20251001" }] },
       { args, ref: "saved-name" });
     deepEqual(plan.args, args);
     equal(plan.ref, "saved-name");
@@ -196,7 +196,7 @@ test("runPlan: manifest.json written at dispatch, before any leaf launches; cont
   const dir = tmp();
   try {
     let snapshotSeenAtLaunch = null;
-    const plan = loadPlan(dir, { tasks: [{ id: "a", prompt: "say {{args.word}}", model: "haiku" }] },
+    const plan = loadPlan(dir, { tasks: [{ id: "a", prompt: "say {{args.word}}", provider: "claude", model: "claude-haiku-4-5-20251001" }] },
       { args: { word: "hello" } });
     const spawn = fakeSpawnFactory(() => {
       snapshotSeenAtLaunch = existsSync(join(plan.resultsDir, "manifest.json"));
@@ -217,8 +217,8 @@ test("leaf result records the exact prompt sent ({{result:dep}} inlined)", async
   try {
     const plan = loadPlan(dir, {
       tasks: [
-        { id: "a", prompt: "emit the codeword", model: "haiku" },
-        { id: "b", prompt: "check {{result:a}} carefully", model: "haiku", after: ["a"] },
+        { id: "a", prompt: "emit the codeword", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "b", prompt: "check {{result:a}} carefully", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["a"] },
       ],
     });
     const spawn = fakeSpawnFactory((call) => promptOf(call).startsWith("emit") ? { output: "XYZZY" } : { output: "ok" });
@@ -237,8 +237,8 @@ test("forEach clones each record their item-substituted prompt", async () => {
   try {
     const plan = loadPlan(dir, {
       tasks: [
-        { id: "src", prompt: "list files", model: "haiku" },
-        { id: "fix", prompt: "fix {{item.f}}", model: "haiku", after: ["src"], forEach: { from: "src", maxItems: 5 } },
+        { id: "src", prompt: "list files", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "fix", prompt: "fix {{item.f}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["src"], forEach: { from: "src", maxItems: 5 } },
       ],
     });
     const spawn = fakeSpawnFactory((call) =>
@@ -257,13 +257,13 @@ test("spliced child leaves record their remapped prompts; digest records its pro
     const childPath = join(dir, "child.json");
     writeFileSync(childPath, JSON.stringify({
       tasks: [
-        { id: "scan", prompt: "child scan", model: "haiku" },
-        { id: "sum", prompt: "sum of {{result:scan}}", model: "haiku", after: ["scan"] },
+        { id: "scan", prompt: "child scan", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "sum", prompt: "sum of {{result:scan}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["scan"] },
       ],
     }));
     const plan = loadPlan(dir, {
       tasks: [{ id: "node", manifest: "child.json" }],
-      digest: { model: "haiku", instructions: "wrap up" },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "wrap up" },
     });
     const spawn = fakeSpawnFactory((call) => promptOf(call) === "child scan" ? { output: "SCANOUT" } : { output: "d" });
     await runPlan(plan, CFG, makeIo(spawn));
@@ -281,9 +281,9 @@ test("compute steps and aggregates carry no prompt field", async () => {
   try {
     const plan = loadPlan(dir, {
       tasks: [
-        { id: "src", prompt: "list", model: "haiku" },
+        { id: "src", prompt: "list", provider: "claude", model: "claude-haiku-4-5-20251001" },
         { id: "count", compute: "deps['src']", after: ["src"] },
-        { id: "fix", prompt: "fix {{item}}", model: "haiku", after: ["src"], forEach: { from: "src", maxItems: 5 } },
+        { id: "fix", prompt: "fix {{item}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["src"], forEach: { from: "src", maxItems: 5 } },
       ],
     });
     const spawn = fakeSpawnFactory((call) =>
@@ -299,7 +299,7 @@ test("compute steps and aggregates carry no prompt field", async () => {
 test("resume: snapshot re-written at each dispatch; skipped leaves keep their persisted prompt", async () => {
   const dir = tmp();
   try {
-    const body = { tasks: [{ id: "a", prompt: "say {{args.word}}", model: "haiku" }] };
+    const body = { tasks: [{ id: "a", prompt: "say {{args.word}}", provider: "claude", model: "claude-haiku-4-5-20251001" }] };
     const plan = loadPlan(dir, body, { args: { word: "hello" } });
     const spawn = fakeSpawnFactory(() => ({ output: "hello" }));
     await runPlan(plan, CFG, makeIo(spawn));

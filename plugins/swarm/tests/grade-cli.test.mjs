@@ -17,9 +17,9 @@ function fakeRun(dir) {
   const run = join(dir, "run-1");
   mkdirSync(join(run, "results"), { recursive: true });
   const write = (id, obj) => writeFileSync(join(run, "results", `${id}.json`), JSON.stringify(obj, null, 2));
-  write("icons", { id: "icons", model: "glm-5.2:cloud", ok: true, exit: 0, durationMs: 41000, numTurns: 6, output: "…" });
-  write("pack", { id: "pack", model: "kimi-k2.7-code:cloud", ok: true, exit: 0, durationMs: 90000, numTurns: 12, output: "…" });
-  write("verdict", { id: "verdict", model: "sonnet", ok: true, exit: 0, durationMs: 5000, output: "…" });
+  write("icons", { id: "icons", provider: "ollama", model: "glm-5.2:cloud", ok: true, exit: 0, durationMs: 41000, numTurns: 6, output: "…" });
+  write("pack", { id: "pack", provider: "ollama", model: "kimi-k2.7-code:cloud", ok: true, exit: 0, durationMs: 90000, numTurns: 12, output: "…" });
+  write("verdict", { id: "verdict", provider: "claude", model: "claude-sonnet-5", ok: true, exit: 0, durationMs: 5000, output: "…" });
   writeFileSync(join(run, "manifest.json"), JSON.stringify({ tasks: [{ id: "icons", effort: null }] }));
   return run;
 }
@@ -32,7 +32,7 @@ test("grade --init: one row per model leaf, Claude leaves included", () => {
     equal(r.status, 0, r.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
     equal(batch.rows.length, 3);
-    ok(batch.rows.some((x) => x.leaf === "verdict" && x.model === "sonnet"), "the Claude leaf gets a row too");
+    ok(batch.rows.some((x) => x.leaf === "verdict" && x.model === "claude-sonnet-5"), "the Claude leaf gets a row too");
     // every aspect key present and null — the skeleton is a form to fill, and
     // validation refuses it until it has been
     for (const row of batch.rows) {
@@ -143,7 +143,7 @@ test("grade --file: a filled batch lands, with model and mechanical taken from t
       session: "abc123",
       rows: [
         // the batch claims sonnet; the result says glm — the result wins
-        { leaf: "icons", model: "sonnet", domain: "godot", outcome: "completed", note: "",
+        { leaf: "icons", provider: "claude", model: "claude-sonnet-5", domain: "godot", outcome: "completed", note: "",
           grades: { adherence: 9, handoff: 7, truthfulness: 8, depth: 8, geometry: 8 } },
         { leaf: "pack", domain: "godot", outcome: "session-died", note: "died on an image read" },
       ],

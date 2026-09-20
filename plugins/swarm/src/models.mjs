@@ -1,7 +1,6 @@
 // Claude-family detection and per-tier effort matrices.
 
 import { isClaudeModel, OLLAMA_CLOUD_RE } from "./contracts.mjs";
-import { createProviderRegistry, defaultProviderAdapters } from "./providers.mjs";
 
 export { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
 
@@ -42,14 +41,4 @@ export function isValidEffort(model, effort) {
   const tier = tierFromModel(model);
   if (!tier) return true;
   return TIER_EFFORTS[tier].includes(effort);
-}
-
-const PROVIDERS = createProviderRegistry(defaultProviderAdapters());
-
-export function modelProvider(model, { provider, cache = [], config } = {}) {
-  const resolved = PROVIDERS.resolve(
-    { model, ...(provider !== undefined ? { provider } : {}) },
-    { cache, config, allowDisabled: true },
-  );
-  return resolved.provider;
 }

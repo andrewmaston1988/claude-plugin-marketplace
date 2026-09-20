@@ -341,9 +341,6 @@ export function createOllamaProviderAdapter(options = {}) {
       const value = config.providers?.ollama?.enabled ?? config.provider?.enabled;
       return typeof value === "boolean" ? value : true;
     },
-    matchModel(model) {
-      return OLLAMA_CLOUD_RE.test(String(model || "")) ? { provider: "ollama", model } : null;
-    },
     validateTask() {
       return [];
     },

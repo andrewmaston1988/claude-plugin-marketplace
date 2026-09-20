@@ -42,11 +42,11 @@ function initPruneRepo() {
 // never outgrows summary.json's) — the exact ordering runLiveness trusts.
 function writeFinishedRun(resultsDir, worktreesKept) {
   mkdirSync(resultsDir, { recursive: true });
-  writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }) + "\n");
+  writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n");
   writeFileSync(join(resultsDir, "summary.json"), JSON.stringify({
     started: new Date().toISOString(),
     finished: new Date().toISOString(),
-    tasks: [{ id: "impl", model: "haiku", state: "ok" }],
+    tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001", state: "ok" }],
     blocked: [],
     worktreesKept,
     totalTokens: null,
@@ -59,9 +59,9 @@ test("validate: bad manifest exits 1 with readable errors", () => {
     const p = join(dir, "bad.json");
     writeFileSync(p, JSON.stringify({
       tasks: [
-        { id: "a", prompt: "x", model: "haiku" },
-        { id: "a", prompt: "y", model: "haiku", effort: "max" },
-        { id: "b", prompt: "{{result:ghost}}", model: "haiku" },
+        { id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "a", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001", effort: "max" },
+        { id: "b", prompt: "{{result:ghost}}", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
     const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
@@ -79,8 +79,8 @@ test("validate: good manifest exits 0 and reports task count", () => {
   try {
     const p = join(dir, "good.json");
     writeFileSync(p, JSON.stringify({
-      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
-      digest: { model: "haiku" },
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001" },
     }));
     const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
@@ -118,24 +118,24 @@ function seatsWorld({ enabled, store = "rows", corpus = false } = {}) {
   writeFileSync(join(home, "models-cache.json"), JSON.stringify({
     updated: "2026-09-10T00:00:00Z",
     models: [
-      { model: "glm-5.2:cloud", description: "graded" },
-      { model: "glm-5.3-flash:cloud", description: "unseated" },
+      { provider: "ollama", model: "glm-5.2:cloud", description: "graded" },
+      { provider: "ollama", model: "glm-5.3-flash:cloud", description: "unseated" },
     ],
   }));
   if (corpus) {
     const runDir = join(home, "runs", "some-proj", "old-1");
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "summary.json"), JSON.stringify({
-      tasks: [{ id: "a", state: "ok", model: "haiku", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } }],
+      tasks: [{ id: "a", state: "ok", provider: "claude", model: "claude-haiku-4-5-20251001", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } }],
     }));
   }
   const manifest = join(dir, "m.json");
   writeFileSync(manifest, JSON.stringify({
     tasks: [
-      { id: "lane", prompt: "x", model: "glm-5.2:cloud" },
-      { id: "audit", prompt: "y", model: "haiku" },
+      { id: "lane", prompt: "x", provider: "ollama", model: "glm-5.2:cloud" },
+      { id: "audit", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001" },
     ],
-    digest: { model: "haiku" },
+    digest: { provider: "claude", model: "claude-haiku-4-5-20251001" },
   }));
   return { dir, home, manifest };
 }
@@ -197,8 +197,8 @@ test("validate: the seats block sits between the existing lines and never distur
     const bad = join(w.dir, "bad.json");
     writeFileSync(bad, JSON.stringify({
       tasks: [
-        { id: "a", prompt: "x", model: "haiku" },
-        { id: "a", prompt: "y", model: "haiku" },
+        { id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "a", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
     const b = runCli(["validate", bad], { cwd: w.dir, env: { SWARM_HOME: w.home } });
@@ -249,11 +249,11 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
       resultsDir: "out",
       goal: "e2e smoke",
       tasks: [
-        { id: "scan-a", prompt: "look a", model: "haiku" },
-        { id: "scan-b", prompt: "look b", model: "haiku", effort: "high" },
-        { id: "scan-c", prompt: "look c", model: "sonnet" },
+        { id: "scan-a", prompt: "look a", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "scan-b", prompt: "look b", provider: "claude", model: "claude-haiku-4-5-20251001", effort: "high" },
+        { id: "scan-c", prompt: "look c", provider: "claude", model: "claude-sonnet-5" },
       ],
-      digest: { model: "haiku", instructions: "focus on X" },
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "focus on X" },
     }));
     const r = runCli(["run", manifest], {
       cwd: dir,
@@ -315,8 +315,8 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
       tasks: [
-        { id: "a", prompt: "x", model: "haiku" },
-        { id: "b", prompt: "y", model: "haiku", after: ["a"] },
+        { id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "b", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["a"] },
       ],
     }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_EXIT: "1", SWARM_SHIM_OUTPUT: "boom" };
@@ -352,7 +352,7 @@ test("run: quota-blocked leaf -> re-run-after names the reset in the reader's ow
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const env = {
       SWARM_HOME: join(dir, "home"),
@@ -375,7 +375,7 @@ test("stop: refuses on a finished run, naming the state", () => {
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "done" };
     const r1 = runCli(["run", manifest], { cwd: dir, quotaPreflight: false, env });
@@ -398,11 +398,11 @@ test("run: refuses a results dir whose engine is alive (fresh heartbeat, no summ
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const runLog = JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "a", model: "haiku" }] }) + "\n";
+    const runLog = JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "a", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n";
     writeFileSync(join(resultsDir, "run.log"), runLog);
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
 
@@ -425,11 +425,11 @@ test("run --force: also refuses a live engine — force is not a bypass", () => 
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    const runLog = JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "a", model: "haiku" }] }) + "\n";
+    const runLog = JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "a", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n";
     writeFileSync(join(resultsDir, "run.log"), runLog);
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
 
@@ -450,11 +450,11 @@ test("run: a stale heartbeat (dead engine) is not mistaken for live — resume p
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
-    writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "a", model: "haiku" }] }) + "\n");
+    writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "a", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n");
     const hbPath = join(resultsDir, "heartbeat");
     writeFileSync(hbPath, "2020-01-01T00:00:00.000Z 4321\n");
     const anHourAgo = new Date(Date.now() - 60 * 60 * 1000);
@@ -475,7 +475,7 @@ test("run: a fresh results dir (no heartbeat ever written) is not mistaken for l
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const shimLog = join(dir, "shim.log");
     const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
@@ -492,12 +492,12 @@ test("C1: ask refuses a results dir whose engine is alive — exit 1, claude nev
     const resultsDir = join(dir, "out");
     mkdirSync(join(resultsDir, "results"), { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({
-      cwd: dir, resultsDir, tasks: [{ id: "t1", model: "haiku" }],
+      cwd: dir, resultsDir, tasks: [{ id: "t1", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     writeFileSync(join(resultsDir, "results", "t1.json"), JSON.stringify({
-      id: "t1", model: "haiku", ok: true, output: "original", sessionId: "s-1", cwd: dir,
+      id: "t1", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, output: "original", sessionId: "s-1", cwd: dir,
     }));
-    const runLog = JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "t1", model: "haiku" }] }) + "\n";
+    const runLog = JSON.stringify({ ts: new Date().toISOString(), event: "run-start", pid: 4321, tasks: [{ id: "t1", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n";
     writeFileSync(join(resultsDir, "run.log"), runLog);
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
 
@@ -524,7 +524,7 @@ test("C2: run refuses to start while an ask is live", async () => {
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "t1", prompt: "x", model: "haiku" }],
+      tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const resultsDir = join(dir, "out");
 
@@ -567,7 +567,7 @@ test("stop: dead engine (stale heartbeat, no summary) — records run-stop and m
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     const lines = [
-      JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "a", model: "haiku" }, { id: "b", model: "haiku" }] }),
+      JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "a", provider: "claude", model: "claude-haiku-4-5-20251001" }, { id: "b", provider: "claude", model: "claude-haiku-4-5-20251001" }] }),
       JSON.stringify({ ts: new Date().toISOString(), id: "a", state: "running" }),
     ];
     writeFileSync(join(resultsDir, "run.log"), lines.join("\n") + "\n");
@@ -600,7 +600,7 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "slow", prompt: "x", model: "haiku" }],
+      tasks: [{ id: "slow", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const resultsDir = join(dir, "out");
     const shimLog = join(dir, "stop-shim.log");
@@ -793,7 +793,7 @@ test("prune: refuses a live run (fresh heartbeat, no summary) — exit 1, nothin
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir);
-    writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }) + "\n");
+    writeFileSync(join(resultsDir, "run.log"), JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) + "\n");
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 1234\n`);
 
     const r = runCli(["prune", resultsDir], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
@@ -848,7 +848,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
     const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, { worktreeBranchPrefix: "swarm/" }, resultsDir);
 
     const lines = [
-      JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }),
+      JSON.stringify({ ts: new Date().toISOString(), event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }),
       JSON.stringify({ ts: new Date().toISOString(), id: "impl", state: "running" }),
     ];
     writeFileSync(join(resultsDir, "run.log"), lines.join("\n") + "\n");
@@ -880,7 +880,7 @@ test("run: prints the absolute resultsDir and the watch command at dispatch", ()
     const manifest = join(dir, "banner.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const r = runCli(["run", manifest], {
       cwd: dir,
@@ -905,8 +905,8 @@ test("run: an all-skipped replay still exits 0 but says NOTHING RE-EXECUTED", ()
     const manifest = join(dir, "replay.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "a", prompt: "x", model: "haiku" }],
-      digest: { model: "haiku" },
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001" },
     }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "first-pass" };
     const r1 = runCli(["run", manifest], { cwd: dir, env });
@@ -941,7 +941,7 @@ test("models: stub server + SWARM_HOME config -> names with descriptions, aliase
       res.writeHead(200, { "content-type": "application/json" });
       res.end(JSON.stringify({
         recommendations: [
-          { model: "glm-5.2:cloud", description: "Frontier open model", context_length: 1000000, max_output_tokens: 131072, required_plan: "pro" },
+          { provider: "ollama", model: "glm-5.2:cloud", description: "Frontier open model", context_length: 1000000, max_output_tokens: 131072, required_plan: "pro" },
           { model: "not-cloud:480b", description: "local", context_length: 1, max_output_tokens: 1, required_plan: null },
         ],
       }));
@@ -990,8 +990,8 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
         // 5.1 listed first so the size-order assertion tests the sort, not the input order
         res.end(JSON.stringify({
           recommendations: [
-            { model: "glm-5.1:cloud", description: "Prior gen", context_length: 202752 },
-            { model: "glm-5.2:cloud", description: "Frontier open model", context_length: 1000000 },
+            { provider: "ollama", model: "glm-5.1:cloud", description: "Prior gen", context_length: 202752 },
+            { provider: "ollama", model: "glm-5.2:cloud", description: "Frontier open model", context_length: 1000000 },
           ],
         }));
       } else if (req.url === "/api/show") {
@@ -1019,9 +1019,8 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
     ok(!r.stdout.includes("glm-5.1"), `superseded entry must be hidden by default: ${r.stdout}`);
     ok(r.stdout.includes("1 superseded hidden"), r.stdout);
     ok(r.stdout.includes("--all"), r.stdout);
-    // aliases keep the legacy no-parens format; the trailing — is the cost
-    // column (an unmeasured Claude tier renders "—", never blank)
-    ok(/^sonnet — Claude Sonnet — always available  —$/m.test(r.stdout), r.stdout);
+    // Claude aliases are outlawed, so `swarm models` no longer offers them
+    ok(!/^(haiku|sonnet|opus)/m.test(r.stdout), r.stdout);
     // probe fired on the refresh path, top-3-visible only — the hidden elder is not probed
     deepEqual(generateHits, ["glm-5.2:cloud"]);
     // cache keeps the full size-ordered roster and carries supersededBy
@@ -1184,7 +1183,7 @@ function modelsStubServer(settingsHtml = null) {
     res.writeHead(200, { "content-type": "application/json" });
     if (req.url === "/api/experimental/model-recommendations") {
       res.end(JSON.stringify({
-        recommendations: [{ model: "glm-5.2:cloud", description: "Frontier open model", context_length: 1000000 }],
+        recommendations: [{ provider: "ollama", model: "glm-5.2:cloud", description: "Frontier open model", context_length: 1000000 }],
       }));
     } else {
       res.end("{}");
@@ -1259,7 +1258,7 @@ test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare
     const manifest = join(dir, "m.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "one", prompt: "look", model: "haiku" }],
+      tasks: [{ id: "one", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
     equal(r.status, 0, r.stderr + r.stdout);
@@ -1299,7 +1298,7 @@ test("status: renders the roster with counts, elapsed, tokens from a synthetic r
     mkdirSync(join(rd, "results"), { recursive: true });
     const t0 = new Date(Date.now() - 42000).toISOString();
     const lines = [
-      { ts: t0, event: "run-start", tasks: [{ id: "a", model: "haiku" }, { id: "b", model: "glm-5.2:cloud" }, { id: "c", model: "haiku" }, { id: "d", model: "haiku" }, { id: "e", model: "haiku" }, { id: "f", model: "haiku" }] },
+      { ts: t0, event: "run-start", tasks: [{ id: "a", provider: "claude", model: "claude-haiku-4-5-20251001" }, { id: "b", provider: "ollama", model: "glm-5.2:cloud" }, { id: "c", provider: "claude", model: "claude-haiku-4-5-20251001" }, { id: "d", provider: "claude", model: "claude-haiku-4-5-20251001" }, { id: "e", provider: "claude", model: "claude-haiku-4-5-20251001" }, { id: "f", provider: "claude", model: "claude-haiku-4-5-20251001" }] },
       { ts: t0, id: "a", state: "running" },
       { ts: t0, id: "a", state: "ok", durationMs: 30000, tokens: { input: 1000, output: 500, cacheCreation: 0, cacheRead: 0 } },
       { ts: t0, id: "b", state: "running" },
@@ -1330,8 +1329,8 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
       tasks: [
-        { id: "t1", prompt: "x", model: "haiku" },
-        { id: "t2", prompt: "y", model: "haiku" },
+        { id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "t2", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
     const r = runCli(["run", manifest], {
@@ -1376,7 +1375,7 @@ test("C3: ask stdout is exactly the answer and the tokens line, no roster frames
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
-    writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", model: "haiku" }] }));
+    writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const r0 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
     equal(r0.status, 0, r0.stdout + r0.stderr);
 
@@ -1400,7 +1399,7 @@ test("C3: a failed ask exits non-zero, leaves the leaf ok, records the failure",
   const dir = tmp();
   try {
     const manifest = join(dir, "plan.json");
-    writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", model: "haiku" }] }));
+    writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const r0 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
     equal(r0.status, 0, r0.stdout + r0.stderr);
 
@@ -1424,9 +1423,9 @@ test("run: forEach expands end-to-end via the shim; validate previews worst-case
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
       tasks: [
-        { id: "src", prompt: "list", model: "haiku" },
+        { id: "src", prompt: "list", provider: "claude", model: "claude-haiku-4-5-20251001" },
         {
-          id: "fix", prompt: "fix {{item.f}} #{{index}}", model: "haiku", after: ["src"],
+          id: "fix", prompt: "fix {{item.f}} #{{index}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["src"],
           forEach: { from: "src", path: "sites", maxItems: 1 },
         },
       ],
@@ -1473,7 +1472,7 @@ test("run: default resultsDir lands under <home>/runs/<encoded-repo-toplevel>/<s
   const dir = tmp();
   try {
     const manifest = join(dir, "myplan.json");
-    writeFileSync(manifest, JSON.stringify({ tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    writeFileSync(manifest, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const rd = join(dir, "home", "runs", gitOut(["rev-parse", "--show-toplevel"], dir).replace(/[\\/:]/g, "-"), "myplan-1");
@@ -1490,10 +1489,10 @@ test("validate: mustRead tasks are announced, gated on mustRead not returns", ()
     const p = join(dir, "mr.json");
     writeFileSync(p, JSON.stringify({
       tasks: [
-        { id: "withret", prompt: "x", model: "haiku", returns: { type: "object", required: ["answer"], properties: { answer: { type: "string" } } }, mustRead: ["README.md"] },
-        { id: "noret", prompt: "y", model: "haiku", mustRead: ["README.md", "b.md"] },
-        { id: "idx", prompt: "w", model: "haiku", mustRead: [{ index: "i.json" }] },
-        { id: "plain", prompt: "z", model: "haiku" },
+        { id: "withret", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", returns: { type: "object", required: ["answer"], properties: { answer: { type: "string" } } }, mustRead: ["README.md"] },
+        { id: "noret", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001", mustRead: ["README.md", "b.md"] },
+        { id: "idx", prompt: "w", provider: "claude", model: "claude-haiku-4-5-20251001", mustRead: [{ index: "i.json" }] },
+        { id: "plain", prompt: "z", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
     const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
@@ -1515,8 +1514,8 @@ test("validate: returns schemas join the approval preview; malformed ones exit 1
     const p = join(dir, "ret.json");
     writeFileSync(p, JSON.stringify({
       tasks: [
-        { id: "scan", prompt: "x", model: "haiku", returns: { type: "object", required: ["sites"], properties: { sites: { type: "array" } } } },
-        { id: "sum", prompt: "y {{result:scan}}", model: "haiku", after: ["scan"] },
+        { id: "scan", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", returns: { type: "object", required: ["sites"], properties: { sites: { type: "array" } } } },
+        { id: "sum", prompt: "y {{result:scan}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["scan"] },
       ],
     }));
     const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
@@ -1526,7 +1525,7 @@ test("validate: returns schemas join the approval preview; malformed ones exit 1
 
     const bad = join(dir, "bad-ret.json");
     writeFileSync(bad, JSON.stringify({
-      tasks: [{ id: "a", prompt: "x", model: "haiku", returns: { type: "list" } }],
+      tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001", returns: { type: "list" } }],
     }));
     const b = runCli(["validate", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(b.status, 1);
@@ -1544,16 +1543,16 @@ test("validate: estimate line from a seeded corpus; cold start says none", () =>
     mkdirSync(runDir, { recursive: true });
     writeFileSync(join(runDir, "summary.json"), JSON.stringify({
       tasks: [
-        { id: "a", state: "ok", model: "haiku", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } },
-        { id: "b", state: "ok", model: "haiku", tokens: { input: 2000, output: 0, cacheCreation: 0, cacheRead: 0 } },
-        { id: "c", state: "ok", model: "haiku", tokens: { input: 3000, output: 0, cacheCreation: 0, cacheRead: 0 } },
+        { id: "a", state: "ok", provider: "claude", model: "claude-haiku-4-5-20251001", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } },
+        { id: "b", state: "ok", provider: "claude", model: "claude-haiku-4-5-20251001", tokens: { input: 2000, output: 0, cacheCreation: 0, cacheRead: 0 } },
+        { id: "c", state: "ok", provider: "claude", model: "claude-haiku-4-5-20251001", tokens: { input: 3000, output: 0, cacheCreation: 0, cacheRead: 0 } },
       ],
     }));
     const p = join(dir, "plan.json");
     writeFileSync(p, JSON.stringify({
       tasks: [
-        { id: "x", prompt: "a", model: "haiku" },
-        { id: "y", prompt: "b", model: "haiku" },
+        { id: "x", prompt: "a", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "y", prompt: "b", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
     const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
@@ -1576,7 +1575,7 @@ test("run: closing tokens line compares actual vs estimate; projection warn reac
     mkdirSync(runDir, { recursive: true });
     // median 1000/leaf; shim leaves actually burn 1500 each
     writeFileSync(join(runDir, "summary.json"), JSON.stringify({
-      tasks: [{ id: "s", state: "ok", model: "haiku", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } }],
+      tasks: [{ id: "s", state: "ok", provider: "claude", model: "claude-haiku-4-5-20251001", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } }],
     }));
     const cfgPath = join(dir, "config.json");
     writeFileSync(cfgPath, JSON.stringify({ costWarnTokens: 100 }));
@@ -1584,8 +1583,8 @@ test("run: closing tokens line compares actual vs estimate; projection warn reac
     writeFileSync(p, JSON.stringify({
       resultsDir: "out",
       tasks: [
-        { id: "x", prompt: "a", model: "haiku" },
-        { id: "y", prompt: "b", model: "haiku" },
+        { id: "x", prompt: "a", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "y", prompt: "b", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
     const r = runCli(["run", p], {
@@ -1606,14 +1605,14 @@ test("validate: composed leaves multiply into the worst case; child errors exit 
   try {
     writeFileSync(join(dir, "child.json"), JSON.stringify({
       tasks: [
-        { id: "scan", prompt: "scan {{item}}", model: "haiku" },
-        { id: "sum", prompt: "sum {{result:scan}}", model: "haiku", after: ["scan"] },
+        { id: "scan", prompt: "scan {{item}}", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "sum", prompt: "sum {{result:scan}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["scan"] },
       ],
     }));
     const p = join(dir, "parent.json");
     writeFileSync(p, JSON.stringify({
       tasks: [
-        { id: "seed", prompt: "list", model: "haiku" },
+        { id: "seed", prompt: "list", provider: "claude", model: "claude-haiku-4-5-20251001" },
         { id: "audit", manifest: "child.json", after: ["seed"], forEach: { from: "seed", path: "", maxItems: 3 } },
       ],
     }));
@@ -1622,7 +1621,7 @@ test("validate: composed leaves multiply into the worst case; child errors exit 
     ok(v.stdout.includes("up to 7 leaves"), v.stdout);               // 1 + 3×2
     ok(v.stdout.includes("audit ≤ 3 × 2 child leaves"), v.stdout);   // composition detail
 
-    writeFileSync(join(dir, "bad-child.json"), JSON.stringify({ tasks: [{ id: "scan", model: "haiku" }] }));
+    writeFileSync(join(dir, "bad-child.json"), JSON.stringify({ tasks: [{ id: "scan", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const bad = join(dir, "bad-parent.json");
     writeFileSync(bad, JSON.stringify({ tasks: [{ id: "audit", manifest: "bad-child.json" }] }));
     const b = runCli(["validate", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
@@ -1642,7 +1641,7 @@ test("validate: registry name resolves and announces the lookup; --resolved prin
     mkdirSync(join(home, "manifests"), { recursive: true });
     const saved = join(home, "manifests", "w1-smoke.json");
     writeFileSync(saved, JSON.stringify({
-      tasks: [{ id: "a", prompt: "say {{args.word}}", model: "haiku" }],
+      tasks: [{ id: "a", prompt: "say {{args.word}}", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const r = runCli(["validate", "w1-smoke", "--args", '{"word":"hello"}', "--resolved"], {
       cwd: dir, env: { SWARM_HOME: home },
@@ -1663,7 +1662,7 @@ test("validate: path invocation prints no resolved line (byte-compatible with to
   const dir = tmp();
   try {
     const p = join(dir, "plain.json");
-    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     ok(!r.stdout.includes("resolved:"), r.stdout);
@@ -1676,7 +1675,7 @@ test("--args must be a JSON object — teaching error with example", () => {
   const dir = tmp();
   try {
     const p = join(dir, "plain.json");
-    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", model: "haiku" }] }));
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     for (const bad of ["notjson", "[1]", '"str"']) {
       const r = runCli(["validate", p, "--args", bad], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
       equal(r.status, 1, `--args ${bad} should fail`);
@@ -1693,7 +1692,7 @@ test("list: both scopes shown with names + scopes; collisions loud; exit 0", () 
     const home = join(dir, "home");
     mkdirSync(join(home, "manifests"), { recursive: true });
     mkdirSync(join(dir, ".swarm", "manifests"), { recursive: true });
-    const body = JSON.stringify({ goal: "g", tasks: [{ id: "a", prompt: "x", model: "haiku" }] });
+    const body = JSON.stringify({ goal: "g", tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] });
     writeFileSync(join(dir, ".swarm", "manifests", "local-a.json"), body);
     writeFileSync(join(home, "manifests", "glob-b.json"), body);
     writeFileSync(join(dir, ".swarm", "manifests", "dup.json"), body);
@@ -1717,7 +1716,7 @@ test("run: named manifest end-to-end — args substituted into the dispatched le
     mkdirSync(join(home, "manifests"), { recursive: true });
     writeFileSync(join(home, "manifests", "w1-run.json"), JSON.stringify({
       resultsDir: "out",
-      tasks: [{ id: "a", prompt: "say {{args.word}}", model: "haiku" }],
+      tasks: [{ id: "a", prompt: "say {{args.word}}", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const shimLog = join(dir, "w1-shim.log");
     const r = runCli(["run", "w1-run", "--args", '{"word":"hello"}'], {
@@ -1822,7 +1821,7 @@ test("run: the closing block asks for grading only when grading.enabled is true"
       writeFileSync(manifest, JSON.stringify({
         resultsDir: "out",
         goal: "grading gate",
-        tasks: [{ id: "one", prompt: "look", model: "haiku" }],
+        tasks: [{ id: "one", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }],
       }));
       const r = runCli(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
       equal(r.status, 0, r.stderr);
@@ -1845,8 +1844,8 @@ test("run: digest.md carries exactly one grade footer while the run is ungraded,
     const manifest = join(dir, "m.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out", goal: "digest footer",
-      tasks: [{ id: "one", prompt: "look", model: "haiku" }, { id: "two", prompt: "look", model: "haiku" }],
-      digest: { model: "haiku", instructions: "" },
+      tasks: [{ id: "one", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }, { id: "two", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }],
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "" },
     }));
     const run = () => runCli(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
     return { dir, home, run };
@@ -1878,7 +1877,7 @@ test("A5: grade --waive needs a non-empty reason; writes the waiver file; store 
     mkdirSync(home, { recursive: true });
     const resultsDir = join(dir, "out");
     mkdirSync(join(resultsDir, "results"), { recursive: true });
-    writeFileSync(join(resultsDir, "results", "one.json"), JSON.stringify({ id: "one", model: "haiku", ok: true }));
+    writeFileSync(join(resultsDir, "results", "one.json"), JSON.stringify({ id: "one", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true }));
     writeFileSync(join(home, "model-scores.jsonl"), JSON.stringify({ resultsDir, leaf: "other" }) + "\n");
     const before = readFileSync(join(home, "model-scores.jsonl"), "utf8");
 
@@ -2004,7 +2003,7 @@ function snapPruneFixture() {
 function writeSnapRun(f, { summary }) {
   const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
   writeFileSync(join(f.resultsDir, "run.log"),
-    line({ event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }) +
+    line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
     line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
     line({ event: "run-aborted", reason: "killed" }));
   if (summary) writeFileSync(join(f.resultsDir, "summary.json"), JSON.stringify({ started: new Date().toISOString(), finished: new Date().toISOString(), tasks: [], blocked: [], worktreesKept: [], totalTokens: null }));
@@ -2063,7 +2062,7 @@ test("prune: a second snapshotted repo's leftover tree is removed too, not just 
     spawnSync("git", ["worktree", "add", "--detach", tree2, sha2], { cwd: repo2, windowsHide: true });
     const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
     writeFileSync(join(f.resultsDir, "run.log"),
-      line({ event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }) +
+      line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
       line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
       line({ event: "snapshot", repo: repo2, repoKey: "repokey00002", runKey: f.runKey, sha: sha2, clean: true }) +
       line({ event: "run-aborted", reason: "killed" }));
@@ -2094,7 +2093,7 @@ test("prune: a killed run with snapshot trees in two repos removes both trees an
     writeFileSync(join(f.resultsDir, "manifest.json"), JSON.stringify({ resultsDir: f.resultsDir, cwd: f.repo, tasks: [] }));
     const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
     writeFileSync(join(f.resultsDir, "run.log"),
-      line({ event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }) +
+      line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
       line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
       line({ event: "snapshot", repo: repo2, repoKey: key2, runKey: f.runKey, sha: sha2, clean: true }) +
       line({ event: "run-aborted", reason: "killed" }));
@@ -2127,7 +2126,7 @@ test("stop: dead engine records no kept-worktree row for a branchless snapshot t
     ok(existsSync(f.tree));
     const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o });
     writeFileSync(join(f.resultsDir, "run.log"), [
-      line({ event: "run-start", tasks: [{ id: "impl", model: "haiku" }] }),
+      line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }),
       line({ id: "impl", state: "running" }),
     ].join("\n") + "\n");
     const r = runCli(["stop", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: home } });

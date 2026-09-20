@@ -122,7 +122,7 @@ when a finished swarm missed something, or when the result should be auditable o
 
 ```json
 { "tasks": [
-    { "id": "check", "model": "glm-5.2:cloud",
+    { "id": "check", "provider": "ollama", "model": "glm-5.2:cloud",
       "prompt": "Your single job: <closed question>.
 File scope: <paths>.
 Return ≤10 bullets: claim, file:line. No prose. If you cannot answer, say so in one line." }
@@ -153,11 +153,11 @@ If you cannot find the answer, say so in one line — do not expand scope.
 
 ```json
 { "tasks": [
-    { "id": "auth",    "model": "minimax-m3:cloud", "prompt": "Your single job: where is session token expiry enforced?\nFile scope: src/auth/**\nReturn your findings as ≤10 bullet points: name, file path, line number, one-line description. No prose. If you cannot find the answer, say so in one line — do not expand scope." },
-    { "id": "session", "model": "minimax-m3:cloud", "prompt": "…same shape, session-store cluster…" },
-    { "id": "api",     "model": "glm-5.2:cloud",    "prompt": "…same shape, API-layer cluster…" }
+    { "id": "auth",    "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "Your single job: where is session token expiry enforced?\nFile scope: src/auth/**\nReturn your findings as ≤10 bullet points: name, file path, line number, one-line description. No prose. If you cannot find the answer, say so in one line — do not expand scope." },
+    { "id": "session", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…same shape, session-store cluster…" },
+    { "id": "api",     "provider": "ollama", "model": "glm-5.2:cloud",    "prompt": "…same shape, API-layer cluster…" }
   ],
-  "digest": { "model": "glm-5.2:cloud", "instructions": "must_be_sure: the expiry enforcement point, with file:line. PROVEN/OPEN ledger required." } }
+  "digest": { "provider": "ollama", "model": "glm-5.2:cloud", "instructions": "must_be_sure: the expiry enforcement point, with file:line. PROVEN/OPEN ledger required." } }
 ```
 
 ### Chain — mechanical links only
@@ -173,15 +173,15 @@ next implementer through `{{result:}}`.
 
 ```json
 { "tasks": [
-    { "id": "p1", "model": "glm-5.2:cloud", "isolation": { "worktree": "feat" },
+    { "id": "p1", "provider": "ollama", "model": "glm-5.2:cloud", "isolation": { "worktree": "feat" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Phase 1: <scope>.\nCommit your work before you finish — the next link builds on your commits." },
 
-    { "id": "p1-review", "model": "kimi-k2.7-code:cloud", "after": ["p1"],
+    { "id": "p1-review", "provider": "ollama", "model": "kimi-k2.7-code:cloud", "after": ["p1"],
       "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob",
       "prompt": "Review phase 1 in this worktree (git log/diff to see it).\nReturn ONLY: (a) defects with file:line, (b) risks phase 2 must avoid. No prose." },
 
-    { "id": "p2", "model": "glm-5.2:cloud", "after": ["p1-review"],
+    { "id": "p2", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["p1-review"],
       "isolation": { "worktree": "feat" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Phase 2: <scope>.\nThe phase-1 reviewer warned:\n{{result:p1-review}}\nFix what it flagged, then do phase 2. Commit before you finish." }
@@ -206,11 +206,11 @@ Same subject, diverse lenses, JSON verdicts; the digest presents agreement and d
 
 ```json
 { "tasks": [
-    { "id": "security",    "model": "glm-5.2:cloud",    "prompt": "Review the diff at {{resultPath:…}} as a security reviewer. Return JSON {verdict, findings:[{severity, path, line, note}]}." },
-    { "id": "performance", "model": "minimax-m3:cloud", "effort": "high", "prompt": "…performance lens, same JSON shape…" },
-    { "id": "api-design",  "model": "sonnet",           "prompt": "…API-design lens, same JSON shape…" }
+    { "id": "security",    "provider": "ollama", "model": "glm-5.2:cloud",    "prompt": "Review the diff at {{resultPath:…}} as a security reviewer. Return JSON {verdict, findings:[{severity, path, line, note}]}." },
+    { "id": "performance", "provider": "ollama", "model": "minimax-m3:cloud", "effort": "high", "prompt": "…performance lens, same JSON shape…" },
+    { "id": "api-design",  "provider": "claude", "model": "claude-sonnet-5",           "prompt": "…API-design lens, same JSON shape…" }
   ],
-  "digest": { "model": "glm-5.2:cloud", "instructions": "Where judges disagree, present both sides — do not average verdicts." } }
+  "digest": { "provider": "ollama", "model": "glm-5.2:cloud", "instructions": "Where judges disagree, present both sides — do not average verdicts." } }
 ```
 
 ### Mixed topology — one manifest whose width changes more than once
@@ -219,18 +219,18 @@ A run may narrow to one task and widen again:
 
 ```json
 { "tasks": [
-    { "id": "survey-a", "model": "minimax-m3:cloud", "prompt": "…closed question A…" },
-    { "id": "survey-b", "model": "minimax-m3:cloud", "prompt": "…closed question B…" },
+    { "id": "survey-a", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question A…" },
+    { "id": "survey-b", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question B…" },
 
-    { "id": "helper", "model": "glm-5.2:cloud", "after": ["survey-a", "survey-b"],
+    { "id": "helper", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["survey-a", "survey-b"],
       "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Read {{resultPath:survey-a}} and {{resultPath:survey-b}}. Write the helper. Commit before you finish." },
 
-    { "id": "migrate-x", "model": "glm-5.2:cloud", "after": ["helper", "survey-a"],
+    { "id": "migrate-x", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["helper", "survey-a"],
       "isolation": { "worktree": "migrate-x", "from": "helper" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…migrate every site in {{resultPath:survey-a}}. Commit before you finish." },
-    { "id": "migrate-y", "model": "glm-5.2:cloud", "after": ["helper", "survey-b"],
+    { "id": "migrate-y", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["helper", "survey-b"],
       "isolation": { "worktree": "migrate-y", "from": "helper" },
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish." },
@@ -238,7 +238,7 @@ A run may narrow to one task and widen again:
     { "id": "join", "after": ["migrate-x", "migrate-y"],
       "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
 
-    { "id": "cleanup", "model": "glm-5.2:cloud", "after": ["join"],
+    { "id": "cleanup", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["join"],
       "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…delete the dead code, run the suite. Commit before you finish." }
   ] }
@@ -262,7 +262,7 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
 
 ```json
 { "tasks": [
-    { "id": "find-sites", "model": "glm-5.2:cloud",
+    { "id": "find-sites", "provider": "ollama", "model": "glm-5.2:cloud",
       "prompt": "…return ONLY JSON: {\"sites\":[{\"file\":\"…\",\"line\":1}]}" },
 
     { "id": "dedupe", "after": ["find-sites"],
@@ -270,12 +270,12 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
 
     { "id": "fix", "after": ["dedupe"],
       "forEach": { "from": "dedupe", "path": "", "maxItems": 30 },
-      "model": "glm-5.2:cloud", "isolation": "worktree",
+      "provider": "ollama", "model": "glm-5.2:cloud", "isolation": "worktree",
       "prompt": "Fix the call site at {{item.file}}:{{item.line}} (clone {{index}})" },
 
     { "id": "escalate", "after": ["fix", "dedupe"],
       "when": { "from": "dedupe", "expr": "length(value) > 20" },
-      "model": "sonnet", "prompt": "Many sites were touched: {{result:fix}} …" },
+      "provider": "claude", "model": "claude-sonnet-5", "prompt": "Many sites were touched: {{result:fix}} …" },
 
     { "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
   ] }
