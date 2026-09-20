@@ -19,8 +19,9 @@ was never created cannot be based on. `isolation.from` must name a task that:
 
 - **is a declared dependency** — in this leaf's `after`, so its branch is guaranteed to exist by
   the time this leaf starts;
-- **has an `isolation` block** — a task with none runs in the shared checkout, never gets a
-  worktree, and so never gets a branch;
+- **owns a branch** — an explicit `isolation` block, or a write-capable task with no `isolation`
+  (it gets a private tree by default). A read-only task with none runs in a shared snapshot tree,
+  and `isolation: "none"` runs in place; neither gets a branch;
 - **is not `when`-gated** — a false gate skips the task before its worktree is created, so the
   branch may never exist; and
 - **holds write tools** — see "A task only owns a branch if it COMMITS" below; the same
