@@ -178,8 +178,8 @@ next implementer through `{{result:}}`.
       "prompt": "Phase 1: <scope>.\nCommit your work before you finish — the next link builds on your commits." },
 
     { "id": "p1-review", "provider": "ollama", "model": "kimi-k2.7-code:cloud", "after": ["p1"],
-      "allowedTools": "Read,Grep,Glob",
-      "prompt": "Review phase 1's commits on branch swarm/<run>/feat (git log/diff to see them).\nReturn ONLY: (a) defects with file:line, (b) risks phase 2 must avoid. No prose." },
+      "allowedTools": "Read,Grep,Glob,Bash",
+      "prompt": "Review phase 1's commits. The chain's branch is the one ending in /feat — \`git branch --list '*/feat'\` names it; git log/diff it.\nReturn ONLY: (a) defects with file:line, (b) risks phase 2 must avoid. No prose." },
 
     { "id": "p2", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["p1-review"],
       "workspace": "feat",
@@ -191,7 +191,7 @@ next implementer through `{{result:}}`.
 **Rules that make it work:**
 
 - **Every implementing link names the same `workspace`.** All links sharing one must be totally ordered by `after` — validation rejects an unordered pair, because they would race in one directory.
-- **Reviewers get no write tools, so they are not in the tree.** `allowedTools: "Read,Grep,Glob"` is what makes a reviewer a reviewer, and a leaf with no write tools owns no tree — it reads the live repo and inspects the chain's branch with `git log`/`git diff`. A `workspace` on it is refused. That is the trade for one derivation rule: a reviewer reads the branch rather than sitting in the tree.
+- **A reviewer needs `Bash`, and `Bash` is a write tool** (`manifest.mjs:32`), so it gets a private tree of its own on repo HEAD. That is fine and costs nothing: a worktree shares the repo's refs, so `git log`/`git diff` reach the chain's branch from it, and a tree the reviewer never writes to is swept at collect. **"Reviewers get no write tools" is a convention about intent, not a confinement guarantee** — a leaf holding `Bash` can write anywhere, and withholding it would only stop the reviewer reading the commits it exists to review. What a reviewer must not do is name the chain's `workspace`: that would put it in the writers' tree and force it into their `after` ordering.
 - **Every implementing prompt must say "commit before you finish."** The engine never commits for a leaf. Uncommitted work still reaches the next link (same tree), but the history is what makes a failed link recoverable.
 - **The tree is collected once**, after the last link — so one entry in `worktreesKept`, with a diffstat spanning every phase.
 - **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix p2, re-run, and p3/p4 redo their work on the corrected base.

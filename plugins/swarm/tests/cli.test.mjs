@@ -2050,7 +2050,7 @@ test("prune: a killed run's leftover tree (no summary.json) is removed without a
     const branchesBefore = gitOut(["branch", "--list"], f.repo);
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
-    ok(r.stdout.includes("(detached snapshot)"), r.stdout);
+    ok(r.stdout.includes("(detached)") && !/snapshot/.test(r.stdout), r.stdout);
     ok(!existsSync(f.tree), "tree removed");
     equal(gitOut(["branch", "--list"], f.repo), branchesBefore, "no branch touched");
     ok(!existsSync(join(f.resultsDir, "summary.json")), "prune must not write a summary.json the run never had");
