@@ -524,3 +524,45 @@ test("provider-qualified model caches merge and preserve failed-provider rows", 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("refreshModelsCache: a zero-row discover keeps a populated roster and names the provider", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-zero-row-"));
+  try {
+    const env = { SWARM_HOME: dir };
+    writeCompositeModelsCache([
+      { provider: "ollama", model: "glm-5.2:cloud" },
+      { provider: "codex", model: "gpt-5-codex" },
+    ], env);
+    const before = readModelsCache(env).models;
+    const refreshed = await refreshModelsCache({
+      env,
+      providers: ["ollama"],
+      discoverers: { ollama: async () => [] },
+    });
+    // Both halves matter: an assertion on `errors` alone also passes while the
+    // roster is still wiped, because the report is written either way.
+    deepEqual(refreshed.models, before, "a zero-row resolve must not empty the roster");
+    deepEqual(readModelsCache(env).models, before, "the written cache must keep the roster too");
+    ok(refreshed.errors.ollama, "the operator must be told the discovery returned nothing");
+    ok(refreshed.errors.ollama.includes("ollama"), "the report must name the provider");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("refreshModelsCache: a first-ever zero-row discover still writes the empty roster", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-zero-row-first-"));
+  try {
+    const env = { SWARM_HOME: dir }; // no cache at all — nothing to keep
+    const refreshed = await refreshModelsCache({
+      env,
+      providers: ["codex"],
+      discoverers: { codex: async () => [] },
+    });
+    deepEqual(refreshed.models, []);
+    deepEqual(readModelsCache(env).models, []);
+    equal(refreshed.errors.codex, undefined, "a legitimate empty is not a failure to report");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

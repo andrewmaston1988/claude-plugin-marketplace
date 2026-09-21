@@ -433,6 +433,18 @@ export async function refreshModelsCache({
     if (!discover) continue;
     try {
       const rows = await discover({ config, env, fetchImpl, spawnImpl, rich });
+      if (!rows.length) {
+        // A resolve with zero rows (an empty 200, a provider mid-outage) is not
+        // the same answer as "this provider has no models". Where a roster is
+        // already cached, keep it and say so; a first-ever empty is written.
+        const cached = mergeProviderModelCaches([readModelsCache(env)?.models || []])
+          .filter((row) => row.provider === provider);
+        if (cached.length) {
+          byProvider.set(provider, cached);
+          errors[provider] = `model discovery returned no rows for ${provider} — kept the ${cached.length} cached model(s)`;
+          continue;
+        }
+      }
       byProvider.set(provider, providerQualifiedModels(provider, rows));
     } catch (error) {
       errors[provider] = error?.message || String(error);
