@@ -146,6 +146,12 @@ function loadPage(opts = {}) {
   const esInstances = [];
   const fetchLog = [];
   const pendingFetches = [];
+  // The haptic is the part the operator asked for and the only celebration
+  // instrument that can COUNT: two celebrations of the same run write the same
+  // document.title, so the title cannot tell one fire from two. navigator.vibrate
+  // has no test surface on a real phone (the manual row covers that); here it is
+  // a stub, which is exactly what makes "exactly once" checkable.
+  const vibrateCalls = [];
   const fetch = (url, init = {}) => {
     fetchLog.push(url);
     return new Promise((resolve, reject) => {
@@ -175,8 +181,13 @@ function loadPage(opts = {}) {
   };
   EventSource.CONNECTING = 0; EventSource.OPEN = 1; EventSource.CLOSED = 2;
 
-  Object.assign(context, { window, document, location, fetch, DOMParser, EventSource, navigator: {},
-    URLSearchParams, AbortController, setInterval: () => 0,
+  Object.assign(context, { window, document, location, fetch, DOMParser, EventSource,
+    navigator: { vibrate: (p) => { vibrateCalls.push(p); return true; } },
+    URLSearchParams, AbortController,
+    // Intervals are captured like the timeouts — the page must not depend on
+    // wall-clock time either way — but they REPEAT, so fireTimers does not null
+    // one out after its first fire.
+    setInterval: (fn, ms) => { timers.push({ fn, ms, every: true }); return timers.length; },
     // Timers are captured, never fired, unless a test fires them: the page must not
     // depend on wall-clock time to behave.
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
@@ -210,7 +221,7 @@ function loadPage(opts = {}) {
     fireEsError: (readyState) => { const es = esInstances[esInstances.length - 1]; if (readyState !== undefined) es.readyState = readyState; es.onerror && es.onerror(); },
     fetchLog,
     pendingCount: () => pendingFetches.length,
-    fireTimers: (ms) => timers.filter((t) => t.fn && t.ms === ms).forEach((t) => { const fn = t.fn; t.fn = null; fn(); }),
+    fireTimers: (ms) => timers.filter((t) => t.fn && t.ms === ms).forEach((t) => { const fn = t.fn; if (!t.every) t.fn = null; fn(); }),
     listFetches: () => fetchLog.filter(isList),
     runFetches: () => fetchLog.filter(isRun),
     respondList: (data) => respond(isList, data),
@@ -223,6 +234,7 @@ function loadPage(opts = {}) {
     // The screen the user sees is header + main together — the flicker wipes both.
     screenText: () => `${hdr.textContent}\n${main.textContent}`,
     docTitle: () => document.title,
+    vibrations: () => vibrateCalls,
     seam: () => window.__swarmPage,
     snapshot: () => window.__swarmPage && window.__swarmPage.snapshot(),
   };
@@ -726,6 +738,134 @@ test("P4: EventSource reconnect — CLOSED backs off and reconnects, CONNECTING 
   P.fireEsOpen();
   await P.flush();
   assert.equal(P.listFetches().length, before + 1, "the reconnect's open triggers one catch-up list fetch");
+});
+
+// ── the buzz ─────────────────────────────────────────────────────────────
+// The haptic marks "something just finished" — not "you navigated back and I
+// noticed". The scan used to live inside buildRuns(), which only ever runs on the
+// runs route, so seenActive froze for as long as you sat on any other screen and
+// the celebration arrived attached to the navigation that ended the freeze.
+//
+// Observed two ways, both without a browser: the document title (:277's existing
+// instrument) and the haptic — navigator.vibrate is a harness stub, and a stub is
+// the only celebration counter there is, since two celebrations of the same run
+// write the same title. The device-level haptic stays the manual row.
+
+const endedRow = () => listRow({ active: false, finishedMs: Date.now() });
+const mountRun = async (P) => {
+  P.location.hash = RUN_URL;
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun(targetRun());
+  await P.flush();
+};
+
+test("finish: a run going inactive buzzes from the RUN view, where you are sitting", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow())); // boot commits LISTRUN as active
+  await P.flush();
+  await mountRun(P);
+  assert.ok(P.screenText().includes("TARGETRUN"), "the run view is mounted");
+  assert.equal(P.vibrations().length, 0, "nothing has finished yet");
+  P.fireTimers(5000);
+  await P.flush();
+  assert.equal(P.listFetches().length, 2,
+    "the estate tick reaches a run view — the poll alone refetches this run's own route, which can never see another run finish");
+  P.respondList(listData(endedRow()));
+  await P.flush();
+  assert.equal(P.docTitle(), "✓ LISTRUN", "the buzz lands here, at the finish");
+  assert.equal(P.vibrations().length, 1, "one haptic");
+});
+
+test("finish: the same finish buzzes from a LEAF view", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.location.hash = "#/run/C--code-tgt/TARGETRUN/leaf/leaf-a";
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun(targetRun());
+  P.respondLeaf({ id: "leaf-a", model: "glm", ok: true, prompt: "p", output: "o" });
+  await P.flush();
+  assert.ok(P.screenText().includes("leaf-a"), "the leaf view is mounted");
+  P.fireTimers(5000);
+  await P.flush();
+  assert.equal(P.listFetches().length, 2, "the estate tick reaches a leaf view too");
+  P.respondList(listData(endedRow()));
+  await P.flush();
+  assert.equal(P.docTitle(), "✓ LISTRUN");
+  assert.equal(P.vibrations().length, 1);
+});
+
+test("finish: the first load stays silent — absent is not 'was active'", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(endedRow())); // seenActive is empty; this run ended before the page opened
+  await P.flush();
+  assert.equal(P.docTitle(), "swarm", "history is not news");
+  assert.equal(P.vibrations().length, 0, "no haptic for a run that finished before the dashboard opened");
+  P.fireTimers(5000);
+  await P.flush();
+  P.respondList(listData(endedRow()));
+  await P.flush();
+  assert.equal(P.vibrations().length, 0, "nor on the tick after it");
+});
+
+test("finish: the 1 s clock does not fire the buzz — only a fetched transition does", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.fireTimers(1000); P.fireTimers(1000); P.fireTimers(1000); // the clock, between polls
+  await P.flush();
+  assert.equal(P.listFetches().length, 1, "the clock repaints the same fetched data and fetches nothing");
+  assert.equal(P.vibrations().length, 0, "so it cannot fire a buzz");
+  P.fireTimers(5000);
+  await P.flush();
+  P.respondList(listData(endedRow()));
+  await P.flush();
+  assert.equal(P.vibrations().length, 1, "the fetched transition does");
+});
+
+test("finish: one transition celebrates exactly once — the tick and the list build cannot both fire it", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.fireTimers(5000); // one poll: the tick's fetch, then the runs route's own build
+  await P.flush();
+  assert.equal(P.listFetches().length, 3, "both a tick fetch and a route build are in flight");
+  const ended = listData(endedRow());
+  P.respondList(ended); // the tick resolves first
+  await P.flush();
+  assert.equal(P.vibrations().length, 1, "the tick announced the finish");
+  P.respondList(ended); // then the route build commits the same transition
+  await P.flush();
+  assert.equal(P.vibrations().length, 1, "the build must not announce it a second time");
+});
+
+test("finish: a run that goes inactive, active again, then inactive again re-arms", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  await mountRun(P); // off the runs route, so each tick's list fetch is unambiguous
+  const tick = async (row) => {
+    const before = P.listFetches().length;
+    P.fireTimers(5000);
+    await P.flush();
+    assert.equal(P.listFetches().length, before + 1, "each tick fetches the estate, from whatever view is mounted");
+    P.respondList(listData(row));
+    await P.flush();
+  };
+  await tick(endedRow());
+  assert.equal(P.vibrations().length, 1, "the finish");
+  await tick(listRow());
+  assert.equal(P.vibrations().length, 1, "active again is not a finish");
+  await tick(endedRow());
+  assert.equal(P.vibrations().length, 2, "and the second finish fires again — the map tracks the current flag, not a one-way finished set");
 });
 
 test("Test 10: a hung list request times out into the error panel and frees the next refresh", async () => {
