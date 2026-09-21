@@ -2104,6 +2104,10 @@ test("prune: a killed run with leftover trees in two repos removes both, and inv
     const tree2 = join(f.resultsDir, "wt-two");
     addDetachedTree(f);
     addDetachedTree(f, repo2, tree2, sha2);
+    // A killed run wrote no summary, so the manifest task cwds are the only record
+    // that this run reached a second repo — a real two-repo manifest carries them.
+    writeFileSync(join(f.resultsDir, "manifest.json"),
+      JSON.stringify({ resultsDir: f.resultsDir, cwd: f.repo, tasks: [{ id: "two", cwd: repo2 }] }));
     writeKilledRun(f);
     ok(existsSync(f.tree) && existsSync(tree2));
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });

@@ -49,7 +49,10 @@ export function registeredUnder(git, repo, resultsDir) {
   return rows.filter((r) => (r.path + sep).startsWith(prefix) || r.path.startsWith(prefix));
 }
 
-// `run`: { live, repo, resultsDir, worktreesKept: [{ branch, path, repo? }] }.
+// `run`: { live, repos: [string], resultsDir, worktreesKept: [{ branch, path, repo }] }.
+// A run may span several repos, so every kept tree carries its OWN repo and `repos`
+// is the set to sweep for orphans the summary never recorded — never one scalar,
+// which attributed every tree to whichever repo resolved first.
 // `live` short-circuits before any git/fs call — a live run is never inspected,
 // only refused, so the cost of asking must be zero.
 export function plan(run, git, fs) {
@@ -59,15 +62,15 @@ export function plan(run, git, fs) {
   const seen = new Set();
   for (const wt of run.worktreesKept || []) {
     if (!fs.existsSync(wt.path)) continue; // already gone from disk — not a row to plan or report
-    const repo = wt.repo || run.repo;
-    rows.push({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo });
+    rows.push({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo: wt.repo });
     seen.add(resolve(wt.path));
   }
 
-  if (fs.existsSync(run.repo)) {
-    for (const reg of registeredUnder(git, run.repo, run.resultsDir)) {
+  for (const repo of run.repos || []) {
+    if (!fs.existsSync(repo)) continue;
+    for (const reg of registeredUnder(git, repo, run.resultsDir)) {
       if (seen.has(reg.path)) continue;
-      rows.push({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo: run.repo });
+      rows.push({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo });
       seen.add(reg.path);
     }
   }

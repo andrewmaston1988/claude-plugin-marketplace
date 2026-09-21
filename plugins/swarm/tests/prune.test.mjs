@@ -19,7 +19,7 @@ test("plan: a kept tree becomes a row with path, branch, measured bytes and repo
     readdirSync: (p) => (p === "/results/wt-impl" ? [{ name: "a.txt", isDirectory: () => false }] : []),
     statSync: () => ({ size: 1024 }),
   };
-  const run = { repo: "/repo", resultsDir: "/results", worktreesKept: [{ branch: "swarm/impl", path: "/results/wt-impl" }] };
+  const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [{ branch: "swarm/impl", path: "/results/wt-impl", repo: "/repo" }] };
   const { rows } = plan(run, git, fs);
   deepEqual(rows, [{ path: "/results/wt-impl", branch: "swarm/impl", bytes: 1024, repo: "/repo" }]);
 });
@@ -49,7 +49,7 @@ test("plan: a tree registered in git under resultsDir but absent from worktreesK
     readdirSync: (p) => (p === orphanPath ? [{ name: "x.txt", isDirectory: () => false }] : []),
     statSync: () => ({ size: 7 }),
   };
-  const run = { repo: "/repo", resultsDir: "/results", worktreesKept: [] };
+  const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [] };
   const { rows } = plan(run, git, fs);
   equal(rows.length, 1);
   equal(rows[0].path, orphanPath);
@@ -66,7 +66,7 @@ test("plan: a repo that no longer exists is never asked for its orphaned worktre
     readdirSync: (p) => (p === "/results/wt-gone" ? [{ name: "a.txt", isDirectory: () => false }] : []),
     statSync: () => ({ size: 512 }),
   };
-  const run = { repo: "/gone-repo", resultsDir: "/results", worktreesKept: [{ branch: "swarm/gone", path: "/results/wt-gone" }] };
+  const run = { repos: ["/gone-repo"], resultsDir: "/results", worktreesKept: [{ branch: "swarm/gone", path: "/results/wt-gone", repo: "/gone-repo" }] };
   const { rows } = plan(run, git, fs);
   deepEqual(rows, [{ path: "/results/wt-gone", branch: "swarm/gone", bytes: 512, repo: "/gone-repo" }]);
   equal(calls.length, 0, "must not run git against a repo that doesn't exist");

@@ -502,12 +502,15 @@ function makeGit(spawnSync) {
 // Once every kept worktree is gone there is nothing left to ask for the repo —
 // manifest.json's cwd (the invoking process's cwd at dispatch) is the only
 // surviving record of it.
-function repoFromManifest(fs, dir) {
+// Every cwd the manifest named, not just the top-level one — a manifest may place
+// tasks in different repos, and a killed run's only record of the second is here.
+function reposFromManifest(fs, dir) {
   try {
     const m = JSON.parse(fs.readFileSync(join(dir, "manifest.json"), "utf8"));
-    return typeof m.cwd === "string" ? m.cwd : null;
+    const cwds = [m.cwd, ...(Array.isArray(m.tasks) ? m.tasks.map((t) => t?.cwd) : [])];
+    return cwds.filter((c) => typeof c === "string" && c);
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -613,15 +616,17 @@ async function cmdPrune(rest) {
   const hadSummary = fs.existsSync(summaryFile);
   const summary = hadSummary ? JSON.parse(fs.readFileSync(summaryFile, "utf8")) : null;
   const worktreesKept = Array.isArray(summary?.worktreesKept) ? summary.worktreesKept : [];
-  const repo = worktreesKept.map((wt) => repoOfWorktree(spawnSync, wt.path)).find(Boolean)
-    || repoFromManifest(fs, dir);
-  if (!repo) {
+  // Resolve each tree's own repo: one scalar attributed a second repo's tree to the
+  // first and `git worktree remove` then silently failed against the wrong cwd.
+  const keptWithRepo = worktreesKept.map((wt) => ({ ...wt, repo: wt.repo || repoOfWorktree(spawnSync, wt.path) }));
+  const repos = [...new Set([...keptWithRepo.map((wt) => wt.repo), ...reposFromManifest(fs, dir)].filter(Boolean))];
+  if (!repos.length) {
     err(`swarm: could not resolve the repo for ${dir} — no kept worktree survives and manifest.json has no cwd.`);
     return 1;
   }
   const git = makeGit(spawnSync);
 
-  const { rows } = planPrune({ live: false, repo, resultsDir: dir, worktreesKept }, git, fs);
+  const { rows } = planPrune({ live: false, repos, resultsDir: dir, worktreesKept: keptWithRepo }, git, fs);
   if (!rows.length) {
     out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
     return 0;
