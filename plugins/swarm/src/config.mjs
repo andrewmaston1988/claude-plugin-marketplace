@@ -235,18 +235,20 @@ export function userConfigPath(overridePath, env = process.env) {
 // not "providers.ollama", and a complaint about a path they have never seen reads as
 // a swarm bug rather than a value to go and fix.
 function refuseToWrite(raw, path, migrated, err) {
-  const head = migrated ? `cannot migrate ${path}` : `cannot write ${path}`;
   const tail = "Nothing was written. Fix the value and re-run `swarm config init`.";
+  // "cannot migrate" belongs to a rewrite that actually happened. A file can carry a
+  // legacy key and an unrelated bad canonical one, and blaming the fold for a key it
+  // never touched sends the operator looking in the wrong place.
   if (migrated) {
     for (const [legacy, canonical] of Object.entries(LEGACY_KEY_TO_CANONICAL)) {
       const prefix = `${canonical}.`;
       const at = err.message.indexOf(prefix);
       if (at < 0 || !isPlainObject(raw[legacy])) continue;
       const leaf = err.message.slice(at).match(/^[\w.$]+/)[0];
-      return `${head}: ${err.message.replace(prefix, `${legacy}.`)}\n  (it becomes ${leaf}, which swarm validates on every load)\n${tail}`;
+      return `cannot migrate ${path}: ${err.message.replace(prefix, `${legacy}.`)}\n  (it becomes ${leaf}, which swarm validates on every load)\n${tail}`;
     }
   }
-  return `${head}: ${err.message}\n${tail}`;
+  return `cannot write ${path}: ${err.message}\n${tail}`;
 }
 
 // Write every shipped key into the user file, keeping whatever is already set. An
@@ -260,7 +262,15 @@ export function initConfig(overridePath, env = process.env) {
   const created = !existsSync(path);
   const raw = created ? {} : parseUser(path);
   const migratedKeys = created ? [] : legacyKeys(raw);
-  const user = normalizeConfigInput(raw);
+  // One refusal shape for both validation steps. The leaf fill stays outside these
+  // catches: a bug in it is a swarm bug, not a value the operator can go and fix.
+  const refuse = (e) => new Error(refuseToWrite(raw, path, migratedKeys.length > 0, e));
+  let user;
+  try {
+    user = normalizeConfigInput(raw);
+  } catch (e) {
+    throw refuse(e);
+  }
   const added = [];
   for (const key of leafKeys(defaults)) {
     if (getPath(user, key).found) continue;
@@ -275,7 +285,7 @@ export function initConfig(overridePath, env = process.env) {
   try {
     validateConfig(user);
   } catch (e) {
-    throw new Error(refuseToWrite(raw, path, migratedKeys.length > 0, e));
+    throw refuse(e);
   }
   // Only a migration keeps a backup: the added.length path fires on every plugin
   // update that ships a key, and a backup churned that often answers nothing.

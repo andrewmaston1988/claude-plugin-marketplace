@@ -70,6 +70,40 @@ test("a bad canonical config is refused as a write, not dressed up as a migratio
   }
 });
 
+test("a bad canonical key is refused as a write even when the file also holds a legacy key", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    // The fold runs, so a head chosen from the file's own `migrated` flag would say
+    // "cannot migrate" about a key the fold never touched.
+    writeFileSync(p, JSON.stringify({ provider: { url: "http://legacy" }, providers: { codex: { enabled: "yes" } } }));
+    throws(() => initConfig(p), (e) =>
+      e.message.includes(`cannot write ${p}`) &&
+      !e.message.includes("cannot migrate") &&
+      e.message.includes("providers.codex.enabled must be true or false"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a malformed legacy value is refused with the same framing as a bad canonical one", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    // `normalizeConfigInput` throws before the leaf fill; a refusal that skips the
+    // wrapper loses the path, the promise, and the re-run instruction.
+    const before = JSON.stringify({ provider: "http://legacy" });
+    writeFileSync(p, before);
+    throws(() => initConfig(p), (e) =>
+      e.message.includes(`cannot write ${p}`) &&
+      e.message.includes("provider must be an object") &&
+      e.message.includes("Nothing was written"));
+    equal(read(p), before);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // --- the placement guard: validation runs AFTER the leaf fill ---
 
 test("initConfig still migrates a sparse legacy object — validation runs after the leaf fill, not before", () => {
