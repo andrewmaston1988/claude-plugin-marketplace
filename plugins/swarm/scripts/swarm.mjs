@@ -7,7 +7,7 @@ import { loadConfig, swarmHome } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
 import { readModelsCache as readProviderModelsCache, refreshModelsCache, writeCompositeModelsCache, visibleModels, probeTopModels } from "../src/discovery.mjs";
-import { providerConfig } from "../src/providers.mjs";
+import { providerConfig, probeProvider } from "../src/providers.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
@@ -1096,7 +1096,15 @@ async function cmdServe(rest) {
   if (verb === "doctor") {
     const rec = readPid(home);
     const alive = isAlive(rec?.pid);
-    const checks = await doctorChecks({ record: rec, alive, installed, port, bind: cfg.dashboard?.bind ?? "0.0.0.0", startupDir: defaultStartupDir(), shimPath });
+    // Every provider the config has switched ON is probed — a switch that is on and
+    // cannot dispatch is the thing worth reporting, and one that is off makes no claim.
+    const registry = defaultProviderRegistry();
+    const checks = await doctorChecks({
+      record: rec, alive, installed, port, bind: cfg.dashboard?.bind ?? "0.0.0.0", startupDir: defaultStartupDir(), shimPath,
+      providers: registry.list().filter((a) => a.enabled(cfg)).map((a) => a.id),
+      config: cfg,
+      _probeProvider: (id, opts) => probeProvider(id, { ...opts, registry, env: process.env }),
+    });
     for (const c of checks) out(`${c.status === "pass" ? "✓" : c.status === "unknown" ? "⚠" : "✗"} ${c.name}: ${c.detail}`);
     const code = doctorExit(checks);
     if (code) out(`${checks.filter((c) => c.status === "fail").length} check(s) failed`);

@@ -206,7 +206,17 @@ export async function readFirewallRule(ruleName = "swarm dashboard") {
   }
 }
 
-export async function doctorChecks({ record, alive, installed, port, bind = "0.0.0.0", startupDir, shimPath, _probePort = probePort, _firewall = readFirewallRule }) {
+// A provider's probe result as a doctor row. `probed` is the whole reason the flag
+// exists: a provider with no preflight to run has not passed anything, and printing
+// it as a pass claims a check nobody performed.
+export function providerCheck({ id, ok, detail, probed }) {
+  const name = `provider:${id}`;
+  if (!probed) return { name, status: "unknown", detail: "no preflight to run" };
+  if (ok) return { name, status: "pass", detail: "preflight passed" };
+  return { name, status: "fail", detail: detail || "preflight failed" };
+}
+
+export async function doctorChecks({ record, alive, installed, port, bind = "0.0.0.0", startupDir, shimPath, providers = [], config = {}, _probePort = probePort, _firewall = readFirewallRule, _probeProvider }) {
   const checks = [];
   const p = await _probePort(port, bind);
   checks.push({ name: "port", status: p.reachable ? "pass" : "fail", detail: p.reachable ? `reachable on ${port}` : `nothing listening on ${port}` });
@@ -228,6 +238,12 @@ export async function doctorChecks({ record, alive, installed, port, bind = "0.0
   if (fw.error) checks.push({ name: "firewall", status: "unknown", detail: `cannot read the rule (${fw.error}) — elevated netsh may be required` });
   else if (fw.found) checks.push({ name: "firewall", status: "pass", detail: `"swarm dashboard" rule present` });
   else checks.push({ name: "firewall", status: "fail", detail: `no "swarm dashboard" rule — run (elevated): ${firewallHint(port)}` });
+
+  // One row per configured provider — the probe setup asks its enable question from,
+  // so the same evidence is available outside setup. `providers` and `_probeProvider`
+  // are injected: this module stays free of config and network, and a provider that
+  // is switched OFF is not probed, because nothing is claiming it works.
+  for (const id of providers) checks.push(providerCheck(await _probeProvider(id, { config })));
   return checks;
 }
 export const doctorExit = (checks) => (checks.some((c) => c.status === "fail") ? 1 : 0);
