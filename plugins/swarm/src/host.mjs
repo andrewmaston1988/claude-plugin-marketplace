@@ -26,13 +26,33 @@ export function resolveInstalled({ registry = registryPath(), readFile = readFil
 
 const HOSTS = new Set(["claude", "codex"]);
 
-// The host swarm is running inside: `claude`, `codex`, or `unknown`. The VALUE of
-// CLAUDECODE is the test, not the key's presence — a stray CLAUDECODE=0 would otherwise
-// turn a provider on by accident. Codex has no marker swarm can see yet
-// (codex-plugin-surface's job), so SWARM_HOST names the host by hand until then.
-export function detectHost(env = process.env) {
+// Which host's tree an install path sits in. The directory the host keeps its
+// plugins under is the marker — `.claude`, `.codex` — because that is the thing
+// that differs between hosts and the thing an install path is made of. A source
+// checkout matches nothing, which is the right answer: it says nothing about what
+// is running it.
+const HOST_DIRS = [["claude", ".claude"], ["codex", ".codex"]];
+
+export function hostFromInstallPath(installPath) {
+  const segments = String(installPath || "").split(/[\\/]/);
+  for (const [host, dir] of HOST_DIRS) if (segments.includes(dir)) return host;
+  return "unknown";
+}
+
+// The host swarm is running inside: `claude`, `codex`, or `unknown`.
+//
+// Where this copy is INSTALLED is the evidence — the honest signal, and the one
+// available when the operator types `swarm config init`, which no host wraps in a
+// hook (CLAUDE_PLUGIN_ROOT is only set for the hooks the host itself invokes).
+// SWARM_HOST stays as the explicit override for a host swarm cannot see yet, and
+// the CLAUDECODE marker stays as the fallback where the registry is unreadable —
+// its VALUE, not the key's presence, because a stray CLAUDECODE=0 would otherwise
+// turn a provider on by accident.
+export function detectHost(env = process.env, { installed = resolveInstalled({ registry: registryPath(env) }) } = {}) {
   const declared = env?.SWARM_HOST;
   if (declared !== undefined) return HOSTS.has(declared) ? declared : "unknown";
+  const fromPath = hostFromInstallPath(installed?.installPath);
+  if (fromPath !== "unknown") return fromPath;
   if (env?.CLAUDECODE === "1") return "claude";
   return "unknown";
 }
