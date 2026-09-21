@@ -390,20 +390,9 @@ async function cmdRun(rest) {
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
   const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: readProviderModelsCache(process.env)?.models || [], ...(fromRegistry && { ref: rest[0] }) });
-  // Fire-and-forget notification hook (e.g. "claude-slack notify --message {status}").
-  // Mechanical plumbing only: substitute tokens, spawn detached, swallow errors.
   // Shared by the end-of-run status and the scheduler's single-shot cost warn.
-  const notify = async (status, { digest = "", summary = "" } = {}) => {
-    if (!cfg.notifyCmd) return;
-    const cmdLine = cfg.notifyCmd
-      .replaceAll("{status}", status)
-      .replaceAll("{digest}", digest)
-      .replaceAll("{summary}", summary);
-    try {
-      const { spawn } = await import("node:child_process");
-      spawn(cmdLine, { shell: true, detached: true, stdio: "ignore" }).unref();
-    } catch { /* notification is garnish, never a failure */ }
-  };
+  const { createNotifier } = await import("../src/notify.mjs");
+  const notify = createNotifier({ notifyCmd: cfg.notifyCmd });
   if (refuseLiveEngine(plan.resultsDir, cfg, "re-running")) return 1;
 
   plan.estimate = estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")));
