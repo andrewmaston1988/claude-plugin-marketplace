@@ -88,7 +88,7 @@ test("E3: filterRuns over the snapshot matches the pre-change handler's captured
     const plain = filterRuns(snapshot.rows, { finishedPerProject: 3, expanded: new Set() });
     assert.deepEqual(withoutProviderProjection(plain.rows), GOLDEN.plain.runs, "unexpanded rows match the captured handler output");
     assert.deepEqual(plain.rows[0].providers, ["ollama", "claude"]);
-    assert.deepEqual(plain.rows[0].providerTokens, { claude: 17000, ollama: 307100, unknown: 0 });
+    assert.deepEqual(plain.rows[0].providerTokens, { claude: 67000, ollama: 307100, unknown: 0 });
     assert.deepEqual(plain.finishedTotals, GOLDEN.plain.finishedTotals);
 
     const expanded = filterRuns(snapshot.rows, { finishedPerProject: 3, expanded: new Set(["C--code-alpha"]) });

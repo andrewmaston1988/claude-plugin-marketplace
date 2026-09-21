@@ -1,6 +1,9 @@
 // Golden that pins the run.log → roster rendering across the parser split
-// (src/runlog.mjs). Captured on the unmodified code with CAPTURE_GOLDEN=1 and
-// must never move. Paths are normalised because the fixture lives in a temp dir.
+// (src/runlog.mjs). Captured with CAPTURE_GOLDEN=1. It moves only when the roster is
+// deliberately redefined, and the move is stated here: 2026-09-21, `tokenTotal` became the
+// processed total, so `fix[0]` (the one fixture leaf with a cacheRead) went 17k → 67k and the
+// run total 324.1k → 374.1k. Nothing else in the render changed. Paths are normalised because
+// the fixture lives in a temp dir.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";

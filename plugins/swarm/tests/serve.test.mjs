@@ -1224,7 +1224,12 @@ test("token total: estate row, page tokTotal and the leaf detail panel agree for
   const tokTotal = new Function(`${src.match(/const tokTotal = [^\n]+/)[0]}; return tokTotal;`)();
   assert.equal(tokTotal(tokens), row.tokens, "page tokTotal must match the estate row");
 
-  // page.html's leaf detail panel: billedIn = input + cacheCreation, output, cache read.
+  // The panel's headline is lifted from page.html's own template and evaluated, not
+  // recomputed here: the previous version added the three figures up itself, which is true
+  // by arithmetic whatever the page prints. RED when the headline drops cacheRead.
+  const headlineExpr = src.match(/<span>tokens<\/span><small>\$\{fmtTok\((.+?)\)\}<\/small>/)[1];
   const billedIn = tokens.input + tokens.cacheCreation;
-  assert.equal(billedIn + tokens.output + tokens.cacheRead, row.tokens, "detail panel rows sum to the headline");
+  const headline = new Function("t", "tk", "inp", "outp", "cc", "cr", "billedIn", "tokTotal", `return ${headlineExpr};`)(
+    tokens, tokens, tokens.input, tokens.output, tokens.cacheCreation, tokens.cacheRead, billedIn, tokTotal);
+  assert.equal(headline, row.tokens, "the leaf panel headline must be the same total as the estate row");
 });

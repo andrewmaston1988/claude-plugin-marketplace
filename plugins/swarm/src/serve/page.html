@@ -719,8 +719,10 @@
       // On a Claude leaf the whole prompt is cache-written on turn 1, so `input` alone is
       // just the uncached tail — reporting it raw showed 18 next to the CLI's 78k for the
       // same leaf. cacheRead stays its own row: it is re-read transcript, not billable input.
+      // The headline is the processed total — the same figure the estate row shows, cacheRead
+      // included — so one leaf never reads as two numbers; the rows below it split out what was billed.
       const billedIn = inp + cc;
-      html += `<div class="block"><label><span>tokens</span><small>${fmtTok(billedIn + outp)}</small></label><div class="bar"><span style="flex:${billedIn};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span></div><div class="kv" style="padding:0;border:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(billedIn)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label class="faint">cache read</label><span>${cr ? fmtTok(cr) : "—"}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
+      html += `<div class="block"><label><span>tokens</span><small>${fmtTok(tokTotal(tk))}</small></label><div class="bar"><span style="flex:${billedIn};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span></div><div class="kv" style="padding:0;border:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(billedIn)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label class="faint">cache read</label><span>${cr ? fmtTok(cr) : "—"}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
     }
     html += `<div class="block"><label>activity</label><div class="meta">${t.activity ? esc(t.activity) : "<span class='faint'>—</span>"}</div></div>`;
     // Raw by default; a prettify chip appears when the output carries JSON.
