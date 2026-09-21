@@ -504,6 +504,84 @@ test("governance: Claude task anywhere passes with empty allowedRoots", () => {
   }
 });
 
+// The run-level gate must judge the run's repo against the roots of the providers the
+// manifest SEATS. It read `cfg.provider` — the legacy getter onto providers.ollama — so a
+// claude-only run was refused whenever ollama's roots happened not to cover the repo.
+test("governance: run-level gate reads the seated provider's roots, not ollama's", () => {
+  const repo = tmp();
+  const elsewhere = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      // The legacy spelling resolves to ollama's block — this is what the old gate read.
+      provider: { allowedRoots: [elsewhere] },
+      providers: {
+        claude: { enabled: true, allowedRoots: [repo] },
+        ollama: { enabled: true, allowedRoots: [elsewhere] },
+      },
+    };
+    const p = writeManifest(repo, { tasks: [claudeTask()] });
+    const plan = loadManifest(p, cfg, repo);
+    equal(plan.tasks[0].provider, "claude");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+// The union reading: a seated provider whose own roots miss the repo does not veto the run
+// when another seated provider's roots cover it. Every task is still gated individually.
+test("governance: run-level gate passes on the UNION of seated providers' roots", () => {
+  const parent = tmp();
+  const repo = join(parent, "repo");
+  const other = tmp();
+  try {
+    mkdirSync(repo, { recursive: true });
+    const cfg = {
+      ...CFG,
+      provider: { allowedRoots: [other] },
+      providers: {
+        claude: { enabled: true, allowedRoots: [parent] },
+        ollama: { enabled: true, allowedRoots: [other] },
+      },
+    };
+    const p = writeManifest(repo, {
+      tasks: [
+        claudeTask({ id: "c", cwd: repo }),
+        { id: "o", prompt: "inspect", provider: "ollama", model: "glm-5.3:cloud", cwd: other },
+      ],
+    });
+    const plan = loadManifest(p, cfg, repo);
+    equal(plan.tasks.length, 2);
+  } finally {
+    rmSync(parent, { recursive: true, force: true });
+    rmSync(other, { recursive: true, force: true });
+  }
+});
+
+// The converse: outside every seated provider's roots is still refused, and the message
+// names a key the config actually has.
+test("governance: run-level gate still refuses a repo outside every seated provider's roots", () => {
+  const repo = tmp();
+  const elsewhere = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      provider: { allowedRoots: [elsewhere] },
+      providers: { claude: { enabled: true, allowedRoots: [elsewhere] } },
+    };
+    const p = writeManifest(repo, { tasks: [claudeTask()] });
+    const errs = errorsOf(() => loadManifest(p, cfg, repo));
+    ok(
+      errs.some((e) => e.includes(`this run's repo '${repo}'`) && e.includes("providers.claude.allowedRoots")),
+      errs.join("|")
+    );
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
 test("digest.report: true and a steering string both survive to the plan", () => {
   const dir = tmp();
   try {
@@ -1950,6 +2028,10 @@ function withHome(dir, fn) {
   }
 }
 
+// The run gate bounds the run's REPO, not just each leaf's cwd, so the fixtures below that
+// stub a toplevel outside the tmpdir must let claude's roots cover the stubbed path.
+const CFG_PROJ = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [tmpdir(), "C:/proj"] } } };
+
 test("run home: a subdirectory dispatch is filed under the repo toplevel's key", () => {
   const dir = tmp();
   try {
@@ -1957,7 +2039,7 @@ test("run home: a subdirectory dispatch is filed under the repo toplevel's key",
       const sub = join(dir, "sub");
       mkdirSync(sub);
       const p = writeManifest(dir, { tasks: [claudeTask()] }, "m.json");
-      const plan = loadManifest(p, CFG, sub, { io: { repoToplevel: () => "C:/proj/repo" } });
+      const plan = loadManifest(p, CFG_PROJ, sub, { io: { repoToplevel: () => "C:/proj/repo" } });
       equal(plan.resultsDir, join(dir, "home", "runs", "C--proj-repo", "m-1"));
     });
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -1973,8 +2055,8 @@ test("run home: dispatches from the toplevel and a subdirectory resume the same 
       const p = writeManifest(dir, { tasks: [claudeTask()] }, "m.json");
       const io = { repoToplevel: () => "C:/proj/repo" };
       const want = join(dir, "home", "runs", "C--proj-repo", "m-1");
-      equal(loadManifest(p, CFG, dir, { io }).resultsDir, want);
-      equal(loadManifest(p, CFG, sub, { io }).resultsDir, want);
+      equal(loadManifest(p, CFG_PROJ, dir, { io }).resultsDir, want);
+      equal(loadManifest(p, CFG_PROJ, sub, { io }).resultsDir, want);
     });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -1983,24 +2065,35 @@ test("run home: allowedRoots bounds the repo for a Claude-only manifest too", ()
   const dir = tmp();
   try {
     withHome(dir, () => {
-      const cfg = { ...CFG, provider: { allowedRoots: [join(dir, "root")] } };
-      const p = writeManifest(dir, { tasks: [claudeTask()] });
+      // Claude's OWN roots, nested spelling — the legacy top-level `provider` key resolves
+      // onto ollama and has no say over a Claude-only run.
+      const root = join(dir, "root");
+      const inside = join(root, "repo");
+      mkdirSync(inside, { recursive: true });
+      const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [root] } } };
+      const p = writeManifest(dir, { tasks: [claudeTask({ cwd: inside })] });
       const outside = join(dir, "elsewhere");
-      const errs = errorsOf(() => loadManifest(p, cfg, dir, { io: { repoToplevel: () => outside } }));
-      ok(errs.some((e) => e.includes(outside) && e.includes("provider.allowedRoots") && e.includes(join(dir, "root"))), errs.join("\n"));
-      loadManifest(p, cfg, dir, { io: { repoToplevel: () => join(dir, "root", "repo") } });
+      const errs = errorsOf(() => loadManifest(p, cfg, inside, { io: { repoToplevel: () => outside } }));
+      ok(errs.some((e) => e.includes(`this run's repo '${outside}'`) && e.includes("providers.claude.allowedRoots") && e.includes(root)), errs.join("\n"));
+      loadManifest(p, cfg, inside, { io: { repoToplevel: () => inside } });
     });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("run home: absent or empty allowedRoots leaves the roots gate inert", () => {
+// Fail-open by design, as it always was: no roots declared for the providers a run seats
+// states no policy, so the run gate adds nothing. checkGovernance still denies every leaf
+// whose provider has no roots — the run is refused, just not by this gate.
+test("run home: absent or empty allowedRoots leaves the run gate inert", () => {
   const dir = tmp();
   try {
     withHome(dir, () => {
       const p = writeManifest(dir, { tasks: [claudeTask()] });
       const io = { repoToplevel: () => join(dir, "anywhere") };
-      loadManifest(p, { ...CFG, provider: {} }, dir, { io });
-      loadManifest(p, { ...CFG, provider: { allowedRoots: [] } }, dir, { io });
+      const configs = [{ claude: { enabled: true } }, { claude: { enabled: true, allowedRoots: [] } }];
+      for (const providers of configs) {
+        const errs = errorsOf(() => loadManifest(p, { ...CFG, providers }, dir, { io }));
+        ok(!errs.some((e) => e.includes("this run's repo")), errs.join("\n"));
+      }
     });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

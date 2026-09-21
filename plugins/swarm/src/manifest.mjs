@@ -1186,11 +1186,6 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
       `swarm: '${cwd}' is not inside a git repository, so this run has no project to be filed under. Run from the repo the work belongs to and pass the manifest by absolute path: cd <repo>; swarm run "<abs manifest path>"`,
     ]);
   }
-  const allowedRoots = cfg.provider?.allowedRoots;
-  if (Array.isArray(allowedRoots) && allowedRoots.length && !allowedRoots.some((r) => isUnderRoot(toplevel, r))) {
-    errors.push(`swarm: this run's repo '${toplevel}' is not under any provider.allowedRoots entry — dispatch from a repo under ${allowedRoots.join(", ")}, or add its root to provider.allowedRoots in ~/.swarm/config.json`);
-  }
-
   const resultsDir = raw.resultsDir
     ? resolve(cwd, raw.resultsDir)
     : defaultResultsDir(manifestPath, toplevel, argsFingerprint(args));
@@ -1234,6 +1229,23 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     cwd, resultsDir, cfg, errors, label, childPlans, cache, headroom, warnings, io: resolvedIo, probedGuards, providerRegistry,
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
+  // The run's repo must sit under the roots of the providers this manifest actually seats
+  // — the UNION, because the per-task gate already refuses each out-of-bounds task, and a
+  // repo one seated provider may run in is a repo this run may be filed under. Seated
+  // means resolved on a task (primary or fallback), a child manifest's tasks included.
+  // This read `cfg.provider`, the legacy getter onto `providers.ollama`, so every run was
+  // judged against ollama's roots whatever it seated: a repo its own provider permits was
+  // refused, and a config with no ollama block passed anything.
+  const seatedTasks = tasks.flatMap((t) => [t, ...(t.childPlan?.tasks || [])]);
+  const seated = [...new Set(seatedTasks.flatMap((t) => [t.provider, t.fallbackProvider]).filter(Boolean))].sort();
+  const seatedRoots = [...new Set(seated.flatMap((id) => providerConfig(cfg, id).allowedRoots || []))];
+  if (seatedRoots.length && !seatedRoots.some((root) => isUnderRoot(toplevel, root))) {
+    errors.push(
+      `swarm: this run's repo '${toplevel}' is not under any allowedRoots entry for the providers it seats ` +
+      `(${seated.join(", ")}) — dispatch from a repo under ${seatedRoots.join(", ")}, or add its root to ` +
+      `${seated.map((id) => `providers.${id}.allowedRoots`).join(" / ")} in ~/.swarm/config.json`
+    );
+  }
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
   validateMustReadRunners(tasks, cfg, resolvedIo, errors, label);
 
