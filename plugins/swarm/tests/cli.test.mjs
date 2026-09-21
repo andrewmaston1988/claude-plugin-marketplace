@@ -9,12 +9,29 @@ import { runCli, runCliAsync, CLI } from "./helpers/cli.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
 
-// A git repo with one commit: runs are filed under the dispatching repo, and read-only leaves snapshot it.
+// The one place the provider-root policy lives. `allowedRoots` gates EVERY provider
+// including claude, and an empty list denies — so a fixture HOME with no
+// providers.claude.allowedRoots refuses every row that dispatches. Fixtures live under
+// tmpdir, so that is the root they declare; `extra` keys win over the block.
+const gateConfig = (extra = {}) => JSON.stringify({ providers: { claude: { allowedRoots: [tmpdir()] } }, ...extra });
+
+// Writes that config into `home` and returns it — every fixture HOME a dispatching row
+// reads goes through here, so the block exists in exactly one place.
+function gateHome(home, extra = {}) {
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "config.json"), gateConfig(extra));
+  return home;
+}
+
+// A git repo with one commit: runs are filed under the dispatching repo. It also carries
+// the fixture HOME every row points at, pre-gated, so a row only writes its own config
+// keys when it has a reason to.
 function tmp() {
   const dir = mkdtempSync(join(tmpdir(), "swarm-cli-"));
   spawnSync("git", ["init", "-q"], { cwd: dir, windowsHide: true });
   writeFileSync(join(dir, "seed.txt"), "seed\n");
   commitAll(dir, "init");
+  gateHome(join(dir, "home"));
   return dir;
 }
 
@@ -101,12 +118,10 @@ test("validate: good manifest exits 0 and reports task count", () => {
 // or none; `corpus` seeds run history so the estimate line reads "estimated ~".
 function seatsWorld({ enabled, store = "rows", corpus = false } = {}) {
   const dir = tmp();
-  const home = join(dir, "home");
-  mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "config.json"), JSON.stringify({
+  const home = gateHome(join(dir, "home"), {
     grading: { enabled },
     provider: { allowedRoots: [tmpdir()] },
-  }));
+  });
   const row = (leaf, model, grades) => JSON.stringify({
     resultsDir: `C:/runs/${leaf}`, leaf, model, domain: "node", outcome: "completed",
     grades, note: "", assessedBy: { session: "s1", date: "2026-09-10" },
@@ -530,9 +545,7 @@ test("C2: run refuses to start while an ask is live", async () => {
   const dir = tmp();
   let askPromise;
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.5 }));
+    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.5 });
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
@@ -573,9 +586,7 @@ test("C2: run refuses to start while an ask is live", async () => {
 test("stop: dead engine (stale heartbeat, no summary) — records run-stop and marks non-terminal leaves failed:stopped, touching no process", () => {
   const dir = tmp();
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.1 }));
+    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.1 });
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     const lines = [
@@ -606,9 +617,7 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
   const dir = tmp();
   let runPromise;
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.5 }));
+    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.5 });
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
@@ -851,9 +860,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
   const repo = initPruneRepo();
   const dir = tmp();
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.1 }));
+    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.1 });
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
@@ -966,12 +973,10 @@ test("models: stub server + SWARM_HOME config -> names with descriptions, no ali
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
     // catalogUrl also points at the stub — the CLI child must never hit the live WAN.
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: { url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
-    }));
+    });
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     // ctx from the recommendation, no parameter count from the empty /api/show;
@@ -1016,11 +1021,9 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: { url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
-    }));
+    });
     const env = { SWARM_HOME: home };
 
     const r = await runCliAsync(["models"], { cwd: dir, env });
@@ -1061,9 +1064,7 @@ test("quota: prints per-window utilization from the usage endpoint", async () =>
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` }));
+    const home = gateHome(join(dir, "home"), { quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` });
     const creds = join(home, "creds.json");
     writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
     const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds, TZ: "Europe/London" } });
@@ -1092,11 +1093,9 @@ test("ollama-usage: P0 an expired cookie prints /!\\ Cookie Expired above the fi
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: { cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } } },
-    }));
+    });
     writeFileSync(join(home, "ollama-cookie.json"), "expired-cookie\n");
     writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
       sessionPctUsed: 3, sessionResetsAt: "2026-09-07T14:49:00Z",
@@ -1131,11 +1130,9 @@ test("ollama-usage: C0 a live fetch prints exactly two provider-named lines, not
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: { cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } } },
-    }));
+    });
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
     const r = await runCliAsync(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr + r.stdout);
@@ -1164,9 +1161,7 @@ test("quota: C0b every line is prefixed anthropic, not claude", async () => {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` }));
+    const home = gateHome(join(dir, "home"), { quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` });
     const creds = join(home, "creds.json");
     writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
     const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds } });
@@ -1210,15 +1205,13 @@ test("models: C1 an exhausted meter is named above the :cloud list", async () =>
   const server = modelsStubServer(EXHAUSTED_HTML);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: {
         url: `http://127.0.0.1:${server.address().port}`,
         catalogUrl: `http://127.0.0.1:${server.address().port}`,
         cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } },
       },
-    }));
+    });
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr);
@@ -1239,15 +1232,13 @@ test("models: C2 false-positive guard — a healthy meter changes nothing", asyn
   const server = modelsStubServer(readFileSync(join(import.meta.dirname, "fixtures", "ollama-settings.html"), "utf8"));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: {
         url: `http://127.0.0.1:${server.address().port}`,
         catalogUrl: `http://127.0.0.1:${server.address().port}`,
         cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } },
       },
-    }));
+    });
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
@@ -1262,9 +1253,7 @@ test("models: C2 false-positive guard — a healthy meter changes nothing", asyn
 test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare dispatch exits 0", () => {
   const dir = tmp();
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ swarm: { always: true } }));
+    const home = gateHome(join(dir, "home"), { swarm: { always: true } });
     const manifest = join(dir, "m.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
@@ -1569,7 +1558,7 @@ test("validate: estimate line from a seeded corpus; cold start says none", () =>
     equal(v.status, 0, v.stderr);
     ok(v.stdout.includes("estimated ~4k tokens"), v.stdout); // median 2000 × 2 leaves
 
-    const cold = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "empty-home") } });
+    const cold = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: gateHome(join(dir, "empty-home")) } });
     equal(cold.status, 0, cold.stderr);
     ok(cold.stdout.includes("estimate: none (no run history yet)"), cold.stdout);
   } finally {
@@ -1588,7 +1577,7 @@ test("run: closing tokens line compares actual vs estimate; projection warn reac
       tasks: [{ id: "s", state: "ok", provider: "claude", model: "claude-haiku-4-5-20251001", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } }],
     }));
     const cfgPath = join(dir, "config.json");
-    writeFileSync(cfgPath, JSON.stringify({ costWarnTokens: 100 }));
+    writeFileSync(cfgPath, gateConfig({ costWarnTokens: 100 }));
     const p = join(dir, "plan.json");
     writeFileSync(p, JSON.stringify({
       resultsDir: "out",
@@ -1781,7 +1770,7 @@ test("serve: dashboard.enabled=false refuses to start (foreground and --daemon),
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ dashboard: { enabled: false, port: 0 } }));
+    writeFileSync(join(home, "config.json"), gateConfig({ dashboard: { enabled: false, port: 0 } }));
     for (const args of [["serve"], ["serve", "--daemon"]]) {
       const r = runCli(args, { cwd: dir, env: { SWARM_HOME: home } });
       equal(r.status, 0, r.stderr);
@@ -1797,7 +1786,9 @@ test("serve: dashboard.enabled=false refuses to start (foreground and --daemon),
 test("config init: writes every shipped key into ~/.swarm/config.json, keeps set values, reports added keys", () => {
   const dir = tmp();
   try {
-    const home = join(dir, "home");
+    // Its own HOME, not tmp()'s pre-gated one: this row asserts what init does to a
+    // config file that does not exist yet ("created"), so the file must not exist.
+    const home = join(dir, "cfg-home");
     let r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes(join(home, "config.json")), r.stdout);
@@ -1826,7 +1817,7 @@ test("run: the closing block asks for grading only when grading.enabled is true"
     try {
       const home = join(dir, "home");
       mkdirSync(home, { recursive: true });
-      writeFileSync(join(home, "config.json"), JSON.stringify({ grading: { enabled } }));
+      writeFileSync(join(home, "config.json"), gateConfig({ grading: { enabled } }));
       const manifest = join(dir, "m.json");
       writeFileSync(manifest, JSON.stringify({
         resultsDir: "out",
@@ -1850,7 +1841,7 @@ test("run: digest.md carries exactly one grade footer while the run is ungraded,
     const dir = tmp();
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ grading: { enabled } }));
+    writeFileSync(join(home, "config.json"), gateConfig({ grading: { enabled } }));
     const manifest = join(dir, "m.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out", goal: "digest footer",
@@ -1942,11 +1933,9 @@ test("statusline install: writes the self-resolving shim into ~/.swarm and print
 // Restart button case, and it did nothing.
 test("serve restart: a live daemon on the current version is killed and replaced, never short-circuited as already-running", async () => {
   const dir = tmp();
-  const home = join(dir, "home");
-  mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "config.json"), JSON.stringify({
+  const home = gateHome(join(dir, "home"), {
     dashboard: { enabled: true, port: 0, bind: "127.0.0.1", tray: false, autoRestartOnUpdate: false },
-  }));
+  });
   const version = "v-restart-test";
   const registry = join(dir, "installed_plugins.json");
   writeFileSync(registry, JSON.stringify({
@@ -2130,7 +2119,7 @@ test("stop: dead engine records no kept-worktree row for a branchless snapshot t
   try {
     const home = join(f.dir, "home");
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.1 }));
+    writeFileSync(join(home, "config.json"), gateConfig({ heartbeatSecs: 0.1 }));
     writeFileSync(join(f.resultsDir, "manifest.json"), JSON.stringify({ resultsDir: f.resultsDir, cwd: f.repo, tasks: [] }));
     spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
     ok(existsSync(f.tree));
