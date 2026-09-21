@@ -276,6 +276,15 @@ test("usageLines: a bucket that restates the provider collapses — kind prefix 
   ok(!lines.some((l) => l.includes("codex codex")), `the provider id printed twice: ${lines.join(" | ")}`);
   ok(!lines.some((l) => l.includes("(codex)")), `the scope restated the provider: ${lines.join(" | ")}`);
 
+  // A bucket with neither primary nor secondary falls back to its own id as the
+  // kind — the same restatement, with nothing after it.
+  const bare = usageLines([normalizeCodex({
+    provider: "codex",
+    buckets: [{ kind: "rate-limit", limitId: "codex", usedPercent: 4, resetsAt: "2026-09-20T16:00:00Z" }],
+    source: "account/rateLimits/read", provenance: "live", asOf: "2026-09-20T15:00:00Z",
+  })], { timeZone: LONDON });
+  equal(bare[0], "codex: 4% — resets Sun 20 Sep, 17:00");
+
   // Not naming luck: any provider's row collapses the same way.
   const generic = [{ provider: "anthropic", limits: [{ kind: "anthropic weekly_all", percent: 25, resetsAt: "2026-09-20T16:00:00Z", scope: "anthropic" }] }];
   equal(usageLines(generic, { timeZone: LONDON })[0], "anthropic weekly_all: 25% — resets Sun 20 Sep, 17:00");

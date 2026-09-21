@@ -268,17 +268,23 @@ function restatesProvider(provider, value) {
   return typeof value === "string" && value.toLowerCase() === String(provider).toLowerCase();
 }
 
+// `codex primary` -> `primary`; a bare `codex` -> nothing at all.
+function stripProviderPrefix(provider, kind) {
+  const prefix = `${provider} `;
+  if (restatesProvider(provider, kind)) return "";
+  return kind.toLowerCase().startsWith(prefix.toLowerCase()) ? kind.slice(prefix.length) : kind;
+}
+
 export function usageLines(usages, { timeZone } = {}) {
   const lines = [];
   for (const u of usages) {
-    const prefix = `${u.provider} `;
     for (const l of u.limits) {
-      const kind = l.kind?.toLowerCase().startsWith(prefix.toLowerCase()) ? l.kind.slice(prefix.length) : l.kind;
-      const window = l.window ? ` (${l.window})` : "";
-      const scope = l.scope && !restatesProvider(u.provider, l.scope) ? ` (${l.scope})` : "";
+      const kind = stripProviderPrefix(u.provider, l.kind);
+      const scope = l.scope && !restatesProvider(u.provider, l.scope) ? l.scope : null;
+      const label = [kind, l.window && `(${l.window})`, scope && `(${scope})`].filter(Boolean).join(" ");
       const formatted = formatResetTime(l.resetsAt, { timeZone });
       const resets = formatted ? ` — resets ${formatted}` : "";
-      lines.push(`${u.provider} ${kind}${window}${scope}: ${l.percent}%${resets}`);
+      lines.push(`${u.provider}${label ? ` ${label}` : ""}: ${l.percent}%${resets}`);
     }
   }
   return lines;
