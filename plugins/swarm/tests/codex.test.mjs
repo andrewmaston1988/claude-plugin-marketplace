@@ -94,6 +94,7 @@ test("Codex parser normalizes JSONL text, usage, and terminal failure", () => {
     output: "hello",
     usage: { input: 17, output: 5, cacheCreation: 0, cacheRead: 3 },
     terminal: true,
+    numTurns: 1,
   });
   equal(events.filter((event) => event.terminal === true).length, 1);
   equal(events.filter((event) => event.type === "text").map((event) => event.text).join(""), "hello");
