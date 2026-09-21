@@ -7,7 +7,7 @@
 
 import { aggregate, frontier } from "./scores.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
-import { identityOf, identityKey } from "./contracts.mjs";
+import { identityOf, identityKey, CLAUDE_ALIASES, claudeFamilyOf } from "./contracts.mjs";
 
 // The seating canon: 20 graded runs per model per capability slot. Under it a
 // grade is not a verdict — printed as n<20, the rule's own term, which reads as
@@ -25,11 +25,11 @@ const colPart = (label, cell) =>
 // the run resolved to ("claude-sonnet-5"). Exact-string lookup therefore reads
 // a model with hundreds of graded rows as never graded — the same inversion
 // row 3 guards against, one field over, and it would hand the exploration seat
-// to the best-measured model on the roster. Match on the family token, as the
-// quota preflight already does for the same alias/id split, and take the id
-// with the most rows: an alias means the tier's current model, which is the one
-// still being graded. Non-alias names never take this path.
-const CLAUDE_ALIAS_RE = /^(fable|opus|sonnet|haiku)$/i;
+// to the best-measured model on the roster. Match on the family token
+// (contracts.mjs's claudeFamilyOf — positional, so an id that merely contains
+// the token never matches), and take the id with the most rows: an alias means
+// the tier's current model, which is the one still being graded. Non-alias
+// names never take this path.
 
 function shown(identity) {
   return identity.explicit && identity.provider ? `${identity.provider}/${identity.model}` : identity.model;
@@ -55,11 +55,11 @@ export function resolveSeatModel(name, byModel) {
   const entries = entriesOf(byModel);
   const exact = entries.find(({ identity }) => identity.model === target.model && (!target.provider || identity.provider === target.provider));
   if (exact) return exact.identity.model;
-  if ((target.provider && target.provider !== "claude") || !CLAUDE_ALIAS_RE.test(String(target.model || ""))) return null;
+  if ((target.provider && target.provider !== "claude") || !CLAUDE_ALIASES.has(String(target.model || "").toLowerCase())) return null;
   const family = String(target.model).toLowerCase();
   let best = null;
   for (const { identity, entry } of entries) {
-    if (identity.provider !== "claude" || !String(identity.model).toLowerCase().includes(family)) continue;
+    if (identity.provider !== "claude" || claudeFamilyOf(identity.model) !== family) continue;
     if (!best || (entry.n || 0) > (best.entry.n || 0)) best = { identity, entry };
   }
   return best?.identity.model || null;
@@ -68,10 +68,10 @@ export function resolveSeatModel(name, byModel) {
 function resolveSeatIdentity(target, byIdentity) {
   const exact = byIdentity.get(identityKey(target));
   if (exact) return exact;
-  if (target.provider !== "claude" || !CLAUDE_ALIAS_RE.test(String(target.model || ""))) return null;
+  if (target.provider !== "claude" || !CLAUDE_ALIASES.has(String(target.model || "").toLowerCase())) return null;
   const family = String(target.model).toLowerCase();
   return [...byIdentity.values()]
-    .filter((entry) => entry.identity.provider === "claude" && String(entry.identity.model).toLowerCase().includes(family))
+    .filter((entry) => entry.identity.provider === "claude" && claudeFamilyOf(entry.identity.model) === family)
     .sort((a, b) => (b.entry.n || 0) - (a.entry.n || 0))[0] || null;
 }
 

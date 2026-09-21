@@ -124,19 +124,19 @@ async function costBands(cfg = getConfig()) {
 
 // Read usage through registered provider capabilities. `live` is reserved for
 // the explicit operator command; hooks and validation use the cache-only path.
-export async function readProviderUsage(cfg, { registry = defaultProviderRegistry(), live = false, provider, env = process.env, fetchImpl = globalThis.fetch } = {}) {
+export async function readProviderUsage(cfg, { registry = defaultProviderRegistry(), live = false, provider, env = process.env, fetchImpl = globalThis.fetch, quotaCheck } = {}) {
   const { getUsage } = await import("../src/ollama-usage.mjs");
-  const { normalizeOllama, normalizeCodex, normalizeProviderUsage } = await import("../src/usage.mjs");
+  const { normalizeProviderUsage } = await import("../src/usage.mjs");
   const usages = [];
   const errors = {};
   for (const adapter of registry.list()) {
-    if (adapter.id === "claude" || (provider && adapter.id !== provider) || !adapter.enabled(cfg)) continue;
+    if ((provider && adapter.id !== provider) || !adapter.enabled(cfg)) continue;
     const readUsage = registry.capability(adapter.id, "readUsage");
     if (!readUsage) continue;
     try {
       const reading = live && adapter.id === "ollama"
         ? await getUsage(cfg, { gate: false, env, _fetch: fetchImpl })
-        : await readUsage({ config: cfg, env, fetch: fetchImpl, usageOptIn: live });
+        : await readUsage({ config: cfg, env, fetch: fetchImpl, usageOptIn: live, ...(quotaCheck && { quotaCheck }) });
       if (reading == null) continue;
       usages.push(normalizeProviderUsage(adapter.id, reading));
     } catch (error) {
@@ -1006,31 +1006,17 @@ async function cmdUsage(rest = [], {
   quotaCheck,
   write = out,
 } = {}) {
-  const { checkQuota: defaultCheckQuota } = await import("../src/quota.mjs");
-  const { normalizeAnthropic, usageLines, notableLines } = await import("../src/usage.mjs");
-  const selected = getFlag("provider", rest);
+  const { usageLines, notableLines } = await import("../src/usage.mjs");
   // `claude` is the registry id for the reading this command prints as
-  // `anthropic`, so either name selects it. Anthropic is fetched outside the
-  // registry loop, so it needs the flag applied here too — without this the row
-  // was fetched and printed whatever `--provider` named.
-  const wantsAnthropic = !selected || selected === "claude" || selected === "anthropic";
-  const q = wantsAnthropic ? await (quotaCheck || defaultCheckQuota)({
-    cfg,
-    fetch: (...a) => fetchImpl(...a),
-    cachePath: join(swarmHome(env), "quota-cache.json"),
-    ...(env.SWARM_CREDENTIALS && { credentialsPath: env.SWARM_CREDENTIALS }),
-  }) : null;
-  const usages = [];
-  // Filtered out says nothing about Anthropic — a line here would be the exact
-  // defect the flag exists to prevent.
-  if (wantsAnthropic && q) usages.push(normalizeAnthropic(q));
-  else if (wantsAnthropic) write("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
-  const providerReading = await readProviderUsage(cfg, { registry, env, fetchImpl, live: true, ...(selected ? { provider: selected } : {}) });
-  usages.push(...providerReading.usages);
+  // `anthropic`, so either name selects it.
+  const selected = getFlag("provider", rest);
+  const provider = selected === "anthropic" ? "claude" : selected;
+  const providerReading = await readProviderUsage(cfg, { registry, env, fetchImpl, live: true, quotaCheck, ...(provider ? { provider } : {}) });
+  const usages = providerReading.usages;
   for (const [provider, message] of Object.entries(providerReading.errors)) write(`${provider}: unavailable (${message})`);
   for (const line of usageLines(usages)) write(line);
   for (const line of notableLines(usages)) write(line);
-  return q?.exhausted ? 1 : 0;
+  return usages.some((u) => u.provider === "anthropic" && u.state === "exhausted") ? 1 : 0;
 }
 
 // serve — the LAN dashboard. Foreground by default; --daemon forks a detached

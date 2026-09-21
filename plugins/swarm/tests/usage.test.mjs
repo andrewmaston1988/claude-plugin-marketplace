@@ -7,7 +7,8 @@ import {
   normalizeAnthropic, normalizeOllama, readCachedUsage, usageLines, notableLines,
   formatResetTime, QUOTA_CACHE_FILENAME, normalizeCodex,
 } from "../src/usage.mjs";
-import { createProviderRegistry } from "../src/providers.mjs";
+import { createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
+import { providerUsageSnapshot } from "../src/contracts.mjs";
 import { cmdUsage } from "../scripts/swarm.mjs";
 
 const LONDON = "Europe/London";
@@ -329,8 +330,9 @@ test("normalizeCodex: a Codex resetsAt in Unix seconds is the instant it names, 
 });
 
 // Defect 4 — `swarm usage --provider codex` printed the Anthropic rows anyway.
-// The registry loop honours the flag; the separately-fetched Anthropic reading
-// did not.
+// Anthropic reads through the registry walk now, so the flag's filter covers it
+// like every provider: the claude adapter below is in the walked registry, and
+// still must not print under --provider codex.
 test("cmdUsage: --provider selects one provider — the Anthropic row is filtered too", async () => {
   const codex = {
     id: "codex",
@@ -341,13 +343,13 @@ test("cmdUsage: --provider selects one provider — the Anthropic row is filtere
       readUsage: async () => normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" } })),
     },
   };
-  const registry = createProviderRegistry([codex]);
+  const registry = createProviderRegistry([claudeProbeAdapter(), codex]);
   const cfg = { providers: { codex: { enabled: true } } };
   const read = async (rest) => {
     const lines = [];
     const code = await cmdUsage(rest, {
-      cfg, env: {}, registry, fetchImpl: async () => ({ ok: true }),
-      quotaCheck: async () => ANTHROPIC, write: (line) => lines.push(line),
+      cfg, env: { SWARM_HOME: WALK_HOME }, registry, fetchImpl: async () => ({ ok: true }),
+      write: (line) => lines.push(line),
     });
     return { lines, code };
   };
@@ -360,7 +362,7 @@ test("cmdUsage: --provider selects one provider — the Anthropic row is filtere
   // `claude` is the registry id for the Anthropic reading, so it selects it.
   const claude = await read(["--provider", "claude"]);
   ok(claude.lines.every((l) => l.startsWith("anthropic")), `--provider claude printed another provider: ${claude.lines.join(" | ")}`);
-  ok(claude.lines.some((l) => l.startsWith("anthropic session")), claude.lines.join(" | "));
+  ok(claude.lines.some((l) => l.startsWith("anthropic probe-marker")), claude.lines.join(" | "));
 
   // No flag: every provider that answered is present.
   const all = await read([]);
@@ -398,5 +400,97 @@ test("notableLines: a partial codex reading is announced, and says so honestly",
 
   // The negative half: a clean live read carries no caveat at all.
   deepEqual(notableLines([normalizeCodex(codexReading({ primary: { usedPercent: 20 } }))], { timeZone: LONDON }), []);
+});
+
+// Claude reads through the registry like every provider; the walk is the only
+// route a claude adapter's reading can take, so a distinctive window here is a
+// marker the deleted special case cannot fake: on the old code the skip dropped
+// the adapter and no such line could print at all.
+const WALK_NOW = Date.parse("2026-09-20T12:00:00Z");
+const WALK_HOME = mkdtempSync(join(tmpdir(), "swarm-usage-walk-"));
+
+const probeSnapshot = () => providerUsageSnapshot({
+  provider: "claude",
+  buckets: [{ kind: "probe-marker", percent: 13, resetsAt: "2026-09-20T16:00:00Z", scope: null }],
+  source: "probe",
+  provenance: "live",
+  exhausted: false,
+  asOf: new Date(WALK_NOW).toISOString(),
+});
+
+function claudeProbeAdapter() {
+  return {
+    id: "claude",
+    runnerId: "claude",
+    enabled: () => true,
+    validateTask: () => [],
+    capabilities: { readUsage: async () => probeSnapshot() },
+  };
+}
+
+test("readCachedUsage: a claude adapter's reading joins the registry walk under the anthropic label", async () => {
+  const registry = createProviderRegistry([claudeProbeAdapter()]);
+  const out = await readCachedUsage({ providers: { claude: { enabled: true } } }, {
+    now: NOW, env: { SWARM_HOME: WALK_HOME }, providerRegistry: registry,
+  });
+  const row = out.find((r) => r.provider === "anthropic" && r.limits.some((l) => l.kind === "probe-marker"));
+  ok(row, `the walk must carry the claude adapter's reading: ${JSON.stringify(out)}`);
+  equal(row.state, "ok");
+});
+
+// The `quota` subcommand's Anthropic reading comes from the same walk — the
+// separately-fetched Anthropic block and its `--provider` re-check are gone.
+test("cmdUsage: a claude adapter's reading is walked, selected, and gates the exit code", async () => {
+  const codex = {
+    id: "codex",
+    runnerId: "codex",
+    enabled: () => true,
+    validateTask: () => [],
+    capabilities: {
+      readUsage: async () => normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" } })),
+    },
+  };
+  const registry = createProviderRegistry([claudeProbeAdapter(), codex]);
+  const cfg = { providers: { claude: { enabled: true }, codex: { enabled: true } } };
+  const read = async (rest, over = {}) => {
+    const lines = [];
+    const code = await cmdUsage(rest, {
+      cfg, env: { SWARM_HOME: WALK_HOME }, registry, fetchImpl: async () => ({ ok: true }),
+      quotaCheck: async () => null, write: (line) => lines.push(line), ...over,
+    });
+    return { lines, code };
+  };
+
+  const all = await read([]);
+  ok(all.lines.some((l) => l.startsWith("anthropic probe-marker")), `claude's reading must be walked: ${all.lines.join(" | ")}`);
+  ok(all.lines.some((l) => l.startsWith("codex ")), all.lines.join(" | "));
+
+  const claude = await read(["--provider", "claude"]);
+  ok(claude.lines.some((l) => l.startsWith("anthropic probe-marker")), claude.lines.join(" | "));
+  ok(claude.lines.every((l) => !l.startsWith("codex")), `the flag must filter codex: ${claude.lines.join(" | ")}`);
+
+  // `anthropic` selects the same reading by its display name.
+  const alias = await read(["--provider", "anthropic"]);
+  ok(alias.lines.some((l) => l.startsWith("anthropic probe-marker")), alias.lines.join(" | "));
+});
+
+// The `quota` seam plumbs to the real adapter: cmdUsage's injected reading must
+// reach readClaudeUsage's live branch, and the exhausted verdict must still exit 1.
+test("cmdUsage: the quotaCheck seam reaches the claude adapter and exhaustion exits 1", async () => {
+  const registry = createProviderRegistry(defaultProviderAdapters());
+  const cfg = { providers: { claude: { enabled: true } } };
+  const read = async (quotaCheck) => {
+    const lines = [];
+    const code = await cmdUsage([], {
+      cfg, env: { SWARM_HOME: WALK_HOME }, registry, fetchImpl: async () => ({ ok: true }),
+      quotaCheck, write: (line) => lines.push(line),
+    });
+    return { lines, code };
+  };
+  const okRead = await read(async () => ({ ...ANTHROPIC, source: "endpoint" }));
+  ok(okRead.lines.some((l) => l.startsWith("anthropic session")), `the injected reading must print: ${okRead.lines.join(" | ")}`);
+  equal(okRead.code, 0);
+  const done = await read(async () => ({ ...ANTHROPIC, source: "endpoint", exhausted: true }));
+  equal(done.code, 1, "an exhausted Anthropic reading must ground the command");
 });
 
