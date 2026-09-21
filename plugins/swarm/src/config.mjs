@@ -95,11 +95,22 @@ export function normalizeConfigInput(input) {
   return normalized;
 }
 
+// Legacy key -> the canonical path normalizeConfigInput folds it into. The one place
+// the mapping lives: the fold targets it, the deprecation warning names it, and
+// initConfig reports the migration through it.
+export const LEGACY_KEY_TO_CANONICAL = {
+  provider: "providers.ollama",
+  codex: "providers.codex",
+};
+
+// The legacy keys actually present, in a fixed order so the warnings and the printed
+// mapping are stable. Single source for both, and for initConfig's `migrated` flag.
+function legacyKeys(input) {
+  return Object.keys(LEGACY_KEY_TO_CANONICAL).filter((k) => isPlainObject(input?.[k]));
+}
+
 function legacyConfigWarnings(input) {
-  const warnings = [];
-  if (isPlainObject(input?.provider)) warnings.push("swarm config key 'provider' is deprecated; move it to 'providers.ollama'");
-  if (isPlainObject(input?.codex)) warnings.push("swarm config key 'codex' is deprecated; move it to 'providers.codex'");
-  return warnings;
+  return legacyKeys(input).map((k) => `swarm config key '${k}' is deprecated; move it to '${LEGACY_KEY_TO_CANONICAL[k]}'`);
 }
 
 // Both levels take the same shape. An empty array is valid and means "deny everything"
@@ -121,6 +132,24 @@ function validateProviderConfig(cfg) {
   }
 }
 
+// Every check a config must pass, in one place: loadConfig runs it on the merged
+// view, initConfig on the object it is about to write. Five checks — the
+// valve/minFreeMemMb ordering below is the one an extraction keeps dropping.
+function validateConfig(cfg) {
+  validateProviderConfig(cfg);
+  if (typeof cfg.disable1mContext !== "boolean") {
+    throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
+  }
+  validateProjects(cfg.projects);
+  validateMemFloor(cfg, "minFreeMemMb");
+  validateMemFloor(cfg, "valveFreeMemMb");
+  // minFreeMemMb: 0 is the documented "disabled" sentinel for the spawn floor —
+  // the valve is then the only mechanism, so the ordering check doesn't apply.
+  if (cfg.minFreeMemMb > 0 && cfg.valveFreeMemMb > cfg.minFreeMemMb) {
+    throw new Error(`valveFreeMemMb (${cfg.valveFreeMemMb}) must not exceed minFreeMemMb (${cfg.minFreeMemMb}) — the valve would fire before the spawn floor ever parks a leaf; lower valveFreeMemMb or raise minFreeMemMb in ~/.swarm/config.json`);
+  }
+}
+
 function addLegacyProviderView(cfg) {
   Object.defineProperty(cfg, "provider", {
     enumerable: false,
@@ -139,18 +168,7 @@ export function loadConfig(overridePath, env = process.env, { warn = (message) =
   const user = existsSync(userPath) ? parseUser(userPath) : null;
   for (const warning of legacyConfigWarnings(user)) warn(warning);
   const cfg = user ? deepMerge(defaults, normalizeConfigInput(user)) : defaults;
-  validateProviderConfig(cfg);
-  if (typeof cfg.disable1mContext !== "boolean") {
-    throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
-  }
-  validateProjects(cfg.projects);
-  validateMemFloor(cfg, "minFreeMemMb");
-  validateMemFloor(cfg, "valveFreeMemMb");
-  // minFreeMemMb: 0 is the documented "disabled" sentinel for the spawn floor —
-  // the valve is then the only mechanism, so the ordering check doesn't apply.
-  if (cfg.minFreeMemMb > 0 && cfg.valveFreeMemMb > cfg.minFreeMemMb) {
-    throw new Error(`valveFreeMemMb (${cfg.valveFreeMemMb}) must not exceed minFreeMemMb (${cfg.minFreeMemMb}) — the valve would fire before the spawn floor ever parks a leaf; lower valveFreeMemMb or raise minFreeMemMb in ~/.swarm/config.json`);
-  }
+  validateConfig(cfg);
   return addLegacyProviderView(cfg);
 }
 
@@ -213,14 +231,35 @@ export function userConfigPath(overridePath, env = process.env) {
   return overridePath || join(swarmHome(env), "config.json");
 }
 
-// Write every shipped key into the user file, keeping whatever is already set.
-// Returns { path, created, added } — added = leaf keys filled in this call.
+// A refusal has to name the key the operator actually wrote: they have "provider",
+// not "providers.ollama", and a complaint about a path they have never seen reads as
+// a swarm bug rather than a value to go and fix.
+function refuseToWrite(raw, path, migrated, err) {
+  const head = migrated ? `cannot migrate ${path}` : `cannot write ${path}`;
+  const tail = "Nothing was written. Fix the value and re-run `swarm config init`.";
+  if (migrated) {
+    for (const [legacy, canonical] of Object.entries(LEGACY_KEY_TO_CANONICAL)) {
+      const prefix = `${canonical}.`;
+      const at = err.message.indexOf(prefix);
+      if (at < 0 || !isPlainObject(raw[legacy])) continue;
+      const leaf = err.message.slice(at).match(/^[\w.$]+/)[0];
+      return `${head}: ${err.message.replace(prefix, `${legacy}.`)}\n  (it becomes ${leaf}, which swarm validates on every load)\n${tail}`;
+    }
+  }
+  return `${head}: ${err.message}\n${tail}`;
+}
+
+// Write every shipped key into the user file, keeping whatever is already set. An
+// old-shaped file is folded to the canonical shape in the same pass, so the operator's
+// file stops carrying keys swarm only tolerates.
+// Returns { path, created, migrated, migratedKeys, added } — added = leaf keys filled
+// in this call, migratedKeys = the legacy keys the fold rewrote.
 export function initConfig(overridePath, env = process.env) {
   const path = userConfigPath(overridePath, env);
   const defaults = readDefaults();
   const created = !existsSync(path);
   const raw = created ? {} : parseUser(path);
-  const migrated = !created && legacyConfigWarnings(raw).length > 0;
+  const migratedKeys = created ? [] : legacyKeys(raw);
   const user = normalizeConfigInput(raw);
   const added = [];
   for (const key of leafKeys(defaults)) {
@@ -228,6 +267,19 @@ export function initConfig(overridePath, env = process.env) {
     setPath(user, key, getPath(defaults, key).value);
     added.push(key);
   }
-  if (created || migrated || added.length) writeAtomic(path, user);
-  return { path, created, migrated, added };
+  // Validate AFTER the fill, immediately before the write. A sparse legacy file
+  // ({"provider": {}}) sets no `enabled` of its own and is only valid once the
+  // defaults supply it, so judging the fragment would refuse a file that loads fine
+  // today. A write the next loadConfig rejects is worse than a refusal: the operator
+  // loses the shape they understood and gains one that does not load.
+  try {
+    validateConfig(user);
+  } catch (e) {
+    throw new Error(refuseToWrite(raw, path, migratedKeys.length > 0, e));
+  }
+  // Only a migration keeps a backup: the added.length path fires on every plugin
+  // update that ships a key, and a backup churned that often answers nothing.
+  if (migratedKeys.length) writeAtomic(path + ".bak", raw);
+  if (created || migratedKeys.length || added.length) writeAtomic(path, user);
+  return { path, created, migrated: migratedKeys.length > 0, migratedKeys, added };
 }
