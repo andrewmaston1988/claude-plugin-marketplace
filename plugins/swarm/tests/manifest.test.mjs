@@ -637,6 +637,40 @@ test("governance: an integrate-only manifest is still bounded by allowedRoots", 
   }
 });
 
+// A provider with NO allowedRoots at all is UNCONFIGURED, not mis-located. Every cwd fails
+// the check, so "dispatch from a repo under <list>" names an empty list and teaches nothing.
+// This is exactly what a fresh install hits: config.default.json ships claude with only
+// { enabled: true }, and dropping the Claude exemption made that deny every task.
+// RED while the refusal does not separate the two cases: it offers no setup route.
+test("governance: a provider with no allowedRoots is diagnosed as unconfigured, pointing at setup", () => {
+  const repo = tmp();
+  try {
+    const cfg = { ...CFG, providers: { claude: { enabled: true } } };
+    const p = writeManifest(repo, { tasks: [claudeTask()] });
+    const msg = errorsOf(() => loadManifest(p, cfg, repo)).join("|");
+    ok(msg.includes("/swarm:swarm setup"), "no setup route offered: " + msg);
+    ok(/has no .*allowedRoots configured/i.test(msg), "not diagnosed as unconfigured: " + msg);
+    ok(!msg.includes("dispatch from a repo under  "), "names an empty root list: " + msg);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// The shipped default config must either dispatch or say exactly how to fix itself. No
+// fixture-based test can catch this — every other row supplies its own roots, which is why
+// 1380 green tests sat on top of a plugin that refused every task on a clean install.
+test("governance: the SHIPPED default config refuses with a setup route, not a bare denial", () => {
+  const repo = tmp();
+  try {
+    const shipped = JSON.parse(readFileSync(new URL("../config.default.json", import.meta.url), "utf8"));
+    const msg = errorsOf(() => loadManifest(writeManifest(repo, { tasks: [claudeTask()] }), shipped, repo)).join("|");
+    ok(msg.length > 0, "shipped default unexpectedly dispatches with no roots configured");
+    ok(msg.includes("/swarm:swarm setup"), "shipped default gives no setup route: " + msg);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 test("digest.report: true and a steering string both survive to the plan", () => {
   const dir = tmp();
   try {
