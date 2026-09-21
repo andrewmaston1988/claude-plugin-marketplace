@@ -51,7 +51,7 @@ A `/goal`, Stop hook, or "just fix it" directive does **not** license any of the
 
 ## Data governance — read this first
 
-Non-Claude dispatch is **deny-by-default**. `providers.<name>.allowedRoots` in `~/.swarm/config.json` lists the directory roots where that provider's tasks may run; a non-Claude task whose effective `cwd` is not under its provider root **fails validation**, because the employer's data agreement covers Anthropic only — code outside those roots must never reach another provider. Claude-model tasks run anywhere, with one exception: `"isolation": "none"` reads its `cwd` in the live checkout rather than a tree, so it is root-gated for every model, Claude included. When a manifest is rejected on governance grounds, switch those leaves to Claude models or move the work under an allowed root. Never work around the gate.
+Dispatch is **deny-by-default, for every provider including Claude**. `providers.<name>.allowedRoots` in `~/.swarm/config.json` lists the directory roots where that provider's tasks may run; a task whose effective `cwd` is not under its provider's roots **fails validation**, and an empty list permits nothing. For a non-Claude provider the reason is the data agreement — the employer's covers Anthropic only, so code outside those roots must never reach another provider. For Claude it is containment: swarm runs nothing outside its configured roots. A provider with no `allowedRoots` entry therefore dispatches nothing until one is configured, which is what `swarm setup` writes. When a manifest is rejected on governance grounds, move the work under an allowed root or configure the root — never work around the gate.
 
 ## Routing — when to swarm
 
@@ -190,7 +190,7 @@ Every phrase below came from a session that read a *working* roster and moved to
 
 The red flags above are about a *healthy* run. The other failure class (2026-07-15) is a leaf that genuinely ended with nothing — and the damage was the *response*, not the empty result. When a **completed** leaf (its notification fired) left no work:
 
-1. Read `results/<id>.json` and, for an isolation leaf, `git log <target>..<branch>` — confirm it is genuinely empty. (The engine now marks a leaf that died mid-stream `failed`, not `ok`, so this is usually already flagged for you.)
+1. Read `results/<id>.json` and, for a leaf with a tree, `git log <target>..<branch>` — confirm it is genuinely empty. (The engine now marks a leaf that died mid-stream `failed`, not `ok`, so this is usually already flagged for you.)
 2. If empty, **re-dispatch a FRESH manifest name** (new run dir). If it rat-holed (a leaf sitting in a long silent thinking turn), fix the PROMPT first — add "write files as you go, commit early" and pre-resolve the one genuinely ambiguous step, so the leaf emits frequent tool calls instead of one long output-less turn.
 3. **Never** kill a process, `rm -rf` a run dir, or `branch -D` a worktree branch to "clean up" — that is the operator's call alone. And never relay a leaf's self-report, or your own guess, as the cause: verify the OUTPUT (the diff, the result file), not the running process. A `swarm stop <resultsDir>` keeps the worktree and the run resumes; leaf grandchildren (a cargo build) still run to completion.
 
@@ -217,12 +217,11 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "effort": "medium",                        // optional; defaults to the model's declared default or medium; validated when the provider declares levels
     "allowedTools": "Read,Grep,Glob",          // default: read-only set
     "cwd": "C:/code/somerepo",                 // default: manifest's cwd
-    "isolation": "worktree",                   // private tree (implementation leaves); omit = default tree (see Leaf shapes); OR
-                                               //   "none" — read in place, read-only leaves only, cwd under allowedRoots; OR
-                                               //   { "worktree": "feat" } — SHARED tree, phased chains — swarm:executing-swarms
-                                               //   optional "branch": names the branch explicitly (default swarm/<worktree>)
-                                               //   optional "from": base this tree on that task's branch, not repo HEAD
-                                               //     (that task must WRITE — a read-only task owns no branch)
+    "workspace": "feat",                       // optional, writers only: the name of a tree SHARED with
+                                               //   other leaves, which must be totally ordered by `after`.
+                                               //   Omit it and a writer gets its own tree; a reader gets none.
+    "branch": "swarm/eco-p3",                  // optional, writers only: a stable branch instead of the
+                                               //   derived run-scoped one — which opts out of run scoping
     "fallbackProvider": "ollama", "fallbackModel": "glm-5.2:cloud",          // optional; auto-switch on quota / exhausted rate-limit retries (governance-validated)
     "outputDir": "…",                          // generation leaves
     "timeoutMs": 3600000,
@@ -262,12 +261,12 @@ a second manifest is almost never needed. Invoke it before drafting, alongside
 |---|---|
 | Investigation | Read-only tools (the default), closed question, ≤10-bullet return contract |
 | Review | Prompt demands a JSON verdict; engine stores raw + parsed |
-| Generation | `outputDir`; no isolation field needed |
-| Implementation | `isolation: "worktree"` — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the two required lines below |
+| Generation | `outputDir`; nothing to declare |
+| Implementation | write tools — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the two required lines below |
 
-Every leaf that spawns a session starts in a tree, never the live checkout. With no `isolation` field: a read-only leaf shares one frozen snapshot of the repo (it sees uncommitted work, not gitignored files); a write-capable leaf (Edit/Write/Bash) gets a private worktree on HEAD, on a run-scoped branch `swarm/<run>/<id>`. The task's `cwd` must be inside a git repo.
+**The write tools decide where a leaf runs, and nothing else does.** A leaf holding `Edit`, `Write` or `Bash` gets a private worktree on HEAD, on a run-scoped branch `swarm/<run>/<id>`; a read-only leaf reads the live repo at the `cwd` it was given. Only a writer needs its `cwd` inside a git repo — a reader reads logs or a data dump outside any repo just as well.
 
-To read in place instead (gitignored data, a path outside any repo) set `"isolation": "none"` with a `cwd`: read-only leaves only, and `cwd` must sit under `provider.allowedRoots` when roots are configured — for every model, Claude included.
+Name a `workspace` only when leaves must SHARE one tree, and a `branch` only when the branch name must be stable. Both are writer-only, both are omitted by the common case, and `swarm validate` names either if it is wrong.
 
 ### Two lines every Bash-running leaf's prompt carries, verbatim
 

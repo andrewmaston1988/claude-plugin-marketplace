@@ -3,64 +3,58 @@
 Deep reference for six manifest features. Read when you are actually writing one of
 these fields; the decision of *whether* to use them lives in SKILL.md.
 
-### Where a leaf runs — `isolation`
+### Where a leaf runs — the write tools decide
 
-Every leaf that spawns a session gets a tree. `isolation` only says *which*; omitting it
-does not mean "run in the operator's checkout".
+**A leaf that can write gets its own tree; a leaf that cannot reads the live repo.** Nothing
+declares this — `allowedTools` already says which a leaf is, and a second field saying the
+same thing is a second field to disagree with.
 
-| `isolation` | The leaf runs in | `isolationMode` |
+| The leaf holds | It runs in | Its branch |
 |---|---|---|
-| omitted, read-only tools | one frozen snapshot of its repo, shared with the run's other readers | `snapshot` |
-| omitted, write-capable tools | its own worktree, on `swarm/<runKey>/<id>` | `private` |
-| `"worktree"` | its own worktree, on `swarm/<id>` | — |
-| `{ "worktree": "feat" }` | a worktree shared with every other link naming `feat`, which must be totally ordered by `after` | — |
-| `"none"` | its `cwd`, in place | `none` |
+| `Read,Grep,Glob` (the default) | the live repo, at the `cwd` it was given | none — it commits nothing |
+| `Edit`, `Write` or `Bash` | a private worktree on repo HEAD | `swarm/<run>/<id>`, scoped to this run |
 
-"Write-capable" is `allowedTools` containing a write tool; the default `"Read,Grep,Glob"`
-is not. So granting `Bash` to a leaf silently moves it from the shared snapshot to a
-private worktree with its own branch — intended, and worth knowing when you add the tool.
+So granting `Bash` to a leaf moves it out of the live repo into a tree of its own. That is
+intended, and worth knowing when you add the tool.
 
-A snapshot holds the operator's uncommitted work: a reader sees the tree as it was at run
-start, including edits and untracked files, and cannot be disturbed by later ones. A
-private worktree bases on HEAD instead, so a leaf's branch never carries a synthetic
-commit of somebody's half-finished work.
+A writer sits at the same depth in its tree as in the live checkout, so cwd-relative paths in
+its prompt still resolve. A gitignored cwd (`build/`, `.claude/worktrees/x`) is created in the
+tree, since the checkout never carried it.
 
-`"none"` is the opt-out, and it is narrow:
+Two optional keys, both writer-only, both omitted by the common case:
 
-- **Read-only only.** A leaf holding a write tool is refused at validation — a leaf that
-  can write always gets a tree.
-- **Root-gated for every model, Claude included.** When `provider.allowedRoots` is
-  non-empty and the leaf's `cwd` is outside all of them, it is refused. With no roots
-  configured the gate is inert.
+- **`workspace`** — the name of a tree SHARED with other leaves. Reach for it when leaves must
+  accumulate on one branch (a phased chain). Every leaf naming one workspace must be totally
+  ordered by `after`: two unordered members would race in one directory, and validation
+  refuses them.
+- **`branch`** — a stable branch name instead of the derived one. Naming it opts out of run
+  scoping by construction, so a second run of the same manifest meets the first's kept tree.
+  That is the point of naming it; `prepareIsolation` still refuses to reset a tree holding
+  unlanded commits.
 
-Reach for it to read something outside any repo, or gitignored content a snapshot would
-not carry: dispatch from a repo and give the task `"isolation": "none"` with a `cwd`
-elsewhere under a root.
-
-A task `cwd` that is not inside a git repository is refused, because there is no repo to
-snapshot or branch from. The error names `"none"` as the way out. `compute`, `integrate`
-and `manifest` nodes spawn no leaf, so none of this applies to them.
-
-The object form takes two more optional keys: `"branch"` names the branch explicitly
-instead of deriving it, and `"from"` bases the tree on another task's branch rather than
-repo HEAD — that task must be one that WRITES, since a read-only task owns no branch. A
-default-private writer is a valid `from` source; a reader and a `"none"` task are not.
+A writer whose `cwd` is not inside a git repository is refused — there is no repo to branch
+from. A reader has no such constraint: it reads wherever it was pointed, which is how a leaf
+reads logs or a data dump outside any repo. `compute`, `integrate` and `manifest` nodes spawn
+no leaf, so none of this applies, and naming either key on one is refused.
 
 ```json
 {
   "tasks": [
     { "id": "survey", "provider": "claude", "model": "claude-haiku-4-5-20251001", "prompt": "…" },
     { "id": "impl", "provider": "claude", "model": "claude-sonnet-5", "allowedTools": "Read,Edit,Bash", "prompt": "…" },
-    { "id": "follow", "provider": "claude", "model": "claude-sonnet-5", "after": ["impl"], "allowedTools": "Read,Edit,Bash",
-      "isolation": { "worktree": "follow", "from": "impl" }, "prompt": "…" },
-    { "id": "read-logs", "provider": "claude", "model": "claude-haiku-4-5-20251001", "cwd": "C:/logs", "isolation": "none", "prompt": "…" }
+    { "id": "review", "provider": "claude", "model": "claude-sonnet-5", "after": ["impl"], "allowedTools": "Read,Edit,Bash",
+      "workspace": "feat", "prompt": "…" },
+    { "id": "read-logs", "provider": "claude", "model": "claude-haiku-4-5-20251001", "cwd": "C:/logs", "prompt": "…" }
   ]
 }
 ```
 
-`survey` gets the run's shared snapshot; `impl` gets a private worktree on a run-scoped
-branch without asking; `follow` branches off `impl`'s work; `read-logs` reads a directory
-that is not a repo at all.
+`survey` reads the live repo; `impl` gets a private tree without asking; `review` shares the
+`feat` tree with anything else naming it; `read-logs` reads a directory that is not a repo.
+
+**To start a tree from another task's commits, use an `integrate` node** — it creates the
+target tree and merges the named branches into it. There is no key for basing one tree on
+another's branch.
 
 ### Provider identity
 

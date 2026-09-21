@@ -1,4 +1,4 @@
-# Topology field semantics — `after`, `isolation.from`, `integrate`
+# Topology field semantics — `after`, `workspace`, `integrate`
 
 Read this when a manifest's width changes more than once: a fan-out feeding a shared step,
 private trees seeded from another task's branch, or branches folded back together. The shapes
@@ -11,46 +11,26 @@ its `after` names only `helper`. Referencing it anyway fails validation; add the
 `after` too (`["helper", "survey-a"]`). The extra edge changes no ordering, it declares what the
 prompt reads.
 
-## A private tree branches from repo HEAD unless you say otherwise
+## A tree is ALWAYS based on repo HEAD — `integrate` is what seeds it
 
-`"from": "<task id>"` bases it on that task's branch instead, so the leaf starts with the code
-it depends on. `validate` rejects a source that can end without ever committing — a branch that
-was never created cannot be based on. `isolation.from` must name a task that:
-
-- **is a declared dependency** — in this leaf's `after`, so its branch is guaranteed to exist by
-  the time this leaf starts;
-- **owns a branch** — an explicit `isolation` block, or a write-capable task with no `isolation`
-  (it gets a private tree by default). A read-only task with none runs in a shared snapshot tree,
-  and `isolation: "none"` runs in place; neither gets a branch;
-- **is not `when`-gated** — a false gate skips the task before its worktree is created, so the
-  branch may never exist; and
-- **holds write tools** — see "A task only owns a branch if it COMMITS" below; the same
-  reasoning `integrate.from` uses applies here.
-
-**A `skipped` source is the live failure this guard catches.** A skipped task never runs its
-body, so even one with an `isolation` block leaves no branch behind if its gate — or an
-upstream failure — skipped it. Before this guard existed, tasks naming a skipped source as
-`from` did not fail at `validate`: `prepareIsolation` resolved `baseRef` however its fallback
-happened to work out, and leaves reported success built on the wrong code. The run-time
-backstop closes the gap `validate` cannot: if `baseRef` is ever handed to `prepareIsolation` and
-does not resolve — the source's branch never existed, or existed and was later cleaned up — it
-throws instead of falling back, and the leaf fails loudly rather than quietly building on the
-wrong base.
-
-## `from` names a TASK that commits, not the STAGE this leaf follows
-
-Ordering is what `after` expresses; `from` answers a narrower question — whose branch carries
-the code. In a fan-out → review → fan-out shape those are different tasks by construction: the
-last task in a stage is usually a reviewer, and a reviewer owns no branch, so `from` must reach
-*past* it to the last writer. Pass the reviewer's findings as information instead:
+There is no key for basing one tree on another's branch. A leaf that must start from another
+task's commits is preceded by an agentless `integrate` node, which creates the target tree and
+merges the named branch into it:
 
 ```json
-{ "after": ["review", "extract"],
-  "isolation": { "worktree": "impl", "from": "extract" },
+{ "id": "seed-impl", "after": ["extract"], "integrate": { "into": "impl", "from": ["extract"] } },
+{ "id": "impl", "after": ["seed-impl", "review"], "workspace": "impl",
+  "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
   "prompt": "The reviewer reported: {{result:review}} …" }
 ```
 
-`from` is where the CODE comes from; `{{result:X}}` is where the INFORMATION comes from.
+The seed is where the CODE comes from; `{{result:X}}` is where the INFORMATION comes from. The
+seed node names the last task that WRITES, never the reviewer between them — a reviewer holds no
+write tools, so it owns no branch to merge.
+
+This is one mechanism instead of two, and it is why the old `isolation.from` guards are gone:
+`integrate.from`'s own checks below cover the same failure modes (a non-dependency, a
+`when`-gated source, a source that commits nothing), in one place.
 
 ## A task only owns a branch if it COMMITS
 
@@ -67,7 +47,7 @@ survives the sweep even carrying nothing, because a merge needs the REF, not its
 `git merge` on an empty branch reports `Already up to date`. So a survey wave where only some
 leaves find work to do is a legitimate shape, and the integrate over all of them completes.
 
-Note the asymmetry with `isolation.from` above: `from` needs the source's *commits*, so a
+Note the asymmetry with a seed node: seeding needs the source's *commits*, so a
 source that commits nothing genuinely has nothing to offer. `integrate.from` needs only the
 ref. Same word, different requirement.
 
@@ -82,7 +62,7 @@ named task's branch into `into`:
   "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } }
 ```
 
-Every id in `from` must be a task that WRITES, for the same reason `isolation.from` must be: a
+Every id in `from` must be a task that WRITES, and for the obvious reason: a
 read-only task has no branch to merge. The one exception is a `forEach` parent — see below.
 
 **A conflict is not a failure.** The merge stops with markers in the tree, the node stays `ok`,
@@ -98,7 +78,7 @@ performs, applied one step later:
 
 ```json
 { "id": "fix", "after": ["find-sites"], "forEach": { "from": "find-sites", "path": "sites", "maxItems": 30 },
-  "provider": "ollama", "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
+  "provider": "ollama", "model": "glm-5.2:cloud", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
 { "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
 ```
 
@@ -119,7 +99,7 @@ markers with the node `ok`. Everything else follows from that:
 
 The tree lives under the run's `resultsDir`, so a later manifest naming the same worktree gets a
 *new* tree — and its branch `swarm/<name>` already exists, which fails. To put a tree on a
-specific branch, name it: `"isolation": { "worktree": "p3", "branch": "swarm/eco-p3" }`. The
+specific branch, name it: `"workspace": "p3", "branch": "swarm/eco-p3"`. The
 engine refuses to reset a branch carrying commits HEAD does not have, so a previous run's phases
 cannot be silently discarded.
 

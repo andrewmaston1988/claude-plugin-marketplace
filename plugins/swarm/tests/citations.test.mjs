@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -260,6 +260,8 @@ test("verifyCitations: a fragment of a 200-char decompiled line verifies (false-
 
 const CFG = {
   provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },
+  // allowedRoots gates Claude too now; every fixture lives under tmpdir.
+  providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } },
   concurrency: 4,
   timeoutMs: 600000,
   resultInlineCap: 4000,
@@ -507,7 +509,13 @@ test("validate CLI: announces mechanical citation verification; opt-out omits th
         { id: "loose", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001", returns: SITES_SCHEMA, verifyCitations: false },
       ],
     }));
-    const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    // allowedRoots gates every provider now, so a real CLI run needs a configured root —
+    // the shipped default has none, which is what the setup wizard exists to write.
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "config.json"),
+      JSON.stringify({ providers: { claude: { enabled: true, allowedRoots: [dir] } } }));
+    const r = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     const line = r.stdout.split("\n").find((l) => l.includes("citations verified mechanically"));
     ok(line, r.stdout);

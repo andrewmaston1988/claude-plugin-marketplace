@@ -316,7 +316,7 @@ test("runnerOf: launch-mode wrapper whose binary isn't claude → that binary na
 
 // ── manifest: mustRead shape validation, normalisation, effectivePlanDoc ───────
 
-const manCfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 600000, resultInlineCap: 4000 };
+const manCfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 600000, resultInlineCap: 4000 };
 function writeMan(dir, body, name = "plan.json") { const p = join(dir, name); writeFileSync(p, JSON.stringify(body)); return p; }
 function manErrors(fn) {
   try { fn(); } catch (e) { ok(e instanceof ValidationError, `expected ValidationError, got ${e}`); return e.errors; }

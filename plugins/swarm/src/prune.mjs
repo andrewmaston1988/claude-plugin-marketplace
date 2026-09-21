@@ -93,16 +93,6 @@ export function execute(rows, git, fs) {
   }
 }
 
-// The refs a run's snapshots pinned in `repo`. They can hold untracked secrets, so prune deletes them.
-export function snapshotRefs(git, repo, runKey) {
-  const r = git(["for-each-ref", "--format=%(refname)", `refs/swarm/snapshots/${runKey}/`], repo);
-  return r.status === 0 ? r.stdout.split("\n").map((s) => s.trim()).filter(Boolean) : [];
-}
-
-export function deleteSnapshotRefs(git, repo, refs) {
-  for (const ref of refs) git(["update-ref", "-d", ref], repo);
-}
-
 function gb(bytes) {
   return (bytes / 1024 ** 3).toFixed(2);
 }

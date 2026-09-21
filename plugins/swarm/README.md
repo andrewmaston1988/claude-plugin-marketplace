@@ -129,7 +129,7 @@ dominates:
 | ***Parity — either tool does these well*** | | |
 | Parallel fan-out — concurrency caps, dependency ordering, pipelining | ✅ | ✅ |
 | Per-agent model + effort selection | ✅ | ✅ |
-| Worktree isolation for write-capable agents | ✅ | ✅ |
+| A private worktree for every write-capable agent | ✅ | ✅ |
 | Leaves run foreground-only — a headless session that yields its turn is over, so `run_in_background` is denied inside a leaf | ✅ `hooks/foreground-guard.mjs` | — |
 | Per-repo PreToolUse hook — a repo-owned script sees every tool call inside its leaves and can deny it | ✅ `hooks/leaf-guard.mjs` | — |
 | Full headless Claude Code agents — complete tool roster | ✅ | ✅ |
@@ -217,7 +217,7 @@ worst-case leaf count.
     { "id": "find-sites", "provider": "ollama", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: {\"sites\":[…]}" },
     { "id": "dedupe", "after": ["find-sites"], "compute": "unique_by(deps['find-sites'].sites, 'file')" },
     { "id": "fix", "after": ["dedupe"], "forEach": { "from": "dedupe", "path": "", "maxItems": 30 },
-      "provider": "ollama", "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}" },
+      "provider": "ollama", "model": "glm-5.2:cloud", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "Fix {{item.file}}:{{item.line}}" },
     { "id": "escalate", "after": ["fix", "dedupe"], "when": { "from": "dedupe", "expr": "length(value) > 20" },
       "provider": "claude", "model": "claude-sonnet-5", "prompt": "…{{result:fix}}…" }
   ] }
@@ -235,7 +235,7 @@ worst-case leaf count.
   `flatten`, `min/max/sum`, `contains`, comparisons, 500-char cap) rather than `eval`,
   since manifests may themselves be model-authored.
 
-## Widening after a narrow step — `isolation.from` and `integrate`
+## Widening after a narrow step — `workspace` and `integrate`
 
 Private trees branch from repo HEAD and never see each other's commits, so a fan-out that
 follows a shared step needs a way to start from that step's work and a way to fold results
@@ -243,21 +243,21 @@ back:
 
 ```json
 { "tasks": [
-    { "id": "helper", "provider": "ollama", "model": "glm-5.2:cloud", "isolation": { "worktree": "feat" },
+    { "id": "helper", "provider": "ollama", "model": "glm-5.2:cloud", "workspace": "feat",
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…write the helper. Commit before you finish." },
 
     { "id": "migrate-x", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["helper"],
-      "isolation": { "worktree": "migrate-x", "from": "helper" },
+      "workspace": "migrate-x",
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…Commit before you finish." },
     { "id": "migrate-y", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["helper"],
-      "isolation": { "worktree": "migrate-y", "from": "helper" },
+      "workspace": "migrate-y",
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "…Commit before you finish." },
 
     { "id": "join", "after": ["migrate-x", "migrate-y"],
       "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
 
     { "id": "cleanup", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["join"],
-      "isolation": { "worktree": "feat" }, "prompt": "…resolve {{result:join}}, run the suite. Commit." }
+      "workspace": "feat", "prompt": "…resolve {{result:join}}, run the suite. Commit." }
   ] }
 ```
 
@@ -272,7 +272,7 @@ holding `helper`'s commit, then `join` merges both into `feat`, and `cleanup` ca
 
 ### Folding a `forEach` fan-out back — `integrate.from` naming the parent
 
-"Discover N sites, fix each in isolation, fold together" is `forEach` writing in
+"Discover N sites, fix each in its own tree, fold together" is `forEach` writing in
 worktrees, then `integrate` naming the `forEach` task — every clone that actually expanded
 merges, in index order:
 
@@ -280,7 +280,7 @@ merges, in index order:
 { "tasks": [
     { "id": "find-sites", "provider": "ollama", "model": "glm-5.2:cloud", "prompt": "…return ONLY JSON: {\"sites\":[…]}" },
     { "id": "fix", "after": ["find-sites"], "forEach": { "from": "find-sites", "path": "sites", "maxItems": 30 },
-      "provider": "ollama", "model": "glm-5.2:cloud", "isolation": "worktree", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
+      "provider": "ollama", "model": "glm-5.2:cloud", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
 
     { "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
   ] }
@@ -306,14 +306,17 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
                               # still has every session id on disk for resume to fall back to
 ```
 
-`isolation` is either the string `"worktree"` — a private tree keyed by the leaf's own id —
-or an object:
+**A leaf's tree follows from its tools.** `Edit`/`Write`/`Bash` ⇒ a private worktree on repo
+HEAD, on the run-scoped branch `swarm/<run>/<id>`; read-only ⇒ the live repo at the leaf's own
+`cwd`. Two optional keys refine it, both writer-only:
 
 | Key | Effect |
 |---|---|
-| `worktree` | Every leaf naming this name meets in **one** tree on one branch, so an ordered chain accumulates. Links sharing a name must be totally ordered by `after`; `forEach` cannot share a tree. |
-| `branch` | Names the branch explicitly instead of deriving it from the worktree name (default `swarm/<worktree>`). |
-| `from` | Bases this tree on **that task's branch tip** instead of repo HEAD. The named task must be a dependency, worktree-isolated, and write-capable; a `forEach` parent is rejected (its clones own the branches). |
+| `workspace` | Every leaf naming it meets in **one** tree on one branch, so an ordered chain accumulates. Members must be totally ordered by `after`; `forEach` cannot name one. |
+| `branch` | A stable branch name instead of the derived one — which opts out of run scoping, so a second run of the manifest meets the first's kept tree. |
+
+To start a tree from another task's commits, put an `integrate` node before it: the node creates
+the target tree and merges the named branches in. There is no key for it.
 
 `worktreesKept` in `summary.json` carries one entry per shared group. A branch with
 commits not yet landed (by patch, so squash-merges count) is never deleted or force-reset —
