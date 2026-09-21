@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { checkQuota } from "./quota.mjs";
 import { swarmHome } from "./config.mjs";
 import { readClaudeCatalog } from "./claude-models.mjs";
+import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 
 const PROVIDER_CAPABILITIES = new Set([
   "discoverModels",
@@ -12,13 +13,69 @@ const PROVIDER_CAPABILITIES = new Set([
   "costObservations",
 ]);
 
+// Shape test local to this module: config.mjs owns its own for the user-file validation
+// rules, and importing it here would couple the two.
+function isConfigObject(v) {
+  return v !== null && typeof v === "object" && !Array.isArray(v);
+}
+
 export function providerConfig(config = {}, id) {
   const canonical = config?.providers?.[id];
   if (canonical && typeof canonical === "object" && !Array.isArray(canonical)) return canonical;
   if (id === "ollama" && config?.provider && typeof config.provider === "object") return config.provider;
   if (id === "codex" && config?.codex && typeof config.codex === "object") return config.codex;
-  if (id === "codex" && !config?.providers && !config?.provider && !config?.codex) return config;
+  // A bare codex config has no provider block at all — the file IS the block. Guarded on
+  // shape: a `null` config (a hook with no ~/.swarm/config.json yet) satisfied every `!`
+  // test and was returned as a null block, crashing any caller that read a key off it.
+  if (id === "codex" && isConfigObject(config) && !config.providers && !config.provider && !config.codex) return config;
   return {};
+}
+
+// One resolution point for the two levels. A provider entry may only ever REMOVE a root
+// from the top-level list — never add one, never replace it — so the result is the
+// intersection. Each pair resolves to its NARROWER side by containment: isUnderRoot is
+// asymmetric, so "keep whichever side we happened to read" is fail-open (a provider naming
+// C:/ against a top-level C:/code would hand back the whole drive), and a set-style
+// equality test drops the pair entirely, which looks fail-closed and permits nothing.
+//
+// `roots` is undefined when NEITHER level configures a list — never configured, which is a
+// different refusal from `[]`, the operator's deliberate denial. Collapsing the two would
+// silently rewrite the message #302 built. `deniedBy` names the key that actually binds:
+// with a bare array the caller can only guess, and guesses send the operator to a key where
+// editing the roots has no effect.
+export function allowedRootsFor(config = {}, id) {
+  const top = Array.isArray(config?.allowedRoots) ? config.allowedRoots : undefined;
+  const own = providerConfig(config, id).allowedRoots;
+  const topLabel = "allowedRoots";
+  // A canonical provider block puts the key under `providers`; the legacy spelling lives at
+  // the root of the file. Same rule the refusal text has always used.
+  const ownLabel = config?.providers?.[id] ? `providers.${id}.allowedRoots` : "provider.allowedRoots";
+  if (own === undefined) return { roots: top, deniedBy: top === undefined ? ownLabel : topLabel };
+  if (top === undefined) return { roots: own.slice(), deniedBy: ownLabel };
+  return { roots: intersectRoots(own, top), deniedBy: bindsAtTopLevel(own, top) ? topLabel : ownLabel };
+}
+
+function intersectRoots(own, top) {
+  const out = [];
+  const seen = new Set();
+  for (const a of own) {
+    for (const b of top) {
+      const kept = isUnderRoot(a, b) ? a : isUnderRoot(b, a) ? b : null;
+      if (kept === null) continue;
+      const key = normalizeForCompare(kept);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(kept);
+    }
+  }
+  return out;
+}
+
+// True when the top-level list is the closer constraint — it sits under every root the
+// provider named, so it is the key whose edit changes what is permitted.
+function bindsAtTopLevel(own, top) {
+  if (own.every((root) => top.some((t) => isUnderRoot(root, t)))) return false;
+  return top.every((root) => own.some((o) => isUnderRoot(root, o)));
 }
 
 function adapterShape(adapter) {

@@ -102,14 +102,22 @@ function legacyConfigWarnings(input) {
   return warnings;
 }
 
+// Both levels take the same shape. An empty array is valid and means "deny everything"
+// — a deliberate denial, not the absence of configuration, so `undefined` is left alone.
+function validateAllowedRoots(value, label) {
+  if (value !== undefined && (!Array.isArray(value) || value.some((root) => typeof root !== "string" || !root))) {
+    throw new Error(`${label} must be an array of non-empty path strings`);
+  }
+}
+
 function validateProviderConfig(cfg) {
   if (!isPlainObject(cfg.providers)) throw new Error('providers must be an object — e.g. "providers": {"codex": {"enabled": false}}');
+  // Top level is the default every provider inherits; a provider entry narrows it.
+  validateAllowedRoots(cfg.allowedRoots, "allowedRoots");
   for (const [id, provider] of Object.entries(cfg.providers)) {
     if (!isPlainObject(provider)) throw new Error(`providers.${id} must be an object`);
     if (typeof provider.enabled !== "boolean") throw new Error(`providers.${id}.enabled must be true or false`);
-    if (provider.allowedRoots !== undefined && (!Array.isArray(provider.allowedRoots) || provider.allowedRoots.some((root) => typeof root !== "string" || !root))) {
-      throw new Error(`providers.${id}.allowedRoots must be an array of non-empty path strings`);
-    }
+    validateAllowedRoots(provider.allowedRoots, `providers.${id}.allowedRoots`);
   }
 }
 

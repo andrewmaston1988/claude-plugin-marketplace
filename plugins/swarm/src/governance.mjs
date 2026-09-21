@@ -1,4 +1,4 @@
-import { providerConfig } from "./providers.mjs";
+import { allowedRootsFor } from "./providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
 // Cyclic on purpose: ValidationError is manifest.mjs's, and it is only ever
 // referenced inside checkRunRoots' body — never at module-evaluation time.
@@ -17,33 +17,37 @@ function unconfigured(provider, rootLabel) {
 // statement of where swarm may run anything. The old `claude` early return made the roots
 // list a non-Anthropic policy, which left the Claude leaves that do the writing ungated.
 export function checkGovernance(provider, model, effCwd, l, cfg, errors) {
-  const configured = providerConfig(cfg, provider).allowedRoots;
-  const allowedRoots = configured || [];
-  const rootLabel = cfg?.providers?.[provider] ? `providers.${provider}.allowedRoots` : "provider.allowedRoots";
-  // Absent, not merely empty: an explicit [] is a deliberate denial and keeps the
-  // data-governance wording, while a provider never given the key has nothing to say.
-  if (configured === undefined) {
-    errors.push(`${l}: ${unconfigured(provider, rootLabel)}`);
+  // The top-level list is the default; a provider entry narrows it and can never widen it.
+  // `roots === undefined` is a provider nobody ever configured — a different refusal from
+  // the explicit [] that denies on purpose, and the label names whichever key binds.
+  const { roots, deniedBy } = allowedRootsFor(cfg, provider);
+  if (roots === undefined) {
+    errors.push(`${l}: ${unconfigured(provider, deniedBy)}`);
     return;
   }
-  if (!allowedRoots.some((root) => isUnderRoot(effCwd, root))) {
+  if (!roots.some((root) => isUnderRoot(effCwd, root))) {
     errors.push(
       `${l}: provider '${provider}' model '${model}' and its cwd '${effCwd}' is not under any ` +
-      `${rootLabel} entry — ${provider === "claude"
+      `${deniedBy} entry — ${provider === "claude"
         ? `swarm runs nothing outside its configured roots`
         : `blocked by data governance policy (only Anthropic is covered by the data agreement)`}. ` +
-      `Configure ${rootLabel} in ~/.swarm/config.json to permit this provider there.`
+      `Configure ${deniedBy} in ~/.swarm/config.json to permit this provider there.`
     );
   }
 }
 
 export function checkRunRoots(gateIds, cfg, toplevel, errors) {
-  const gateRoots = [...new Set(gateIds.flatMap((id) => providerConfig(cfg, id).allowedRoots || []))];
+  // Resolved per seated provider, so a top-level list bounds the run too. The label comes
+  // from the provider that actually binds: naming providers.<id>.allowedRoots when the
+  // top-level key is the constraint sends the operator to a key with no effect.
+  const gate = gateIds.map((id) => ({ id, ...allowedRootsFor(cfg, id) }));
+  const gateRoots = [...new Set(gate.flatMap((g) => g.roots || []))];
   if (gateRoots.length && !gateRoots.some((root) => isUnderRoot(toplevel, root))) {
+    const labels = [...new Set(gate.map((g) => g.deniedBy))].join(" / ");
     errors.push(
       `swarm: this run's repo '${toplevel}' is not under any allowedRoots entry for the providers it seats ` +
       `(${gateIds.join(", ")}) — dispatch from a repo under ${gateRoots.join(", ")}, or add its root to ` +
-      `${gateIds.map((id) => `providers.${id}.allowedRoots`).join(" / ")} in ~/.swarm/config.json`
+      `${labels} in ~/.swarm/config.json`
     );
     throw new ValidationError(errors);
   }

@@ -318,3 +318,172 @@ test("governance: allowedRoots gates Claude too — the exemption is gone", () =
     ok(errorsOf(() => loadManifest(p, cfg, dir)).join("\n").match(/allowedRoots/));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ── allowedRoots: one top-level list, per-provider narrowing ──────────────────
+// A top-level key states the common case once; a provider entry may only ever REMOVE a
+// root from it. The widening half is what separates intersection from override, and an
+// override implementation passes every other row in this section.
+
+const ollamaTask = (over = {}) => ({ id: "o", prompt: "p", provider: "ollama", model: "minimax-m3:cloud", ...over });
+
+test("governance: a top-level allowedRoots alone permits a provider with no entry of its own", () => {
+  const repo = tmp();
+  try {
+    const p = writeManifest(repo, { tasks: [ollamaTask()] });
+    const cfg = {
+      ...CFG,
+      allowedRoots: [repo],
+      providers: { claude: { enabled: true }, ollama: { enabled: true } },
+    };
+    equal(loadManifest(p, cfg, repo).tasks[0].model, "minimax-m3:cloud");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Narrowing cuts BOTH ways: a root the top level allows but the provider's own list omits
+// is refused, and the refusal names the provider key — the only one that can fix it.
+test("governance: a provider entry narrows the top-level list", () => {
+  const repo = tmp();
+  const narrow = join(repo, "narrow");
+  const wide = join(repo, "wide");
+  mkdirSync(narrow, { recursive: true });
+  mkdirSync(wide, { recursive: true });
+  try {
+    const cfg = {
+      ...CFG,
+      allowedRoots: [repo],
+      providers: { claude: { enabled: true }, ollama: { enabled: true, allowedRoots: [narrow] } },
+    };
+    const inside = writeManifest(narrow, { tasks: [ollamaTask()] }); // task cwd defaults to the manifest's dir
+    equal(loadManifest(inside, cfg, narrow).tasks[0].model, "minimax-m3:cloud");
+
+    const outside = writeManifest(narrow, { tasks: [ollamaTask({ cwd: wide })] }, "outside.json");
+    const errs = errorsOf(() => loadManifest(outside, cfg, narrow));
+    ok(errs.some((e) => e.includes("data governance") && e.includes("providers.ollama.allowedRoots")), errs.join("|"));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// Override returns the provider's own list here and dispatches; intersection returns the
+// empty set and refuses. A root named only in a provider's list may never be granted.
+test("governance: a provider entry cannot widen past the top-level list", () => {
+  const repo = tmp();
+  const elsewhere = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      allowedRoots: [repo],
+      providers: { claude: { enabled: true }, ollama: { enabled: true, allowedRoots: [elsewhere] } },
+    };
+    const errs = errorsOf(() => loadManifest(writeManifest(elsewhere, { tasks: [ollamaTask()] }), cfg, elsewhere));
+    ok(errs.some((e) => e.includes("data governance")), errs.join("|"));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+// An explicit [] is the operator saying no. It keeps the data-governance wording and names
+// the key that carries it — never the "unconfigured, run setup" route, which would tell a
+// user who denied the root on purpose that they had never configured anything.
+test("governance: an explicit [] at the top level denies, with the deliberate-denial wording", () => {
+  const repo = tmp();
+  try {
+    const cfg = { ...CFG, allowedRoots: [], providers: { claude: { enabled: true }, ollama: { enabled: true } } };
+    const msg = errorsOf(() => loadManifest(writeManifest(repo, { tasks: [ollamaTask()] }), cfg, repo)).join("|");
+    ok(msg.includes("data governance"), msg);
+    ok(msg.includes("allowedRoots"), msg);
+    ok(!/has no .*allowedRoots configured/i.test(msg), "deliberate denial read as unconfigured: " + msg);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test("governance: an explicit [] on the provider denies, naming the provider key", () => {
+  const repo = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      allowedRoots: [repo],
+      providers: { claude: { enabled: true }, ollama: { enabled: true, allowedRoots: [] } },
+    };
+    const msg = errorsOf(() => loadManifest(writeManifest(repo, { tasks: [ollamaTask()] }), cfg, repo)).join("|");
+    ok(msg.includes("data governance") && msg.includes("providers.ollama.allowedRoots"), msg);
+    ok(!/has no .*allowedRoots configured/i.test(msg), "deliberate denial read as unconfigured: " + msg);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// The third unconfigured shape: no `providers` block at all. The already-landed rows cover
+// a provider block that merely omits the key; this is the legacy-shaped config.
+test("governance: a config with no providers block at all is unconfigured too", () => {
+  const repo = tmp();
+  try {
+    const cfg = { ...CFG, providers: undefined };
+    const msg = errorsOf(() => loadManifest(writeManifest(repo, { tasks: [claudeTask()] }), cfg, repo)).join("|");
+    ok(msg.includes("/swarm:swarm setup"), "no setup route offered: " + msg);
+    ok(/has no .*allowedRoots configured/i.test(msg), "not diagnosed as unconfigured: " + msg);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// The shipped artifact, not a fixture: deny-by-default is a property of what users install.
+// The shipped file gave ollama and codex `"allowedRoots": []` — a DELIBERATE denial nobody
+// wrote, which under intersection permanently disarms any top-level list. Deleting those two
+// entries is what moves this row from the deliberate-denial wording to the unconfigured one.
+test("governance: the SHIPPED default config leaves ollama and codex unconfigured, not denied", () => {
+  const repo = tmp();
+  try {
+    const shipped = JSON.parse(readFileSync(new URL("../config.default.json", import.meta.url), "utf8"));
+    const cases = [
+      ["ollama", "minimax-m3:cloud", shipped],
+      // enabled:false only gates dispatch; the branch under test is the roots one.
+      ["codex", "gpt-5-codex", { ...shipped, providers: { ...shipped.providers, codex: { ...shipped.providers.codex, enabled: true } } }],
+    ];
+    for (const [provider, model, cfg] of cases) {
+      const msg = errorsOf(() => loadManifest(writeManifest(repo, { tasks: [ollamaTask({ provider, model })] }), cfg, repo)).join("|");
+      ok(msg.includes("/swarm:swarm setup"), `${provider}: no setup route: ${msg}`);
+      ok(/has no .*allowedRoots configured/i.test(msg), `${provider}: not the unconfigured wording: ${msg}`);
+      ok(!msg.includes("data governance"), `${provider}: a list the user never wrote read as a deliberate denial: ${msg}`);
+    }
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// The compatibility floor: every config already in the wild carries only per-provider keys.
+test("governance: a legacy config with only per-provider keys dispatches unchanged", () => {
+  const repo = tmp();
+  const elsewhere = tmp();
+  try {
+    const cfg = { ...CFG, providers: undefined, provider: { allowedRoots: [repo] } };
+    equal(loadManifest(writeManifest(repo, { tasks: [ollamaTask()] }), cfg, repo).tasks[0].model, "minimax-m3:cloud");
+
+    const msg = errorsOf(() => loadManifest(writeManifest(elsewhere, { tasks: [ollamaTask()] }), cfg, elsewhere)).join("|");
+    ok(msg.includes("provider.allowedRoots"), msg);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+// The run-level gate unions the seated providers' roots, so it must read the top level too —
+// and name it, since a fix applied to a provider key the operator has not written does nothing.
+test("governance: the run-level gate is bounded by a top-level list and names that key", () => {
+  const repo = tmp();
+  const elsewhere = tmp();
+  try {
+    const cfg = { ...CFG, allowedRoots: [elsewhere], providers: { claude: { enabled: true } } };
+    const msg = errorsOf(() => loadManifest(writeManifest(repo, { tasks: [claudeTask()] }), cfg, repo)).join("|");
+    ok(msg.includes(`this run's repo '${repo}'`), msg);
+    ok(msg.includes("allowedRoots"), msg);
+    ok(!msg.includes("providers.claude.allowedRoots"), "sent the operator to a key with no effect: " + msg);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});

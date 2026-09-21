@@ -30,3 +30,17 @@ test("reason mentions swarm, the retry escape hatch, and once-per-session", () =
   assert.match(r, /call Workflow again/i);
   assert.match(r, /once per session/i);
 });
+
+// The nudge asks "is the ALTERNATIVE-model path armed?" — Claude is excluded, so claude's
+// own roots must not arm it. Unifying this with the run gate is the naive-collapse bug.
+test("not armed when only claude has roots", () => {
+  const cfg = { providers: { claude: { enabled: true, allowedRoots: ["C:/personal"] }, ollama: { enabled: true } } };
+  assert.equal(decideNudge({ config: cfg, seen: null, sessionId: "s1" }), false);
+});
+
+test("armed when a non-Claude provider inherits the top-level list", () => {
+  const cfg = { allowedRoots: ["C:/personal"], providers: { claude: { enabled: true }, ollama: { enabled: true } } };
+  assert.equal(decideNudge({ config: cfg, seen: null, sessionId: "s1" }), true);
+  // Raw config.json, no defaults merge — a top-level key alone still arms the shipped providers.
+  assert.equal(decideNudge({ config: { allowedRoots: ["C:/personal"] }, seen: null, sessionId: "s1" }), true);
+});

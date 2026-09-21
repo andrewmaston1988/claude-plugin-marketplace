@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import { deepEqual, equal, ok, rejects, throws } from "node:assert/strict";
-import { createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join, sep } from "node:path";
+import { tmpdir } from "node:os";
+import { allowedRootsFor, createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
 import { assertProviderAdapterContract } from "./helpers/provider-contract.mjs";
 
 const config = {
@@ -119,4 +122,98 @@ test("provider and runner identifiers reject mixed case and surrounding whitespa
   throws(() => createProviderRegistry([{ ...base, id: "Fixture" }]), /canonical lowercase identifier/);
   throws(() => createProviderRegistry([{ ...base, id: " fixture" }]), /canonical lowercase identifier/);
   throws(() => createProviderRegistry([{ ...base, id: "fixture", runnerId: "Claude" }]), /canonical lowercase identifier/);
+});
+
+// ── allowedRootsFor: one resolution point for the two levels ──────────────────
+// A provider entry may only ever REMOVE a root from the top-level list. It returns
+// provenance, not a bare array: every operator-facing refusal has to name the key
+// where the fix actually has an effect.
+
+test("allowedRootsFor: a provider with no list of its own inherits the top-level one", () => {
+  const cfg = { allowedRoots: ["C:/code"], providers: { ollama: { enabled: true } } };
+  deepEqual(allowedRootsFor(cfg, "ollama").roots, ["C:/code"]);
+  equal(allowedRootsFor(cfg, "ollama").deniedBy, "allowedRoots");
+});
+
+test("allowedRootsFor: a provider entry narrows the top-level list", () => {
+  const cfg = {
+    allowedRoots: ["C:/code", "C:/work"],
+    providers: { ollama: { allowedRoots: ["C:/work"] } },
+  };
+  deepEqual(allowedRootsFor(cfg, "ollama").roots, ["C:/work"]);
+  equal(allowedRootsFor(cfg, "ollama").deniedBy, "providers.ollama.allowedRoots");
+});
+
+// The widening half — the one an override implementation passes and intersection must not.
+// RED against an override: the provider's own list alone would be returned, granting C:/personal.
+test("allowedRootsFor: a provider entry can never widen — a root the top level withheld grants nothing", () => {
+  const cfg = { allowedRoots: ["C:/code"], providers: { ollama: { allowedRoots: ["C:/personal"] } } };
+  deepEqual(allowedRootsFor(cfg, "ollama").roots, []);
+});
+
+// The intersection keeps the NARROWER side by containment. isUnderRoot is asymmetric, so
+// "keep the provider's entry when either contains the other" hands back the whole drive —
+// and a set-style equality intersection drops the pair entirely, which looks fail-closed
+// and passes any row that only asserts "refused".
+test("allowedRootsFor: the intersection keeps the narrower root, not the wider one", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-roots-"));
+  try {
+    const narrow = join(dir, "code");
+    // Provider is the WIDER side: tmpdir() contains tmpdir()/code.
+    deepEqual(
+      allowedRootsFor({ allowedRoots: [narrow], providers: { ollama: { allowedRoots: [dir] } } }, "ollama").roots,
+      [narrow],
+    );
+    // Provider is the NARROWER side: the top-level list keeps the whole directory.
+    deepEqual(
+      allowedRootsFor({ allowedRoots: [dir], providers: { ollama: { allowedRoots: [narrow] } } }, "ollama").roots,
+      [narrow],
+    );
+    // The plan's own shape: a provider naming the drive root must not widen past C:/code.
+    deepEqual(
+      allowedRootsFor({ allowedRoots: ["C:/code"], providers: { ollama: { allowedRoots: ["C:/"] } } }, "ollama").roots,
+      ["C:/code"],
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Raw string equality is not an intersection: C:\code, C:/code and c:/code/ are one root.
+test("allowedRootsFor: the intersection compares normalised paths, not raw strings", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-roots-"));
+  try {
+    const variants = [dir + sep, dir + `${sep}.${sep}`, dir + sep + sep];
+    if (process.platform === "win32") variants.push(dir.toUpperCase(), dir.replace(/\//g, "\\"));
+    for (const variant of variants) {
+      const { roots } = allowedRootsFor({ allowedRoots: [dir], providers: { ollama: { allowedRoots: [variant] } } }, "ollama");
+      equal(roots.length, 1, `'${variant}' did not intersect '${dir}'`);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// #302 made the two refusals say different things: absent means never configured, [] means
+// the operator denied it. A helper that coalesces one into the other passes any assertion
+// that only checks "refused", and silently rewrites the operator's own message.
+test("allowedRootsFor: undefined (inherit) stays distinguishable from [] (denial)", () => {
+  equal(allowedRootsFor({ providers: { ollama: { enabled: true } } }, "ollama").roots, undefined);
+  deepEqual(allowedRootsFor({ allowedRoots: [], providers: { ollama: { enabled: true } } }, "ollama").roots, []);
+  deepEqual(
+    allowedRootsFor({ allowedRoots: ["C:/code"], providers: { ollama: { allowedRoots: [] } } }, "ollama").roots,
+    [],
+  );
+});
+
+// The compatibility floor: every config in the wild carries only per-provider keys. With no
+// top-level key there is nothing to intersect, so the provider's own list comes back verbatim.
+test("allowedRootsFor: a config with only per-provider keys resolves exactly as it did before", () => {
+  const legacy = { provider: { allowedRoots: ["C:/code"] } };
+  deepEqual(allowedRootsFor(legacy, "ollama").roots, ["C:/code"]);
+  equal(allowedRootsFor(legacy, "ollama").deniedBy, "provider.allowedRoots");
+
+  const canonical = { providers: { codex: { allowedRoots: ["C:/codex"] } } };
+  deepEqual(allowedRootsFor(canonical, "codex").roots, ["C:/codex"]);
+  equal(allowedRootsFor(canonical, "codex").deniedBy, "providers.codex.allowedRoots");
 });

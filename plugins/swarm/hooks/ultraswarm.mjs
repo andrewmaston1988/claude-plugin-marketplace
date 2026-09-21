@@ -7,6 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { notableLines } from '../src/usage.mjs';
+import { allowedRootsFor, providerConfig } from '../src/providers.mjs';
 
 const CONFIG = path.join(os.homedir(), '.swarm', 'config.json');
 
@@ -39,12 +40,28 @@ export function standingBlock(mode) {
   ].join('\n');
 }
 
+// Every id that could own roots: the canonical blocks the operator wrote, plus the two ids
+// that are configurable without one (ollama via `provider`, codex via `codex` or a bare
+// file). `claude` is excluded — see modeFor. A config setting ONLY the top-level key has no
+// `providers` object at all, so the two-id floor is what keeps inherited roots visible;
+// enumerating `providers` alone would call that config unarmed while the gate calls it armed.
+function providerIds(config) {
+  return [...new Set([...Object.keys(config?.providers || {}), "ollama", "codex"])]
+    .filter((id) => id !== 'claude');
+}
+
 // cwd under any allowed root -> alternative models are launchable here. Lazy import:
 // manifest.mjs is the governance source of truth but heavy for a per-prompt hook.
+//
+// Claude is EXCLUDED here and included by the run-level gate. The two are not the same
+// question: this one is "is the alternative-model path armed?", not "where may swarm run".
+// Roots are resolved per provider rather than read off the block, so a provider that names
+// none inherits the top-level list. The legacy `provider.allowedRoots` concat stays: this
+// hook reads RAW config.json, and addLegacyProviderView never runs on a file off disk.
 export async function modeFor({ cwd, config }) {
-  const roots = [...new Set((Object.entries(config?.providers || {})
-    .filter(([id, block]) => id !== 'claude' && block?.enabled !== false && Array.isArray(block?.allowedRoots))
-    .flatMap(([, block]) => block.allowedRoots))
+  const roots = [...new Set(providerIds(config)
+    .filter((id) => providerConfig(config, id)?.enabled !== false)
+    .flatMap((id) => allowedRootsFor(config, id).roots || [])
     .concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
   if (!roots.length || !cwd) return MODE_ANTHROPIC;
   const { isUnderRoot } = await import('../src/manifest.mjs');

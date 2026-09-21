@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { readResult } from "./results.mjs";
 import { isUnderRoot } from "./roots.mjs";
-import { providerConfig } from "./providers.mjs";
+import { allowedRootsFor, providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { runPlan, makeDefaultIo } from "./scheduler.mjs";
 
@@ -47,10 +47,10 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   // not the worktree redirect it executed in.
   {
     const govCwd = prior.originalCwd || cwd;
-    const roots = providerConfig(cfg, identity.provider).allowedRoots || [];
-    if (!roots.some((root) => isUnderRoot(govCwd, root))) {
+    const { roots, deniedBy } = allowedRootsFor(cfg, identity.provider);
+    if (!(roots || []).some((root) => isUnderRoot(govCwd, root))) {
       throw new Error(
-        `governance: provider '${identity.provider}' model '${askModel}' and '${govCwd}' is not under any allowedRoots entry`
+        `governance: provider '${identity.provider}' model '${askModel}' and '${govCwd}' is not under any ${deniedBy} entry`
       );
     }
   }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PreToolUse hook on the Workflow tool: once per session, when swarm's
-// alternative-model path is armed (an enabled provider has allowedRoots), block the
-// first Workflow call with a "consider swarm instead" reason. A retry passes
+// alternative-model path is armed (an enabled provider resolves to allowedRoots), block
+// the first Workflow call with a "consider swarm instead" reason. A retry passes
 // straight through — this is a speed bump, not a wall. Silent (exit 0) when:
 // swarm isn't armed, the nudge already fired this session, CORRELATION_ID is
 // set (pipeline child), or swarm.workflowNudge === false. Never throws.
@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { allowedRootsFor, providerConfig } from '../src/providers.mjs';
 
 const SWARM_HOME = process.env.SWARM_HOME || path.join(os.homedir(), '.swarm');
 const CONFIG = path.join(SWARM_HOME, 'config.json');
@@ -18,10 +19,23 @@ function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
 
+// Every id that could own roots: the canonical blocks the operator wrote, plus the two ids
+// that are configurable without one (ollama via `provider`, codex via `codex` or a bare
+// file). `claude` is excluded — this asks whether the ALTERNATIVE-model path is armed, not
+// where swarm may run. A config setting only the top-level key has no `providers` object at
+// all, so the two-id floor is what keeps those inherited roots visible.
+function providerIds(config) {
+  return [...new Set([...Object.keys(config?.providers || {}), 'ollama', 'codex'])]
+    .filter((id) => id !== 'claude');
+}
+
+// Roots are resolved per provider so one naming none inherits the top-level list. The legacy
+// `provider.allowedRoots` concat stays: this hook reads RAW config.json, and
+// addLegacyProviderView never runs on a file off disk.
 function allowedRoots(config) {
-  const canonical = Object.entries(config?.providers || {})
-    .filter(([id, block]) => id !== 'claude' && block?.enabled !== false && Array.isArray(block?.allowedRoots))
-    .flatMap(([, block]) => block.allowedRoots);
+  const canonical = providerIds(config)
+    .filter((id) => providerConfig(config, id)?.enabled !== false)
+    .flatMap((id) => allowedRootsFor(config, id).roots || []);
   return [...new Set(canonical.concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
 }
 

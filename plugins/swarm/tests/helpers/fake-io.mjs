@@ -77,3 +77,12 @@ export function promptOf(call) {
   const i = args.indexOf("-p");
   return i >= 0 ? args[i + 1] : undefined;
 }
+
+// A canned claude stream-json transcript for a resumed ask: init on s-2, then the answer.
+export const STREAM = [
+  JSON.stringify({ type: "system", subtype: "init", session_id: "s-2" }),
+  JSON.stringify({
+    type: "result", subtype: "success", is_error: false, result: "the follow-up answer",
+    usage: { input_tokens: 900, output_tokens: 80 },
+  }),
+].join("\n") + "\n";
