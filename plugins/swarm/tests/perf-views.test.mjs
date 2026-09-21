@@ -3,7 +3,7 @@ import { equal, deepEqual, ok } from "node:assert/strict";
 import { aggregate, dedupe } from "../src/scores.mjs";
 import { OUTCOMES } from "../src/aspects.mjs";
 import { coverage, reliability, leaders, costView } from "../src/serve/perf-views.mjs";
-import { DEFAULT_COST_BANDS } from "../src/cost.mjs";
+import { DEFAULT_COST_BANDS, costRowsFor as providerCostRows } from "../src/cost.mjs";
 
 // Minimal valid row — mirrors scores.test.mjs's baseline shape so aggregate()
 // and dedupe() see exactly what the real store would hand them.
@@ -383,4 +383,62 @@ test("best value: ties on multiplier break on the better model, then the name", 
   const rows = [...many("q-a", 8.9), ...many("q-b", 8.7)];
   const { best } = costView(rows, [costRow("q-a", 2), costRow("q-b", 2)]);
   equal(best.model, "q-a", "same price — take the better one");
+});
+
+// ── one section per provider ─────────────────────────────────────────────────
+// Three cost lists, one per provider, each ranked within its own accounting
+// unit. The rate-card rows come from cost.mjs itself, not a fixture, so this is
+// the integration the dashboard actually serves: a Codex or Claude row reaching
+// costView and being drawn as a section.
+
+const codexSnaps = [];
+
+test("cost: every provider gets its own section — one list per provider, never merged", () => {
+  const rows = [
+    ...many("m-meter", 8),
+    graded({ leaf: "cx", model: "gpt-5.6-sol", provider: "codex", grades: { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 } }),
+    graded({ leaf: "cl", model: "claude-opus-5", provider: "claude", grades: { adherence: 6, handoff: 6, truthfulness: 6, depth: 6 } }),
+  ];
+  const costRows = [
+    costRow("m-meter", 1, { provider: "ollama" }),
+    ...providerCostRows("codex", { models: ["gpt-5.6-sol"], snaps: codexSnaps }),
+    ...providerCostRows("claude", { models: ["claude-opus-5"], snaps: codexSnaps }),
+  ];
+  const view = costView(rows, costRows);
+  deepEqual(view.sections.map((s) => s.provider), ["claude", "codex", "ollama"],
+    "RED: a provider's rows were merged into another provider's section");
+  for (const section of view.sections) {
+    ok(section.spread.every((r) => r.provider === section.provider),
+      `${section.provider}'s section carries another provider's row`);
+    ok(section.points.every((p) => (p.provider || "unqualified") === section.provider));
+  }
+  // A section per provider is not a ranking ACROSS providers. The global cards
+  // must stay null on a mixed view: a published Codex price and a measured
+  // Ollama meter point do not share an axis, so there is no cross-provider
+  // "cheapest model" to name. Two guards hold this — `verdicts` refuses on more
+  // than one cost domain, and costView refuses a global verdict unless exactly
+  // one provider is present. Removing EITHER alone is still safe; removing both
+  // ships the cross-provider ranking, and that is what these two lines catch.
+  equal(view.best, null, "RED: a global best was named across incommensurable units");
+  equal(view.worst, null, "RED: a global worst was named across incommensurable units");
+});
+
+// The Claude panel was entirely empty on the dashboard and read as broken. An
+// `unpriced` ROW is the honest alternative, and it is a row the page can draw.
+test("cost: a provider with no cost source renders an unpriced ROW, never an empty panel", () => {
+  const rows = [graded({ leaf: "cx", model: "gpt-5.6-sol", provider: "codex", grades: { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 } })];
+  const costRows = providerCostRows("codex", { models: ["gpt-5.6-sol"], snaps: codexSnaps });
+  const view = costView(rows, costRows);
+  const codex = view.sections.find((s) => s.provider === "codex");
+  ok(codex, "RED: a provider with cost rows produced no section at all");
+  const spread = codex.spread.find((r) => r.model === "gpt-5.6-sol");
+  ok(spread, "RED: the model was dropped from the spread — a blank panel reads as broken");
+  equal(spread.mult, null, "RED: a weight was invented for a model with no published price");
+  equal(spread.classification, "unpriced", "the row says why it is unmeasured");
+  equal(spread.band, null);
+  const point = codex.points.find((p) => p.model === "gpt-5.6-sol");
+  equal(point.multiplier, null, "unmeasured is not free");
+  equal(point.classification, "unpriced", "RED: the point carried no classification, so the page could not say unpriced");
+  equal(point.unit, costRows[0].unit, "the point states which unit its weight would be in");
+  equal(point.baseModel, "gpt-5.6-luna", "the point names what it is relative to");
 });

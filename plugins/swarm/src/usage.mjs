@@ -20,9 +20,11 @@ import { providerUsageSnapshot } from "./contracts.mjs";
 export const QUOTA_CACHE_FILENAME = "quota-cache.json";
 
 // A limit window, uniform across providers. `scope` is Anthropic's per-model
-// bucket; cloud providers have no equivalent and leave it null.
-function limit(kind, percent, resetsAt, scope = null) {
-  return { kind, percent, resetsAt: resetsAt ?? null, scope };
+// bucket; cloud providers have no equivalent and leave it null. `window` is the
+// duration the bucket covers, when the provider states one — a LABEL for what
+// the bucket measures, never a mapping onto another provider's vocabulary.
+function limit(kind, percent, resetsAt, scope = null, window = null) {
+  return { kind, percent, resetsAt: resetsAt ?? null, scope, window };
 }
 
 function asOf(value = Date.now()) {
@@ -81,6 +83,25 @@ export function normalizeOllama(reading, options = {}) {
   };
 }
 
+// Codex's app-server sends `resetsAt` as Unix SECONDS. `new Date()` reads a
+// bare number as milliseconds, so a same-day reset printed as 1970-01-21 —
+// "Wed 21 Jan" beside Anthropic's same-day stamps. Strings are already
+// instants and pass through; 1e11 separates the two unit scales until year 5138.
+function toInstant(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return value ?? null;
+  return new Date(value < 1e11 ? value * 1000 : value).toISOString();
+}
+
+// The payload's own answer to "what does this bucket measure". Printed, never
+// mapped: `primary`/`secondary` are not established to BE session/weekly, and a
+// wrong window name is worse than an opaque one.
+function windowLabel(mins) {
+  if (typeof mins !== "number" || !Number.isFinite(mins) || mins <= 0) return null;
+  if (mins % 1440 === 0) return `${mins / 1440}d`;
+  if (mins % 60 === 0) return `${mins / 60}h`;
+  return `${mins}m`;
+}
+
 function codexLimitBuckets(buckets) {
   const limits = [];
   for (const bucket of buckets || []) {
@@ -92,7 +113,13 @@ function codexLimitBuckets(buckets) {
     for (const [name, value] of entries) {
       const percent = value.usedPercent ?? value.used_percent ?? value.percent;
       if (typeof percent !== "number") continue;
-      limits.push(limit(name ? `${id} ${name}` : id, percent, value.resetsAt ?? value.resets_at ?? null, id));
+      limits.push(limit(
+        name ? `${id} ${name}` : id,
+        percent,
+        toInstant(value.resetsAt ?? value.resets_at ?? null),
+        id,
+        windowLabel(value.windowDurationMins ?? value.window_duration_mins),
+      ));
     }
   }
   return limits;
@@ -232,14 +259,32 @@ export function formatResetTime(iso, { timeZone } = {}) {
 
 // `<provider> <kind>: <pct>% — resets <when>` — the line shape `quota` already
 // printed for Anthropic, now every provider's.
+//
+// The provider is already the line's first token, so a bucket that restates it
+// renders it once — in a leading `kind` token or in the scope. Anthropic's rows
+// read clean today only because its bucket names happen not to repeat
+// "anthropic"; Codex's `codex primary (codex)` does, three times over.
+function restatesProvider(provider, value) {
+  return typeof value === "string" && value.toLowerCase() === String(provider).toLowerCase();
+}
+
+// `codex primary` -> `primary`; a bare `codex` -> nothing at all.
+function stripProviderPrefix(provider, kind) {
+  const prefix = `${provider} `;
+  if (restatesProvider(provider, kind)) return "";
+  return kind.toLowerCase().startsWith(prefix.toLowerCase()) ? kind.slice(prefix.length) : kind;
+}
+
 export function usageLines(usages, { timeZone } = {}) {
   const lines = [];
   for (const u of usages) {
     for (const l of u.limits) {
-      const scope = l.scope ? ` (${l.scope})` : "";
+      const kind = stripProviderPrefix(u.provider, l.kind);
+      const scope = l.scope && !restatesProvider(u.provider, l.scope) ? l.scope : null;
+      const label = [kind, l.window && `(${l.window})`, scope && `(${scope})`].filter(Boolean).join(" ");
       const formatted = formatResetTime(l.resetsAt, { timeZone });
       const resets = formatted ? ` — resets ${formatted}` : "";
-      lines.push(`${u.provider} ${l.kind}${scope}: ${l.percent}%${resets}`);
+      lines.push(`${u.provider}${label ? ` ${label}` : ""}: ${l.percent}%${resets}`);
     }
   }
   return lines;

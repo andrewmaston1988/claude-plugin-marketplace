@@ -308,6 +308,106 @@ export function ollamaCloudCostRows(snaps) {
   return multipliers(costPerModel(canonical));
 }
 
+// ---- provider rate cards ─────────────────────────────────────────────────────
+// A static $/Mtok table per provider, normalised to a base the table NAMES.
+// "Explicit base" is the whole point: writing the base down means a later edit
+// cannot silently move the unit every other row is measured in, which a derived
+// floor (the cheapest entry) does the moment a cheap model is added.
+//
+// `prices` carries the base ALONE. The published $/Mtok figures are not in this
+// repository and were not fetched: a wrong price ranks models wrongly for ever
+// and nothing downstream can tell it from a sourced one, so every model without
+// an operator-supplied figure stays `unpriced` — a row, not a blank.
+//
+// A subscription seat pays a flat fee, so even a sourced per-token figure is an
+// equivalence rather than a bill. Rows priced from these tables are labelled
+// `api-equivalent estimate`, never `billed`.
+export const CODEX_RATE_CARD = {
+  provider: "codex",
+  baseModel: "gpt-5.6-luna",
+  unit: "published-price-relative",
+  source: "codex-rate-card",
+  asOf: "2026-09-21",
+  prices: { "gpt-5.6-luna": 1 },
+};
+
+export const CLAUDE_RATE_CARD = {
+  provider: "claude",
+  baseModel: "claude-sonnet-5",
+  unit: "published-price-relative",
+  source: "anthropic-rate-card",
+  asOf: "2026-09-21",
+  prices: { "claude-sonnet-5": 1 },
+};
+
+export const RATE_CARDS = { codex: CODEX_RATE_CARD, claude: CLAUDE_RATE_CARD };
+// The meter's provider id. Ollama's list is the one measured rather than
+// published, which is why the three stay separate even though the labels rhyme.
+export const METER_PROVIDER = "ollama";
+export const COST_PROVIDERS = [METER_PROVIDER, ...Object.keys(RATE_CARDS)];
+
+// One row per model the caller names, plus one per model the table prices. A
+// model absent from the table is `unpriced` — a row the page can draw, because
+// a blank panel reads as broken and an unpriced row reads as honest.
+function rateCardObservation(card, model) {
+  const listed = Object.hasOwn(card.prices, model);
+  return normalizeCostObservation({
+    provider: card.provider,
+    model,
+    unit: card.unit,
+    source: card.source,
+    classification: listed ? API_EQUIVALENT_CLASSIFICATION : UNPRICED_CLASSIFICATION,
+    asOf: card.asOf,
+    costDomain: `${card.provider}:${card.unit}`,
+    ...(listed ? { value: card.prices[model] } : {}),
+  });
+}
+
+export function rateCardRows(card, models = []) {
+  const named = [...new Set([
+    ...models.filter((model) => typeof model === "string" && model.trim()),
+    ...Object.keys(card.prices),
+  ])];
+  return relativeCostRows(
+    named.map((model) => rateCardObservation(card, model)),
+    { baseModels: { [card.provider]: card.baseModel } },
+  );
+}
+
+// The one entry point every surface uses. Ollama's list comes from its banked
+// weekly meter; Codex's and Claude's come from their static tables. There is
+// deliberately no branch through which one provider's derivation can feed
+// another's list — the units are incommensurable, and a shared floor would rank
+// a measured meter point against a published price.
+export function costRowsFor(provider, { models = [], snaps = [] } = {}) {
+  const card = RATE_CARDS[provider];
+  if (card) return rateCardRows(card, models);
+  if (provider === METER_PROVIDER) return ollamaCloudCostRows(snaps);
+  return [];
+}
+
+// The unit each list is read in, named on the list itself — including what the
+// weight is relative to, because that is part of the weight. Two rate cards are
+// two units, not one: each names its own base.
+export function costUnitLabel(provider = METER_PROVIDER) {
+  const card = RATE_CARDS[provider];
+  return card
+    ? `published price, relative (${card.baseModel} = 1x)`
+    : `measured meter points/request, relative to the cheapest model with >=${THIN_REQUESTS} requests`;
+}
+
+// One section per provider, each ranked cheapest→dearest within itself. This is
+// a grouping, never a ranking: no row is ever re-weighted against another
+// section's base. A provider with no source still gets a section, so the reader
+// sees that the provider exists and is unpriced rather than absent.
+export function costSections({ providers = COST_PROVIDERS, models = {}, snaps = [] } = {}) {
+  return providers.map((provider) => ({
+    provider,
+    unit: costUnitLabel(provider),
+    rows: costRowsFor(provider, { models: models[provider] || [], snaps }),
+  }));
+}
+
 // Cost band for surfacing: 1 cheap, 2 mid, 3 expensive. Unmeasured is null.
 export function band(mult, bands = DEFAULT_COST_BANDS) {
   if (mult == null || !Number.isFinite(mult)) return null;

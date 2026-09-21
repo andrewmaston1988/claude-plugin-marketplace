@@ -10,7 +10,8 @@ import { readRun, projectKeys, resultSuperseded, resolveTaskId } from "../runlog
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
-import { ollamaCloudCostRows, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
+import { costRowsFor, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
+import { readModelsCache } from "../discovery.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
 import { coverage, reliability, leaders, costView } from "./perf-views.mjs";
@@ -303,17 +304,37 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     return scoreCache.rows;
   };
   // The cost half, cached the same way: snapshots re-read when the history's
-  // mtime moves, the multiplier derivation (pure, cheap) on every request.
+  // mtime moves, the derivation (pure, cheap) on every request.
   const costFile = usageHistoryPath({ ...process.env, SWARM_HOME: home });
   let costCache = { mtimeMs: -1, snaps: [] };
+  // The roster each provider is asked to price, so a scored model the table does
+  // not list still draws an `unpriced` ROW rather than a blank one. Cached by
+  // mtime like the two stores above — `swarm models` rewrites it.
+  const costModelsFile = join(home, "models-cache.json");
+  let costModelCache = { mtimeMs: -1, models: {} };
+  const costRoster = () => {
+    let mtimeMs = 0;
+    try { mtimeMs = statSync(costModelsFile).mtimeMs; } catch { mtimeMs = 0; }
+    if (mtimeMs !== costModelCache.mtimeMs) {
+      const byProvider = {};
+      for (const row of readModelsCache({ ...process.env, SWARM_HOME: home })?.models || []) {
+        if (!row?.model) continue;
+        (byProvider[row.provider || "ollama"] ||= []).push(row.model);
+      }
+      costModelCache = { mtimeMs, models: byProvider };
+    }
+    return costModelCache.models;
+  };
   const costRows = () => {
     let mtimeMs = 0;
     try { mtimeMs = statSync(costFile).mtimeMs; } catch { mtimeMs = 0; }
     if (mtimeMs !== costCache.mtimeMs) costCache = { mtimeMs, snaps: readSnapshots(costFile) };
-    // The meter banks its own names; the score store carries the roster's
-    // cloud forms. Same mapping the CLI's cloudCostRows applies — never a
-    // second rule.
-    return ollamaCloudCostRows(costCache.snaps);
+    // Every provider with a cost source, each on its own axis: the meter banks
+    // its own names (the score store carries the roster's cloud forms — the same
+    // mapping discovery uses, never a second rule), and the rate cards price
+    // theirs. `costView` sections the result by provider.
+    const roster = costRoster();
+    return COST_PROVIDERS.flatMap((provider) => costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps }));
   };
   const rankOf = (cells, model) => {
     const ranked = cells.filter((c) => c.combined != null);

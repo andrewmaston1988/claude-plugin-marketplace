@@ -7,6 +7,8 @@ import {
   normalizeAnthropic, normalizeOllama, readCachedUsage, usageLines, notableLines,
   formatResetTime, QUOTA_CACHE_FILENAME, normalizeCodex,
 } from "../src/usage.mjs";
+import { createProviderRegistry } from "../src/providers.mjs";
+import { cmdUsage } from "../scripts/swarm.mjs";
 
 const LONDON = "Europe/London";
 
@@ -243,6 +245,126 @@ test("notableLines: R4 weekly-exhausted and session-limit lines use the same for
 
   const session = notableLines([normalizeOllama({ ...OLLAMA_OK, sessionPctUsed: 100 })], { timeZone: LONDON });
   equal(session[0], "ollama: session limit reached, resets Sun 6 Sep, 13:00");
+});
+
+// ---- the four `swarm usage` defects the operator hit on 2026-09-20 ---------
+
+// A Codex rate-limit bucket as the app-server sends it. `resetsAt` is Unix
+// SECONDS, and the limit id repeats the provider — both verbatim from the run
+// that read `codex codex primary (codex): 0% — resets Wed 21 Jan, 18:12`.
+function codexReading({ primary = {}, secondary = {}, limitId = "codex" } = {}) {
+  return {
+    provider: "codex",
+    buckets: [{ kind: "rate-limit", limitId, primary, secondary }],
+    source: "account/rateLimits/read",
+    provenance: "live",
+    asOf: "2026-09-20T15:00:00Z",
+  };
+}
+
+// Defect 1 — the provider id rendered three times in one line. The collapse is
+// a renderer rule, never a Codex special case, so it is pinned for a provider
+// whose bucket does not happen to be named "codex" too.
+test("usageLines: a bucket that restates the provider collapses — kind prefix AND scope", () => {
+  const lines = usageLines([normalizeCodex(codexReading({
+    primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" },
+    secondary: { usedPercent: 95, resetsAt: "2026-09-20T17:00:00Z" },
+  }))], { timeZone: LONDON });
+
+  equal(lines[0], "codex primary: 9% — resets Sun 20 Sep, 17:00");
+  equal(lines[1], "codex secondary: 95% — resets Sun 20 Sep, 18:00");
+  ok(!lines.some((l) => l.includes("codex codex")), `the provider id printed twice: ${lines.join(" | ")}`);
+  ok(!lines.some((l) => l.includes("(codex)")), `the scope restated the provider: ${lines.join(" | ")}`);
+
+  // A bucket with neither primary nor secondary falls back to its own id as the
+  // kind — the same restatement, with nothing after it.
+  const bare = usageLines([normalizeCodex({
+    provider: "codex",
+    buckets: [{ kind: "rate-limit", limitId: "codex", usedPercent: 4, resetsAt: "2026-09-20T16:00:00Z" }],
+    source: "account/rateLimits/read", provenance: "live", asOf: "2026-09-20T15:00:00Z",
+  })], { timeZone: LONDON });
+  equal(bare[0], "codex: 4% — resets Sun 20 Sep, 17:00");
+
+  // Not naming luck: any provider's row collapses the same way.
+  const generic = [{ provider: "anthropic", limits: [{ kind: "anthropic weekly_all", percent: 25, resetsAt: "2026-09-20T16:00:00Z", scope: "anthropic" }] }];
+  equal(usageLines(generic, { timeZone: LONDON })[0], "anthropic weekly_all: 25% — resets Sun 20 Sep, 17:00");
+  // A scope that is NOT the provider is real information and stays.
+  const scoped = [{ provider: "anthropic", limits: [{ kind: "weekly_scoped", percent: 2, resetsAt: null, scope: "Fable" }] }];
+  equal(usageLines(scoped, { timeZone: LONDON })[0], "anthropic weekly_scoped (Fable): 2%");
+});
+
+// Defect 2 — `primary` / `secondary` say nothing next to `session` /
+// `weekly_all`. Print what the bucket measures, from the payload's own
+// `windowDurationMins`; where the payload does not say, print the raw name and
+// invent nothing.
+test("usageLines: a Codex bucket states the window the payload says it measures", () => {
+  const lines = usageLines([normalizeCodex(codexReading({
+    primary: { usedPercent: 9, windowDurationMins: 300, resetsAt: "2026-09-20T16:00:00Z" },
+    secondary: { usedPercent: 95, windowDurationMins: 10080, resetsAt: "2026-09-27T16:00:00Z" },
+  }))], { timeZone: LONDON });
+
+  equal(lines[0], "codex primary (5h): 9% — resets Sun 20 Sep, 17:00");
+  equal(lines[1], "codex secondary (7d): 95% — resets Sun 27 Sep, 17:00");
+
+  // No duration in the payload => the raw name plus nothing invented. A wrong
+  // mapping onto session/weekly would be worse than an opaque label.
+  const bare = usageLines([normalizeCodex(codexReading({
+    primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" },
+  }))], { timeZone: LONDON });
+  equal(bare[0], "codex primary: 9% — resets Sun 20 Sep, 17:00");
+});
+
+// Defect 3 — the Codex reset read ~4 months out because `new Date()` took Unix
+// SECONDS as milliseconds. The expected instant is a literal derived from the
+// payload, never from the fix's own arithmetic.
+test("normalizeCodex: a Codex resetsAt in Unix seconds is the instant it names, not 1970", () => {
+  const RESETS_AT = 1789920000;
+  const u = normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: RESETS_AT } }));
+  equal(u.limits[0].resetsAt, "2026-09-20T16:00:00.000Z");
+  ok(usageLines([u], { timeZone: "UTC" })[0].includes("resets Sun 20 Sep, 16:00"), usageLines([u], { timeZone: "UTC" })[0]);
+
+  // An ISO string is already an instant and must pass through untouched.
+  const iso = normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" } }));
+  equal(iso.limits[0].resetsAt, "2026-09-20T16:00:00Z");
+});
+
+// Defect 4 — `swarm usage --provider codex` printed the Anthropic rows anyway.
+// The registry loop honours the flag; the separately-fetched Anthropic reading
+// did not.
+test("cmdUsage: --provider selects one provider — the Anthropic row is filtered too", async () => {
+  const codex = {
+    id: "codex",
+    runnerId: "codex",
+    enabled: () => true,
+    validateTask: () => [],
+    capabilities: {
+      readUsage: async () => normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" } })),
+    },
+  };
+  const registry = createProviderRegistry([codex]);
+  const cfg = { providers: { codex: { enabled: true } } };
+  const read = async (rest) => {
+    const lines = [];
+    const code = await cmdUsage(rest, {
+      cfg, env: {}, registry, fetchImpl: async () => ({ ok: true }),
+      quotaCheck: async () => ANTHROPIC, write: (line) => lines.push(line),
+    });
+    return { lines, code };
+  };
+
+  const only = await read(["--provider", "codex"]);
+  ok(only.lines.every((l) => l.startsWith("codex")), `--provider codex printed another provider: ${only.lines.join(" | ")}`);
+  ok(only.lines.some((l) => l.startsWith("codex ")), only.lines.join(" | "));
+  equal(only.code, 0);
+
+  // `claude` is the registry id for the Anthropic reading, so it selects it.
+  const claude = await read(["--provider", "claude"]);
+  ok(claude.lines.every((l) => l.startsWith("anthropic")), `--provider claude printed another provider: ${claude.lines.join(" | ")}`);
+  ok(claude.lines.some((l) => l.startsWith("anthropic session")), claude.lines.join(" | "));
+
+  // No flag: every provider that answered is present.
+  const all = await read([]);
+  ok(all.lines.some((l) => l.startsWith("anthropic ")) && all.lines.some((l) => l.startsWith("codex ")), all.lines.join(" | "));
 });
 
 test("formatResetTime: R5 a missing or unparseable resetsAt prints no clause, never throws", () => {

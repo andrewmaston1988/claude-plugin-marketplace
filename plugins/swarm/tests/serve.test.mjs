@@ -647,7 +647,9 @@ test("perf: the cost view joins the banked history to the score store — multip
       assert.equal(sonnet.multiplier, null, "a model with no history is unmeasured, not free");
       assert.equal(sonnet.band, null);
       assert.equal(sonnet.onFrontier, false);
-      assert.deepEqual(cost.spread.map((s) => s.model), ["m-thin:cloud", "m-b:cloud", "m-a:cloud"],
+      // The meter's own rows only: the rate-card sections carry their own bases,
+      // and this assertion is about the banked history's ordering.
+      assert.deepEqual(cost.spread.filter((s) => s.provider === "ollama").map((s) => s.model), ["m-thin:cloud", "m-b:cloud", "m-a:cloud"],
         "cheapest-first over measured rows, sonnet absent (no history to price)");
       // The history's mtime moves: the next request re-reads it, like the score store.
       writeFileSync(join(home, "usage-history.jsonl"), JSON.stringify({
@@ -718,7 +720,7 @@ test("perf: the meter's own names join the score store's cloud names — banked 
       assert.ok(byModel.get("m-b:cloud").onFrontier, "the floor is never dominated");
       assert.equal(byModel.get("sonnet").multiplier, null, "no history is still unmeasured");
       const cost = (await get("/api/perf")).body.views.cost;
-      assert.deepEqual(cost.spread.map((s) => s.model), ["m-b:cloud", "m-a:cloud", "m-c:cloud"],
+      assert.deepEqual(cost.spread.filter((s) => s.provider === "ollama").map((s) => s.model), ["m-b:cloud", "m-a:cloud", "m-c:cloud"],
         "the spread carries the mapped names too — its links must land on real model pages");
     });
   } finally { rmSync(home, { recursive: true, force: true }); }
