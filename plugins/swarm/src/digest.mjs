@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { resultPath } from "./results.mjs";
+import { applyWriteGuard } from "../hooks/leaf-write-guard.mjs";
 
 export const DIGEST_ID = "__digest";
 
@@ -128,6 +129,13 @@ Return the digest as your final response text. ${plan.digest?.report
 export function buildDigestTask(plan) {
   const timeoutMs = Math.max(...plan.tasks.map((t) => t.timeoutMs || 0)) || DEFAULT_TIMEOUT_MS;
   const report = Boolean(plan.digest.report);
+  // The report digest is the one non-leaf node holding Write, and buildDigestTask
+  // bypasses normalizeTasks — so the write guard every other writer gets is attached
+  // here or nowhere. Its roots are the drafting directory and the single file the
+  // prompt permits, both named in reportPhase.
+  const settings = report
+    ? applyWriteGuard(undefined, [scratchPath(plan.resultsDir), reportPath(plan.resultsDir)])
+    : undefined;
   return {
     id: DIGEST_ID,
     prompt: digestPrompt(plan),
@@ -139,5 +147,6 @@ export function buildDigestTask(plan) {
     timeoutMs,
     after: plan.tasks.map((t) => t.id),
     isDigest: true,
+    ...(settings && { settings }),
   };
 }
