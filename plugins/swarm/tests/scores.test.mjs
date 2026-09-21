@@ -1,12 +1,14 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, throws, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync, mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, overall, scoresPath, shrink, fairPrior, PRIOR_WEIGHT, frontier, canonicalRunKey, gradedRunKeys,
+  transcriptModels, backfillRealmodel,
 } from "../src/scores.mjs";
 import { ASPECTS, OUTCOMES } from "../src/aspects.mjs";
+import { runCli } from "./helpers/cli.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-scores-"));
@@ -620,4 +622,185 @@ test("gradedRunKeys: a re-graded (superseded) dir still counts as graded — any
   const keys = gradedRunKeys([first, second]);
   equal(keys.size, 1);
   ok(keys.has(canonicalRunKey("C:/runs/review-1")));
+});
+
+// ── backfill-realmodel: alias rows rewritten to the model the leaf ran ────────
+// `grade --init` copied the manifest's authored alias verbatim, so the store
+// files one model under two identities and overall()/frontier() rank the alias
+// as a rival model. The leaf's own transcript is the only thing that names the
+// concrete id the runner used; a "runs before date X were Opus 4.8" table is the
+// same inference that caused the defect, and one alias legitimately resolving to
+// two different ids across rows is why.
+
+// A store's worth of lines. `row()` is the valid baseline the rest of this file
+// mutates one field off, so a fixture row here is a real row.
+function lines(rows) {
+  return rows.map((r) => JSON.stringify(r)).join("\n") + "\n";
+}
+
+// A Claude-CLI stream-json transcript. Only assistant events carry the model the
+// runner actually invoked.
+function streamJson(...models) {
+  return models.map((m) => JSON.stringify({ type: "assistant", message: { model: m, content: [] } })).join("\n") + "\n";
+}
+
+// The reader the CLI injects is fs-backed; here it is a plain map of
+// "<resultsDir>|<leaf>" -> transcript text, null meaning unreadable.
+function transcripts(map) {
+  return (resultsDir, leaf) => map[`${resultsDir}|${leaf}`] ?? null;
+}
+
+test("transcriptModels: the assistant events' model, deduped; a transcript naming none yields none", () => {
+  deepEqual(transcriptModels(streamJson("claude-opus-4-8", "claude-opus-4-8")), ["claude-opus-4-8"]);
+  deepEqual(transcriptModels(streamJson("claude-opus-4-8", "claude-opus-5")), ["claude-opus-4-8", "claude-opus-5"]);
+  // A non-Claude runner writes a plain log, and a torn tail is not JSON — both
+  // name nothing, and nothing is not an answer.
+  deepEqual(transcriptModels("plain text runner output\n"), []);
+  deepEqual(transcriptModels(""), []);
+  deepEqual(transcriptModels(null), []);
+  // Only an assistant event is the leaf's own model. Another event type carrying
+  // a message.model must not be read as one — a plain `event.model` read would
+  // also pick up the system/init banner, which names the harness's default.
+  deepEqual(transcriptModels('{"type":"user","message":{"model":"claude-opus-4-8"}}\n'), []);
+});
+
+test("backfillRealmodel: an alias row takes the concrete model its transcript reports", () => {
+  const alias = row({ model: "opus", resultsDir: "C:/runs/a-1", leaf: "citations" });
+  const out = backfillRealmodel(lines([alias]), {
+    readTranscript: transcripts({ "C:/runs/a-1|citations": streamJson("claude-opus-4-8") }),
+  });
+  equal(JSON.parse(out.text).model, "claude-opus-4-8");
+  equal(out.changed, 1);
+  deepEqual(out.mapping, [{ alias: "opus", model: "claude-opus-4-8", n: 1 }]);
+  deepEqual(out.dropped, []);
+});
+
+test("backfillRealmodel: one alias resolving to two concrete ids is two mappings, not an error", () => {
+  const old = row({ model: "opus", resultsDir: "C:/runs/old-1", leaf: "x" });
+  const fresh = row({ model: "opus", resultsDir: "C:/runs/new-1", leaf: "x" });
+  const out = backfillRealmodel(lines([old, fresh]), {
+    readTranscript: transcripts({
+      "C:/runs/old-1|x": streamJson("claude-opus-4-8"),
+      "C:/runs/new-1|x": streamJson("claude-opus-5"),
+    }),
+  });
+  deepEqual(out.text.trim().split("\n").map((l) => JSON.parse(l).model), ["claude-opus-4-8", "claude-opus-5"]);
+  deepEqual(out.mapping, [
+    { alias: "opus", model: "claude-opus-4-8", n: 1 },
+    { alias: "opus", model: "claude-opus-5", n: 1 },
+  ]);
+  deepEqual(out.dropped, [], "one alias, two ids, nothing dropped");
+});
+
+test("backfillRealmodel: a row whose transcript names no model is dropped, never guessed", () => {
+  const named = row({ model: "haiku", resultsDir: "C:/runs/a-1", leaf: "ok" });
+  const silent = row({ model: "haiku", resultsDir: "C:/runs/a-1", leaf: "silent" });
+  const gone = row({ model: "sonnet", resultsDir: "C:/runs/gone-1", leaf: "x" });
+  const out = backfillRealmodel(lines([named, silent, gone]), {
+    readTranscript: transcripts({
+      "C:/runs/a-1|ok": streamJson("claude-haiku-4-5-20251001"),
+      "C:/runs/a-1|silent": "no model line in here\n",
+    }),
+  });
+  deepEqual(out.text.trim().split("\n").map((l) => JSON.parse(l).leaf), ["ok"], "only the named row survives");
+  equal(out.changed, 1);
+  equal(out.dropped.length, 2);
+  ok(out.dropped.some((d) => d.leaf === "silent" && /names no model/.test(d.reason)), JSON.stringify(out.dropped));
+  ok(out.dropped.some((d) => d.leaf === "x" && /unreadable/.test(d.reason)), JSON.stringify(out.dropped));
+});
+
+test("backfillRealmodel: a transcript naming two models is ambiguous and also dropped", () => {
+  const two = row({ model: "sonnet", resultsDir: "C:/runs/a-1", leaf: "mixed" });
+  const out = backfillRealmodel(lines([two]), {
+    readTranscript: transcripts({ "C:/runs/a-1|mixed": streamJson("claude-sonnet-5", "claude-haiku-4-5-20251001") }),
+  });
+  equal(out.text.trim(), "", "picking one of two named models would be a guess");
+  equal(out.dropped.length, 1);
+  match(out.dropped[0].reason, /2 models/);
+});
+
+test("backfillRealmodel: rows that are not aliased pass through byte-for-byte", () => {
+  const full = row({ model: "claude-sonnet-5", resultsDir: "C:/runs/a-1", leaf: "full" });
+  const cloud = row({ model: "glm-5.2:cloud", resultsDir: "C:/runs/a-1", leaf: "cloud" });
+  const store = `${lines([full, cloud])}{"torn":`;
+  const out = backfillRealmodel(store, { readTranscript: () => null });
+  equal(out.text, store, "a backfill must not re-serialise or discard what it did not touch");
+  equal(out.changed, 0);
+  deepEqual(out.mapping, []);
+});
+
+test("backfillRealmodel: a store with no alias rows is a no-op — the second run finds nothing", () => {
+  const named = row({ model: "claude-opus-5", resultsDir: "C:/runs/a-1", leaf: "x" });
+  const store = lines([named]);
+  const out = backfillRealmodel(store, { readTranscript: () => { throw new Error("no alias row may be read"); } });
+  equal(out.text, store);
+  equal(out.changed, 0);
+});
+
+test("scores backfill-realmodel: the backup holds the pre-rewrite store, written before the rewrite", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const run = join(dir, "run-1");
+    mkdirSync(join(run, "results"), { recursive: true });
+    writeFileSync(join(run, "results", "citations.log"), streamJson("claude-opus-4-8"));
+    const before = lines([row({ model: "opus", resultsDir: run, leaf: "citations" })]);
+    const store = join(home, "model-scores.jsonl");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(store, before);
+
+    const r = runCli(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    const baks = readdirSync(home).filter((f) => f.startsWith("model-scores.jsonl.bak-"));
+    equal(baks.length, 1, `exactly one backup, got ${baks.join(", ")}`);
+    equal(readFileSync(join(home, baks[0]), "utf8"), before, "the backup must be the store as it was before the rewrite");
+    equal(JSON.parse(readFileSync(store, "utf8")).model, "claude-opus-4-8");
+    match(r.stdout, /opus -> claude-opus-4-8 \(1\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("scores backfill-realmodel --dry-run: prints the mapping and writes nothing at all", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const run = join(dir, "run-1");
+    mkdirSync(join(run, "results"), { recursive: true });
+    writeFileSync(join(run, "results", "citations.log"), streamJson("claude-haiku-4-5-20251001"));
+    const before = lines([row({ model: "haiku", resultsDir: run, leaf: "citations" })]);
+    const store = join(home, "model-scores.jsonl");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(store, before);
+
+    const r = runCli(["scores", "backfill-realmodel", "--dry-run"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    match(r.stdout, /haiku -> claude-haiku-4-5-20251001 \(1\)/);
+    equal(readFileSync(store, "utf8"), before, "the store must be byte-identical after a dry run");
+    deepEqual(readdirSync(home).filter((f) => f.includes(".bak-")), [], "a dry run backs up nothing either");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("scores backfill-realmodel: a second run has nothing to do and writes no second backup", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const run = join(dir, "run-1");
+    mkdirSync(join(run, "results"), { recursive: true });
+    writeFileSync(join(run, "results", "citations.log"), streamJson("claude-sonnet-5"));
+    const store = join(home, "model-scores.jsonl");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(store, lines([row({ model: "sonnet", resultsDir: run, leaf: "citations" })]));
+
+    equal(runCli(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } }).status, 0);
+    const once = readFileSync(store, "utf8");
+    const r = runCli(["scores", "backfill-realmodel"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    equal(readFileSync(store, "utf8"), once);
+    equal(readdirSync(home).filter((f) => f.startsWith("model-scores.jsonl.bak-")).length, 1, "the no-op run adds no backup");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
