@@ -938,7 +938,7 @@ async function cmdCost() {
   const pad = (s, n) => String(s).padEnd(n);
   const num = (s, n) => String(s).padStart(n);
   for (const section of sections) {
-    out(`── ${section.provider} — ${section.unit}`);
+    for (const line of [`── ${section.provider} — ${section.unit}`, ...section.banner]) out(line);
     if (!section.rows.length) {
       out(section.provider === METER_PROVIDER
         ? `   no cost history yet at ${path} — every live usage fetch banks one snapshot; a fresh install fills within a week`

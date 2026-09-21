@@ -319,6 +319,7 @@ const REASON_TITLES = {
   "network-error": "Network Error",
   timeout: "Fetch Timed Out",
   unparseable: "Page Unreadable",
+  "stale-rate-card": "Stale Rate Card",
 };
 
 export function provenanceBanner(usage) {
@@ -326,12 +327,12 @@ export function provenanceBanner(usage) {
   const title = REASON_TITLES[usage.reason] ?? "Usage Unread";
   // Legacy headroom callers pass the raw Ollama reading before normalization.
   const provider = usage.provider || "ollama";
-  const refresh = provider === "ollama"
+  const refresh = usage.refresh ?? (provider === "ollama"
     ? `    Refresh: swarm ollama-usage --cookie '<value>'${usage.cookiePath ? `   (writes ${usage.cookiePath})` : ""}`
-    : `    Refresh: swarm usage --provider ${provider}`;
+    : `    Refresh: swarm usage --provider ${provider}`);
   if (usage.provenance === "cached") {
     const lastSeen = usage.lastSeen ? `  last seen: ${new Date(usage.lastSeen).toISOString()}` : "";
-    return [`/!\\ ${title} — figures below are cached.${lastSeen}`, refresh];
+    return [`/!\\ ${title} (${provider}) — figures below are cached.${lastSeen}`, refresh];
   }
   // A partial read DID fetch this process — saying "no cached reading available"
   // over figures that just arrived live would be a lie the reader acts on.
