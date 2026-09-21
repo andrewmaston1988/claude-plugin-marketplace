@@ -331,13 +331,28 @@ export const CODEX_RATE_CARD = {
   prices: { "gpt-5.6-luna": 1 },
 };
 
+// Ratios from Anthropic's published $/Mtok table (the model reference bundled
+// with the claude-code-guide skill), read 2026-09-21. Output is exactly 5x input
+// for every model, so one number serves both columns:
+//   fable-5-1 $10/$50 · opus-5 $5/$25 · sonnet-5 $2/$10 · haiku-4-5 $1/$5
+// Keys are the ids swarm DISPATCHES, which is why haiku carries its date suffix
+// while the rate doc's own id does not. Cache-read rates are deliberately absent:
+// only Fable's ($0.25) is published in that table and a guessed one would rank
+// long-context work wrongly for ever.
 export const CLAUDE_RATE_CARD = {
   provider: "claude",
   baseModel: "claude-sonnet-5",
   unit: "published-price-relative",
   source: "anthropic-rate-card",
   asOf: "2026-09-21",
-  prices: { "claude-sonnet-5": 1 },
+  prices: {
+    "claude-haiku-4-5-20251001": 0.5,
+    "claude-sonnet-5": 1,
+    "claude-sonnet-4-6": 1.5,
+    "claude-opus-5": 2.5,
+    "claude-opus-4-8": 2.5,
+    "claude-fable-5-1": 5,
+  },
 };
 
 export const RATE_CARDS = { codex: CODEX_RATE_CARD, claude: CLAUDE_RATE_CARD };

@@ -328,8 +328,8 @@ test("costRowsFor: each provider's list is normalised to its own named base", ()
   ok(!codex.some((r) => r.model === "claude-sonnet-5"), "a Codex list never carries a Claude model");
 });
 
-// Cheapest→dearest is tested on a synthetic card because the SHIPPED tables
-// carry no sourced prices (see the no-invented-price test below). A named base
+// Cheapest→dearest is tested on a synthetic card so the ordering logic is pinned
+// independently of whatever the shipped tables happen to contain. A named base
 // of 2 with a cheaper entry of 1 is the whole point: the unit is the model the
 // table names, never the cheapest row it happens to contain.
 test("rateCardRows: ranks cheapest first within one provider, unmeasured last, base named not derived", () => {
@@ -359,13 +359,35 @@ test("costRowsFor: a model absent from its table is an unpriced row, never a bla
 // tell it from a sourced one. UPDATE THIS when an operator supplies published
 // $/Mtok figures: fill the tables and rewrite the expectation to the sourced
 // multiplier. Until then the honest row is `unpriced`.
-test("rate cards: no price is invented — every non-base model is unpriced", () => {
-  for (const card of [CODEX_RATE_CARD, CLAUDE_RATE_CARD]) {
-    deepEqual(Object.keys(card.prices).filter((model) => model !== card.baseModel), [],
-      `RED: ${card.provider} carries an unsourced price`);
-  }
+// The published $/Mtok table (Anthropic's model reference, read 2026-09-21).
+// Output is exactly 5x input for every Claude model, so the ratio is the same
+// whichever column it is taken from — which is why the card stores one number.
+test("CLAUDE_RATE_CARD: the published ratios, keyed on the ids swarm dispatches", () => {
+  const rows = costRowsFor("claude");
+  const mult = (id) => rows.find((r) => r.model === id)?.mult;
+  equal(mult("claude-haiku-4-5-20251001"), 0.5, "RED: haiku is $1/$5 against sonnet's $2/$10");
+  equal(mult("claude-sonnet-5"), 1, "RED: the base must be exactly 1x");
+  equal(mult("claude-opus-5"), 2.5, "RED: opus is $5/$25 against sonnet's $2/$10");
+  equal(mult("claude-fable-5-1"), 5, "RED: fable is $10/$50 against sonnet's $2/$10");
+  // The catalog's haiku id carries a date suffix the rate doc's does not. Keying
+  // on the doc's bare id renders the model swarm actually seats as `unpriced`.
+  ok(!Object.keys(CLAUDE_RATE_CARD.prices).includes("claude-haiku-4-5"),
+    "RED: the card is keyed on the doc's bare haiku id, not the one swarm dispatches");
+});
+
+test("rate cards: no price is invented — Codex unpriced, Claude only the published set", () => {
+  // No Codex rate card has been read, so its table still carries the base alone.
+  deepEqual(Object.keys(CODEX_RATE_CARD.prices).filter((model) => model !== CODEX_RATE_CARD.baseModel), [],
+    "RED: codex carries an unsourced price");
   ok(!costRowsFor("codex", { models: ["gpt-5.6-sol"] })
     .some((r) => r.model !== CODEX_RATE_CARD.baseModel && r.mult != null), "a non-base model got a weight");
+  // Claude's set is pinned to the published table it was read from. Adding a row
+  // without a source fails here — the pinned list IS the sourcing record, and it
+  // is the only thing standing between a guessed price and a permanent mis-rank.
+  deepEqual(Object.keys(CLAUDE_RATE_CARD.prices).sort(), [
+    "claude-fable-5-1", "claude-haiku-4-5-20251001", "claude-opus-4-8",
+    "claude-opus-5", "claude-sonnet-4-6", "claude-sonnet-5",
+  ], "RED: a Claude price was added or removed without updating the published set");
 });
 
 test("rate cards: a published-price weight is an api-equivalent estimate, never a bill", () => {
