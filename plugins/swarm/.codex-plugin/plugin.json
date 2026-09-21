@@ -1,0 +1,39 @@
+{
+  "name": "swarm",
+  "version": "0.1.0",
+  "description": "Alternative-model fan-out engine. Manifest-driven parallel runs across capable :cloud models and Claude — background execution, digest compression, worktree isolation, and a governance-gated provider path.",
+  "author": {
+    "name": "Andrew Maston",
+    "email": "andrew.maston1988@gmail.com"
+  },
+  "homepage": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "repository": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+  "license": "MIT",
+  "keywords": [
+    "swarm",
+    "fan-out",
+    "multi-model",
+    "ollama",
+    "orchestration"
+  ],
+  "skills": "./skills/",
+  "hooks": {},
+  "interface": {
+    "displayName": "Swarm",
+    "shortDescription": "Manifest-driven parallel fan-out across alternative models",
+    "longDescription": "Swarm fans a task graph out across capable :cloud models and Claude in parallel, each leaf isolated in its own git worktree, and compresses the run into one digest. Use it to sweep a codebase, run a judge panel, or hand a bounded task to another model on a cloud budget it reports honestly.",
+    "developerName": "Andrew Maston",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/andrewmaston1988/claude-plugin-marketplace",
+    "defaultPrompt": [
+      "Fan this out across three models.",
+      "Run a read-only swarm over this repo."
+    ],
+    "brandColor": "#8e7ff2"
+  }
+}
