@@ -330,9 +330,16 @@ export function provenanceBanner(usage) {
   const refresh = usage.refresh ?? (provider === "ollama"
     ? `    Refresh: swarm ollama-usage --cookie '<value>'${usage.cookiePath ? `   (writes ${usage.cookiePath})` : ""}`
     : `    Refresh: swarm usage --provider ${provider}`);
+  // A rate card is a published price table, not a cached usage reading, so it
+  // gets its own sentence rather than the shared cached wording: the reader's
+  // next action is re-reading ONE provider's card, so the line has to name which.
+  if (usage.reason === "stale-rate-card") {
+    const lastRead = usage.lastSeen ? ` — last read ${new Date(usage.lastSeen).toISOString()}` : "";
+    return [`/!\\ ${title} — ${provider}'s published prices are past their re-read date${lastRead}.`, refresh];
+  }
   if (usage.provenance === "cached") {
     const lastSeen = usage.lastSeen ? `  last seen: ${new Date(usage.lastSeen).toISOString()}` : "";
-    return [`/!\\ ${title} (${provider}) — figures below are cached.${lastSeen}`, refresh];
+    return [`/!\\ ${title} — figures below are cached.${lastSeen}`, refresh];
   }
   // A partial read DID fetch this process — saying "no cached reading available"
   // over figures that just arrived live would be a lie the reader acts on.
