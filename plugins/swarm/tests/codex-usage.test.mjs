@@ -16,20 +16,27 @@ import {
 
 const NOW = "2026-09-19T12:00:00.000Z";
 
-function clientFor({ fail = false } = {}) {
+const LIMITS_OK = {
+  rateLimitsByLimitId: {
+    session: { primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 111 }, secondary: null },
+  },
+};
+
+const ACCOUNT_OK = {
+  summary: { inputTokens: 10, outputTokens: 2 },
+  dailyUsageBuckets: [{ date: "2026-09-19", inputTokens: 10 }],
+};
+
+// `fail` rejects both endpoints; `failMethods` rejects only the named ones, so a
+// half-failed read is expressible.
+function clientFor({ fail = false, failMethods = [], limits = LIMITS_OK } = {}) {
   return {
     async initialize() {},
     async request(method) {
       if (fail) throw new Error("offline");
-      if (method === CODEX_RATE_LIMITS_METHOD) return {
-        rateLimitsByLimitId: {
-          session: { primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 111 }, secondary: null },
-        },
-      };
-      if (method === CODEX_ACCOUNT_USAGE_METHOD) return {
-        summary: { inputTokens: 10, outputTokens: 2 },
-        dailyUsageBuckets: [{ date: "2026-09-19", inputTokens: 10 }],
-      };
+      if (failMethods.includes(method)) throw new Error(`refused: ${method}`);
+      if (method === CODEX_RATE_LIMITS_METHOD) return limits;
+      if (method === CODEX_ACCOUNT_USAGE_METHOD) return ACCOUNT_OK;
       throw new Error(`unexpected method ${method}`);
     },
   };
@@ -117,3 +124,119 @@ test("Codex rate-limit update notifications normalize inline payloads", async ()
   unsubscribe();
   equal(listener, undefined);
 });
+
+// Defect CS-2 — a rejected half was recorded and then discarded, and the one
+// reading that lost data was exactly the one `provenanceBanner` suppresses for
+// being `live`. The failure must reach the snapshot it belongs to.
+test("Codex usage marks a half-failed read partial and names the endpoint that failed", async () => {
+  const snapshot = await readCodexUsage({}, {
+    client: clientFor({ failMethods: [CODEX_ACCOUNT_USAGE_METHOD] }),
+    now: () => NOW,
+  });
+
+  equal(snapshot.provenance, "partial");
+  ok(snapshot.reason?.includes(CODEX_ACCOUNT_USAGE_METHOD), `reason must name the failed endpoint: ${snapshot.reason}`);
+
+  const unavailable = snapshot.buckets.filter((bucket) => bucket.kind === "unavailable");
+  equal(unavailable.length, 1, "the failed half must ride as an unavailable bucket");
+  ok(unavailable[0].reason.includes(CODEX_ACCOUNT_USAGE_METHOD), unavailable[0].reason);
+
+  // The half that DID answer keeps its figures — a partial read is not a blank one.
+  ok(snapshot.buckets.some((bucket) => bucket.kind === "rate-limit"));
+});
+
+// The negative half: a clean two-endpoint success gains no caveat and no bucket.
+// Without this, a fix that marks everything partial reads as correct.
+test("Codex usage reports a clean two-endpoint read as live with no reason", async () => {
+  const snapshot = await readCodexUsage({}, { client: clientFor(), now: () => NOW });
+  equal(snapshot.provenance, "live");
+  equal(snapshot.reason, undefined);
+  equal(snapshot.buckets.some((bucket) => bucket.kind === "unavailable"), false);
+});
+
+// Defect CS-3's field, asserted on the contract-validated return: `record()`
+// strips any field that is not in the record's optional list, so a gate reading
+// `exhausted` sees `undefined` however loudly the source sets it.
+test("Codex usage reports exhaustion from the rate-limit half", async () => {
+  const read = (limits) => readCodexUsage({}, { client: clientFor({ limits }), now: () => NOW });
+
+  const full = await read({ rateLimitsByLimitId: { session: { primary: { usedPercent: 100 } } } });
+  equal(full.exhausted, true);
+
+  const nearly = await read({ rateLimitsByLimitId: { session: { primary: { usedPercent: 99 } } } });
+  equal(nearly.exhausted, false);
+
+  // The secondary window counts too — it is a rate-limit window like any other.
+  const secondary = await read({ rateLimitsByLimitId: { session: { primary: { usedPercent: 9 }, secondary: { usedPercent: 100 } } } });
+  equal(secondary.exhausted, true);
+
+  // Account usage alone is a measurement, not a limit: a read that lost the
+  // rate-limit half must not read as exhausted.
+  const accountOnly = await readCodexUsage({}, {
+    client: clientFor({ failMethods: [CODEX_RATE_LIMITS_METHOD] }),
+    now: () => NOW,
+  });
+  equal(accountOnly.exhausted, false);
+  equal(accountOnly.provenance, "partial");
+});
+
+// Defect CS-8 — the request path and the caller's own onUpdate shared one
+// `.catch((error) => onError?.(error))`, and onError is optional. With none
+// supplied every failure was a silent no-op: rate-limit live updates stopped
+// arriving with no diagnostic anywhere. A failure may be unwitnessed, never
+// unwitnessable.
+async function withWarningSpy(fn) {
+  const warnings = [];
+  const onWarning = (warning) => warnings.push(warning);
+  process.on("warning", onWarning);
+  try {
+    return await fn(warnings);
+  } finally {
+    process.off("warning", onWarning);
+  }
+}
+
+// Two macrotask-free ticks: one for the request's rejection to settle, one for
+// the .catch handler's own continuation.
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+function failingSubscriptionClient() {
+  const client = {
+    subscribe(fn) { client.listener = fn; return () => { client.listener = undefined; }; },
+    async request() { throw new Error("subscription offline"); },
+  };
+  return client;
+}
+
+test("Codex rate-limit subscription warns when a failure has no onError to go to", async () => {
+  await withWarningSpy(async (warnings) => {
+    const client = failingSubscriptionClient();
+    subscribeCodexRateLimitUpdates(client, { now: () => NOW, onUpdate: () => {} });
+    client.listener({ method: CODEX_RATE_LIMITS_UPDATED_METHOD });
+    await settle();
+    await settle();
+
+    equal(warnings.length, 1, "a swallowed failure must surface somewhere");
+    ok(warnings[0].message.includes("subscription offline"), warnings[0].message);
+    ok(/rate.?limit/i.test(warnings[0].message), `the warning must name its subject: ${warnings[0].message}`);
+  });
+});
+
+// The negative half: a caller that DID supply onError stays its sole receiver —
+// without this, a fix that warns unconditionally reads as correct.
+test("Codex rate-limit subscription gives a failure to onError and warns not at all", async () => {
+  await withWarningSpy(async (warnings) => {
+    const seen = [];
+    const client = failingSubscriptionClient();
+    subscribeCodexRateLimitUpdates(client, { now: () => NOW, onUpdate: () => {}, onError: (error) => seen.push(error) });
+    client.listener({ method: CODEX_RATE_LIMITS_UPDATED_METHOD });
+    await settle();
+    await settle();
+
+    equal(seen.length, 1);
+    equal(seen[0].message, "subscription offline");
+    equal(warnings.length, 0, `an onError caller must be the only receiver: ${warnings.map((w) => w.message).join(" | ")}`);
+  });
+});
+
+

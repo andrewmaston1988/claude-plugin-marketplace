@@ -11,7 +11,14 @@ import {
   runnerEvent,
   identityOf,
   identityKey,
+  PROVENANCE_STATES,
 } from "../src/contracts.mjs";
+
+function usageSnapshot(over = {}) {
+  return providerUsageSnapshot({
+    provider: "codex", buckets: [], source: "app-server", provenance: "live", asOf: "2026-09-18", ...over,
+  });
+}
 
 test("identityOf reads a stored row's provider, or infers it from the model", () => {
   deepEqual(identityOf({ provider: "codex", model: "gpt-5" }), { provider: "codex", model: "gpt-5", explicit: true });
@@ -88,3 +95,37 @@ test("normalized records name missing required fields", () => {
   throws(() => costObservation({ provider: "codex", model: "x" }), /CostObservation.*unit/);
   throws(() => availabilityVerdict({ provider: "codex", model: "x" }), /AvailabilityVerdict.*state/);
 });
+
+// Defect CS-9 — `provenance` crossed the trust boundary as a plain string while
+// its siblings (`classification`, `state`) checked against a declared set. Both
+// directions of the display key off this token — `provenanceBanner` suppresses
+// itself for `live`, the headroom gate trusts only `live` — so a typo'd `"Live"`
+// renders as an unverified reading with no caveat and no error.
+// The token list is read off the shipped sources, not memory: live
+// (codex-usage), cached/none (ollama-usage), cache (usage.mjs's Anthropic TTL
+// cache read), unknown (normalizeProviderUsage's generic path), partial (a
+// half-failed codex read).
+test("providerUsageSnapshot: every shipped provenance token is accepted, a typo is not", () => {
+  const SHIPPED = ["live", "cached", "cache", "none", "unknown", "partial"];
+  deepEqual([...PROVENANCE_STATES].sort(), [...SHIPPED].sort());
+  for (const provenance of SHIPPED) equal(usageSnapshot({ provenance }).provenance, provenance);
+  throws(() => usageSnapshot({ provenance: "Live" }), /provenance.*one of/);
+  throws(() => usageSnapshot({ provenance: "lively" }), /provenance.*one of/);
+  throws(() => usageSnapshot({ provenance: "" }), /provenance/);
+});
+
+// `record()` keeps only the fields in a record's required+optional list, so an
+// un-widened ProviderUsageSnapshot drops `exhausted` and `reason` in silence —
+// the scheduler gate reads `undefined`, dispatches into an exhausted allowance,
+// and every source row stays green. This is the row that guards that trap.
+test("providerUsageSnapshot: optional exhausted and reason survive record()", () => {
+  const out = usageSnapshot({ exhausted: true, reason: "account/usage/read failed" });
+  equal(out.exhausted, true);
+  equal(out.reason, "account/usage/read failed");
+  // Absent means absent: a reading nobody measured must not carry a false that
+  // reads as "has headroom".
+  equal("exhausted" in usageSnapshot({}), false);
+  throws(() => usageSnapshot({ exhausted: "yes" }), /exhausted.*boolean/);
+  throws(() => usageSnapshot({ reason: 42 }), /reason.*string/);
+});
+

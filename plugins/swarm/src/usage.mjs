@@ -32,8 +32,10 @@ function asOf(value = Date.now()) {
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
 
-function snapshot(provider, buckets, { source = "unknown", provenance = "none", asOf: at = Date.now() } = {}) {
-  return providerUsageSnapshot({ provider, buckets, source, provenance, asOf: asOf(at) });
+function snapshot(provider, buckets, { source = "unknown", provenance = "none", reason, asOf: at = Date.now() } = {}) {
+  return providerUsageSnapshot({
+    provider, buckets, source, provenance, ...(reason ? { reason } : {}), asOf: asOf(at),
+  });
 }
 
 const none = (provider, options = {}) => ({
@@ -125,6 +127,15 @@ function codexLimitBuckets(buckets) {
   return limits;
 }
 
+// The one home of the 100% rule. A rate-limit window at or over its cap means
+// the provider cannot take work; the codex snapshot builder folds over the same
+// `codexLimitBuckets` output rather than reading the payload a second time.
+// Account-usage buckets are skipped by that reader, and deliberately: they are a
+// measurement, not a limit.
+export function codexExhausted(buckets) {
+  return codexLimitBuckets(buckets).some((entry) => entry.percent >= 100);
+}
+
 // Codex account usage is deliberately retained in `buckets` but is not
 // flattened into a quota bar. Rate-limit ids are the dispatch/headroom view;
 // account summaries and daily buckets are account measurements, not leaf cost.
@@ -135,10 +146,13 @@ export function normalizeCodex(reading, options = {}) {
     ...snapshot("codex", source.buckets, {
       source: source.source || options.source || "codex-app-server",
       provenance: source.provenance || options.provenance || "none",
+      // A half-failed read's caveat must survive normalisation or the banner
+      // never sees it — this is the whole point of marking the reading.
+      reason: source.reason || options.reason,
       asOf: source.asOf || options.asOf,
     }),
     provider: "codex",
-    state: limits.some((entry) => entry.percent >= 100) ? "exhausted" : limits.length ? "ok" : "unknown",
+    state: codexExhausted(source.buckets) ? "exhausted" : limits.length ? "ok" : "unknown",
     limits,
   };
 }
@@ -318,6 +332,11 @@ export function provenanceBanner(usage) {
   if (usage.provenance === "cached") {
     const lastSeen = usage.lastSeen ? `  last seen: ${new Date(usage.lastSeen).toISOString()}` : "";
     return [`/!\\ ${title} — figures below are cached.${lastSeen}`, refresh];
+  }
+  // A partial read DID fetch this process — saying "no cached reading available"
+  // over figures that just arrived live would be a lie the reader acts on.
+  if (usage.provenance === "partial") {
+    return [`/!\\ Partial Reading — ${usage.reason}. Figures shown are live; the rest of the reading did not answer.`, refresh];
   }
   return [`/!\\ ${title} — no cached reading available.`, refresh];
 }

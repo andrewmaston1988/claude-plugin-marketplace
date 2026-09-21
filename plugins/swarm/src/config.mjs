@@ -121,6 +121,12 @@ function validateAllowedRoots(value, label) {
   }
 }
 
+function validateModelDenylist(value, path) {
+  if (value !== undefined && (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !entry))) {
+    throw new Error(`modelDenylist in ${path} must be an array of non-empty strings`);
+  }
+}
+
 function validateProviderConfig(cfg) {
   if (!isPlainObject(cfg.providers)) throw new Error('providers must be an object — e.g. "providers": {"codex": {"enabled": false}}');
   // Top level is the default every provider inherits; a provider entry narrows it.
@@ -135,8 +141,9 @@ function validateProviderConfig(cfg) {
 // Every check a config must pass, in one place: loadConfig runs it on the merged
 // view, initConfig on the object it is about to write. Five checks — the
 // valve/minFreeMemMb ordering below is the one an extraction keeps dropping.
-function validateConfig(cfg) {
+function validateConfig(cfg, configPath) {
   validateProviderConfig(cfg);
+  validateModelDenylist(cfg.modelDenylist, configPath);
   if (typeof cfg.disable1mContext !== "boolean") {
     throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
   }
@@ -168,7 +175,7 @@ export function loadConfig(overridePath, env = process.env, { warn = (message) =
   const user = existsSync(userPath) ? parseUser(userPath) : null;
   for (const warning of legacyConfigWarnings(user)) warn(warning);
   const cfg = user ? deepMerge(defaults, normalizeConfigInput(user)) : defaults;
-  validateConfig(cfg);
+  validateConfig(cfg, userPath);
   return addLegacyProviderView(cfg);
 }
 
@@ -288,7 +295,7 @@ export function initConfig(overridePath, env = process.env) {
   // today. A write the next loadConfig rejects is worse than a refusal: the operator
   // loses the shape they understood and gains one that does not load.
   try {
-    validateConfig(user);
+    validateConfig(user, path);
   } catch (e) {
     throw refuse(e);
   }
@@ -313,7 +320,7 @@ export function setConfigValue(key, value, overridePath, env = process.env) {
   const next = structuredClone(raw);
   setPath(next, key, value);
   try {
-    validateConfig(deepMerge(readDefaults(), normalizeConfigInput(next)));
+    validateConfig(deepMerge(readDefaults(), normalizeConfigInput(next)), path);
   } catch (e) {
     throw new Error(refuseToWrite(raw, path, false, e));
   }

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { swarmHome } from "./config.mjs";
-import { modelDescriptor, OLLAMA_CLOUD_RE } from "./contracts.mjs";
+import { modelDescriptor, OLLAMA_CLOUD_RE, identityOf, identityKey } from "./contracts.mjs";
 import { providerConfig } from "./providers.mjs";
 
 // Model discovery — the ollama cloud catalog ONLY: recommendations ∪ /api/tags,
@@ -226,17 +226,6 @@ export async function discoverModels(cfg, fetchImpl = globalThis.fetch, { spawnI
   return sortModelsBySize(collapseFamilies(await enrichWithShow([...merged.values()], base, fetchImpl), suffix));
 }
 
-// Cache the last discovery so the 402 removal and the next `models` refresh work
-// from a durable roster. Written on every `models` run.
-export function writeModelsCache(models, env = process.env) {
-  const dir = swarmHome(env);
-  mkdirSync(dir, { recursive: true });
-  const p = join(dir, "models-cache.json");
-  writeFileSync(p + ".tmp", JSON.stringify({ updated: new Date().toISOString(), models }, null, 2) + "\n");
-  renameSync(p + ".tmp", p);
-  return p;
-}
-
 // Matches ollama's 402 body for a model priced "extra usage" with an empty
 // balance. The scheduler greps leaf failure output with this; the refresh
 // probe greps the HTTP body.
@@ -251,7 +240,17 @@ export function removeCachedModel(model, env = process.env, provider) {
   let cache;
   try { cache = JSON.parse(readFileSync(p, "utf8")); } catch { return; }
   const models = Array.isArray(cache?.models) ? cache.models : [];
-  const matches = (row) => row?.model === model && (!provider || !row.provider || row.provider === provider);
+  const wanted = identityOf(model);
+  const wantedProvider = provider && identityOf({ model: wanted.model, provider }).provider;
+  const matches = (row) => {
+    if (!row?.model) return false;
+    const identity = identityOf(row);
+    if (identity.model !== wanted.model) return false;
+    // Legacy: a provider-less row matches any eviction; an eviction without a
+    // provider matches any row.
+    if (!row.provider || !wantedProvider) return true;
+    return identity.provider === wantedProvider;
+  };
   if (!models.some(matches)) return;
   cache.models = models.filter((m) => !matches(m));
   writeFileSync(p + ".tmp", JSON.stringify(cache, null, 2) + "\n");
@@ -365,10 +364,15 @@ export function createOllamaProviderAdapter(options = {}) {
 }
 
 export function readModelsCache(env = process.env) {
+  const p = join(swarmHome(env), "models-cache.json");
   try {
-    return JSON.parse(readFileSync(join(swarmHome(env), "models-cache.json"), "utf8"));
-  } catch {
-    return null;
+    return JSON.parse(readFileSync(p, "utf8"));
+  } catch (error) {
+    // Missing file = first-ever install. Anything else (truncated, hand-edited)
+    // must be loud: silent null disarms the zero-row protection in
+    // refreshModelsCache and blanks the roster.
+    if (error?.code === "ENOENT") return null;
+    throw new Error(`models cache is unreadable: ${p} (${error?.message || error})`);
   }
 }
 
@@ -384,8 +388,11 @@ export function mergeProviderModelCaches(caches = []) {
   for (const cache of caches) {
     for (const row of cache || []) {
       if (!row?.model) continue;
-      const provider = row.provider || "ollama";
-      merged.set(`${provider}\u0000${row.model}`, { ...row, provider });
+      // Keyed through the identity reading, so 'Codex'/'codex' cannot split a
+      // model's roster row in two and 402 eviction can still find it.
+      const identity = identityOf(row);
+      const provider = identity.provider || "ollama";
+      merged.set(identityKey(identity), { ...row, model: identity.model, provider });
     }
   }
   return [...merged.values()];

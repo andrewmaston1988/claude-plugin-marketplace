@@ -317,7 +317,13 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     try { mtimeMs = statSync(costModelsFile).mtimeMs; } catch { mtimeMs = 0; }
     if (mtimeMs !== costModelCache.mtimeMs) {
       const byProvider = {};
-      for (const row of readModelsCache({ ...process.env, SWARM_HOME: home })?.models || []) {
+      let rows = [];
+      try {
+        rows = readModelsCache({ ...process.env, SWARM_HOME: home })?.models || [];
+      } catch {
+        // Display-only: a corrupt roster renders empty; the CLI is the loud path.
+      }
+      for (const row of rows) {
         if (!row?.model) continue;
         (byProvider[row.provider || "ollama"] ||= []).push(row.model);
       }

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
 import {
-  discoverModels, writeModelsCache, scrapeDiscoverCmd,
+  discoverModels, scrapeDiscoverCmd,
   deriveCloudName, enrichWithShow, sortModelsBySize,
   collapseFamilies, visibleModels, removeCachedModel, probeTopModels,
   createOllamaProviderAdapter, discoverOllamaModels, mergeProviderModelCaches,
@@ -167,20 +167,6 @@ test("all sources exhausted -> clear error", async () => {
 test("scrapeDiscoverCmd tolerates a spawn that errors", async () => {
   const throwingSpawn = () => { throw new Error("ENOENT"); };
   deepEqual(await scrapeDiscoverCmd(cfg("x"), throwingSpawn), []);
-});
-
-test("writeModelsCache lands in SWARM_HOME/models-cache.json", () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-cache-"));
-  try {
-    const p = writeModelsCache([{ model: "glm-5.2:cloud", description: "d" }], { SWARM_HOME: dir });
-    equal(p, join(dir, "models-cache.json"));
-    const cache = JSON.parse(readFileSync(p, "utf8"));
-    ok(cache.updated);
-    deepEqual(cache.models, [{ model: "glm-5.2:cloud", description: "d" }]);
-    ok(!existsSync(p + ".tmp")); // atomic: tmp renamed away
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 });
 
 test("deriveCloudName: bare gets :cloud, tagged gets -cloud, cloud forms pass through", () => {
@@ -346,7 +332,7 @@ test("probeTopModels: 402 removes the row, 200 keeps it, other errors fail open"
       { model: "deepseek-v4-pro:cloud" },
       { model: "kimi-k2.7-code:cloud" },
     ];
-    writeModelsCache(roster, env);
+    writeCompositeModelsCache(roster, env);
     const calls = [];
     const live = await probeTopModels(roster, "http://x", probeFetch({
       "kimi-k3:cloud": 402,
@@ -367,7 +353,7 @@ test("probeTopModels: fetch throw keeps the row (fail open)", async () => {
   try {
     const env = { SWARM_HOME: dir };
     const roster = [{ model: "glm-5.2:cloud" }];
-    writeModelsCache(roster, env);
+    writeCompositeModelsCache(roster, env);
     const before = readFileSync(join(dir, "models-cache.json"), "utf8");
     const live = await probeTopModels(roster, "http://x", probeFetch({ "glm-5.2:cloud": "throw" }, []), { env });
     equal(readFileSync(join(dir, "models-cache.json"), "utf8"), before);
@@ -387,7 +373,7 @@ test("probeTopModels: only the top 3 visible entries; non-cloud names never prob
       { model: "glm-5.2:cloud" },
       { model: "minimax-m3:cloud" }, // 4th — outside the top 3
     ];
-    writeModelsCache(roster, env);
+    writeCompositeModelsCache(roster, env);
     const calls = [];
     await probeTopModels(roster, "http://x", probeFetch({}, calls), { env });
     deepEqual(calls, ["kimi-k3:cloud", "glm-5.2:cloud"]);
@@ -406,7 +392,7 @@ test("probeTopModels: denylisted entries neither probed nor occupying a slot", a
       { model: "kimi-k2.7-code:cloud" },
       { model: "minimax-m3:cloud" }, // takes the freed third slot
     ];
-    writeModelsCache(roster, env);
+    writeCompositeModelsCache(roster, env);
     const calls = [];
     await probeTopModels(roster, "http://x", probeFetch({}, calls), {
       env, isDenylisted: (n) => n.includes("nemotron"),
@@ -428,7 +414,7 @@ test("probeTopModels: a removal cascades to the resurfaced elder, capped at 6 pr
       { model: "kimi-k2.7-code:cloud" },
       { model: "kimi-k2.6:cloud", supersededBy: "kimi-k3:cloud" },
     ];
-    writeModelsCache(roster, env);
+    writeCompositeModelsCache(roster, env);
     const calls = [];
     const live = await probeTopModels(roster, "http://x", probeFetch({ "kimi-k3:cloud": 402 }, calls), { env });
     deepEqual(calls, ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "kimi-k2.7-code:cloud", "kimi-k2.6:cloud"]);
@@ -440,7 +426,7 @@ test("probeTopModels: a removal cascades to the resurfaced elder, capped at 6 pr
     for (let v = 9; v >= 2; v--) {
       chain.push({ model: `glm-5.${v}:cloud`, ...(v < 9 ? { supersededBy: `glm-5.${v + 1}:cloud` } : {}) });
     }
-    writeModelsCache(chain, env);
+    writeCompositeModelsCache(chain, env);
     const chainCalls = [];
     const verdicts = Object.fromEntries(chain.map((m) => [m.model, 402]));
     await probeTopModels(chain, "http://x", probeFetch(verdicts, chainCalls), { env });
@@ -458,7 +444,7 @@ test("removeCachedModel deletes the row atomically; missing cache/entry are no-o
     // missing cache -> silent no-op
     removeCachedModel("glm-5.2:cloud", env);
     ok(!existsSync(p));
-    writeModelsCache([{ model: "kimi-k3:cloud" }, { model: "glm-5.2:cloud" }], env);
+    writeCompositeModelsCache([{ model: "kimi-k3:cloud" }, { model: "glm-5.2:cloud" }], env);
     // missing entry -> no write (compact hand-written JSON survives byte-identical;
     // a rewrite would re-indent)
     const compact = JSON.stringify(JSON.parse(readFileSync(p, "utf8")));

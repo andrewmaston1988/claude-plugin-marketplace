@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { equal, deepEqual, ok } from "node:assert/strict";
 import { declaredEfforts, effortFor, isClaudeModel, tierFromModel, isValidEffort } from "../src/models.mjs";
 
 test("isClaudeModel matrix", () => {
@@ -50,3 +50,21 @@ test("effortFor and declaredEfforts use the provider-qualified cache row", () =>
   equal(effortFor({}, undefined), "medium");
 });
 
+
+test("declaredEfforts never returns another provider's declaration (shared model id)", () => {
+  const cache = [
+    { provider: "ollama", model: "shared-id", efforts: ["low"] },
+    { provider: "codex", model: "shared-id", efforts: ["minimal", "xhigh"] },
+  ];
+  equal(declaredEfforts("shared-id", "claude", cache), undefined);
+  deepEqual(declaredEfforts("shared-id", "codex", cache), { efforts: ["minimal", "xhigh"] });
+  deepEqual(declaredEfforts("shared-id", "ollama", cache), { efforts: ["low"] });
+});
+
+test("declaredEfforts: provider-less rows stay reachable, even with a provider named", () => {
+  const cache = [{ model: "legacy-id", efforts: ["high"], defaultEffort: "high" }];
+  // With no provider argument the qualified key is already [null, model];
+  // the fallback is what keeps a legacy row resolvable when a provider IS named.
+  deepEqual(declaredEfforts("legacy-id", undefined, cache), { efforts: ["high"], defaultEffort: "high" });
+  deepEqual(declaredEfforts("legacy-id", "codex", cache), { efforts: ["high"], defaultEffort: "high" });
+});

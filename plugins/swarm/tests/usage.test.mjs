@@ -379,3 +379,24 @@ test("formatResetTime: R5 a missing or unparseable resetsAt prints no clause, ne
   const exhausted = notableLines([normalizeOllama({ ...OLLAMA_OK, state: "exhausted", weeklyPctUsed: 100, resetsAt: "garbage" })], { timeZone: LONDON });
   equal(exhausted[0], "ollama: weekly allowance exhausted");
 });
+
+// CS-2's operator surface. `provenanceBanner` suppresses itself for `live`, so
+// before the reading carried a `partial` provenance and a reason, the one
+// reading that lost half its data was the one that rendered with no caveat.
+test("notableLines: a partial codex reading is announced, and says so honestly", () => {
+  const REASON = "account/usage/read: refused";
+  const partial = normalizeCodex({
+    ...codexReading({ primary: { usedPercent: 20 } }),
+    provenance: "partial",
+    reason: REASON,
+  });
+  const lines = notableLines([partial], { timeZone: LONDON });
+  ok(lines.some((l) => l.includes(REASON)), `the caveat must name the failed endpoint: ${lines.join(" | ")}`);
+  // Figures in the same block were fetched live this process — promising a
+  // cached reading over them is the lie the reader would act on.
+  ok(!/no cached reading/i.test(lines.join(" ")), lines.join(" | "));
+
+  // The negative half: a clean live read carries no caveat at all.
+  deepEqual(notableLines([normalizeCodex(codexReading({ primary: { usedPercent: 20 } }))], { timeZone: LONDON }), []);
+});
+
