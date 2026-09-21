@@ -6,6 +6,8 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import http from "node:http";
 import { fixtureRegistry, fixtureRunner, FIXTURE_MODEL } from "./fixtures/fourth-provider.mjs";
+import { createProviderRegistry } from "../src/providers.mjs";
+import { providerUsageSnapshot } from "../src/contracts.mjs";
 import { refreshModelsCache, readModelsCache, writeCompositeModelsCache } from "../src/discovery.mjs";
 import { loadManifest, effectivePlanDoc } from "../src/manifest.mjs";
 import { buildDispatch, createDispatchRegistry } from "../src/dispatch.mjs";
@@ -87,7 +89,9 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
 
     const usage = await readCachedUsage(cfg, { providerRegistry: registry, env });
     equal(usage.find((row) => row.provider === "fixture").state, "ok");
-    const liveUsage = await readProviderUsage(cfg, { registry, env });
+    // The claude adapter reads live here too; keep the read hermetic — the
+    // fixture row is what this assertion is about.
+    const liveUsage = await readProviderUsage(cfg, { registry, env, fetchImpl: async () => { throw new Error("no network in tests"); } });
     deepEqual(liveUsage.errors, {});
     equal(liveUsage.usages.find((row) => row.provider === "fixture").state, "ok");
 
@@ -196,6 +200,39 @@ test("CLI roster hides disabled/denylisted cached providers", async () => {
     const disabled = [];
     await cmdModels([], { cfg: disabledCfg, env, registry, fetchImpl: async () => ({ ok: true }), write: (line) => disabled.push(line) });
     ok(!disabled.some((line) => line.includes(FIXTURE_MODEL)), disabled.join("\n"));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// scripts/swarm.mjs's walk skipped `claude` by id — Anthropic was read outside
+// the registry, and the walk could never carry its reading. A distinctive
+// window from a claude adapter is the marker: the skip dropped the adapter and
+// no such row could exist.
+test("readProviderUsage walks a claude adapter's reading like any provider's", async () => {
+  const claude = {
+    id: "claude",
+    runnerId: "claude",
+    enabled: () => true,
+    validateTask: () => [],
+    capabilities: {
+      readUsage: async () => providerUsageSnapshot({
+        provider: "claude",
+        buckets: [{ kind: "probe-marker", percent: 13, resetsAt: "2026-09-20T16:00:00Z", scope: null }],
+        source: "probe",
+        provenance: "live",
+        exhausted: false,
+        asOf: "2026-09-20T12:00:00Z",
+      }),
+    },
+  };
+  const home = mkdtempSync(join(tmpdir(), "swarm-claude-walk-"));
+  try {
+    const { usages } = await readProviderUsage({ providers: { claude: { enabled: true } } }, {
+      registry: createProviderRegistry([claude]),
+      env: { SWARM_HOME: home },
+    });
+    ok(usages.some((r) => r.provider === "anthropic" && r.limits.some((l) => l.kind === "probe-marker")), JSON.stringify(usages));
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

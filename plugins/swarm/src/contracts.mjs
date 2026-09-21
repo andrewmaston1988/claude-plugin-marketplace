@@ -103,6 +103,16 @@ export function isClaudeModel(model) {
   return value.startsWith("claude-") || CLAUDE_ALIASES.has(value);
 }
 
+// The family token a Claude model id sits in, positional: the family must come
+// directly after the "claude-" prefix or BE the bare alias. A substring test
+// reads any id containing the token as that family. Null when the id names no
+// family — callers handle it rather than assume a string.
+export function claudeFamilyOf(model) {
+  const value = String(model || "").toLowerCase();
+  const m = /^claude-(fable|opus|sonnet|haiku)(?:-|$)/.exec(value) || /^(fable|opus|sonnet|haiku)$/.exec(value);
+  return m ? m[1] : null;
+}
+
 function record(name, value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error(`${name} must be an object`);

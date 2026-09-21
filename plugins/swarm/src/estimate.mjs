@@ -9,6 +9,7 @@ import { workTokens } from "./stream.mjs";
 import { formatTokens } from "./results.mjs";
 import { modelKey, identityOf } from "./contracts.mjs";
 import { isAgentless } from "./manifest.mjs";
+import { createDefaultProviderRegistry } from "./providers.mjs";
 
 export function median(nums) {
   const s = [...nums].sort((a, b) => a - b);
@@ -54,7 +55,20 @@ function shownIdentity(identity) {
 // project — per-model cost is a property of the model, not the repo). Rows
 // need state ok + a real model + tokens; pre-D1 summaries lack `model` and
 // simply don't contribute. Every read is best-effort.
-export function loadCorpus(runsRoot) {
+// A provider bills real dollars only when its adapter declares it — the
+// registry is the single home of that fact. An unknown or unregistered
+// provider never bills.
+function billsInUsdViaRegistry(registry, provider) {
+  if (!provider) return false;
+  try {
+    return registry.capability(provider, "billsInUsd")?.() === true;
+  } catch {
+    return false;
+  }
+}
+
+export function loadCorpus(runsRoot, { providerRegistry } = {}) {
+  const registry = providerRegistry || createDefaultProviderRegistry();
   const tokens = new ProviderModelMap();
   const costUsd = new ProviderModelMap();
   let l1 = [];
@@ -69,16 +83,18 @@ export function loadCorpus(runsRoot) {
         if (row?.state !== "ok" || typeof row.model !== "string" || isAgentless(row) || !row.tokens) continue;
         const identity = identityOf(row);
         push(tokens, keyOf(identity), workTokens(row.tokens));
-        // costUsd is real only for Anthropic-billed leaves. On a :cloud row the CLI
-        // applies its own price table to token counts, but the provider bills on
-        // subscription/GPU cycles with no token->$ mapping — that dollar figure is
-        // fiction, and feeding it to the estimator would fabricate the cost the
-        // operator consents against. Tokens (above) are real for every model.
+        // costUsd is real only for a provider that bills in USD — its adapter's
+        // billsInUsd capability, the registry being the single home of that
+        // fact. On a :cloud row the CLI applies its own price table
+        // to token counts, but the provider bills on subscription/GPU cycles with
+        // no token->$ mapping — that dollar figure is fiction, and feeding it to
+        // the estimator would fabricate the cost the operator consents against.
+        // Tokens (above) are real for every model.
         const billed = row.costClassification === "billed" || row.costObservation?.classification === "billed";
         // identity.provider already resolves "claude" whether the row recorded it or the
         // model name implies it; an extra !row.provider would exclude the recorded case,
         // which is every row a normalised manifest writes.
-        if (Number.isFinite(row.costUsd) && (identity.provider === "claude" || billed)) {
+        if (Number.isFinite(row.costUsd) && (billsInUsdViaRegistry(registry, identity.provider) || billed)) {
           push(costUsd, keyOf(identity), row.costUsd);
         }
       }

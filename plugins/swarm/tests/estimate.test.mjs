@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { median, loadCorpus, estimateRun, projectRun, formatEstimate, leafCounts } from "../src/estimate.mjs";
+import { createProviderRegistry } from "../src/providers.mjs";
 
 // Estimates are consent infrastructure: worst-case leaf counts × historical
 // per-model medians, labelled ~, never a guess on cold start.
@@ -78,6 +79,24 @@ test("a Claude row that RECORDS its provider still feeds the usd corpus", () => 
     ]);
     const corpus = loadCorpus(root);
     deepEqual([...corpus.costUsd.values()], [[0.5]]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("loadCorpus keeps a non-Claude row's costUsd when its provider declares billsInUsd", () => {
+  // RED (the hardcoded `identity.provider === "claude"`): acme bills real USD,
+  // but the branch knows only the one name and drops the row's cost.
+  const registry = createProviderRegistry([
+    { id: "acme", runnerId: "acme", enabled: () => true, validateTask: () => [], capabilities: { billsInUsd: () => true } },
+  ]);
+  const root = mkdtempSync(join(tmpdir(), "swarm-est-bills-"));
+  try {
+    seedRun(root, "project", "run-1", [
+      { id: "a", state: "ok", provider: "acme", model: "acme-big", tokens: tok(100), costUsd: 0.25 },
+    ]);
+    const corpus = loadCorpus(root, { providerRegistry: registry });
+    deepEqual([...corpus.costUsd.values()], [[0.25]]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

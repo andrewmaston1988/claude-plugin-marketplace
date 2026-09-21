@@ -3,7 +3,7 @@ import { freemem } from "node:os";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { buildDispatch, createDispatchRegistry, toSpawnable, runnerOf } from "./dispatch.mjs";
-import { isClaudeModel } from "./models.mjs";
+import { claudeFamilyOf } from "./models.mjs";
 import {
   buildDigestTask, DIGEST_ID,
   reportPath as digestReportPath, scratchPath as digestScratchPath,
@@ -1230,7 +1230,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       // manifest alias kept as modelAlias — grade rows resolve model from here.
       // Non-Claude models keep the manifest name verbatim: ':cloud' is a
       // routing/governance identity an init-reported bare name must not clobber.
-      const stamped = r.realModel && isClaudeModel(task.model) && r.realModel !== task.model;
+      const stamped = r.realModel && claudeFamilyOf(task.model) && r.realModel !== task.model;
       const resultIdentity = task.provider !== undefined
         ? { provider: r.provider || resolvedIdentity(task).provider, runner: r.runner || providerRegistry.get(r.provider || resolvedIdentity(task).provider).runnerId }
         : {};

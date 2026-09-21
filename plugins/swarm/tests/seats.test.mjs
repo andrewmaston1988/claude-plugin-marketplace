@@ -224,6 +224,25 @@ test("resolveSeatModel: an alias takes the id with the most rows; a non-alias ne
   equal(resolveSeatModel("glm-5.4:cloud", byModel), null, "a non-alias never family-matches — only the four aliases take that path");
 });
 
+// The family match is positional, not substring: a claude-provided id that
+// merely CONTAINS "opus" is not the opus family. A substring test hands the
+// seat to whichever claude-provided row has the most rows — an id like
+// not-opus-9b out-polling the real model would seat a non-family id.
+test("a claude-provided id containing a family token is not that family (substring trap)", () => {
+  const byModel = new Map([
+    [JSON.stringify(["claude", "not-opus-9b"]), { n: 99 }],
+    [JSON.stringify(["claude", "claude-opus-5"]), { n: 3 }],
+  ]);
+  equal(resolveSeatModel("opus", byModel), "claude-opus-5", "family matching is positional: not-opus-9b is not the opus family");
+  equal(resolveSeatModel("opus", new Map([[JSON.stringify(["claude", "not-opus-9b"]), { n: 99 }]])), null, "no real family id, no resolution");
+  const rows = [
+    ...Array.from({ length: 3 }, (_, i) => graded({ provider: "claude", model: "not-opus-9b", leaf: `g${i}` })),
+    graded({ provider: "claude", model: "claude-opus-5", leaf: "p0" }),
+  ];
+  const out = seatReport({ models: [{ model: "opus", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");
+  ok(out.includes("opus -> claude/claude-opus-5"), `the seat must resolve to the real family id, got: ${out}`);
+});
+
 test("seatReport: an alias with genuinely no rows still reads never graded", () => {
   const rows = [graded({ model: "claude-sonnet-5" })];
   const out = seatReport({ models: [{ model: "fable", leaves: ["d"] }], rows, costRows: [], roster: [] }).join("\n");

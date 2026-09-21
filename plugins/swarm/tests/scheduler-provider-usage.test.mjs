@@ -13,11 +13,11 @@
 // field has to survive it to reach the gate.
 import { test } from "node:test";
 import { equal, ok, rejects } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runPlan } from "../src/scheduler.mjs";
-import { createProviderRegistry } from "../src/providers.mjs";
+import { createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
 import { createCodexProviderAdapter } from "../src/codex.mjs";
 import { CODEX_ACCOUNT_USAGE_METHOD, CODEX_RATE_LIMITS_METHOD } from "../src/codex-usage.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
@@ -132,6 +132,40 @@ test("preflight: an exhausted Codex reading still dispatches a leaf that has a f
       ok(!/usage is exhausted/.test(error.message), `a fallback leaf must not be grounded: ${error.message}`);
     });
     ok(spawn.calls.length > 0, "a fallback leaf must be dispatched");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Claude's row — same gate, real adapter. The reading reaches `scheduler.mjs:539`
+// through readClaudeUsage and the contract's record(), so `exhausted` has to
+// survive the snapshot round-trip to ground the dispatch. quotaPreflight is off:
+// preflightClaude refuses exhaustion with its own message, and this row exists
+// for the GATE — the refusal it asserts names the gate, not the preflight.
+test("preflight: an exhausted Claude reading aborts before dispatch", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    writeFileSync(join(home, "creds.json"), JSON.stringify({ claudeAiOauth: { accessToken: "t" } }));
+    const usage = { limits: [{ kind: "session", percent: 100, resets_at: "2026-09-20T16:00:00Z", severity: "exceeded" }] };
+    const spawn = fakeSpawnFactory(() => ({ output: "ok" }));
+    const io = makeIo(spawn, {
+      env: { PATH: process.env.PATH, SWARM_HOME: home, SWARM_CREDENTIALS: join(home, "creds.json") },
+      fetch: async () => ({ ok: true, status: 200, json: async () => usage }),
+    });
+    const providerRegistry = createProviderRegistry(defaultProviderAdapters());
+    const task = { id: "c", prompt: "do c", provider: "claude", model: "claude-sonnet-5", allowedTools: "Read", cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [] };
+    await rejects(
+      () => runPlan(
+        buildPlan(dir, [task]),
+        { ...CFG, providers: { claude: { enabled: true } }, quotaPreflight: false, allowedRoots: [dir] },
+        io,
+        { providerRegistry, providerUsage: true },
+      ),
+      /usage is exhausted/,
+    );
+    equal(spawn.calls.length, 0, "an exhausted provider must not burn a dispatch");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

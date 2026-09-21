@@ -1,16 +1,21 @@
-import { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
+import { CLAUDE_ALIASES, isClaudeModel, claudeFamilyOf } from "./contracts.mjs";
 import { join } from "node:path";
 import { checkQuota } from "./quota.mjs";
 import { swarmHome } from "./config.mjs";
 import { readClaudeCatalog } from "./claude-models.mjs";
+import { readClaudeUsage } from "./claude-usage.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 
-const PROVIDER_CAPABILITIES = new Set([
+// The registry's one list of capability names — `capability()` refuses anything
+// not on it, and the adapter-contract test helper imports it rather than copying.
+export const PROVIDER_CAPABILITIES = new Set([
   "discoverModels",
   "readUsage",
   "preflight",
   "invalidateAvailability",
   "costObservations",
+  "billsInUsd",
+  "familyOf",
 ]);
 
 // Probe clock. The ollama endpoint is a local daemon: if it is there it answers in
@@ -31,7 +36,11 @@ export function providerConfig(config = {}, id) {
   // A bare codex config has no provider block at all — the file IS the block. Guarded on
   // shape: a `null` config (a hook with no ~/.swarm/config.json yet) satisfied every `!`
   // test and was returned as a null block, crashing any caller that read a key off it.
-  if (id === "codex" && isConfigObject(config) && !config.providers && !config.provider && !config.codex) return config;
+  // It must also LOOK like a codex file: one of the keys only a codex config carries
+  // (its bin path, sandbox mode, app-server args) — absence of the other provider
+  // keys alone read an unrelated top-level `enabled` as Codex config.
+  if (id === "codex" && isConfigObject(config) && !config.providers && !config.provider && !config.codex
+      && (config.path !== undefined || config.sandbox !== undefined || config.appServerArgs !== undefined)) return config;
   return {};
 }
 
@@ -214,7 +223,7 @@ export function defaultProviderAdapters({ codexAdapter, ollamaCapabilities = {} 
       runnerId: "claude",
       defaultEnabled: true,
       validateModel: (model) => isClaudeModel(model) ? null : `model '${model}' is not a Claude model — provider "claude" needs a full id such as "claude-opus-5"`,
-      capabilities: { preflight: preflightClaude, discoverModels: readClaudeCatalog },
+      capabilities: { preflight: preflightClaude, discoverModels: readClaudeCatalog, readUsage: readClaudeUsage, billsInUsd: () => true, familyOf: claudeFamilyOf },
     }),
     descriptor({
       id: "ollama",

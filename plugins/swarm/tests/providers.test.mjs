@@ -3,7 +3,7 @@ import { deepEqual, equal, ok, rejects, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { allowedRootsFor, createProviderRegistry, defaultProviderAdapters, probeProvider } from "../src/providers.mjs";
+import { allowedRootsFor, createProviderRegistry, defaultProviderAdapters, probeProvider, providerConfig } from "../src/providers.mjs";
 import { assertProviderAdapterContract } from "./helpers/provider-contract.mjs";
 
 const config = {
@@ -101,6 +101,19 @@ test("provider contract helper enforces scoped validation and canonical discover
 test("optional capabilities are explicit and unknown capabilities stay scoped", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
   equal(typeof registry.capability("claude", "preflight"), "function");
+  // Claude reads usage like every other registry provider — the two
+  // `adapter.id === "claude"` special cases in usage.mjs and scripts/swarm.mjs
+  // exist only because this capability was missing.
+  equal(typeof registry.capability("claude", "readUsage"), "function");
+  equal(registry.capability("claude", "billsInUsd")(), true, "Claude's subscription is billed in USD");
+  // familyOf: the claude descriptor owns family classification, positional —
+  // seats and the scheduler route through this instead of a substring includes.
+  equal(typeof registry.capability("claude", "familyOf"), "function");
+  equal(registry.capability("claude", "familyOf")("claude-opus-4-8"), "opus");
+  equal(registry.capability("claude", "familyOf")("claude-haiku-4-5-20251001"), "haiku");
+  equal(registry.capability("claude", "familyOf")("fable"), "fable");
+  equal(registry.capability("claude", "familyOf")("not-opus-9b"), null);
+  equal(registry.capability("claude", "familyOf")("glm-4.6:cloud"), null);
   equal(registry.capability("codex", "readUsage"), null);
   throws(() => registry.capability("codex", "invented"), /unknown provider capability/);
   throws(() => registry.register({
@@ -110,6 +123,20 @@ test("optional capabilities are explicit and unknown capabilities stay scoped", 
     validateTask: () => [],
     capabilities: { invented: () => {} },
   }), /unknown capability 'invented'/);
+});
+
+// The bare-codex fallback (a ~/.codex-shaped config with no provider block at
+// all — the file IS the block) must require a codex-shaped marker key, not
+// merely the ABSENCE of provider keys: an unrelated top-level `enabled` or
+// `path` was read as Codex config by everything downstream of the block.
+test("providerConfig: the bare-codex fallback resolves only a codex-shaped file", () => {
+  deepEqual(providerConfig({ enabled: true }, "codex"), {}, "an unrelated top-level enabled is not a codex block");
+  deepEqual(providerConfig({ path: "C:/tools/codex.exe" }, "codex"), { path: "C:/tools/codex.exe" }, "a codex bin path is the marker — the file IS the block");
+  deepEqual(providerConfig({ sandbox: "workspace-write" }, "codex"), { sandbox: "workspace-write" }, "sandbox is a codex marker too");
+  deepEqual(providerConfig({ appServerArgs: ["x"] }, "codex"), { appServerArgs: ["x"] }, "app-server args are a codex marker too");
+  deepEqual(providerConfig({ enabled: true, path: "codex" }, "codex"), { enabled: true, path: "codex" }, "enabled beside a marker key rides along as before");
+  deepEqual(providerConfig(null, "codex"), {}, "a null config stays a null block");
+  deepEqual(providerConfig({ providers: { codex: { enabled: true } } }, "codex"), { enabled: true }, "the canonical block still wins");
 });
 
 test("provider and runner identifiers reject mixed case and surrounding whitespace", () => {

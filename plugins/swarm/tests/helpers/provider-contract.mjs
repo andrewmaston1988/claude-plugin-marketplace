@@ -1,14 +1,6 @@
 import { ok, equal, deepEqual, throws } from "node:assert/strict";
 import { modelDescriptor } from "../../src/contracts.mjs";
-import { createProviderRegistry } from "../../src/providers.mjs";
-
-const CAPABILITIES = new Set([
-  "discoverModels",
-  "readUsage",
-  "preflight",
-  "invalidateAvailability",
-  "costObservations",
-]);
+import { createProviderRegistry, PROVIDER_CAPABILITIES } from "../../src/providers.mjs";
 
 export async function assertProviderAdapterContract(adapter, { config = {}, model = "fixture-model", context = {} } = {}) {
   ok(adapter && typeof adapter === "object", "provider adapter must be an object");
@@ -18,7 +10,7 @@ export async function assertProviderAdapterContract(adapter, { config = {}, mode
   equal(typeof adapter.validateTask, "function", "provider adapter requires validateTask(task, context)");
   ok(adapter.capabilities && typeof adapter.capabilities === "object" && !Array.isArray(adapter.capabilities), "provider capabilities must be an object");
   for (const [name, capability] of Object.entries(adapter.capabilities)) {
-    ok(CAPABILITIES.has(name), `unknown provider capability '${name}'`);
+    ok(PROVIDER_CAPABILITIES.has(name), `unknown provider capability '${name}'`);
     equal(typeof capability, "function", `provider capability '${name}' must be a function`);
   }
   const enabled = adapter.enabled(config);

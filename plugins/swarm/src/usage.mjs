@@ -162,6 +162,20 @@ export function normalizeCodex(reading, options = {}) {
 const PROVIDER_NORMALIZERS = {
   ollama: (reading) => normalizeOllama(reading),
   codex: (reading) => normalizeCodex(reading),
+  // Claude arrives in the canonical snapshot shape (claude-usage.mjs) and renders
+  // under the `anthropic` label the quota command has always printed. Its windows
+  // are already limit-shaped; the unavailable bucket carries no percent and drops.
+  claude: (reading) => normalizeAnthropic(
+    {
+      limits: (reading.buckets || []).filter((b) => typeof b?.percent === "number"),
+      exhausted: reading.exhausted,
+    },
+    {
+      provenance: reading.provenance,
+      asOf: reading.asOf,
+      ...(reading.reason && { reason: reading.reason }),
+    },
+  ),
 };
 
 export function normalizeProviderUsage(provider, reading) {
@@ -190,29 +204,41 @@ export function normalizeProviderUsage(provider, reading) {
 // why only ollama's readings carry provenance and the /!\ banner. That
 // asymmetry is real; flattening it would either spam a warning Anthropic fixes
 // silently, or bury one only the operator can fix.
-function readAnthropicCache(cfg, now, cachePath) {
+// Single home for the quota-cache TTL read — the legacy snapshot path and the
+// claude adapter's cache-only branch read the same file the same way. Returns
+// `{ parsed, asOf }` for a fresh cache, null when absent, corrupt or stale.
+export function readAnthropicCacheResult(cfg = {}, now = Date.now(), cachePath) {
   let cached;
   try {
     cached = JSON.parse(readFileSync(cachePath || join(swarmHome(), QUOTA_CACHE_FILENAME), "utf8"));
   } catch {
-    return none("anthropic");
+    return null;
   }
-  if (typeof cached?.ts !== "number") return none("anthropic");
-  if (now - cached.ts >= (cfg.quotaCacheSecs ?? 300) * 1000) return none("anthropic");
-  return normalizeAnthropic(cached.result, { source: "anthropic-oauth-cache", provenance: "cache", asOf: cached.ts });
+  if (typeof cached?.ts !== "number") return null;
+  if (now - cached.ts >= (cfg.quotaCacheSecs ?? 300) * 1000) return null;
+  return { parsed: cached.result, asOf: cached.ts };
 }
 
-// Every provider, in one array, cache-only. Callers that can afford a fetch (the
+function readAnthropicCache(cfg, now, cachePath) {
+  const fresh = readAnthropicCacheResult(cfg, now, cachePath);
+  return fresh
+    ? normalizeAnthropic(fresh.parsed, { source: "anthropic-oauth-cache", provenance: "cache", asOf: fresh.asOf })
+    : none("anthropic");
+}
+
+// Every provider, in one array, cache-only. With a registry, Claude reads through
+// its adapter like everyone else — the adapter's cache-only branch reads the same
+// TTL file the old inline prepend did. Callers that can afford a fetch (the
 // `quota` subcommand) fetch first and normalize the fresher reading themselves.
 export async function readCachedUsage(cfg = {}, { env = process.env, now = Date.now(), cachePath, _ollama, _codex, providerRegistry } = {}) {
-  const out = [readAnthropicCache(cfg, now, cachePath)];
   if (providerRegistry) {
+    const out = [];
     for (const adapter of providerRegistry.list()) {
-      if (adapter.id === "claude" || !adapter.enabled(cfg)) continue;
+      if (!adapter.enabled(cfg)) continue;
       const readUsage = adapter.capabilities.readUsage;
       if (!readUsage) continue;
       try {
-        const reading = await readUsage({ config: cfg, env, now, usageOptIn: false });
+        const reading = await readUsage({ config: cfg, env, now, usageOptIn: false, ...(cachePath && { cachePath }) });
         const normalized = normalizeProviderUsage(adapter.id, reading);
         if (normalized) out.push(normalized);
       } catch {
@@ -223,6 +249,7 @@ export async function readCachedUsage(cfg = {}, { env = process.env, now = Date.
     }
     return out;
   }
+  const out = [readAnthropicCache(cfg, now, cachePath)];
   const ollamaEnabled = cfg?.providers?.ollama?.cloud?.ollama?.enabled === true || cfg?.provider?.cloud?.ollama?.enabled === true;
   if (ollamaEnabled) {
     const { usageFromCache } = _ollama || (await import("./ollama-usage.mjs"));

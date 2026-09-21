@@ -2,7 +2,7 @@
 
 import { identityKey, OLLAMA_CLOUD_RE } from "./contracts.mjs";
 
-export { CLAUDE_ALIASES, isClaudeModel } from "./contracts.mjs";
+export { CLAUDE_ALIASES, isClaudeModel, claudeFamilyOf } from "./contracts.mjs";
 
 // Both separators occur in the roster — discovery derives `:cloud` names from
 // bare tags, and the entitlement probe matches either. Single home: the score
