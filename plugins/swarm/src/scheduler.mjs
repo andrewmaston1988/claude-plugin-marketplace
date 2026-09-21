@@ -1172,15 +1172,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       // report mode drafts here; the prompt names it, so it must exist
       if (task.isDigest && plan.digest?.report) mkdirSync(digestScratchPath(plan.resultsDir), { recursive: true });
 
-      // Resume a previously-failed leaf in place: re-enter its kept worktree
-      // (partial diff intact) and resume its session, rather than starting cold.
-      // --force is a deliberate fresh redo, so it resets the tree and drops the
-      // session. A first-ever run has no prior and does neither. A leaf whose
-      // engine died before it settled has no result, only its recorded session.
+      // Resume a previously-failed leaf in place: an id rides to its own provider, past a turn.
       const prior = force ? null : readResult(plan.resultsDir, task.id);
       const recorded = recordedSessions.get(task.id);
-      const resumeId = prior?.ok === true ? null : (prior?.sessionId ?? recorded?.sessionId ?? null);
       const resumeProvider = task.provider || prior?.provider || recorded?.provider;
+      const minted = prior?.sessionId ? prior : recorded;
+      const noTurn = /"num_turns"\s*:\s*0\b/.test(String(prior?.output ?? "")); // failed attempts carry it only here
+      const declined = minted?.provider && resumeProvider && minted.provider !== resumeProvider ? "provider-changed"
+        : noTurn ? "no-turns" : null;
+      const resumeId = prior?.ok === true || declined ? null : (minted?.sessionId ?? null);
 
       let wt = null;
       let taskCwd = task.cwd;
@@ -1195,7 +1195,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
           taskCwd = defaultWorktree.treeCwd(wt.path, task.repoToplevel, task.originalCwd);
           if (wt.reused) appendRunLog(plan.resultsDir, {
             ts: new Date().toISOString(), event: "worktree-resume", id: task.id,
-            reset: force, session: resumeId ? "resumed" : "fresh",
+            reset: force, session: resumeId ? "resumed" : "fresh", ...(declined && { declined }),
           });
         } catch (e) {
           const result = { id: task.id, model: task.model, ...durableIdentity(task), ok: false, exit: null, durationMs: 0, output: `worktree setup failed: ${e.message}` };
