@@ -245,6 +245,11 @@ function refuseToWrite(raw, path, migrated, err) {
       const at = err.message.indexOf(prefix);
       if (at < 0 || !isPlainObject(raw[legacy])) continue;
       const leaf = err.message.slice(at).match(/^[\w.$]+/)[0];
+      // The legacy key being present is not enough — the fold has to have PRODUCED this
+      // leaf. A file carrying both `provider` and a canonical providers.ollama.* offender
+      // is refused naming `provider.*`, a key canonical wins the fold against: the
+      // operator edits it, re-runs, and the same error comes back.
+      if (getPath(raw, leaf).found) continue;
       return `cannot migrate ${path}: ${err.message.replace(prefix, `${legacy}.`)}\n  (it becomes ${leaf}, which swarm validates on every load)\n${tail}`;
     }
   }
@@ -296,20 +301,23 @@ export function initConfig(overridePath, env = process.env) {
 
 // Set ONE key, leaving every other line as it was: `config init` is the command that
 // materialises the defaults, and a verb asked to change one setting must not decide the
-// rest. Validation judges the MERGED view, because that is what the next loadConfig reads.
+// rest. Validation judges the MERGED view of the object ABOUT to be written — the new
+// value included, since that is what the next loadConfig reads. Judging the pre-change
+// view instead passes every value and persists a file the next command refuses.
 // `changed: false` when the value was already there, so a caller can re-run safely.
 export function setConfigValue(key, value, overridePath, env = process.env) {
   const path = userConfigPath(overridePath, env);
   const raw = existsSync(path) ? parseUser(path) : {};
   const before = getPath(raw, key);
   if (before.found && before.value === value) return { path, key, changed: false, previous: value };
+  const next = structuredClone(raw);
+  setPath(next, key, value);
   try {
-    validateConfig(deepMerge(readDefaults(), normalizeConfigInput(raw)));
+    validateConfig(deepMerge(readDefaults(), normalizeConfigInput(next)));
   } catch (e) {
     throw new Error(refuseToWrite(raw, path, false, e));
   }
-  setPath(raw, key, value);
-  writeAtomic(path, raw);
+  writeAtomic(path, next);
   return { path, key, changed: true, previous: before.found ? before.value : undefined };
 }
 

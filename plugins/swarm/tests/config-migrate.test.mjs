@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdi
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { initConfig, loadConfig } from "../src/config.mjs";
+import { initConfig, loadConfig, setConfigValue } from "../src/config.mjs";
 import { runCli } from "./helpers/cli.mjs";
 
 function tmp() {
@@ -81,6 +81,27 @@ test("a bad canonical key is refused as a write even when the file also holds a 
       e.message.includes(`cannot write ${p}`) &&
       !e.message.includes("cannot migrate") &&
       e.message.includes("providers.codex.enabled must be true or false"));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a canonical leaf the fold never rewrote is refused as a write, not dressed up as a migration", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    // Both halves in one file: a legacy `provider` block, and the canonical
+    // providers.ollama.enabled that is the actual offender. The fold lets canonical
+    // win, so `provider.enabled` is a key the fold never produced — and one the
+    // operator cannot fix, because writing it changes nothing the fold does not
+    // overwrite again. Naming it sends them to the wrong place.
+    const before = JSON.stringify({ provider: { url: "http://legacy" }, providers: { ollama: { enabled: "yes" } } });
+    writeFileSync(p, before);
+    throws(() => initConfig(p), (e) =>
+      e.message.includes(`cannot write ${p}`) &&
+      !e.message.includes("cannot migrate") &&
+      e.message.includes("providers.ollama.enabled must be true or false"));
+    equal(read(p), before);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -265,6 +286,45 @@ test("config init prints the mapping it applied and where the previous file went
     equal(Object.hasOwn(stored, "provider"), false);
     equal(Object.hasOwn(stored, "codex"), false);
     equal(stored.providers.ollama.url, "http://legacy", "values are unchanged, as the report says");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- the single-key writer: the value being SET is what has to pass validation ---
+
+test("setConfigValue refuses a value loadConfig would reject, leaving the file byte-identical", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    const before = JSON.stringify({ concurrency: 2 });
+    writeFileSync(p, before);
+    // Driven through the function, not the CLI: `dashboard.enabled` is the only key
+    // any caller sets today, so no surface reaches this with a bad value — the guard
+    // has to be asserted directly or it is never exercised at all.
+    throws(() => setConfigValue("providers.ollama.enabled", "yes", p), (e) =>
+      e.message.includes(`cannot write ${p}`) &&
+      e.message.includes("providers.ollama.enabled must be true or false") &&
+      e.message.includes("Nothing was written"));
+    equal(read(p), before, "a value the next loadConfig refuses must never reach the file");
+    equal(existsSync(p + ".bak"), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("setConfigValue writes a valid value, keeps every other line, and the next loadConfig accepts it", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ concurrency: 2 }));
+    const r = setConfigValue("providers.ollama.enabled", true, p);
+    equal(r.changed, true);
+    equal(r.previous, undefined);
+    const stored = JSON.parse(read(p));
+    equal(stored.providers.ollama.enabled, true);
+    equal(stored.concurrency, 2, "a verb asked to change one setting must not decide the rest");
+    equal(loadConfig(p, process.env, { warn: () => {} }).providers.ollama.enabled, true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

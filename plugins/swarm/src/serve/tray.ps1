@@ -12,8 +12,10 @@ param(
   # Not -Home: $HOME is a read-only automatic variable, and binding to it fails the
   # whole script before a line runs.
   [string]$SwarmHome = "",
-  # dashboard.enabled is false. The tray still starts — it is the only surface left
-  # that can turn the dashboard back on — so it starts in its off state.
+  # dashboard.enabled is false at spawn. The tray still starts — it is the only
+  # surface left that can turn the dashboard back on — so it starts in its off
+  # state. This is the SEED only: the poll re-reads the key every tick, so an
+  # out-of-band switch moves the menu without a tray restart.
   [switch]$Disabled
 )
 
@@ -47,9 +49,12 @@ $script:tray = New-Object System.Windows.Forms.NotifyIcon
 $script:tray.Text = 'swarm'
 $script:tray.Visible = $true
 
-# Whether the dashboard is switched off. Seeded from the spawn, flipped by the
-# Enable click below; the poll reads it on every tick.
+# Whether the dashboard is switched off. Seeded from the spawn and flipped by the
+# Enable click below, but the poll re-reads dashboard.enabled every tick — an
+# out-of-band `swarm serve enable`/`disable` writes the key and nothing else, and
+# the one-tray guard above means this process is the only surface left to follow it.
 $script:disabled = [bool]$Disabled
+$script:ConfigFile = if ($SwarmHome) { Join-Path $SwarmHome 'config.json' } else { '' }
 
 # The daemon renders the same mark the web manifest uses; load via MemoryStream
 # so no file handle is held — the next daemon start rewrites the PNG.
@@ -119,7 +124,8 @@ function Start-SwarmEnable {
 
 # The off state, restated on the existing menu: Open is greyed (there is nothing to
 # open), Restart is greyed (nothing to restart), and Stop's slot becomes the way back
-# on. Called once at startup and again after the operator enables the dashboard.
+# on. Called at startup, after the operator enables from the menu, and on any tick
+# whose config read moves the off state.
 function Set-TrayDisabledUi {
   if ($script:disabled) {
     $script:itemOpen.Text = 'Open dashboard (Disabled)'
@@ -165,7 +171,9 @@ $script:tray.ContextMenuStrip = $menu
 # restarts in 10 minutes, gives up and reports "crashed" instead of thrashing.
 # A record ABSENT for 5 straight polls (a deliberate `serve stop`) still just
 # exits the tray — unless the dashboard is switched off, where an absent record is
-# the normal state and the tray is the only way back on. $script:lastDeadPid /
+# the normal state and the tray is the only way back on. dashboard.enabled is
+# re-read on the same tick, so the off state is the config file's current answer
+# rather than whatever the spawn passed. $script:lastDeadPid /
 # deadStreak / absentStreak /
 # restartTimestamps persist across ticks; a pid change mid-streak (the
 # daemon's own handover retake landing between polls) is read as healed, not
@@ -219,11 +227,29 @@ $timer.add_Tick({
       $script:absentStreak = 0
     }
 
+    # dashboard.enabled, re-read the way the record above is. $null means the file or
+    # the key could not be read this tick — Get-TrayDisabled resolves that to the seed
+    # rather than to "enabled", so a half-written config can never take away the only
+    # way back on.
+    $enabledNow = $null
+    if ($script:ConfigFile -and (Test-Path $script:ConfigFile -PathType Leaf)) {
+      try {
+        $cfgNow = (Get-Content $script:ConfigFile -Raw -ErrorAction Stop) | ConvertFrom-Json
+        if ($null -ne $cfgNow.dashboard -and $null -ne $cfgNow.dashboard.enabled) { $enabledNow = [bool]$cfgNow.dashboard.enabled }
+      } catch { $enabledNow = $null }
+    }
+    $disabledNow = Get-TrayDisabled -DashboardEnabled $enabledNow -DisabledSeed $script:disabled
+    if ($disabledNow -ne $script:disabled) {
+      $script:disabled = $disabledNow
+      Set-TrayDisabledUi
+    }
+
     $recordPidForDecision = $null
     if ($daemonPid -gt 0) { $recordPidForDecision = $daemonPid }
     $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $action = Get-TrayAction -RecordPid $recordPidForDecision -Alive $alive -Streak $streakForDecision `
-      -SamePid $samePid -RestartTimestamps @($script:restartTimestamps) -Now $nowMs -Disabled $script:disabled
+      -SamePid $samePid -RestartTimestamps @($script:restartTimestamps) -Now $nowMs `
+      -DashboardEnabled $enabledNow -DisabledSeed $script:disabled
 
     if ($action -eq 'disabled') {
       # A daemon started before the switch is still serving — say so, rather than

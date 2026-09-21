@@ -297,6 +297,7 @@ from the appendix. If no, close.
 |---|---|---|
 | `allowedRoots` | *(unset)* | Stage 2. The root list for EVERY provider, Claude included. Unset = unconfigured, which dispatches nothing; `[]` = denied on purpose, which is a different refusal. |
 | `providers.<name>.allowedRoots` | *(unset)* | Narrowing only — intersected with `allowedRoots`, so it can never add or widen a root. Set it when one provider must be held to less than the default. |
+| `providers.ollama.enabled` | `false` | Stage 1. Turns the Ollama provider on for dispatch. `false` is the shipped default, so declining an untouched file writes nothing; the probe result leads the question but never flips this on its own. |
 | `providers.ollama.url` | `http://localhost:11434` | Ollama endpoint the `:cloud` leaves talk to; pinged before an Ollama run, unreachable = refuse. |
 | `providers.ollama.mode` | `env` | `env` = plain `claude -p` with the Ollama endpoint and model injected; `launch` = shell out through `launchCmd`. |
 | `providers.ollama.launchCmd` | `ollama launch claude --model {model} -- {args}` | Only in `launch` mode. |
