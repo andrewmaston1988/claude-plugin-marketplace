@@ -2,6 +2,7 @@ import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync, 
 import { freemem } from "node:os";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
+import { storedTurnCount } from "./contracts.mjs";
 import { buildDispatch, createDispatchRegistry, toSpawnable, runnerOf } from "./dispatch.mjs";
 import { isClaudeModel } from "./models.mjs";
 import {
@@ -1177,17 +1178,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       const recorded = recordedSessions.get(task.id);
       const resumeProvider = task.provider || prior?.provider || recorded?.provider;
       const minted = prior?.sessionId ? prior : recorded;
-      // Turn evidence, FIELD FIRST: a failed attempt reports its own count now, so
-      // every runner answers the same way instead of one of them being read out of
-      // its prose. The scan of raw output survives only for results written before
-      // the field existed, and reproduces their verdict exactly. An absent count
-      // that neither source can supply stays UNKNOWN — never zero, or every
-      // pre-upgrade result on disk becomes unresumable overnight.
-      const noTurn = prior?.numTurns != null
-        ? prior.numTurns === 0
-        : /"num_turns"\s*:\s*0\b/.test(String(prior?.output ?? ""));
       const declined = minted?.provider && resumeProvider && minted.provider !== resumeProvider ? "provider-changed"
-        : noTurn ? "no-turns" : null;
+        : storedTurnCount(prior) === 0 ? "no-turns" : null;
       const resumeId = prior?.ok === true || declined ? null : (minted?.sessionId ?? null);
 
       let wt = null;
