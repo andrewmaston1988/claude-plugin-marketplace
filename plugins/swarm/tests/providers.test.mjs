@@ -3,7 +3,7 @@ import { deepEqual, equal, ok, rejects, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { allowedRootsFor, createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
+import { allowedRootsFor, createProviderRegistry, defaultProviderAdapters, probeProvider } from "../src/providers.mjs";
 import { assertProviderAdapterContract } from "./helpers/provider-contract.mjs";
 
 const config = {
@@ -216,4 +216,74 @@ test("allowedRootsFor: a config with only per-provider keys resolves exactly as 
   const canonical = { providers: { codex: { allowedRoots: ["C:/codex"] } } };
   deepEqual(allowedRootsFor(canonical, "codex").roots, ["C:/codex"]);
   equal(allowedRootsFor(canonical, "codex").deniedBy, "providers.codex.allowedRoots");
+});
+
+// ── the probe: setup asks "can this provider dispatch right now?" ─────────────
+
+const ollamaCfg = (url) => ({ providers: { ollama: { url } } });
+
+test("probe: a reachable endpoint reports ok, and the request carries the configured url", async () => {
+  const seen = [];
+  const r = await probeProvider("ollama", {
+    config: ollamaCfg("http://127.0.0.1:11434"),
+    fetch: async (url) => { seen.push(String(url)); return { ok: true }; },
+  });
+  deepEqual(r, { id: "ollama", ok: true, detail: null });
+  deepEqual(seen, ["http://127.0.0.1:11434"]);
+});
+
+test("probe: a refused endpoint reports the refusal, keeping the word the dispatch path matches on", async () => {
+  const r = await probeProvider("ollama", {
+    config: ollamaCfg("http://127.0.0.1:11434"),
+    fetch: async () => { throw new Error("ECONNREFUSED"); },
+  });
+  equal(r.ok, false);
+  ok(r.detail.includes("unreachable"), r.detail);
+  ok(r.detail.includes("ECONNREFUSED"), r.detail);
+});
+
+// The one that matters for setup: a probe with no timeout hangs the command that
+// ran it. Assert the probe RESOLVES, never that it was fast — an elapsed-time
+// assertion on a machine under load is a coin flip.
+test("probe: an endpoint that never answers still resolves, reporting the timeout not a refusal", async () => {
+  const r = await probeProvider("ollama", {
+    config: ollamaCfg("http://127.0.0.1:11434"),
+    timeoutMs: 25,
+    fetch: () => new Promise(() => {}),
+  });
+  equal(r.ok, false);
+  ok(r.detail.includes("did not answer"), r.detail);
+  ok(!r.detail.includes("unreachable"), `a timeout is not a refusal — the two route to different fixes: ${r.detail}`);
+});
+
+// A provider with no preflight capability cannot be probed, and "cannot probe" must
+// not read as "cannot dispatch" — setup would offer to disable a working provider.
+test("probe: a provider with no preflight reports ok with no detail, not a failure", async () => {
+  deepEqual(await probeProvider("codex", { config: {} }), { id: "codex", ok: true, detail: null });
+});
+
+// The preflight capability throws by contract (preflightClaude does, on quota
+// exhaustion). A probe that lets that escape takes the whole setup command with it.
+test("probe: a preflight that throws is caught, and its message becomes the detail", async () => {
+  const registry = createProviderRegistry([{
+    id: "ollama",
+    runnerId: "claude",
+    enabled: () => true,
+    validateTask: () => [],
+    capabilities: { preflight: () => { throw new Error("quota exploded"); } },
+  }]);
+  deepEqual(await probeProvider("ollama", { config: {}, registry }), { id: "ollama", ok: false, detail: "quota exploded" });
+});
+
+// The positive half of the same contract: a capability that REPORTS failure rather
+// than throwing keeps its own error text, so setup shows the operator the real cause.
+test("probe: a preflight reporting ok:false keeps its own error text", async () => {
+  const registry = createProviderRegistry([{
+    id: "ollama",
+    runnerId: "claude",
+    enabled: () => true,
+    validateTask: () => [],
+    capabilities: { preflight: async () => ({ ok: false, error: "endpoint refused" }) },
+  }]);
+  deepEqual(await probeProvider("ollama", { config: {}, registry }), { id: "ollama", ok: false, detail: "endpoint refused" });
 });

@@ -13,6 +13,10 @@ const PROVIDER_CAPABILITIES = new Set([
   "costObservations",
 ]);
 
+// Probe clock. The ollama endpoint is a local daemon: if it is there it answers in
+// milliseconds, and if it is not, nothing is gained by waiting longer than this.
+const PROBE_TIMEOUT_MS = 2000;
+
 // Shape test local to this module: config.mjs owns its own for the user-file validation
 // rules, and importing it here would couple the two.
 function isConfigObject(v) {
@@ -116,14 +120,46 @@ function descriptor({ id, runnerId, defaultEnabled, validateModel = () => null, 
   };
 }
 
-async function pingOllamaEndpoint({ config, fetch } = {}) {
+// A probe with no clock is worse than a probe that fails: it hangs the command that
+// ran it. Passing an AbortSignal to fetch is not enough, because a fetch that ignores
+// the signal never settles — so the attempt races a timer instead, and the losing
+// side is tagged rather than left as a rejection nothing awaits.
+async function attemptWithin(run, ms) {
+  let timer;
+  const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve({ kind: "timeout" }), ms); });
+  try {
+    const attempt = run().then((value) => ({ kind: "value", value }), (error) => ({ kind: "error", error }));
+    return await Promise.race([attempt, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function pingOllamaEndpoint({ config, fetch, timeoutMs = PROBE_TIMEOUT_MS } = {}) {
   const endpoint = providerConfig(config, "ollama").url;
   if (!endpoint) return { ok: true };
+  const outcome = await attemptWithin(() => fetch(endpoint), timeoutMs);
+  if (outcome.kind === "value") return { ok: true };
+  if (outcome.kind === "timeout") {
+    return { ok: false, error: `endpoint ${endpoint} did not answer within ${timeoutMs}ms — open-model tasks cannot dispatch. Is the provider running?` };
+  }
+  return { ok: false, error: `endpoint ${endpoint} is unreachable (${outcome.error.message}) — open-model tasks cannot dispatch. Is the provider running?` };
+}
+
+// One uniform answer to "can this provider dispatch right now?", for callers that must
+// survive the answer: setup offers to disable a provider, and the provider whose
+// preflight throws is exactly the one it has to be able to report. A capability that
+// reports success rather than throwing keeps its own `ok`; no preflight at all is not
+// a failure — setup must never offer to disable a provider it simply could not ask.
+export async function probeProvider(id, { config = {}, registry, ...deps } = {}) {
+  const preflight = (registry || createDefaultProviderRegistry()).capability(id, "preflight");
+  if (!preflight) return { id, ok: true, detail: null };
   try {
-    await fetch(endpoint);
-    return { ok: true };
+    const r = await preflight({ config, ...deps });
+    if (r?.ok === false) return { id, ok: false, detail: r.error || "preflight reported a failure" };
+    return { id, ok: true, detail: null };
   } catch (e) {
-    return { ok: false, error: `endpoint ${endpoint} is unreachable (${e.message}) — open-model tasks cannot dispatch. Is the provider running?` };
+    return { id, ok: false, detail: e.message };
   }
 }
 
