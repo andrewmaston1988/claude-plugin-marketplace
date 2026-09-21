@@ -9,8 +9,9 @@ import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
-import { writeResult, initResultsDir, appendRunLog } from "../src/results.mjs";
+import { writeResult, readResult, initResultsDir, appendRunLog } from "../src/results.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
+import { createCodexStreamParser } from "../src/stream.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 
 const CFG = {
@@ -49,6 +50,14 @@ function resumeOf(call) {
   return i < 0 ? null : argv[i + 1];
 }
 const argvOf = (call) => (call.args ?? call.argv).join(" ");
+
+// The codex runner resumes with the `resume <id>` subcommand, not `--resume`.
+// Reading only the claude flag would make every codex row vacuously green.
+function codexResumeOf(call) {
+  const argv = call.args ?? call.argv;
+  const i = argv.indexOf("resume");
+  return i < 0 ? null : argv[i + 1];
+}
 
 function runLog(dir) {
   return readFileSync(join(dir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
@@ -246,3 +255,155 @@ test("R6: --force still resets the tree and clears every session", async () => {
     cleanRepo(repo, dir, "wt-wt");
   }
 });
+
+// ── the turn count as DATA, not as output text ───────────────────────────────
+// A failed attempt reports its turn count as a field; the scheduler reads that
+// field. The scan of raw runner output survives only as a legacy fallback for
+// results written before the field existed.
+
+const CODEX_SEAT = { provider: "codex", model: "gpt-5-codex", sandbox: "workspace-write" };
+// Codex dispatch is fail-closed on allowed roots, so the seat needs one that
+// covers the temp repo the isolation rows build.
+const CODEX_CFG = { ...CFG, providers: { codex: { enabled: true, allowedRoots: [tmpdir()] } } };
+
+// A codex thread that started and then never got a turn down — the failure the
+// resume carve-out must refuse. No "num_turns" text appears anywhere in it.
+const CODEX_ZERO_TURN = JSON.stringify({ type: "thread.started", thread_id: CODEX_SID }) + "\n";
+
+// A codex thread that did work before it died: the case that must still resume.
+const CODEX_WORKED = [
+  JSON.stringify({ type: "thread.started", thread_id: CODEX_SID }),
+  JSON.stringify({ type: "item.completed", item: { id: "m1", type: "agent_message", text: "worked" } }),
+  JSON.stringify({ type: "turn.failed", error: { code: "shim_failure", message: "died after a turn" } }),
+].join("\n") + "\n";
+
+function parseCodex(stream) {
+  const parser = createCodexStreamParser({});
+  parser.feed(stream);
+  parser.end();
+  return parser.result();
+}
+
+// The claude runner's failure surface: a result event that reports its turns.
+function claudeErrorStream(numTurns) {
+  return [
+    JSON.stringify({ type: "system", subtype: "init", session_id: OLLAMA_SID }),
+    JSON.stringify({
+      type: "result", subtype: "error_during_execution", is_error: true,
+      result: `No conversation found with session ID: ${CODEX_SID}`,
+      num_turns: numTurns, session_id: OLLAMA_SID,
+    }),
+  ].join("\n") + "\n";
+}
+
+test("Z1: a failed attempt's result carries its turn count as a field", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: claudeErrorStream(0), exit: 1 }));
+    const p = plan(dir, [task("leaf")]);
+    await runPlan(p, CFG, makeIo(spawn));
+
+    const res = readResult(p.resultsDir, "leaf");
+    equal(res.ok, false, "the attempt failed");
+    equal(res.numTurns, 0,
+      `a failed attempt must carry its turn count, not only the text: ${JSON.stringify(res)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("Z-codex parser: a leaf that never got a turn down reports zero turns", () => {
+  // The count has to be PRODUCIBLE, or the dispatch row below asserts on a
+  // record no runner can write.
+  equal(parseCodex(CODEX_ZERO_TURN).numTurns, 0, "no turn content at all is zero turns");
+  equal(parseCodex(CODEX_WORKED).numTurns, 1, "a turn that ran and failed is still a turn");
+});
+
+test("Z-codex: a codex leaf that failed at zero turns dispatches with no resume", async () => {
+  const repo = initRepo();
+  const dir = tmp();
+  try {
+    const p = plan(dir, [task("prose", {
+      ...CODEX_SEAT, cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo,
+    })]);
+    initResultsDir(p.resultsDir);
+    // The prior attempt exactly as the fixed engine records it: the count rides
+    // the result, and the output text carries no "num_turns" for a regex to find.
+    const parsed = parseCodex(CODEX_ZERO_TURN);
+    writeResult(p.resultsDir, "prose", priorAttempt("prose", {
+      ...CODEX_SEAT,
+      output: `leaf ended with a runner error: Codex runner exited with code 1\n${parsed.output}`,
+      numTurns: parsed.numTurns,
+    }));
+    // The leaf keeps its codex seat, so the provider predicate cannot be what
+    // drops this session — only the turn predicate can.
+    appendRunLog(p.resultsDir, {
+      ts: new Date().toISOString(), id: "prose", event: "session",
+      sessionId: CODEX_SID, provider: "codex", runner: "codex",
+    });
+    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CODEX_CFG, p.resultsDir);
+
+    const spawn = fakeSpawnFactory(writesInTree);
+    await runPlan(p, CODEX_CFG, makeIo(spawn));
+
+    equal(spawn.calls.length, 1, "the leaf must be dispatched");
+    equal(codexResumeOf(spawn.calls[0]), null,
+      `a codex session with no completed turn must not be resumed: ${argvOf(spawn.calls[0])}`);
+    equal(worktreeResume(p.resultsDir, "prose").declined, "no-turns");
+  } finally {
+    cleanRepo(repo, dir, "wt-wt");
+  }
+});
+
+test("U1: an absent turn count behaves as today — the session is still resumed", async () => {
+  const repo = initRepo();
+  const dir = tmp();
+  try {
+    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo })]);
+    initResultsDir(p.resultsDir);
+    // Every result written before the field existed: no numTurns key at all, and
+    // no turn text in the output either. Unknown is NOT zero — treating it as
+    // zero makes the whole historical corpus unresumable overnight.
+    writeResult(p.resultsDir, "impl", priorAttempt("impl", {
+      tokens: TURNS, sessionId: OLLAMA_SID,
+      output: "leaf ended with a runner error: Claude runner failed",
+    }));
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir);
+
+    const spawn = fakeSpawnFactory(writesInTree);
+    await runPlan(p, CFG, makeIo(spawn));
+
+    equal(resumeOf(spawn.calls[0]), OLLAMA_SID,
+      `an unknown turn count must not read as zero: ${argvOf(spawn.calls[0])}`);
+    equal(worktreeResume(p.resultsDir, "impl").declined, undefined, "an unknown count declines nothing");
+  } finally {
+    cleanRepo(repo, dir, "wt-wt");
+  }
+});
+
+test("U2: a turn count in the field wins over a zero in the output text", async () => {
+  const repo = initRepo();
+  const dir = tmp();
+  try {
+    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo })]);
+    initResultsDir(p.resultsDir);
+    // The field says forty turns landed; the raw output happens to contain a
+    // "num_turns": 0 from some other event. Only a reader still scanning the
+    // text drops this session.
+    writeResult(p.resultsDir, "impl", priorAttempt("impl", {
+      durationMs: 2400000, numTurns: 40, tokens: TURNS, sessionId: OLLAMA_SID,
+      output: 'leaf ended with a runner error: Claude runner failed\n'
+        + JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, num_turns: 0 }),
+    }));
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir);
+
+    const spawn = fakeSpawnFactory(writesInTree);
+    await runPlan(p, CFG, makeIo(spawn));
+
+    equal(resumeOf(spawn.calls[0]), OLLAMA_SID,
+      `the field decides, not the output text: ${argvOf(spawn.calls[0])}`);
+  } finally {
+    cleanRepo(repo, dir, "wt-wt");
+  }
+});
+
