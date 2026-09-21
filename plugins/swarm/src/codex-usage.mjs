@@ -1,4 +1,5 @@
 import { providerUsageSnapshot } from "./contracts.mjs";
+import { codexExhausted } from "./usage.mjs";
 import { createCodexAppServerClient } from "./codex.mjs";
 
 export const CODEX_RATE_LIMITS_METHOD = "account/rateLimits/read";
@@ -132,6 +133,12 @@ export function subscribeCodexRateLimitUpdates(client, { onUpdate, onError, now 
   if (!client || typeof client.subscribe !== "function") {
     throw new Error("Codex app-server client must expose subscribe() for rate-limit updates");
   }
+  // onError is optional, and a failure with nowhere to go died in silence —
+  // indistinguishable from a subscription with nothing to say. A caller that
+  // supplies one is still the only receiver.
+  const report = onError || ((error) => {
+    process.emitWarning(`codex rate-limit update failed: ${error?.message || String(error)}`);
+  });
   return client.subscribe((message) => {
     if (message?.method !== CODEX_RATE_LIMITS_UPDATED_METHOD) return;
     const direct = notificationPayload(message);
@@ -141,7 +148,7 @@ export function subscribeCodexRateLimitUpdates(client, { onUpdate, onError, now 
       : request(client, CODEX_RATE_LIMITS_METHOD);
     payload
       .then((value) => onUpdate?.(normalizeCodexRateLimits(value, { asOf: now, source })))
-      .catch((error) => onError?.(error));
+      .catch(report);
   });
 }
 
@@ -167,12 +174,33 @@ export async function readCodexAccountUsage(config = {}, options = {}) {
   }
 }
 
-function combineSnapshots(rateLimits, accountUsage, asOf) {
+// Which endpoint a failure came from, so the caveat can name it. A bare error
+// message from the app-server rarely says which read it belonged to.
+function failureReason({ method, error }) {
+  const text = error?.message || String(error);
+  return method ? `${method}: ${text}` : text;
+}
+
+function combineSnapshots(rateLimits, accountUsage, asOf, failure) {
+  const rateLimitBuckets = rateLimits?.buckets || [];
+  const reason = failure ? failureReason(failure) : null;
   return providerUsageSnapshot({
     provider: "codex",
-    buckets: [...(rateLimits?.buckets || []), ...(accountUsage?.buckets || [])],
+    buckets: [
+      ...rateLimitBuckets,
+      ...(accountUsage?.buckets || []),
+      // The failed half rides as a bucket, not a silent gap. `codexLimitBuckets`
+      // skips a non-rate-limit kind, so it never becomes a quota bar.
+      ...(reason ? [{ kind: "unavailable", reason }] : []),
+    ],
     source: "codex-app-server",
-    provenance: "live",
+    // `partial` — this process did fetch, and lost half. `live` would render the
+    // caveatless reading the banner suppresses for exactly the wrong reason.
+    provenance: reason ? "partial" : "live",
+    ...(reason ? { reason } : {}),
+    // Rate limits are the dispatch-relevant half; account usage is a measurement,
+    // so a failed account read must not weaken the gate.
+    exhausted: codexExhausted(rateLimitBuckets),
     asOf: isoNow(asOf),
   });
 }
@@ -190,16 +218,19 @@ export async function readCodexUsage(config = {}, options = {}) {
       request(client, CODEX_ACCOUNT_USAGE_METHOD, options.accountUsageParams || {}),
     ]);
     if (limitsResult.status === "fulfilled") rateLimits = normalizeCodexRateLimits(limitsResult.value, { asOf, provenance: "live" });
-    else failure = limitsResult.reason;
+    else failure = { method: CODEX_RATE_LIMITS_METHOD, error: limitsResult.reason };
     if (usageResult.status === "fulfilled") accountUsage = normalizeCodexAccountUsage(usageResult.value, { asOf, provenance: "live" });
-    else failure ||= usageResult.reason;
-    if (!rateLimits && !accountUsage) throw failure || new Error("Codex usage endpoints returned no data");
-    return combineSnapshots(rateLimits, accountUsage, asOf);
+    else failure ||= { method: CODEX_ACCOUNT_USAGE_METHOD, error: usageResult.reason };
+    if (!rateLimits && !accountUsage) throw failure?.error || new Error("Codex usage endpoints returned no data");
+    return combineSnapshots(rateLimits, accountUsage, asOf, failure);
   } catch (error) {
-    failure ||= error;
+    // Total failure: no half to mark, so the reading is `none` and names the raw
+    // error — there is no surviving half for an endpoint name to disambiguate.
+    failure ||= { method: null, error };
+    const thrown = failure.error ?? failure;
     return providerUsageSnapshot({
       provider: "codex",
-      buckets: [{ kind: "unavailable", reason: failure?.message || String(failure) }],
+      buckets: [{ kind: "unavailable", reason: thrown?.message || String(thrown) }],
       source: "codex-app-server",
       provenance: "none",
       asOf: isoNow(asOf),

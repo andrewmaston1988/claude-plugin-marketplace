@@ -1,10 +1,11 @@
 import { test } from "node:test";
-import { equal, ok, deepEqual } from "node:assert/strict";
+import { equal, ok, deepEqual, throws } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { matchDenylist, ValidationError } from "../src/manifest.mjs";
+import { loadConfig } from "../src/config.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { runCliAsync } from "./helpers/cli.mjs";
 
@@ -108,6 +109,48 @@ test("empty denylist: the same manifest loads clean", () => {
     const p = writeManifest(dir, { tasks: [{ id: "v", prompt: "verify", provider: "ollama", model: "nemotron-3-super:cloud" }] });
     const plan = loadManifest(p, cfg(dir, []), dir);
     equal(plan.tasks[0].model, "nemotron-3-super:cloud");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig rejects a non-array modelDenylist and names the config file", () => {
+  const dir = tmp();
+  const p = join(dir, "config.json");
+  try {
+    writeFileSync(p, JSON.stringify({ modelDenylist: "glm-5.2" }));
+    throws(
+      () => loadConfig(p),
+      (error) => error.message.includes("modelDenylist") && error.message.includes(p),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig rejects a non-string modelDenylist entry", () => {
+  const dir = tmp();
+  const p = join(dir, "config.json");
+  try {
+    writeFileSync(p, JSON.stringify({ modelDenylist: ["nemotron", 42] }));
+    throws(
+      () => loadConfig(p),
+      (error) => error.message.includes("modelDenylist") && error.message.includes(p),
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("loadConfig rejects an empty modelDenylist entry", () => {
+  const dir = tmp();
+  const p = join(dir, "config.json");
+  try {
+    writeFileSync(p, JSON.stringify({ modelDenylist: ["nemotron", ""] }));
+    throws(
+      () => loadConfig(p),
+      (error) => error.message.includes("modelDenylist") && error.message.includes(p),
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

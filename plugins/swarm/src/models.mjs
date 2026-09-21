@@ -40,9 +40,10 @@ export function declaredEfforts(model, provider, cache = []) {
   for (const row of cache || []) {
     if (!row?.model) continue;
     entries.set(identityKey(row), row);
-    entries.set(row.model, row);
   }
-  const row = entries.get(identityKey({ model, provider })) || entries.get(model);
+  // The fallback reaches only provider-less rows ([null, model]) — a qualified
+  // row for another provider can never collide with it.
+  const row = entries.get(identityKey({ model, provider })) || entries.get(identityKey({ model }));
   if (!row) return undefined;
   const declared = {};
   if (Array.isArray(row.efforts) && row.efforts.length) declared.efforts = row.efforts;

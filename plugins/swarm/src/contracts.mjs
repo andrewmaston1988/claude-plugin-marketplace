@@ -5,7 +5,10 @@ const RECORD_FIELDS = {
   },
   ProviderUsageSnapshot: {
     required: ["provider", "buckets", "source", "provenance", "asOf"],
-    optional: [],
+    // `exhausted` is the dispatch gate's field and `reason` the partial-failure
+    // caveat's. Both are dropped here in silence if unlisted, which is how a
+    // dead gate ships looking committed.
+    optional: ["exhausted", "reason"],
   },
   RunnerEvent: {
     required: ["type"],
@@ -30,6 +33,13 @@ export const CONTEXT_WINDOW_1M = "1m";
 export const CONTEXT_WINDOWS = new Set([CONTEXT_WINDOW_1M]);
 export const COST_CLASSIFICATIONS = new Set(["billed", "api-equivalent estimate", "unpriced"]);
 export const AVAILABILITY_STATES = new Set(["available", "unavailable", "unknown"]);
+// How a usage reading was obtained. Both directions of the display key off this
+// token — the banner suppresses itself for `live`, the headroom gate trusts only
+// `live` — so an undeclared token would render as an unverified reading with no
+// caveat. `live` this process fetched it, `partial` it fetched half, `cached`
+// from a store this process did not fill, `cache` Anthropic's self-healing TTL
+// cache, `none` no reading, `unknown` a provider that never declared one.
+export const PROVENANCE_STATES = new Set(["live", "partial", "cached", "cache", "none", "unknown"]);
 // What makes an ollama model a cloud one. Discovery and the provider descriptor each
 // carried their own copy of this.
 export const OLLAMA_CLOUD_RE = /(:|-)cloud$/i;
@@ -131,8 +141,10 @@ export function providerUsageSnapshot(value) {
     throw new Error("ProviderUsageSnapshot field 'buckets' must be an array of objects");
   }
   requireString(out.source, "ProviderUsageSnapshot field 'source'");
-  requireString(out.provenance, "ProviderUsageSnapshot field 'provenance'");
+  requireEnum(out.provenance, "ProviderUsageSnapshot field 'provenance'", PROVENANCE_STATES);
   requireTimestamp(out.asOf, "ProviderUsageSnapshot field 'asOf'");
+  if (out.exhausted !== undefined) requireBoolean(out.exhausted, "ProviderUsageSnapshot field 'exhausted'");
+  if (out.reason !== undefined) requireString(out.reason, "ProviderUsageSnapshot field 'reason'");
   return out;
 }
 
