@@ -17,7 +17,7 @@ import {
 import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
-  createRunnerParser, addTokens, emptyTokens, tokenTotal,
+  createRunnerParser, addTokens, emptyTokens, tokenTotal, workTokens,
 } from "./stream.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createSnapshotWriter, liveViewLines } from "./ui.mjs";
@@ -693,7 +693,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     state.set(task.id, st);
     if (st === "running") startedAt.set(task.id, io.now());
     if (durationMs != null) durations.set(task.id, durationMs);
-    if (tokens && tokenTotal(tokens) + tokens.cacheRead > 0) tokensMap.set(task.id, tokens);
+    if (tokens && tokenTotal(tokens) > 0) tokensMap.set(task.id, tokens);
     appendRunLog(plan.resultsDir, {
       ts: new Date().toISOString(), id: task.id, state: st,
       ...durableIdentity(task),
@@ -1158,7 +1158,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
           model,
           ...(r.provider && { provider: r.provider }),
           ...(r.runner && { runner: r.runner }),
-          ...(tokenTotal(r.tokens) + (r.tokens?.cacheRead || 0) > 0 && { tokens: r.tokens }),
+          ...(tokenTotal(r.tokens) > 0 && { tokens: r.tokens }),
           ...(r.sessionId && { sessionId: r.sessionId }),
         };
         // The leaf's own identity is what it ran as; an override's identity lives on its ask entry.
@@ -1248,7 +1248,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         // input was cut — the run-level warning is easy to skip past.
         ...(promptTruncations.length && { promptTruncations }),
       };
-      if (tokenTotal(r.tokens) + (r.tokens?.cacheRead || 0) > 0) result.tokens = r.tokens;
+      if (tokenTotal(r.tokens) > 0) result.tokens = r.tokens;
       if (r.costUsd != null) result.costUsd = r.costUsd;
       if (r.numTurns != null) result.numTurns = r.numTurns;
       // interrogation fields: `swarm ask` resumes this session in this cwd;
@@ -1428,7 +1428,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       const realKey = r.apiKeySource != null && r.apiKeySource !== "none";
       if (r.costUsd != null && realKey) costMap.set(task.id, r.costUsd);
       completedLeaves++;
-      spentTokens += tokenTotal(r.tokens || emptyTokens());
+      spentTokens += workTokens(r.tokens || emptyTokens());
       spentUsd += r.costUsd ?? 0;
       costIsRealComplete &&= r.costUsd != null && realKey;
       if (cfg.costWarn !== false && !costWarnFired) {

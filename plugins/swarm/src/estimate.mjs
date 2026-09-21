@@ -5,7 +5,7 @@
 // with no history are named as uncounted, a fully cold corpus yields null.
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { tokenTotal } from "./stream.mjs";
+import { workTokens } from "./stream.mjs";
 import { formatTokens } from "./results.mjs";
 import { modelKey, identityOf } from "./contracts.mjs";
 import { isAgentless } from "./manifest.mjs";
@@ -68,7 +68,7 @@ export function loadCorpus(runsRoot) {
       for (const row of summary?.tasks || []) {
         if (row?.state !== "ok" || typeof row.model !== "string" || isAgentless(row) || !row.tokens) continue;
         const identity = identityOf(row);
-        push(tokens, keyOf(identity), tokenTotal(row.tokens));
+        push(tokens, keyOf(identity), workTokens(row.tokens));
         // costUsd is real only for Anthropic-billed leaves. On a :cloud row the CLI
         // applies its own price table to token counts, but the provider bills on
         // subscription/GPU cycles with no token->$ mapping — that dollar figure is

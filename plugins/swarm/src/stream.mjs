@@ -29,12 +29,28 @@ export function addTokens(a, b) {
   };
 }
 
-// Headline count: work tokens (input + output + cache writes). Cache reads are
-// re-served prefix, kept in the breakdown but excluded from the headline.
+// Headline count: tokens the provider processed. `input` means UNCACHED input on
+// every provider (codexUsage subtracts the cached subset OpenAI folds into it), so
+// the four fields are disjoint and this sum counts each processed token once.
+// Tolerates partial shapes — a summary row may omit buckets.
 export function tokenTotal(t) {
-  return t ? t.input + t.output + t.cacheCreation : 0;
+  return t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) + (t.cacheRead || 0) : 0;
 }
 
+// Work tokens (input + output + cache writes), excluding cache reads. For cost
+// estimation, where a re-served prefix really is cheaper than fresh input.
+export function workTokens(t) {
+  return t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
+}
+
+// Runner usage contract — two accumulation disciplines, chosen by emission shape:
+//  - delta emitters (Claude: one usage per message) -> SUM per id, latest-per-id
+//    winning (this accumulator);
+//  - cumulative emitters (Codex: a running total per event) -> REPLACE with the
+//    latest event (recordUsage in the Codex parser).
+// A new adapter must pick by what its provider emits; summing a cumulative
+// stream counts every turn again, replacing a delta stream drops all but one.
+//
 // stream-json may re-emit an assistant message (same id) as content blocks
 // complete; latest usage per id wins so re-emits never double-count.
 export function createUsageAccumulator() {
@@ -55,7 +71,7 @@ export function createUsageAccumulator() {
 // present; the live accumulation is the fallback (timeout, kill, old CLI).
 export function pickFinalTokens(resultUsage, accumulated) {
   const t = usageTokens(resultUsage);
-  return tokenTotal(t) + t.cacheRead > 0 ? t : accumulated;
+  return tokenTotal(t) > 0 ? t : accumulated;
 }
 
 // One tool_use block -> a short human line for the roster's activity cell.
@@ -122,11 +138,14 @@ function numberOrZero(value) {
 
 function codexUsage(usage) {
   const source = usage && typeof usage === "object" ? usage : {};
+  const cacheRead = numberOrZero(source.cached_input_tokens ?? source.cache_read_input_tokens ?? source.cacheRead);
   return {
-    input: numberOrZero(source.input_tokens ?? source.inputTokens ?? source.input),
+    // OpenAI counts cached input INSIDE input_tokens; Anthropic reports it beside.
+    // Subtract so `input` is uncached on both. Clamp: cached > input is malformed.
+    input: Math.max(0, numberOrZero(source.input_tokens ?? source.inputTokens ?? source.input) - cacheRead),
     output: numberOrZero(source.output_tokens ?? source.outputTokens ?? source.output),
     cacheCreation: numberOrZero(source.cache_creation_input_tokens ?? source.cacheCreation),
-    cacheRead: numberOrZero(source.cached_input_tokens ?? source.cache_read_input_tokens ?? source.cacheRead),
+    cacheRead,
   };
 }
 

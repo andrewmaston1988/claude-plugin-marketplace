@@ -1238,8 +1238,8 @@ test("stream-json leaf: result text extracted, tokens accounted end-to-end", asy
     deepEqual(r.summary.tasks[0].tokens, { input: 3000, output: 200, cacheCreation: 0, cacheRead: 500 });
     deepEqual(r.summary.totalTokens, { input: 3000, output: 200, cacheCreation: 0, cacheRead: 500 });
 
-    // final roster row shows 3000+200 work tokens = 3.2k; raw text never leaks
-    ok(io.snapshots.some((s) => /leaf.*3\.2k/.test(s)), io.snapshots.at(-1));
+    // final roster row shows the processed total 3000+200+500 cache read = 3.7k; raw text never leaks
+    ok(io.snapshots.some((s) => /leaf.*3\.7k/.test(s)), io.snapshots.at(-1));
     ok(!io.snapshots.some((s) => s.includes("extracted answer")));
   } finally {
     rmSync(dir, { recursive: true, force: true });
