@@ -962,6 +962,9 @@ async function cmdCost() {
       } else if (r.classification === API_EQUIVALENT_CLASSIFICATION) {
         notes.push("api-equivalent estimate, not money spent");
       }
+      // Inferred from a family tier rather than read off the table — say so, or
+      // it reads as sourced.
+      if (r.pricedVia) notes.push(`family tier, priced as ${r.pricedVia}`);
       out(
         "   " + pad(r.model, 26) +
         num(r.requests ?? "—", 7) +

@@ -314,31 +314,49 @@ export function ollamaCloudCostRows(snaps) {
 // cannot silently move the unit every other row is measured in, which a derived
 // floor (the cheapest entry) does the moment a cheap model is added.
 //
-// `prices` carries the base ALONE. The published $/Mtok figures are not in this
-// repository and were not fetched: a wrong price ranks models wrongly for ever
-// and nothing downstream can tell it from a sourced one, so every model without
-// an operator-supplied figure stays `unpriced` — a row, not a blank.
+// `prices` stores the PUBLISHED COLUMNS in USD per 1M tokens, not a collapsed
+// ratio. A single stored number assumes a fixed output/input relationship, which
+// Codex does not have — astra and sol are 5x output/input, terra, luna and 5.5
+// are 6x — so collapsing goes silently wrong the moment one column moves alone.
+// Storing the columns means a published change is edited where it was read.
+//
+// Keys are the ids swarm DISPATCHES, which is why haiku carries its date suffix
+// while Anthropic's own table does not: keying on the table's bare id would
+// render the model actually seated as `unpriced`. A model in neither table is a
+// row that says `unpriced` — a wrong price ranks models wrongly for ever and
+// nothing downstream can tell it from a sourced one.
 //
 // A subscription seat pays a flat fee, so even a sourced per-token figure is an
 // equivalence rather than a bill. Rows priced from these tables are labelled
 // `api-equivalent estimate`, never `billed`.
+
+// openai.com help centre, "ChatGPT Rate Card (Enterprise token-based pricing)",
+// the *ChatGPT Work and Codex models* table — the one that governs Codex CLI
+// usage, not the Chat table above it. Read 2026-09-21.
+// Sol's $4.00 is promotional "at least through November 21, 2026"; re-read the
+// card after that date rather than trusting this row.
 export const CODEX_RATE_CARD = {
   provider: "codex",
   baseModel: "gpt-5.6-luna",
   unit: "published-price-relative",
   source: "codex-rate-card",
   asOf: "2026-09-21",
-  prices: { "gpt-5.6-luna": 1 },
+  prices: {
+    "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, output: 1.2 },
+    "gpt-5.6-terra": { input: 2, cachedInput: 0.2, output: 12 },
+    "gpt-5.6-sol": { input: 4, cachedInput: 0.4, output: 20 },
+    "gpt-5.5": { input: 5, cachedInput: 0.5, output: 30 },
+    "gpt-6-astra": { input: 10, cachedInput: 1, output: 50 },
+  },
 };
 
-// Ratios from Anthropic's published $/Mtok table (the model reference bundled
-// with the claude-code-guide skill), read 2026-09-21. Output is exactly 5x input
-// for every model, so one number serves both columns:
-//   fable-5-1 $10/$50 · opus-5 $5/$25 · sonnet-5 $2/$10 · haiku-4-5 $1/$5
-// Keys are the ids swarm DISPATCHES, which is why haiku carries its date suffix
-// while the rate doc's own id does not. Cache-read rates are deliberately absent:
-// only Fable's ($0.25) is published in that table and a guessed one would rank
-// long-context work wrongly for ever.
+// Anthropic's published $/Mtok table (the model reference bundled with the
+// claude-code-guide skill), read 2026-09-21. A family shares its tier's price
+// (operator, 2026-09-21: "claude doesn't vary prices for a model family as far
+// as I know"), so sonnet-4-6 carries sonnet's figures and opus-4-8 opus's rather
+// than numbers of their own. Cache-read is published for Fable alone, so the
+// field is absent elsewhere instead of guessed — a guessed cache rate would
+// mis-rank long-context work permanently.
 export const CLAUDE_RATE_CARD = {
   provider: "claude",
   baseModel: "claude-sonnet-5",
@@ -346,12 +364,12 @@ export const CLAUDE_RATE_CARD = {
   source: "anthropic-rate-card",
   asOf: "2026-09-21",
   prices: {
-    "claude-haiku-4-5-20251001": 0.5,
-    "claude-sonnet-5": 1,
-    "claude-sonnet-4-6": 1.5,
-    "claude-opus-5": 2.5,
-    "claude-opus-4-8": 2.5,
-    "claude-fable-5-1": 5,
+    "claude-haiku-4-5-20251001": { input: 1, output: 5 },
+    "claude-sonnet-5": { input: 2, output: 10 },
+    "claude-sonnet-4-6": { input: 2, output: 10, via: "claude-sonnet-5" },
+    "claude-opus-5": { input: 5, output: 25 },
+    "claude-opus-4-8": { input: 5, output: 25, via: "claude-opus-5" },
+    "claude-fable-5-1": { input: 10, cachedInput: 0.25, output: 50 },
   },
 };
 
@@ -374,7 +392,12 @@ function rateCardObservation(card, model) {
     classification: listed ? API_EQUIVALENT_CLASSIFICATION : UNPRICED_CLASSIFICATION,
     asOf: card.asOf,
     costDomain: `${card.provider}:${card.unit}`,
-    ...(listed ? { value: card.prices[model] } : {}),
+    // The input column is the basis: swarm work is input- and cache-read
+    // dominated, and for every Codex model cached input is exactly 0.1x input,
+    // so that column yields the identical ratio. Output does not — an
+    // output-basis card puts astra at 41.67x rather than 50x.
+    ...(listed ? { value: card.prices[model].input } : {}),
+    ...(listed && card.prices[model].via ? { pricedVia: card.prices[model].via } : {}),
   });
 }
 

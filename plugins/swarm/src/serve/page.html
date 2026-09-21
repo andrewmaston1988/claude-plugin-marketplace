@@ -162,7 +162,11 @@
   .costcards label { font-size:11px; letter-spacing:.16em; color:var(--accent); }
   .costcards span { white-space:normal; font-size:15px; }
   .costcards small { font-size:11px; color:var(--muted); line-height:1.35; }
-  .arow.costrow { grid-template-columns:96px 1fr 64px; row-gap:0; }
+  /* A cost row is read for its model name; the perf rows are read for their bars.
+     Smaller type plus a wider label column fits `deepseek-v4.1-flash:cloud`, which
+     the shared 96px/12px cell clipped to `deepseek-v4...`. */
+  .arow.costrow { grid-template-columns:124px 1fr 60px; row-gap:0; }
+  .arow.costrow .alabel { font-size:10.5px; }
   .arow.costrow .costverdict { grid-column:1 / -1; font-size:10px; color:var(--faint); margin:-2px 0 4px; }
   .arow.costrow.unmfirst { border-top:1px solid var(--rule); padding-top:6px; }
   .arow.costrow.unm .alabel, .arow.costrow.unm .aval { color:var(--faint); }
