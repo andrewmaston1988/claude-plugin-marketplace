@@ -4,6 +4,10 @@
 // processed total, so `fix[0]` (the one fixture leaf with a cacheRead) went 17k → 67k and the
 // run total 324.1k → 374.1k. Nothing else in the render changed. Paths are normalised because
 // the fixture lives in a temp dir.
+//
+// Move 2026-09-21 (same day, later): the PER-LEAF CELL went back to work tokens, so `fix[0]`
+// returned 67k → 17k while the run total stayed 374.1k — the cell shows a leaf's work, the
+// total shows everything the providers processed. Only that one row moved.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";

@@ -5,7 +5,7 @@ swarm · fixture-1 · 9 tasks · 10m00s
   ✓  find-a       glm-5.3:cloud  119s  83.1k
   ◐  find-b       glm-5.3:cloud  599s   224k  ⚠ quiet 120s
   ·  fix          sonnet            —      —
-  ◐  fix[0]       sonnet         469s    67k  ⚠ quiet 415s
+  ◐  fix[0]       sonnet         469s    17k  ⚠ quiet 415s
   ⧖  fix[1]       sonnet            —      — [rate-limited]
   ·  review       haiku             —      —
   ✗  review~lint  haiku           29s      — [failed]

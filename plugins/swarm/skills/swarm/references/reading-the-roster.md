@@ -8,13 +8,8 @@ to author a manifest.
 
 **A provider leaf is a full autonomous agent**, running its own multi-turn loop: it greps, reads, reasons, greps again, dozens or hundreds of turns, until it has an answer. It is not one request/response. Judge it as you would a colleague working a problem for fifteen minutes — not as a query that should have returned by now. When the same model id is available from more than one provider, read the `provider/model` identity rather than the model id alone.
 
-**Their token counts are enormous, and that is arithmetic, not pathology.** These providers report no prompt-cache buckets (`cache_creation_input_tokens` / `cache_read_input_tokens` come back absent). So every turn re-sends the agent's entire growing transcript as *fresh input*, and `tokenTotal` counts it (`input + output + cacheCreation` — `cacheRead` is deliberately excluded). A Claude leaf doing identical work parks that same re-sent prefix in `cacheRead`, which the roster does **not** count. The number is real; the magnitude is an accounting artefact of where the bucket lands.
-
-Read the two columns for what they are: **`output` is the work. `input` is the transcript re-sent, once per turn.**
-
 | What you see | What it means |
 |---|---|
-| A provider leaf at 1M–20M+ tokens | **Normal for providers that report transcript input.** Input/output ratios of 100–180× are the ordinary signature of a working agent. |
 | Its `costUsd` (`$108`, `$53`) | **Provider-specific evidence only.** Read cost against that provider's pricing or meter; an unpriced row is not free. Never compare `costUsd` across providers. |
 | The activity cell (`Grep("handler")`) | The **most recent** tool call — a heartbeat, proof of life. NOT a call the leaf has been stuck on. A leaf showing a tool call is a leaf that is working. |
 | One leaf far slower than its siblings | **Normal.** Leaves have different amounts to do. 840s next to 184s is scope, not sickness. |

@@ -18,6 +18,7 @@ import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim } from "../src/ui.mjs";
+import { modelLine, effortsCell } from "../src/model-row.mjs";
 
 const USAGE = `usage: swarm.mjs <command>
   models [--all]             list launchable models from enabled providers (+ Claude aliases)
@@ -80,23 +81,6 @@ function resolveManifestRef(ref) {
   if (r.source !== "path") out(`resolved: ${ref} → ${r.path} (${r.source})`);
   return r;
 }
-
-function fmtParams(n) {
-  return n >= 1e12 ? `${(n / 1e12).toFixed(1)}T` : `${Math.round(n / 1e9)}B`;
-}
-
-function fmtCtx(n) {
-  return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M ctx` : `${Math.round(n / 1e3)}k ctx`;
-}
-
-function modelLine(m) {
-  const name = m.displayModel || m.model;
-  const line = m.description ? `${name} — ${m.description}` : name;
-  if (!(m.parameterCount > 0) && !(m.contextLength > 0)) return line;
-  const size = m.parameterCount > 0 ? fmtParams(m.parameterCount) : "size unreported";
-  return `${line} (${[size, ...(m.contextLength > 0 ? [fmtCtx(m.contextLength)] : [])].join(", ")})`;
-}
-
 
 // The single ollama usage entry point for the CLI — getUsage memoises per
 // process, so validate/run/models share one fetch however many seats.
@@ -248,7 +232,7 @@ async function cmdModels(rest = [], {
     const mark = showAll && m.supersededBy && !visible.has(identityKey(m)) ? ` [superseded by ${m.supersededBy}]` : "";
     const mult = multOf.get(m.model);
     const cost = m.provider && m.provider !== "ollama" ? "—" : mult == null ? "—" : onFrontier.has(m.model) ? `* ${mult.toFixed(1)}x` : `${mult.toFixed(1)}x`;
-    write(modelLine({ ...m, displayModel: displayModel(m, liveRoster) }) + mark + `  ${cost}`);
+    write(modelLine({ ...m, displayModel: displayModel(m, liveRoster) }) + mark + `  ${effortsCell(m, roster)}  ${cost}`);
   }
   write(dim("* on the quality/cost frontier · N.Nx = meter weight vs the cheapest measured model (swarm cost) · — not yet measured"));
   const hidden = liveRoster.length - shown.length;
