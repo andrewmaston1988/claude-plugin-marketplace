@@ -658,7 +658,10 @@ test("transcriptModels: the assistant events' model, deduped; a transcript namin
   deepEqual(transcriptModels("plain text runner output\n"), []);
   deepEqual(transcriptModels(""), []);
   deepEqual(transcriptModels(null), []);
-  deepEqual(transcriptModels('{"type":"system","subtype":"init","model":"claude-opus-4-8"}\n'), [], "the init event is not the leaf's model");
+  // Only an assistant event is the leaf's own model. Another event type carrying
+  // a message.model must not be read as one — a plain `event.model` read would
+  // also pick up the system/init banner, which names the harness's default.
+  deepEqual(transcriptModels('{"type":"user","message":{"model":"claude-opus-4-8"}}\n'), []);
 });
 
 test("backfillRealmodel: an alias row takes the concrete model its transcript reports", () => {
