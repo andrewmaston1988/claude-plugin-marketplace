@@ -6,31 +6,14 @@ Every task in a swarm manifest pins a **model** and, optionally, an **effort**. 
 
 With grading enabled, `swarm perf` is the record and this guide covers only what it has not measured. Run `swarm models` first — it lists launchable rows from enabled providers, keeps provider identity visible, and annotates provider-local meter evidence where available.
 
-## How to pick: read the frontier, never compute a ranking
-
-Quality and cost are two axes and **never collapse into one number**:
-
-- **`swarm perf`** owns quality — per-aspect weighted scores, and `--overall` the one combined ranking.
-- **`swarm cost`** owns cost — each measured model's meter weight relative to the cheapest well-measured model, derived from the history every live usage fetch banks.
-- The **frontier** joins them: a model is on it when no other model is both higher-scoring *and* cheaper. In `perf`, `dom <model>` marks a dominated model — one that is better AND cheaper exists — and a dominated model is never worth seating. A model rendering `—` is **unmeasured, not free and not dominated**: the history has not priced it, and absence is not evidence in either direction.
-
 The seating rule is the method, not a list:
 
 1. Read `perf --overall` and `cost` together.
 2. Seat from the frontier — the best-scoring model that is not dominated. A dominated model always has a strictly better-and-cheaper replacement; take the replacement.
-3. When the leaf's job needs a capability class nothing on the frontier has shown — cross-file architectural reasoning, subtle synthesis — seat the Claude tier named below. Claude tiers are unmeasured by the ollama meter by design: their cost lives on the Anthropic subscription, so they render `—` and neither dominate nor are dominated.
+3. When the leaf's job needs a capability class nothing on the frontier has shown — cross-file architectural reasoning, subtle synthesis — seat the matching Claude tier.
 4. Never re-rank by hand, and never as quality÷cost. The shrinkage prior floors every model near a common score, so a ratio mostly measures the denominator — cheapness — and has been observed to put a one-graded-leaf model on top. The frontier is computed from the banked evidence by the tool; read it.
 
-A fresh install has no history: every model renders `—`, the frontier is empty, and the tier guide below is the whole guide until the meter record fills — which happens by itself within a week of normal use.
-
-## Tier guide
-
-- **Registered alternative models** — capable on bounded reasoning leaves. **The default for bounded leaf work**: investigation sweeps with a closed question, structured extraction, fixed-lens reviews, mechanical implementation, generation, digesting. This is what makes group-think patterns affordable to run wide — reserve Claude tiers for final synthesis and subtle judgement. Use the explicit provider when a model id is not unique.
-- **`haiku`** — existence checks, file listing, "does this symbol appear?", deterministic JSON extraction, one-line annotations. Fast, weak at independent reasoning. **Avoid when the leaf must synthesise or reason** — Haiku pattern-matches the prompt's examples instead of doing the work.
-- **`sonnet`** — the Claude floor for any leaf that must understand code, reason about patterns, trace a flow, or produce structured findings. Single-cluster judgement.
-- **`opus`** — cross-file architectural reasoning, behavioural-equivalence constraints, multi-branch impact assessment one leaf must hold in its head at once. The ceiling for cross-cutting questions. A leaf that genuinely needs Opus is often a sign the question wasn't decomposed enough — check before reaching for it.
-
-If you decomposed correctly, most leaves answer a *bounded, closed* question over one cluster — that's an alternative-provider model or sonnet territory. Do not compare provider-local prices as one cross-provider order; within Ollama, `swarm cost` owns the changing meter evidence.
+Claude tiers are unmeasured by the ollama meter by design: their cost lives on the Anthropic subscription, so they render `—` and neither dominate nor are dominated.
 
 ## Choosing effort given model
 
@@ -53,12 +36,8 @@ Swarm has no fixed roles: you invent the cast per manifest, so **derive each lea
 ### Provider-declared effort levels
 
 Every dispatching leaf receives an explicit effort; `manifest-fields.md` → "Effort"
-owns how one is resolved and when `swarm validate` rejects it.
-
-Claude reads its levels and default from Claude Code's model catalog. Codex reads the
-effort list from its model cache and uses `medium` because the cache declares no
-default. Ollama does not declare effort levels, so its values pass through to the
-upstream launcher.
+owns how one is resolved and when `swarm validate` rejects it. Run `swarm models`
+to see each model's declared efforts.
 
 ## Context window
 

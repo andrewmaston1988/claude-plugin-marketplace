@@ -344,7 +344,7 @@ export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLin
     glyph: GLYPHS[t.state] || "?",
     dur: t.state === "running" && t.startedMs != null ? fmtSecs(now - t.startedMs)
       : t.durationMs != null ? fmtSecs(t.durationMs) : "—",
-    tok: formatTokens(tokenTotal(t.tokens)),
+    tok: formatTokens(workTokens(t.tokens)), // the leaf's work — tokenTotal's cacheRead is not work
     tag: TAGGED.has(t.state) ? ` [${t.state}]` : "",
     act: activityCell(t),
   }));

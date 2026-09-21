@@ -1,0 +1,93 @@
+import { test } from "node:test";
+import { equal, ok } from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { modelDescriptor } from "../src/contracts.mjs";
+import { defaultProviderRegistry } from "../src/default-providers.mjs";
+import { effortsCell } from "../src/model-row.mjs";
+import { cmdModels } from "../scripts/swarm.mjs";
+
+// Same shape as tests/fixtures/fourth-provider.mjs, parameterised over the
+// descriptors the discovery capability returns.
+function effortProvider(descriptors) {
+  return {
+    id: "fixture",
+    runnerId: "fixture",
+    enabled: (cfg) => cfg.providers?.fixture?.enabled === true,
+    validateTask: () => [],
+    capabilities: { discoverModels: async () => descriptors },
+  };
+}
+
+function effortConfig(root) {
+  return {
+    providers: {
+      claude: { enabled: true },
+      ollama: { enabled: false, allowedRoots: [] },
+      codex: { enabled: false, allowedRoots: [] },
+      fixture: { enabled: true, allowedRoots: [root] },
+    },
+    concurrency: 1,
+  };
+}
+
+async function modelLines(descriptors) {
+  const home = mkdtempSync(join(tmpdir(), "swarm-efforts-"));
+  // HOME too, not just SWARM_HOME: the claude adapter's discoverModels reads
+  // ~/.claude/cache/model-catalog, so a real one would add rows this roster asserts against.
+  const env = { ...process.env, SWARM_HOME: home, HOME: home, USERPROFILE: home };
+  const registry = defaultProviderRegistry({ additionalProviders: [effortProvider(descriptors)] });
+  const lines = [];
+  try {
+    equal(await cmdModels([], { cfg: effortConfig(home), env, registry, fetchImpl: async () => ({ ok: true }), write: (line) => lines.push(line) }), 0);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+  return lines;
+}
+
+test("swarm models renders each row's declared efforts", async () => {
+  const lines = await modelLines([
+    modelDescriptor({ provider: "fixture", model: "declares-list", runner: "fixture", efforts: ["low", "medium", "high"] }),
+  ]);
+  const line = lines.find((l) => l.includes("declares-list"));
+  ok(line && line.includes("low/medium/high"), lines.join("\n"));
+});
+
+// claude-haiku-4-5-20251001 is the real case: thinking.type "none", no effort
+// options — the row is present, the declaration is not. In words, never a blank.
+test("a row that declares no efforts renders the words, not an empty cell", async () => {
+  const lines = await modelLines([
+    modelDescriptor({ provider: "fixture", model: "declares-none", runner: "fixture" }),
+    modelDescriptor({ provider: "fixture", model: "declares-empty", runner: "fixture", efforts: [] }),
+  ]);
+  const noneLine = lines.find((l) => l.includes("declares-none"));
+  ok(noneLine && noneLine.includes("declares none"), lines.join("\n"));
+  const emptyLine = lines.find((l) => l.includes("declares-empty"));
+  ok(emptyLine && emptyLine.includes("declares none"), lines.join("\n"));
+});
+
+// "We have not looked" is a model with no roster row at all — the state a
+// session cannot act on and must not mistake for a declaration of none.
+test("a model with no roster row renders unknown, distinct from declares none", () => {
+  equal(effortsCell({ model: "unseen", provider: "fixture" }, []), "unknown");
+  equal(effortsCell({ model: "unseen", provider: "fixture" }, [{ model: "other", provider: "fixture" }]), "unknown");
+  const present = effortsCell({ model: "present", provider: "fixture" }, [{ model: "present", provider: "fixture" }]);
+  ok(present.includes("declares none"), present);
+  ok(present !== "unknown", present);
+});
+
+// defaultEffort is declaredEfforts' own output field — the raw efforts field
+// does not carry it, so a column reading the cache field directly loses it.
+// claude-* rows are the real case (default from the catalog badge).
+test("a declared default effort renders beside the list and stands alone", async () => {
+  const lines = await modelLines([
+    modelDescriptor({ provider: "fixture", model: "default-with-list", runner: "fixture", efforts: ["low", "high"], defaultEffort: "low" }),
+    modelDescriptor({ provider: "fixture", model: "default-only", runner: "fixture", defaultEffort: "medium" }),
+  ]);
+  const listLine = lines.find((l) => l.includes("default-with-list"));
+  ok(listLine && listLine.includes("low/high (default low)"), lines.join("\n"));
+  const onlyLine = lines.find((l) => l.includes("default-only"));
+  ok(onlyLine && onlyLine.includes("default medium"), lines.join("\n"));
+});
