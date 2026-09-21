@@ -1400,20 +1400,8 @@ async function main() {
       }
       case "config": {
         if (rest[0] !== "init") { err(USAGE); return 1; }
-        const { initConfig, LEGACY_KEY_TO_CANONICAL } = await import("../src/config.mjs");
-        const r = initConfig(process.env.SWARM_CONFIG);
-        const parts = [];
-        if (r.added.length) parts.push(`added ${r.added.length} key${r.added.length === 1 ? "" : "s"}: ${r.added.join(", ")}`);
-        if (r.migrated) parts.push("rewrote it into the canonical shape");
-        out(`config: ${r.path} (${r.created ? "created" : parts.length ? parts.join("; ") : "up to date"})`);
-        // The fold is silent on disk otherwise: the operator's file changes shape and
-        // nothing says what moved or where the previous copy went.
-        if (r.migrated) {
-          out(`Migrated ${r.path} to the canonical shape:`);
-          const width = Math.max(...r.migratedKeys.map((k) => JSON.stringify(k).length)) + 1;
-          for (const k of r.migratedKeys) out(`  ${JSON.stringify(k).padEnd(width)}-> ${JSON.stringify(LEGACY_KEY_TO_CANONICAL[k])}`);
-          out(`Values are unchanged; a backup of the previous file is at ${r.path}.bak`);
-        }
+        const { initConfig, configInitReport } = await import("../src/config.mjs");
+        for (const line of configInitReport(initConfig(process.env.SWARM_CONFIG))) out(line);
         return 0;
       }
       case "status": {

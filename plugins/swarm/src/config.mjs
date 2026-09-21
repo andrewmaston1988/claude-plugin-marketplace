@@ -283,3 +283,21 @@ export function initConfig(overridePath, env = process.env) {
   if (created || migratedKeys.length || added.length) writeAtomic(path, user);
   return { path, created, migrated: migratedKeys.length > 0, migratedKeys, added };
 }
+
+// What `config init` prints, as lines. It lives here rather than in the CLI because
+// every word of it — the added-key list, the legacy key names, the backup path — is
+// this module's own vocabulary. The fold is silent on disk otherwise: the operator's
+// file changes shape and nothing says what moved or where the previous copy went.
+export function configInitReport(result) {
+  const parts = [];
+  if (result.added.length) parts.push(`added ${result.added.length} key${result.added.length === 1 ? "" : "s"}: ${result.added.join(", ")}`);
+  if (result.migrated) parts.push("rewrote it into the canonical shape");
+  const lines = [`config: ${result.path} (${result.created ? "created" : parts.length ? parts.join("; ") : "up to date"})`];
+  if (result.migrated) {
+    lines.push(`Migrated ${result.path} to the canonical shape:`);
+    const width = Math.max(...result.migratedKeys.map((k) => JSON.stringify(k).length)) + 1;
+    for (const k of result.migratedKeys) lines.push(`  ${JSON.stringify(k).padEnd(width)}-> ${JSON.stringify(LEGACY_KEY_TO_CANONICAL[k])}`);
+    lines.push(`Values are unchanged; a backup of the previous file is at ${result.path}.bak`);
+  }
+  return lines;
+}
