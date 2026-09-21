@@ -70,3 +70,60 @@ test("serve with the dashboard disabled spawns the tray and never binds the port
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- serve enable / serve disable: the single write path the tray and setup share ---
+
+test("serve disable then enable flips exactly one key and leaves the rest of the file intact", async () => {
+  const dir = tmp();
+  const port = await freePort();
+  const home = join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  const configPath = join(home, "config.json");
+  // A config with something to disturb in every direction: nested objects, an
+  // array, a legacy-shaped key, and the dashboard block itself.
+  const seeded = {
+    providers: { claude: { allowedRoots: [dir] }, ollama: { enabled: false, url: "http://localhost:11434" } },
+    concurrency: 4,
+    projects: [{ name: "one", hooks: {} }, { name: "two", hooks: {} }],
+    modelDenylist: ["nemotron"],
+    dashboard: { enabled: true, port, bind: "127.0.0.1", tray: true },
+  };
+  writeFileSync(configPath, JSON.stringify(seeded, null, 2) + "\n");
+  const env = { SWARM_CONFIG: configPath, SWARM_SERVE_TEST_TRAY: join(dir, "tray.jsonl") };
+  try {
+    const off = runCli(["serve", "disable"], { cwd: dir, env });
+    equal(off.status, 0, off.stderr);
+    const after = JSON.parse(readFileSync(configPath, "utf8"));
+    equal(after.dashboard.enabled, false);
+    // Everything else byte-for-byte: a writer that re-materialises the file from the
+    // defaults would silently re-enable a provider or drop the denylist.
+    equal(JSON.stringify({ ...after, dashboard: { ...after.dashboard, enabled: true } }), JSON.stringify(seeded));
+
+    const on = runCli(["serve", "enable"], { cwd: dir, env });
+    equal(on.status, 0, on.stderr);
+    equal(JSON.parse(readFileSync(configPath, "utf8")).dashboard.enabled, true, "and back");
+    // Neither verb starts anything: the answer is observable without a side effect,
+    // so setup can ask and then offer to start.
+    equal(existsSync(join(dir, "tray.jsonl")), false, "enable/disable write the key; they do not launch the tray");
+    equal(await portAnswers(port), false, "nor the webserver");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("serve enable on a machine with no config file creates one carrying only that key", async () => {
+  const dir = tmp();
+  const home = join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  const configPath = join(home, "config.json");
+  try {
+    const r = runCli(["serve", "enable"], { cwd: dir, env: { SWARM_CONFIG: configPath } });
+    equal(r.status, 0, r.stderr);
+    // The one key, not a materialised copy of the defaults: `swarm config init` is
+    // the command that fills a file out, and a verb asked to change one setting
+    // must not decide the rest of them for the operator.
+    equal(readFileSync(configPath, "utf8").trim(), JSON.stringify({ dashboard: { enabled: true } }, null, 2));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

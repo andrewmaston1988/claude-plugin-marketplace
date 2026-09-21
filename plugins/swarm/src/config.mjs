@@ -294,6 +294,29 @@ export function initConfig(overridePath, env = process.env) {
   return { path, created, migrated: migratedKeys.length > 0, migratedKeys, added };
 }
 
+// Set ONE key, leaving every other line of the operator's file exactly as it was.
+// `config init` is the command that materialises the shipped defaults; a verb asked
+// to change a single setting must not decide the rest of them for the operator — a
+// re-materialising writer would silently re-enable a provider they turned off.
+// Validation judges the MERGED view (defaults <- user), because that is what the
+// next loadConfig reads: a sparse file is legitimate, a file that cannot load is not.
+// Returns { path, key, changed, previous } — `changed: false` when the value was
+// already there, so a caller can re-run without churning the file's mtime.
+export function setConfigValue(key, value, overridePath, env = process.env) {
+  const path = userConfigPath(overridePath, env);
+  const raw = existsSync(path) ? parseUser(path) : {};
+  const before = getPath(raw, key);
+  if (before.found && before.value === value) return { path, key, changed: false, previous: value };
+  try {
+    validateConfig(deepMerge(readDefaults(), normalizeConfigInput(raw)));
+  } catch (e) {
+    throw new Error(refuseToWrite(raw, path, false, e));
+  }
+  setPath(raw, key, value);
+  writeAtomic(path, raw);
+  return { path, key, changed: true, previous: before.found ? before.value : undefined };
+}
+
 // What `config init` prints, as lines. It lives here rather than in the CLI because
 // every word of it — the added-key list, the legacy key names, the backup path — is
 // this module's own vocabulary. The fold is silent on disk otherwise: the operator's

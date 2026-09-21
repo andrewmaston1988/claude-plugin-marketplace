@@ -39,7 +39,7 @@ const USAGE = `usage: swarm.mjs <command>
   scores backfill-realmodel [--dry-run]   rewrite alias-named score rows to the model their leaf transcript reports
   cost                       one cost list per provider, cheapest to dearest (meter + static rate cards)
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
-  serve restart | doctor | stop | status | install-autostart | uninstall-autostart
+  serve restart | doctor | stop | status | enable | disable | install-autostart | uninstall-autostart
   config init                write every shipped key into ~/.swarm/config.json, keeping what is set and folding an old-shaped file ("provider"/"codex") into "providers" — it prints the mapping and leaves the previous file at config.json.bak; the /swarm:swarm setup skill walks it
   statusline install         write the self-resolving statusline shim to ~/.swarm/statusline.mjs and print the settings.json line
   install                    put swarm on PATH: bash + cmd wrappers and the resolver copy in ~/.local/bin (idempotent; never edits a shell profile)`;
@@ -1115,6 +1115,20 @@ async function cmdServe(rest) {
     if (!startupDir) out(`no Startup folder on this platform — add "${process.execPath}" "${shim}" scripts/swarm.mjs serve --daemon to your login items by hand`);
     else out(verb === "install-autostart" ? `autostart: ${r.changed ? "installed" : "already installed"} → ${r.path}` : `autostart: ${r.removed ? "removed" : "was not installed"}`);
     exitSoon(0); return 0;
+  }
+  // enable/disable write the key and NOTHING else: no daemon, no tray. The two
+  // callers that need a side effect — setup's dashboard stage and the tray's own
+  // menu — each ask the operator and then run `serve` or `serve stop`, so the
+  // answer stays observable on its own and neither caller inherits a surprise.
+  if (verb === "enable" || verb === "disable") {
+    const want = verb === "enable";
+    const { setConfigValue } = await import("../src/config.mjs");
+    let r;
+    try { r = setConfigValue("dashboard.enabled", want, process.env.SWARM_CONFIG); }
+    catch (e) { err(`dashboard: ${e.message}`); return 1; }
+    out(`dashboard: ${want ? "enabled" : "disabled"} (${r.key}=${want} in ${r.path})`);
+    out(want ? "  start it with: swarm serve" : "  a running dashboard keeps serving until: swarm serve stop");
+    return 0;
   }
   if (verb !== "start" && verb !== "restart") { err(USAGE); return 1; }
 
