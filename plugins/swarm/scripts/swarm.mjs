@@ -1063,8 +1063,9 @@ async function cmdUsage(rest = [], {
 // serve — the LAN dashboard. Foreground by default; --daemon forks a detached
 // copy and records its pid (written by the parent, per the plugin daemon rule).
 async function cmdServe(rest) {
-  const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir, pidPath,
+  const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir,
     resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort, waitForExit, restartPlan, drainAndClose, spawnLoggedDaemon } = await import("../src/serve/daemon.mjs");
+  const { launchTray } = await import("../src/serve/tray.mjs");
   const home = swarmHome();
   const cfg = getConfig();
   const port = cfg.dashboard?.port ?? 7331;
@@ -1120,7 +1121,12 @@ async function cmdServe(rest) {
   // The off switch — covers restart too, which would stop the daemon and start
   // nothing. stop/status/doctor/autostart verbs still work above, so a Startup
   // launcher left installed becomes a no-op instead of needing uninstalling.
-  if (cfg.dashboard?.enabled === false) { out("dashboard: disabled (dashboard.enabled=false in ~/.swarm/config.json)"); exitSoon(0); return 0; }
+  if (cfg.dashboard?.enabled === false) {
+    out("dashboard: disabled (dashboard.enabled=false in ~/.swarm/config.json)");
+    const t = await launchTray({ home, port, shimPath, tray: cfg.dashboard?.tray !== false });
+    if (!t.ok) err(`dashboard: ${t.reason}`);
+    exitSoon(0); return 0;
+  }
 
   // The --daemon parent records the child's pid before the child gets here, so a
   // pid equal to our own is us, not a rival. A live daemon with a moved-off
@@ -1151,28 +1157,8 @@ async function cmdServe(rest) {
     const started = spawnLoggedDaemon([process.execPath, enginePath, "serve"], home);
     if (!started.ok) return { ok: false, reason: `could not spawn the daemon: ${started.reason}` };
     if (!takeover) writePid(home, { pid: started.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() });
-    if (process.platform === "win32" && cfg.dashboard?.tray !== false) {
-      try {
-        const { spawn } = await import("node:child_process");
-        const { writeFileSync, renameSync } = await import("node:fs");
-        const { renderTrayIconPng } = await import("../src/serve/icon.mjs");
-        const iconPath = join(home, "dashboard-icon.png");
-        writeFileSync(`${iconPath}.tmp`, renderTrayIconPng());
-        renameSync(`${iconPath}.tmp`, iconPath);
-        const trayScript = fileURLToPath(new URL("../src/serve/tray.ps1", import.meta.url));
-        // The tray needs a console — powershell.exe is a console-subsystem exe whose
-        // WinForms message loop dies without one, and `detached: true` strips it
-        // (DETACHED_PROCESS) — and it must outlive this short-lived parent: `cmd /c
-        // start` gives it a fresh hidden console AND breaks it out of our job. Same
-        // shape as slack-bridge claude-slack.mjs:245-270; its Task-Scheduler reason
-        // does not apply here (swarm autostarts from the Startup folder), but the
-        // console and breakaway halves both do.
-        const tray = spawn("cmd.exe", ["/c", "start", "", "/min", "powershell.exe", "-WindowStyle", "Hidden", "-NonInteractive",
-          "-File", trayScript, "-PidFile", pidPath(home), "-NodeExe", process.execPath, "-ShimPath", shimPath,
-          "-Port", String(port), "-IconPath", iconPath, "-SwarmHome", home], { detached: true, stdio: "ignore", windowsHide: true });
-        tray.unref();
-      } catch (e) { err(`dashboard: tray not started: ${e.message}`); }
-    }
+    const t = await launchTray({ home, port, shimPath, tray: cfg.dashboard?.tray !== false });
+    if (!t.ok) err(`dashboard: ${t.reason}`);
     return { ok: true, pid: started.pid, logPath: started.logPath };
   };
 
