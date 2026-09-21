@@ -2662,6 +2662,19 @@ test("write guard: absent from a read-only leaf, which has no tree to be confine
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("write guard: absent from a read-only leaf even when it declares an outputDir", () => {
+  // The row above passes on its own for the wrong reason: a reader derives no tree,
+  // so its root list is empty and applyWriteGuard no-ops. outputDir is the one root a
+  // reader CAN have, which makes hasWriteTools the only thing withholding the guard.
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { resultsDir: "out", tasks: [claudeTask({ outputDir: "artefacts" })] });
+    const plan = loadManifest(p, CFG, dir);
+    equal(plan.tasks[0].outputDir, join(dir, "artefacts"), "the root would exist if the predicate let it through");
+    equal(plan.tasks[0].settings, undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("write guard: outputDir is a second allowed root — it resolves into the live checkout", () => {
   const dir = tmp();
   try {
@@ -2687,6 +2700,26 @@ test("write guard: a task's own hooks cannot replace it", () => {
     deepEqual(hooks.PreToolUse[1], own, "the task's own entry survives beside it");
     ok(hooks.Stop, "unrelated hook events survive");
     equal(plan.tasks[0].settings.env.OTHER, "x", "unrelated settings survive");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("write guard: the emitted command actually denies when a shell runs it", () => {
+  // Every other row asserts the command as a STRING; a wrong hook path or a root
+  // list that never made it into the command would pass all of them. This runs it.
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask()] });
+    const command = loadManifest(p, CFG, dir).tasks[0].settings.hooks.PreToolUse[0].hooks[0].command;
+    const payload = (filePath) => JSON.stringify({ tool_name: "Write", tool_input: { file_path: filePath } });
+    const run = (filePath) => {
+      const r = spawnSync(command, { shell: true, input: payload(filePath), encoding: "utf8" });
+      equal(r.status, 0, `the emitted command must run — ${r.stderr}`);
+      return r.stdout.trim();
+    };
+    const root = join(dir, "out", "wt-a");
+    equal(run(join(root, "inside.txt")), "", "a write inside the leaf's own tree is allowed");
+    const out = JSON.parse(run(join(dir, "escape.txt")));
+    equal(out.hookSpecificOutput.permissionDecision, "deny", "a write outside it is denied");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
