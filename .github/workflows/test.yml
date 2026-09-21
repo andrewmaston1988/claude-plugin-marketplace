@@ -6,6 +6,26 @@ on:
     branches: [master]
 
 jobs:
+  file-size:
+    name: file-size
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The ratchet reads its baseline from git, so it needs the base
+          # commit present. A shallow clone makes the diff fail, and a failed
+          # diff is exit 2 (fail closed), never a silent pass.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: 500-line growth ratchet
+        # `pull_request` and `push` both supply a base. `before` is all zeros on
+        # a branch's first push -- the checker reports that as no comparable
+        # base and exits 0. Neither field present (e.g. workflow_dispatch)
+        # yields an empty ref, which the checker fails closed on (exit 2).
+        run: node scripts/check-file-size.mjs --against "${{ github.event.pull_request.base.sha || github.event.before }}"
+
   checkpoint:
     name: checkpoint
     runs-on: ubuntu-latest
