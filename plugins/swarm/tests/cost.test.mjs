@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import {
   usageHistoryPath, appendSnapshot, readSnapshots, splitWeeks, costPerModel, multipliers, band,
   resolveBands, normalizeCostObservation, codexUnpricedObservation, relativeCostRows, DEFAULT_COST_BANDS,
-  ollamaCloudCostRows, costRowsFor, costSections, costUnitLabel, rateCardRows, COST_PROVIDERS,
+  ollamaCloudCostRows, costRowsFor, costSections, costUnitLabel, rateCardRows, COST_PROVIDERS, RATE_CARDS,
   CODEX_RATE_CARD, CLAUDE_RATE_CARD,
 } from "../src/cost.mjs";
 
@@ -482,4 +482,79 @@ test("costSections: one section per provider, never a merged list", () => {
   // re-weighted against another section's base.
   ok(sections.every((s) => s.rows.every((r) => !r.baseModel || s.provider !== "ollama")),
     "a rate-card base priced an Ollama meter row");
+});
+
+test("costSections: a past-dated rate card announces its stale published prices", () => {
+  const provider = "test-stale-rate-card";
+  RATE_CARDS[provider] = {
+    provider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
+    asOf: "2020-01-01", staleAfter: "2020-02-01", prices: { base: { input: 1, output: 1 } },
+  };
+  try {
+    const section = costSections({ providers: [provider] })[0];
+    ok(section.banner.length > 0, "RED: a past-dated rate card must announce itself");
+    match(section.banner.join("\n"), /Stale Rate Card/);
+    match(section.banner.join("\n"), new RegExp(provider));
+    match(section.banner.join("\n"), /2020-01-01T00:00:00\.000Z/);
+    equal(section.banner[1], "    Refresh: re-read the published rate card");
+  } finally {
+    delete RATE_CARDS[provider];
+  }
+});
+
+test("costSections: a fresh rate card stays silent", () => {
+  const provider = "test-fresh-rate-card";
+  RATE_CARDS[provider] = {
+    provider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
+    asOf: "2020-01-01", staleAfter: "2099-01-01", prices: { base: { input: 1, output: 1 } },
+  };
+  try {
+    const section = costSections({ providers: [provider] })[0];
+    deepEqual(section.banner, [], "RED: a fresh rate card must not print a stale-data banner");
+  } finally {
+    delete RATE_CARDS[provider];
+  }
+});
+
+test("costSections: a stale rate-card row keeps its published value", () => {
+  const provider = "test-stale-value";
+  RATE_CARDS[provider] = {
+    provider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
+    asOf: "2020-01-01", staleAfter: "2020-02-01", prices: { base: { input: 7, output: 1 } },
+  };
+  try {
+    const row = costSections({ providers: [provider] })[0].rows.find((candidate) => candidate.model === "base");
+    equal(row.value, 7, "RED: a stale rate card must retain its published price");
+  } finally {
+    delete RATE_CARDS[provider];
+  }
+});
+
+test("costSections: a default shelf life does not override an explicit expiry", () => {
+  const explicitProvider = "test-explicit-expiry";
+  const defaultProvider = "test-default-expiry";
+  RATE_CARDS[explicitProvider] = {
+    provider: explicitProvider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
+    asOf: "2020-01-01", staleAfter: "2099-01-01", prices: { base: { input: 1, output: 1 } },
+  };
+  RATE_CARDS[defaultProvider] = {
+    provider: defaultProvider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
+    asOf: "2020-01-01", prices: { base: { input: 1, output: 1 } },
+  };
+  try {
+    const [explicit, defaulted] = costSections({ providers: [explicitProvider, defaultProvider] });
+    deepEqual(explicit.banner, [], "RED: an explicit staleAfter must win over the default shelf life");
+    ok(defaulted.banner.length > 0, "RED: a card with no expiry must use the default shelf life");
+  } finally {
+    delete RATE_CARDS[explicitProvider];
+    delete RATE_CARDS[defaultProvider];
+  }
+});
+
+test("rate cards: shipped staleAfter dates are still in the future", () => {
+  for (const card of [CODEX_RATE_CARD, CLAUDE_RATE_CARD]) {
+    ok(card.staleAfter, `RED: ${card.provider} must state when its rate card goes stale`);
+    ok(Date.parse(`${card.staleAfter}T23:59:59.999Z`) > Date.now(),
+      `RED: ${card.provider}'s rate card is past ${card.staleAfter}; re-read the published price table`);
+  }
 });

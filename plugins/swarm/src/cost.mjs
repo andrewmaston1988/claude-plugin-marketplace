@@ -14,6 +14,7 @@ import { swarmHome } from "./config.mjs";
 import { inferStoredIdentity } from "./results.mjs";
 import { costObservation as validateCostObservation } from "./contracts.mjs";
 import { deriveCloudName } from "./discovery.mjs";
+import { provenanceBanner } from "./usage.mjs";
 
 export function usageHistoryPath(env = process.env) {
   return join(swarmHome(env), "usage-history.jsonl");
@@ -333,14 +334,23 @@ export function ollamaCloudCostRows(snaps) {
 // openai.com help centre, "ChatGPT Rate Card (Enterprise token-based pricing)",
 // the *ChatGPT Work and Codex models* table — the one that governs Codex CLI
 // usage, not the Chat table above it. Read 2026-09-21.
-// Sol's $4.00 is promotional "at least through November 21, 2026"; re-read the
-// card after that date rather than trusting this row.
+// Cards with no published expiry are re-read after this deliberately short window.
+export const RATE_CARD_STALE_WINDOW_DAYS = 90;
+
+function defaultRateCardStaleAfter(asOf) {
+  const date = new Date(`${asOf}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + RATE_CARD_STALE_WINDOW_DAYS);
+  return date.toISOString().slice(0, 10);
+}
+
+// Sol's $4.00 is promotional "at least through November 21, 2026".
 export const CODEX_RATE_CARD = {
   provider: "codex",
   baseModel: "gpt-5.6-luna",
   unit: "published-price-relative",
   source: "codex-rate-card",
   asOf: "2026-09-21",
+  staleAfter: "2026-11-21", // Published promo floor, not the default window.
   prices: {
     "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, output: 1.2 },
     "gpt-5.6-terra": { input: 2, cachedInput: 0.2, output: 12 },
@@ -363,6 +373,8 @@ export const CLAUDE_RATE_CARD = {
   unit: "published-price-relative",
   source: "anthropic-rate-card",
   asOf: "2026-09-21",
+  // No published expiry: this is the default 90-day shelf life from asOf.
+  staleAfter: defaultRateCardStaleAfter("2026-09-21"),
   prices: {
     "claude-haiku-4-5-20251001": { input: 1, output: 5 },
     "claude-sonnet-5": { input: 2, output: 10 },
@@ -378,6 +390,24 @@ export const RATE_CARDS = { codex: CODEX_RATE_CARD, claude: CLAUDE_RATE_CARD };
 // published, which is why the three stay separate even though the labels rhyme.
 export const METER_PROVIDER = "ollama";
 export const COST_PROVIDERS = [METER_PROVIDER, ...Object.keys(RATE_CARDS)];
+
+function rateCardStaleAfter(card) {
+  if (card.staleAfter) return card.staleAfter;
+  return defaultRateCardStaleAfter(card.asOf);
+}
+
+function rateCardBanner(card) {
+  const staleAfter = rateCardStaleAfter(card);
+  const staleAt = Date.parse(`${staleAfter}T23:59:59.999Z`);
+  const stale = Date.now() > staleAt;
+  return provenanceBanner({
+    provenance: stale ? "cached" : "live",
+    ...(stale ? { reason: "stale-rate-card" } : {}),
+    provider: card.provider,
+    lastSeen: card.asOf,
+    refresh: "    Refresh: re-read the published rate card",
+  });
+}
 
 // One row per model the caller names, plus one per model the table prices. A
 // model absent from the table is `unpriced` — a row the page can draw, because
@@ -439,11 +469,15 @@ export function costUnitLabel(provider = METER_PROVIDER) {
 // section's base. A provider with no source still gets a section, so the reader
 // sees that the provider exists and is unpriced rather than absent.
 export function costSections({ providers = COST_PROVIDERS, models = {}, snaps = [] } = {}) {
-  return providers.map((provider) => ({
-    provider,
-    unit: costUnitLabel(provider),
-    rows: costRowsFor(provider, { models: models[provider] || [], snaps }),
-  }));
+  return providers.map((provider) => {
+    const card = RATE_CARDS[provider];
+    return {
+      provider,
+      unit: costUnitLabel(provider),
+      rows: costRowsFor(provider, { models: models[provider] || [], snaps }),
+      banner: card ? rateCardBanner(card) : [],
+    };
+  });
 }
 
 // Cost band for surfacing: 1 cheap, 2 mid, 3 expensive. Unmeasured is null.

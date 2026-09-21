@@ -319,6 +319,7 @@ const REASON_TITLES = {
   "network-error": "Network Error",
   timeout: "Fetch Timed Out",
   unparseable: "Page Unreadable",
+  "stale-rate-card": "Stale Rate Card",
 };
 
 export function provenanceBanner(usage) {
@@ -326,9 +327,16 @@ export function provenanceBanner(usage) {
   const title = REASON_TITLES[usage.reason] ?? "Usage Unread";
   // Legacy headroom callers pass the raw Ollama reading before normalization.
   const provider = usage.provider || "ollama";
-  const refresh = provider === "ollama"
+  const refresh = usage.refresh ?? (provider === "ollama"
     ? `    Refresh: swarm ollama-usage --cookie '<value>'${usage.cookiePath ? `   (writes ${usage.cookiePath})` : ""}`
-    : `    Refresh: swarm usage --provider ${provider}`;
+    : `    Refresh: swarm usage --provider ${provider}`);
+  // A rate card is a published price table, not a cached usage reading, so it
+  // gets its own sentence rather than the shared cached wording: the reader's
+  // next action is re-reading ONE provider's card, so the line has to name which.
+  if (usage.reason === "stale-rate-card") {
+    const lastRead = usage.lastSeen ? ` — last read ${new Date(usage.lastSeen).toISOString()}` : "";
+    return [`/!\\ ${title} — ${provider}'s published prices are past their re-read date${lastRead}.`, refresh];
+  }
   if (usage.provenance === "cached") {
     const lastSeen = usage.lastSeen ? `  last seen: ${new Date(usage.lastSeen).toISOString()}` : "";
     return [`/!\\ ${title} — figures below are cached.${lastSeen}`, refresh];
