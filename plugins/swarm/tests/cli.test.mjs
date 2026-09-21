@@ -301,10 +301,10 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     ok(summary.started && summary.finished);
     deepEqual(summary.tasks.map((t) => t.state), ["ok", "ok", "ok", "ok"]);
     deepEqual(summary.blocked, []);
-    // run.log is JSONL: run-start + one snapshot event + 2 lines per task
+    // run.log is JSONL: run-start + 2 lines per task — no snapshot event, since
+    // isolation trees are no longer snapshotted into the run's results dir.
     const logLines = readFileSync(join(resultsDir, "run.log"), "utf8").trim().split("\n");
-    equal(logLines.length, 10);
-    equal(logLines.map((l) => JSON.parse(l)).filter((e) => e.event === "snapshot").length, 1);
+    equal(logLines.length, 9);
     // progressive per-leaf logs
     for (const id of ["scan-a", "scan-b", "scan-c", "__digest"]) {
       equal(readFileSync(join(resultsDir, "results", `${id}.log`), "utf8"), "leaf-output-text");
@@ -1984,66 +1984,74 @@ test("serve restart: a live daemon on the current version is killed and replaced
   }
 });
 
-// --- prune over snapshot runs ---
+// --- prune over a run's leftover worktrees ---
 
-function snapPruneFixture() {
+// A real repo plus a resultsDir holding a tree the run never summarised. The run's
+// repo signal is manifest.json's cwd: the snapshot refs and the run.log `snapshot`
+// events that used to name the repo are gone, so a fixture without a manifest is a
+// fixture prune cannot resolve.
+function pruneFixture() {
   const repo = initPruneRepo();
   const dir = tmp();
   const resultsDir = join(dir, "out");
   mkdirSync(resultsDir, { recursive: true });
   const sha = gitOut(["rev-parse", "HEAD"], repo);
-  const runKey = "runkey000001";
-  const repoKey = "repokey00001";
-  const ref = `refs/swarm/snapshots/${runKey}/${repoKey}`;
-  spawnSync("git", ["update-ref", ref, sha], { cwd: repo, windowsHide: true });
-  return { repo, dir, resultsDir, sha, runKey, repoKey, ref, tree: join(resultsDir, "wt-snapshot-" + repoKey) };
+  writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
+  return { repo, dir, resultsDir, sha, tree: join(resultsDir, "wt-impl") };
 }
 
-function writeSnapRun(f, { summary }) {
+// A detached tree is what a killed `worktree add` leaves: no branch, so prune's
+// branchless removal path is the one under test.
+function addDetachedTree(f, repo = f.repo, tree = f.tree, sha = f.sha) {
+  spawnSync("git", ["worktree", "add", "--detach", tree, sha], { cwd: repo, windowsHide: true });
+}
+
+function writeKilledRun(f) {
   const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
   writeFileSync(join(f.resultsDir, "run.log"),
     line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
-    line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
     line({ event: "run-aborted", reason: "killed" }));
-  if (summary) writeFileSync(join(f.resultsDir, "summary.json"), JSON.stringify({ started: new Date().toISOString(), finished: new Date().toISOString(), tasks: [], blocked: [], worktreesKept: [], totalTokens: null }));
 }
 
-const snapRefs = (f) => gitOut(["for-each-ref", "refs/swarm/snapshots/"], f.repo);
 const dropSnapPrune = (f) => {
   rmSync(f.dir, { recursive: true, force: true });
   rmSync(f.repo, { recursive: true, force: true });
 };
 
-test("prune: a run that ended normally still has its snapshot ref deleted — refs go before the nothing-to-prune exit", () => {
-  const f = snapPruneFixture();
+test("prune: a run that ended normally still has its leftover tree removed — the sweep goes before the nothing-to-prune exit", () => {
+  const f = pruneFixture();
   try {
-    writeSnapRun(f, { summary: true });
-    ok(snapRefs(f).includes(f.ref));
+    // A run that finished with nothing kept, yet left a tree registered under its
+    // resultsDir: row discovery is the repo registry, not summary.worktreesKept, so
+    // the empty record must not short-circuit the sweep.
+    writeFinishedRun(f.resultsDir, []);
+    addDetachedTree(f);
+    ok(existsSync(f.tree));
     const env = { SWARM_HOME: join(f.dir, "home") };
     const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env });
     equal(dry.status, 0, dry.stdout + dry.stderr);
-    ok(dry.stdout.includes(f.ref), dry.stdout);
-    ok(snapRefs(f).includes(f.ref), "dry-run keeps the ref");
+    ok(dry.stdout.includes(f.tree), dry.stdout);
+    ok(existsSync(f.tree), "dry-run keeps the tree");
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
     equal(r.status, 0, r.stdout + r.stderr);
-    equal(snapRefs(f), "", "ref deleted");
+    ok(!existsSync(f.tree), "tree removed");
+    ok(!gitOut(["worktree", "list", "--porcelain"], f.repo).includes("wt-impl"), "tree deregistered");
   } finally {
     dropSnapPrune(f);
   }
 });
 
-test("prune: a killed run's leftover snapshot tree (no summary.json) is removed without a branch delete, and no summary is invented", () => {
-  const f = snapPruneFixture();
+test("prune: a killed run's leftover tree (no summary.json) is removed without a branch delete, and no summary is invented", () => {
+  const f = pruneFixture();
   try {
-    spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
+    addDetachedTree(f);
     ok(existsSync(f.tree));
-    writeSnapRun(f, { summary: false });
+    writeKilledRun(f);
     const branchesBefore = gitOut(["branch", "--list"], f.repo);
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(r.stdout.includes("(detached snapshot)"), r.stdout);
     ok(!existsSync(f.tree), "tree removed");
-    equal(snapRefs(f), "");
     equal(gitOut(["branch", "--list"], f.repo), branchesBefore, "no branch touched");
     ok(!existsSync(join(f.resultsDir, "summary.json")), "prune must not write a summary.json the run never had");
   } finally {
@@ -2051,60 +2059,58 @@ test("prune: a killed run's leftover snapshot tree (no summary.json) is removed 
   }
 });
 
-test("prune: a second snapshotted repo's leftover tree is removed too, not just the first repo's", () => {
-  const f = snapPruneFixture();
+// RED as written, and it is a src defect rather than a stale fixture — see the note on
+// the sibling row below.
+test("prune: a second repo's leftover tree is removed too, not just the first repo's", () => {
+  const f = pruneFixture();
   const repo2 = initPruneRepo();
   try {
     const sha2 = gitOut(["rev-parse", "HEAD"], repo2);
-    const tree2 = join(f.resultsDir, "wt-snapshot-repokey00002");
-    spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
-    spawnSync("git", ["worktree", "add", "--detach", tree2, sha2], { cwd: repo2, windowsHide: true });
-    const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
-    writeFileSync(join(f.resultsDir, "run.log"),
-      line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
-      line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
-      line({ event: "snapshot", repo: repo2, repoKey: "repokey00002", runKey: f.runKey, sha: sha2, clean: true }) +
-      line({ event: "run-aborted", reason: "killed" }));
+    const tree2 = join(f.resultsDir, "wt-two");
+    addDetachedTree(f);
+    addDetachedTree(f, repo2, tree2, sha2);
+    writeKilledRun(f);
+    // A second repo now has no signal at all: manifest.json names one cwd and the
+    // run.log `snapshot` events that used to name the other are gone.
+    writeFileSync(join(f.resultsDir, "summary.json"), JSON.stringify({
+      started: new Date().toISOString(), finished: new Date().toISOString(), tasks: [], blocked: [],
+      worktreesKept: [
+        { name: "impl", branch: null, path: f.tree },
+        { name: "two", branch: null, path: tree2 },
+      ], totalTokens: null,
+    }));
     ok(existsSync(f.tree) && existsSync(tree2));
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "first tree removed");
     ok(!existsSync(tree2), "second repo's tree removed");
-    ok(!gitOut(["worktree", "list", "--porcelain"], repo2).includes("wt-snapshot-repokey00002"), "second repo deregistered");
+    ok(!gitOut(["worktree", "list", "--porcelain"], repo2).includes("wt-two"), "second repo deregistered");
   } finally {
     dropSnapPrune(f);
     rmSync(repo2, { recursive: true, force: true });
   }
 });
 
-test("prune: a killed run with snapshot trees in two repos removes both trees and refs, and invents no summary", () => {
-  const f = snapPruneFixture();
+// RED as written: `execute()` (src/prune.mjs:80) runs `git worktree remove` with
+// cwd = row.repo, and every row's repo is the single one cmdPrune resolved
+// (scripts/swarm.mjs:616-621 resolved a repo per snapshot event until 46003f5).
+// A tree registered in a second repo therefore survives, silently — prune still
+// prints "freed … across 2 worktrees". Not a fixture problem; left red on purpose.
+test("prune: a killed run with leftover trees in two repos removes both, and invents no summary", () => {
+  const f = pruneFixture();
   const repo2 = initPruneRepo();
   try {
     const sha2 = gitOut(["rev-parse", "HEAD"], repo2);
-    const key2 = "repokey00002";
-    const ref2 = `refs/swarm/snapshots/${f.runKey}/${key2}`;
-    const tree2 = join(f.resultsDir, "wt-snapshot-" + key2);
-    spawnSync("git", ["update-ref", ref2, sha2], { cwd: repo2, windowsHide: true });
-    spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
-    spawnSync("git", ["worktree", "add", "--detach", tree2, sha2], { cwd: repo2, windowsHide: true });
-    // manifest.json names only the first repo, so only the run.log can find the second.
-    writeFileSync(join(f.resultsDir, "manifest.json"), JSON.stringify({ resultsDir: f.resultsDir, cwd: f.repo, tasks: [] }));
-    const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
-    writeFileSync(join(f.resultsDir, "run.log"),
-      line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
-      line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
-      line({ event: "snapshot", repo: repo2, repoKey: key2, runKey: f.runKey, sha: sha2, clean: true }) +
-      line({ event: "run-aborted", reason: "killed" }));
+    const tree2 = join(f.resultsDir, "wt-two");
+    addDetachedTree(f);
+    addDetachedTree(f, repo2, tree2, sha2);
+    writeKilledRun(f);
     ok(existsSync(f.tree) && existsSync(tree2));
-    ok(snapRefs(f).includes(f.ref));
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "first tree removed");
     ok(!existsSync(tree2), "second tree removed");
-    equal(snapRefs(f), "", "first ref deleted");
-    equal(gitOut(["for-each-ref", "refs/swarm/snapshots/"], repo2), "", "second ref deleted");
-    for (const [repo, name] of [[f.repo, "wt-snapshot-" + f.repoKey], [repo2, "wt-snapshot-" + key2]]) {
+    for (const [repo, name] of [[f.repo, "wt-impl"], [repo2, "wt-two"]]) {
       ok(!gitOut(["worktree", "list", "--porcelain"], repo).includes(name), `${name} still registered`);
     }
     ok(!existsSync(join(f.resultsDir, "summary.json")), "prune must not write a summary.json the run never had");
@@ -2114,14 +2120,12 @@ test("prune: a killed run with snapshot trees in two repos removes both trees an
   }
 });
 
-test("stop: dead engine records no kept-worktree row for a branchless snapshot tree", () => {
-  const f = snapPruneFixture();
+test("stop: dead engine records no kept-worktree row for a branchless tree", () => {
+  const f = pruneFixture();
   try {
     const home = join(f.dir, "home");
-    mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "config.json"), gateConfig({ heartbeatSecs: 0.1 }));
-    writeFileSync(join(f.resultsDir, "manifest.json"), JSON.stringify({ resultsDir: f.resultsDir, cwd: f.repo, tasks: [] }));
-    spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
+    addDetachedTree(f);
     ok(existsSync(f.tree));
     const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o });
     writeFileSync(join(f.resultsDir, "run.log"), [
