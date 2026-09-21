@@ -22,6 +22,11 @@ for it.
 1. **Materialise**: `swarm config init`. Creates the file with every shipped key, or
    fills in keys a newer plugin version added; values already set are never touched. Say what
    it did in one line (created / added N / up to date).
+   A file written before swarm had `providers` may hold the older `"provider"` and `"codex"`
+   keys. `init` folds them into `providers.ollama` / `providers.codex` in the same pass,
+   prints the mapping it applied, and leaves the previous file at `config.json.bak`. Values
+   do not change. A folded value swarm would refuse makes it write nothing and say which key
+   is wrong — fix that value, then re-run.
 2. **Read** the file (`Read` on the printed path). You need the current values for every stage.
 3. **Walk the stages below, one at a time.** For each: explain, state the current value, one
    `AskUserQuestion` with concrete options. Then the next stage. Never batch the stages into one

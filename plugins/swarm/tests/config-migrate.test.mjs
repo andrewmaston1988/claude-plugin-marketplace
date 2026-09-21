@@ -1,10 +1,11 @@
 import { test } from "node:test";
-import { equal, deepEqual, throws } from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
+import { equal, deepEqual, throws, ok } from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { initConfig, loadConfig } from "../src/config.mjs";
+import { runCli } from "./helpers/cli.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cfgmig-"));
@@ -202,6 +203,48 @@ test("initConfig backs up the pre-migration file, and does not churn a backup wi
     equal(r2.migrated, false);
     equal(existsSync(p + ".bak"), false, "the added-a-default path must not churn a backup");
     equal(readdirSync(dir).some((f) => f.endsWith(".tmp")), false, "no tmp left behind");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- the CLI surface: the rewrite is silent on disk unless it says what it did ---
+
+test("config init prints the mapping it applied and where the previous file went", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    const p = join(home, "config.json");
+    writeFileSync(p, JSON.stringify({ provider: { url: "http://legacy" }, codex: { enabled: true } }));
+    const r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
+    equal(r.status, 0, r.stderr);
+    ok(/"provider"\s+-> "providers\.ollama"/.test(r.stdout), r.stdout);
+    ok(/"codex"\s+-> "providers\.codex"/.test(r.stdout), r.stdout);
+    ok(r.stdout.includes(`${p}.bak`), r.stdout);
+    ok(existsSync(p + ".bak"), "the printed backup path must be the file that exists");
+    // The printed mapping is a claim about the file on disk — check the file agrees.
+    const stored = JSON.parse(read(p));
+    equal(Object.hasOwn(stored, "provider"), false);
+    equal(Object.hasOwn(stored, "codex"), false);
+    equal(stored.providers.ollama.url, "http://legacy", "values are unchanged, as the report says");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("config init exits non-zero and says nothing was written when the migration is refused", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    const p = join(home, "config.json");
+    const before = JSON.stringify({ provider: { enabled: "yes" } });
+    writeFileSync(p, before);
+    const r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: p } });
+    ok(r.status !== 0, `a refused migration must not report success:\n${r.stdout}`);
+    ok(r.stderr.includes("cannot migrate") && r.stderr.includes("Nothing was written"), r.stderr);
+    equal(read(p), before);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

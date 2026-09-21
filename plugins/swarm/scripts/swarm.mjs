@@ -40,7 +40,7 @@ const USAGE = `usage: swarm.mjs <command>
   cost                       one cost list per provider, cheapest to dearest (meter + static rate cards)
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
   serve restart | doctor | stop | status | install-autostart | uninstall-autostart
-  config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it
+  config init                write every shipped key into ~/.swarm/config.json, keeping what is set and folding an old-shaped file ("provider"/"codex") into "providers" — it prints the mapping and leaves the previous file at config.json.bak; the /swarm:swarm setup skill walks it
   statusline install         write the self-resolving statusline shim to ~/.swarm/statusline.mjs and print the settings.json line
   install                    put swarm on PATH: bash + cmd wrappers and the resolver copy in ~/.local/bin (idempotent; never edits a shell profile)`;
 
@@ -1400,9 +1400,20 @@ async function main() {
       }
       case "config": {
         if (rest[0] !== "init") { err(USAGE); return 1; }
-        const { initConfig } = await import("../src/config.mjs");
+        const { initConfig, LEGACY_KEY_TO_CANONICAL } = await import("../src/config.mjs");
         const r = initConfig(process.env.SWARM_CONFIG);
-        out(`config: ${r.path} (${r.created ? "created" : r.added.length ? `added ${r.added.length} key${r.added.length === 1 ? "" : "s"}: ${r.added.join(", ")}` : "up to date"})`);
+        const parts = [];
+        if (r.added.length) parts.push(`added ${r.added.length} key${r.added.length === 1 ? "" : "s"}: ${r.added.join(", ")}`);
+        if (r.migrated) parts.push("rewrote it into the canonical shape");
+        out(`config: ${r.path} (${r.created ? "created" : parts.length ? parts.join("; ") : "up to date"})`);
+        // The fold is silent on disk otherwise: the operator's file changes shape and
+        // nothing says what moved or where the previous copy went.
+        if (r.migrated) {
+          out(`Migrated ${r.path} to the canonical shape:`);
+          const width = Math.max(...r.migratedKeys.map((k) => JSON.stringify(k).length)) + 1;
+          for (const k of r.migratedKeys) out(`  ${JSON.stringify(k).padEnd(width)}-> ${JSON.stringify(LEGACY_KEY_TO_CANONICAL[k])}`);
+          out(`Values are unchanged; a backup of the previous file is at ${r.path}.bak`);
+        }
         return 0;
       }
       case "status": {
