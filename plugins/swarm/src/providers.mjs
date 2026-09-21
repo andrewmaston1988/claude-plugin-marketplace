@@ -155,15 +155,20 @@ async function pingOllamaEndpoint({ config, fetch, timeoutMs = PROBE_TIMEOUT_MS 
 // one-liner — has no fetch to inject, and an un-injected one throws "fetch is not a
 // function", which the catch below would report as a REFUSAL: setup offering to
 // disable a provider whose route was never tried.
+//
+// `probed` separates "the preflight passed" from "there is no preflight to run":
+// `detail` is null in both, and setup renders this result as the content of its own
+// question — reading the two as one answer tells the operator a provider answered
+// when the engine never asked it anything.
 export async function probeProvider(id, { config = {}, registry, fetch = globalThis.fetch, ...deps } = {}) {
   const preflight = (registry || createDefaultProviderRegistry()).capability(id, "preflight");
-  if (!preflight) return { id, ok: true, detail: null };
+  if (!preflight) return { id, ok: true, detail: null, probed: false };
   try {
     const r = await preflight({ config, fetch, ...deps });
-    if (r?.ok === false) return { id, ok: false, detail: r.error || "preflight reported a failure" };
-    return { id, ok: true, detail: null };
+    if (r?.ok === false) return { id, ok: false, detail: r.error || "preflight reported a failure", probed: true };
+    return { id, ok: true, detail: null, probed: true };
   } catch (e) {
-    return { id, ok: false, detail: e.message };
+    return { id, ok: false, detail: e.message, probed: true };
   }
 }
 

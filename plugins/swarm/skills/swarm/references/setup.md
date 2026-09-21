@@ -93,6 +93,12 @@ the global one, which is what makes this runnable as a one-liner. The probe is b
 so a black-holed endpoint on a corporate network reports a timeout instead of hanging the
 conversation on the OS TCP timeout — a setup question that hangs is worse than one that fails.
 
+**Read `probed` before you read anything else.** `probed: false` means the engine has no
+preflight for that provider, so there is no evidence at all — ask the question with no probe
+line. Never render that as *"answered"*: `detail` is `null` for a probe that passed too, which
+is exactly why the field exists. `codex` has no preflight today, so a codex question is always
+asked on the operator's say-so alone — unless host detection already answered it above.
+
 ```
 Ollama — endpoint http://localhost:11434 is unreachable (connect ECONNREFUSED).
   Leave disabled (Recommended)  /  Enable anyway (I will start it later)
@@ -101,6 +107,11 @@ Ollama — endpoint http://localhost:11434 is unreachable (connect ECONNREFUSED)
 ```
 Ollama — endpoint http://localhost:11434 answered.
   Enable (Recommended)  /  Leave disabled
+```
+
+```
+Codex — no probe available for this provider.
+  Leave disabled (Recommended)  /  Enable
 ```
 
 **A successful probe never enables on its own.** A reachable endpoint is *available*, not
