@@ -333,7 +333,8 @@ test("costRowsFor: each provider's list is normalised to its own named base", ()
 // of 2 with a cheaper entry of 1 is the whole point: the unit is the model the
 // table names, never the cheapest row it happens to contain.
 test("rateCardRows: ranks cheapest first within one provider, unmeasured last, base named not derived", () => {
-  const card = { provider: "codex", baseModel: "b", unit: "u", source: "s", asOf: "2026-09-21", prices: { b: 2, dear: 8, cheap: 1 } };
+  const card = { provider: "codex", baseModel: "b", unit: "u", source: "s", asOf: "2026-09-21",
+    prices: { b: { input: 2, output: 10 }, dear: { input: 8, output: 40 }, cheap: { input: 1, output: 5 } } };
   const rows = rateCardRows(card, ["unknown"]);
   deepEqual(rows.map((r) => r.model), ["cheap", "b", "dear", "unknown"], "RED: cheapest first, unmeasured last");
   equal(rows[0].mult, 0.5);
@@ -345,49 +346,109 @@ test("rateCardRows: ranks cheapest first within one provider, unmeasured last, b
 // A model absent from its table is a ROW, not a blank. The Claude section of
 // the dashboard was empty for exactly this reason and read as broken.
 test("costRowsFor: a model absent from its table is an unpriced row, never a blank", () => {
-  const rows = costRowsFor("codex", { models: ["gpt-5.6-sol"] });
-  const sol = rows.find((r) => r.model === "gpt-5.6-sol");
-  ok(sol, "RED: the model was dropped from the list — a blank panel reads as broken");
-  equal(sol.mult, null, "RED: a weight was invented for a model with no published price");
-  equal(sol.classification, "unpriced");
-  equal(sol.provider, "codex");
+  // Rosalind is in the rate card's *Chat* table and absent from the Work/Codex
+  // one this card is read from, so it is genuinely unpriced for a Codex seat.
+  const rows = costRowsFor("codex", { models: ["gpt-rosalind-research"] });
+  const absent = rows.find((r) => r.model === "gpt-rosalind-research");
+  ok(absent, "RED: the model was dropped from the list — a blank panel reads as broken");
+  equal(absent.mult, null, "RED: a weight was invented for a model with no published price");
+  equal(absent.classification, "unpriced");
+  equal(absent.provider, "codex");
   ok(costRowsFor("codex").some((r) => r.model === CODEX_RATE_CARD.baseModel), "the table's own models are always listed");
   ok(costRowsFor("claude", { models: ["claude-opus-5"] }).some((r) => r.model === "claude-opus-5"));
 });
 
-// A fabricated rate ranks models wrongly for ever, and nothing downstream can
-// tell it from a sourced one. UPDATE THIS when an operator supplies published
-// $/Mtok figures: fill the tables and rewrite the expectation to the sourced
-// multiplier. Until then the honest row is `unpriced`.
-// The published $/Mtok table (Anthropic's model reference, read 2026-09-21).
-// Output is exactly 5x input for every Claude model, so the ratio is the same
-// whichever column it is taken from — which is why the card stores one number.
+// A card stores the PUBLISHED COLUMNS, not a collapsed ratio. Collapsing assumes
+// a fixed output/input relationship, which Codex does not have — astra and sol
+// are 5x output/input, terra, luna and 5.5 are 6x — so a single stored number
+// silently goes wrong the moment one column moves on its own.
+test("rate cards: each price is the published columns, so a column change updates the card", () => {
+  // openai.com help centre, ChatGPT Rate Card (Enterprise token-based pricing),
+  // "ChatGPT Work and Codex models" — the table that governs Codex CLI usage.
+  deepEqual(CODEX_RATE_CARD.prices["gpt-6-astra"], { input: 10, cachedInput: 1, output: 50 });
+  deepEqual(CODEX_RATE_CARD.prices["gpt-5.6-sol"], { input: 4, cachedInput: 0.4, output: 20 });
+  deepEqual(CODEX_RATE_CARD.prices["gpt-5.6-terra"], { input: 2, cachedInput: 0.2, output: 12 });
+  deepEqual(CODEX_RATE_CARD.prices["gpt-5.6-luna"], { input: 0.2, cachedInput: 0.02, output: 1.2 });
+  deepEqual(CODEX_RATE_CARD.prices["gpt-5.5"], { input: 5, cachedInput: 0.5, output: 30 });
+
+  // Anthropic's table publishes no cache-read rate except Fable's, so the field
+  // is absent rather than guessed on every other row.
+  deepEqual(CLAUDE_RATE_CARD.prices["claude-haiku-4-5-20251001"], { input: 1, output: 5 });
+  deepEqual(CLAUDE_RATE_CARD.prices["claude-sonnet-5"], { input: 2, output: 10 });
+  deepEqual(CLAUDE_RATE_CARD.prices["claude-opus-5"], { input: 5, output: 25 });
+  deepEqual(CLAUDE_RATE_CARD.prices["claude-fable-5-1"], { input: 10, cachedInput: 0.25, output: 50 });
+});
+
+// The basis is the INPUT column. Swarm leaves are input- and cache-read
+// dominated (a measured implementation leaf: 2.12M in, 12.8k out), and for
+// every Codex model cached input is exactly 0.1x input, so the cached column
+// yields the identical ratio. The output column does NOT: an output-basis card
+// puts astra at 41.67x and sol at 16.67x, which is what the two values below pin.
+test("costRowsFor: a rate-card multiplier is the input column over the card's named base", () => {
+  const rows = costRowsFor("codex");
+  const mult = (id) => rows.find((r) => r.model === id)?.mult;
+  equal(mult("gpt-5.6-luna"), 1, "RED: the base must be exactly 1x");
+  equal(mult("gpt-5.6-terra"), 10, "RED: terra is $2.00 input against luna's $0.20");
+  equal(mult("gpt-5.6-sol"), 20, "RED: sol is $4.00 input against luna's $0.20 — 16.67x means an output basis");
+  equal(mult("gpt-5.5"), 25, "RED: 5.5 is $5.00 input against luna's $0.20");
+  equal(mult("gpt-6-astra"), 50, "RED: astra is $10.00 input against luna's $0.20 — 41.67x means an output basis");
+});
+
 test("CLAUDE_RATE_CARD: the published ratios, keyed on the ids swarm dispatches", () => {
   const rows = costRowsFor("claude");
   const mult = (id) => rows.find((r) => r.model === id)?.mult;
-  equal(mult("claude-haiku-4-5-20251001"), 0.5, "RED: haiku is $1/$5 against sonnet's $2/$10");
+  equal(mult("claude-haiku-4-5-20251001"), 0.5, "RED: haiku is $1 input against sonnet's $2");
   equal(mult("claude-sonnet-5"), 1, "RED: the base must be exactly 1x");
-  equal(mult("claude-opus-5"), 2.5, "RED: opus is $5/$25 against sonnet's $2/$10");
-  equal(mult("claude-fable-5-1"), 5, "RED: fable is $10/$50 against sonnet's $2/$10");
+  equal(mult("claude-opus-5"), 2.5, "RED: opus is $5 input against sonnet's $2");
+  equal(mult("claude-fable-5-1"), 5, "RED: fable is $10 input against sonnet's $2");
+  // A Claude family shares its tier's published price (operator, 2026-09-21:
+  // "claude doesn't vary prices for a model family as far as I know"), so a
+  // family member carries its tier's figures rather than a number of its own.
+  // This row is what caught sonnet-4-6 shipping at an invented 1.5x.
+  equal(mult("claude-sonnet-4-6"), 1, "RED: sonnet-4-6 is the sonnet tier's $2 input, not a value of its own");
+  equal(mult("claude-opus-4-8"), 2.5, "RED: opus-4-8 is the opus tier's $5 input, not a value of its own");
   // The catalog's haiku id carries a date suffix the rate doc's does not. Keying
   // on the doc's bare id renders the model swarm actually seats as `unpriced`.
   ok(!Object.keys(CLAUDE_RATE_CARD.prices).includes("claude-haiku-4-5"),
     "RED: the card is keyed on the doc's bare haiku id, not the one swarm dispatches");
 });
 
-test("rate cards: no price is invented — Codex unpriced, Claude only the published set", () => {
-  // No Codex rate card has been read, so its table still carries the base alone.
-  deepEqual(Object.keys(CODEX_RATE_CARD.prices).filter((model) => model !== CODEX_RATE_CARD.baseModel), [],
-    "RED: codex carries an unsourced price");
-  ok(!costRowsFor("codex", { models: ["gpt-5.6-sol"] })
-    .some((r) => r.model !== CODEX_RATE_CARD.baseModel && r.mult != null), "a non-base model got a weight");
-  // Claude's set is pinned to the published table it was read from. Adding a row
-  // without a source fails here — the pinned list IS the sourcing record, and it
-  // is the only thing standing between a guessed price and a permanent mis-rank.
+// A price READ off the table and a price taken from the family tier are not the
+// same evidence, and the row has to say which — an inference that renders
+// identically to a reading is how a made-up 1.5x for sonnet-4-6 shipped in #307.
+test("rate cards: a family-tier price is marked as one, a directly published price is not", () => {
+  equal(CLAUDE_RATE_CARD.prices["claude-sonnet-4-6"].via, "claude-sonnet-5",
+    "RED: sonnet-4-6 is priced from the sonnet tier and must name where the figure came from");
+  equal(CLAUDE_RATE_CARD.prices["claude-opus-4-8"].via, "claude-opus-5",
+    "RED: opus-4-8 is priced from the opus tier and must name where the figure came from");
+  equal(CLAUDE_RATE_CARD.prices["claude-sonnet-5"].via, undefined,
+    "RED: a directly published price must not claim a family tier");
+  equal(CODEX_RATE_CARD.prices["gpt-5.6-sol"].via, undefined,
+    "RED: every Codex figure is read off its table, so none is a family tier");
+
+  const rows = costRowsFor("claude");
+  const row = (id) => rows.find((r) => r.model === id);
+  equal(row("claude-sonnet-4-6").pricedVia, "claude-sonnet-5", "RED: the marker never reached the row");
+  equal(row("claude-sonnet-5").pricedVia, undefined, "RED: a published row was marked as inferred");
+  // The inference must not change the number, only its provenance.
+  equal(row("claude-sonnet-4-6").mult, row("claude-sonnet-5").mult);
+});
+
+// The pinned key sets ARE the sourcing record: adding a row without reading it
+// off a published table fails here, which is the only thing standing between a
+// guessed price and a permanent mis-rank.
+test("rate cards: no price is invented — every key traces to a published table", () => {
+  deepEqual(Object.keys(CODEX_RATE_CARD.prices).sort(), [
+    "gpt-5.5", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-6-astra",
+  ], "RED: a Codex price was added or removed without updating the published set");
   deepEqual(Object.keys(CLAUDE_RATE_CARD.prices).sort(), [
     "claude-fable-5-1", "claude-haiku-4-5-20251001", "claude-opus-4-8",
     "claude-opus-5", "claude-sonnet-4-6", "claude-sonnet-5",
   ], "RED: a Claude price was added or removed without updating the published set");
+  // A model in neither table is a row that says so, never a blank and never a guess.
+  const rosalind = costRowsFor("codex", { models: ["gpt-rosalind-research"] })
+    .find((r) => r.model === "gpt-rosalind-research");
+  equal(rosalind.mult, null, "a model absent from the table must carry no weight");
 });
 
 test("rate cards: a published-price weight is an api-equivalent estimate, never a bill", () => {

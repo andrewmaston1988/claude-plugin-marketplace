@@ -426,17 +426,19 @@ test("cost: every provider gets its own section — one list per provider, never
 // The Claude panel was entirely empty on the dashboard and read as broken. An
 // `unpriced` ROW is the honest alternative, and it is a row the page can draw.
 test("cost: a provider with no cost source renders an unpriced ROW, never an empty panel", () => {
-  const rows = [graded({ leaf: "cx", model: "gpt-5.6-sol", provider: "codex", grades: { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 } })];
-  const costRows = providerCostRows("codex", { models: ["gpt-5.6-sol"], snaps: codexSnaps });
+  // Rosalind is in the rate cards Chat table and absent from the Work/Codex
+  // one the card is read from, so it is genuinely unpriced for a Codex seat.
+  const rows = [graded({ leaf: "cx", model: "gpt-rosalind-research", provider: "codex", grades: { adherence: 7, handoff: 7, truthfulness: 7, depth: 7 } })];
+  const costRows = providerCostRows("codex", { models: ["gpt-rosalind-research"], snaps: codexSnaps });
   const view = costView(rows, costRows);
   const codex = view.sections.find((s) => s.provider === "codex");
   ok(codex, "RED: a provider with cost rows produced no section at all");
-  const spread = codex.spread.find((r) => r.model === "gpt-5.6-sol");
+  const spread = codex.spread.find((r) => r.model === "gpt-rosalind-research");
   ok(spread, "RED: the model was dropped from the spread — a blank panel reads as broken");
   equal(spread.mult, null, "RED: a weight was invented for a model with no published price");
   equal(spread.classification, "unpriced", "the row says why it is unmeasured");
   equal(spread.band, null);
-  const point = codex.points.find((p) => p.model === "gpt-5.6-sol");
+  const point = codex.points.find((p) => p.model === "gpt-rosalind-research");
   equal(point.multiplier, null, "unmeasured is not free");
   equal(point.classification, "unpriced", "RED: the point carried no classification, so the page could not say unpriced");
   equal(point.unit, costRows[0].unit, "the point states which unit its weight would be in");
