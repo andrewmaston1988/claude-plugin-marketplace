@@ -929,10 +929,6 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     if (!tops.has(dir)) tops.set(dir, io.repoToplevel(dir));
     return tops.get(dir);
   };
-  // In-place reading is gated on the generic root list, not the per-provider one:
-  // "none" is about what may be read from the live checkout, Claude included.
-  const allowedRoots = cfg?.provider?.allowedRoots || [];
-
   return rawTasks.map((t) => {
     const l = label(t);
     const isCompute = t.compute !== undefined;
@@ -1229,13 +1225,10 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     cwd, resultsDir, cfg, errors, label, childPlans, cache, headroom, warnings, io: resolvedIo, probedGuards, providerRegistry,
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
-  // The run's repo must sit under the roots of the providers this manifest actually seats
-  // — the UNION, because the per-task gate already refuses each out-of-bounds task, and a
-  // repo one seated provider may run in is a repo this run may be filed under. Seated
-  // means resolved on a task (primary or fallback), a child manifest's tasks included.
-  // This read `cfg.provider`, the legacy getter onto `providers.ollama`, so every run was
-  // judged against ollama's roots whatever it seated: a repo its own provider permits was
-  // refused, and a config with no ollama block passed anything.
+  // The run's repo must sit under the roots of some provider this manifest seats — the
+  // union, because the per-task gate already refuses each out-of-bounds task. `cfg.provider`
+  // is the legacy getter onto `providers.ollama`, so reading it judged every run against
+  // ollama's roots whatever it seated.
   const seatedTasks = tasks.flatMap((t) => [t, ...(t.childPlan?.tasks || [])]);
   const seated = [...new Set(seatedTasks.flatMap((t) => [t.provider, t.fallbackProvider]).filter(Boolean))].sort();
   const seatedRoots = [...new Set(seated.flatMap((id) => providerConfig(cfg, id).allowedRoots || []))];

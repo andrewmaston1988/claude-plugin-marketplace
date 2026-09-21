@@ -91,11 +91,9 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     // A follower starts from what its predecessor left, so its own collect()
     // diffstat covers its work alone rather than the whole chain's.
     const treeHead = git(["rev-parse", "HEAD"], path, { timeout: 60000 });
-    // Re-entering a tree means ADOPTING its ref: a seed integrate node creates a
-    // writer's tree under the seed's own name, so the writer's derived name was
-    // never created and reporting it would name a ref that does not exist. The
-    // tree's checked-out branch is the fact; `branch` is only the name this task
-    // would have used had it created the tree itself.
+    // Re-entering a tree adopts its ref: `branch` is only the name this task would
+    // have used had it created the tree, and a tree seeded by another node is on
+    // that node's ref instead.
     const on = git(["rev-parse", "--abbrev-ref", "HEAD"], path, { timeout: 60000 });
     const reused = on.status === 0 && on.stdout && on.stdout !== "HEAD" ? on.stdout : branch;
     return {
