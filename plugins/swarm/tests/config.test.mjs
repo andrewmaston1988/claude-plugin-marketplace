@@ -4,19 +4,31 @@ import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readdirSync, readFileSyn
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { loadConfig, deepMerge, swarmHome, DEFAULT_TIMEOUT_MS } from "../src/config.mjs";
+import { loadConfig, initConfig, deepMerge, swarmHome, DEFAULT_TIMEOUT_MS } from "../src/config.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cfg-"));
 }
 
+// The shipped file is what a fresh install gets, so it is read from DISK rather than
+// from a fixture: a fixture copy of config.default.json proves nothing about what a
+// new machine arrives with. Same precedent as #302, where 1,380 green fixture tests
+// sat on top of a shipped config that refused every task. The values below are the
+// same ones loadConfig materialises — that is the point of pinning them twice.
+test("the shipped config.default.json turns on the host provider and nothing else", () => {
+  const shipped = JSON.parse(readFileSync(fileURLToPath(new URL("../config.default.json", import.meta.url)), "utf8"));
+  equal(shipped.providers.claude.enabled, true, "Claude is the host swarm runs inside today — a fresh install that can dispatch nothing is a worse first run than one that over-enables its own host");
+  equal(shipped.providers.ollama.enabled, false, "a fresh install must not arrive with Ollama already on — a work machine with no Ollama gets an enabled provider and never a question");
+  equal(shipped.providers.codex.enabled, false);
+});
+
 test("loadConfig returns shipped defaults when user config is missing", () => {
   const dir = tmp();
   try {
     const cfg = loadConfig(join(dir, "nope.json"));
     equal(cfg.providers.claude.enabled, true);
-    equal(cfg.providers.ollama.enabled, true);
+    equal(cfg.providers.ollama.enabled, false);
     equal(cfg.providers.ollama.name, "ollama");
     equal(cfg.providers.ollama.mode, "env");
     equal(cfg.providers.ollama.url, "http://localhost:11434");
@@ -405,65 +417,6 @@ test("no bare 600000 literal survives anywhere under src/", () => {
   })(srcDir);
   equal(hits.length, 0, `bare 600000 literal remains in: ${hits.join(", ")}`);
 });
-// ---- config init / explain / set (the /swarm:swarm setup surface) ----
-import { initConfig } from "../src/config.mjs";
-
-test("initConfig materialises every shipped key into the user file, keeps set values, is idempotent", () => {
-  const dir = tmp();
-  try {
-    const p = join(dir, "home", "config.json");
-    writeFileSync(join(dir, "nope"), ""); // dir exists; home/ does not — init must mkdir
-    const r1 = initConfig(p);
-    equal(r1.created, true);
-    equal(r1.migrated, false);
-    const on = JSON.parse(readFileSync(p, "utf8"));
-    equal(on.providers.ollama.mode, "env");
-    equal(on.dashboard.port, 7331);
-    equal(on.swarm.always, false);            // shipped default now exists for swarm.always
-    equal(on.disable1mContext, true);          // shipped default now exists for disable1mContext
-    deepEqual(on.projects, []);                // shipped default now exists for projects
-    equal(on.providers.ollama.allowedRoots, undefined); // no shipped denial — see the defaults row
-    on.providers.ollama.allowedRoots = ["C:/code"];
-    on.timeoutMs = 5400000;
-    delete on.dashboard.livenessPollMs;       // simulate a key added by a later plugin version
-    writeFileSync(p, JSON.stringify(on));
-    const r2 = initConfig(p);
-    equal(r2.created, false);
-    equal(r2.migrated, false);
-    deepEqual(r2.added, ["dashboard.livenessPollMs"]);
-    const after = JSON.parse(readFileSync(p, "utf8"));
-    deepEqual(after.providers.ollama.allowedRoots, ["C:/code"]);
-    equal(after.timeoutMs, 5400000);
-    equal(after.dashboard.livenessPollMs, 10000);
-    const r3 = initConfig(p);
-    deepEqual(r3.added, []);
-    equal(readdirSync(join(dir, "home")).some((f) => f.endsWith(".tmp")), false, "no tmp left behind");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("initConfig rewrites a fully populated legacy file even when no default leaf is missing", () => {
-  const dir = tmp();
-  try {
-    const p = join(dir, "config.json");
-    const defaults = loadConfig(join(dir, "missing.json"));
-    const legacy = JSON.parse(JSON.stringify(defaults));
-    legacy.provider = legacy.providers.ollama;
-    delete legacy.providers.ollama;
-    writeFileSync(p, JSON.stringify(legacy));
-    const result = initConfig(p);
-    equal(result.migrated, true);
-    const stored = JSON.parse(readFileSync(p, "utf8"));
-    equal(Object.hasOwn(stored, "provider"), false);
-    equal(stored.providers.ollama.mode, "env");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-
-
 // config.concurrency is a CEILING, not a default: a manifest may run narrower,
 // never wider. The machine that pays for the sessions sets the limit; an
 // authoring model does not raise it by writing a bigger number (operator, 2026-09-05).

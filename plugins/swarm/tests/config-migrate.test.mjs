@@ -115,8 +115,11 @@ test("initConfig still migrates a sparse legacy object — validation runs after
     equal(r.migrated, true);
     const stored = JSON.parse(read(p));
     equal(Object.hasOwn(stored, "provider"), false);
-    equal(stored.providers.ollama.enabled, true, "the shipped default supplies the key validation needs");
-    equal(loadConfig(p, process.env, { warn: () => {} }).providers.ollama.enabled, true);
+    // The VALUE is the shipped default (opt-in, so false); what this row needs is
+    // that the fill supplied the KEY at all — a sparse legacy file sets no `enabled`
+    // of its own and is only valid once the defaults supply one.
+    equal(typeof stored.providers.ollama.enabled, "boolean", "the shipped default supplies the key validation needs");
+    equal(loadConfig(p, process.env, { warn: () => {} }).providers.ollama.enabled, stored.providers.ollama.enabled);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
