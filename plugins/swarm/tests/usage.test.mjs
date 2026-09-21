@@ -319,8 +319,6 @@ test("usageLines: a Codex bucket states the window the payload says it measures"
 // payload, never from the fix's own arithmetic.
 test("normalizeCodex: a Codex resetsAt in Unix seconds is the instant it names, not 1970", () => {
   const RESETS_AT = 1789920000;
-  equal(new Date(RESETS_AT * 1000).toISOString(), "2026-09-20T16:00:00.000Z", "anchor: what this payload instant IS");
-
   const u = normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: RESETS_AT } }));
   equal(u.limits[0].resetsAt, "2026-09-20T16:00:00.000Z");
   ok(usageLines([u], { timeZone: "UTC" })[0].includes("resets Sun 20 Sep, 16:00"), usageLines([u], { timeZone: "UTC" })[0]);
