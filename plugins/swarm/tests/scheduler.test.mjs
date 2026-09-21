@@ -3236,6 +3236,61 @@ test("IS3: integrate's missing-ref throw still fires for a ref absent for a reas
   }
 });
 
+// The documented mixed topology (skills/executing-swarms/SKILL.md): an agentless
+// seed integrate node creates a writer's tree BEFORE the writer runs, so the
+// writer takes prepareIsolation's reuse path rather than creating its own ref.
+// An integrate node carries no branchScope (manifest.mjs excludes it), while the
+// writer in the same tree does — so the seed's branch and the writer's derived
+// one are two names for one tree. The join must merge the ref the seed created,
+// because that is the ref the writer's commits actually landed on.
+test("IS4: a seed integrate node's tree, reused by a workspace writer, joins on the branch the seed created", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => {
+      const cwd = call.opts.cwd;
+      if (cwd.endsWith("wt-feat")) {
+        writeFileSync(join(cwd, "base.txt"), "base\n");
+        commitAllInRepo(cwd, "base");
+      } else if (cwd.endsWith("wt-migrate-x")) {
+        writeFileSync(join(cwd, "migrated.txt"), "migrated\n");
+        commitAllInRepo(cwd, "migrate");
+      }
+      return { output: "done" };
+    });
+    const io = makeIo(spawn);
+    const p = {
+      cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
+      tasks: [
+        // branchScope is what manifest.mjs gives a writer inside a git repo —
+        // and what it withholds from an integrate node.
+        integrateLeaf("helper", { cwd: repo, originalCwd: repo, worktreeName: "feat", branchScope: "run1" }),
+        { id: "seed-x", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["helper"], worktreeName: "migrate-x",
+          integrate: { into: "migrate-x", from: ["helper"] } },
+        integrateLeaf("migrate-x", { cwd: repo, originalCwd: repo, after: ["seed-x"],
+          worktreeName: "migrate-x", branchScope: "run1" }),
+        { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
+          timeoutMs: 5000, after: ["migrate-x"], worktreeName: "feat",
+          integrate: { into: "feat", from: ["migrate-x"] } },
+      ],
+    };
+    await runPlan(p, CFG, io);
+
+    const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
+    ok(gitInRepo(["branch", "--list", "swarm/migrate-x"], repo) !== "",
+      "precondition: the seed created swarm/migrate-x — the ref the writer reused and committed onto");
+    equal(res.ok, true, `the join must merge the branch its source actually created, got: ${res.output}`);
+    deepEqual(res.outputJson.merged, ["swarm/migrate-x"],
+      "the writer's commits are on the seed's branch, so that is the ref the join merges");
+    ok(existsSync(join(p.resultsDir, "wt-feat", "migrated.txt")),
+      "the writer's commit reaches the target tree");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
 // ── F3-F7: integrate.from over a forEach parent (foreach-integrate-fold-back) ──
 // A forEach parent named in integrate.from has no branch of its own — its
 // clones ('id[0]', 'id[1]', …) do. These reuse IS1-IS3's real-git-repo rig.

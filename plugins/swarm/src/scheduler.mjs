@@ -608,9 +608,20 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // plans — resolveWorktreeName covers both rather than silently skipping isolation.
   const nameOf = resolveWorktreeName;
 
-  // The branch a task id resolves to, for `integrate.from`. The id may name a task
-  // whose worktree name differs from it, or (defensively) no task at all.
+  // The branch a task id resolves to, for `integrate.from`. An integrate node is
+  // `after` its sources by construction (validated), so by the time it runs those
+  // branches are recorded FACTS — read the ref the source actually created. Its
+  // recorded branch is the tree's own, which is not always the name this source
+  // derives: a seed integrate node creates a writer's tree under the seed's name,
+  // and the writer adopts that ref. Re-deriving here is how one branch got two
+  // names and the merge aimed at the one nobody made.
+  //
+  // Re-derivation survives ONLY for a source that recorded no branch at all — an
+  // id naming no task in this plan and carrying no result on disk, so its ref was
+  // never created either. There it merely produces the name to fail on.
   const branchOf = (srcId) => {
+    const recorded = readResult(plan.resultsDir, srcId)?.worktree?.branch;
+    if (recorded) return recorded;
     const src = tasks.find((o) => o.id === srcId);
     return worktree.branchNameFor(
       src ? { ...src, worktreeName: nameOf(src) ?? src.id } : { id: srcId }, cfg);
