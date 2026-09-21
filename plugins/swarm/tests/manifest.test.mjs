@@ -582,6 +582,61 @@ test("governance: run-level gate still refuses a repo outside every seated provi
   }
 });
 
+// The gate must fire before anything SPAWNS. normalizeTasks probes a project's configured
+// preToolUse hook with cwd in the run's repo, so a gate placed after it executes an operator
+// command inside the very repo it is about to refuse.
+// RED when the root check sits after normalizeTasks: spawnSync records a call.
+test("governance: the run-level gate refuses before any guard hook is spawned", () => {
+  const repo = tmp();
+  const elsewhere = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      providers: { claude: { enabled: true, allowedRoots: [elsewhere] } },
+      projects: [{ name: basename(repo), hooks: { preToolUse: "guard-cmd" } }],
+    };
+    const spawned = [];
+    const p = writeManifest(repo, { tasks: [claudeTask()] });
+    const errs = errorsOf(() => loadManifest(p, cfg, repo, {
+      io: {
+        repoToplevel: () => repo,
+        spawnSync: (cmd) => { spawned.push(cmd); return { status: 0, stderr: "" }; },
+        stdout: () => {},
+      },
+    }));
+    ok(errs.some((e) => e.includes(`this run's repo '${repo}'`)), errs.join("|"));
+    equal(spawned.length, 0, `guard hook ran in a refused repo: ${spawned.join(",")}`);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+// An agentless-only manifest seats no provider, but integrate nodes still run real git
+// merges against the run's repo. Seating nobody must not mean gating on nothing.
+// RED when the gate keys off seated providers alone: seatedRoots is empty, so it never fires.
+test("governance: an integrate-only manifest is still bounded by allowedRoots", () => {
+  const repo = tmp();
+  const elsewhere = tmp();
+  try {
+    const cfg = {
+      ...CFG,
+      providers: {
+        claude: { enabled: true, allowedRoots: [elsewhere] },
+        ollama: { enabled: true, allowedRoots: [elsewhere] },
+      },
+    };
+    const p = writeManifest(repo, {
+      tasks: [{ id: "join", integrate: { into: "feat", from: ["feat"] } }],
+    });
+    const errs = errorsOf(() => loadManifest(p, cfg, repo));
+    ok(errs.some((e) => e.includes(`this run's repo '${repo}'`)), errs.join("|"));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
 test("digest.report: true and a steering string both survive to the plan", () => {
   const dir = tmp();
   try {

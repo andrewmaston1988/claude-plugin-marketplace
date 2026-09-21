@@ -1205,6 +1205,26 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`dependency cycle detected: ${cycle.join(" -> ")}`);
 
+  // The run's repo must sit under the roots of some provider this manifest seats — the
+  // union, since the per-task gate refuses each out-of-bounds task individually. Runs BEFORE
+  // normalizeTasks, which probes a project's configured preToolUse hook with cwd in this
+  // repo: a gate after that has already executed an operator command in the repo it refuses.
+  // Seats come from the raw tasks for the same reason; a child manifest's own providers are
+  // therefore not in the union, which can only refuse a run the parent's seats would allow.
+  const seated = [...new Set(raw.tasks.flatMap((t) => [t?.provider, t?.fallbackProvider]).filter(Boolean))].sort();
+  // An agentless-only manifest seats nobody, yet an integrate node still merges into this
+  // repo — so it is judged against every configured provider's roots rather than none.
+  const gateIds = seated.length ? seated : Object.keys(cfg.providers || {}).sort();
+  const gateRoots = [...new Set(gateIds.flatMap((id) => providerConfig(cfg, id).allowedRoots || []))];
+  if (gateRoots.length && !gateRoots.some((root) => isUnderRoot(toplevel, root))) {
+    errors.push(
+      `swarm: this run's repo '${toplevel}' is not under any allowedRoots entry for the providers it seats ` +
+      `(${gateIds.join(", ")}) — dispatch from a repo under ${gateRoots.join(", ")}, or add its root to ` +
+      `${gateIds.map((id) => `providers.${id}.allowedRoots`).join(" / ")} in ~/.swarm/config.json`
+    );
+    throw new ValidationError(errors);
+  }
+
   const childPlans = new Map();
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
@@ -1225,20 +1245,6 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     cwd, resultsDir, cfg, errors, label, childPlans, cache, headroom, warnings, io: resolvedIo, probedGuards, providerRegistry,
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
-  // The run's repo must sit under the roots of some provider this manifest seats — the
-  // union, because the per-task gate already refuses each out-of-bounds task. `cfg.provider`
-  // is the legacy getter onto `providers.ollama`, so reading it judged every run against
-  // ollama's roots whatever it seated.
-  const seatedTasks = tasks.flatMap((t) => [t, ...(t.childPlan?.tasks || [])]);
-  const seated = [...new Set(seatedTasks.flatMap((t) => [t.provider, t.fallbackProvider]).filter(Boolean))].sort();
-  const seatedRoots = [...new Set(seated.flatMap((id) => providerConfig(cfg, id).allowedRoots || []))];
-  if (seatedRoots.length && !seatedRoots.some((root) => isUnderRoot(toplevel, root))) {
-    errors.push(
-      `swarm: this run's repo '${toplevel}' is not under any allowedRoots entry for the providers it seats ` +
-      `(${seated.join(", ")}) — dispatch from a repo under ${seatedRoots.join(", ")}, or add its root to ` +
-      `${seated.map((id) => `providers.${id}.allowedRoots`).join(" / ")} in ~/.swarm/config.json`
-    );
-  }
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
   validateMustReadRunners(tasks, cfg, resolvedIo, errors, label);
 
