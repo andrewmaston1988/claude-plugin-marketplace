@@ -15,6 +15,8 @@ const tmp = () => mkdtempSync(join(tmpdir(), "swarm-report-"));
 
 const CFG = {
   provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },
+  // allowedRoots gates Claude too now; every fixture lives under tmpdir.
+  providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } },
   concurrency: 4,
   timeoutMs: 600000,
   resultInlineCap: 4000,

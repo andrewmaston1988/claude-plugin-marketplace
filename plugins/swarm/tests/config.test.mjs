@@ -362,7 +362,7 @@ test("a task's own timeoutMs wins over manifest-level and config defaults", () =
         { id: "b", prompt: "look more", provider: "claude", model: "claude-haiku-4-5-20251001" }, // no own timeout
       ],
     }));
-    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000 };
+    const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000 };
     const plan = loadManifest(p, cfg, dir);
     // per-task beats per-manifest beats config beats default (manifest.mjs resolution chain)
     equal(plan.tasks[0].timeoutMs, 2700000);
@@ -452,7 +452,7 @@ test("config concurrency is a ceiling: a manifest may ask for less, asking for m
   const dir = tmp();
   try {
     const p = join(dir, "plan.json");
-    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000 };
+    const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000 };
     writeFileSync(p, JSON.stringify({ concurrency: 2, tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     equal(loadManifest(p, cfg, dir).concurrency, 2, "narrower is fine");
     writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
@@ -474,7 +474,7 @@ test("win32 command-line check: a 40,000-char prompt fails, naming the task, its
   const dir = tmp();
   try {
     const p = join(dir, "plan.json");
-    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
+    const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
     writeFileSync(p, JSON.stringify({ tasks: [{ id: "long", prompt: "x".repeat(40000), provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     throws(
       () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
@@ -490,7 +490,7 @@ test("win32 command-line check: the same manifest loads fine on linux (platform 
   const dir = tmp();
   try {
     const p = join(dir, "plan.json");
-    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
+    const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
     writeFileSync(p, JSON.stringify({ tasks: [{ id: "long", prompt: "x".repeat(40000), provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     const plan = loadManifest(p, cfg, dir, { io: { platform: "linux" } });
     equal(plan.tasks[0].id, "long");
@@ -503,7 +503,7 @@ test("win32 command-line check: a 31,000-char prompt plus a long allowedTools li
   const dir = tmp();
   try {
     const p = join(dir, "plan.json");
-    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
+    const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
     const bigTools = Array.from({ length: 200 }, (_, i) => `Tool${i}`).join(",");
     writeFileSync(p, JSON.stringify({
       tasks: [{ id: "combo", prompt: "x".repeat(31000), provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: bigTools }],
@@ -521,7 +521,7 @@ test("win32 command-line check: a {{result:x}} placeholder is measured at result
   const dir = tmp();
   try {
     const p = join(dir, "plan.json");
-    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 40000, claudePath: "C:\\fake\\claude.exe" };
+    const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 40000, claudePath: "C:\\fake\\claude.exe" };
     writeFileSync(p, JSON.stringify({
       tasks: [
         { id: "a", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" },
@@ -541,7 +541,7 @@ test("win32 command-line check: a 20,000-char prompt of quote characters fails (
   const dir = tmp();
   try {
     const p = join(dir, "plan.json");
-    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
+    const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
     writeFileSync(p, JSON.stringify({ tasks: [{ id: "quotey", prompt: '"'.repeat(20000), provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
     throws(
       () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
@@ -557,7 +557,7 @@ test("win32 command-line check: with a .cmd launcher, the measured length includ
   try {
     const cmdPath = join(dir, "claude.cmd");
     writeFileSync(cmdPath, "@echo off\r\necho hello\r\n"); // opaque shim -> cmd /d /s /c fallback
-    const cfg = { provider: { allowedRoots: [] }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: cmdPath };
+    const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: cmdPath };
     const baseTask = { id: "shim", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob" };
     // Find the prompt length where the WRAPPED command line just crosses the
     // cap but the bare (unwrapped) argv join would not — isolates that the

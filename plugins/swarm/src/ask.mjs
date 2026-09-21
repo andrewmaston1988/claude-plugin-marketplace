@@ -11,7 +11,6 @@ import { isUnderRoot } from "./roots.mjs";
 import { providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { runPlan, makeDefaultIo } from "./scheduler.mjs";
-import { prepareSnapshotTree, removeSnapshotTree, snapshotCwd } from "./worktree.mjs";
 
 const PROVIDERS = defaultProviderRegistry();
 
@@ -21,25 +20,15 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   if (!prior.sessionId) {
     throw new Error(`result for '${taskId}' has no sessionId — the run predates session capture; re-run the plan to enable interrogation`);
   }
-  let cwd = prior.cwd;
-  // The run's end removed the snapshot tree; the leaf's session lives at that path, so put it back
-  // (at the SHA the leaf read) for the duration of the ask.
-  let readdedTree = null;
-  if (prior.isolationMode === "snapshot" && (!cwd || !existsSync(cwd))) {
-    try {
-      readdedTree = prepareSnapshotTree(prior.repoToplevel, prior.snapshotSha, resultsDir, prior.repoKey);
-      cwd = snapshotCwd(readdedTree, prior.repoToplevel, prior.originalCwd);
-    } catch (e) {
-      if (readdedTree) removeSnapshotTree(readdedTree, prior.repoToplevel);
-      throw new Error(`cannot re-create the snapshot this leaf read: ${e.message} — re-run the leaf to ask it again`);
-    }
-  }
-  try {
+  // A reader's cwd is the live repo and is still there; only a writer's tree can have been
+  // reaped, and only when it changed nothing. Nothing is re-created here — that re-add was
+  // also what made `run` collide with itself after a `stop`.
+  const cwd = prior.cwd;
   if (!cwd || !existsSync(cwd)) {
-    if (prior.isolationMode === "private") {
-      throw new Error(`the leaf's worktree was removed because it changed nothing; re-run the leaf, or give it explicit isolation to keep its tree`);
+    if (prior.worktree) {
+      throw new Error(`the leaf's worktree was removed because it changed nothing; re-run the leaf to ask it again`);
     }
-    throw new Error(`leaf cwd '${cwd}' no longer exists (removed worktree?) — the session cannot be resumed`);
+    throw new Error(`leaf cwd '${cwd}' no longer exists — the session cannot be resumed`);
   }
   const askModel = model || prior.model;
   const manifest = JSON.parse(readFileSync(join(resultsDir, "manifest.json"), "utf8"));
@@ -52,11 +41,11 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   const adapter = providerRegistry.get(identity.provider);
   const problems = adapter.validateTask({ model: askModel, provider: identity.provider }, { config: cfg });
   if (problems?.length) throw new Error(`provider '${identity.provider}' rejected ask: ${problems.join("; ")}`);
-  // Same deny-by-default gate as the manifest: a non-Claude model may only see
-  // code under an allow-listed root, whether it got here by override or not.
-  // Checked against the leaf's ORIGINAL cwd — the identity the manifest gate
-  // approved — not the scratch/worktree redirect it executed in.
-  if (identity.provider !== "claude") {
+  // Same deny-by-default gate as the manifest, and for EVERY provider including Claude:
+  // an ask does not reload the manifest, so this is the only root check on the path.
+  // Checked against the leaf's ORIGINAL cwd — the identity the manifest gate approved —
+  // not the worktree redirect it executed in.
+  {
     const govCwd = prior.originalCwd || cwd;
     const roots = providerConfig(cfg, identity.provider).allowedRoots || [];
     if (!roots.some((root) => isUnderRoot(govCwd, root))) {
@@ -112,7 +101,4 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
     ...(askEntry.provider && { provider: askEntry.provider }),
     ...(askEntry.runner && { runner: askEntry.runner }),
   };
-  } finally {
-    if (readdedTree) removeSnapshotTree(readdedTree, prior.repoToplevel);
-  }
 }

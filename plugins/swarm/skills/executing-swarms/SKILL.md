@@ -71,7 +71,7 @@ digraph swarm_place {
     need [label="What must FINISH before this starts?", shape=diamond];
     nothing [label="Nothing — no after", shape=box];
     output [label="Another task OUTPUT — after + resultPath", shape=box];
-    edits [label="Another task EDITS — after + shared worktree, or isolation.from", shape=box];
+    edits [label="Another task EDITS — after + shared workspace, or an integrate seed", shape=box];
     done [label="Done — one manifest", shape=ellipse];
 
     left -> need [label="yes — take one"];
@@ -101,7 +101,7 @@ placed. Naming one does not commit the rest of the manifest to it:
 | **another's output** | chain — each link consuming the last via `{{result:}}` / `{{resultPath:}}` |
 | **the previous one edits** | phased chain — one shared worktree, implement → review → implement |
 | **a list only known at runtime** | `forEach` — the leaf cloned per item of a dependency's result |
-| **an earlier task's commits** | widening — `isolation.from` seeds private trees from that branch |
+| **an earlier task's commits** | widening — an agentless `integrate` node seeds each private tree from that branch |
 | **several branches at once** | `integrate` — an agentless merge folding them back into one tree |
 | **a `forEach`'s clone branches** | `integrate.from` naming the `forEach` task itself — every clone that expanded, folded back |
 
@@ -173,16 +173,16 @@ next implementer through `{{result:}}`.
 
 ```json
 { "tasks": [
-    { "id": "p1", "provider": "ollama", "model": "glm-5.2:cloud", "isolation": { "worktree": "feat" },
+    { "id": "p1", "provider": "ollama", "model": "glm-5.2:cloud", "workspace": "feat",
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Phase 1: <scope>.\nCommit your work before you finish — the next link builds on your commits." },
 
     { "id": "p1-review", "provider": "ollama", "model": "kimi-k2.7-code:cloud", "after": ["p1"],
-      "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob",
-      "prompt": "Review phase 1 in this worktree (git log/diff to see it).\nReturn ONLY: (a) defects with file:line, (b) risks phase 2 must avoid. No prose." },
+      "allowedTools": "Read,Grep,Glob,Bash",
+      "prompt": "Review phase 1's commits. The chain's branch is the one ending in /feat — \`git branch --list '*/feat'\` names it; git log/diff it.\nReturn ONLY: (a) defects with file:line, (b) risks phase 2 must avoid. No prose." },
 
     { "id": "p2", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["p1-review"],
-      "isolation": { "worktree": "feat" },
+      "workspace": "feat",
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Phase 2: <scope>.\nThe phase-1 reviewer warned:\n{{result:p1-review}}\nFix what it flagged, then do phase 2. Commit before you finish." }
   ] }
@@ -190,13 +190,13 @@ next implementer through `{{result:}}`.
 
 **Rules that make it work:**
 
-- **Every link names the same worktree.** All links sharing a name must be totally ordered by `after` — validation rejects an unordered pair, because they would race in one directory.
-- **Reviewers get no write tools.** `allowedTools: "Read,Grep,Glob"`. A reviewer that edits is not reviewing, and a leaf holding `Write` can write anywhere — withholding the tool is the only real confinement.
+- **Every implementing link names the same `workspace`.** All links sharing one must be totally ordered by `after` — validation rejects an unordered pair, because they would race in one directory.
+- **A reviewer needs `Bash`, and `Bash` is a write tool** (`manifest.mjs:32`), so it gets a private tree of its own on repo HEAD. That is fine and costs nothing: a worktree shares the repo's refs, so `git log`/`git diff` reach the chain's branch from it, and a tree the reviewer never writes to is swept at collect. **"Reviewers get no write tools" is a convention about intent, not a confinement guarantee** — a leaf holding `Bash` can write anywhere, and withholding it would only stop the reviewer reading the commits it exists to review. What a reviewer must not do is name the chain's `workspace`: that would put it in the writers' tree and force it into their `after` ordering.
 - **Every implementing prompt must say "commit before you finish."** The engine never commits for a leaf. Uncommitted work still reaches the next link (same tree), but the history is what makes a failed link recoverable.
 - **The tree is collected once**, after the last link — so one entry in `worktreesKept`, with a diffstat spanning every phase.
 - **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix p2, re-run, and p3/p4 redo their work on the corrected base.
-- **`forEach` cannot share a worktree** — clones are concurrent by construction.
-- **A leaf that branches off the chain needs its OWN worktree.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their tree — sharing demands total ordering, which would force a false dependency. Give it `isolation: "worktree"` with `"from"` naming the link it builds on — the last link that WRITES, never the reviewer between them — so it starts from that commit without joining the chain.
+- **`forEach` cannot name a `workspace`** — clones are concurrent by construction, so each gets its own tree.
+- **A leaf that branches off the chain gets its own tree, seeded by an `integrate` node.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their workspace — sharing demands total ordering, which would force a false dependency. Give it its own tree (just write tools, no `workspace`) and put an agentless `integrate` node before it: `{ "id": "seed-docs", "after": ["p1"], "integrate": { "into": "docs", "from": ["p1"] } }` creates the `docs` tree and merges `p1`'s commits into it. Name the last link that WRITES, never the reviewer between them.
 
 **How a verifier link works** — why a reviewer needs no write tools to report, and what breaks if you give it some: [references/topology.md](references/topology.md).
 
@@ -223,34 +223,41 @@ A run may narrow to one task and widen again:
     { "id": "survey-b", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question B…" },
 
     { "id": "helper", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["survey-a", "survey-b"],
-      "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+      "workspace": "feat", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Read {{resultPath:survey-a}} and {{resultPath:survey-b}}. Write the helper. Commit before you finish." },
 
-    { "id": "migrate-x", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["helper", "survey-a"],
-      "isolation": { "worktree": "migrate-x", "from": "helper" },
-      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+    { "id": "seed-x", "after": ["helper"], "integrate": { "into": "migrate-x", "from": ["helper"] } },
+    { "id": "seed-y", "after": ["helper"], "integrate": { "into": "migrate-y", "from": ["helper"] } },
+
+    { "id": "migrate-x", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-x", "survey-a"],
+      "workspace": "migrate-x", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…migrate every site in {{resultPath:survey-a}}. Commit before you finish." },
-    { "id": "migrate-y", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["helper", "survey-b"],
-      "isolation": { "worktree": "migrate-y", "from": "helper" },
-      "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+    { "id": "migrate-y", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-y", "survey-b"],
+      "workspace": "migrate-y", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish." },
 
     { "id": "join", "after": ["migrate-x", "migrate-y"],
       "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
 
     { "id": "cleanup", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["join"],
-      "isolation": { "worktree": "feat" }, "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+      "workspace": "feat", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…delete the dead code, run the suite. Commit before you finish." }
   ] }
 ```
 
-Width goes `2 → 1 → 2 → 1`. This validates today: `migrate-x` and `migrate-y` are
-**separate private trees**, so the shared-worktree ordering rule never applies to them, while the
-`feat` group (`helper`, `cleanup`) stays totally ordered through them.
+Width goes `2 → 1 → 2 → 1`. `migrate-x` and `migrate-y` name **different workspaces**, so the
+total-ordering rule never applies between them and they run concurrently, while the `feat`
+group (`helper`, `cleanup`) stays totally ordered through them.
+
+**The two `seed-*` nodes are what `isolation.from` used to be.** A tree is always based on repo
+HEAD, so a leaf that must start from another task's commits gets an agentless `integrate` node
+before it: the node creates the target tree and merges the named branch in. Two extra nodes for
+the branch-and-rejoin case is the price of one derivation rule everywhere else — and they cost
+no tokens.
 
 **Field-by-field semantics live in [references/topology.md](references/topology.md)** — which
-dependency `{{result:}}` can reach, what `isolation.from` may name, why a reviewer is never a
-`from` target, and how `integrate` folds sibling trees back. Read it before writing any of them.
+dependency `{{result:}}` can reach, what `integrate.from` may name, and how `integrate` both
+seeds a tree and folds sibling trees back. Read it before writing any of them.
 
 ### Sweep-then-synthesize
 
@@ -270,7 +277,7 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
 
     { "id": "fix", "after": ["dedupe"],
       "forEach": { "from": "dedupe", "path": "", "maxItems": 30 },
-      "provider": "ollama", "model": "glm-5.2:cloud", "isolation": "worktree",
+      "provider": "ollama", "model": "glm-5.2:cloud", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Fix the call site at {{item.file}}:{{item.line}} (clone {{index}})" },
 
     { "id": "escalate", "after": ["fix", "dedupe"],
@@ -285,7 +292,7 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
 `integrate.from: ["fix"]` (see topology.md).
 
 - **`compute`** — an agentless step: an expression over `deps['<id>']` (each dependency's JSON output; raw text binds as a string). Zero tokens; the result is a normal task result, so `{{result:}}` and `forEach.from` consume it. Replaces `model`+`prompt` — never combine them.
-- **`forEach`** — clones this leaf once per element of a dependency's JSON array. `from` names a dependency in `after`; `path` selects the array inside its output (`""` = the output itself); **`maxItems` is required — the cap is the approval**. Clones get ids `fix[0]`, `fix[1]`, … and inherit model/effort/fallbackModel/retries/isolation. `{{item}}` (whole element), `{{item.field}}`, `{{index}}` substitute at clone time. Dependents wait for ALL clones; `{{result:fix}}` inlines a JSON array of clone outputs. If the source array exceeds `maxItems` the run proceeds loudly (result field + run.log + closing warning) — never silently.
+- **`forEach`** — clones this leaf once per element of a dependency's JSON array. `from` names a dependency in `after`; `path` selects the array inside its output (`""` = the output itself); **`maxItems` is required — the cap is the approval**. Clones get ids `fix[0]`, `fix[1]`, … and inherit model/effort/fallbackModel/retries, and each clone gets its own tree. `{{item}}` (whole element), `{{item.field}}`, `{{index}}` substitute at clone time. Dependents wait for ALL clones; `{{result:fix}}` inlines a JSON array of clone outputs. If the source array exceeds `maxItems` the run proceeds loudly (result field + run.log + closing warning) — never silently.
 - **`when`** — a conditional edge: `expr` runs over `value` (the `from` dependency's JSON output) and **must yield true/false** — write a comparison like `length(value) > 0`, never a bare value. False ⇒ the task completes as `skipped`; dependents still run and `{{result:}}` of a skipped task inlines empty.
 
 **Expression grammar** (same for `when`/`compute`, ≤500 chars): literals, `deps['id']`/`value`/`item` + `.field`/`[0]` access, `== != > >= < <=`, `&& || !`, and functions `length(x)`, `count(arr, pred?)`, `filter(arr, pred)`, `unique_by(arr, 'key')`, `flatten(arr)`, `min/max/sum(arr)`, `contains(a, b)`. Predicates bind `item` per element and must yield true/false. No arithmetic, no user JS. On any validation error, run `validate` and follow the message — it names the field, the fix, and an example.
@@ -306,7 +313,7 @@ Three features have field-by-field semantics too long to carry here. Read
 
 ### Two waves — the between-wave synthesis is yours
 
-**Invariant: wave 2 never starts until wave 1 results are compressed into `[SHARED_CONTEXT]` (≤400 words).** Wave 1 explores (fan-out manifest + digest); then **you** (the session) synthesize `[SHARED_CONTEXT]` covering: **data model** (exact names, key schema facts), **API contract** (exact interfaces, response structures), **existing conventions** (patterns, helpers, file locations wave-2 leaves must follow). Wave 2 is a second manifest embedding it verbatim in each leaf prompt — `isolation: "worktree"` for implementation leaves, `outputDir` for plan/generation leaves — plus per-leaf: "Do not claim files outside your scope boundary" and "List dependencies under `## Prerequisites` (use `- none`)". Encoding both waves in one manifest is FORBIDDEN: the between-wave synthesis is the judgement step and must not be delegated to the plan. **This governs *discovery* waves only — where wave 2's prompts cannot be written until wave 1's findings are read and compressed.** A structure known upfront is not a two-wave run: a phased chain, or any mixed topology whose leaves you can already write (see *Mixed topology*), belongs in ONE manifest with `after` doing the ordering. If you can author every prompt now, it is one manifest.
+**Invariant: wave 2 never starts until wave 1 results are compressed into `[SHARED_CONTEXT]` (≤400 words).** Wave 1 explores (fan-out manifest + digest); then **you** (the session) synthesize `[SHARED_CONTEXT]` covering: **data model** (exact names, key schema facts), **API contract** (exact interfaces, response structures), **existing conventions** (patterns, helpers, file locations wave-2 leaves must follow). Wave 2 is a second manifest embedding it verbatim in each leaf prompt — write tools for implementation leaves, `outputDir` for plan/generation leaves — plus per-leaf: "Do not claim files outside your scope boundary" and "List dependencies under `## Prerequisites` (use `- none`)". Encoding both waves in one manifest is FORBIDDEN: the between-wave synthesis is the judgement step and must not be delegated to the plan. **This governs *discovery* waves only — where wave 2's prompts cannot be written until wave 1's findings are read and compressed.** A structure known upfront is not a two-wave run: a phased chain, or any mixed topology whose leaves you can already write (see *Mixed topology*), belongs in ONE manifest with `after` doing the ordering. If you can author every prompt now, it is one manifest.
 
 ## 4. It is one manifest
 
@@ -319,7 +326,7 @@ field, resolved by the engine at runtime:
 | I don't know whether that segment should run | `when` — *Deterministic steps* |
 | the input is derived from earlier output | `compute` — *Deterministic steps* |
 | the leaf must read all of a dependency's output | `{{resultPath:<id>}}` — *Mixed topology* |
-| later leaves must build on an earlier one's **commits** | `isolation.from` — *Mixed topology* |
+| later leaves must build on an earlier one's **commits** | an `integrate` seed node — *Mixed topology* |
 | parallel branches must be folded back together | `integrate` — *Mixed topology* |
 | a `forEach`'s clones must be folded back together | `integrate.from` naming the `forEach` task — *Mixed topology* |
 | it's a whole sub-graph | a `manifest` node — *Deeper manifest fields* |
@@ -356,7 +363,7 @@ prose. That is why the law above is a law.
 | "Clone ids don't exist until runtime, I'll hand-list the leaves I expect." | `integrate.from` accepts the `forEach` task's own id and resolves to every clone that expanded, in order. Hand-listing hardcodes today's count. |
 | "This is basically a fan-out." | You have named a shape before placing a task. Ask the per-task question and see what the answers build — "basically" is the tell that you skipped it. |
 | "The graph is too hard to write, I'll do it in two waves." | Every reason to split has a field (§4). A second manifest is fresh prompts, fresh spend, a full gate — earned only by a judgement a human must make between segments. |
-| "They both touch the repo, so they must be chained." | Output vs edits is the question, not the repo. Leaves editing disjoint files stay parallel in private trees; only accumulation needs a shared tree or `isolation.from`. |
+| "They both touch the repo, so they must be chained." | Output vs edits is the question, not the repo. Leaves editing disjoint files stay parallel in private trees; only accumulation needs a shared `workspace`. |
 | "B obviously comes after A." | Name the file they collide on, or they run in parallel. Two tasks sharing a prerequisite but not each other are independent. |
 
 ## Red Flags — STOP

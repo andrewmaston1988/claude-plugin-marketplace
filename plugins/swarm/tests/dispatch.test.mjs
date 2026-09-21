@@ -181,7 +181,7 @@ test("Codex leaf with no manifest effort dispatches medium", () => {
   try {
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
-      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5.5", provider: "codex", isolation: "none" }],
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5.5", provider: "codex" }],
     }));
     const cfg = {
       providers: {

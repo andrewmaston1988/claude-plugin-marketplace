@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { resolve } from "node:path";
-import { plan, execute, formatPrune, snapshotRefs, deleteSnapshotRefs } from "../src/prune.mjs";
+import { plan, execute, formatPrune } from "../src/prune.mjs";
 
 test("plan: a live run short-circuits before any git call", () => {
   let gitCalled = false;
@@ -19,7 +19,7 @@ test("plan: a kept tree becomes a row with path, branch, measured bytes and repo
     readdirSync: (p) => (p === "/results/wt-impl" ? [{ name: "a.txt", isDirectory: () => false }] : []),
     statSync: () => ({ size: 1024 }),
   };
-  const run = { repo: "/repo", resultsDir: "/results", worktreesKept: [{ branch: "swarm/impl", path: "/results/wt-impl" }] };
+  const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [{ branch: "swarm/impl", path: "/results/wt-impl", repo: "/repo" }] };
   const { rows } = plan(run, git, fs);
   deepEqual(rows, [{ path: "/results/wt-impl", branch: "swarm/impl", bytes: 1024, repo: "/repo" }]);
 });
@@ -49,7 +49,7 @@ test("plan: a tree registered in git under resultsDir but absent from worktreesK
     readdirSync: (p) => (p === orphanPath ? [{ name: "x.txt", isDirectory: () => false }] : []),
     statSync: () => ({ size: 7 }),
   };
-  const run = { repo: "/repo", resultsDir: "/results", worktreesKept: [] };
+  const run = { repos: ["/repo"], resultsDir: "/results", worktreesKept: [] };
   const { rows } = plan(run, git, fs);
   equal(rows.length, 1);
   equal(rows[0].path, orphanPath);
@@ -66,7 +66,7 @@ test("plan: a repo that no longer exists is never asked for its orphaned worktre
     readdirSync: (p) => (p === "/results/wt-gone" ? [{ name: "a.txt", isDirectory: () => false }] : []),
     statSync: () => ({ size: 512 }),
   };
-  const run = { repo: "/gone-repo", resultsDir: "/results", worktreesKept: [{ branch: "swarm/gone", path: "/results/wt-gone" }] };
+  const run = { repos: ["/gone-repo"], resultsDir: "/results", worktreesKept: [{ branch: "swarm/gone", path: "/results/wt-gone", repo: "/gone-repo" }] };
   const { rows } = plan(run, git, fs);
   deepEqual(rows, [{ path: "/results/wt-gone", branch: "swarm/gone", bytes: 512, repo: "/gone-repo" }]);
   equal(calls.length, 0, "must not run git against a repo that doesn't exist");
@@ -131,20 +131,8 @@ test("execute: a branchless snapshot row is removed with -f -f and never gets a 
   deepEqual(calls, [{ args: ["worktree", "remove", "-f", "-f", "/r/wt-snapshot-abc"], cwd: "/repo" }]);
 });
 
-test("snapshotRefs lists only the run's refs; deleteSnapshotRefs update-ref -d's each; formatPrune labels a branchless row", () => {
-  const calls = [];
-  const git = (args, cwd) => {
-    calls.push({ args, cwd });
-    return { status: 0, stdout: "refs/swarm/snapshots/RK/aaa\n refs/swarm/snapshots/RK/bbb \n\n", stderr: "" };
-  };
-  const refs = snapshotRefs(git, "/repo", "RK");
-  deepEqual(refs, ["refs/swarm/snapshots/RK/aaa", "refs/swarm/snapshots/RK/bbb"]);
-  deepEqual(calls[0].args, ["for-each-ref", "--format=%(refname)", "refs/swarm/snapshots/RK/"]);
-  equal(snapshotRefs(() => ({ status: 1, stdout: "x", stderr: "" }), "/repo", "RK").length, 0);
-
-  calls.length = 0;
-  deleteSnapshotRefs(git, "/repo", refs);
-  deepEqual(calls.map((c) => c.args), [["update-ref", "-d", refs[0]], ["update-ref", "-d", refs[1]]]);
-
-  ok(formatPrune([{ path: "/r/wt-snapshot-abc", branch: null, bytes: 0, repo: "/repo" }]).includes("(detached snapshot)"));
+test("formatPrune labels a branchless row", () => {
+  const out = formatPrune([{ path: "/r/wt-a", branch: null, repo: "/repo", bytes: 0 }]);
+  ok(/wt-a/.test(out), out);
+  ok(out.includes("(detached)") && !/snapshot/.test(out), out);
 });

@@ -9,12 +9,29 @@ import { runCli, runCliAsync, CLI } from "./helpers/cli.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
 
-// A git repo with one commit: runs are filed under the dispatching repo, and read-only leaves snapshot it.
+// The one place the provider-root policy lives. `allowedRoots` gates EVERY provider
+// including claude, and an empty list denies — so a fixture HOME with no
+// providers.claude.allowedRoots refuses every row that dispatches. Fixtures live under
+// tmpdir, so that is the root they declare; `extra` keys win over the block.
+const gateConfig = (extra = {}) => JSON.stringify({ providers: { claude: { allowedRoots: [tmpdir()] } }, ...extra });
+
+// Writes that config into `home` and returns it — every fixture HOME a dispatching row
+// reads goes through here, so the block exists in exactly one place.
+function gateHome(home, extra = {}) {
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, "config.json"), gateConfig(extra));
+  return home;
+}
+
+// A git repo with one commit: runs are filed under the dispatching repo. It also carries
+// the fixture HOME every row points at, pre-gated, so a row only writes its own config
+// keys when it has a reason to.
 function tmp() {
   const dir = mkdtempSync(join(tmpdir(), "swarm-cli-"));
   spawnSync("git", ["init", "-q"], { cwd: dir, windowsHide: true });
   writeFileSync(join(dir, "seed.txt"), "seed\n");
   commitAll(dir, "init");
+  gateHome(join(dir, "home"));
   return dir;
 }
 
@@ -101,12 +118,10 @@ test("validate: good manifest exits 0 and reports task count", () => {
 // or none; `corpus` seeds run history so the estimate line reads "estimated ~".
 function seatsWorld({ enabled, store = "rows", corpus = false } = {}) {
   const dir = tmp();
-  const home = join(dir, "home");
-  mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "config.json"), JSON.stringify({
+  const home = gateHome(join(dir, "home"), {
     grading: { enabled },
     provider: { allowedRoots: [tmpdir()] },
-  }));
+  });
   const row = (leaf, model, grades) => JSON.stringify({
     resultsDir: `C:/runs/${leaf}`, leaf, model, domain: "node", outcome: "completed",
     grades, note: "", assessedBy: { session: "s1", date: "2026-09-10" },
@@ -286,10 +301,10 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     ok(summary.started && summary.finished);
     deepEqual(summary.tasks.map((t) => t.state), ["ok", "ok", "ok", "ok"]);
     deepEqual(summary.blocked, []);
-    // run.log is JSONL: run-start + one snapshot event + 2 lines per task
+    // run.log is JSONL: run-start + 2 lines per task — no snapshot event, since
+    // isolation trees are no longer snapshotted into the run's results dir.
     const logLines = readFileSync(join(resultsDir, "run.log"), "utf8").trim().split("\n");
-    equal(logLines.length, 10);
-    equal(logLines.map((l) => JSON.parse(l)).filter((e) => e.event === "snapshot").length, 1);
+    equal(logLines.length, 9);
     // progressive per-leaf logs
     for (const id of ["scan-a", "scan-b", "scan-c", "__digest"]) {
       equal(readFileSync(join(resultsDir, "results", `${id}.log`), "utf8"), "leaf-output-text");
@@ -530,9 +545,7 @@ test("C2: run refuses to start while an ask is live", async () => {
   const dir = tmp();
   let askPromise;
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.5 }));
+    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.5 });
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
@@ -573,9 +586,7 @@ test("C2: run refuses to start while an ask is live", async () => {
 test("stop: dead engine (stale heartbeat, no summary) — records run-stop and marks non-terminal leaves failed:stopped, touching no process", () => {
   const dir = tmp();
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.1 }));
+    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.1 });
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     const lines = [
@@ -606,9 +617,7 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
   const dir = tmp();
   let runPromise;
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.5 }));
+    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.5 });
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
@@ -851,9 +860,7 @@ test("stop: dead engine discovers a real orphaned worktree via manifest cwd, rec
   const repo = initPruneRepo();
   const dir = tmp();
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.1 }));
+    const home = gateHome(join(dir, "home"), { heartbeatSecs: 0.1 });
     const resultsDir = join(dir, "out");
     mkdirSync(resultsDir, { recursive: true });
     writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
@@ -966,12 +973,10 @@ test("models: stub server + SWARM_HOME config -> names with descriptions, no ali
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
     // catalogUrl also points at the stub — the CLI child must never hit the live WAN.
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: { url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
-    }));
+    });
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
     // ctx from the recommendation, no parameter count from the empty /api/show;
@@ -1016,11 +1021,9 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: { url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
-    }));
+    });
     const env = { SWARM_HOME: home };
 
     const r = await runCliAsync(["models"], { cwd: dir, env });
@@ -1061,9 +1064,7 @@ test("quota: prints per-window utilization from the usage endpoint", async () =>
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` }));
+    const home = gateHome(join(dir, "home"), { quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` });
     const creds = join(home, "creds.json");
     writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
     const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds, TZ: "Europe/London" } });
@@ -1092,11 +1093,9 @@ test("ollama-usage: P0 an expired cookie prints /!\\ Cookie Expired above the fi
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: { cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } } },
-    }));
+    });
     writeFileSync(join(home, "ollama-cookie.json"), "expired-cookie\n");
     writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
       sessionPctUsed: 3, sessionResetsAt: "2026-09-07T14:49:00Z",
@@ -1131,11 +1130,9 @@ test("ollama-usage: C0 a live fetch prints exactly two provider-named lines, not
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: { cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } } },
-    }));
+    });
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
     const r = await runCliAsync(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr + r.stdout);
@@ -1164,9 +1161,7 @@ test("quota: C0b every line is prefixed anthropic, not claude", async () => {
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` }));
+    const home = gateHome(join(dir, "home"), { quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` });
     const creds = join(home, "creds.json");
     writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
     const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds } });
@@ -1210,15 +1205,13 @@ test("models: C1 an exhausted meter is named above the :cloud list", async () =>
   const server = modelsStubServer(EXHAUSTED_HTML);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: {
         url: `http://127.0.0.1:${server.address().port}`,
         catalogUrl: `http://127.0.0.1:${server.address().port}`,
         cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } },
       },
-    }));
+    });
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr);
@@ -1239,15 +1232,13 @@ test("models: C2 false-positive guard — a healthy meter changes nothing", asyn
   const server = modelsStubServer(readFileSync(join(import.meta.dirname, "fixtures", "ollama-settings.html"), "utf8"));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({
+    const home = gateHome(join(dir, "home"), {
       provider: {
         url: `http://127.0.0.1:${server.address().port}`,
         catalogUrl: `http://127.0.0.1:${server.address().port}`,
         cloud: { ollama: { enabled: true, settingsUrl: `http://127.0.0.1:${server.address().port}/settings` } },
       },
-    }));
+    });
     writeFileSync(join(home, "ollama-cookie.json"), "tok\n");
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr);
@@ -1262,9 +1253,7 @@ test("models: C2 false-positive guard — a healthy meter changes nothing", asyn
 test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare dispatch exits 0", () => {
   const dir = tmp();
   try {
-    const home = join(dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ swarm: { always: true } }));
+    const home = gateHome(join(dir, "home"), { swarm: { always: true } });
     const manifest = join(dir, "m.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out",
@@ -1569,7 +1558,7 @@ test("validate: estimate line from a seeded corpus; cold start says none", () =>
     equal(v.status, 0, v.stderr);
     ok(v.stdout.includes("estimated ~4k tokens"), v.stdout); // median 2000 × 2 leaves
 
-    const cold = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "empty-home") } });
+    const cold = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: gateHome(join(dir, "empty-home")) } });
     equal(cold.status, 0, cold.stderr);
     ok(cold.stdout.includes("estimate: none (no run history yet)"), cold.stdout);
   } finally {
@@ -1588,7 +1577,7 @@ test("run: closing tokens line compares actual vs estimate; projection warn reac
       tasks: [{ id: "s", state: "ok", provider: "claude", model: "claude-haiku-4-5-20251001", tokens: { input: 1000, output: 0, cacheCreation: 0, cacheRead: 0 } }],
     }));
     const cfgPath = join(dir, "config.json");
-    writeFileSync(cfgPath, JSON.stringify({ costWarnTokens: 100 }));
+    writeFileSync(cfgPath, gateConfig({ costWarnTokens: 100 }));
     const p = join(dir, "plan.json");
     writeFileSync(p, JSON.stringify({
       resultsDir: "out",
@@ -1781,7 +1770,7 @@ test("serve: dashboard.enabled=false refuses to start (foreground and --daemon),
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ dashboard: { enabled: false, port: 0 } }));
+    writeFileSync(join(home, "config.json"), gateConfig({ dashboard: { enabled: false, port: 0 } }));
     for (const args of [["serve"], ["serve", "--daemon"]]) {
       const r = runCli(args, { cwd: dir, env: { SWARM_HOME: home } });
       equal(r.status, 0, r.stderr);
@@ -1797,7 +1786,9 @@ test("serve: dashboard.enabled=false refuses to start (foreground and --daemon),
 test("config init: writes every shipped key into ~/.swarm/config.json, keeps set values, reports added keys", () => {
   const dir = tmp();
   try {
-    const home = join(dir, "home");
+    // Its own HOME, not tmp()'s pre-gated one: this row asserts what init does to a
+    // config file that does not exist yet ("created"), so the file must not exist.
+    const home = join(dir, "cfg-home");
     let r = runCli(["config", "init"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CONFIG: join(home, "config.json") } });
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes(join(home, "config.json")), r.stdout);
@@ -1826,7 +1817,7 @@ test("run: the closing block asks for grading only when grading.enabled is true"
     try {
       const home = join(dir, "home");
       mkdirSync(home, { recursive: true });
-      writeFileSync(join(home, "config.json"), JSON.stringify({ grading: { enabled } }));
+      writeFileSync(join(home, "config.json"), gateConfig({ grading: { enabled } }));
       const manifest = join(dir, "m.json");
       writeFileSync(manifest, JSON.stringify({
         resultsDir: "out",
@@ -1850,7 +1841,7 @@ test("run: digest.md carries exactly one grade footer while the run is ungraded,
     const dir = tmp();
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ grading: { enabled } }));
+    writeFileSync(join(home, "config.json"), gateConfig({ grading: { enabled } }));
     const manifest = join(dir, "m.json");
     writeFileSync(manifest, JSON.stringify({
       resultsDir: "out", goal: "digest footer",
@@ -1942,11 +1933,9 @@ test("statusline install: writes the self-resolving shim into ~/.swarm and print
 // Restart button case, and it did nothing.
 test("serve restart: a live daemon on the current version is killed and replaced, never short-circuited as already-running", async () => {
   const dir = tmp();
-  const home = join(dir, "home");
-  mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "config.json"), JSON.stringify({
+  const home = gateHome(join(dir, "home"), {
     dashboard: { enabled: true, port: 0, bind: "127.0.0.1", tray: false, autoRestartOnUpdate: false },
-  }));
+  });
   const version = "v-restart-test";
   const registry = join(dir, "installed_plugins.json");
   writeFileSync(registry, JSON.stringify({
@@ -1995,66 +1984,74 @@ test("serve restart: a live daemon on the current version is killed and replaced
   }
 });
 
-// --- prune over snapshot runs ---
+// --- prune over a run's leftover worktrees ---
 
-function snapPruneFixture() {
+// A real repo plus a resultsDir holding a tree the run never summarised. The run's
+// repo signal is manifest.json's cwd: the snapshot refs and the run.log `snapshot`
+// events that used to name the repo are gone, so a fixture without a manifest is a
+// fixture prune cannot resolve.
+function pruneFixture() {
   const repo = initPruneRepo();
   const dir = tmp();
   const resultsDir = join(dir, "out");
   mkdirSync(resultsDir, { recursive: true });
   const sha = gitOut(["rev-parse", "HEAD"], repo);
-  const runKey = "runkey000001";
-  const repoKey = "repokey00001";
-  const ref = `refs/swarm/snapshots/${runKey}/${repoKey}`;
-  spawnSync("git", ["update-ref", ref, sha], { cwd: repo, windowsHide: true });
-  return { repo, dir, resultsDir, sha, runKey, repoKey, ref, tree: join(resultsDir, "wt-snapshot-" + repoKey) };
+  writeFileSync(join(resultsDir, "manifest.json"), JSON.stringify({ resultsDir, cwd: repo, tasks: [] }));
+  return { repo, dir, resultsDir, sha, tree: join(resultsDir, "wt-impl") };
 }
 
-function writeSnapRun(f, { summary }) {
+// A detached tree is what a killed `worktree add` leaves: no branch, so prune's
+// branchless removal path is the one under test.
+function addDetachedTree(f, repo = f.repo, tree = f.tree, sha = f.sha) {
+  spawnSync("git", ["worktree", "add", "--detach", tree, sha], { cwd: repo, windowsHide: true });
+}
+
+function writeKilledRun(f) {
   const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
   writeFileSync(join(f.resultsDir, "run.log"),
     line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
-    line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
     line({ event: "run-aborted", reason: "killed" }));
-  if (summary) writeFileSync(join(f.resultsDir, "summary.json"), JSON.stringify({ started: new Date().toISOString(), finished: new Date().toISOString(), tasks: [], blocked: [], worktreesKept: [], totalTokens: null }));
 }
 
-const snapRefs = (f) => gitOut(["for-each-ref", "refs/swarm/snapshots/"], f.repo);
 const dropSnapPrune = (f) => {
   rmSync(f.dir, { recursive: true, force: true });
   rmSync(f.repo, { recursive: true, force: true });
 };
 
-test("prune: a run that ended normally still has its snapshot ref deleted — refs go before the nothing-to-prune exit", () => {
-  const f = snapPruneFixture();
+test("prune: a run that ended normally still has its leftover tree removed — the sweep goes before the nothing-to-prune exit", () => {
+  const f = pruneFixture();
   try {
-    writeSnapRun(f, { summary: true });
-    ok(snapRefs(f).includes(f.ref));
+    // A run that finished with nothing kept, yet left a tree registered under its
+    // resultsDir: row discovery is the repo registry, not summary.worktreesKept, so
+    // the empty record must not short-circuit the sweep.
+    writeFinishedRun(f.resultsDir, []);
+    addDetachedTree(f);
+    ok(existsSync(f.tree));
     const env = { SWARM_HOME: join(f.dir, "home") };
     const dry = runCli(["prune", f.resultsDir, "--dry-run"], { cwd: f.dir, env });
     equal(dry.status, 0, dry.stdout + dry.stderr);
-    ok(dry.stdout.includes(f.ref), dry.stdout);
-    ok(snapRefs(f).includes(f.ref), "dry-run keeps the ref");
+    ok(dry.stdout.includes(f.tree), dry.stdout);
+    ok(existsSync(f.tree), "dry-run keeps the tree");
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env });
     equal(r.status, 0, r.stdout + r.stderr);
-    equal(snapRefs(f), "", "ref deleted");
+    ok(!existsSync(f.tree), "tree removed");
+    ok(!gitOut(["worktree", "list", "--porcelain"], f.repo).includes("wt-impl"), "tree deregistered");
   } finally {
     dropSnapPrune(f);
   }
 });
 
-test("prune: a killed run's leftover snapshot tree (no summary.json) is removed without a branch delete, and no summary is invented", () => {
-  const f = snapPruneFixture();
+test("prune: a killed run's leftover tree (no summary.json) is removed without a branch delete, and no summary is invented", () => {
+  const f = pruneFixture();
   try {
-    spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
+    addDetachedTree(f);
     ok(existsSync(f.tree));
-    writeSnapRun(f, { summary: false });
+    writeKilledRun(f);
     const branchesBefore = gitOut(["branch", "--list"], f.repo);
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
-    ok(r.stdout.includes("(detached snapshot)"), r.stdout);
+    ok(r.stdout.includes("(detached)") && !/snapshot/.test(r.stdout), r.stdout);
     ok(!existsSync(f.tree), "tree removed");
-    equal(snapRefs(f), "");
     equal(gitOut(["branch", "--list"], f.repo), branchesBefore, "no branch touched");
     ok(!existsSync(join(f.resultsDir, "summary.json")), "prune must not write a summary.json the run never had");
   } finally {
@@ -2062,60 +2059,62 @@ test("prune: a killed run's leftover snapshot tree (no summary.json) is removed 
   }
 });
 
-test("prune: a second snapshotted repo's leftover tree is removed too, not just the first repo's", () => {
-  const f = snapPruneFixture();
+// RED as written, and it is a src defect rather than a stale fixture — see the note on
+// the sibling row below.
+test("prune: a second repo's leftover tree is removed too, not just the first repo's", () => {
+  const f = pruneFixture();
   const repo2 = initPruneRepo();
   try {
     const sha2 = gitOut(["rev-parse", "HEAD"], repo2);
-    const tree2 = join(f.resultsDir, "wt-snapshot-repokey00002");
-    spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
-    spawnSync("git", ["worktree", "add", "--detach", tree2, sha2], { cwd: repo2, windowsHide: true });
-    const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
-    writeFileSync(join(f.resultsDir, "run.log"),
-      line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
-      line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
-      line({ event: "snapshot", repo: repo2, repoKey: "repokey00002", runKey: f.runKey, sha: sha2, clean: true }) +
-      line({ event: "run-aborted", reason: "killed" }));
+    const tree2 = join(f.resultsDir, "wt-two");
+    addDetachedTree(f);
+    addDetachedTree(f, repo2, tree2, sha2);
+    writeKilledRun(f);
+    // A second repo now has no signal at all: manifest.json names one cwd and the
+    // run.log `snapshot` events that used to name the other are gone.
+    writeFileSync(join(f.resultsDir, "summary.json"), JSON.stringify({
+      started: new Date().toISOString(), finished: new Date().toISOString(), tasks: [], blocked: [],
+      worktreesKept: [
+        { name: "impl", branch: null, path: f.tree },
+        { name: "two", branch: null, path: tree2 },
+      ], totalTokens: null,
+    }));
     ok(existsSync(f.tree) && existsSync(tree2));
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "first tree removed");
     ok(!existsSync(tree2), "second repo's tree removed");
-    ok(!gitOut(["worktree", "list", "--porcelain"], repo2).includes("wt-snapshot-repokey00002"), "second repo deregistered");
+    ok(!gitOut(["worktree", "list", "--porcelain"], repo2).includes("wt-two"), "second repo deregistered");
   } finally {
     dropSnapPrune(f);
     rmSync(repo2, { recursive: true, force: true });
   }
 });
 
-test("prune: a killed run with snapshot trees in two repos removes both trees and refs, and invents no summary", () => {
-  const f = snapPruneFixture();
+// RED as written: `execute()` (src/prune.mjs:80) runs `git worktree remove` with
+// cwd = row.repo, and every row's repo is the single one cmdPrune resolved
+// (scripts/swarm.mjs:616-621 resolved a repo per snapshot event until 46003f5).
+// A tree registered in a second repo therefore survives, silently — prune still
+// prints "freed … across 2 worktrees". Not a fixture problem; left red on purpose.
+test("prune: a killed run with leftover trees in two repos removes both, and invents no summary", () => {
+  const f = pruneFixture();
   const repo2 = initPruneRepo();
   try {
     const sha2 = gitOut(["rev-parse", "HEAD"], repo2);
-    const key2 = "repokey00002";
-    const ref2 = `refs/swarm/snapshots/${f.runKey}/${key2}`;
-    const tree2 = join(f.resultsDir, "wt-snapshot-" + key2);
-    spawnSync("git", ["update-ref", ref2, sha2], { cwd: repo2, windowsHide: true });
-    spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
-    spawnSync("git", ["worktree", "add", "--detach", tree2, sha2], { cwd: repo2, windowsHide: true });
-    // manifest.json names only the first repo, so only the run.log can find the second.
-    writeFileSync(join(f.resultsDir, "manifest.json"), JSON.stringify({ resultsDir: f.resultsDir, cwd: f.repo, tasks: [] }));
-    const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o }) + "\n";
-    writeFileSync(join(f.resultsDir, "run.log"),
-      line({ event: "run-start", tasks: [{ id: "impl", provider: "claude", model: "claude-haiku-4-5-20251001" }] }) +
-      line({ event: "snapshot", repo: f.repo, repoKey: f.repoKey, runKey: f.runKey, sha: f.sha, clean: true }) +
-      line({ event: "snapshot", repo: repo2, repoKey: key2, runKey: f.runKey, sha: sha2, clean: true }) +
-      line({ event: "run-aborted", reason: "killed" }));
+    const tree2 = join(f.resultsDir, "wt-two");
+    addDetachedTree(f);
+    addDetachedTree(f, repo2, tree2, sha2);
+    // A killed run wrote no summary, so the manifest task cwds are the only record
+    // that this run reached a second repo — a real two-repo manifest carries them.
+    writeFileSync(join(f.resultsDir, "manifest.json"),
+      JSON.stringify({ resultsDir: f.resultsDir, cwd: f.repo, tasks: [{ id: "two", cwd: repo2 }] }));
+    writeKilledRun(f);
     ok(existsSync(f.tree) && existsSync(tree2));
-    ok(snapRefs(f).includes(f.ref));
     const r = runCli(["prune", f.resultsDir], { cwd: f.dir, env: { SWARM_HOME: join(f.dir, "home") } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(!existsSync(f.tree), "first tree removed");
     ok(!existsSync(tree2), "second tree removed");
-    equal(snapRefs(f), "", "first ref deleted");
-    equal(gitOut(["for-each-ref", "refs/swarm/snapshots/"], repo2), "", "second ref deleted");
-    for (const [repo, name] of [[f.repo, "wt-snapshot-" + f.repoKey], [repo2, "wt-snapshot-" + key2]]) {
+    for (const [repo, name] of [[f.repo, "wt-impl"], [repo2, "wt-two"]]) {
       ok(!gitOut(["worktree", "list", "--porcelain"], repo).includes(name), `${name} still registered`);
     }
     ok(!existsSync(join(f.resultsDir, "summary.json")), "prune must not write a summary.json the run never had");
@@ -2125,14 +2124,12 @@ test("prune: a killed run with snapshot trees in two repos removes both trees an
   }
 });
 
-test("stop: dead engine records no kept-worktree row for a branchless snapshot tree", () => {
-  const f = snapPruneFixture();
+test("stop: dead engine records no kept-worktree row for a branchless tree", () => {
+  const f = pruneFixture();
   try {
     const home = join(f.dir, "home");
-    mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), JSON.stringify({ heartbeatSecs: 0.1 }));
-    writeFileSync(join(f.resultsDir, "manifest.json"), JSON.stringify({ resultsDir: f.resultsDir, cwd: f.repo, tasks: [] }));
-    spawnSync("git", ["worktree", "add", "--detach", f.tree, f.sha], { cwd: f.repo, windowsHide: true });
+    writeFileSync(join(home, "config.json"), gateConfig({ heartbeatSecs: 0.1 }));
+    addDetachedTree(f);
     ok(existsSync(f.tree));
     const line = (o) => JSON.stringify({ ts: new Date().toISOString(), ...o });
     writeFileSync(join(f.resultsDir, "run.log"), [

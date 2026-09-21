@@ -15,7 +15,7 @@ import { TEMPLATE_RE } from "./coverage.mjs";
 import { providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
-import { snapshotKey } from "./worktree.mjs";
+import { runScopeKey } from "./worktree.mjs";
 
 export { isUnderRoot } from "./roots.mjs";
 
@@ -46,11 +46,12 @@ const ITEM_TEMPLATE_RE_G = new RegExp(ITEM_TEMPLATE_RE.source, "g");
 const WIN_CMDLINE_MAX = 32000;
 const RESULT_PATH_MEASURE_LEN = 260;
 export const FOREACH_ITEM_MAX = 4000;
-// The isolation object's own allowlist — KNOWN_TASK_KEYS only gates top-level keys.
-const KNOWN_ISOLATION_KEYS = new Set(["worktree", "branch", "from"]);
+// Keys that existed and no longer do. Each gets its own message naming what replaced it,
+// so the generic unknown-key error never fires for one and say nothing useful.
+const RETIRED_TASK_KEYS = new Set(["isolation"]);
 const KNOWN_TASK_KEYS = new Set([
   "id", "prompt", "model", "provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "cwd",
-  "isolation", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
+  "workspace", "branch", "outputDir", "timeoutMs", "after", "compute", "when", "forEach",
   "returns", "verifyCitations", "manifest", "integrate", "settings", "leafGuard",
   "mustRead", "contextWindow",
 ]);
@@ -59,7 +60,7 @@ const PROVIDERS = defaultProviderRegistry();
 // A manifest task is an agentless container for its child's tasks — every
 // leaf-shaped key on the node itself is an authoring mistake.
 const MANIFEST_BANNED_KEYS = [
-  "prompt", "model", "compute", "returns", "isolation", "allowedTools",
+  "prompt", "model", "compute", "returns", "workspace", "branch", "allowedTools",
   "outputDir", "effort", "fallbackModel", "mustRead", "contextWindow",
 ];
 // More `mustRead` entries than this is an authoring mistake — use an index entry.
@@ -257,6 +258,7 @@ function validateTaskShapes(rawTasks, errors, label) {
   for (const t of rawTasks) {
     const l = label(t);
     for (const k of Object.keys(t || {})) {
+      if (RETIRED_TASK_KEYS.has(k)) continue;   // named individually below, with its replacement
       if (!KNOWN_TASK_KEYS.has(k)) {
         errors.push(`${l}: unknown key '${k}' — known keys: ${[...KNOWN_TASK_KEYS].join(", ")}`);
       }
@@ -282,7 +284,7 @@ function validateTaskShapes(rawTasks, errors, label) {
     } else if (t.compute !== undefined) {
       // Agentless: a compute step never spawns a leaf, so leaf-only keys are
       // authoring mistakes worth naming individually.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "isolation", "outputDir", "contextWindow"]
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "workspace", "branch", "outputDir", "contextWindow"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: compute tasks are agentless — remove ${agentKeys.join("/")}; the expression runs in the engine, no leaf is spawned`);
@@ -292,7 +294,9 @@ function validateTaskShapes(rawTasks, errors, label) {
       }
     } else if (t.integrate !== undefined) {
       // Agentless like compute: the engine merges, no leaf is spawned.
-      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "outputDir", "contextWindow"]
+      // `workspace`/`branch` too: an integrate node's tree is `integrate.into`, so naming
+      // one here would validate and be silently ignored.
+      const agentKeys = ["model", "prompt", "fallbackModel", "effort", "allowedTools", "returns", "workspace", "branch", "outputDir", "contextWindow"]
         .filter((k) => t[k] !== undefined);
       if (agentKeys.length) {
         errors.push(`${l}: integrate tasks are agentless — remove ${agentKeys.join("/")}; the merge runs in the engine, no leaf is spawned`);
@@ -326,39 +330,38 @@ function validateTaskShapes(rawTasks, errors, label) {
     if (t.effort !== undefined && (typeof t.effort !== "string" || !t.effort.trim())) {
       errors.push(`${l}: effort must be a non-empty string — e.g. \"effort\": \"medium\"`);
     }
+    // `isolation` is gone. Named explicitly rather than left to the unknown-key error,
+    // because every manifest written before this change carries it and the generic
+    // message would not say what to write instead.
     if (t.isolation !== undefined) {
-      const iso = t.isolation;
-      const named = iso && typeof iso === "object" && !Array.isArray(iso);
-      if (iso !== "worktree" && iso !== "none" && !named) {
+      errors.push(
+        `${l}: isolation was removed — a writer always gets a tree and a reader never does, so there is nothing to declare.\n` +
+        `    Delete it. Only name a workspace if leaves must SHARE one tree:\n` +
+        `        "workspace": "feat"\n` +
+        `    To read a path in place, just point cwd at it — readers run in the live repo.`);
+    }
+    if (t.workspace !== undefined) {
+      if (typeof t.workspace !== "string" || !t.workspace) {
+        errors.push(`${l}: workspace must be a non-empty string naming the shared tree — e.g. "workspace": "feat"`);
+      } else if (!/^[A-Za-z0-9._-]+$/.test(t.workspace)) {
         errors.push(
-          `${l}: isolation must be "worktree", { "worktree": "<name>" } or "none" (got ${JSON.stringify(iso)})\n` +
-          `    private tree: "isolation": "worktree"\n` +
-          `    shared tree:  "isolation": { "worktree": "feat" }\n` +
-          `    in place (read-only, under provider.allowedRoots): "isolation": "none"`);
-      } else if (named && (typeof iso.worktree !== "string" || !iso.worktree)) {
-        errors.push(`${l}: isolation.worktree must be a non-empty string naming the shared worktree — e.g. { "worktree": "feat" }`);
-      } else if (named && !/^[A-Za-z0-9._-]+$/.test(iso.worktree)) {
-        errors.push(
-          `${l}: isolation.worktree '${iso.worktree}' must be filename-safe ` +
+          `${l}: workspace '${t.workspace}' must be filename-safe ` +
           `(letters, digits, dot, dash, underscore) — it becomes a directory and a branch name`);
-      }
-      if (named && iso.branch !== undefined
-          && (typeof iso.branch !== "string" || !/^[A-Za-z0-9._\/-]+$/.test(iso.branch))) {
+      } else if (!isAgentless(t) && t.manifest === undefined && !hasWriteTools(t.allowedTools)) {
         errors.push(
-          `${l}: isolation.branch must be a git branch name (letters, digits, dot, dash, ` +
-          `underscore, slash) — e.g. { "worktree": "p3", "branch": "swarm/eco-p3" }`);
+          `${l}: workspace is for leaves that WRITE — a read-only leaf owns no tree to share.\n` +
+          `    Drop "workspace", or give it write tools — e.g. "allowedTools": "Read,Edit,Bash"`);
       }
-      // An unknown key here is silent otherwise: the leaf runs with a tree the
-      // author did not ask for and nothing reports it.
-      if (named) {
-        for (const k of Object.keys(iso)) {
-          if (!KNOWN_ISOLATION_KEYS.has(k)) {
-            errors.push(
-              `${l}: unknown key '${k}' in isolation — known keys: ${[...KNOWN_ISOLATION_KEYS].join(", ")}\n` +
-              `    shared tree:  "isolation": { "worktree": "feat" }\n` +
-              `    private tree: "isolation": "worktree"`);
-          }
-        }
+    }
+    if (t.branch !== undefined) {
+      if (typeof t.branch !== "string" || !/^[A-Za-z0-9._\/-]+$/.test(t.branch)) {
+        errors.push(
+          `${l}: branch must be a git branch name (letters, digits, dot, dash, ` +
+          `underscore, slash) — e.g. "branch": "swarm/eco-p3"`);
+      } else if (!isAgentless(t) && t.manifest === undefined && !hasWriteTools(t.allowedTools)) {
+        errors.push(
+          `${l}: branch is for leaves that WRITE — a read-only leaf commits nothing, so it owns no branch.\n` +
+          `    Drop "branch", or give it write tools — e.g. "allowedTools": "Read,Edit,Bash"`);
       }
     }
     if (t.timeoutMs !== undefined && (!Number.isInteger(t.timeoutMs) || t.timeoutMs < 1)) {
@@ -389,25 +392,27 @@ function validateTaskShapes(rawTasks, errors, label) {
   }
 }
 
-// The one rule for which worktree a task lives in: the object form names a
-// tree shared with ordered siblings, the string form is shorthand for the
-// task's own id. Normalized tasks carry the answer already; raw ones (hand-built
-// plans, pre-normalization validation) derive it here.
+// THE rule for which tree a task lives in, and the only one: a leaf that can write
+// gets a tree — the one its `workspace` names, else its own id — and a leaf that
+// cannot gets none, because it reads the live repo. Normalized tasks carry the
+// answer; raw ones (hand-built plans, pre-normalization validation) derive it here.
+//
+// There is deliberately no second path for an explicitly-spelled tree. The previous
+// grammar had one, and the two disagreed on three derived fields for months.
 export function resolveWorktreeName(t) {
   if (t.worktreeName !== undefined) return t.worktreeName;
-  if (t.isolation === "none") return undefined;
-  if (t.isolation === undefined || t.isolation === null) return undefined;
-  return typeof t.isolation === "object" ? t.isolation.worktree : t.id;
+  if (t.compute !== undefined || t.integrate !== undefined || t.manifest !== undefined) return undefined;
+  // The engine's own digest node is not a repo leaf: a report digest holds Write so it would
+  // otherwise derive a tree, and its cwd is a scratch dir outside every tree by design.
+  if (t.isDigest) return undefined;
+  if (!hasWriteTools(t.allowedTools)) return undefined;
+  return t.workspace ?? t.id;
 }
 
-// What normalisation WILL synthesise, so raw-task validation sees it too.
-// resolveWorktreeName deliberately stays ignorant of the write default (pinned by
-// "resolveWorktreeName: isolation none owns no tree").
-export function effectiveIsolation(t) {
-  if (t.compute !== undefined || t.integrate !== undefined || t.manifest !== undefined) return undefined;
-  if (t.isolation === "none") return undefined;
-  if (t.isolation !== undefined && t.isolation !== null) return t.isolation;
-  return hasWriteTools(t.allowedTools) ? "worktree" : undefined;
+// True when this task shares its tree with ordered siblings rather than owning it.
+// Only a named workspace shares; a derived tree is the task's alone by construction.
+export function isSharedTree(t) {
+  return typeof t.workspace === "string" && !!t.workspace;
 }
 
 // Tasks sharing a worktree run in ONE directory, so they must form a single
@@ -496,8 +501,7 @@ export function makeReaches(tasks) {
   return reaches;
 }
 
-function validateWorktreeGroups(rawInput, errors, label) {
-  const rawTasks = rawInput.map((t) => ({ ...t, isolation: effectiveIsolation(t) }));
+function validateWorktreeGroups(rawTasks, errors, label) {
   const groups = new Map();
   for (const t of rawTasks) {
     const n = resolveWorktreeName(t);
@@ -510,14 +514,14 @@ function validateWorktreeGroups(rawInput, errors, label) {
   const reaches = makeReaches(rawTasks);
 
   for (const [name, members] of groups) {
-    const shared = members.filter((t) => typeof t.isolation === "object" && t.isolation !== null);
+    const shared = members.filter(isSharedTree);
 
     for (const t of shared) {
       if (t.forEach !== undefined) {
         errors.push(
-          `${label(t)}: a forEach task cannot use the shared worktree "${name}" — clones run ` +
+          `${label(t)}: a forEach task cannot name the shared workspace "${name}" — clones run ` +
           `concurrently and would collide in one directory.\n` +
-          `    Give each clone its own tree instead: "isolation": "worktree"`);
+          `    Drop "workspace" and each clone gets its own tree.`);
       }
     }
 
@@ -526,29 +530,29 @@ function validateWorktreeGroups(rawInput, errors, label) {
         const [a, b] = [members[i], members[j]];
         if (reaches(a.id, b.id) || reaches(b.id, a.id)) continue;
         errors.push(
-          `tasks '${a.id}' and '${b.id}' share worktree "${name}" but neither runs before the other.\n` +
-          `    Tasks sharing a worktree must form a single ordered chain — add the missing\n` +
+          `tasks '${a.id}' and '${b.id}' share workspace "${name}" but neither runs before the other.\n` +
+          `    Tasks sharing a workspace must form a single ordered chain — add the missing\n` +
           `    \`after\` so one waits for the other:\n` +
-          `        { "id": "${b.id}", "after": ["${a.id}"], "isolation": { "worktree": "${name}" }, … }`);
+          `        { "id": "${b.id}", "after": ["${a.id}"], "workspace": "${name}", … }`);
       }
     }
 
-    // One directory cannot hold two branches: a link naming isolation.branch beside
-    // siblings taking the derived one dies at `worktree add`, after the first committed.
-    const branches = new Set(shared.map((t) => t.isolation.branch ?? null));
+    // One directory cannot hold two branches: a link naming `branch` beside siblings
+    // taking the derived one dies at `worktree add`, after the first committed.
+    const branches = new Set(shared.map((t) => t.branch ?? null));
     if (branches.size > 1) {
-      const named = shared.find((t) => t.isolation.branch);
+      const named = shared.find((t) => t.branch);
       errors.push(
-        `tasks sharing worktree "${name}" disagree on their branch: ` +
-        shared.map((t) => `'${t.id}' → ${t.isolation.branch ? `"${t.isolation.branch}"` : "(derived)"}`).join(", ") + `.\n` +
-        `    Every link of a shared worktree runs in ONE directory on ONE branch.\n` +
+        `tasks sharing workspace "${name}" disagree on their branch: ` +
+        shared.map((t) => `'${t.id}' → ${t.branch ? `"${t.branch}"` : "(derived)"}`).join(", ") + `.\n` +
+        `    Every link of a shared workspace runs in ONE directory on ONE branch.\n` +
         `    Give them all the same branch, or drop it from all of them:\n` +
-        `        "isolation": { "worktree": "${name}", "branch": "${named.isolation.branch}" }`);
+        `        "workspace": "${name}", "branch": "${named.branch}"`);
     }
 
     // A shared name equal to another task's id resolves to the same wt-<name> path.
     if (!shared.length) continue;
-    const clash = members.find((t) => t.id === name && typeof t.isolation === "string");
+    const clash = members.find((t) => t.id === name && !isSharedTree(t));
     if (clash) {
       errors.push(
         `shared worktree "${name}" collides with task '${clash.id}', which has its own private ` +
@@ -701,44 +705,10 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
       }
     }
 
-    // isolation.from bases this tree on another task's branch — that task must be a
-    // declared dependency (so its branch exists by then), worktree-isolated, and able
-    // to WRITE: a read-only task commits nothing, so its worktree is reaped and the
-    // branch never exists. All three are silent wrong-base bugs otherwise.
-    const isoFrom = t.isolation && typeof t.isolation === "object" && !Array.isArray(t.isolation)
-      ? t.isolation.from : undefined;
-    if (isoFrom !== undefined) {
-      if (typeof isoFrom !== "string" || !isoFrom) {
-        errors.push(`${l}: isolation.from must be the id of a worktree-isolated dependency — e.g. { "worktree": "migrate-x", "from": "helper" }`);
-      } else if (!deps.has(isoFrom)) {
-        errors.push(`${l}: isolation.from '${isoFrom}' must be a declared dependency — add '${isoFrom}' to after, or its branch may not exist when this leaf starts`);
-      } else {
-        const src = rawTasks.find((o) => o.id === isoFrom);
-        if (src && resolveWorktreeName({ ...src, isolation: effectiveIsolation(src) }) === undefined) {
-          errors.push(
-            `${l}: isolation.from '${isoFrom}' has no worktree, so it has no branch to base on — ` +
-            `give '${isoFrom}' an isolation block, or drop from and branch from the repo instead`);
-        } else if (src && src.forEach !== undefined) {
-          errors.push(
-            `${l}: isolation.from '${isoFrom}' is a forEach task — its clones own the branches ` +
-            `('${isoFrom}[0]', '${isoFrom}[1]', …) and '${isoFrom}' itself never gets one. ` +
-            `Base on a single-tree task instead.`);
-        } else if (src && src.when !== undefined) {
-          errors.push(
-            `${l}: isolation.from '${isoFrom}' is when-gated — if its gate is false it is skipped ` +
-            `before its worktree exists, so the branch may never be created. Base on an ` +
-            `unconditional task, or move the gate onto this leaf too`);
-        } else if (src && !hasWriteTools(src.allowedTools || DEFAULT_TOOLS)) {
-          errors.push(
-            `${l}: isolation.from '${isoFrom}' has no write tools, so it commits nothing and its ` +
-            `branch will never exist — base from on the last task that WRITES, and pass ` +
-            `'${isoFrom}' findings to this leaf with {{result:${isoFrom}}} instead`);
-        }
-      }
-    }
-
     // Every branch an integrate node merges must exist by the time it runs, and
-    // must actually be a branch — same two failure modes as isolation.from.
+    // must actually be a branch. `integrate` is now the ONLY way to seed a tree from
+    // another task's commits — `isolation.from` is gone, so a branch-and-rejoin shape
+    // seeds each private tree with its own integrate node.
     if (t.integrate && typeof t.integrate === "object" && Array.isArray(t.integrate.from)) {
       for (const srcId of t.integrate.from) {
         if (typeof srcId !== "string" || !srcId) {
@@ -747,18 +717,16 @@ function validateTaskRelations(rawTasks, errors, label, { itemAllowed = false } 
           errors.push(`${l}: integrate.from '${srcId}' must be a declared dependency — add '${srcId}' to after, or its branch may not exist when the merge runs`);
         } else {
           const src = rawTasks.find((o) => o.id === srcId);
-          if (src && resolveWorktreeName({ ...src, isolation: effectiveIsolation(src) }) === undefined) {
-            errors.push(`${l}: integrate.from '${srcId}' has no worktree, so it has no branch to merge — give '${srcId}' an isolation block`);
+          if (src && resolveWorktreeName(src) === undefined) {
+            errors.push(
+              `${l}: integrate.from '${srcId}' has no write tools, so it commits nothing and owns no ` +
+              `branch to merge — merge the tasks that WRITE, and pass '${srcId}' findings to a leaf ` +
+              `with {{result:${srcId}}} instead`);
           } else if (src && src.when !== undefined) {
             errors.push(
               `${l}: integrate.from '${srcId}' is when-gated — if its gate is false it is skipped ` +
               `before its worktree exists, so there may be no branch to merge. Merge an ` +
               `unconditional task, or move the gate onto this node too`);
-          } else if (src && !hasWriteTools(src.allowedTools || DEFAULT_TOOLS)) {
-            errors.push(
-              `${l}: integrate.from '${srcId}' has no write tools, so it commits nothing and its ` +
-              `branch will never exist — merge the tasks that WRITE, and pass '${srcId}' findings ` +
-              `to a leaf with {{result:${srcId}}} instead`);
           }
         }
       }
@@ -892,15 +860,35 @@ function checkDenylist(model, l, cfg, errors) {
   }
 }
 
+// An empty roots list denies every cwd, so a provider that has never been given one is
+// UNCONFIGURED, not mis-located — naming the empty list it failed against teaches nothing.
+// The shipped config.default.json is exactly this case, so the first thing a new install
+// sees must be the way out of it rather than a bare denial.
+function unconfigured(provider, rootLabel) {
+  return `provider '${provider}' has no ${rootLabel} configured, and swarm runs nothing outside its ` +
+    `configured roots — so every task is refused. Run /swarm:swarm setup to choose the directory roots ` +
+    `swarm may work in, or add ${rootLabel} to ~/.swarm/config.json by hand.`;
+}
+// Every provider, Claude included — operator, 2026-09-21: allowedRoots is the single
+// statement of where swarm may run anything. The old `claude` early return made the roots
+// list a non-Anthropic policy, which left the Claude leaves that do the writing ungated.
 function checkGovernance(provider, model, effCwd, l, cfg, errors) {
-  if (provider === "claude") return;
-  const allowedRoots = providerConfig(cfg, provider).allowedRoots || [];
+  const configured = providerConfig(cfg, provider).allowedRoots;
+  const allowedRoots = configured || [];
   const rootLabel = cfg?.providers?.[provider] ? `providers.${provider}.allowedRoots` : "provider.allowedRoots";
+  // Absent, not merely empty: an explicit [] is a deliberate denial and keeps the
+  // data-governance wording, while a provider never given the key has nothing to say.
+  if (configured === undefined) {
+    errors.push(`${l}: ${unconfigured(provider, rootLabel)}`);
+    return;
+  }
   if (!allowedRoots.some((root) => isUnderRoot(effCwd, root))) {
     errors.push(
       `${l}: provider '${provider}' model '${model}' and its cwd '${effCwd}' is not under any ` +
-      `${rootLabel} entry — blocked by data governance policy (only Anthropic is covered ` +
-      `by the data agreement). Configure ${rootLabel} in ~/.swarm/config.json to permit this provider there.`
+      `${rootLabel} entry — ${provider === "claude"
+        ? `swarm runs nothing outside its configured roots`
+        : `blocked by data governance policy (only Anthropic is covered by the data agreement)`}. ` +
+      `Configure ${rootLabel} in ~/.swarm/config.json to permit this provider there.`
     );
   }
 }
@@ -957,10 +945,6 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     if (!tops.has(dir)) tops.set(dir, io.repoToplevel(dir));
     return tops.get(dir);
   };
-  // In-place reading is gated on the generic root list, not the per-provider one:
-  // "none" is about what may be read from the live checkout, Claude included.
-  const allowedRoots = cfg?.provider?.allowedRoots || [];
-
   return rawTasks.map((t) => {
     const l = label(t);
     const isCompute = t.compute !== undefined;
@@ -1034,56 +1018,29 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
         io.stdout(`leaf guard: ${guard.name} → ${guard.command}`);
       }
     }
-    // Compute and manifest nodes spawn no leaf, so there is nothing to isolate.
-    // Every other leaf gets a tree by default: readers share a snapshot of the repo,
-    // writers a private worktree, and "none" (read-only, under a root) opts out.
-    // The default is decided HERE, before worktreeName, so a synthesised private
-    // tree carries a name exactly as an explicit "worktree" does.
-    let isolation = (isCompute || isManifest) ? undefined : t.isolation;
-    let isolationMode;
+    // ONE derivation, for every leaf. A leaf that can write gets a tree; a leaf that
+    // cannot reads the live repo where it was pointed. There is no second branch for an
+    // explicitly-spelled tree, because there is no explicit spelling: that split is what
+    // left `isolationMode`, `branchScope` and `repoToplevel` unset on every hand-written
+    // `"isolation": "worktree"`, landing the leaf at its tree root instead of its depth.
     let repoToplevel;
     let branchScope;
-    if (!isCompute && !isManifest && !isIntegrate) {
-      if (t.isolation === "none") {
-        isolation = undefined;
-        isolationMode = "none";
-        if (hasWriteTools(t.allowedTools)) {
-          errors.push(
-            `${l}: isolation "none" is for read-only leaves — a leaf that can write always gets a worktree. ` +
-            `Drop "isolation" (or use "worktree"), or remove the write tools from allowedTools — e.g. "allowedTools": "Read,Grep,Glob"`);
-        }
-        if (allowedRoots.length && !allowedRoots.some((r) => isUnderRoot(originalCwd, r))) {
-          errors.push(
-            `${l}: isolation "none" reads cwd '${originalCwd}' in place, and it is not under any provider.allowedRoots entry — ` +
-            `point cwd under one of ${allowedRoots.join(", ")}, or drop "isolation": "none" to read a snapshot of the repo instead`);
-        }
-      } else if (t.isolation === undefined) {
-        const top = repoTop(originalCwd);
-        if (!top) {
-          errors.push(
-            `${l}: task cwd '${originalCwd}' is not inside a git repository, so it cannot get a worktree — ` +
-            `set "isolation": "none" to read it in place (read-only, under provider.allowedRoots), or point cwd into a repo`);
-        } else {
-          repoToplevel = top;
-          if (hasWriteTools(t.allowedTools)) {
-            isolationMode = "private";
-            isolation = "worktree";
-            // Run-scoped branch: a kept tree from an earlier run of this manifest must not block this one.
-            branchScope = snapshotKey(resultsDir);
-          } else {
-            isolationMode = "snapshot";
-          }
-        }
+    if (!isCompute && !isManifest && !isIntegrate && hasWriteTools(t.allowedTools)) {
+      const top = repoTop(originalCwd);
+      if (!top) {
+        errors.push(
+          `${l}: task cwd '${originalCwd}' is not inside a git repository, so it cannot get a worktree — ` +
+          `point cwd into a repo, or drop the write tools and read it in place (e.g. "allowedTools": "Read,Grep,Glob")`);
+      } else {
+        repoToplevel = top;
+        // Run-scoped branch: a kept tree from an earlier run of this manifest must not
+        // block this one. An explicit `branch` opts out by naming a stable one instead —
+        // that is what naming it means, so the author owns the collision.
+        if (!t.branch) branchScope = runScopeKey(resultsDir);
       }
     }
-    const worktreeName = isIntegrate ? t.integrate.into
-      : (isCompute || isManifest) ? undefined : resolveWorktreeName({ ...t, isolation });
-    const branchName = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
-      ? undefined : t.isolation.branch;
-    // `from` names a task; the tree bases on that task's BRANCH, resolved the
-    // same way its own prepareIsolation derives it.
-    const fromId = (isCompute || isManifest || !t.isolation || typeof t.isolation !== "object")
-      ? undefined : t.isolation.from;
+    const worktreeName = isIntegrate ? t.integrate.into : resolveWorktreeName(t);
+    const branchName = (isCompute || isManifest) ? undefined : t.branch;
     const whenBlock = t.when && typeof t.when === "object" && !Array.isArray(t.when)
       ? { when: { from: t.when.from, expr: t.when.expr } } : {};
     const forEachBlock = !isCompute && t.forEach && typeof t.forEach === "object" && !Array.isArray(t.forEach)
@@ -1102,14 +1059,12 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || DEFAULT_TOOLS,
       cwd: originalCwd,
       originalCwd,
-      isolation,
-      ...(isolationMode !== undefined && { isolationMode }),
-      ...(repoToplevel !== undefined && { repoToplevel, repoKey: snapshotKey(repoToplevel) }),
+      ...(repoToplevel !== undefined && { repoToplevel }),
       ...(branchScope !== undefined && { branchScope }),
+      ...(t.workspace !== undefined && { workspace: t.workspace }),
       ...(worktreeName !== undefined && { worktreeName }),
       ...(isIntegrate && { integrate: { into: t.integrate.into, from: [...t.integrate.from] } }),
       ...(branchName !== undefined && { branchName }),
-      ...(fromId !== undefined && { from: fromId }),
       outputDir: t.outputDir ? resolve(cwd, t.outputDir) : undefined,
       timeoutMs: t.timeoutMs ?? defaultTimeoutMs,
       after: [...(t.after || [])],
@@ -1243,11 +1198,6 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
       `swarm: '${cwd}' is not inside a git repository, so this run has no project to be filed under. Run from the repo the work belongs to and pass the manifest by absolute path: cd <repo>; swarm run "<abs manifest path>"`,
     ]);
   }
-  const allowedRoots = cfg.provider?.allowedRoots;
-  if (Array.isArray(allowedRoots) && allowedRoots.length && !allowedRoots.some((r) => isUnderRoot(toplevel, r))) {
-    errors.push(`swarm: this run's repo '${toplevel}' is not under any provider.allowedRoots entry — dispatch from a repo under ${allowedRoots.join(", ")}, or add its root to provider.allowedRoots in ~/.swarm/config.json`);
-  }
-
   const resultsDir = raw.resultsDir
     ? resolve(cwd, raw.resultsDir)
     : defaultResultsDir(manifestPath, toplevel, argsFingerprint(args));
@@ -1270,6 +1220,26 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
 
   const cycle = detectCycle(raw.tasks.filter((t) => t.id));
   if (cycle) errors.push(`dependency cycle detected: ${cycle.join(" -> ")}`);
+
+  // The run's repo must sit under the roots of some provider this manifest seats — the
+  // union, since the per-task gate refuses each out-of-bounds task individually. Runs BEFORE
+  // normalizeTasks, which probes a project's configured preToolUse hook with cwd in this
+  // repo: a gate after that has already executed an operator command in the repo it refuses.
+  // Seats come from the raw tasks for the same reason; a child manifest's own providers are
+  // therefore not in the union, which can only refuse a run the parent's seats would allow.
+  const seated = [...new Set(raw.tasks.flatMap((t) => [t?.provider, t?.fallbackProvider]).filter(Boolean))].sort();
+  // An agentless-only manifest seats nobody, yet an integrate node still merges into this
+  // repo — so it is judged against every configured provider's roots rather than none.
+  const gateIds = seated.length ? seated : Object.keys(cfg.providers || {}).sort();
+  const gateRoots = [...new Set(gateIds.flatMap((id) => providerConfig(cfg, id).allowedRoots || []))];
+  if (gateRoots.length && !gateRoots.some((root) => isUnderRoot(toplevel, root))) {
+    errors.push(
+      `swarm: this run's repo '${toplevel}' is not under any allowedRoots entry for the providers it seats ` +
+      `(${gateIds.join(", ")}) — dispatch from a repo under ${gateRoots.join(", ")}, or add its root to ` +
+      `${gateIds.map((id) => `providers.${id}.allowedRoots`).join(" / ")} in ~/.swarm/config.json`
+    );
+    throw new ValidationError(errors);
+  }
 
   const childPlans = new Map();
   for (const t of raw.tasks) {
@@ -1340,9 +1310,8 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     tasks,
     digest,
     goal: raw.goal || "",
-    // The dispatching repo: the read-only digest snapshots it.
+    // The dispatching repo, which the run is filed under.
     repoToplevel: toplevel,
-    repoKey: snapshotKey(toplevel),
     ...(args && Object.keys(args).length && { args }),
     ...(ref && { ref }),
     ...(warnings.length && { warnings }),
@@ -1357,11 +1326,10 @@ export function effectivePlanDoc(plan) {
   const strip = (t) => {
     const o = { id: t.id, model: t.model };
     if (t.prompt) o.prompt = t.prompt;
-    // Record what the author wrote: a synthesised private tree is not authored, and "none" was
-    // normalised away.
-    const isolation = t.isolationMode === "none" ? "none" : t.isolationMode === "private" ? undefined : t.isolation;
-    t = { ...t, isolation };
-    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "isolation", "outputDir", "mustRead", "contextWindow"]) {
+    // `workspace` and `branch` are recorded as authored — a derived tree is not authored,
+    // and there is no longer any normalised form to project back.
+    if (t.branchName !== undefined) o.branch = t.branchName;
+    for (const k of ["provider", "fallbackModel", "fallbackProvider", "effort", "allowedTools", "after", "when", "forEach", "compute", "returns", "verifyCitations", "workspace", "outputDir", "mustRead", "contextWindow"]) {
       if (t[k] !== undefined && t[k] !== "" && !(Array.isArray(t[k]) && t[k].length === 0)) o[k] = t[k];
     }
     if (t.childPlan) o.child = t.childPlan.tasks.map(strip);

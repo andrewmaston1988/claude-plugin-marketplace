@@ -12,7 +12,7 @@ import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from 
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary, readSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
-  renderProvenance, touchHeartbeat, stopPath, recordedSessionRecords, recordedSnapshots, heartbeatPath, transcriptPath,
+  renderProvenance, touchHeartbeat, stopPath, recordedSessionRecords, heartbeatPath, transcriptPath,
 } from "./results.mjs";
 import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
@@ -608,10 +608,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // plans — resolveWorktreeName covers both rather than silently skipping isolation.
   const nameOf = resolveWorktreeName;
 
-  // The branch a task id resolves to, for `isolation.from` and `integrate.from`.
-  // Both ask the same question, so both ask it here — the id may name a task
-  // whose worktree name differs from it, or (defensively) no task at all.
+  // The branch a task id resolves to, for `integrate.from`. An integrate node is
+  // `after` its sources, so their branches are recorded facts by then — re-deriving
+  // the name is how a tree adopted under another node's name got merged as a ref
+  // nobody created. The fallback survives only for a source that recorded nothing.
   const branchOf = (srcId) => {
+    const recorded = readResult(plan.resultsDir, srcId)?.worktree?.branch;
+    if (recorded) return recorded;
     const src = tasks.find((o) => o.id === srcId);
     return worktree.branchNameFor(
       src ? { ...src, worktreeName: nameOf(src) ?? src.id } : { id: srcId }, cfg);
@@ -856,39 +859,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   }, heartbeatMs);
   if (heartbeat.unref) heartbeat.unref();
 
-  // repoKey -> { sha, tree, repo }: the snapshot trees this run owns, removed in the finally.
-  const snaps = new Map();
   // The try (not re-indented, to keep the diff readable) closes after the stopped sweep. Its
-  // finally owns the heartbeat, the signal handlers and the snapshot trees on every exit path.
+  // finally owns the heartbeat and the signal handlers on every exit path.
   try {
-  // Run-start snapshot pass: every snapshot-mode leaf in the static leaf view, before anything
-  // spawns. Ask mode launches into the recorded cwd, so it does no snapshot work.
-  const snapLeaves = ask ? [] : leafView.filter((t) => t.isolationMode === "snapshot" && !cachedIds.has(t.id));
-  if (snapLeaves.length) {
-    const runKey = defaultWorktree.snapshotKey(plan.resultsDir);
-    const recorded = force ? new Map() : recordedSnapshots(plan.resultsDir);
-    const repos = new Map(snapLeaves.map((t) => [t.repoKey, t.repoToplevel]));
-    for (const [repoKey, repo] of repos) {
-      try {
-        touchHeartbeat(plan.resultsDir, new Date().toISOString(), process.pid);
-        let sha = recorded.get(repoKey)?.sha;
-        if (!sha) {
-          const snap = defaultWorktree.snapshotCommit(repo, { resultsDir: plan.resultsDir, runKey, repoKey, label: basename(plan.resultsDir) });
-          sha = snap.sha;
-          appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), event: "snapshot", repo, repoKey, runKey, sha, clean: snap.clean });
-        }
-        touchHeartbeat(plan.resultsDir, new Date().toISOString(), process.pid);
-        const tree = defaultWorktree.prepareSnapshotTree(repo, sha, plan.resultsDir, repoKey);
-        snaps.set(repoKey, { sha, tree, repo });
-      } catch (e) {
-        const reason = `snapshot failed for ${repo}: ${e.message} — fix the repo state git reported, or re-run with --force to take a fresh snapshot`;
-        appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), event: "run-refused", reason });
-        // No summary and no heartbeat: liveness reads the run as aborted at once, so a re-run is not refused.
-        rmSync(heartbeatPath(plan.resultsDir), { force: true });
-        throw new Error(reason);
-      }
-    }
-  }
 
   const depsSatisfied = (t) => t.after.every((d) => OK_STATES.has(state.get(d)));
   const depsDoomed = (t) => t.after.some((d) => {
@@ -1211,28 +1184,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
 
       let wt = null;
       let taskCwd = task.cwd;
-      if (task.isolationMode === "snapshot") {
-        try {
-          taskCwd = defaultWorktree.snapshotCwd(snaps.get(task.repoKey).tree, task.repoToplevel, task.originalCwd);
-        } catch (e) {
-          const result = { id: task.id, model: task.model, ok: false, exit: null, durationMs: 0, output: `worktree setup failed: ${e.message}` };
-          writeResult(plan.resultsDir, task.id, result);
-          record(task, "failed", 0);
-          return task.id;
-        }
-      }
       const wtName = nameOf(task);
       if (wtName !== undefined) {
         try {
-          // `from` names a task; base this tree on THAT task's branch, derived
-          // the same way its own isolation did (explicit branch, else prefix+name).
-          const baseRef = task.from ? branchOf(task.from) : undefined;
-          wt = worktree.prepareIsolation({ ...task, worktreeName: wtName, baseRef }, cfg, plan.resultsDir, {
+          wt = worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
             reset: force && groupFirst.get(wtName) === task.id,
           });
-          taskCwd = task.isolationMode === "private"
-            ? defaultWorktree.snapshotCwd(wt.path, task.repoToplevel, task.originalCwd)
-            : wt.path;
+          // Every tree-holding leaf sits at its declared depth. Unconditionally: the old
+          // mode test skipped this for a hand-written tree and landed it at the root.
+          taskCwd = defaultWorktree.treeCwd(wt.path, task.repoToplevel, task.originalCwd);
           if (wt.reused) appendRunLog(plan.resultsDir, {
             ts: new Date().toISOString(), event: "worktree-resume", id: task.id,
             reset: force, session: resumeId ? "resumed" : "fresh",
@@ -1312,12 +1272,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       }
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
-      if (task.isolationMode) result.isolationMode = task.isolationMode;
-      if (task.isolationMode === "snapshot") {
-        result.repoKey = task.repoKey;
-        result.repoToplevel = task.repoToplevel;
-        result.snapshotSha = snaps.get(task.repoKey).sha;
-      }
+      if (task.repoToplevel) result.repoToplevel = task.repoToplevel;
       result.allowedTools = task.allowedTools;
 
       // returns-validation failures are semantic — the leaf itself ran fine.
@@ -1572,12 +1527,6 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     clearInterval(heartbeat);
     process.off("SIGINT", sigintHandler);
     process.off("SIGTERM", sigtermHandler);
-    // Best-effort: the ref stays (swarm ask re-creates the tree), and a tree that survives is prune's.
-    for (const s of snaps.values()) {
-      if (!defaultWorktree.removeSnapshotTree(s.tree, s.repo)) {
-        io.stdout(`⚠ snapshot tree ${s.tree} could not be removed — swarm prune ${plan.resultsDir} clears it`);
-      }
-    }
   }
 
   // Ask mode changes exactly one row of a run the engine already finished: the

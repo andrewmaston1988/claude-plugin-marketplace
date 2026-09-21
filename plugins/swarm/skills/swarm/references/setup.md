@@ -48,13 +48,16 @@ to the plugin root, then run the engine under `scripts/` with the single argumen
 Never glob the plugin cache and never sort sha directories by name — that is the exact bug this
 whole command exists to remove, and it silently picks a stale build.
 
-### Stage 1 — where alternative models may run (`providers.<name>.allowedRoots`)
+### Stage 1 — where swarm may run at all (`providers.<name>.allowedRoots`)
 
-Swarm can dispatch leaves to non-Anthropic models through enabled provider adapters. Code
-under a provider's listed root may be sent to that provider; anything else fails validation,
-because the operator's data agreement may cover Anthropic only. Empty means Claude-only —
-swarm still works, the alternative tier never arms. Ask which roots, if any, are cleared to
-leave. Do not suggest a root; the operator names it.
+**Every provider is gated, Claude included, and an empty list permits nothing.** Code under a
+provider's listed root may be dispatched to it; anything else fails validation. For a
+non-Anthropic provider the reason is the data agreement, which may cover Anthropic only. For
+Claude it is containment: swarm runs nothing outside its configured roots.
+
+So this stage is not optional and has no Claude-only fallback — **a provider with no roots
+dispatches nothing**. Ask which roots are cleared for each enabled provider, and set `claude`'s
+too or swarm will refuse every leaf. Do not suggest a root; the operator names it.
 
 ### Stage 1b — enable provider capabilities (`providers.<name>.*`)
 
@@ -202,7 +205,7 @@ from the appendix. If no, close.
 
 | Key | Default | What it does |
 |---|---|---|
-| `providers.<name>.allowedRoots` | `[]` | Stage 1; roots are provider-specific. |
+| `providers.<name>.allowedRoots` | `[]` | Stage 1; roots are provider-specific, and an empty list dispatches nothing — `claude` needs one too. |
 | `providers.ollama.url` | `http://localhost:11434` | Ollama endpoint the `:cloud` leaves talk to; pinged before an Ollama run, unreachable = refuse. |
 | `providers.ollama.mode` | `env` | `env` = plain `claude -p` with the Ollama endpoint and model injected; `launch` = shell out through `launchCmd`. |
 | `providers.ollama.launchCmd` | `ollama launch claude --model {model} -- {args}` | Only in `launch` mode. |
@@ -250,4 +253,4 @@ from the appendix. If no, close.
 - **Editing `config.default.json`** — lost on the next plugin update. Only `~/.swarm/config.json` persists.
 - **Setting a key from a remark** ("I suppose C:/code is fine") — ask, then write what the operator said.
 - **Skipping `config init` after a plugin update** — new keys stay invisible; the engine still uses their defaults, but the operator never sees them.
-- **Adding a root to `allowedRoots` that is not cleared to leave** — the gate exists for the data agreement; explain that before asking.
+- **Adding a root to `allowedRoots` that is not cleared to leave** — for a non-Anthropic provider the gate exists for the data agreement; explain that before asking.

@@ -35,7 +35,7 @@ function sanitiseRef(name) {
     .replace(/(\.lock|\.)$/, "-");
 }
 
-// The one rule for a task's branch name: an explicit `isolation.branch` wins,
+// The one rule for a task's branch name: an explicit `branch` wins,
 // else the worktree name under the configured prefix (and the run's `branchScope`
 // for a default-private tree). Exported so the scheduler resolves `from` /
 // `integrate` sources the same way prepareIsolation creates them — three copies
@@ -77,13 +77,9 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
   // branch instead of repo HEAD — otherwise it starts without the code it
   // depends on. `wt.head` follows the base, so "did this leaf change anything"
   // stays a question about THIS leaf's work.
-  const baseRef = task.baseRef || "HEAD";
-  const head = git(["rev-parse", baseRef], repo, { timeout: 60000 });
+  const head = git(["rev-parse", "HEAD"], repo, { timeout: 60000 });
   if (head.status !== 0) {
-    throw new Error(task.baseRef
-      ? `cannot resolve base '${baseRef}' in ${repo} for task '${task.id}': ${head.stderr || "no such ref"} — ` +
-        `isolation.from names a task whose branch must exist by the time this leaf runs`
-      : `cannot resolve HEAD in ${repo}: ${head.stderr || "not a git repo?"}`);
+    throw new Error(`cannot resolve HEAD in ${repo}: ${head.stderr || "not a git repo?"}`);
   }
 
   if (isRegisteredWorktree(path, repo)) {
@@ -95,10 +91,14 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     // A follower starts from what its predecessor left, so its own collect()
     // diffstat covers its work alone rather than the whole chain's.
     const treeHead = git(["rev-parse", "HEAD"], path, { timeout: 60000 });
+    // Re-entering a tree adopts its ref: `branch` is only the name this task would
+    // have used had it created the tree, and a tree seeded by another node is on
+    // that node's ref instead.
+    const on = git(["rev-parse", "--abbrev-ref", "HEAD"], path, { timeout: 60000 });
+    const reused = on.status === 0 && on.stdout && on.stdout !== "HEAD" ? on.stdout : branch;
     return {
-      path, branch, name, repo, reused: true,
+      path, branch: reused, name, repo, reused: true,
       head: (!reset && treeHead.status === 0) ? treeHead.stdout : head.stdout,
-      ...(task.baseRef && { baseRef: task.baseRef }),
     };
   }
 
@@ -120,7 +120,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     throw new Error(`git worktree add failed for '${task.id}': ${add.stderr}`);
   }
 
-  return { path, branch, name, head: head.stdout, repo, reused: false, ...(task.baseRef && { baseRef: task.baseRef }) };
+  return { path, branch, name, head: head.stdout, repo, reused: false };
 }
 
 // Collect after the leaf ran: unchanged worktrees are removed (and their
@@ -142,13 +142,11 @@ export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSou
   const changed = status.stdout !== "" || (headNow.status === 0 && headNow.stdout !== wt.head);
 
   // Destroy only a tree that carries nothing: a leaf changing nothing of its OWN
-  // may still sit on a branch holding earlier phases' commits, and `branch -D`
-  // would take them with it. `isChainFollower` only sees THIS plan's group, so
-  // ask git as well — measured against the tree's own base, since a `from`-based
-  // tree inherits its dependency's commits at birth.
+  // may still sit on a branch holding earlier phases' commits (or an integrate node's
+  // merges), and `branch -D` would take them with it. `isChainFollower` only sees THIS
+  // plan's group, so ask git as well.
   const repoHead = git(["rev-parse", "HEAD"], wt.repo, { timeout: 60000 });
-  const base = wt.baseRef ? wt.head : repoHead.stdout;
-  const carriesWork = repoHead.status !== 0 || unlandedCount(base, wt.branch, wt.repo) > 0;
+  const carriesWork = repoHead.status !== 0 || unlandedCount(repoHead.stdout, wt.branch, wt.repo) > 0;
 
   if (!changed && !(wt.reused && isChainFollower) && !carriesWork) {
     git(["worktree", "remove", "--force", wt.path], wt.repo, { timeout: 60000 });
@@ -202,102 +200,30 @@ export function integrate(task, cfg, resultsDir, { repo: repoOverride } = {}) {
   return { path: wt.path, branch: wt.branch, name: wt.name, repo, merged, conflicts };
 }
 
-// ---- Snapshot trees: one frozen, detached copy of a repo per run, shared by its read-only leaves.
-
-// Ten minutes: a 60 s kill mid-checkout leaves a locked, half-populated tree. Written as a product
-// because config.test.mjs forbids the bare millisecond literal under src/.
-const SNAPSHOT_TIMEOUT = 10 * 60 * 1000;
-// Keeps the snapshot independent of the operator's identity and signing config.
-const SNAPSHOT_IDENTITY = ["-c", "user.name=swarm", "-c", "user.email=swarm@localhost", "-c", "commit.gpgsign=false"];
+// ---- Run scoping and cwd depth: what survives the snapshot tree's removal.
 
 // 12 hex of sha1 over the resolved path: ref-safe whatever the path holds, short under a long
-// Windows run home, and (unlike the encoded run-home name) collision-free.
-export function snapshotKey(s) {
+// Windows run home, and (unlike the encoded run-home name) collision-free. Scopes a derived
+// branch to its run so a kept tree from an earlier run of the same manifest cannot block it.
+export function runScopeKey(s) {
   const p = resolve(s);
   return createHash("sha1").update(process.platform === "win32" ? p.toLowerCase() : p).digest("hex").slice(0, 12);
 }
 
-function must(r, step, repo) {
-  if (r.status !== 0) throw new Error(`cannot snapshot ${repo}: ${step} failed: ${r.stderr || r.stdout || "no output"}`);
-  return r.stdout;
-}
-
-// A commit whose tree is the working tree as it stands (HEAD + uncommitted + untracked-not-ignored),
-// built through a COPY of the index so the operator's index and files are untouched. A clean tree
-// snapshots as HEAD itself. Pinned by refs/swarm/snapshots/<runKey>/<repoKey> so it outlives the tree.
-export function snapshotCommit(repo, { resultsDir, runKey, repoKey, label, _git = git }) {
-  const idx = join(resultsDir, `snapshot-${repoKey}.index`);
-  const scrub = () => {
-    rmSync(idx, { force: true });
-    rmSync(idx + ".lock", { force: true });
-  };
-  const g = (args, opts = {}) => _git(args, repo, { timeout: SNAPSHOT_TIMEOUT, ...opts });
-  scrub();
-  try {
-    const head = g(["rev-parse", "HEAD"]);
-    if (head.status !== 0) {
-      throw new Error(`cannot snapshot ${repo}: it has no commits yet — commit once, or give the task isolation: "worktree"`);
-    }
-    // --git-path is relative to the git cwd and worktree-aware (a linked worktree's .git is a file).
-    const realIdx = resolve(repo, must(g(["rev-parse", "--git-path", "index"]), "rev-parse --git-path index", repo));
-    // Copying (not read-tree HEAD) keeps the stat cache and skip-worktree bits.
-    if (existsSync(realIdx)) copyFileSync(realIdx, idx);
-    const env = { GIT_INDEX_FILE: idx };
-    must(g(["add", "-A"], { env }), "add -A", repo);
-    const tree = must(g(["write-tree"], { env }), "write-tree", repo);
-    const headTree = must(g(["rev-parse", "HEAD^{tree}"]), "rev-parse HEAD^{tree}", repo);
-    const clean = tree === headTree;
-    const sha = clean
-      ? head.stdout
-      : must(g([...SNAPSHOT_IDENTITY, "commit-tree", tree, "-p", head.stdout, "-m", `swarm snapshot ${label}`]), "commit-tree", repo);
-    must(g(["update-ref", `refs/swarm/snapshots/${runKey}/${repoKey}`, sha]), "update-ref", repo);
-    return { sha, clean };
-  } finally {
-    scrub();
-  }
-}
-
-// Remove an engine-owned snapshot tree, however it died. A timed-out `worktree add` leaves the tree
-// registered and locked; `remove --force` refuses it, `remove -f -f` does not. Never throws.
-// True when `path` is gone afterwards.
-export function removeSnapshotTree(path, repo, { _git = git } = {}) {
-  const g = (args) => _git(args, repo, { timeout: 60000 });
-  try { g(["worktree", "remove", "-f", "-f", path]); } catch { /* exit is ignored */ }
-  try { rmSync(path, { recursive: true, force: true }); } catch { /* held open on Windows */ }
-  try { g(["worktree", "prune"]); } catch { /* best effort */ }
-  return !existsSync(path);
-}
-
-// The tree's path is a pure function of run and repo (never the SHA): a resumed leaf runs
-// `claude --resume`, which finds its session by cwd.
-export function prepareSnapshotTree(repo, sha, resultsDir, repoKey, { _git = git } = {}) {
-  const path = resolve(resultsDir, "wt-snapshot-" + repoKey);
-  const g = (args, cwd, opts = {}) => _git(args, cwd, { timeout: SNAPSHOT_TIMEOUT, ...opts });
-
-  if (g(["cat-file", "-e", `${sha}^{commit}`], repo).status !== 0) {
-    throw new Error(`snapshot ${sha} no longer exists in ${repo} — its ref was pruned`);
-  }
-  if (isRegisteredWorktree(path, repo)) {
-    const at = g(["rev-parse", "HEAD"], path);
-    const dirty = g(["status", "--porcelain"], path);
-    if (at.status === 0 && at.stdout === sha && dirty.status === 0 && dirty.stdout === "") return path;
-    removeSnapshotTree(path, repo, { _git });
-  }
-  const add = g(["-c", "core.longpaths=true", "worktree", "add", "--detach", path, sha], repo,
-    { env: { GIT_LFS_SKIP_SMUDGE: "1" } });
-  if (add.status !== 0) {
-    removeSnapshotTree(path, repo, { _git });
-    throw new Error(`git worktree add of snapshot ${sha} failed in ${repo}: ${add.stderr || "timed out"}`);
-  }
-  return path;
-}
-
-// The leaf sits at the same depth in the tree as in the live checkout, so cwd-relative prompt paths
-// still resolve. Created empty when absent (a gitignored directory is never captured).
-export function snapshotCwd(tree, repoToplevel, originalCwd) {
+// The leaf sits at the same depth in its tree as in the live checkout, so cwd-relative prompt
+// paths still resolve. This is every WRITER's cwd mapper, not a snapshot detail: without it a
+// leaf that declared a subdirectory lands at the tree root instead.
+//
+// The mkdir is load-bearing for the same reason. A writer whose declared cwd is gitignored
+// (build/, .claude/worktrees/x) has no such directory in the tree and cannot spawn without it.
+export function treeCwd(tree, repoToplevel, originalCwd) {
+  // No repo recorded means no depth to preserve, so the tree root IS the leaf's cwd. Only a
+  // hand-built plan reaches this: normalisation sets repoToplevel on every writer, which is
+  // what stops a real writer silently landing at its root.
+  if (!repoToplevel) return tree;
   const rel = relative(repoToplevel, originalCwd);
   if (rel === ".." || rel.startsWith("../") || rel.startsWith("..\\") || isAbsolute(rel)) {
-    throw new Error(`cwd ${originalCwd} is outside its repo ${repoToplevel} — a snapshot-mode task must sit inside its repoToplevel`);
+    throw new Error(`cwd ${originalCwd} is outside its repo ${repoToplevel} — a task with a tree must sit inside its repoToplevel`);
   }
   const p = join(tree, rel);
   mkdirSync(p, { recursive: true });

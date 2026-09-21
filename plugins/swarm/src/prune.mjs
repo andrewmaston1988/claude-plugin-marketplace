@@ -49,7 +49,10 @@ export function registeredUnder(git, repo, resultsDir) {
   return rows.filter((r) => (r.path + sep).startsWith(prefix) || r.path.startsWith(prefix));
 }
 
-// `run`: { live, repo, resultsDir, worktreesKept: [{ branch, path, repo? }] }.
+// `run`: { live, repos: [string], resultsDir, worktreesKept: [{ branch, path, repo }] }.
+// A run may span several repos, so every kept tree carries its OWN repo and `repos`
+// is the set to sweep for orphans the summary never recorded — never one scalar,
+// which attributed every tree to whichever repo resolved first.
 // `live` short-circuits before any git/fs call — a live run is never inspected,
 // only refused, so the cost of asking must be zero.
 export function plan(run, git, fs) {
@@ -59,15 +62,15 @@ export function plan(run, git, fs) {
   const seen = new Set();
   for (const wt of run.worktreesKept || []) {
     if (!fs.existsSync(wt.path)) continue; // already gone from disk — not a row to plan or report
-    const repo = wt.repo || run.repo;
-    rows.push({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo });
+    rows.push({ path: wt.path, branch: wt.branch, bytes: dirSize(fs, wt.path), repo: wt.repo });
     seen.add(resolve(wt.path));
   }
 
-  if (fs.existsSync(run.repo)) {
-    for (const reg of registeredUnder(git, run.repo, run.resultsDir)) {
+  for (const repo of run.repos || []) {
+    if (!fs.existsSync(repo)) continue;
+    for (const reg of registeredUnder(git, repo, run.resultsDir)) {
       if (seen.has(reg.path)) continue;
-      rows.push({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo: run.repo });
+      rows.push({ path: reg.path, branch: reg.branch, bytes: dirSize(fs, reg.path), repo });
       seen.add(reg.path);
     }
   }
@@ -83,7 +86,7 @@ export function execute(rows, git, fs) {
       fs.rmSync(row.path, { recursive: true, force: true });
       continue;
     }
-    // A detached snapshot tree has no branch, and may be left locked by a killed `worktree add`.
+    // A detached tree has no branch, and may be left locked by a killed `worktree add`.
     if (row.branch) {
       git(["worktree", "remove", "--force", row.path], row.repo);
       git(["branch", "-D", row.branch], row.repo);
@@ -93,22 +96,12 @@ export function execute(rows, git, fs) {
   }
 }
 
-// The refs a run's snapshots pinned in `repo`. They can hold untracked secrets, so prune deletes them.
-export function snapshotRefs(git, repo, runKey) {
-  const r = git(["for-each-ref", "--format=%(refname)", `refs/swarm/snapshots/${runKey}/`], repo);
-  return r.status === 0 ? r.stdout.split("\n").map((s) => s.trim()).filter(Boolean) : [];
-}
-
-export function deleteSnapshotRefs(git, repo, refs) {
-  for (const ref of refs) git(["update-ref", "-d", ref], repo);
-}
-
 function gb(bytes) {
   return (bytes / 1024 ** 3).toFixed(2);
 }
 
 export function formatPrune(rows, { dryRun = false } = {}) {
-  const lines = rows.map((r) => `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached snapshot)"}`);
+  const lines = rows.map((r) => `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached)"}`);
   const total = rows.reduce((s, r) => s + r.bytes, 0);
   const verb = dryRun ? "would free" : "freed";
   lines.push(`${verb} ${gb(total)} GB across ${rows.length} worktree${rows.length === 1 ? "" : "s"}`);

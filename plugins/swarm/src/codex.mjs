@@ -324,7 +324,7 @@ function writeEffortArg(args, effort) {
 
 function writeSandboxArg(args, task, context) {
   const cfg = providerConfig(context?.config || context?.cfg || {}, "codex");
-  const writeCapable = task.write === true || task.writeCapable === true || task.isolation ||
+  const writeCapable = task.write === true || task.writeCapable === true || task.worktreeName ||
     /(?:^|,)(?:Write|Edit|Bash)(?:,|$)/.test(String(task.allowedTools || ""));
   const sandbox = task.sandbox || (writeCapable ? (cfg.sandbox || "workspace-write") : "read-only");
   if (!["read-only", "workspace-write"].includes(sandbox)) {

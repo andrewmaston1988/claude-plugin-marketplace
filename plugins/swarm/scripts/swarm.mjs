@@ -12,10 +12,10 @@ import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat, recordedSnapshots } from "../src/results.mjs";
+import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, snapshotRefs, deleteSnapshotRefs } from "../src/prune.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim } from "../src/ui.mjs";
 
@@ -502,12 +502,15 @@ function makeGit(spawnSync) {
 // Once every kept worktree is gone there is nothing left to ask for the repo —
 // manifest.json's cwd (the invoking process's cwd at dispatch) is the only
 // surviving record of it.
-function repoFromManifest(fs, dir) {
+// Every cwd the manifest named, not just the top-level one — a manifest may place
+// tasks in different repos, and a killed run's only record of the second is here.
+function reposFromManifest(fs, dir) {
   try {
     const m = JSON.parse(fs.readFileSync(join(dir, "manifest.json"), "utf8"));
-    return typeof m.cwd === "string" ? m.cwd : null;
+    const cwds = [m.cwd, ...(Array.isArray(m.tasks) ? m.tasks.map((t) => t?.cwd) : [])];
+    return cwds.filter((c) => typeof c === "string" && c);
   } catch {
-    return null;
+    return [];
   }
 }
 
@@ -529,10 +532,13 @@ async function recordDeadEngineStop(dir) {
 
   const fs = await import("node:fs");
   const { spawnSync } = await import("node:child_process");
-  const repo = repoFromManifest(fs, dir);
-  const worktreesKept = repo && fs.existsSync(repo)
-    ? registeredUnder(makeGit(spawnSync), repo, dir).filter((r) => r.branch).map((r) => ({ name: basename(r.path), branch: r.branch, path: r.path }))
-    : [];
+  // Every repo the manifest named, not just the first: a run spanning two repos
+  // leaves trees in both, and a dead engine is the only chance to record them.
+  const git = makeGit(spawnSync);
+  const worktreesKept = reposFromManifest(fs, dir)
+    .filter((repo) => fs.existsSync(repo))
+    .flatMap((repo) => registeredUnder(git, repo, dir).filter((r) => r.branch)
+      .map((r) => ({ name: basename(r.path), branch: r.branch, path: r.path })));
 
   const summary = {
     started: run.startedMs ? new Date(run.startedMs).toISOString() : new Date().toISOString(),
@@ -613,39 +619,24 @@ async function cmdPrune(rest) {
   const hadSummary = fs.existsSync(summaryFile);
   const summary = hadSummary ? JSON.parse(fs.readFileSync(summaryFile, "utf8")) : null;
   const worktreesKept = Array.isArray(summary?.worktreesKept) ? summary.worktreesKept : [];
-  // Snapshot repos and run keys come from the run's own log: the refs live in each repo the run
-  // snapshotted, which need not be the manifest's cwd.
-  const snapshots = new Map();
-  for (const e of recordedSnapshots(dir).values()) snapshots.set(`${e.repo}|${e.runKey}`, e);
-  const snapEntries = [...snapshots.values()].filter((e) => fs.existsSync(e.repo));
-
-  const repo = worktreesKept.map((wt) => repoOfWorktree(spawnSync, wt.path)).find(Boolean)
-    || repoFromManifest(fs, dir)
-    || snapEntries[0]?.repo;
-  if (!repo) {
+  // Resolve each tree's own repo: one scalar attributed a second repo's tree to the
+  // first and `git worktree remove` then silently failed against the wrong cwd.
+  const keptWithRepo = worktreesKept.map((wt) => ({ ...wt, repo: wt.repo || repoOfWorktree(spawnSync, wt.path) }));
+  const repos = [...new Set([...keptWithRepo.map((wt) => wt.repo), ...reposFromManifest(fs, dir)].filter(Boolean))];
+  if (!repos.length) {
     err(`swarm: could not resolve the repo for ${dir} — no kept worktree survives and manifest.json has no cwd.`);
     return 1;
   }
   const git = makeGit(spawnSync);
 
-  const { rows } = planPrune({ live: false, repo, resultsDir: dir, worktreesKept }, git, fs);
-  const seenRepos = new Set([resolve(repo)]);
-  for (const e of snapEntries) {
-    if (seenRepos.has(resolve(e.repo))) continue;
-    seenRepos.add(resolve(e.repo));
-    rows.push(...planPrune({ live: false, repo: e.repo, resultsDir: dir, worktreesKept: [] }, git, fs).rows);
-  }
-  // Refs go before either "nothing to do" exit: a run that ended normally has no tree left but keeps them.
-  const refs = snapEntries.flatMap((e) => snapshotRefs(git, e.repo, e.runKey).map((ref) => ({ repo: e.repo, ref })));
-  if (!rows.length && !refs.length) {
+  const { rows } = planPrune({ live: false, repos, resultsDir: dir, worktreesKept: keptWithRepo }, git, fs);
+  if (!rows.length) {
     out(`swarm: ${dir} has no kept worktrees — nothing to prune.`);
     return 0;
   }
-  if (rows.length) out(formatPrune(rows, { dryRun }));
-  for (const r of refs) out(`  ${r.ref}  (snapshot ref)`);
+  out(formatPrune(rows, { dryRun }));
   if (!dryRun) {
     executePrune(rows, git, fs);
-    for (const e of snapEntries) deleteSnapshotRefs(git, e.repo, refs.filter((r) => r.repo === e.repo).map((r) => r.ref));
     // survivors: whatever wasn't just removed and wasn't already gone before we started
     if (hadSummary) writeSummary(dir, { ...summary, worktreesKept: worktreesKept.filter((wt) => fs.existsSync(wt.path)) });
   }
