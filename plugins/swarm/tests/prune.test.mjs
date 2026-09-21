@@ -134,4 +134,5 @@ test("execute: a branchless snapshot row is removed with -f -f and never gets a 
 test("formatPrune labels a branchless row", () => {
   const out = formatPrune([{ path: "/r/wt-a", branch: null, repo: "/repo", bytes: 0 }]);
   ok(/wt-a/.test(out), out);
+  ok(out.includes("(detached)") && !/snapshot/.test(out), out);
 });

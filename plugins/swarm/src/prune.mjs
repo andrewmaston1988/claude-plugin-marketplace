@@ -86,7 +86,7 @@ export function execute(rows, git, fs) {
       fs.rmSync(row.path, { recursive: true, force: true });
       continue;
     }
-    // A detached snapshot tree has no branch, and may be left locked by a killed `worktree add`.
+    // A detached tree has no branch, and may be left locked by a killed `worktree add`.
     if (row.branch) {
       git(["worktree", "remove", "--force", row.path], row.repo);
       git(["branch", "-D", row.branch], row.repo);
@@ -101,7 +101,7 @@ function gb(bytes) {
 }
 
 export function formatPrune(rows, { dryRun = false } = {}) {
-  const lines = rows.map((r) => `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached snapshot)"}`);
+  const lines = rows.map((r) => `  ${r.path}  ${gb(r.bytes)} GB  ${r.branch ?? "(detached)"}`);
   const total = rows.reduce((s, r) => s + r.bytes, 0);
   const verb = dryRun ? "would free" : "freed";
   lines.push(`${verb} ${gb(total)} GB across ${rows.length} worktree${rows.length === 1 ? "" : "s"}`);
