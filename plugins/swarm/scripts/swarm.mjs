@@ -950,16 +950,23 @@ async function cmdUsage(rest = [], {
 } = {}) {
   const { checkQuota: defaultCheckQuota } = await import("../src/quota.mjs");
   const { normalizeAnthropic, usageLines, notableLines } = await import("../src/usage.mjs");
-  const q = await (quotaCheck || defaultCheckQuota)({
+  const selected = getFlag("provider", rest);
+  // `claude` is the registry id for the reading this command prints as
+  // `anthropic`, so either name selects it. Anthropic is fetched outside the
+  // registry loop, so it needs the flag applied here too — without this the row
+  // was fetched and printed whatever `--provider` named.
+  const wantsAnthropic = !selected || selected === "claude" || selected === "anthropic";
+  const q = wantsAnthropic ? await (quotaCheck || defaultCheckQuota)({
     cfg,
     fetch: (...a) => fetchImpl(...a),
     cachePath: join(swarmHome(env), "quota-cache.json"),
     ...(env.SWARM_CREDENTIALS && { credentialsPath: env.SWARM_CREDENTIALS }),
-  });
+  }) : null;
   const usages = [];
-  if (q) usages.push(normalizeAnthropic(q));
-  else write("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
-  const selected = getFlag("provider", rest);
+  // Filtered out says nothing about Anthropic — a line here would be the exact
+  // defect the flag exists to prevent.
+  if (wantsAnthropic && q) usages.push(normalizeAnthropic(q));
+  else if (wantsAnthropic) write("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
   const providerReading = await readProviderUsage(cfg, { registry, env, fetchImpl, live: true, ...(selected ? { provider: selected } : {}) });
   usages.push(...providerReading.usages);
   for (const [provider, message] of Object.entries(providerReading.errors)) write(`${provider}: unavailable (${message})`);
