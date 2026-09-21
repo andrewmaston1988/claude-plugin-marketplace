@@ -9,11 +9,11 @@ import { runCli, runCliAsync, CLI } from "./helpers/cli.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
 
-// The one place the provider-root policy lives. `allowedRoots` gates EVERY provider
-// including claude, and an empty list denies — so a fixture HOME with no
-// providers.claude.allowedRoots refuses every row that dispatches. Fixtures live under
-// tmpdir, so that is the root they declare; `extra` keys win over the block.
-const gateConfig = (extra = {}) => JSON.stringify({ providers: { claude: { allowedRoots: [tmpdir()] } }, ...extra });
+// The one place the provider policy lives. `allowedRoots` gates EVERY provider, claude
+// included, and an empty list denies — so a fixture HOME without it refuses every
+// dispatching row; fixtures live under tmpdir, so that is the root they declare and
+// `extra` keys win. Ollama is on explicitly: the shipped default is opt-in, so a fixture that omits it refuses.
+const gateConfig = (extra = {}) => JSON.stringify({ providers: { claude: { allowedRoots: [tmpdir()] }, ollama: { enabled: true } }, ...extra });
 
 // Writes that config into `home` and returns it — every fixture HOME a dispatching row
 // reads goes through here, so the block exists in exactly one place.

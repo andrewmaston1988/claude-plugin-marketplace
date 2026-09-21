@@ -4,7 +4,7 @@
 // dir or spawn anything.
 import { readFileSync, writeFileSync, renameSync, unlinkSync, existsSync, mkdirSync, copyFileSync, openSync, closeSync } from "node:fs";
 import { join } from "node:path";
-import { hostname, networkInterfaces, homedir } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 import { connect } from "node:net";
 import { execFile, spawn } from "node:child_process";
 import { promisify } from "node:util";
@@ -65,26 +65,11 @@ export function spawnLoggedDaemon(argv, home, { _spawn = spawn, _openSync = open
   }
 }
 
-// The plugin registry — the SAME file statusline/resolver.mjs reads; its path and
-// the user-scoped / newest-lastUpdated selection are mirrored here and must stay
-// in step (resolver.mjs is the other reader; env override honoured for the same
-// rehearsals).
-export const PLUGIN_KEY = "swarm@andrewmaston1988-claude-plugins";
-export const registryPath = (env = process.env) =>
-  env.SWARM_PLUGIN_REGISTRY || join(homedir(), ".claude", "plugins", "installed_plugins.json");
-
-// { installPath, version } of the active swarm entry, or null. Never throws: an
-// unreadable or mid-write registry is "unknown", and unknown must never move a
-// daemon.
-export function resolveInstalled({ registry = registryPath(), readFile = readFileSync } = {}) {
-  try {
-    const entries = JSON.parse(readFile(registry, "utf8"))?.plugins?.[PLUGIN_KEY] ?? [];
-    const userScoped = entries.filter((e) => e.scope === "user");
-    const pool = userScoped.length ? userScoped : entries;
-    pool.sort((a, b) => (b.lastUpdated || "").localeCompare(a.lastUpdated || ""));
-    return pool[0]?.installPath ? { installPath: pool[0].installPath, version: pool[0].version ?? null } : null;
-  } catch { return null; }
-}
+// The plugin registry lives in src/host.mjs — the same file statusline/resolver.mjs
+// reads. Re-exported, not re-implemented: it was mirrored here, and a mirror is a
+// second definition to keep in step. resolver.mjs keeps its own copy because it is
+// copied to a stable path and imports only node builtins.
+export { PLUGIN_KEY, registryPath, resolveInstalled } from "../host.mjs";
 
 // Stale = the VERSION moved, nothing else: an install-path change alone is not a
 // restart signal, a missing/unreadable registry entry is never one (that would
@@ -221,7 +206,17 @@ export async function readFirewallRule(ruleName = "swarm dashboard") {
   }
 }
 
-export async function doctorChecks({ record, alive, installed, port, bind = "0.0.0.0", startupDir, shimPath, _probePort = probePort, _firewall = readFirewallRule }) {
+// A provider's probe result as a doctor row. `probed` is the whole reason the flag
+// exists: a provider with no preflight to run has not passed anything, and printing
+// it as a pass claims a check nobody performed.
+export function providerCheck({ id, ok, detail, probed }) {
+  const name = `provider:${id}`;
+  if (!probed) return { name, status: "unknown", detail: "no preflight to run" };
+  if (ok) return { name, status: "pass", detail: "preflight passed" };
+  return { name, status: "fail", detail: detail || "preflight failed" };
+}
+
+export async function doctorChecks({ record, alive, installed, port, bind = "0.0.0.0", startupDir, shimPath, providers = [], config = {}, _probePort = probePort, _firewall = readFirewallRule, _probeProvider }) {
   const checks = [];
   const p = await _probePort(port, bind);
   checks.push({ name: "port", status: p.reachable ? "pass" : "fail", detail: p.reachable ? `reachable on ${port}` : `nothing listening on ${port}` });
@@ -243,6 +238,12 @@ export async function doctorChecks({ record, alive, installed, port, bind = "0.0
   if (fw.error) checks.push({ name: "firewall", status: "unknown", detail: `cannot read the rule (${fw.error}) — elevated netsh may be required` });
   else if (fw.found) checks.push({ name: "firewall", status: "pass", detail: `"swarm dashboard" rule present` });
   else checks.push({ name: "firewall", status: "fail", detail: `no "swarm dashboard" rule — run (elevated): ${firewallHint(port)}` });
+
+  // One row per configured provider — the probe setup asks its enable question from,
+  // so the same evidence is available outside setup. `providers` and `_probeProvider`
+  // are injected: this module stays free of config and network, and a provider that
+  // is switched OFF is not probed, because nothing is claiming it works.
+  for (const id of providers) checks.push(providerCheck(await _probeProvider(id, { config })));
   return checks;
 }
 export const doctorExit = (checks) => (checks.some((c) => c.status === "fail") ? 1 : 0);

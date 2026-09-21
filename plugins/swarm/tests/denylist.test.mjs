@@ -143,7 +143,9 @@ test("swarm models: denylist filters at print only — absent from output, prese
     mkdirSync(home, { recursive: true });
     // catalogUrl also points at the stub — the CLI child must never hit the live WAN.
     writeFileSync(join(home, "config.json"), JSON.stringify({
-      provider: { url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
+      // Explicitly enabled: the shipped default is opt-in, and this row is about the
+      // denylist, not about a disabled provider refusing discovery.
+      provider: { enabled: true, url: `http://127.0.0.1:${server.address().port}`, catalogUrl: `http://127.0.0.1:${server.address().port}` },
       modelDenylist: ["nemotron"],
     }));
     const r = await runCliAsync(["models"], { cwd: dir, env: { SWARM_HOME: home } });

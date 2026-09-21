@@ -439,8 +439,11 @@ test("governance: the SHIPPED default config leaves ollama and codex unconfigure
   const repo = tmp();
   try {
     const shipped = JSON.parse(readFileSync(new URL("../config.default.json", import.meta.url), "utf8"));
+    // Both cases enable their provider: the shipped default is opt-in, and
+    // enabled:false only gates DISPATCH — the branch under test is the roots one.
+    const on = (id) => ({ ...shipped, providers: { ...shipped.providers, [id]: { ...shipped.providers[id], enabled: true } } });
     const cases = [
-      ["ollama", "minimax-m3:cloud", shipped],
+      ["ollama", "minimax-m3:cloud", on("ollama")],
       // enabled:false only gates dispatch; the branch under test is the roots one.
       ["codex", "gpt-5-codex", { ...shipped, providers: { ...shipped.providers, codex: { ...shipped.providers.codex, enabled: true } } }],
     ];

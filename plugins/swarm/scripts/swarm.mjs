@@ -39,8 +39,8 @@ const USAGE = `usage: swarm.mjs <command>
   scores backfill-realmodel [--dry-run]   rewrite alias-named score rows to the model their leaf transcript reports
   cost                       one cost list per provider, cheapest to dearest (meter + static rate cards)
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
-  serve restart | doctor | stop | status | install-autostart | uninstall-autostart
-  config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it
+  serve restart | doctor | stop | status | enable | disable | install-autostart | uninstall-autostart
+  config init                write every shipped key into ~/.swarm/config.json, keeping what is set and folding an old-shaped file ("provider"/"codex") into "providers" — it prints the mapping and leaves the previous file at config.json.bak; the /swarm:swarm setup skill walks it
   statusline install         write the self-resolving statusline shim to ~/.swarm/statusline.mjs and print the settings.json line
   install                    put swarm on PATH: bash + cmd wrappers and the resolver copy in ~/.local/bin (idempotent; never edits a shell profile)`;
 
@@ -1063,8 +1063,10 @@ async function cmdUsage(rest = [], {
 // serve — the LAN dashboard. Foreground by default; --daemon forks a detached
 // copy and records its pid (written by the parent, per the plugin daemon rule).
 async function cmdServe(rest) {
-  const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir, pidPath,
-    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, doctorChecks, doctorExit, registryPath, ensureShim, probePort, waitForExit, restartPlan, drainAndClose, spawnLoggedDaemon } = await import("../src/serve/daemon.mjs");
+  const { writePid, readPid, clearPid, isAlive, urlLines, firewallHint, installAutostart, uninstallAutostart, defaultStartupDir,
+    resolveInstalled, isStale, blocksStart, bindFailureRecordAction, waitForDaemon, statusReport, registryPath, ensureShim, probePort, waitForExit, restartPlan, drainAndClose, spawnLoggedDaemon } = await import("../src/serve/daemon.mjs");
+  const { launchTray } = await import("../src/serve/tray.mjs");
+  const { runDoctor } = await import("../src/serve/doctor.mjs");
   const home = swarmHome();
   const cfg = getConfig();
   const port = cfg.dashboard?.port ?? 7331;
@@ -1093,13 +1095,7 @@ async function cmdServe(rest) {
     exitSoon(rep.exit); return rep.exit;
   }
   if (verb === "doctor") {
-    const rec = readPid(home);
-    const alive = isAlive(rec?.pid);
-    const checks = await doctorChecks({ record: rec, alive, installed, port, bind: cfg.dashboard?.bind ?? "0.0.0.0", startupDir: defaultStartupDir(), shimPath });
-    for (const c of checks) out(`${c.status === "pass" ? "✓" : c.status === "unknown" ? "⚠" : "✗"} ${c.name}: ${c.detail}`);
-    const code = doctorExit(checks);
-    if (code) out(`${checks.filter((c) => c.status === "fail").length} check(s) failed`);
-    else out("all checks passed");
+    const code = await runDoctor({ home, installed, port, cfg, shimPath, out });
     exitSoon(code); return code;
   }
   if (verb === "install-autostart" || verb === "uninstall-autostart") {
@@ -1115,12 +1111,31 @@ async function cmdServe(rest) {
     else out(verb === "install-autostart" ? `autostart: ${r.changed ? "installed" : "already installed"} → ${r.path}` : `autostart: ${r.removed ? "removed" : "was not installed"}`);
     exitSoon(0); return 0;
   }
+  // enable/disable write the key and NOTHING else: no daemon, no tray. The two
+  // callers that need a side effect — setup's dashboard stage and the tray's own
+  // menu — each ask the operator and then run `serve` or `serve stop`, so the
+  // answer stays observable on its own and neither caller inherits a surprise.
+  if (verb === "enable" || verb === "disable") {
+    const want = verb === "enable";
+    const { setConfigValue } = await import("../src/config.mjs");
+    let r;
+    try { r = setConfigValue("dashboard.enabled", want, process.env.SWARM_CONFIG); }
+    catch (e) { err(`dashboard: ${e.message}`); return 1; }
+    out(`dashboard: ${want ? "enabled" : "disabled"} (${r.key}=${want} in ${r.path})`);
+    out(want ? "  start it with: swarm serve" : "  a running dashboard keeps serving until: swarm serve stop");
+    return 0;
+  }
   if (verb !== "start" && verb !== "restart") { err(USAGE); return 1; }
 
   // The off switch — covers restart too, which would stop the daemon and start
   // nothing. stop/status/doctor/autostart verbs still work above, so a Startup
   // launcher left installed becomes a no-op instead of needing uninstalling.
-  if (cfg.dashboard?.enabled === false) { out("dashboard: disabled (dashboard.enabled=false in ~/.swarm/config.json)"); exitSoon(0); return 0; }
+  if (cfg.dashboard?.enabled === false) {
+    out("dashboard: disabled (dashboard.enabled=false in ~/.swarm/config.json)");
+    const t = await launchTray({ home, port, shimPath, tray: cfg.dashboard?.tray !== false, disabled: true });
+    if (!t.ok) err(`dashboard: ${t.reason}`);
+    exitSoon(0); return 0;
+  }
 
   // The --daemon parent records the child's pid before the child gets here, so a
   // pid equal to our own is us, not a rival. A live daemon with a moved-off
@@ -1151,28 +1166,8 @@ async function cmdServe(rest) {
     const started = spawnLoggedDaemon([process.execPath, enginePath, "serve"], home);
     if (!started.ok) return { ok: false, reason: `could not spawn the daemon: ${started.reason}` };
     if (!takeover) writePid(home, { pid: started.pid, port, installPath: installed?.installPath ?? null, version: installed?.version ?? null, startedMs: Date.now() });
-    if (process.platform === "win32" && cfg.dashboard?.tray !== false) {
-      try {
-        const { spawn } = await import("node:child_process");
-        const { writeFileSync, renameSync } = await import("node:fs");
-        const { renderTrayIconPng } = await import("../src/serve/icon.mjs");
-        const iconPath = join(home, "dashboard-icon.png");
-        writeFileSync(`${iconPath}.tmp`, renderTrayIconPng());
-        renameSync(`${iconPath}.tmp`, iconPath);
-        const trayScript = fileURLToPath(new URL("../src/serve/tray.ps1", import.meta.url));
-        // The tray needs a console — powershell.exe is a console-subsystem exe whose
-        // WinForms message loop dies without one, and `detached: true` strips it
-        // (DETACHED_PROCESS) — and it must outlive this short-lived parent: `cmd /c
-        // start` gives it a fresh hidden console AND breaks it out of our job. Same
-        // shape as slack-bridge claude-slack.mjs:245-270; its Task-Scheduler reason
-        // does not apply here (swarm autostarts from the Startup folder), but the
-        // console and breakaway halves both do.
-        const tray = spawn("cmd.exe", ["/c", "start", "", "/min", "powershell.exe", "-WindowStyle", "Hidden", "-NonInteractive",
-          "-File", trayScript, "-PidFile", pidPath(home), "-NodeExe", process.execPath, "-ShimPath", shimPath,
-          "-Port", String(port), "-IconPath", iconPath, "-SwarmHome", home], { detached: true, stdio: "ignore", windowsHide: true });
-        tray.unref();
-      } catch (e) { err(`dashboard: tray not started: ${e.message}`); }
-    }
+    const t = await launchTray({ home, port, shimPath, tray: cfg.dashboard?.tray !== false });
+    if (!t.ok) err(`dashboard: ${t.reason}`);
     return { ok: true, pid: started.pid, logPath: started.logPath };
   };
 
@@ -1400,9 +1395,8 @@ async function main() {
       }
       case "config": {
         if (rest[0] !== "init") { err(USAGE); return 1; }
-        const { initConfig } = await import("../src/config.mjs");
-        const r = initConfig(process.env.SWARM_CONFIG);
-        out(`config: ${r.path} (${r.created ? "created" : r.added.length ? `added ${r.added.length} key${r.added.length === 1 ? "" : "s"}: ${r.added.join(", ")}` : "up to date"})`);
+        const { initConfig, configInitReport } = await import("../src/config.mjs");
+        for (const line of configInitReport(initConfig(process.env.SWARM_CONFIG))) out(line);
         return 0;
       }
       case "status": {
