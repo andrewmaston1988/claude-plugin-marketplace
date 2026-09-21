@@ -370,6 +370,22 @@ test("tray.ps1: every Start-Process -ArgumentList is an array, not a formatted s
   }
 });
 
+// --- the tray's icon title and its dashboard-off menu ---
+// The operator's spec: the title reads `swarm`, not `swarm dashboard` (the icon is
+// not a window), and with `dashboard.enabled: false` the dashboard button is greyed
+// and relabelled while Stop becomes the way back on.
+test("tray.ps1: the icon title is swarm in every state, and the disabled menu offers the way back on", () => {
+  const ps = readFileSync(fileURLToPath(new URL("../src/serve/tray.ps1", import.meta.url)), "utf8");
+  const titles = [...ps.matchAll(/\$script:tray\.Text = '([^']*)'/g)].map((m) => m[1]);
+  // The full set, not "no title mentions dashboard": a check that only forbids the
+  // bad string passes just as happily on a tray that sets no title at all.
+  assert.deepEqual([...titles].sort(), ["swarm", "swarm - crashed", "swarm - disabled", "swarm - running", "swarm - stopped"].sort(),
+    `the tray title in every poll state: ${JSON.stringify(titles)}`);
+  assert.ok(ps.includes("'Open dashboard (Disabled)'"), "the dashboard button names its state");
+  assert.ok(ps.includes("'Enable dashboard'"), "Stop's slot becomes the way back on");
+  assert.ok(ps.includes("'Status: Dashboard disabled'"), "and the status line says so");
+});
+
 // A parameter named after a read-only automatic variable (`-Home` vs `$HOME`) fails
 // at binding — "Cannot overwrite variable Home because it is read-only or constant" —
 // before a single line runs, so the tray never appeared and nothing said why.

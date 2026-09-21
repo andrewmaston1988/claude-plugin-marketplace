@@ -17,8 +17,11 @@
 #                        never be read as "still dead".
 #   RestartTimestamps   epoch-ms of restarts this tray has already issued.
 #   Now                 epoch-ms "now", for the 10-minute restart window.
+#   Disabled            dashboard.enabled is false. Outranks every other input: a
+#                        missing record is then the NORMAL state, not `serve stop`,
+#                        and restarting is not a thing the operator asked for.
 #
-# Output: 'none' | 'restart' | 'crashed' | 'exit'.
+# Output: 'none' | 'restart' | 'crashed' | 'exit' | 'disabled'.
 function Get-TrayAction {
   param(
     [Nullable[int]]$RecordPid,
@@ -26,8 +29,14 @@ function Get-TrayAction {
     [int]$Streak,
     [bool]$SamePid,
     [array]$RestartTimestamps = @(),
-    [long]$Now = 0
+    [long]$Now = 0,
+    [bool]$Disabled = $false
   )
+
+  # First: with the dashboard off, the absent-streak exit below would take the tray
+  # down ten seconds after it appeared — and the tray is the only surface left that
+  # can turn the dashboard back on.
+  if ($Disabled) { return "disabled" }
 
   if ($null -eq $RecordPid) {
     # No record: today's "exit after 5 dead polls" — a deliberate `serve stop`.

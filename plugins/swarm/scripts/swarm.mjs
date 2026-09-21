@@ -1137,7 +1137,7 @@ async function cmdServe(rest) {
   // launcher left installed becomes a no-op instead of needing uninstalling.
   if (cfg.dashboard?.enabled === false) {
     out("dashboard: disabled (dashboard.enabled=false in ~/.swarm/config.json)");
-    const t = await launchTray({ home, port, shimPath, tray: cfg.dashboard?.tray !== false });
+    const t = await launchTray({ home, port, shimPath, tray: cfg.dashboard?.tray !== false, disabled: true });
     if (!t.ok) err(`dashboard: ${t.reason}`);
     exitSoon(0); return 0;
   }

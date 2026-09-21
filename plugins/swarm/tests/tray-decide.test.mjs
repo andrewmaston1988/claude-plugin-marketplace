@@ -18,6 +18,12 @@ test("tray-decide.ps1: Get-TrayAction covers the poll decision table, including 
     { name: "record present, dead, same pid, streak >= 5, 0 recent restarts -> restart", RecordPid: 111, Alive: false, Streak: 5, SamePid: true, RestartTimestamps: [], Now: 1000000, expect: "restart" },
     { name: "record present, dead, same pid, streak >= 5, 3 restarts inside the 10-minute window -> crashed", RecordPid: 111, Alive: false, Streak: 5, SamePid: true, RestartTimestamps: [500000, 700000, 900000], Now: 1000000, expect: "crashed" },
     { name: "record present, dead, same pid, streak >= 5, 3 restarts but all outside the 10-minute window -> restart", RecordPid: 111, Alive: false, Streak: 5, SamePid: true, RestartTimestamps: [1000, 2000, 3000], Now: 1000000, expect: "restart" },
+    // The dashboard switched off: the record being absent is the NORMAL state, not
+    // a `serve stop` — without these rows the absent-streak exit fires five polls
+    // after the tray appears and the operator's only way back to enabled vanishes.
+    { name: "disabled, record absent, streak >= 5 -> disabled, never exit", RecordPid: null, Alive: false, Streak: 5, SamePid: false, RestartTimestamps: [], Now: 0, Disabled: true, expect: "disabled" },
+    { name: "disabled, record present but dead -> disabled, never restart", RecordPid: 111, Alive: false, Streak: 9, SamePid: true, RestartTimestamps: [], Now: 1000000, Disabled: true, expect: "disabled" },
+    { name: "disabled with a daemon still serving -> disabled (the switch outranks the record)", RecordPid: 111, Alive: true, Streak: 0, SamePid: true, RestartTimestamps: [], Now: 1000000, Disabled: true, expect: "disabled" },
   ];
 
   const probe = [
@@ -27,7 +33,7 @@ test("tray-decide.ps1: Get-TrayAction covers the poll decision table, including 
     "foreach ($c in $cases) {",
     "  $pidVal = $null",
     "  if ($null -ne $c.RecordPid) { $pidVal = [int]$c.RecordPid }",
-    "  $action = Get-TrayAction -RecordPid $pidVal -Alive $c.Alive -Streak $c.Streak -SamePid $c.SamePid -RestartTimestamps @($c.RestartTimestamps) -Now $c.Now",
+    "  $action = Get-TrayAction -RecordPid $pidVal -Alive $c.Alive -Streak $c.Streak -SamePid $c.SamePid -RestartTimestamps @($c.RestartTimestamps) -Now $c.Now -Disabled ([bool]$c.Disabled)",
     "  $results += [pscustomobject]@{ name = $c.name; action = $action }",
     "}",
     "$results | ConvertTo-Json -Compress",

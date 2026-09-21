@@ -2,7 +2,7 @@
 # (cmd /c start shape — see cmdServe) with every path a named parameter:
 #   powershell -WindowStyle Hidden -NonInteractive -File tray.ps1 `
 #     -PidFile <dashboard.pid> -NodeExe <node.exe> -ShimPath <~/.swarm/serve.mjs> `
-#     -Port <n> -IconPath <dashboard-icon.png> -SwarmHome <~/.swarm>
+#     -Port <n> -IconPath <dashboard-icon.png> -SwarmHome <~/.swarm> [-Disabled]
 param(
   [string]$PidFile,
   [string]$NodeExe,
@@ -11,7 +11,10 @@ param(
   [string]$IconPath = "",
   # Not -Home: $HOME is a read-only automatic variable, and binding to it fails the
   # whole script before a line runs.
-  [string]$SwarmHome = ""
+  [string]$SwarmHome = "",
+  # dashboard.enabled is false. The tray still starts — it is the only surface left
+  # that can turn the dashboard back on — so it starts in its off state.
+  [switch]$Disabled
 )
 
 Add-Type -AssemblyName System.Windows.Forms
@@ -41,8 +44,12 @@ if ($guardPath -and (Test-Path $guardPath -PathType Leaf)) {
 if ($guardPath) { Set-Content -Path $guardPath -Value $PID -Encoding Ascii }
 
 $script:tray = New-Object System.Windows.Forms.NotifyIcon
-$script:tray.Text = 'swarm dashboard'
+$script:tray.Text = 'swarm'
 $script:tray.Visible = $true
+
+# Whether the dashboard is switched off. Seeded from the spawn, flipped by the
+# Enable click below; the poll reads it on every tick.
+$script:disabled = [bool]$Disabled
 
 # The daemon renders the same mark the web manifest uses; load via MemoryStream
 # so no file handle is held — the next daemon start rewrites the PNG.
@@ -97,13 +104,49 @@ $script:itemRestart.Text = 'Restart'
 $script:itemRestart.add_Click({ Start-SwarmDaemonRestart })
 $menu.Items.Add($script:itemRestart) | Out-Null
 
+# Enable: write the key through the CLI FIRST — one writer, one validation, one
+# message if it refuses — then start the daemon. The write is waited on so a
+# refused enable is not followed by a start that cannot work.
+function Start-SwarmEnable {
+  $enable = Start-Process -FilePath $script:NodeExe -WindowStyle Hidden -Wait -PassThru `
+    -ArgumentList @($script:ShimPath, 'scripts/swarm.mjs', 'serve', 'enable')
+  if ($enable.ExitCode -ne 0) { return }
+  Start-Process -FilePath $script:NodeExe -WindowStyle Hidden `
+    -ArgumentList @($script:ShimPath, 'scripts/swarm.mjs', 'serve')
+  $script:disabled = $false
+  Set-TrayDisabledUi
+}
+
+# The off state, restated on the existing menu: Open is greyed (there is nothing to
+# open), Restart is greyed (nothing to restart), and Stop's slot becomes the way back
+# on. Called once at startup and again after the operator enables the dashboard.
+function Set-TrayDisabledUi {
+  if ($script:disabled) {
+    $script:itemOpen.Text = 'Open dashboard (Disabled)'
+    $script:itemOpen.Enabled = $false
+    $script:itemRestart.Enabled = $false
+    $script:itemStop.Text = 'Enable dashboard'
+  } else {
+    $script:itemOpen.Text = 'Open dashboard'
+    $script:itemOpen.Enabled = $true
+    $script:itemRestart.Enabled = $true
+    $script:itemStop.Text = 'Stop'
+  }
+}
+
 $script:itemStop = New-Object System.Windows.Forms.ToolStripMenuItem
 $script:itemStop.Text = 'Stop'
 $script:itemStop.add_Click({
+  if ($script:disabled) {
+    Start-SwarmEnable
+    return
+  }
   Start-Process -FilePath $script:NodeExe -WindowStyle Hidden `
     -ArgumentList @($script:ShimPath, 'scripts/swarm.mjs', 'serve', 'stop')
 })
 $menu.Items.Add($script:itemStop) | Out-Null
+
+Set-TrayDisabledUi
 
 $menu.Items.Add('-') | Out-Null
 
@@ -121,7 +164,9 @@ $script:tray.ContextMenuStrip = $menu
 # auto-restarts through the shim (like the menu's own Restart) or, past 3
 # restarts in 10 minutes, gives up and reports "crashed" instead of thrashing.
 # A record ABSENT for 5 straight polls (a deliberate `serve stop`) still just
-# exits the tray. $script:lastDeadPid / deadStreak / absentStreak /
+# exits the tray — unless the dashboard is switched off, where an absent record is
+# the normal state and the tray is the only way back on. $script:lastDeadPid /
+# deadStreak / absentStreak /
 # restartTimestamps persist across ticks; a pid change mid-streak (the
 # daemon's own handover retake landing between polls) is read as healed, not
 # as "still dead".
@@ -178,19 +223,25 @@ $timer.add_Tick({
     if ($daemonPid -gt 0) { $recordPidForDecision = $daemonPid }
     $nowMs = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
     $action = Get-TrayAction -RecordPid $recordPidForDecision -Alive $alive -Streak $streakForDecision `
-      -SamePid $samePid -RestartTimestamps @($script:restartTimestamps) -Now $nowMs
+      -SamePid $samePid -RestartTimestamps @($script:restartTimestamps) -Now $nowMs -Disabled $script:disabled
 
-    if ($alive) {
+    if ($action -eq 'disabled') {
+      # A daemon started before the switch is still serving — say so, rather than
+      # reporting a dashboard that is off while the port is answering.
+      if ($alive) { $script:itemStatus.Text = 'Status: disabled - a daemon from before the switch is still serving (PID {0})' -f $daemonPid }
+      else { $script:itemStatus.Text = 'Status: Dashboard disabled' }
+      $script:tray.Text = 'swarm - disabled'
+    } elseif ($alive) {
       $script:itemStatus.Text = 'Status: running (PID {0})' -f $daemonPid
       if ($daemonVersion) { $script:itemVersion.Text = 'Version: {0}' -f $daemonVersion }
       else { $script:itemVersion.Text = 'Version: unknown' }
-      $script:tray.Text = 'swarm dashboard - running'
+      $script:tray.Text = 'swarm - running'
     } elseif ($action -eq 'crashed') {
       $script:itemStatus.Text = 'Status: crashed - use Restart'
-      $script:tray.Text = 'swarm dashboard - crashed'
+      $script:tray.Text = 'swarm - crashed'
     } else {
       $script:itemStatus.Text = 'Status: stopped'
-      $script:tray.Text = 'swarm dashboard - stopped'
+      $script:tray.Text = 'swarm - stopped'
     }
 
     if ($action -eq 'restart') {
