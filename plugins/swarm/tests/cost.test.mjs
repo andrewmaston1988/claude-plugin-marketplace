@@ -10,6 +10,8 @@ import { tmpdir } from "node:os";
 import {
   usageHistoryPath, appendSnapshot, readSnapshots, splitWeeks, costPerModel, multipliers, band,
   resolveBands, normalizeCostObservation, codexUnpricedObservation, relativeCostRows, DEFAULT_COST_BANDS,
+  ollamaCloudCostRows, costRowsFor, costSections, costUnitLabel, rateCardRows, COST_PROVIDERS,
+  CODEX_RATE_CARD, CLAUDE_RATE_CARD,
 } from "../src/cost.mjs";
 
 function tmp() {
@@ -266,4 +268,135 @@ test("provider-local rate-card weights use an explicit Codex base model", () => 
   equal(rows.find((row) => row.model === "gpt-5.6-sol").mult, 4);
   equal(rows.find((row) => row.model === "gpt-5.6-sol").baseModel, "gpt-5.6-luna");
   equal(rows.find((row) => row.provider === "ollama").mult, null, "a Codex base never prices another provider");
+});
+
+// ── provider-local rate cards ─────────────────────────────────────────────────
+// Three lists, one per provider, each ranked cheapest→dearest within its own
+// accounting unit. Never one merged list: a measured Ollama meter point and a
+// published Codex price do not share an axis, and a shared floor would rank one
+// against the other silently and permanently.
+
+// A history whose model name collides with a Codex id, and which prices that
+// name at 9x its own floor. Any leak of the meter into the Codex list hands the
+// Codex row a real, wrong number rather than a null.
+const collidingSnaps = () => [
+  snap(1, [seg("gpt-5.6-luna:cloud", 100, 50), seg("cheap:cloud", 900, 50)], 50),
+];
+
+// The plan's named RED anchor. Nothing guarded this before: the Ollama
+// derivation and the provider tables had no seam between them.
+test("costRowsFor: an Ollama meter multiplier never attaches to a Codex model", () => {
+  const snaps = collidingSnaps();
+  const leaked = ollamaCloudCostRows(snaps).find((r) => r.model.startsWith("gpt-5.6-luna"));
+  ok(leaked, "the fixture must actually price the colliding name, or this test proves nothing");
+  ok(leaked.mult !== 1, `the meter's own weight for the colliding name is ${leaked.mult} — the fixture must make it differ from the table's 1x`);
+
+  const rows = costRowsFor("codex", { models: ["gpt-5.6-luna"], snaps });
+  const luna = rows.find((r) => r.model === "gpt-5.6-luna");
+  ok(luna, "the Codex base is missing from its own list");
+  equal(luna.mult, 1, "RED: the Ollama meter's weight leaked onto a Codex model");
+  equal(luna.baseModel, "gpt-5.6-luna");
+  equal(luna.costDomain, `codex:${CODEX_RATE_CARD.unit}`, "a Codex row lives in the Codex cost domain");
+  ok(rows.every((r) => r.unit !== "meter-points"), "RED: a meter unit reached the Codex list");
+  ok(rows.every((r) => r.source !== "ollama-settings"), "RED: an Ollama source reached the Codex list");
+  ok(rows.every((r) => r.provider === "codex"), "RED: another provider's row landed in the Codex list");
+});
+
+// The absolute form of the same invariant: the history cannot reach the table's
+// list at all — not through a request count, not through a quota percentage.
+// `swarm-provider-economics:63` forbids deriving USD from quota outright.
+test("costRowsFor: a Codex weight is never derived from the usage history or a quota percentage", () => {
+  const quiet = [snap(1, [seg("m:cloud", 400, 100)], 10)];
+  const busy = [snap(1, [seg("m:cloud", 400, 100)], 90)];
+  const asked = { models: ["gpt-5.6-luna", "gpt-5.6-sol"] };
+  deepEqual(costRowsFor("codex", { ...asked, snaps: busy }), costRowsFor("codex", { ...asked, snaps: quiet }),
+    "RED: the table's weights moved with the banked quota history");
+  deepEqual(costRowsFor("codex", { ...asked, snaps: busy }), costRowsFor("codex", asked),
+    "RED: the Codex list read the history it must never read");
+  deepEqual(costRowsFor("claude", { ...asked, snaps: busy }), costRowsFor("claude", asked));
+});
+
+test("costRowsFor: each provider's list is normalised to its own named base", () => {
+  equal(CODEX_RATE_CARD.baseModel, "gpt-5.6-luna");
+  equal(CLAUDE_RATE_CARD.baseModel, "claude-sonnet-5");
+  const codex = costRowsFor("codex", { models: ["gpt-5.6-luna", "gpt-5.6-sol"] });
+  equal(codex.find((r) => r.model === "gpt-5.6-luna").mult, 1, "RED: the Codex base is not exactly 1x");
+  const claude = costRowsFor("claude", { models: ["claude-sonnet-5", "claude-opus-5"] });
+  equal(claude.find((r) => r.model === "claude-sonnet-5").mult, 1, "RED: the Claude base is not exactly 1x");
+  ok(codex.every((r) => r.costDomain.startsWith("codex:")), "a Codex list carries only Codex domains");
+  ok(claude.every((r) => r.costDomain.startsWith("claude:")), "a Claude list carries only Claude domains");
+  ok(!codex.some((r) => r.model === "claude-sonnet-5"), "a Codex list never carries a Claude model");
+});
+
+// Cheapest→dearest is tested on a synthetic card because the SHIPPED tables
+// carry no sourced prices (see the no-invented-price test below). A named base
+// of 2 with a cheaper entry of 1 is the whole point: the unit is the model the
+// table names, never the cheapest row it happens to contain.
+test("rateCardRows: ranks cheapest first within one provider, unmeasured last, base named not derived", () => {
+  const card = { provider: "codex", baseModel: "b", unit: "u", source: "s", asOf: "2026-09-21", prices: { b: 2, dear: 8, cheap: 1 } };
+  const rows = rateCardRows(card, ["unknown"]);
+  deepEqual(rows.map((r) => r.model), ["cheap", "b", "dear", "unknown"], "RED: cheapest first, unmeasured last");
+  equal(rows[0].mult, 0.5);
+  equal(rows.find((r) => r.model === "b").mult, 1, "RED: the floor was derived from the cheapest row, not the named base");
+  equal(rows.find((r) => r.model === "dear").mult, 4);
+  equal(rows.find((r) => r.model === "unknown").mult, null);
+});
+
+// A model absent from its table is a ROW, not a blank. The Claude section of
+// the dashboard was empty for exactly this reason and read as broken.
+test("costRowsFor: a model absent from its table is an unpriced row, never a blank", () => {
+  const rows = costRowsFor("codex", { models: ["gpt-5.6-sol"] });
+  const sol = rows.find((r) => r.model === "gpt-5.6-sol");
+  ok(sol, "RED: the model was dropped from the list — a blank panel reads as broken");
+  equal(sol.mult, null, "RED: a weight was invented for a model with no published price");
+  equal(sol.classification, "unpriced");
+  equal(sol.provider, "codex");
+  ok(costRowsFor("codex").some((r) => r.model === CODEX_RATE_CARD.baseModel), "the table's own models are always listed");
+  ok(costRowsFor("claude", { models: ["claude-opus-5"] }).some((r) => r.model === "claude-opus-5"));
+});
+
+// A fabricated rate ranks models wrongly for ever, and nothing downstream can
+// tell it from a sourced one. UPDATE THIS when an operator supplies published
+// $/Mtok figures: fill the tables and rewrite the expectation to the sourced
+// multiplier. Until then the honest row is `unpriced`.
+test("rate cards: no price is invented — every non-base model is unpriced", () => {
+  for (const card of [CODEX_RATE_CARD, CLAUDE_RATE_CARD]) {
+    deepEqual(Object.keys(card.prices).filter((model) => model !== card.baseModel), [],
+      `RED: ${card.provider} carries an unsourced price`);
+  }
+  ok(!costRowsFor("codex", { models: ["gpt-5.6-sol"] })
+    .some((r) => r.model !== CODEX_RATE_CARD.baseModel && r.mult != null), "a non-base model got a weight");
+});
+
+test("rate cards: a published-price weight is an api-equivalent estimate, never a bill", () => {
+  const base = costRowsFor("codex", { models: ["gpt-5.6-luna"] }).find((r) => r.model === "gpt-5.6-luna");
+  equal(base.classification, "api-equivalent estimate",
+    "RED: a subscription-derived figure was labelled as money actually spent");
+  ok(costRowsFor("claude", { models: ["claude-sonnet-5", "claude-opus-5"] }).every((r) => r.classification !== "billed"));
+});
+
+test("costUnitLabel: each list is labelled in its own unit, naming its own base", () => {
+  match(costUnitLabel("ollama"), /meter points/);
+  ok(costUnitLabel("codex").includes(CODEX_RATE_CARD.baseModel), "the Codex label must name what it is relative to");
+  ok(costUnitLabel("claude").includes(CLAUDE_RATE_CARD.baseModel));
+  ok(costUnitLabel("codex") !== costUnitLabel("claude"), "two bases are two units, not one label");
+});
+
+test("COST_PROVIDERS: one entry per provider with a cost source, Ollama's meter first", () => {
+  deepEqual(COST_PROVIDERS, ["ollama", "codex", "claude"]);
+});
+
+test("costSections: one section per provider, never a merged list", () => {
+  const sections = costSections({ snaps: collidingSnaps(), models: { codex: ["gpt-5.6-sol"] } });
+  deepEqual(sections.map((s) => s.provider), ["ollama", "codex", "claude"], "a provider with no source still gets a section");
+  ok(sections.every((s) => s.rows.every((r) => (r.provider || "ollama") === s.provider)),
+    "RED: one provider's rows landed in another's section");
+  ok(sections.every((s) => typeof s.unit === "string" && s.unit.length), "every section states its own unit");
+  const ollama = sections.find((s) => s.provider === "ollama");
+  deepEqual(ollama.rows.map((r) => r.model), ollamaCloudCostRows(collidingSnaps()).map((r) => r.model),
+    "the Ollama section is still the meter's own rows");
+  // A section per provider is not a ranking across providers: no row is ever
+  // re-weighted against another section's base.
+  ok(sections.every((s) => s.rows.every((r) => !r.baseModel || s.provider !== "ollama")),
+    "a rate-card base priced an Ollama meter row");
 });

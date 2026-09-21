@@ -36,7 +36,7 @@ const USAGE = `usage: swarm.mjs <command>
   grade --file <grades.json>   validate the filled batch and append it to ~/.swarm/model-scores.jsonl
   grade --waive <resultsDir> --reason "<text>"   excuse a run from grading — writes grade-waiver.json, never a store row
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
-  cost                       per-model meter weight from the banked usage history (multiplier vs cheapest measured)
+  cost                       one cost list per provider, cheapest to dearest (meter + static rate cards)
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
   serve restart | doctor | stop | status | install-autostart | uninstall-autostart
   config init                write every shipped key into ~/.swarm/config.json (keeps what is set) — the /swarm:swarm setup skill walks it
@@ -103,13 +103,31 @@ async function usageHeadroom(cfg, { env = process.env, fetchImpl = globalThis.fe
   return (await import("../src/ollama-usage.mjs")).getUsage(cfg, { env, _fetch: fetchImpl });
 }
 
-// The banked cost rows for joining against roster/score names. The history
-// banks the meter's own names (the page's `data-model`); deriveCloudName is the
-// same mapping discovery uses — never a second rule. Both reads are cheap and
-// a missing file reads as empty, so a fresh install is simply "unmeasured".
-async function cloudCostRows(env = process.env) {
+// The OLLAMA METER rows, for joins against the Ollama roster and the dispatch
+// frontier. Deliberately not the provider walk: `swarm perf` and the seat report
+// rank on the meter's own axis and its bands, and a published-price weight from
+// another provider's rate card would be a cross-provider rank — the one thing
+// the units forbid. `swarm cost` asks cost.mjs for all three lists instead.
+//
+// The history banks the meter's own names (the page's `data-model`);
+// deriveCloudName is the same mapping discovery uses — never a second rule. Both
+// reads are cheap and a missing file reads as empty, so a fresh install is
+// simply "unmeasured".
+async function meterCostRows(env = process.env) {
   const { ollamaCloudCostRows, readSnapshots, usageHistoryPath } = await import("../src/cost.mjs");
   return ollamaCloudCostRows(readSnapshots(usageHistoryPath(env)));
+}
+
+// The cached roster, grouped by provider — what `swarm cost` asks each provider
+// to price. A model the table does not list still gets a row, marked unpriced.
+function modelsByProvider(rows = []) {
+  const byProvider = {};
+  for (const row of rows) {
+    if (!row?.model) continue;
+    const provider = row.provider || "ollama";
+    (byProvider[provider] ||= []).push(row.model);
+  }
+  return byProvider;
 }
 
 // Band edges are config (`providers.ollama.cloud.ollama.costBands`), shared with the
@@ -221,7 +239,7 @@ async function cmdModels(rest = [], {
   const visible = new Set(visibleProviderModels(liveRoster, { isDenylisted }).map(identityKey));
   const shown = showAll ? liveRoster : liveRoster.filter((m) => visible.has(identityKey(m)));
   const { readRows, scoresPath, frontier } = await import("../src/scores.mjs");
-  const costRows = await cloudCostRows(env);
+  const costRows = await meterCostRows(env);
   const multOf = new Map(costRows.map((r) => [r.model, r.mult]));
   const onFrontier = new Set(frontier(readRows(scoresPath(env)), costRows.map((r) => ({ model: r.model, mult: r.mult })), { bands: await costBands(cfg) })
     .filter((e) => e.onFrontier).map((e) => e.model));
@@ -295,7 +313,7 @@ async function seatBlock(plan, cfg) {
   return seatReport({
     models,
     rows,
-    costRows: await cloudCostRows(),
+    costRows: await meterCostRows(),
     roster: await launchableRoster(cfg),
     bands: await costBands(),
   });
@@ -819,7 +837,7 @@ async function cmdPerf(rest) {
   const path = scoresPath();
   const rows = readRows(path);
   const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
-  const costs = await cloudCostRows();
+  const costs = await meterCostRows();
   const bands = await costBands();
   // A model is dominated only when another is strictly better AND strictly
   // cheaper; `*` marks the frontier. Unmeasured cost renders "—": blank would
@@ -899,44 +917,62 @@ async function cmdPerf(rest) {
   return 0;
 }
 
-// swarm cost — the cost half of the seat decision, ported table-for-table from
-// the operator-side cost-table.mjs so the two can be read side by side. Model
-// names stay the meter's own (no :cloud mapping here): a row must be findable
-// on the page it came from.
+// swarm cost — one list per provider, cheapest → dearest within each. The
+// sections are never merged and never cross-ranked: a measured Ollama meter
+// point and a published Codex price do not share an axis. The Ollama section is
+// the meter's own table, ported field-for-field from the operator-side
+// cost-table.mjs so the two can be read side by side; the other sections are
+// static rate cards (see cost.mjs), and a model absent from one is an `unpriced`
+// row rather than a blank.
 async function cmdCost() {
-  const { readSnapshots, costPerModel, multipliers, splitWeeks, usageHistoryPath, THIN_REQUESTS } = await import("../src/cost.mjs");
+  const {
+    costSections, readSnapshots, usageHistoryPath, THIN_REQUESTS,
+    METER_PROVIDER, METER_POINTS_UNIT, UNPRICED_CLASSIFICATION, API_EQUIVALENT_CLASSIFICATION,
+  } = await import("../src/cost.mjs");
   const path = usageHistoryPath();
   const snaps = readSnapshots(path);
-  if (!snaps.length) {
-    out(`no cost history yet at ${path} — every live usage fetch banks one snapshot; a fresh install fills within a week`);
-    return 0;
-  }
-  const weeks = splitWeeks(snaps);
-  const rows = multipliers(costPerModel(snaps));
-  out(`cost table — ${rows.length} models over ${weeks.length} week${weeks.length === 1 ? "" : "s"} of ${snaps.length} snapshots (${path})`);
-  out(`multipliers are relative to the cheapest model with >=${THIN_REQUESTS} requests`);
+  const sections = costSections({ models: modelsByProvider(readProviderModelsCache()?.models || []), snaps });
+  out("cost — one list per provider, cheapest to dearest within each. The units are not comparable across sections.");
   out("");
   const pad = (s, n) => String(s).padEnd(n);
   const num = (s, n) => String(s).padStart(n);
-  out(pad("model", 26) + num("reqs", 7) + num("wks", 5) + num("pts/req", 10) + num("cost", 8) + "  notes");
-  for (const r of rows) {
-    const notes = [];
-    if (r.ptsPerReq == null) notes.push("share below the page's 0.1% resolution — not measurable");
-    else if (r.measuredRequests < THIN_REQUESTS) notes.push(`thin (${r.measuredRequests} req)`);
-    if (r.ptsPerReq != null && r.measuredRequests < r.requests) {
-      notes.push(`${r.requests - r.measuredRequests} of ${r.requests} req in weeks below resolution`);
+  for (const section of sections) {
+    out(`── ${section.provider} — ${section.unit}`);
+    if (!section.rows.length) {
+      out(section.provider === METER_PROVIDER
+        ? `   no cost history yet at ${path} — every live usage fetch banks one snapshot; a fresh install fills within a week`
+        : "   no models to list — the roster names none, and the table prices none");
+      out("");
+      continue;
     }
-    out(
-      pad(r.model, 26) +
-      num(r.requests, 7) +
-      num(r.weeks, 5) +
-      num(r.ptsPerReq != null ? r.ptsPerReq.toFixed(5) : "—", 10) +
-      num(r.mult != null ? r.mult.toFixed(1) + "x" : "—", 8) +
-      (notes.length ? "  " + notes.join(", ") : "")
-    );
+    out("   " + pad("model", 26) + num("reqs", 7) + num("wks", 5) + num("pts/req", 10) + num("cost", 8) + "  notes");
+    for (const r of section.rows) {
+      const notes = [];
+      // A meter row's `unpriced` means "this list is not denominated in money at
+      // all" — say the meter's own reason, never the rate card's.
+      if (r.unit === METER_POINTS_UNIT) {
+        if (r.ptsPerReq == null) notes.push("share below the page's 0.1% resolution — not measurable");
+        else if (r.measuredRequests < THIN_REQUESTS) notes.push(`thin (${r.measuredRequests} req)`);
+        if (r.ptsPerReq != null && r.measuredRequests < r.requests) {
+          notes.push(`${r.requests - r.measuredRequests} of ${r.requests} req in weeks below resolution`);
+        }
+      } else if (r.classification === UNPRICED_CLASSIFICATION) {
+        notes.push("unpriced — no published price in the table");
+      } else if (r.classification === API_EQUIVALENT_CLASSIFICATION) {
+        notes.push("api-equivalent estimate, not money spent");
+      }
+      out(
+        "   " + pad(r.model, 26) +
+        num(r.requests ?? "—", 7) +
+        num(r.weeks ?? "—", 5) +
+        num(r.ptsPerReq != null ? r.ptsPerReq.toFixed(5) : "—", 10) +
+        num(r.mult != null ? r.mult.toFixed(1) + "x" : "—", 8) +
+        (notes.length ? "  " + notes.join(", ") : "")
+      );
+    }
+    out("");
   }
-  out("");
-  out("Read beside `swarm perf` — that owns quality, this owns cost.");
+  out("Read beside `swarm perf` — that owns quality, this owns cost. Each section ranks within itself; no section is ever ranked against another.");
   return 0;
 }
 
