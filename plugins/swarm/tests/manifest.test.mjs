@@ -1,9 +1,10 @@
 import { test } from "node:test";
-import { equal, ok, deepEqual, throws } from "node:assert/strict";
+import { equal, ok, deepEqual, throws, match } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { ValidationError, DEFAULT_TOOLS, isUnderRoot, hasWriteTools, guardFor } from "../src/manifest.mjs";
+import { buildDigestTask } from "../src/digest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { getUsage, resetUsageMemo, saveCookie } from "../src/ollama-usage.mjs";
 import { integrateCaps } from "../src/estimate.mjs";
@@ -2509,7 +2510,13 @@ test("workspace: naming your own id is identical to writing nothing", () => {
     ] });
     const [silent, named] = loadManifest(p, CFG, dir).tasks;
     // The authored keys and the ids differ by construction; every DERIVED field must not.
-    const derivedOnly = (t) => { const { id, after, workspace, worktreeName, ...rest } = t; return rest; };
+    // The write guard's allowed root IS the task's own tree, so it differs exactly where
+    // worktreeName does — normalise that one substring rather than dropping `settings`,
+    // so any other divergence in the block still fails.
+    const derivedOnly = (t) => {
+      const { id, after, workspace, worktreeName, ...rest } = t;
+      return JSON.parse(JSON.stringify(rest).split(`wt-${worktreeName}`).join("wt-<name>"));
+    };
     deepEqual(derivedOnly(named), derivedOnly(silent));
     // And the names still agree, so the two spellings really do describe one tree.
     equal(named.worktreeName, "named");
@@ -2621,5 +2628,88 @@ test("governance: allowedRoots gates Claude too — the exemption is gone", () =
     const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: ["C:/nowhere-at-all"] } } };
     const p = writeManifest(dir, { tasks: [claudeTask()] });
     ok(errorsOf(() => loadManifest(p, cfg, dir)).join("\n").match(/allowedRoots/));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── leaf write guard ──────────────────────────────────────────────────────────
+// A worktree confines a leaf's cwd, not an absolute path: the 2026-08-28 incident
+// was a compacted leaf writing across the operator's live checkout. The guard is
+// INJECTED into each writer's own `--settings`, so the leaf cannot rewrite it.
+
+test("write guard: attached to a write-capable leaf, rooted at its own worktree", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask()] });
+    const plan = loadManifest(p, CFG, dir);
+    const guard = plan.tasks[0].settings?.hooks?.PreToolUse?.[0];
+    ok(guard, `a writer must carry the guard: ${JSON.stringify(plan.tasks[0].settings)}`);
+    equal(guard.matcher, "Write|Edit|NotebookEdit");
+    const command = guard.hooks[0].command;
+    match(command, /leaf-write-guard\.mjs/);
+    // The root is the worktree the scheduler will create for this task.
+    match(command, /wt-a/);
+    equal(guard.hooks[0].type, "command");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("write guard: absent from a read-only leaf, which has no tree to be confined to", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { resultsDir: "out", tasks: [claudeTask()] });
+    const plan = loadManifest(p, CFG, dir);
+    equal(plan.tasks[0].allowedTools, DEFAULT_TOOLS);
+    equal(plan.tasks[0].settings, undefined);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("write guard: outputDir is a second allowed root — it resolves into the live checkout", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask({ outputDir: "artefacts" })] });
+    const plan = loadManifest(p, CFG, dir);
+    const command = plan.tasks[0].settings.hooks.PreToolUse[0].hooks[0].command;
+    match(command, /wt-a/);
+    match(command, /artefacts/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("write guard: a task's own hooks cannot replace it", () => {
+  const dir = tmp();
+  try {
+    const own = { matcher: "Bash", hooks: [{ type: "command", command: "node mine.mjs" }] };
+    const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask({
+      settings: { env: { OTHER: "x" }, hooks: { PreToolUse: [own], Stop: [{ hooks: [{ type: "command", command: "node stop.mjs" }] }] } },
+    })] });
+    const plan = loadManifest(p, CFG, dir);
+    const hooks = plan.tasks[0].settings.hooks;
+    equal(hooks.PreToolUse.length, 2, "the engine's entry is prepended, not replaced");
+    equal(hooks.PreToolUse[0].matcher, "Write|Edit|NotebookEdit");
+    deepEqual(hooks.PreToolUse[1], own, "the task's own entry survives beside it");
+    ok(hooks.Stop, "unrelated hook events survive");
+    equal(plan.tasks[0].settings.env.OTHER, "x", "unrelated settings survive");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("write guard: present on the report-mode digest, absent on the read-only one", () => {
+  const dir = tmp();
+  try {
+    const body = (report) => ({
+      resultsDir: "out",
+      tasks: [claudeTask()],
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", ...(report && { report: true }) },
+    });
+
+    const p1 = writeManifest(dir, body(false), "plain.json");
+    equal(buildDigestTask(loadManifest(p1, CFG, dir)).settings, undefined, "a Read-only digest writes nothing to guard");
+
+    const p2 = writeManifest(dir, body(true), "report.json");
+    const plan = loadManifest(p2, CFG, dir);
+    const digestTask = buildDigestTask(plan);
+    const command = digestTask.settings?.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command;
+    ok(command, `the report digest holds Write, so it must carry the guard: ${JSON.stringify(digestTask.settings)}`);
+    match(command, /leaf-write-guard\.mjs/);
+    // Its drafting directory and the one file it may write.
+    match(command, /scratch-__digest/);
+    match(command, /report\.md/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -16,6 +16,7 @@ import { providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
 import { runScopeKey } from "./worktree.mjs";
+import { applyWriteGuard } from "../hooks/leaf-write-guard.mjs";
 
 export { isUnderRoot } from "./roots.mjs";
 
@@ -407,6 +408,25 @@ export function resolveWorktreeName(t) {
   if (t.isDigest) return undefined;
   if (!hasWriteTools(t.allowedTools)) return undefined;
   return t.workspace ?? t.id;
+}
+
+// ── the leaf write guard's roots ──────────────────────────────────────────────
+// The tree the scheduler will create for this writer. The formula is
+// worktree.mjs's prepareIsolation (`resolve(join(resultsDir, "wt-" + name))`) —
+// keep the two in step, or the guard denies every write into the very tree it
+// was injected to protect.
+function worktreePathFor(worktreeName, resultsDir) {
+  return resolve(join(resultsDir, `wt-${worktreeName}`));
+}
+
+// A writer's allowed roots: its own tree, plus `outputDir` when set — that one
+// resolves against the dispatch cwd, i.e. into the live checkout, so it is a
+// second root rather than a directory inside the first.
+function leafWriteGuardRoots({ worktreeName, resultsDir, outputDir }) {
+  return [
+    ...(typeof worktreeName === "string" && worktreeName ? [worktreePathFor(worktreeName, resultsDir)] : []),
+    ...(outputDir ? [outputDir] : []),
+  ];
 }
 
 // True when this task shares its tree with ordered siblings rather than owning it.
@@ -1045,6 +1065,16 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ? { when: { from: t.when.from, expr: t.when.expr } } : {};
     const forEachBlock = !isCompute && t.forEach && typeof t.forEach === "object" && !Array.isArray(t.forEach)
       ? { forEach: { from: t.forEach.from, path: t.forEach.path ?? "", maxItems: t.forEach.maxItems } } : {};
+    const outputDir = t.outputDir ? resolve(cwd, t.outputDir) : undefined;
+    // `--allowedTools` scopes tool NAMES, never paths, and a worktree confines only the
+    // leaf's cwd — so a PreToolUse guard is merged into each writer's own `--settings`.
+    // Codex is skipped deliberately: its adapter refuses any settings at all, so
+    // attaching one would fail the leaf on a message about Claude-only settings, and a
+    // Codex leaf never runs the Claude Code hook machinery the guard rides.
+    const guardRoots = !isCompute && !isManifest && !isIntegrate && provider !== "codex" && hasWriteTools(t.allowedTools)
+      ? leafWriteGuardRoots({ worktreeName, resultsDir, outputDir })
+      : [];
+    const taskSettings = guardRoots.length ? applyWriteGuard(t.settings, guardRoots) : t.settings;
     return {
       id: t.id,
       prompt: isCompute || isManifest || isIntegrate ? "" : t.prompt,
@@ -1065,7 +1095,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ...(worktreeName !== undefined && { worktreeName }),
       ...(isIntegrate && { integrate: { into: t.integrate.into, from: [...t.integrate.from] } }),
       ...(branchName !== undefined && { branchName }),
-      outputDir: t.outputDir ? resolve(cwd, t.outputDir) : undefined,
+      outputDir,
       timeoutMs: t.timeoutMs ?? defaultTimeoutMs,
       after: [...(t.after || [])],
       ...(isCompute && { compute: t.compute }),
@@ -1075,7 +1105,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       ...(!isCompute && !isManifest && !isIntegrate && Array.isArray(t.mustRead) && { mustRead: t.mustRead }),
       ...(!isCompute && !isManifest && !isIntegrate && t.contextWindow !== undefined && { contextWindow: t.contextWindow }),
       ...(typeof t.verifyCitations === "boolean" && { verifyCitations: t.verifyCitations }),
-      ...(!isCompute && !isManifest && !isIntegrate && t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && { settings: t.settings }),
+      ...(taskSettings && typeof taskSettings === "object" && !Array.isArray(taskSettings) && { settings: taskSettings }),
       ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),
       ...(guard && { leafGuard: guard }),
     };
