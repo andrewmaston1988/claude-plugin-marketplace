@@ -532,10 +532,13 @@ async function recordDeadEngineStop(dir) {
 
   const fs = await import("node:fs");
   const { spawnSync } = await import("node:child_process");
-  const repo = repoFromManifest(fs, dir);
-  const worktreesKept = repo && fs.existsSync(repo)
-    ? registeredUnder(makeGit(spawnSync), repo, dir).filter((r) => r.branch).map((r) => ({ name: basename(r.path), branch: r.branch, path: r.path }))
-    : [];
+  // Every repo the manifest named, not just the first: a run spanning two repos
+  // leaves trees in both, and a dead engine is the only chance to record them.
+  const git = makeGit(spawnSync);
+  const worktreesKept = reposFromManifest(fs, dir)
+    .filter((repo) => fs.existsSync(repo))
+    .flatMap((repo) => registeredUnder(git, repo, dir).filter((r) => r.branch)
+      .map((r) => ({ name: basename(r.path), branch: r.branch, path: r.path })));
 
   const summary = {
     started: run.startedMs ? new Date(run.startedMs).toISOString() : new Date().toISOString(),
