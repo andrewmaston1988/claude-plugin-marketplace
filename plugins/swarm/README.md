@@ -19,19 +19,23 @@ leaves in sequence on one shared branch — the plumbing is the same either way.
 The shipped `config.default.json` is overwritten on every plugin update — your own config
 is the only durable copy; re-run `swarm config init` after an update to pick up new keys.
 
-The provider-specific key you must set to arm an alternative provider:
+The key you must set to arm dispatch at all:
 
 ```json
-{ "providers": { "ollama": { "allowedRoots": ["C:/personal-projects"] } } }
+{ "allowedRoots": ["C:/personal-projects"] }
 ```
+
+One list, every provider — Claude included. `providers.<name>.allowedRoots` still exists, but it
+only NARROWS the top-level list (the two are intersected), so a provider entry can never add a
+root or widen one.
 
 Provider identity is canonical under `providers`; legacy provider-shaped config is read for
 compatibility and does not change the public manifest identity.
 
 **Why (data governance):** your org may have a data agreement with Anthropic but not with
 other model providers, so non-Claude dispatch is **deny-by-default** — a task whose
-effective `cwd` isn't under a listed root fails validation. Default `[]` still runs fine
-with Claude models only; list only roots cleared to leave for your provider.
+effective `cwd` isn't under a listed root fails validation. With no list configured, nothing
+dispatches until `swarm setup` writes one; list only roots cleared to leave for your provider.
 
 Every other key (`providers.<name>.*`, `concurrency`, `timeoutMs`,
 `worktreeBranchPrefix`, `modelDenylist`, `providers.ollama.cloud.ollama.*`, `notifyCmd`,

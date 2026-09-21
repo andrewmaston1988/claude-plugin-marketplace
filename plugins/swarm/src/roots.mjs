@@ -1,6 +1,9 @@
 import { resolve, sep } from "node:path";
 
-function normalizeForCompare(path) {
+// Paths that differ only in separator style, case (win32) or a trailing/doubled
+// separator are one root. Exported so the intersection compares the same way this
+// check does — raw string equality silently drops C:\code against C:/code.
+export function normalizeForCompare(path) {
   let normalized = resolve(path).replace(/[\\/]+/g, sep);
   if (normalized.length > 1 && (normalized.endsWith("\\") || normalized.endsWith("/"))) {
     normalized = normalized.slice(0, -1);

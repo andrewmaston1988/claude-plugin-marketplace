@@ -23,9 +23,12 @@ test("loadConfig returns shipped defaults when user config is missing", () => {
     equal(cfg.providers.ollama.url, "http://localhost:11434");
     equal(cfg.providers.ollama.authToken, "ollama");
     equal(cfg.providers.ollama.cloudSuffix, ":cloud");
-    deepEqual(cfg.providers.ollama.allowedRoots, []);
+    // No shipped list for either: `[]` is a deliberate denial the user never wrote, and under
+    // intersection it would permanently disarm any top-level allowedRoots. Absent keeps
+    // deny-by-default through the unconfigured branch instead.
+    equal(cfg.providers.ollama.allowedRoots, undefined);
     equal(cfg.providers.codex.enabled, false);
-    deepEqual(cfg.providers.codex.allowedRoots, []);
+    equal(cfg.providers.codex.allowedRoots, undefined);
     equal(cfg.concurrency, 4);
     equal(cfg.timeoutMs, DEFAULT_TIMEOUT_MS);
     equal(cfg.resultInlineCap, 4000);
@@ -87,6 +90,23 @@ test("provider enabled flags and allowedRoots are validated independently", () =
     throws(() => loadConfig(p), /providers\.codex\.enabled/);
     writeFileSync(p, JSON.stringify({ providers: { ollama: { allowedRoots: "C:/code" } } }));
     throws(() => loadConfig(p), /providers\.ollama\.allowedRoots/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The top-level default is the list a provider without one of its own inherits, so a
+// malformed value arms or disarms the whole run's gate silently — same rule, same refusal.
+test("a top-level allowedRoots is validated like the per-provider one", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    for (const bad of ["C:/code", [""], [7], {}]) {
+      writeFileSync(p, JSON.stringify({ allowedRoots: bad }));
+      throws(() => loadConfig(p), /allowedRoots/);
+    }
+    writeFileSync(p, JSON.stringify({ allowedRoots: ["C:/code"] }));
+    deepEqual(loadConfig(p).allowedRoots, ["C:/code"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -403,7 +423,7 @@ test("initConfig materialises every shipped key into the user file, keeps set va
     equal(on.swarm.always, false);            // shipped default now exists for swarm.always
     equal(on.disable1mContext, true);          // shipped default now exists for disable1mContext
     deepEqual(on.projects, []);                // shipped default now exists for projects
-    deepEqual(on.providers.ollama.allowedRoots, []);
+    equal(on.providers.ollama.allowedRoots, undefined); // no shipped denial — see the defaults row
     on.providers.ollama.allowedRoots = ["C:/code"];
     on.timeoutMs = 5400000;
     delete on.dashboard.livenessPollMs;       // simulate a key added by a later plugin version

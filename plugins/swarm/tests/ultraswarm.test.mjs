@@ -119,3 +119,25 @@ test("modeFor/decide: U5 always-green guard — a missing headroom argument does
   equal(await modeFor({ cwd: "C:/code/x", config: cfg }), MODE_CLOUD);
   equal(await decide({ event: "SessionStart", cwd: "C:/code/x", config: { swarm: { always: true }, provider: cfg.provider } }), standingBlock(MODE_CLOUD));
 });
+
+// The hook asks "are ALTERNATIVE models armed?", not "where may swarm run" — Claude is
+// excluded here while the run gate includes it. Collapsing the two questions is the
+// regression this row exists to catch: claude's own roots must not arm the cloud mode.
+test("modeFor: roots on Claude alone do not arm the alternative-model path", async () => {
+  const cfg = { providers: { claude: { enabled: true, allowedRoots: ["C:/code"] }, ollama: { enabled: true } } };
+  equal(await modeFor({ cwd: "C:/code/x", config: cfg }), MODE_ANTHROPIC);
+});
+
+// The inheritance case a `Array.isArray(block.allowedRoots)` filter skips: no provider has
+// a list of its own, so only the top-level key arms anything.
+test("modeFor: a non-Claude provider inheriting the top-level list is armed", async () => {
+  const cfg = {
+    allowedRoots: ["C:/code"],
+    providers: { claude: { enabled: true }, ollama: { enabled: true } },
+  };
+  equal(await modeFor({ cwd: "C:/code/x", config: cfg }), MODE_CLOUD);
+  equal(await modeFor({ cwd: "D:/work", config: cfg }), MODE_ANTHROPIC);
+  // The hook reads RAW config.json — no defaults merge — so a file that sets only the
+  // top-level key must still arm the providers the plugin ships.
+  equal(await modeFor({ cwd: "C:/code/x", config: { allowedRoots: ["C:/code"] } }), MODE_CLOUD);
+});

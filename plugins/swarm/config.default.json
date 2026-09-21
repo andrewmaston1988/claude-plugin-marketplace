@@ -10,7 +10,6 @@
       "discoverCmd": "ollama launch claude",
       "launchCmd": "ollama launch claude --model {model} -- {args}",
       "cloudSuffix": ":cloud",
-      "allowedRoots": [],
       "url": "http://localhost:11434",
       "catalogUrl": "https://ollama.com",
       "authToken": "ollama",
@@ -27,8 +26,7 @@
     "codex": {
       "enabled": false,
       "path": "codex",
-      "sandbox": "workspace-write",
-      "allowedRoots": []
+      "sandbox": "workspace-write"
     }
   },
   "concurrency": 4,

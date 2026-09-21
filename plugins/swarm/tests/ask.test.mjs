@@ -538,3 +538,45 @@ test("askLeaf: a writer whose tree was swept gets the teaching message, not the 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// An ask never reloads the manifest, so this is the only root check on the path — and it
+// reads the SAME pair the manifest gate approved. Reading providers.<id>.allowedRoots
+// directly leaves a top-level list silently ignored here.
+test("askLeaf: a provider armed only at the top level is root-gated on originalCwd", async () => {
+  const approved = join(tmpdir(), "swarm-ask-approved-root");
+  const dir = setup({ cwd: tmpdir(), originalCwd: approved });
+  try {
+    const cfg = {
+      ...CFG,
+      allowedRoots: [approved],
+      providers: { claude: { enabled: true }, ollama: { enabled: true } },
+    };
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", provider: "ollama", model: "glm-4.6:cloud", cfg, io: makeIo(spawn) });
+    equal(r.answer, "the follow-up answer");
+    equal(spawn.calls[0].opts.cwd, tmpdir()); // resumed in the leaf's own cwd, approved against its original
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("askLeaf: a top-level list that does not cover originalCwd refuses — Claude included", async () => {
+  const dir = setup();
+  try {
+    const cfg = {
+      ...CFG,
+      allowedRoots: [join(tmpdir(), "swarm-ask-elsewhere")],
+      providers: { claude: { enabled: true }, ollama: { enabled: true } },
+    };
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await rejects(
+      () => askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", provider: "ollama", model: "glm-4.6:cloud", cfg, io: makeIo(spawn) }),
+      /governance/i
+    );
+    // Unlike dispatch, ask gates EVERY provider including Claude — unchanged by the sweep.
+    await rejects(() => askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", cfg, io: makeIo(spawn) }), /governance/i);
+    equal(spawn.calls.length, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

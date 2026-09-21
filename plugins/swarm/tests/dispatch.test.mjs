@@ -235,6 +235,41 @@ test("Codex dispatch: resume is native and safety gates run before invocation co
   throws(() => buildDispatch({ ...base, cwd: outside, originalCwd: outside }, "blocked", cfg), /allowedRoots|governance/i);
 });
 
+// The sweep routes this through the shared resolver, so a provider armed ONLY at the top
+// level must still be root-gated. Reading providers.<id>.allowedRoots directly leaves the
+// top-level list silently ignored on the dispatch path.
+test("dispatch: a provider armed only at the top level is still root-gated", () => {
+  const root = mkdtempSync(join(tmpdir(), "swarm-dispatch-roots-"));
+  try {
+    const cfg = {
+      allowedRoots: [root],
+      providers: {
+        claude: { enabled: true },
+        ollama: { enabled: true, mode: "env", url: "http://127.0.0.1:1", authToken: "ollama" },
+      },
+    };
+    const base = { provider: "ollama", model: "minimax-m3:cloud", allowedTools: "Read", cwd: root, originalCwd: root };
+    equal(buildDispatch(base, "p", cfg).runner, "claude");
+    const outside = resolve(root, "..", "swarm-outside-top-level-root");
+    throws(() => buildDispatch({ ...base, cwd: outside, originalCwd: outside }, "blocked", cfg), /allowedRoots|governance/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The Claude exemption on this path is a governance decision with its own blast radius, not
+// an oversight of the sweep — ask.mjs gates Claude and this does not. Out of scope; pinned
+// so the refactor cannot quietly move it either way.
+test("dispatch: a top-level list does not remove Claude's dispatch-path exemption", () => {
+  const root = mkdtempSync(join(tmpdir(), "swarm-dispatch-roots-"));
+  try {
+    const cfg = { allowedRoots: ["C:/nowhere-at-all"], providers: { claude: { enabled: true } } };
+    ok(buildDispatch(task({ cwd: root, originalCwd: root }), "p", cfg, { _mcpTools: NO_MCP }).argv.length > 0);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // ── windows spawn resolution ──────────────────────────────────────────────────
 
 test("toSpawnable peels a node .cmd shim, expanding %~dp0", { skip: process.platform !== "win32" }, () => {

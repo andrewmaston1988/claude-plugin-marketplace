@@ -48,16 +48,24 @@ to the plugin root, then run the engine under `scripts/` with the single argumen
 Never glob the plugin cache and never sort sha directories by name — that is the exact bug this
 whole command exists to remove, and it silently picks a stale build.
 
-### Stage 1 — where swarm may run at all (`providers.<name>.allowedRoots`)
+### Stage 1 — where swarm may run at all (`allowedRoots`)
 
 **Every provider is gated, Claude included, and an empty list permits nothing.** Code under a
-provider's listed root may be dispatched to it; anything else fails validation. For a
-non-Anthropic provider the reason is the data agreement, which may cover Anthropic only. For
-Claude it is containment: swarm runs nothing outside its configured roots.
+listed root may be dispatched; anything else fails validation. For a non-Anthropic provider the
+reason is the data agreement, which may cover Anthropic only. For Claude it is containment:
+swarm runs nothing outside its configured roots.
 
-So this stage is not optional and has no Claude-only fallback — **a provider with no roots
-dispatches nothing**. Ask which roots are cleared for each enabled provider, and set `claude`'s
-too or swarm will refuse every leaf. Do not suggest a root; the operator names it.
+Write ONE top-level `allowedRoots`. It is the default for every provider, so in the common case
+that is the whole of stage 1. `providers.<name>.allowedRoots` still exists, but it only ever
+NARROWS the top-level list — the two are intersected, so a provider entry can never add a root
+or widen one. Reach for it only when a provider must be held to less than the default, and name
+the trade-off when you do; for a non-Anthropic provider that is normally the data agreement
+being tighter than the machine-wide default.
+
+So this stage is not optional and has no Claude-only fallback — **with no list configured, every
+provider dispatches nothing**. Absent is not the same as `[]`: an empty list is the operator
+deliberately denying everything, and the two refusals read differently. Do not suggest a root;
+the operator names it.
 
 ### Stage 1b — enable provider capabilities (`providers.<name>.*`)
 
@@ -205,7 +213,8 @@ from the appendix. If no, close.
 
 | Key | Default | What it does |
 |---|---|---|
-| `providers.<name>.allowedRoots` | `[]` | Stage 1; roots are provider-specific, and an empty list dispatches nothing — `claude` needs one too. |
+| `allowedRoots` | *(unset)* | Stage 1. The root list for EVERY provider, Claude included. Unset = unconfigured, which dispatches nothing; `[]` = denied on purpose, which is a different refusal. |
+| `providers.<name>.allowedRoots` | *(unset)* | Narrowing only — intersected with `allowedRoots`, so it can never add or widen a root. Set it when one provider must be held to less than the default. |
 | `providers.ollama.url` | `http://localhost:11434` | Ollama endpoint the `:cloud` leaves talk to; pinged before an Ollama run, unreachable = refuse. |
 | `providers.ollama.mode` | `env` | `env` = plain `claude -p` with the Ollama endpoint and model injected; `launch` = shell out through `launchCmd`. |
 | `providers.ollama.launchCmd` | `ollama launch claude --model {model} -- {args}` | Only in `launch` mode. |

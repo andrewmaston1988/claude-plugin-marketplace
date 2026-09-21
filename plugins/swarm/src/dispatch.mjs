@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { CONTEXT_WINDOW_1M } from "./contracts.mjs";
 import { isClaudeModel } from "./models.mjs";
 import { deepMerge } from "./config.mjs";
-import { providerConfig } from "./providers.mjs";
+import { allowedRootsFor, providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createRunnerRegistry } from "./runners.mjs";
 import { defaultCodexRunnerAdapter } from "./codex.mjs";
@@ -126,18 +126,23 @@ function validateDispatchPolicy(task, identity, adapter, cfg) {
   if (identity.provider === "codex" && task.leafGuard && task.leafGuard !== false) {
     throw new Error("provider 'codex' cannot run a configured leaf guard; set leafGuard: false for this task");
   }
-  const roots = providerConfig(cfg, identity.provider).allowedRoots;
+  const { roots, deniedBy } = allowedRootsFor(cfg, identity.provider);
   // Legacy hand-built configs predate canonical provider blocks. Keep their
   // Ollama dispatch byte-compatible, while canonical and Codex configs always
   // opt into the fail-closed root gate. An empty legacy list means "not
   // configured"; an explicit canonical empty list remains fail-closed.
+  // This answers WHETHER to gate, from the shape of the config; the helper answers WHAT
+  // the roots are. Folding one into the other would change which legacy configs are gated.
   const canonicalBlock = cfg?.providers?.[identity.provider] && typeof cfg.providers[identity.provider] === "object";
   const rootGate = identity.provider === "codex" || canonicalBlock || (Array.isArray(roots) && roots.length > 0);
   const cwd = task.originalCwd || task.cwd;
+  // The `!== "claude"` conjunct is deliberate and is NOT the rule ask.mjs applies — an ask
+  // gates every provider including Claude (ask.mjs:44-46). The two disagree on purpose;
+  // unifying them is a governance decision with its own blast radius, not a refactor.
   if (rootGate && identity.provider !== "claude" && (!cwd || !Array.isArray(roots) || !roots.some((root) => isUnderRoot(cwd, root)))) {
     throw new Error(
       `governance: provider '${identity.provider}' model '${identity.model}' cannot dispatch from '${cwd}' — ` +
-      `cwd is not under any providers.${identity.provider}.allowedRoots entry`
+      `cwd is not under any ${deniedBy} entry`
     );
   }
 }
