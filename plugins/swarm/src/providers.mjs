@@ -151,11 +151,15 @@ async function pingOllamaEndpoint({ config, fetch, timeoutMs = PROBE_TIMEOUT_MS 
 // preflight throws is exactly the one it has to be able to report. A capability that
 // reports success rather than throwing keeps its own `ok`; no preflight at all is not
 // a failure — setup must never offer to disable a provider it simply could not ask.
-export async function probeProvider(id, { config = {}, registry, ...deps } = {}) {
+// `fetch` defaults to the global because the caller this exists for — setup's own
+// one-liner — has no fetch to inject, and an un-injected one throws "fetch is not a
+// function", which the catch below would report as a REFUSAL: setup offering to
+// disable a provider whose route was never tried.
+export async function probeProvider(id, { config = {}, registry, fetch = globalThis.fetch, ...deps } = {}) {
   const preflight = (registry || createDefaultProviderRegistry()).capability(id, "preflight");
   if (!preflight) return { id, ok: true, detail: null };
   try {
-    const r = await preflight({ config, ...deps });
+    const r = await preflight({ config, fetch, ...deps });
     if (r?.ok === false) return { id, ok: false, detail: r.error || "preflight reported a failure" };
     return { id, ok: true, detail: null };
   } catch (e) {

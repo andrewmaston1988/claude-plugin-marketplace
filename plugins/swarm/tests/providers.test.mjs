@@ -232,6 +232,22 @@ test("probe: a reachable endpoint reports ok, and the request carries the config
   deepEqual(seen, ["http://127.0.0.1:11434"]);
 });
 
+// The setup one-liner has nothing but a config to hand over — there is no fetch to
+// inject on a command line. Un-injected, the probe threw "fetch is not a function",
+// which probeProvider's catch renders as ok:false: a REFUSAL for a route that was
+// never tried, and setup offering to disable a provider that works.
+test("probe: with no fetch injected the probe uses the global, not a false refusal", async () => {
+  const real = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url) => { seen.push(String(url)); return { ok: true }; };
+  let r;
+  try {
+    r = await probeProvider("ollama", { config: ollamaCfg("http://127.0.0.1:11434") });
+  } finally { globalThis.fetch = real; }
+  deepEqual(r, { id: "ollama", ok: true, detail: null });
+  deepEqual(seen, ["http://127.0.0.1:11434"]);
+});
+
 test("probe: a refused endpoint reports the refusal, keeping the word the dispatch path matches on", async () => {
   const r = await probeProvider("ollama", {
     config: ollamaCfg("http://127.0.0.1:11434"),
