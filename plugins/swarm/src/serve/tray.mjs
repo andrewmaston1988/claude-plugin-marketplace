@@ -10,7 +10,11 @@ import { pidPath, ensureShim } from "./daemon.mjs";
 import { renderTrayIconPng } from "./icon.mjs";
 
 export async function launchTray({ home, port, shimPath = join(home, "serve.mjs"), tray = true, disabled = false, nodeExe = process.execPath, platform = process.platform, env = process.env } = {}) {
-  if (platform !== "win32" || tray === false) return { ok: true, skipped: true };
+  if (tray === false) return { ok: true, skipped: true };
+  // The recorder (below) outranks the win32 gate: the callers' contract — the disabled
+  // path still launches a tray — is platform-independent, and the CI runner is Linux,
+  // so gating on the platform left that row passing only on a developer machine.
+  if (platform !== "win32" && !(env.NODE_TEST_CONTEXT && env.SWARM_SERVE_TEST_TRAY)) return { ok: true, skipped: true };
   try {
     // Every tray command runs through the shim, so a path to a file nobody wrote
     // gives a menu whose Enable exits "Cannot find module" and reports nothing. The

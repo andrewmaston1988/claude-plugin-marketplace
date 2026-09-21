@@ -135,3 +135,28 @@ test("serve enable on a machine with no config file creates one carrying only th
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// The disabled-serve contract above is platform-independent logic — `serve` must
+// reach launchTray rather than return early — but the tray's own win32 gate made
+// the row Windows-only, so it failed on the Linux CI runner that never records a
+// spawn. The recorder is the test harness's own seam: when it is armed, the gate
+// yields to it and the row bites on every OS.
+test("the tray recorder overrides the win32 gate, so the disabled path is pinned on any OS", async () => {
+  const dir = tmp();
+  const home = join(dir, "home");
+  mkdirSync(home, { recursive: true });
+  const trayLog = join(dir, "tray.jsonl");
+  try {
+    const { launchTray } = await import("../src/serve/tray.mjs");
+    const env = { NODE_TEST_CONTEXT: "1", SWARM_SERVE_TEST_TRAY: trayLog };
+    const rec = await launchTray({ home, port: 41999, platform: "linux", disabled: true, env });
+    equal(rec.recorded, true, `a recorder armed on a non-win32 platform must still record: ${JSON.stringify(rec)}`);
+    ok(readFileSync(trayLog, "utf8").includes("-Disabled"), "and record the disabled argv");
+    // `tray: false` is the operator's own switch and outranks the recorder.
+    equal((await launchTray({ home, port: 41999, platform: "linux", tray: false, env })).skipped, true);
+    // Without the recorder a non-win32 platform still spawns nothing.
+    equal((await launchTray({ home, port: 41999, platform: "linux", env: { NODE_TEST_CONTEXT: "1" } })).skipped, true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
