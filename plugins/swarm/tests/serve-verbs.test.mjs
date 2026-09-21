@@ -65,6 +65,14 @@ test("serve with the dashboard disabled spawns the tray and never binds the port
     ok(argv.includes("tray.ps1"), argv);
     ok(argv.includes(String(port)), `the tray is told the port to open: ${argv}`);
     ok(argv.includes(home), `the tray is told which home to re-enable against: ${argv}`);
+    // The tray's only route back on is `node <ShimPath> scripts/swarm.mjs serve enable`
+    // (tray.ps1's Start-SwarmEnable), so the file argv names must exist by the time the
+    // tray gets it. A path to a file nobody wrote spawns a tray whose Enable exits
+    // "Cannot find module" and reports nothing. Read from the argv rather than a
+    // hardcoded path — the path the tray is handed is the only one it can run.
+    const at = calls[0].argv.indexOf("-ShimPath");
+    const shim = calls[0].argv[at + 1];
+    ok(at > 0 && existsSync(shim), `the shim the tray must run has to exist: ${shim}`);
     equal(await portAnswers(port), false, "the webserver must not launch");
   } finally {
     rmSync(dir, { recursive: true, force: true });

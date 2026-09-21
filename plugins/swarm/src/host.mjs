@@ -1,14 +1,7 @@
-// Which agent host swarm is running inside, and where the plugin registry lives.
-//
-// Two facts, one module, because they answer the same question at different scales:
-// the HOST is the surface the operator is typing in, and the REGISTRY is how that
-// surface's install of this plugin is found. Both were previously spelled inline in
-// more than one place (statusline/resolver.mjs pins its own copy of the registry
-// constants; serve/daemon.mjs mirrors them), and mirrors drift.
-//
-// resolver.mjs is copied to a STABLE path under ~/.swarm/ and imports only node
-// builtins, so it cannot import this module — it keeps its own copy on purpose, and
-// any change here has to be carried there by hand.
+// Which agent host swarm is running inside, and where the plugin registry lives. Both were
+// spelled inline in more than one place before (statusline/resolver.mjs, serve/daemon.mjs),
+// and mirrors drift. resolver.mjs is copied to a stable path and imports only builtins, so
+// it cannot import this module: it keeps its own copy on purpose, carried by hand.
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -33,15 +26,10 @@ export function resolveInstalled({ registry = registryPath(), readFile = readFil
 
 const HOSTS = new Set(["claude", "codex"]);
 
-// The host swarm is running inside: `claude`, `codex`, or `unknown`.
-//
-// Claude Code sets CLAUDECODE=1 — the same marker ui.mjs reads for its repaint
-// budget — and the VALUE is the test, not the key's presence, because a stray
-// CLAUDECODE=0 would otherwise turn a provider on by accident.
-//
-// Codex has no marker swarm can see yet: wiring its registry and payload shape is
-// codex-plugin-surface's job. Until that lands, SWARM_HOST names the host by hand
-// rather than swarm guessing at one.
+// The host swarm is running inside: `claude`, `codex`, or `unknown`. The VALUE of
+// CLAUDECODE is the test, not the key's presence — a stray CLAUDECODE=0 would otherwise
+// turn a provider on by accident. Codex has no marker swarm can see yet
+// (codex-plugin-surface's job), so SWARM_HOST names the host by hand until then.
 export function detectHost(env = process.env) {
   const declared = env?.SWARM_HOST;
   if (declared !== undefined) return HOSTS.has(declared) ? declared : "unknown";

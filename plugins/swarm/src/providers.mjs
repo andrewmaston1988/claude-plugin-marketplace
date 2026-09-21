@@ -36,17 +36,10 @@ export function providerConfig(config = {}, id) {
 }
 
 // One resolution point for the two levels. A provider entry may only ever REMOVE a root
-// from the top-level list — never add one, never replace it — so the result is the
-// intersection. Each pair resolves to its NARROWER side by containment: isUnderRoot is
-// asymmetric, so "keep whichever side we happened to read" is fail-open (a provider naming
-// C:/ against a top-level C:/code would hand back the whole drive), and a set-style
-// equality test drops the pair entirely, which looks fail-closed and permits nothing.
-//
-// `roots` is undefined when NEITHER level configures a list — never configured, which is a
-// different refusal from `[]`, the operator's deliberate denial. Collapsing the two would
-// silently rewrite the message #302 built. `deniedBy` names the key that actually binds:
-// with a bare array the caller can only guess, and guesses send the operator to a key where
-// editing the roots has no effect.
+// from the top-level list, so each pair resolves to its NARROWER side by containment —
+// an override, or a set-style equality test, is fail-open on one shape and permits
+// nothing on another. `roots: undefined` is never configured, `[]` is the operator's
+// deliberate denial, and `deniedBy` names the key whose edit actually binds.
 export function allowedRootsFor(config = {}, id) {
   const top = Array.isArray(config?.allowedRoots) ? config.allowedRoots : undefined;
   const own = providerConfig(config, id).allowedRoots;
@@ -147,19 +140,10 @@ async function pingOllamaEndpoint({ config, fetch, timeoutMs = PROBE_TIMEOUT_MS 
 }
 
 // One uniform answer to "can this provider dispatch right now?", for callers that must
-// survive the answer: setup offers to disable a provider, and the provider whose
-// preflight throws is exactly the one it has to be able to report. A capability that
-// reports success rather than throwing keeps its own `ok`; no preflight at all is not
-// a failure — setup must never offer to disable a provider it simply could not ask.
-// `fetch` defaults to the global because the caller this exists for — setup's own
-// one-liner — has no fetch to inject, and an un-injected one throws "fetch is not a
-// function", which the catch below would report as a REFUSAL: setup offering to
-// disable a provider whose route was never tried.
-//
-// `probed` separates "the preflight passed" from "there is no preflight to run":
-// `detail` is null in both, and setup renders this result as the content of its own
-// question — reading the two as one answer tells the operator a provider answered
-// when the engine never asked it anything.
+// survive the answer: a throwing preflight is caught, a capability that reports ok:false
+// keeps its own text, and `probed` separates "the preflight passed" from "there is no
+// preflight to run" — setup renders this as the content of its question, and would
+// otherwise tell the operator a provider answered when nothing was ever asked.
 export async function probeProvider(id, { config = {}, registry, fetch = globalThis.fetch, ...deps } = {}) {
   const preflight = (registry || createDefaultProviderRegistry()).capability(id, "preflight");
   if (!preflight) return { id, ok: true, detail: null, probed: false };

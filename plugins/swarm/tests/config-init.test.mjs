@@ -66,11 +66,10 @@ test("initConfig rewrites a fully populated legacy file even when no default lea
   }
 });
 
-// The migration story the shipped-default flip rests on: `ollama.enabled` moving
-// from true to false in config.default.json only touches FRESH installs, because
-// initConfig's leaf fill skips a key that is already present. An operator who
-// turned Ollama on by hand keeps it on. Mutating the fill to overwrite instead of
-// skip makes this the only row standing between a default change and silently
+// The migration story the shipped-default flip rests on: `ollama.enabled` moving from
+// true to false only touches FRESH installs, because initConfig's leaf fill skips a key
+// already present — an operator who turned Ollama on by hand keeps it on. Overwriting
+// instead of skipping makes this the only row between a default change and silently
 // disabling a working provider on every existing machine.
 test("initConfig never flips a provider the operator already enabled", () => {
   const dir = tmp();
