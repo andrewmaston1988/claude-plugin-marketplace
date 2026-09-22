@@ -71,6 +71,16 @@ test('keepalive-init template defuses the ScheduleWakeup result stop-order', () 
   assert.match(tmpl, /Nothing more to do this turn/); // pre-empts the exact line
 });
 
+// ScheduleWakeup rejects any call that omits `noop` unless `stop` is true, and
+// the template says "these exact arguments" — so an arg list missing it buys a
+// rejected call on every tick. RED input: the three-bullet pre-fix list.
+test('keepalive-init template lists every required ScheduleWakeup argument', () => {
+  const tmpl = fs.readFileSync(new URL('../templates/keepalive-init.md', import.meta.url), 'utf8');
+  for (const arg of ['delaySeconds', 'prompt', 'reason', 'noop']) {
+    assert.match(tmpl, new RegExp('^- `' + arg + '`', 'm'), `arg list must name ${arg}`);
+  }
+});
+
 // Third-party providers expose no prompt-cache TTL — nothing to keep warm, so
 // the keepalive is Claude-model-only.
 test('isThirdPartyModel: non-Claude model on the newest turn skips keepalive', () => {

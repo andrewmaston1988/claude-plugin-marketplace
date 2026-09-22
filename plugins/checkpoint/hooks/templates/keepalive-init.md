@@ -9,6 +9,7 @@ Call the `ScheduleWakeup` tool with these exact arguments:
 - `delaySeconds`: `{delay}` (computed by the hook to self-correct cadence under the {ttl}s TTL)
 - `prompt`: `{tick}` (verbatim — the hook recognises this exact prefix and will re-inject this instruction on the wakeup turn so the chain continues)
 - `reason`: `"operator-opted-in cache keepalive (checkpoint plugin) — extending the prompt cache past its {ttl}s TTL"`
+- `noop`: `true` on a pure tick turn (the tick itself changes nothing), `false` when you batch it with real work — required either way, so omitting it fails the call
 
 `ScheduleWakeup` is a deferred tool — if its schema isn't loaded in this session, fetch it first with `ToolSearch(query="select:ScheduleWakeup")`.
 
