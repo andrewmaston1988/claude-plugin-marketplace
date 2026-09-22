@@ -530,6 +530,7 @@ test("finish: a run going inactive buzzes from the RUN view, where you are sitti
   await P.flush();
   assert.equal(P.docTitle(), "✓ LISTRUN", "the buzz lands here, at the finish");
   assert.equal(P.vibrations().length, 1, "one haptic");
+  assert.equal(P.hdr.classList.contains("flash"), false, "the flash rides the runs header — nothing to flash from a run view");
 });
 
 test("finish: the same finish buzzes from a LEAF view", async () => {
@@ -551,6 +552,21 @@ test("finish: the same finish buzzes from a LEAF view", async () => {
   await P.flush();
   assert.equal(P.docTitle(), "✓ LISTRUN");
   assert.equal(P.vibrations().length, 1);
+  assert.equal(P.hdr.classList.contains("flash"), false, "a leaf view has no runs header to flash");
+});
+
+test("finish: a run going inactive flashes the runs header when the runs view is what's mounted", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow())); // boot commits LISTRUN as active, runs view stays mounted
+  await P.flush();
+  assert.equal(P.hdr.classList.contains("flash"), false, "nothing has finished yet");
+  P.fireTimers(5000);
+  await P.flush();
+  P.respondList(listData(endedRow()));
+  await P.flush();
+  assert.equal(P.docTitle(), "✓ LISTRUN");
+  assert.equal(P.hdr.classList.contains("flash"), true, "the runs header flashes — this is the view it was built for");
 });
 
 test("finish: the first load stays silent — absent is not 'was active'", async () => {

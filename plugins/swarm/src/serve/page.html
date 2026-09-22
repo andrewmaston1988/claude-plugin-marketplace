@@ -204,6 +204,7 @@
   .menu .panel .k { font-size:12px; color:var(--muted); word-break:break-all; }
   iframe.digestframe { width:100%; height:calc(100vh - 100px); border:0; background:var(--ground); }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  .flash { animation:pulse .8s ease-in-out 3; }
   @keyframes dash { to { stroke-dashoffset:-56; } }
   .ring { fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:14 42; animation:dash 1.4s linear infinite; }
 </style>
@@ -962,10 +963,18 @@
     for (const n of finished) celebrate(n);
   }
 
-  // The buzz is haptic + title only, both view-neutral: the flash rode the runs header, which every paint resets.
+  // Haptic + title fire from any view. The flash is runs-view-only: it rides #hdr, which
+  // setHeader repaints on every route commit, so flashing it from another view would either
+  // do nothing (a different header is on screen) or flash a header that's about to be
+  // replaced anyway. Gate on the view live at fire time, not the view active when the run
+  // finished — this only ever fires synchronously off the current view object.
   function celebrate(name) {
     try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch {}
     const old = document.title; document.title = `✓ ${name}`;
+    if (view.name === "runs") {
+      hdr.classList.add("flash");
+      setTimeout(() => hdr.classList.remove("flash"), 800);
+    }
     setTimeout(() => { document.title = old; }, 4000);
   }
 
