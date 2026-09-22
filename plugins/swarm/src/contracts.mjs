@@ -216,16 +216,8 @@ export function inferStoredIdentity(model) {
   return {};
 }
 
-// Turn evidence from a stored result: how many turns the attempt got down.
-//
-// FIELD FIRST. A failed attempt reports its own count now, so every runner
-// answers the same way instead of one of them being read out of its prose. The
-// scan of raw output survives only for results written before the field existed,
-// and reproduces their verdict byte for byte.
-//
-// NULL is not zero. A count neither source can supply is UNKNOWN, and the caller
-// must fall back — reading it as zero would make every pre-upgrade result on disk
-// unresumable overnight.
+// Turn evidence from a stored result: the field wins; the raw-output regex is a
+// legacy fallback for results written before the field existed; null means unknown, never zero.
 export function storedTurnCount(result) {
   if (result?.numTurns != null) return result.numTurns;
   return /"num_turns"\s*:\s*0\b/.test(String(result?.output ?? "")) ? 0 : null;
