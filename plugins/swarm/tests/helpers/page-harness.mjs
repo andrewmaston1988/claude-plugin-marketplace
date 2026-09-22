@@ -1,7 +1,8 @@
 // The vm harness page.html's tests drive: a mini-DOM, a global fetch the test
 // resolves by hand, and the fixtures every page test starts from. Split out of
-// page-route.test.mjs when the file went over the 500-line bar — the tests and
-// the machinery that boots the page are separate concerns.
+// page-route.test.mjs, which was already 743 lines before this change and would
+// only have grown — the tests and the machinery that boots the page are separate
+// concerns, and the machinery is the half that no test row reads.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
