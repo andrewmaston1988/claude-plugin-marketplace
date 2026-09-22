@@ -558,9 +558,21 @@ then dispatches on a printed gate statement instead of an `AskUserQuestion`. A
 otherwise). The keyword **`ultraswarm`** in a prompt injects the same block for that
 session without the config flag.
 
-## Workflow nudge
+## Dispatch nudges
 
-A `PreToolUse` hook on the **Workflow** tool: when alternative models are armed, the first
-Workflow call of a session is intercepted with a "consider swarm instead" reason —
-retrying passes straight through, and it never repeats within the session. Silent on
-unarmed machines and in pipeline child sessions; disable with `"swarm": { "workflowNudge": false }`.
+Two `PreToolUse` hooks intercept the tools that fan work out without going through swarm.
+Both are speed bumps by default — they fire at most **twice per session** and a retry passes
+straight through — and both become **hard blocks with no budget** under standing mode
+(`swarm.always`), where swarm is already pre-authorised and the other tool is the wrong reach.
+Both stay silent in pipeline child sessions (`CORRELATION_ID`).
+
+| Hook | Tool | Fires when | Disable |
+|---|---|---|---|
+| `workflow-nudge.mjs` | `Workflow` | alternative models are armed (an enabled provider resolves to `allowedRoots`) | `"swarm": { "workflowNudge": false }` |
+| `agent-nudge.mjs` | `Agent` | the call leaves **`model`** unpinned | `"swarm": { "agentNudge": false }` |
+
+The agent nudge deliberately does *not* check arming. An `Agent` call with no `model` inherits
+the session model, so an Explore sweeping filenames runs at opus rate for work fable or haiku
+does identically — a live burn on a machine with no alternative provider configured at all.
+Pinning `model` always passes, standing mode included: a deliberate single leaf on Anthropic is
+a legitimate shape, and the budget is spent only on genuinely unpinned calls.

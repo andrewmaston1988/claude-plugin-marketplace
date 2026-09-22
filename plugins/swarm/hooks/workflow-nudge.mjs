@@ -1,15 +1,19 @@
 #!/usr/bin/env node
-// PreToolUse hook on the Workflow tool: once per session, when swarm's
-// alternative-model path is armed (an enabled provider resolves to allowedRoots), block
-// the first Workflow call with a "consider swarm instead" reason. A retry passes
-// straight through — this is a speed bump, not a wall. Silent (exit 0) when:
-// swarm isn't armed, the nudge already fired this session, CORRELATION_ID is
-// set (pipeline child), or swarm.workflowNudge === false. Never throws.
+// PreToolUse hook on the Workflow tool: block a Workflow call with a "consider swarm
+// instead" reason. Two strengths:
+//   standing mode (swarm.always) -> HARD BLOCK, every call, no budget. The operator has
+//     pre-authorised swarm; Workflow is the wrong tool and a retry must not launder it.
+//   otherwise                    -> speed bump, NUDGE_CAP firings per session, and only
+//     when swarm's alternative-model path is armed (an enabled provider resolves to
+//     allowedRoots). A retry passes straight through.
+// Silent (exit 0) when: swarm isn't armed, the budget is spent, CORRELATION_ID is set
+// (pipeline child), or swarm.workflowNudge === false. Never throws.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { allowedRootsFor, providerConfig } from '../src/providers.mjs';
+import { NUDGE_CAP, underCap, recordFiring } from './nudge-count.mjs';
 
 const SWARM_HOME = process.env.SWARM_HOME || path.join(os.homedir(), '.swarm');
 const CONFIG = path.join(SWARM_HOME, 'config.json');
@@ -39,24 +43,34 @@ function allowedRoots(config) {
   return [...new Set(canonical.concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
 }
 
-// Pure decision: should this call be nudged?
+// Pure decision: 'block' (standing mode, no budget), 'nudge' (budgeted), or false.
 export function decideNudge({ config, seen, sessionId, correlationId }) {
   if (correlationId) return false;
-  if (!sessionId) return false;
   if (config?.swarm?.workflowNudge === false) return false;
+  // Standing mode does not consult arming: with no provider armed swarm still runs the
+  // leaves on Claude tiers, so Workflow is still the tool being reached for by mistake.
+  if (config?.swarm?.always === true) return 'block';
+  if (!sessionId) return false;
   if (allowedRoots(config).length === 0) return false; // not armed — Workflow is the only game
-  return !(seen && seen[sessionId]);
+  return underCap(seen, sessionId) ? 'nudge' : false;
 }
 
-export function nudgeReason() {
-  return 'Swarm nudge (fires once per session): alternative models are armed on this machine — '
-    + 'consider a swarm manifest instead of Workflow for this fan-out. Swarm runs the leaves on '
-    + 'the configured providers, in the background, digest-compressed. Invoke the **swarm** skill and '
-    + 'offer it via the question box. Provider runners and tool limits are explicit, so inspect the '
-    + 'manifest when a leaf needs session-connected MCP tools '
-    + '(interactive auth), schema-validated returns wired into deterministic script logic, or '
-    + 'this session\'s in-context state. If so, simply call Workflow again — this reminder will not '
-    + 'repeat this session.';
+const CONSIDER = 'consider a swarm manifest instead of Workflow for this fan-out. Swarm runs the '
+  + 'leaves on the configured providers, in the background, digest-compressed. Invoke the **swarm** '
+  + 'skill. Provider runners and tool limits are explicit, so inspect the manifest when a leaf needs '
+  + 'session-connected MCP tools (interactive auth), schema-validated returns wired into '
+  + 'deterministic script logic, or this session\'s in-context state.';
+
+export function nudgeReason(strength = 'nudge') {
+  if (strength === 'block') {
+    return 'Swarm gate: standing mode (swarm.always) is ON, so this is a hard block, not a speed '
+      + `bump — calling Workflow again will not pass. Swarm is pre-authorised: ${CONSIDER} `
+      + 'If Workflow is genuinely the only tool that can do this, disable the gate with '
+      + '`swarm.workflowNudge: false` in ~/.swarm/config.json.';
+  }
+  return `Swarm nudge (fires at most ${NUDGE_CAP}x per session): alternative models are armed on `
+    + `this machine — ${CONSIDER} If Workflow is the right tool anyway, simply call it again — this `
+    + 'passes on the retry.';
 }
 
 async function main() {
@@ -66,28 +80,23 @@ async function main() {
   let payload = {};
   try { payload = JSON.parse(stdin); } catch { process.exit(0); }
 
-  const nudge = decideNudge({
+  const sessionId = String(payload.session_id || '');
+  const strength = decideNudge({
     config: readJSON(CONFIG),
     seen: readJSON(SEEN),
-    sessionId: String(payload.session_id || ''),
+    sessionId,
     correlationId: process.env.CORRELATION_ID,
   });
-  if (!nudge) process.exit(0);
+  if (!strength) process.exit(0);
 
-  try {
-    const seen = readJSON(SEEN) || {};
-    seen[String(payload.session_id)] = Date.now();
-    // Keep the marker file from growing forever — entries older than a day are dead sessions.
-    for (const [k, v] of Object.entries(seen)) if (Date.now() - v > 86_400_000) delete seen[k];
-    fs.mkdirSync(SWARM_HOME, { recursive: true });
-    fs.writeFileSync(SEEN, JSON.stringify(seen), 'utf8');
-  } catch { /* marker failure must not break the nudge */ }
+  // A hard block has no budget, so it has nothing to remember.
+  if (strength === 'nudge') recordFiring(SEEN, sessionId);
 
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
-      permissionDecisionReason: nudgeReason(),
+      permissionDecisionReason: nudgeReason(strength),
     },
   }) + '\n');
   process.exit(0);
