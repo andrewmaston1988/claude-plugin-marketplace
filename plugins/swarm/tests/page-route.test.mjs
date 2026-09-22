@@ -495,15 +495,7 @@ test("P4: EventSource reconnect — CLOSED backs off and reconnects, CONNECTING 
 });
 
 // ── the buzz ─────────────────────────────────────────────────────────────
-// The haptic marks "something just finished" — not "you navigated back and I
-// noticed". The scan used to live inside buildRuns(), which only ever runs on the
-// runs route, so seenActive froze for as long as you sat on any other screen and
-// the celebration arrived attached to the navigation that ended the freeze.
-//
-// Observed two ways, both without a browser: the document title (:277's existing
-// instrument) and the haptic — navigator.vibrate is a harness stub, and a stub is
-// the only celebration counter there is, since two celebrations of the same run
-// write the same title. The device-level haptic stays the manual row.
+// The haptic marks "something just finished", observed from any view — the vibrate stub, since two celebrations of the same run write the same title.
 
 const endedRow = () => listRow({ active: false, finishedMs: Date.now() });
 const mountRun = async (P) => {

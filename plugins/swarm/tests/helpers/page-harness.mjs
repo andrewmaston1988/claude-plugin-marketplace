@@ -146,11 +146,11 @@ export function loadPage(opts = {}) {
   const esInstances = [];
   const fetchLog = [];
   const pendingFetches = [];
-  // The haptic is the part the operator asked for and the only celebration
-  // instrument that can COUNT: two celebrations of the same run write the same
-  // document.title, so the title cannot tell one fire from two. navigator.vibrate
-  // has no test surface on a real phone (the manual row covers that); here it is
-  // a stub, which is exactly what makes "exactly once" checkable.
+  // The haptic is the only celebration instrument that can COUNT: two celebrations
+  // of the same run write the same document.title, so the title cannot tell one
+  // fire from two. navigator.vibrate has no test surface on a real phone (the
+  // manual row covers that); here it is a stub, which is exactly what makes
+  // "exactly once" checkable.
   const vibrateCalls = [];
   const fetch = (url, init = {}) => {
     fetchLog.push(url);
