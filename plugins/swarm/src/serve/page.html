@@ -204,9 +204,9 @@
   .menu .panel .k { font-size:12px; color:var(--muted); word-break:break-all; }
   iframe.digestframe { width:100%; height:calc(100vh - 100px); border:0; background:var(--ground); }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
+  .flash { animation:pulse .8s ease-in-out 3; }
   @keyframes dash { to { stroke-dashoffset:-56; } }
   .ring { fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:14 42; animation:dash 1.4s linear infinite; }
-  .flash { animation:pulse .8s ease-in-out 3; }
 </style>
 </head>
 <body>
@@ -355,21 +355,10 @@
     // params and the auth token both survive — concatenating after q() mangles
     // the token and 401s the whole list.
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
-    // Everything the commit needs, computed as values — a superseded scan writes none
-    // of it. tickCfg keeps its in-place shape (the timers are armed from it at boot).
+    // Everything the commit needs, as values — a superseded scan writes none of it.
     const cfg = { clockMs: data.clockMs || tickCfg.clockMs, uiPollMs: data.uiPollMs || tickCfg.uiPollMs };
-    // Celebrate on a fetched active→inactive transition only — never from a clock
-    // tick, which re-renders the same fetched data and would otherwise re-fire it.
-    // The build names the finished runs; commitView fires the celebration.
-    const seen = new Map(seenActive);
-    const finished = [];
-    for (const r of data.runs) {
-      const was = seen.get(r.project + "/" + r.name);
-      if (was === true && !r.active) finished.push(r.name);
-      seen.set(r.project + "/" + r.name, r.active);
-    }
     const { header, home, html, labels } = renderRunsHtml(data);
-    return { header, home, html, state: { lastList: data, tickCfg: cfg, seenActive: seen, groupLabels: labels, grading: data.grading, celebrate: finished } };
+    return { header, home, html, state: { lastList: data, tickCfg: cfg, groupLabels: labels, grading: data.grading } };
   }
   function renderRunsHtml(data) {
     // Labels merge into a fresh map — a value the commit swaps in, never a write to
@@ -964,10 +953,29 @@
     };
   }
 
+  // The one home for the seenActive advance, and the whole transition response: it
+  // swaps a whole new map synchronously, so whichever of the tick and a list build
+  // arrives first consumes the transition and the other cannot announce it again off
+  // a snapshot it took earlier.
+  function announceFinished(runs) {
+    const { finished, seen } = window.swarmLive.finishedSince(seenActive, runs);
+    seenActive = seen;
+    for (const n of finished) celebrate(n);
+  }
+
+  // Haptic + title fire from any view. The flash is runs-view-only: it rides #hdr, which
+  // setHeader repaints on every route commit, so flashing it from another view would either
+  // do nothing (a different header is on screen) or flash a header that's about to be
+  // replaced anyway. Gate on the view live at fire time, not the view active when the run
+  // finished — this only ever fires synchronously off the current view object.
   function celebrate(name) {
     try { navigator.vibrate && navigator.vibrate([120, 60, 120]); } catch {}
-    const old = document.title; document.title = `✓ ${name}`; hdr.classList.add("flash");
-    setTimeout(() => { document.title = old; hdr.classList.remove("flash"); }, 4000);
+    const old = document.title; document.title = `✓ ${name}`;
+    if (view.name === "runs") {
+      hdr.classList.add("flash");
+      setTimeout(() => hdr.classList.remove("flash"), 800);
+    }
+    setTimeout(() => { document.title = old; }, 4000);
   }
 
   // ── routing ─────────────────────────────────────────────────────────────
@@ -1000,15 +1008,14 @@
     if ("lastList" in s) lastList = s.lastList;
     if ("currentRun" in s) currentRun = s.currentRun;
     if ("currentLeaf" in s) currentLeaf = s.currentLeaf;
-    if ("seenActive" in s) seenActive = s.seenActive;
     if ("groupLabels" in s) groupLabels = s.groupLabels;
     if ("tickCfg" in s) { tickCfg.clockMs = s.tickCfg.clockMs; tickCfg.uiPollMs = s.tickCfg.uiPollMs; }
     if ("grading" in s) $("#menu .nav a[href='#/perf']").classList.toggle("off", !s.grading);
     if (next.header !== undefined) setHeader(next.header, next.home);
     setHtml(main, next.html);
     next.draw?.();
-    // After the paint: setHeader resets hdr's className, which would wipe the flash.
-    for (const n of s.celebrate || []) celebrate(n);
+    // Past the route guard: a superseded build neither celebrates nor advances.
+    if (s.lastList) announceFinished(s.lastList.runs);
   }
   async function buildFor(v) {
     if (v.name === "perf") return buildPerf(v.kind, v.which);
@@ -1138,6 +1145,8 @@
     // (nothing writes run.log when the engine dies) — shouldPoll gates that refetch
     // to views with something to poll, so a finished run stops hitting the network.
     setInterval(() => { if (window.swarmLive.shouldPoll(pendingView || view, currentRun, Date.now())) requestRoute(route); }, tickCfg.uiPollMs);
+    // The estate scan, which that refetch cannot stand in for: on a run view it re-requests the run's OWN route.
+    setInterval(() => { api("/api/runs").then((d) => announceFinished(d.runs)).catch(() => {}); }, tickCfg.uiPollMs);
   }
 
   // Test seam for tests/page-route.test.mjs: the vm harness has no browser, so the

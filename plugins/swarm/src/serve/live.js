@@ -86,6 +86,22 @@
     return !runEnded(run);
   }
 
+  // The active→inactive scan, lifted out of the runs builder so a tick that does
+  // not care which view is mounted can run it too. Both halves are returned as
+  // VALUES: what just finished, and the advanced map. `undefined` (never seen) is
+  // not `false` (seen inactive) — reading absent as was-active buzzes once for
+  // every run that finished at any point before the dashboard was opened.
+  function finishedSince(seen, runs) {
+    const next = new Map(seen);
+    const finished = [];
+    for (const r of runs || []) {
+      const key = `${r.project}/${r.name}`;
+      if (next.get(key) === true && !r.active) finished.push(r.name);
+      next.set(key, r.active);
+    }
+    return { finished, seen: next };
+  }
+
   // A build commits only while it is still the newest route — the generation
   // token's whole predicate, extracted so tests pin it off the page. `latest`
   // is what the page's counter says NOW; anything but exact equality discards,
@@ -297,5 +313,5 @@
     return n;
   };
 
-  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, identityLabel, agoText, projectOrder, runEnded, shouldPoll, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges, stateOfGroup, railPitch, railRows, railLayout };
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, identityLabel, agoText, projectOrder, runEnded, shouldPoll, finishedSince, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges, stateOfGroup, railPitch, railRows, railLayout };
 })();
