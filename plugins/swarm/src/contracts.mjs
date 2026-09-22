@@ -216,6 +216,13 @@ export function inferStoredIdentity(model) {
   return {};
 }
 
+// Turn evidence from a stored result: the field wins; the raw-output regex is a
+// legacy fallback for results written before the field existed; null means unknown, never zero.
+export function storedTurnCount(result) {
+  if (result?.numTurns != null) return result.numTurns;
+  return /"num_turns"\s*:\s*0\b/.test(String(result?.output ?? "")) ? 0 : null;
+}
+
 // The one reading of a stored row's identity. Six modules held their own copy and
 // they had already diverged on case and trimming, so the same row keyed two ways
 // and a model's history split between them.

@@ -2,6 +2,7 @@ import { mkdirSync, createWriteStream, existsSync, readFileSync, writeFileSync, 
 import { freemem } from "node:os";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
+import { storedTurnCount } from "./contracts.mjs";
 import { buildDispatch, createDispatchRegistry, toSpawnable, runnerOf } from "./dispatch.mjs";
 import { isClaudeModel } from "./models.mjs";
 import {
@@ -1177,9 +1178,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       const recorded = recordedSessions.get(task.id);
       const resumeProvider = task.provider || prior?.provider || recorded?.provider;
       const minted = prior?.sessionId ? prior : recorded;
-      const noTurn = /"num_turns"\s*:\s*0\b/.test(String(prior?.output ?? "")); // failed attempts carry it only here
       const declined = minted?.provider && resumeProvider && minted.provider !== resumeProvider ? "provider-changed"
-        : noTurn ? "no-turns" : null;
+        : storedTurnCount(prior) === 0 ? "no-turns" : null;
       const resumeId = prior?.ok === true || declined ? null : (minted?.sessionId ?? null);
 
       let wt = null;

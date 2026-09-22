@@ -244,6 +244,18 @@ export function createCodexStreamParser({ emit: emitCallback, onEvent, onSession
   let realModel;
   let usage = emptyTokens();
   let error;
+  // Codex reports no turn count of its own, and the scheduler declines to resume
+  // a session whose prior attempt completed no turn — so the count has to come
+  // from here. A turn is counted on its first CONTENT (an item, text or usage),
+  // never on `turn.failed`: a request that died on the way in never got a turn
+  // down, and that is exactly the zero this exists to report.
+  let turns = 0;
+  let inTurn = false;
+  const beginTurn = () => {
+    if (inTurn) return;
+    inTurn = true;
+    turns += 1;
+  };
   const outputById = new Map();
   const events = [];
 
@@ -256,6 +268,7 @@ export function createCodexStreamParser({ emit: emitCallback, onEvent, onSession
   const recordUsage = (value) => {
     const next = codexUsage(value);
     if (!hasUsage(next)) return;
+    beginTurn();
     usage = next;
     emit({ type: "usage", ...(sessionId ? { sessionId } : {}), usage });
   };
@@ -267,7 +280,10 @@ export function createCodexStreamParser({ emit: emitCallback, onEvent, onSession
     const result = delta
       ? appendText(outputById, key, previous + text)
       : appendText(outputById, key, text);
-    if (result.emitted) emit({ type: "text", ...(sessionId ? { sessionId } : {}), text: result.emitted });
+    if (result.emitted) {
+      beginTurn();
+      emit({ type: "text", ...(sessionId ? { sessionId } : {}), text: result.emitted });
+    }
     return result;
   };
 
@@ -320,6 +336,7 @@ export function createCodexStreamParser({ emit: emitCallback, onEvent, onSession
       const item = event.item || event.data || event;
       const id = item.id || event.item_id || event.itemId;
       const activity = activityFrom(item);
+      if (activity) beginTurn();
       if (activity) emit({ type: "activity", ...(sessionId ? { sessionId } : {}), activity });
       const text = isMessageItem(item) ? itemText(item) : "";
       if (text) emitText(text, id);
@@ -334,6 +351,7 @@ export function createCodexStreamParser({ emit: emitCallback, onEvent, onSession
 
     if (type === "turn.completed" || type === "response.completed") {
       recordUsage(event.usage || event.turn?.usage || event.response?.usage);
+      beginTurn(); // a completed turn is a turn down, usage or not
       finish({ output: textFromValue(event.output_text || event.output) });
       return;
     }
@@ -372,6 +390,7 @@ export function createCodexStreamParser({ emit: emitCallback, onEvent, onSession
         output: finalMessage(outputById),
         usage,
         terminal,
+        numTurns: turns,
         ...(error ? { error } : {}),
       };
     },
@@ -421,6 +440,10 @@ export function createClaudeRunnerParser(options = {}) {
     },
     onResult(result) {
       output = typeof result.result === "string" ? result.result : output;
+      // Read BEFORE the error branch returns. A failed attempt still knows how
+      // many turns it got down, and that count is the only thing telling the
+      // scheduler whether there is a session worth resuming.
+      if (result.num_turns != null) numTurns = result.num_turns;
       if (result.is_error === true || result.subtype === "error") {
         error = {
           code: result.error?.code || result.error_code || "runner_error",
