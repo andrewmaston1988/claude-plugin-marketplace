@@ -5,7 +5,7 @@
 // touches the real ~/.local/bin.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, utimesSync } from "node:fs";
 import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -232,4 +232,113 @@ test("installPlan writes the .cmd only on win32", () => {
   assert.deepEqual(names("win32"), ["swarm", "swarm-resolver.mjs", "swarm.cmd"]);
   assert.deepEqual(names("linux"), ["swarm", "swarm-resolver.mjs"]);
   assert.deepEqual(names("darwin"), ["swarm", "swarm-resolver.mjs"]);
+});
+
+// ── Codex host resolution ─────────────────────────────────────────────────────
+// Codex ships no registry file: an install is a versioned directory under
+// ~/.codex/plugins/cache/<marketplace>/<name>/, switched on by a config.toml table.
+// Every row drives the SHIPPED resolver against a fake home, so what is exercised
+// is the file `swarm install` copies, not a re-implementation of its lookup.
+
+// marker lands in bin/swarm.mjs; `touch` back-dates the dir so mtime ordering is
+// pinned rather than left to write order.
+function fixtureCodexInstall(home, { marker, version = "0.1.0", enabled = true, touch } = {}) {
+  const [name, marketplace] = KEY.split("@");
+  mkdirSync(join(home, ".codex"), { recursive: true });
+  writeFileSync(
+    join(home, ".codex", "config.toml"),
+    `[marketplaces.${marketplace}]\nsource_type = "local"\n\n[plugins."${KEY}"]\nenabled = ${enabled}\n`,
+  );
+  const root = fixtureInstall(join(home, ".codex", "plugins", "cache", marketplace, name, version), marker);
+  if (touch) utimesSync(root, touch, touch);
+  return root;
+}
+
+// SWARM_PLUGIN_REGISTRY: "" clears any ambient override so the default Claude path
+// — which does not exist inside the fake home — is what misses.
+const runResolver = (home, env = {}) =>
+  spawnSync(process.execPath, [RESOLVER_SRC, "bin/swarm.mjs"], {
+    encoding: "utf8", timeout: 30000, windowsHide: true,
+    env: { ...process.env, ...fakeHomeEnv(home), SWARM_PLUGIN_REGISTRY: "", ...env },
+  });
+
+test("codex: with no Claude registry, the engine runs from the Codex install", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    fixtureCodexInstall(home, { marker: "marker-codex" });
+    const r = runResolver(home);
+    assert.equal(r.status, 0, `Codex install must resolve: ${r.stderr}`);
+    assert.match(r.stdout, /marker-codex/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codex: a cached install whose config.toml does not enable it is not resolved", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    // The tree is on disk and complete — only `enabled = false` separates this from
+    // the row above, so dropping the config gate turns this green.
+    fixtureCodexInstall(home, { marker: "marker-disabled", enabled: false });
+    const r = runResolver(home);
+    assert.equal(r.status, 1, `a disabled plugin must not resolve, got ${r.status}: ${r.stdout}`);
+    assert.doesNotMatch(r.stdout, /marker-disabled/);
+    assert.match(r.stderr, /not installed/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codex: the newest install by mtime wins, not the highest-sorting version string", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    // "9.9.9" sorts above "0.0.1" by name and by semver, and is the older install —
+    // so a name or version sort picks it and this row reddens. Codex mints version
+    // dirs like "0.1.0", "26.911.61220" and bare shas, which share no ordering.
+    fixtureCodexInstall(home, { marker: "marker-stale", version: "9.9.9", touch: new Date("2020-01-01") });
+    fixtureCodexInstall(home, { marker: "marker-current", version: "0.0.1", touch: new Date("2026-01-01") });
+    const r = runResolver(home);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /marker-current/);
+    assert.doesNotMatch(r.stdout, /marker-stale/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codex: a Claude install takes precedence over a Codex one", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    fixtureCodexInstall(home, { marker: "marker-codex-loses" });
+    mkdirSync(join(home, ".claude", "plugins"), { recursive: true });
+    writeRegistry(
+      join(home, ".claude", "plugins", "installed_plugins.json"),
+      [userEntry(fixtureInstall(join(dir, "claude-install"), "marker-claude-wins"))],
+    );
+    const r = runResolver(home);
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /marker-claude-wins/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("codex: an explicit SWARM_PLUGIN_REGISTRY suppresses the Codex fallback", () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    // A resolvable Codex install is present; the override names a Claude-shaped
+    // registry with no entry, and pointing at one must mean what it says rather
+    // than silently resolving somewhere the operator did not name.
+    fixtureCodexInstall(home, { marker: "marker-should-not-run" });
+    const r = runResolver(home, { SWARM_PLUGIN_REGISTRY: writeRegistry(join(dir, "empty.json"), []) });
+    assert.equal(r.status, 1, `the override must not fall through to Codex, got ${r.status}: ${r.stdout}`);
+    assert.doesNotMatch(r.stdout, /marker-should-not-run/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

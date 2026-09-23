@@ -86,6 +86,30 @@ and need the configured `codex` app-server command.
 <!-- swarm-bootstrap-exception: the only sanctioned engine-path instruction in the tree -->
 Working in a clone of this marketplace, run instead: `node plugins/swarm/scripts/swarm.mjs install`.
 
+### Codex
+
+Swarm installs into Codex from this same tree — one shared `skills/`, `src/` and `bin/`,
+with `.codex-plugin/plugin.json` as the only extra manifest.
+
+```bash
+codex plugin marketplace add <path to this repo>
+codex plugin add swarm@andrewmaston1988-claude-plugins
+```
+
+The marketplace name is shared with the Claude install deliberately, so `swarm@<marketplace>`
+is one identity on both hosts and `swarm install` resolves either. Codex has no registry
+file, so the resolver reads `~/.codex/config.toml` for the enabling entry and resolves the
+newest enabled install itself. `SWARM_PLUGIN_REGISTRY` still names a Claude-shaped registry,
+and setting it suppresses the Codex lookup.
+
+**Swarm's tool-gating hooks are Claude-only, and the Codex manifest declares none.** Codex's
+hook runtime is fully built — the event set, the `type: "command"` schemas and
+`CLAUDE_PLUGIN_ROOT` are all in the 0.156.1 binary — but `feature.plugin_hooks` is `false`
+and server-controlled, and `--enable plugin_hooks` does not flip it. A plugin-declared hook
+cannot run, so declaring one would promise enforcement that never happens. Under Codex,
+`dispatch-gate`, `foreground-guard` and `leaf-guard` do not fire: a Codex leaf is
+unguarded, and the governance roots in `~/.swarm/config.json` are the only containment.
+
 ## Usage
 
 ```bash
