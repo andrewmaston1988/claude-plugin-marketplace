@@ -231,6 +231,18 @@ export function loadPage(opts = {}) {
     respond: (pred, data) => respond(pred, data),
     isPerf,
     mainText: () => main.textContent,
+    // Every painted element carrying `cls`, in document order. The mini-DOM's
+    // querySelector only resolves ids, and textContent cannot distinguish an
+    // element that rendered from one that rendered in the wrong container.
+    findByClass: (cls) => {
+      const out = [];
+      (function walk(n) {
+        if (n.nodeType !== 1) return;
+        if (n.getAttribute("class").split(/\s+/).includes(cls)) out.push(n);
+        for (const c of n.childNodes) walk(c);
+      })(main);
+      return out;
+    },
     // The screen the user sees is header + main together — the flicker wipes both.
     screenText: () => `${hdr.textContent}\n${main.textContent}`,
     docTitle: () => document.title,
