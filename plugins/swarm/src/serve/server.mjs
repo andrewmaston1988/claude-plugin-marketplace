@@ -430,6 +430,13 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       const { groupOf, labelOf } = projectGrouping(_projectKeys(home));
       return send(res, 200, { ...run, groupLabel: labelOf(groupOf(run.project)) });
     }
+    // Already HTML — served as written, never through mdToHtml. 20 runs on disk
+    // carry one and nothing could reach them before this route existed.
+    if (seg.length === 3 && seg[2] === "report") {
+      const file = join(dir, "report.html");
+      if (!existsSync(file)) return notFound(res);
+      return send(res, 200, readFileSync(file, "utf8"), "text/html; charset=utf-8");
+    }
     if (seg.length === 3 && seg[2] === "digest") {
       const md = ["report.md", "digest.md"].map((f) => join(dir, f)).find(existsSync);
       if (!md) return notFound(res);

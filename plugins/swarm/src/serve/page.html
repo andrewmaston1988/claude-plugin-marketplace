@@ -78,12 +78,6 @@
   .strip i.ok { background:var(--ok); } .strip i.run { background:var(--accent); animation:pulse 1.6s ease-in-out infinite; } .strip i.warn { background:var(--warn); } .strip i.bad { background:var(--bad); }
   .strip .more { font-size:11px; color:var(--faint); margin-left:4px; }
   .chev { flex:none; }
-  .digest { display:flex; width:100%; align-items:center; gap:12px; padding:12px 16px; min-height:44px; border-bottom:1px solid var(--ok); background:var(--ok-bg); }
-  .digest .g { font-size:20px; color:var(--ok); flex:none; }
-  .digest .txt { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
-  .digest .meta { font-size:12px; color:var(--muted); }
-  .digest .meta .counts { display:inline-flex; }
-  .digest b { font-size:14px; font-weight:650; }
   .totals { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px; border-bottom:1px solid var(--rule); font-size:13px; line-height:1; }
   .totals > * { line-height:1; }
   .totals .bar { width:150px; flex:none; }
@@ -203,6 +197,31 @@
   .menu .panel h2 { margin:0; font-size:14px; font-weight:700; }
   .menu .panel .k { font-size:12px; color:var(--muted); word-break:break-all; }
   iframe.digestframe { width:100%; height:calc(100vh - 100px); border:0; background:var(--ground); }
+  /* banner — the run's one-line verdict, one tone per state. Tones are the mockup's
+     literals; they are deliberately their own scale, not the --ok/--warn/--bad chips,
+     because a banner is a surface and a chip is ink on one. */
+  .banner { --bn-bg:#161430; --bn-br:#2b2650; --bn-ic-bg:#241f4a; --bn-ic-fg:#b3a9ff; --bn-sub:#9e95e8;
+    display:flex; align-items:center; gap:12px; margin:12px 16px; padding:13px 14px; border-radius:14px;
+    background:var(--bn-bg); border:1px solid var(--bn-br); }
+  .banner.ok     { --bn-bg:#0f1e18; --bn-br:#1f3b2e; --bn-ic-bg:#173a29; --bn-ic-fg:#57d69b; --bn-sub:#8faf9e; }
+  .banner.slow   { --bn-bg:#241e12; --bn-br:#453516; --bn-ic-bg:#3a2c11; --bn-ic-fg:#e5b75c; --bn-sub:#b79a63; }
+  .banner.bad    { --bn-bg:#341916; --bn-br:#5a3630; --bn-ic-bg:#3f1e19; --bn-ic-fg:#e8897c; --bn-sub:#c08b80; }
+  .banner.queued { --bn-bg:#101016; --bn-br:#23232e; --bn-ic-bg:#17171e; --bn-ic-fg:#8c8c8c; --bn-sub:#8c8c8c; }
+  .banner .ic { width:34px; height:34px; border-radius:17px; flex:none; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:600; background:var(--bn-ic-bg); color:var(--bn-ic-fg); }
+  .banner .txt { flex:1; min-width:0; }
+  .banner .t { font-size:14.5px; font-weight:600; }
+  .banner .s { margin-top:5px; font-size:11.5px; color:var(--bn-sub); }
+  .banner .go { flex:none; font-size:18px; color:var(--bn-ic-fg); }
+  .banner.tap { min-height:44px; }
+  /* The mockup draws this as a flex:none footer inside a fixed phone frame. This page
+     scrolls the document instead, so the same role is `fixed` — a bar appended into the
+     scrolling body is below the fold on any run with more than a few waves. */
+  .actionbar { position:fixed; left:0; right:0; bottom:0; z-index:3; display:flex; gap:10px;
+    padding:10px 16px calc(12px + env(safe-area-inset-bottom));
+    background:var(--ground); border-top:1px solid var(--rule); }
+  .actionbar .primary { flex:1; height:46px; border-radius:12px; background:var(--accent); color:var(--ground);
+    display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; }
+  main:has(.actionbar) { padding-bottom:84px; }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
   .flash { animation:pulse .8s ease-in-out 3; }
   @keyframes dash { to { stroke-dashoffset:-56; } }
@@ -494,6 +513,38 @@
   };
   const byStateOf = (tasks) => tasks.reduce((b, t) => (b[t.state] = (b[t.state] || 0) + 1, b), {});
 
+  // One run → one verdict tile, read off the run's own facts in severity order: the
+  // engine is gone, then leaves failed, then it finished, then something is quiet,
+  // then it is simply running. A banner without a `sub` is decoration, so every
+  // branch states its reason.
+  function bannerHtml(run, tasks, now, quietWarn) {
+    const b = byStateOf(tasks);
+    const n = (...ks) => ks.reduce((a, k) => a + (b[k] || 0), 0);
+    const done = n("ok", "skipped");
+    const failed = n("failed", "failed:timeout", "failed:stopped", "blocked");
+    const tok = fmtTok(tasks.reduce((a, t) => a + tokTotal(t.tokens), 0));
+    const dhref = (run.digestPath || run.reportPath) ? `#/run/${enc(run.project)}/${enc(run.name)}/digest` : null;
+    const tile = (kind, icon, title, sub, href) =>
+      `<div class="banner ${kind}${href ? " tap" : ""}"${href ? ` role="link" data-key="banner" data-href="${esc(href)}"` : ""}>`
+      + `<span class="ic">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`
+      + (href ? `<span class="go">›</span>` : "") + `</div>`;
+
+    if (run.abortedMs) return tile("bad", "✕", "Aborted — the engine is gone", `${done} of ${tasks.length} finished · ${tok} tokens`, dhref);
+    if (run.stoppedMs) return tile("bad", "✗", "Stopped by hand", `${tasks.length - done} never finished · ${tok} tokens`, dhref);
+    if (failed) return tile("bad", "✗", `${failed} of ${tasks.length} failed`, `${tok} tokens · ${run.finishedMs ? ago(run.finishedMs) : "still running"}`, dhref);
+    if (run.finishedMs) return tile("ok", "✓", run.digestPath ? "Digest ready" : "Finished", `${done} of ${tasks.length} leaves · ${tok} tokens`, dhref);
+    // The longest quiet stretch is the single most useful fact about a live run that
+    // has one; below the threshold there is nothing to warn about.
+    const quiet = tasks
+      .map((t) => ({ t, s: window.swarmLive.quietSecs(t, now) }))
+      .filter((x) => x.s != null && x.s * 1000 > quietWarn)
+      .sort((a, x) => x.s - a.s)[0];
+    if (quiet) return tile("slow", "!", `${quiet.t.id} has been quiet for ${fmtDur(quiet.s * 1000)}`, "longest quiet stretch of this run", null);
+    const running = n("running", "retrying");
+    if (running) return tile("", "◐", `${running} running`, `${done} of ${tasks.length} done · ${tok} tokens`, null);
+    return tile("queued", "·", "Queued", `${tasks.length} leaves · nothing started yet`, null);
+  }
+
   // `run` carries run-level metadata (finishedMs/digestPath/quietWarnMs/project/name);
   // `tasks`/`waves` is the graph to draw, which the node screen (h) passes as its own
   // subgraph rather than run.tasks/run.waves — the one parameter this needs to be
@@ -502,13 +553,7 @@
     const now = Date.now();
     const rows = buildRows(tasks, waves);
     const quietWarn = run.quietWarnMs || 60000;
-    let html = "";
-    const finished = !!run.finishedMs;
-    if (finished && (run.digestPath || run.reportPath)) {
-      const b = byStateOf(tasks);
-      const dhref = `#/run/${enc(run.project)}/${enc(run.name)}/digest`;
-      html += `<div class="digest tap" role="link" data-key="digest" data-href="${esc(dhref)}"><span class="g">✓</span><div class="txt"><b>Digest</b><span class="meta">${tasks.length} leaves · ${countsHtml(b)}${run.reportPath ? " · report" : ""}</span></div><svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4fc98a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>`;
-    }
+    let html = bannerHtml(run, tasks, now, quietWarn);
     const totalsByState = byStateOf(tasks);
     const total = tasks.reduce((n, t) => n + tokTotal(t.tokens), 0);
     html += `<div class="totals">${countsHtml(totalsByState)}<span class="meta">${fmtTok(total)}</span>${barHtml(totalsByState, tasks.length)}</div>`;
@@ -555,6 +600,10 @@
       html += `<li class="row leaf tap${quiet ? " quiet" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
     html += `</ul></div>`;
+    // The one action this screen exists for, where there is a rendered report to open.
+    // report.html only — the digest is already one tap away from the banner.
+    if (run.reportHtmlPath)
+      html += `<div class="actionbar"><a class="primary" href="#/run/${enc(run.project)}/${enc(run.name)}/report">Open report</a></div>`;
     return { html, rows };
   }
 
@@ -953,6 +1002,13 @@
     };
   }
 
+  function buildReport(project, name) {
+    return {
+      header: `${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(name)}</b><small>report</small></div>${menuBtn}`,
+      html: `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/report`))}"></iframe>`,
+    };
+  }
+
   // The one home for the seenActive advance, and the whole transition response: it
   // swaps a whole new map synchronously, so whichever of the tick and a list build
   // arrives first consumes the transition and the other cannot announce it again off
@@ -997,7 +1053,7 @@
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
     if (seg[0] === "perf") return { name: "perf", project: null, run: null, leaf: null, node: null, kind: seg[1] || null, which: seg[2] || null };
     if (seg[0] === "run" && seg.length >= 3) {
-      const name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "node" ? "node" : "run";
+      const name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "report" ? "report" : seg[3] === "node" ? "node" : "run";
       return { name, project: seg[1], run: seg[2], leaf: name === "leaf" ? seg[4] || null : null, node: name === "node" ? seg[4] || null : null };
     }
     return { name: "runs", project: null, run: null, leaf: null, node: null };
@@ -1021,6 +1077,7 @@
     if (v.name === "perf") return buildPerf(v.kind, v.which);
     if (v.name === "leaf") return buildLeaf(v.project, v.run, v.leaf);
     if (v.name === "digest") return buildDigest(v.project, v.run);
+    if (v.name === "report") return buildReport(v.project, v.run);
     if (v.name === "node") return buildNode(v.project, v.run, v.node);
     if (v.name === "run") return buildRun(v.project, v.run);
     return buildRuns();
