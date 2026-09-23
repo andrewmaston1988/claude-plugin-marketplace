@@ -147,6 +147,49 @@ test("a run that has started nothing banners as queued, not as done", async () =
   assert.ok(text.includes("nothing started yet"));
 });
 
+// ── the run's chrome stays on the run screen ─────────────────────────────
+
+// buildNode feeds renderRunHtml a manifest node's SUBGRAPH while still passing the
+// whole run, so anything run-level inside that renderer paints onto the node screen:
+// a verdict mixing finishedMs/digestPath with one node's leaf counts, and an 'Open
+// report' bar for a report the node screen is not showing.
+const paintNode = async (over, node = "m1") => {
+  const P = loadPage();
+  await P.flush();
+  P.location.hash = `${RUN_URL}/node/${node}`;
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun({ ...targetRun(), ...over });
+  await P.flush();
+  return P;
+};
+
+const subgraphRun = (over = {}) => ({
+  tasks: [
+    { id: "m1", kind: "manifest", state: "ok", model: "glm", tokens: { input: 10, output: 20 }, after: [] },
+    { id: "m1~a", kind: "child", parent: "m1", state: "ok", model: "glm", tokens: { input: 10, output: 20 }, after: [] },
+    { id: "m1~b", kind: "child", parent: "m1", state: "failed", model: "glm", tokens: { input: 10, output: 20 }, after: [] },
+  ],
+  ...over,
+});
+
+test("the node screen carries neither the run's verdict banner nor its report bar", async () => {
+  const P = await paintNode(subgraphRun({
+    finishedMs: Date.now(), digestPath: "/runs/TARGETRUN/digest.md", reportHtmlPath: "/runs/TARGETRUN/report.html",
+  }));
+  assert.equal(P.findByClass("banner").length, 0, "a run-level verdict over one node's subgraph is a lie, not a summary");
+  assert.equal(P.findByClass("actionbar").length, 0, "the report bar belongs to the run screen");
+  assert.equal(P.findByClass("graph").length, 1, "the node's own graph is what this screen is for");
+});
+
+test("the run screen still carries both, so the fix moved the chrome rather than dropping it", async () => {
+  const P = await paint(subgraphRun({
+    finishedMs: Date.now(), digestPath: "/runs/TARGETRUN/digest.md", reportHtmlPath: "/runs/TARGETRUN/report.html",
+  }));
+  assert.equal(P.findByClass("banner").length, 1, "the run's own screen has its verdict");
+  assert.equal(P.findByClass("actionbar").length, 1, "and its report action");
+});
+
 // ── the tones carry their weight ─────────────────────────────────────────
 
 // Ported straight from the mockup, every tile sat at 1.05-1.16 contrast against the
