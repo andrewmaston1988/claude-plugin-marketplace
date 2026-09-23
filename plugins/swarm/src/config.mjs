@@ -345,3 +345,8 @@ export function configInitReport(result) {
   }
   return lines;
 }
+
+// The standard load: whatever SWARM_CONFIG names, else the default path.
+export function getConfig() {
+  return loadConfig(process.env.SWARM_CONFIG);
+}
