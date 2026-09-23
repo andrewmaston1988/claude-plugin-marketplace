@@ -40,6 +40,7 @@ const USAGE = `usage: swarm.mjs <command>
   perf [--aspect X] [--model Y] [--domain D] [--overall]   aspect x model table; --overall = one combined ranking
   scores backfill-realmodel [--dry-run]   rewrite alias-named score rows to the model their leaf transcript reports
   cost                       one cost list per provider, cheapest to dearest (meter + static rate cards)
+  refresh-prices [--dry-run]   re-read both vendors' published price tables and bank them at ~/.swarm/rate-cards.json
   serve [--daemon]           phone dashboard over ~/.swarm/runs on the LAN (config: dashboard.enabled/port/bind/token)
   serve restart | doctor | stop | status | enable | disable | install-autostart | uninstall-autostart
   config init                write every shipped key into ~/.swarm/config.json, keeping what is set and folding an old-shaped file ("provider"/"codex") into "providers" — it prints the mapping and leaves the previous file at config.json.bak; the /swarm:swarm setup skill walks it
@@ -866,6 +867,7 @@ async function cmdPerf(rest) {
 // static rate cards (see cost.mjs), and a model absent from one is an `unpriced`
 // row rather than a blank.
 async function cmdCost() {
+  await (await import("../src/rate-card-cli.mjs")).refreshStaleRateCards({ out, err });
   const {
     costSections, readSnapshots, usageHistoryPath, THIN_REQUESTS,
     METER_PROVIDER, METER_POINTS_UNIT, UNPRICED_CLASSIFICATION, API_EQUIVALENT_CLASSIFICATION,
@@ -1405,6 +1407,10 @@ async function main() {
       }
       case "cost":
         return await cmdCost();
+      case "refresh-prices": {
+        const { refreshPrices } = await import("../src/rate-card-cli.mjs");
+        return await refreshPrices({ out, err, dryRun: rest.includes("--dry-run") });
+      }
       case "usage":
         return await cmdUsage(rest);
       case "quota": {

@@ -335,7 +335,9 @@ test("costRowsFor: each provider's list is normalised to its own named base", ()
 test("rateCardRows: ranks cheapest first within one provider, unmeasured last, base named not derived", () => {
   const card = { provider: "codex", baseModel: "b", unit: "u", source: "s", asOf: "2026-09-21",
     prices: { b: { input: 2, output: 10 }, dear: { input: 8, output: 40 }, cheap: { input: 1, output: 5 } } };
-  const rows = rateCardRows(card, ["unknown"]);
+  // The roster is what gets a row — a refreshed card carries a whole back
+  // catalogue, so naming models is how a caller says which ones it can dispatch.
+  const rows = rateCardRows(card, ["unknown", "b", "dear", "cheap"]);
   deepEqual(rows.map((r) => r.model), ["cheap", "b", "dear", "unknown"], "RED: cheapest first, unmeasured last");
   equal(rows[0].mult, 0.5);
   equal(rows.find((r) => r.model === "b").mult, 1, "RED: the floor was derived from the cheapest row, not the named base");
@@ -521,7 +523,7 @@ test("costSections: a past-dated rate card announces its stale published prices"
     match(section.banner.join("\n"), /Stale Rate Card/);
     match(section.banner.join("\n"), new RegExp(provider));
     match(section.banner.join("\n"), /2020-01-01T00:00:00\.000Z/);
-    equal(section.banner[1], "    Refresh: re-read the published rate card");
+    equal(section.banner[1], "    Refresh: swarm refresh-prices");
   } finally {
     delete RATE_CARDS[provider];
   }
