@@ -200,13 +200,13 @@
   /* banner — the run's one-line verdict, one tone per state. Tones are the mockup's
      literals; they are deliberately their own scale, not the --ok/--warn/--bad chips,
      because a banner is a surface and a chip is ink on one. */
-  .banner { --bn-bg:#161430; --bn-br:#2b2650; --bn-ic-bg:#241f4a; --bn-ic-fg:#b3a9ff; --bn-sub:#9e95e8;
+  .banner { --bn-bg:#292a3d; --bn-br:#585680; --bn-ic-bg:#5d5a87; --bn-ic-fg:#b3a9ff; --bn-sub:#9e95e8;
     display:flex; align-items:center; gap:12px; margin:12px 16px; padding:13px 14px; border-radius:14px;
     background:var(--bn-bg); border:1px solid var(--bn-br); }
-  .banner.ok     { --bn-bg:#0f1e18; --bn-br:#1f3b2e; --bn-ic-bg:#173a29; --bn-ic-fg:#57d69b; --bn-sub:#8faf9e; }
-  .banner.slow   { --bn-bg:#241e12; --bn-br:#453516; --bn-ic-bg:#3a2c11; --bn-ic-fg:#e5b75c; --bn-sub:#b79a63; }
-  .banner.bad    { --bn-bg:#341916; --bn-br:#5a3630; --bn-ic-bg:#3f1e19; --bn-ic-fg:#e8897c; --bn-sub:#c08b80; }
-  .banner.queued { --bn-bg:#101016; --bn-br:#23232e; --bn-ic-bg:#17171e; --bn-ic-fg:#8c8c8c; --bn-sub:#8c8c8c; }
+  .banner.ok     { --bn-bg:#1a2e2c; --bn-br:#2d644f; --bn-ic-bg:#2f6853; --bn-ic-fg:#57d69b; --bn-sub:#8faf9e; }
+  .banner.slow   { --bn-bg:#302a23; --bn-br:#6a5735; --bn-ic-bg:#705b37; --bn-ic-fg:#e5b75c; --bn-sub:#b79a63; }
+  .banner.bad    { --bn-bg:#36272b; --bn-br:#7c4e4b; --bn-ic-bg:#83514e; --bn-ic-fg:#eda196; --bn-sub:#c08b80; }
+  .banner.queued { --bn-bg:#20222a; --bn-br:#434651; --bn-ic-bg:#434651; --bn-ic-fg:#9aa0b1; --bn-sub:#9aa0b1; }
   .banner .ic { width:34px; height:34px; border-radius:17px; flex:none; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:600; background:var(--bn-ic-bg); color:var(--bn-ic-fg); }
   .banner .txt { flex:1; min-width:0; }
   .banner .t { font-size:14.5px; font-weight:600; }

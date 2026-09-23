@@ -146,3 +146,41 @@ test("a run that has started nothing banners as queued, not as done", async () =
   assert.ok(el.getAttribute("class").includes("queued"));
   assert.ok(text.includes("nothing started yet"));
 });
+
+// ── the tones carry their weight ─────────────────────────────────────────
+
+// Ported straight from the mockup, every tile sat at 1.05-1.16 contrast against the
+// page ground — visually flat, because the mockup drew them in a narrow phone frame
+// with empty margins where the bright glyph did the work. At full width they vanish.
+// A hex table cannot be eyeballed, so the floor is asserted.
+const srgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+const lum = (h) => {
+  const [r, g, b] = srgb(h).map((v) => (v /= 255) <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+};
+const contrast = (a, b) => {
+  const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
+
+test("every banner tone separates from the page ground and carries a legible glyph", () => {
+  const css = readFileSync(PAGE, "utf8");
+  const ground = css.match(/--ground:(#[0-9a-f]{6})/)[1];
+
+  const tones = [...css.matchAll(/\.banner(?:\.(\w+))?\s*\{\s*--bn-bg:(#[0-9a-f]{6}); --bn-br:(#[0-9a-f]{6}); --bn-ic-bg:(#[0-9a-f]{6}); --bn-ic-fg:(#[0-9a-f]{6});/g)]
+    .map(([, name, bg, br, ic, fg]) => ({ name: name || "running", bg, br, ic, fg }));
+  assert.equal(tones.length, 5, "one rule per tone: running, ok, slow, bad, queued");
+
+  for (const t of tones) {
+    // `queued` is the recede-into-the-page tone and is held to a lower floor.
+    const floor = t.name === "queued" ? 1.15 : 1.25;
+    assert.ok(contrast(t.bg, ground) >= floor,
+      `${t.name}: tile ${t.bg} is ${contrast(t.bg, ground).toFixed(2)} against ground ${ground} — below ${floor}, reads as flat page`);
+    if (t.name !== "queued") {
+      assert.ok(contrast(t.br, t.bg) >= 1.8, `${t.name}: border ${t.br} is ${contrast(t.br, t.bg).toFixed(2)} against its tile`);
+      assert.ok(contrast(t.ic, t.bg) >= 1.8, `${t.name}: icon circle ${t.ic} is ${contrast(t.ic, t.bg).toFixed(2)} against its tile`);
+    }
+    assert.ok(contrast(t.fg, t.ic) >= 3.0,
+      `${t.name}: glyph ${t.fg} is ${contrast(t.fg, t.ic).toFixed(2)} on circle ${t.ic} — below the 3.0 legibility floor`);
+  }
+});
