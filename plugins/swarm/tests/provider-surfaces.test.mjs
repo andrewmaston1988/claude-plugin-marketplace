@@ -108,7 +108,8 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
 
     const parsed = readRunLog(readFileSync(join(plan.resultsDir, "run.log"), "utf8"));
     equal(parsed.tasks[0].provider, "fixture");
-    equal(identityLabel(parsed.tasks[0]), `fixture/${FIXTURE_MODEL}`);
+    // The bar labels by model alone; line 110 is where the provider must still cross.
+    equal(identityLabel(parsed.tasks[0]), FIXTURE_MODEL);
 
     const modelLines = [];
     equal(await cmdModels([], { cfg, env, registry, fetchImpl: async () => ({ ok: true }), write: (line) => modelLines.push(line) }), 0);
