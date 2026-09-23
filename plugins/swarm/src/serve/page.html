@@ -545,15 +545,25 @@
     return tile("queued", "·", "Queued", `${tasks.length} leaves · nothing started yet`, null);
   }
 
-  // `run` carries run-level metadata (finishedMs/digestPath/quietWarnMs/project/name);
-  // `tasks`/`waves` is the graph to draw, which the node screen (h) passes as its own
-  // subgraph rather than run.tasks/run.waves — the one parameter this needs to be
-  // reusable for both screens.
+  // The RUN screen's chrome: the verdict tile, then the one action that screen exists
+  // for. Deliberately not part of renderRunHtml — the node screen shares that renderer
+  // with a manifest node's SUBGRAPH, and a run-level verdict over one node's leaf counts
+  // (finishedMs/digestPath mixed with a subset of tasks) is a lie, not a summary.
+  function runChromeHtml(run, tasks) {
+    let html = bannerHtml(run, tasks, Date.now(), run.quietWarnMs || 60000);
+    // report.html only — the digest is already one tap away from the banner.
+    if (run.reportHtmlPath)
+      html += `<div class="actionbar"><a class="primary" href="#/run/${enc(run.project)}/${enc(run.name)}/report">Open report</a></div>`;
+    return html;
+  }
+
+  // The graph, and only the graph. `run` is read for project/name alone (row hrefs) —
+  // no verdict, no action bar, so a subgraph renders identically to a whole run.
   function renderRunHtml(run, tasks, waves) {
     const now = Date.now();
     const rows = buildRows(tasks, waves);
     const quietWarn = run.quietWarnMs || 60000;
-    let html = bannerHtml(run, tasks, now, quietWarn);
+    let html = "";
     const totalsByState = byStateOf(tasks);
     const total = tasks.reduce((n, t) => n + tokTotal(t.tokens), 0);
     html += `<div class="totals">${countsHtml(totalsByState)}<span class="meta">${fmtTok(total)}</span>${barHtml(totalsByState, tasks.length)}</div>`;
@@ -600,10 +610,6 @@
       html += `<li class="row leaf tap${quiet ? " quiet" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
     html += `</ul></div>`;
-    // The one action this screen exists for, where there is a rendered report to open.
-    // report.html only — the digest is already one tap away from the banner.
-    if (run.reportHtmlPath)
-      html += `<div class="actionbar"><a class="primary" href="#/run/${enc(run.project)}/${enc(run.name)}/report">Open report</a></div>`;
     return { html, rows };
   }
 
@@ -669,7 +675,7 @@
   async function buildRun(project, name) {
     const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
     const { html, rows } = renderRunHtml(run, run.tasks, run.waves);
-    return { header: runHeaderHtml(run, Date.now()), html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
+    return { header: runHeaderHtml(run, Date.now()), html: runChromeHtml(run, run.tasks) + html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
   }
 
   // A manifest node's own screen: the same graph renderer, fed the task's own
@@ -710,7 +716,7 @@
     if (view.name === "run" && currentRun) {
       setHeader(runHeaderHtml(currentRun, now));
       const { html, rows } = renderRunHtml(currentRun, currentRun.tasks, currentRun.waves);
-      setHtml(main, html);
+      setHtml(main, runChromeHtml(currentRun, currentRun.tasks) + html);
       drawRail(currentRun.tasks, rows);
       return;
     }
