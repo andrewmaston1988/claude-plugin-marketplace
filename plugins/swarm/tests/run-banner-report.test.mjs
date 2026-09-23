@@ -141,11 +141,12 @@ test("a live run with a quiet leaf banners the quiet stretch, not the running co
   assert.ok(text.includes("stuck"), "names the leaf that is quiet, not the one that is fine");
 });
 
-test("a run that has started nothing banners as queued, not as done", async () => {
+test("a live run with no leaf running banners the live floor, not a queued run", async () => {
   const { el, text } = await bannerOf({ finishedMs: null, byState: { pending: 4 } });
-  assert.ok(el.getAttribute("class").includes("queued"));
-  assert.ok(text.includes("nothing started yet"));
+  assert.ok(!el.getAttribute("class").includes("queued"), "no tone for a state a run directory cannot be in");
+  assert.ok(text.includes("0 running"), "the floor states the running count rather than claiming nothing started");
 });
+
 
 // ── the run's chrome stays on the run screen ─────────────────────────────
 
@@ -192,6 +193,20 @@ test("the run screen still carries both, so the fix moved the chrome rather than
 
 // ── the tones carry their weight ─────────────────────────────────────────
 
+// The grey `queued` tone ('nothing started yet') was unreachable by construction: a run
+// directory only exists once the engine has dispatched, so by the time the dashboard can
+// read one, leaves are running, finished, failed, or the run is aborted. Repointing it at
+// an orphaned run (enginePid set, process gone) was the alternative — but `runlog.mjs`
+// computes no liveness for that pid (`runLiveness` is heartbeat-based, and an engine that
+// died without a summary already lands in `abortedMs`), so it would have meant inventing a
+// probe for a tone. Deleted instead. Asserted on the mechanism: no rule AND no producer.
+test("no tone survives for a state a run directory cannot reach", () => {
+  const src = readFileSync(PAGE, "utf8");
+  assert.ok(!/\.banner\.queued\s*\{/.test(src), "a tone rule with no producer is dead CSS");
+  assert.ok(!src.includes("nothing started yet"), "no branch may claim a run started nothing");
+});
+
+
 // Ported straight from the mockup, every tile sat at 1.05-1.16 contrast against the
 // page ground — visually flat, because the mockup drew them in a narrow phone frame
 // with empty margins where the bright glyph did the work. At full width they vanish.
@@ -212,17 +227,13 @@ test("every banner tone separates from the page ground and carries a legible gly
 
   const tones = [...css.matchAll(/\.banner(?:\.(\w+))?\s*\{\s*--bn-bg:(#[0-9a-f]{6}); --bn-br:(#[0-9a-f]{6}); --bn-ic-bg:(#[0-9a-f]{6}); --bn-ic-fg:(#[0-9a-f]{6});/g)]
     .map(([, name, bg, br, ic, fg]) => ({ name: name || "running", bg, br, ic, fg }));
-  assert.equal(tones.length, 5, "one rule per tone: running, ok, slow, bad, queued");
+  assert.equal(tones.length, 4, "one rule per tone: running, ok, slow, bad");
 
   for (const t of tones) {
-    // `queued` is the recede-into-the-page tone and is held to a lower floor.
-    const floor = t.name === "queued" ? 1.15 : 1.25;
-    assert.ok(contrast(t.bg, ground) >= floor,
-      `${t.name}: tile ${t.bg} is ${contrast(t.bg, ground).toFixed(2)} against ground ${ground} — below ${floor}, reads as flat page`);
-    if (t.name !== "queued") {
-      assert.ok(contrast(t.br, t.bg) >= 1.8, `${t.name}: border ${t.br} is ${contrast(t.br, t.bg).toFixed(2)} against its tile`);
-      assert.ok(contrast(t.ic, t.bg) >= 1.8, `${t.name}: icon circle ${t.ic} is ${contrast(t.ic, t.bg).toFixed(2)} against its tile`);
-    }
+    assert.ok(contrast(t.bg, ground) >= 1.25,
+      `${t.name}: tile ${t.bg} is ${contrast(t.bg, ground).toFixed(2)} against ground ${ground} — below 1.25, reads as flat page`);
+    assert.ok(contrast(t.br, t.bg) >= 1.8, `${t.name}: border ${t.br} is ${contrast(t.br, t.bg).toFixed(2)} against its tile`);
+    assert.ok(contrast(t.ic, t.bg) >= 1.8, `${t.name}: icon circle ${t.ic} is ${contrast(t.ic, t.bg).toFixed(2)} against its tile`);
     assert.ok(contrast(t.fg, t.ic) >= 3.0,
       `${t.name}: glyph ${t.fg} is ${contrast(t.fg, t.ic).toFixed(2)} on circle ${t.ic} — below the 3.0 legibility floor`);
   }

@@ -206,7 +206,6 @@
   .banner.ok     { --bn-bg:#1a2e2c; --bn-br:#2d644f; --bn-ic-bg:#2f6853; --bn-ic-fg:#57d69b; --bn-sub:#8faf9e; }
   .banner.slow   { --bn-bg:#302a23; --bn-br:#6a5735; --bn-ic-bg:#705b37; --bn-ic-fg:#e5b75c; --bn-sub:#b79a63; }
   .banner.bad    { --bn-bg:#36272b; --bn-br:#7c4e4b; --bn-ic-bg:#83514e; --bn-ic-fg:#eda196; --bn-sub:#c08b80; }
-  .banner.queued { --bn-bg:#20222a; --bn-br:#434651; --bn-ic-bg:#434651; --bn-ic-fg:#9aa0b1; --bn-sub:#9aa0b1; }
   .banner .ic { width:34px; height:34px; border-radius:17px; flex:none; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:600; background:var(--bn-ic-bg); color:var(--bn-ic-fg); }
   .banner .txt { flex:1; min-width:0; }
   .banner .t { font-size:14.5px; font-weight:600; }
@@ -540,9 +539,12 @@
       .filter((x) => x.s != null && x.s * 1000 > quietWarn)
       .sort((a, x) => x.s - a.s)[0];
     if (quiet) return tile("slow", "!", `${quiet.t.id} has been quiet for ${fmtDur(quiet.s * 1000)}`, "longest quiet stretch of this run", null);
+    // The floor. A run directory only exists once the engine has dispatched, so whatever
+    // anything can read one, a leaf is running, done, failed, or the run is aborted —
+    // there is no reachable run that has started nothing to give a tone of its own. A live
+    // run with no leaf running (between waves, engine alive) is still a live run.
     const running = n("running", "retrying");
-    if (running) return tile("", "◐", `${running} running`, `${done} of ${tasks.length} done · ${tok} tokens`, null);
-    return tile("queued", "·", "Queued", `${tasks.length} leaves · nothing started yet`, null);
+    return tile("", "◐", `${running} running`, `${done} of ${tasks.length} done · ${tok} tokens`, null);
   }
 
   // The RUN screen's chrome: the verdict tile, then the one action that screen exists
