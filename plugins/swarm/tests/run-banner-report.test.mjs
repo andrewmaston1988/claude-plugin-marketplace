@@ -147,7 +147,6 @@ test("a live run with no leaf running banners the live floor, not a queued run",
   assert.ok(text.includes("0 running"), "the floor states the running count rather than claiming nothing started");
 });
 
-
 // ── the run's chrome stays on the run screen ─────────────────────────────
 
 // buildNode feeds renderRunHtml a manifest node's SUBGRAPH while still passing the
@@ -205,7 +204,6 @@ test("no tone survives for a state a run directory cannot reach", () => {
   assert.ok(!/\.banner\.queued\s*\{/.test(src), "a tone rule with no producer is dead CSS");
   assert.ok(!src.includes("nothing started yet"), "no branch may claim a run started nothing");
 });
-
 
 // Ported straight from the mockup, every tile sat at 1.05-1.16 contrast against the
 // page ground — visually flat, because the mockup drew them in a narrow phone frame
