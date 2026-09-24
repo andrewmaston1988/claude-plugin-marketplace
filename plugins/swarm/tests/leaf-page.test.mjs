@@ -140,3 +140,41 @@ test("a running leaf's banner carries the run tree's spinner in its status circl
   (function walk(n) { if (n.nodeType !== 1) return; if ((n.getAttribute("class") || "").split(/\s+/).includes("ring")) ring.push(n); n.childNodes.forEach(walk); })(ic);
   assert.equal(ring.length, 1, "the same .ring element the tree animates, inside the circle");
 });
+
+// "Show in tree" used to be a bare link to the run: it landed at the top of the tree with
+// nothing marking which row the leaf was. It must land ON the leaf — its wave opened and
+// its row flashed — so the tap answers "where is this leaf?".
+const tapShow = (P) => {
+  const show = P.findByClass("show")[0];
+  const target = { dataset: { href: show.getAttribute("data-href"), focus: show.getAttribute("data-focus") }, classList: { contains: () => false } };
+  P.main.contains = () => true;
+  P.main.listeners.click.forEach((f) => f({ target: { closest: () => target } }));
+};
+
+test("Show in tree lands on the leaf's own row, flashed, with its wave opened", async () => {
+  const tasks = [{ id: "survey", state: "ok", after: [] }];
+  const P = await paintLeaf({ state: "ok", after: ["survey"] }, { tasks });
+  tapShow(P);
+  assert.equal(P.location.hash, RUN_URL, "still navigates to the run");
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun({ ...targetRun(), tasks: [{ id: "survey", state: "ok", after: [] }, { id: "impl", state: "ok", model: "glm", tokens: { input: 1, output: 1 }, after: ["survey"] }], waves: [["survey"], ["impl"]] });
+  await P.flush();
+  const flashed = P.findByClass("flash");
+  assert.equal(flashed.length, 1, "exactly one row is marked");
+  assert.equal(flashed[0].getAttribute("data-node"), "impl", "and it is the leaf we came from");
+});
+
+test("Show in tree opens a wave the operator had closed, so the leaf's row exists to land on", async () => {
+  const P = await paintLeaf({ state: "ok", after: ["survey"] }, { tasks: [{ id: "survey", state: "ok", after: [] }] });
+  // close wave 2 (index 1) the way the wave label's tap does
+  P.main.contains = () => true;
+  const waveTap = { dataset: { wave: "1" }, classList: { contains: (c) => c === "wave-label" } };
+  P.main.listeners.click.forEach((f) => f({ target: { closest: () => waveTap } }));
+  tapShow(P);
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun({ ...targetRun(), tasks: [{ id: "survey", state: "ok", after: [] }, { id: "impl", state: "ok", model: "glm", tokens: { input: 1, output: 1 }, after: ["survey"] }], waves: [["survey"], ["impl"]] });
+  await P.flush();
+  assert.equal(P.findByClass("flash").map((e) => e.getAttribute("data-node")).join(), "impl");
+});

@@ -375,7 +375,7 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -588,6 +588,9 @@
   // no verdict, no action bar, so a subgraph renders identically to a whole run.
   function renderRunHtml(run, tasks, waves) {
     const now = Date.now();
+    const focus = ui.focusId;
+    const inFocus = (x) => focus === x || (focus || "").startsWith(x + "~");
+    if (focus) { const w = waves.findIndex((ids) => ids.some(inFocus)); if (w >= 0) ui.closedWaves.delete(w); }
     const rows = buildRows(tasks, waves);
     const quietWarn = run.quietWarnMs || 60000;
     let html = "";
@@ -624,7 +627,7 @@
         // screen, never flattened inline; its dot strip is the row's own summary.
         const t = r.task;
         const href = `#/run/${enc(run.project)}/${enc(run.name)}/node/${enc(t.id)}`;
-         html += `<li class="row leaf tap" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(identityName(t))} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
+         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(identityName(t))} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       const t = r.task;
@@ -634,7 +637,7 @@
        const identity = identityName(t);
        const sub = quiet ? `quiet ${quietSecs}s · ${esc(identity)}` : t.state === "running" && t.activity ? `${esc(identity)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(identity);
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
-      html += `<li class="row leaf tap${quiet ? " quiet" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
+      html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
     html += `</ul></div>`;
     return { html, rows };
@@ -813,7 +816,7 @@
       + `<div class="gr"><span class="k">after</span>${fchips(t.after || [], "nothing upstream")}</div>`
       + `<div class="gr"><span class="k">feeds</span>${fchips(feeds, "—")}</div>`
       + (t.activity ? `<div class="gr"><span class="k">last</span><span class="act">${esc(t.activity)}</span></div>` : "")
-      + `<div class="cf"><span>leaf ${order.indexOf(id) + 1} of ${order.length} · wave ${(t.depth ?? 0) + 1}${turns}</span><span class="show" data-href="#/run/${enc(run.project)}/${enc(run.name)}">Show in tree ›</span></div></div>`;
+      + `<div class="cf"><span>leaf ${order.indexOf(id) + 1} of ${order.length} · wave ${(t.depth ?? 0) + 1}${turns}</span><span class="show" data-focus="${esc(id)}" data-href="#/run/${enc(run.project)}/${enc(run.name)}">Show in tree ›</span></div></div>`;
     const tk = t.tokens || leaf?.tokens;
     if (tk) {
       // "input" means what the CLI means by it (results.mjs:369): input + cacheCreation.
@@ -1139,6 +1142,7 @@
     if (next.header !== undefined) setHeader(next.header, next.home);
     setHtml(main, next.html);
     next.draw?.();
+    if (ui.focusScroll && view.name === "run") { ui.focusScroll = false; main.querySelector?.(".flash")?.scrollIntoView?.({ block: "center" }); }
     // Past the route guard: a superseded build neither celebrates nor advances.
     if (s.lastList) announceFinished(s.lastList.runs);
   }
@@ -1180,6 +1184,13 @@
     if (t.dataset.nav != null) { location.hash = t.value; return; }
     if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; requestRoute(route); }
   });
+  // "Show in tree": the run screen opens the leaf's wave, flashes its row and scrolls to it.
+  // The flash is a render-time class, not a classList.add — each tick's morph would strip it.
+  function focusLeaf(id) {
+    ui.focusId = id;
+    ui.focusScroll = true;
+    setTimeout(() => { ui.focusId = null; rerender(); }, 2400);
+  }
   main.addEventListener("click", (e) => {
     const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand]");
     if (!t || !main.contains(t)) return;
@@ -1194,7 +1205,7 @@
     // Collapsing also drops the expansion, so reopening starts capped again — a stale
     // expansion could otherwise keep a 300-row payload on every poll.
     if (t.dataset.project) { const p = t.dataset.project; if (ui.openProjects.has(p)) { ui.openProjects.delete(p); ui.expandedProjects.delete(p); } else ui.openProjects.add(p); requestRoute(route); return; }
-    if (t.dataset.href) { location.hash = t.dataset.href; return; }
+    if (t.dataset.href) { if (t.dataset.focus) focusLeaf(t.dataset.focus); location.hash = t.dataset.href; return; }
     if (t.dataset.wave != null) {
       const w = Number(t.dataset.wave);
       const isOpen = t.classList.contains("wave-label");
