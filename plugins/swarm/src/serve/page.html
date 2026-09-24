@@ -279,7 +279,7 @@
 <body>
 <header id="hdr" class="home"></header>
 <main id="main"></main>
-<nav id="nav" class="bnav"><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>Swarm</a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>Usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>Perf</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>Cost</a></nav>
+<nav id="nav" class="bnav"><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>swarm</a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>performance</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>cost</a></nav>
 <script>
 (() => {
   const TOKEN = new URLSearchParams(location.search).get("t");
@@ -408,11 +408,11 @@
   // One header on every screen: a title over one small line — the summary on a tab
   // screen, the tappable trail on a child — so the bar never changes shape.
   const headerHtml = (title, sub, extra = "") => `<div class="title"><b>${title}</b><small>${sub || "&nbsp;"}</small></div>${extra}`;
-  const TAB_TITLE = { runs: "Swarm", usage: "Usage", perf: "Performance", cost: "Cost" };
+  const TAB_TITLE = { runs: "swarm", usage: "usage", perf: "performance", cost: "cost" };
   function trailOf(v) {
     if (v.name === "run") return [[TAB_TITLE.runs, "#/"]];
     if (["leaf", "node", "digest", "report"].includes(v.name)) return [[TAB_TITLE.runs, "#/"], [v.run, `#/run/${enc(v.project)}/${enc(v.run)}`]];
-    if (v.name === "perf" && v.kind) return [["Performance", "#/perf"]];
+    if (v.name === "perf" && v.kind) return [[TAB_TITLE.perf, "#/perf"]];
     return null;
   }
   const crumbs = (v, here) => trailOf(v).map(([label, href]) => `<a class="crumb" href="${href}">${esc(label)}</a><i>›</i>`).join("") + esc(here);
@@ -1005,7 +1005,7 @@
     const data = await api("/api/cost");
     await loadPerfJs();
     return {
-      header: headerHtml("Cost", "Relative cost within each provider"),
+      header: headerHtml(TAB_TITLE.cost, "Relative cost within each provider"),
       html: window.perfViews.costScreen(data, { esc, enc }, ui.costProvider),
     };
   }
@@ -1025,7 +1025,7 @@
     await loadPerfJs();
     const n = new Set([...(usageData.usages || []).map((u) => u.provider), ...Object.keys(usageData.errors || {})]).size;
     return {
-      header: headerHtml("Usage", `${n} provider${n === 1 ? "" : "s"} · allowance remaining`),
+      header: headerHtml(TAB_TITLE.usage, `${n} provider${n === 1 ? "" : "s"} · allowance remaining`),
       html: window.perfViews.usageScreen(usageData, { esc }, ui.usageWindow),
     };
   }
@@ -1036,10 +1036,10 @@
     if (domain) qs.set("domain", domain);
     if (model) qs.set("model", model);
     const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
-    const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind[0].toUpperCase() + kind.slice(1) : "Performance";
+    const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind : TAB_TITLE.perf;
     if (!p.grading) {
       return {
-        header: headerHtml("Performance", "grading off"),
+        header: headerHtml(TAB_TITLE.perf, "grading off"),
         html: `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`,
       };
     }
@@ -1129,14 +1129,14 @@
 
   function buildDigest(project, name) {
     return {
-      header: childHeader({ name: "digest", project, run: name }, "Digest"),
+      header: childHeader({ name: "digest", project, run: name }, "digest"),
       html: `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/digest`))}"></iframe>`,
     };
   }
 
   function buildReport(project, name) {
     return {
-      header: childHeader({ name: "report", project, run: name }, "Report"),
+      header: childHeader({ name: "report", project, run: name }, "report"),
       html: `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/report`))}"></iframe>`,
     };
   }
@@ -1181,7 +1181,7 @@
   // a refresh is never dropped just because its target screen has not committed yet.
   let pendingView = null;
   // Every run-family screen lights Runs.
-  const TAB = { usage: "usage", perf: "perf", cost: "cost" };
+  const TAB = { usage: "usage", perf: "performance", cost: "cost" };
   const viewOf = (hash) => {
     const h = hash.replace(/^#/, "") || "/";
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
@@ -1230,7 +1230,7 @@
   // already showing keeps its content.
   const sameView = (a, b) => ["name", "project", "run", "leaf", "node", "kind", "which"].every((k) => (a[k] ?? null) === (b[k] ?? null));
   function skeletonFor(v) {
-    const title = TAB_TITLE[v.name] || { run: v.run, leaf: v.leaf, node: v.node, digest: "Digest", report: "Report" }[v.name];
+    const title = TAB_TITLE[v.name] || { run: v.run, leaf: v.leaf, node: v.node, digest: "digest", report: "report" }[v.name];
     const blocks = v.name === "usage" ? '<div class="sk hero"></div>' + '<div class="sk"></div>'.repeat(3)
       : v.name === "runs" ? '<div class="sk label"></div>' + '<div class="sk"></div>'.repeat(4)
         : '<div class="sk"></div>'.repeat(5);

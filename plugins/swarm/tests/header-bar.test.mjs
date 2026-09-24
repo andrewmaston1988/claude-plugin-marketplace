@@ -22,15 +22,15 @@ test("no screen carries a back button", async () => {
 
 test("a tab screen's title is its tab name over a summary", async () => {
   const P = await goTo(null);
-  assert.match(P.hdr.textContent, /^Swarm\d+ project/);
+  assert.match(P.hdr.textContent, /^swarm\d+ project/);
   assert.equal(P.findByClass("crumb", P.hdr).length, 0);
 });
 
-test("a leaf screen trails back through its run to Swarm", async () => {
+test("a leaf screen trails back through its run to swarm", async () => {
   const P = await goTo("#/run/p/r/leaf/a");
   const crumbs = P.findByClass("crumb", P.hdr);
-  assert.deepEqual(crumbs.map((c) => [c.textContent, c.getAttribute("href")]), [["Swarm", "#/"], ["r", "#/run/p/r"]]);
-  assert.match(P.hdr.textContent, /Swarm›r›a/);
+  assert.deepEqual(crumbs.map((c) => [c.textContent, c.getAttribute("href")]), [["swarm", "#/"], ["r", "#/run/p/r"]]);
+  assert.match(P.hdr.textContent, /swarm›r›a/);
 });
 
 test("a perf child trails back to Performance", async () => {
