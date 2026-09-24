@@ -131,7 +131,7 @@
   // fact card when nothing is measured. Draws only: multipliers, bands and verdicts
   // arrive from the server's costView().
   function costScreen(data, h, pick) {
-    const { esc, enc } = h;
+    const { esc, enc, seg } = h;
     const all = data.sections?.length ? data.sections : [{
       provider: null, points: data.points || [], spread: data.spread || [], best: data.best, worst: data.worst,
     }];
@@ -139,18 +139,28 @@
     if (!sections.length) {
       return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
     }
-    const section = sections.find((s) => s.provider === pick) || sections[0];
     const name = (s) => s.provider || "unqualified";
+    const section = sections.find((s) => name(s) === pick) || sections[0];
     // Never "0×" for a missing multiplier — that would read as free.
     const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
-    // The hero answers "where is the value?" for every provider before the tabs narrow
-    // to one. A provider without a best says why — never its cheapest instead.
+    // One page per provider, switched like Performance's views — multipliers never
+    // compare across providers. The card names this provider's best value; without
+    // one it says why, never the cheapest instead.
+    const switcher = seg(sections.map((s) => ({ label: name(s), href: `#/cost/${enc(name(s))}` })), sections.indexOf(section));
     const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
-    const heroRow = (s) => s.best
-      ? `<div class="hrow" data-href="#/perf/model/${enc(s.best.model)}"><span class="pv">${esc(name(s))}</span><span class="nm">${esc(s.best.model)}</span><span class="val">${s.best.wtd == null ? "—" : s.best.wtd.toFixed(1)} · ${esc(fmtMult(s.best.multiplier))}</span></div>`
-      : `<div class="hrow none"><span class="pv">${esc(name(s))}</span><span class="nm">${whyNone(s)}</span></div>`;
-    const hero = `<div class="uhero chero"><div class="lbl">BEST VALUE PER PROVIDER</div><div class="hrows">${sections.map(heroRow).join("")}</div></div>`;
-    const tabs = hero + `<div class="ctabs">${sections.map((s) => `<a class="ctab${s === section ? " on" : ""}" data-cost-provider="${esc(s.provider || "")}">${esc(name(s))}</a>`).join("")}</div>`;
+    // The value case as two bars against this provider's own ceilings: how close to
+    // its top score, at what share of its top cost.
+    const b = section.best, cl = `<div class="cl"><span>best value</span><span>${esc(name(section))}</span></div>`;
+    const top = (k) => Math.max(0, ...section.points.map((p) => p[k] ?? 0));
+    const share = (v, max) => (max > 0 && v != null ? Math.round((v / max) * 100) : null);
+    const hero = !b ? `<div class="card chero none">${cl}<div class="claim">${whyNone(section)}</div></div>` : (() => {
+      const q = share(b.wtd, top("wtd")), c = share(b.multiplier, top("multiplier"));
+      const vbar = (label, w, val, cls) => `<div class="vbar"><span class="k">${label}</span><div class="bar ${cls}"><span style="width:${w ?? 0}%"></span></div><b>${val}</b></div>`;
+      const claim = q == null || c == null ? "on the value frontier" : `${q}% of the top score at ${c}% of the top cost`;
+      return `<div class="card chero" data-href="#/perf/model/${enc(b.model)}">${cl}<div class="fig">${esc(b.model)}</div><div class="claim">${claim}</div>`
+        + vbar("score", q, b.wtd == null ? "—" : b.wtd.toFixed(1), "q") + vbar("cost", c, esc(fmtMult(b.multiplier)), "c") + `</div>`;
+    })();
+    const tabs = switcher + hero;
     const { points, spread, best } = section;
     const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
     const unit = spread[0] || {};

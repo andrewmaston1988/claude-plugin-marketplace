@@ -15,14 +15,13 @@ const srow = (model, mult, over = {}) => ({
 const section = (provider, spread, over = {}) => ({ provider, points: [], spread, best: null, worst: null, ...over });
 const cards = (html, cls = "crow") => html.match(new RegExp(`class="card ${cls}[^"]*"`, "g")) || [];
 
-test("one chip per provider, the picked one on, the first when nothing is picked", () => {
+test("one page per provider on the Performance switcher, the picked one active, the first by default", () => {
   const { costScreen } = loadPerfViews();
   const data = { sections: [section("claude", [srow("sonnet", 1)]), section("ollama", [srow("glm", 2)])] };
   const first = costScreen(data, H);
-  assert.equal((first.match(/data-cost-provider="/g) || []).length, 2);
-  assert.match(first, /class="ctab on" data-cost-provider="claude"/);
+  assert.ok(first.includes('<div class="seg"><a data-href="#/cost/claude" class="on">claude</a><a data-href="#/cost/ollama">ollama</a></div>'));
   const picked = costScreen(data, H, "ollama");
-  assert.match(picked, /class="ctab on" data-cost-provider="ollama"/);
+  assert.ok(picked.includes('<a data-href="#/cost/ollama" class="on">'));
   assert.ok(picked.includes("glm") && !picked.includes("sonnet"), "only the picked provider's models — multipliers only compare within one");
 });
 
@@ -93,23 +92,29 @@ test("with no cost history anywhere it says how the history starts", () => {
   assert.ok(costScreen({ sections: [] }, H).includes("no cost history yet"));
 });
 
-test("the hero names each provider's best value — model, score, multiplier — across every provider", () => {
+const heroOf = (html) => html.match(/<div class="card chero[\s\S]*?(?=<div class="cnote">)/)?.[0] || "";
+
+test("the hero is the picked provider's best value alone: model, and score and cost bars against its own ceilings", () => {
   const { costScreen } = loadPerfViews();
-  const html = costScreen({ sections: [
-    section("claude", [srow("opus", 2.5)], { best: point("opus", 9.28, 2.5, { onFrontier: true }), worst: point("haiku", 3, 0.2) }),
-    section("ollama", [srow("glm", 1)]),
-  ] }, H, "claude");
-  const hero = html.match(/<div class="uhero chero">[\s\S]*?<\/div><\/div><\/div>/)?.[0] || "";
-  assert.match(hero, /BEST VALUE PER PROVIDER/);
-  assert.match(hero, /data-href="#\/perf\/model\/opus"[\s\S]*?claude[\s\S]*?opus[\s\S]*?9\.3[\s\S]*?2\.5×/);
-  assert.match(hero, /ollama[\s\S]*?not graded yet/, "a provider with no best says so — never the cheapest instead");
-  assert.ok(!html.includes("haiku"), "worst is never drawn");
+  const pts = [point("opus", 9.28, 2.5, { onFrontier: true }), point("fable", 9.5, 10)];
+  const data = { sections: [
+    section("claude", [srow("opus", 2.5), srow("fable", 10)], { points: pts, best: pts[0], worst: point("haiku", 3, 0.2) }),
+    section("ollama", [srow("glm", 1)], { best: point("glm", 8, 1) }),
+  ] };
+  const hero = heroOf(costScreen(data, H, "claude"));
+  assert.ok(hero.includes('data-href="#/perf/model/opus"'));
+  assert.ok(hero.includes('<div class="fig">opus</div>'));
+  assert.match(hero, /98% of the top score at 25% of the top cost/);
+  assert.match(hero, /bar q"><span style="width:98%">[\s\S]*?<b>9\.3<\/b>/);
+  assert.match(hero, /bar c"><span style="width:25%">[\s\S]*?<b>2\.5×<\/b>/);
+  assert.ok(!hero.includes("glm"), "another provider never appears in this one's hero");
+  assert.ok(!costScreen(data, H, "claude").includes("haiku"), "worst is never drawn");
 });
 
-test("a graded provider with no best says there is no clear best — not that nothing is graded", () => {
+test("a provider without a best says why — ungraded, or graded with no clear best", () => {
   const { costScreen } = loadPerfViews();
-  const html = costScreen({ sections: [section("ollama", [srow("glm", 1)], { points: [point("glm", 8.1, 1, { thin: true })] })] }, H);
-  const hero = html.match(/<div class="uhero chero">[\s\S]*?<\/div><\/div><\/div>/)?.[0] || "";
-  assert.match(hero, /ollama[\s\S]*?no clear best yet/);
-  assert.ok(!hero.includes("not graded yet"));
+  const bare = heroOf(costScreen({ sections: [section("ollama", [srow("glm", 1)])] }, H));
+  assert.match(bare, /class="card chero none"[\s\S]*?not graded yet/);
+  const thin = heroOf(costScreen({ sections: [section("ollama", [srow("glm", 1)], { points: [point("glm", 8.1, 1, { thin: true })] })] }, H));
+  assert.match(thin, /no clear best yet/);
 });

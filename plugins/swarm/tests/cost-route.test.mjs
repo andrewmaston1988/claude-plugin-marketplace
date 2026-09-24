@@ -55,7 +55,7 @@ test("the server's real /api/cost response renders cost cards, not the empty sta
 const isCost = (u) => u.startsWith("/api/cost");
 
 async function openCost(hash, calls = []) {
-  const P = loadPage({ perfViews: { costScreen: (data, h, pick) => { calls.push(pick); return `<div class="stub">screen:${data.tag}</div><a class="ctab" data-cost-provider="codex">codex</a>`; } } });
+  const P = loadPage({ perfViews: { costScreen: (data, h, pick) => { calls.push(pick); return `<div class="stub">screen:${data.tag}</div>`; } } });
   await P.flush();
   P.respondList(listData(listRow()));
   await P.flush();
@@ -80,17 +80,12 @@ test("an old #/perf/cost bookmark lands on the Cost screen", async () => {
   assert.ok(P.screenText().includes("screen:flat"));
 });
 
-test("tapping a provider chip redraws the screen for that provider", async () => {
+test("#/cost/<provider> hands that provider to the screen, and #/cost hands none", async () => {
   const calls = [];
-  const P = await openCost("#/cost", calls);
-  P.main.contains = () => true;
-  const chip = { dataset: { costProvider: "codex" }, classList: { contains: () => false } };
-  P.main.listeners.click.forEach((f) => f({ target: { closest: () => chip } }));
-  await P.flush();
-  if (P.pendingCount()) { P.respond(isCost, { tag: "flat", sections: [] }); await P.flush(); }
+  await openCost("#/cost/codex", calls);
   assert.equal(calls.at(-1), "codex");
-  // The harness closest() ignores its selector, so pin that the real one reaches the chip.
-  assert.match(readFileSync(PAGE, "utf8"), /e\.target\.closest\("[^"]*\[data-cost-provider\]/);
+  await openCost("#/cost", calls);
+  assert.equal(calls.at(-1), null);
 });
 
 test("Cost is reached from the bottom nav, and has left the Performance switcher", () => {

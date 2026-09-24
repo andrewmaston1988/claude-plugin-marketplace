@@ -175,13 +175,16 @@
   .uhero .ubar { margin-top:16px; height:8px; }
   .uhero .sub, .upc .sub { margin-top:10px; font-size:11.5px; line-height:1.4; color:var(--faint); }
   /* cost hero: one row per provider — its best-value model, weighted score · multiplier */
-  .chero .hrows { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
-  .chero .hrow { display:flex; align-items:baseline; gap:8px; cursor:pointer; }
-  .chero .hrow .pv { flex:none; width:64px; font-size:12px; color:var(--muted); }
-  .chero .hrow .nm { flex:1; min-width:0; font-size:15px; overflow-wrap:anywhere; }
-  .chero .hrow .val { flex:none; font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
-  .chero .hrow.none { cursor:default; }
-  .chero .hrow.none .nm { color:var(--faint); font-size:13px; }
+  .card.chero { cursor:pointer; } .card.chero.none { cursor:default; }
+  .card.chero { background:var(--accent-soft); padding:16px; }
+  .chero .fig { margin-top:12px; font-size:22px; font-weight:700; letter-spacing:-.02em; overflow-wrap:anywhere; }
+  .chero .claim { margin-top:6px; font-size:12.5px; color:var(--muted); }
+  .chero .vbar { margin-top:12px; display:flex; align-items:center; gap:10px; }
+  .chero .vbar .k { flex:none; width:40px; font-size:11px; color:var(--muted); }
+  .chero .vbar .bar { flex:1; height:6px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
+  .chero .vbar .bar span { display:block; height:100%; border-radius:3px; }
+  .chero .vbar .bar.q span { background:var(--accent); } .chero .vbar .bar.c span { background:var(--warn); }
+  .chero .vbar b { flex:none; width:44px; text-align:right; font-size:14px; font-variant-numeric:tabular-nums; }
   .card.upc { margin-top:10px; padding:14px; }
   .card.upc.bad { border-color:var(--bad-bg); } .card.upc.warn { border-color:var(--warn-bg); }
   .upc .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
@@ -404,7 +407,7 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, costProvider: null, usageWindow: "week" };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, usageWindow: "week" };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -1015,7 +1018,7 @@
     await loadPerfJs();
     return {
       header: headerHtml(TAB_TITLE.cost, "Relative cost within each provider"),
-      html: window.perfViews.costScreen(data, { esc, enc }, ui.costProvider),
+      html: window.perfViews.costScreen(data, { esc, enc, seg: segSwitcher }, v.which),
     };
   }
   // Usage, Cost and Performance read slow endpoints and change gradually. Each is held
@@ -1246,7 +1249,7 @@
     const h = hash.replace(/^#/, "") || "/";
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
     // #/perf/cost is where Cost lived under Performance: old bookmarks still land.
-    if (seg[0] === "cost" || (seg[0] === "perf" && seg[1] === "cost")) return { name: "cost", project: null, run: null, leaf: null, node: null };
+    if (seg[0] === "cost" || (seg[0] === "perf" && seg[1] === "cost")) return { name: "cost", project: null, run: null, leaf: null, node: null, which: seg[0] === "cost" ? seg[1] || null : null };
     if (seg[0] === "usage") return { name: "usage", project: null, run: null, leaf: null, node: null };
     if (seg[0] === "perf") return { name: "perf", project: null, run: null, leaf: null, node: null, kind: seg[1] || null, which: seg[2] || null };
     if (seg[0] === "run" && seg.length >= 3) {
@@ -1339,9 +1342,8 @@
     setTimeout(() => { ui.focusId = null; rerender(); }, 2400);
   }
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-cost-provider], [data-usage-window]");
+    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-usage-window]");
     if (!t || !main.contains(t)) return;
-    if (t.dataset.costProvider != null) { ui.costProvider = t.dataset.costProvider; requestRoute(route); return; }
     if (t.dataset.usageWindow != null) { ui.usageWindow = t.dataset.usageWindow; requestRoute(route); return; }
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
