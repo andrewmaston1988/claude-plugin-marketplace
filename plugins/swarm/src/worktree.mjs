@@ -210,12 +210,6 @@ export function runScopeKey(s) {
   return createHash("sha1").update(process.platform === "win32" ? p.toLowerCase() : p).digest("hex").slice(0, 12);
 }
 
-// The leaf sits at the same depth in its tree as in the live checkout, so cwd-relative prompt
-// paths still resolve. This is every WRITER's cwd mapper, not a snapshot detail: without it a
-// leaf that declared a subdirectory lands at the tree root instead.
-//
-// The mkdir is load-bearing for the same reason. A writer whose declared cwd is gitignored
-// (build/, .claude/worktrees/x) has no such directory in the tree and cannot spawn without it.
 // The checkout containing `cwd` — a linked worktree answers with itself — or null outside
 // git. A writer's tree is cut from this checkout's HEAD, so its depth is measured from here.
 export function checkoutToplevel(cwd) {
@@ -223,6 +217,12 @@ export function checkoutToplevel(cwd) {
   return r.status === 0 && r.stdout ? r.stdout : null;
 }
 
+// The leaf sits at the same depth in its tree as in the live checkout, so cwd-relative prompt
+// paths still resolve. This is every WRITER's cwd mapper, not a snapshot detail: without it a
+// leaf that declared a subdirectory lands at the tree root instead.
+//
+// The mkdir is load-bearing for the same reason. A writer whose declared cwd is gitignored
+// (build/, .claude/worktrees/x) has no such directory in the tree and cannot spawn without it.
 export function treeCwd(tree, repoToplevel, originalCwd) {
   // No repo recorded means no depth to preserve, so the tree root IS the leaf's cwd. Only a
   // hand-built plan reaches this: normalisation sets repoToplevel on every writer, which is
