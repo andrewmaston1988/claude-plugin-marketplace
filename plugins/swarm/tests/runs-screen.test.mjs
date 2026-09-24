@@ -34,3 +34,21 @@ test("with nothing running there is no live pill", async () => {
   assert.doesNotMatch(P.hdr.textContent, /live/);
   assert.equal(P.findByClass("rcard").length, 0);
 });
+
+// Operator 2026-09-24: "dislike the pulsing purple dot, keep the spinning one from other screens".
+test("a running card carries the spinning ring, not a pulsing dot", async () => {
+  const P = await runsWith(listData(listRow()));
+  assert.equal(P.findByClass("rspin").length, 1);
+  assert.equal(P.findByClass("ring").length, 1);
+  assert.equal(P.findByClass("rdot").length, 0);
+});
+
+// Operator 2026-09-24: "does it duplicate the token count" — the per-provider split
+// replaces the total, never sits beside it.
+test("a run's tokens read once: the provider split when there is one, else the total", async () => {
+  const one = await runsWith(listData(listRow({ tokens: 12_000, providerTokens: { ollama: 12_000 } })));
+  assert.equal(one.findByClass("rs")[0].textContent.match(/12k/g).length, 1);
+  assert.match(one.findByClass("rs")[0].textContent, /ollama 12k/);
+  const none = await runsWith(listData(listRow({ tokens: 12_000 })));
+  assert.match(none.findByClass("rs")[0].textContent, /12k/);
+});

@@ -160,7 +160,7 @@
   .card.cfact { padding:18px 16px; }
   .card.rcard { margin-top:10px; cursor:pointer; } .card.rcard.bad { border-color:var(--bad-bg); } .card.rcard.warn { border-color:var(--warn-bg); }
   .rcard .rh { display:flex; align-items:center; gap:8px; }
-  .rcard .rdot { width:7px; height:7px; border-radius:50%; flex:none; } .rcard .rdot.run { animation:pulse 1.6s ease-in-out infinite; }
+  .rcard .rdot { width:7px; height:7px; border-radius:50%; flex:none; } .rcard .rspin { flex:none; display:flex; margin:-4px -2px; } .rcard .rspin svg { width:16px; height:16px; } .rcard .rspin circle:not(.ring) { animation:pulse 1.6s ease-in-out infinite; }
   .rcard .nm { flex:1; min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .rcard .tm { flex:none; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; }
   .rcard .rs { margin-top:8px; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -495,8 +495,8 @@
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
        return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${providerMeta ? ` · ${esc(providerMeta)}` : ""}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
     }
-    return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh"><i class="rdot ${st}" style="background:${COLOR[st]}"></i><span class="nm">${esc(r.name)}</span><span class="tm">${elapsed}</span></div>`
-      + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}${providerMeta ? ` · ${esc(providerMeta)}` : ""}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
+    return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span><span class="tm">${elapsed}</span></div>`
+      + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${providerMeta ? esc(providerMeta) : fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
   }
 
   // ── run view: rows + rail ──────────────────────────────────────────────
