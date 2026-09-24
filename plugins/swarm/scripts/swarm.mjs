@@ -631,37 +631,20 @@ function getFlag(name, args) {
   return i < 0 ? undefined : args[i + 1];
 }
 
-// `grade --init` — one skeleton row per model leaf, every grade null. It is
-// deliberately unappendable as written: validation rejects a null universal, so
-// an untouched skeleton cannot land.
+// `grade --init` — one skeleton row per model leaf. It is deliberately
+// unappendable as written: validation rejects a null universal, so an untouched
+// skeleton cannot land.
 async function cmdGradeInit(dir) {
   dir = resolve(dir);
   const { writeFileSync } = await import("node:fs");
-  const { UNIVERSAL, CAPABILITY, OUTCOMES } = await import("../src/aspects.mjs");
+  const { buildSkeleton } = await import("../src/grade-init.mjs");
   const leaves = listLeaves(dir, { gradeable: true });
   if (!leaves.length) {
     err(`swarm: no gradeable leaves with results in ${dir} — agentless nodes carry no model, so there is nothing to grade.`);
     return 1;
   }
-  const skeleton = {
-    resultsDir: dir,
-    session: "<this session's id>",
-    rows: leaves.map((l) => ({
-      leaf: l.id,
-      ...(l.provider ? { provider: l.provider } : {}),
-      model: l.model,
-      read: { result: l.resultPath, transcript: l.transcriptPath },
-      domain: "<one lowercase token: the language or ecosystem the leaf worked in — rust, godot, node, python, docs. Not the repo, not the task>",
-      outcome: `<${OUTCOMES.join(" | ")}>`,
-      note: "",
-      grades: {
-        ...Object.fromEntries(UNIVERSAL.map((a) => [a, null])),
-        ...Object.fromEntries(CAPABILITY.map((a) => [a, null])),
-      },
-    })),
-  };
   const p = join(dir, "grades.json");
-  writeFileSync(p, JSON.stringify(skeleton, null, 2) + "\n");
+  writeFileSync(p, JSON.stringify(buildSkeleton(leaves, { resultsDir: dir }), null, 2) + "\n");
   out(p);
   out(`${leaves.length} gradeable leaf/leaves. Grade the four universal aspects 1-10 on every row; leave a`);
   out("capability aspect null unless the leaf stressed it. Drop `grades` entirely on a row whose leaf");
