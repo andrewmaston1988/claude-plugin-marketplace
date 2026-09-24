@@ -160,7 +160,7 @@
   .card.cfact { padding:18px 16px; }
   .card.rcard { margin-top:10px; cursor:pointer; } .card.rcard.bad { border-color:var(--bad-bg); } .card.rcard.warn { border-color:var(--warn-bg); }
   .rcard .rh { display:flex; align-items:center; gap:8px; }
-  .rcard .rdot { width:7px; height:7px; border-radius:50%; flex:none; } .rcard .rspin { flex:none; display:flex; margin:-4px -2px; } .rcard .rspin svg { width:16px; height:16px; } .rcard .rspin circle:not(.ring) { animation:pulse 1.6s ease-in-out infinite; }
+  .rcard .rdot { width:7px; height:7px; border-radius:50%; flex:none; } .rcard .rspin { flex:none; display:flex; margin:-4px -2px; } .rcard .rspin svg { width:16px; height:16px; }
   .rcard .nm { flex:1; min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .rcard .tm { flex:none; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; }
   .rcard .rs { margin-top:8px; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -274,6 +274,8 @@
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
   .flash { animation:pulse .8s ease-in-out 3; }
   @keyframes dash { to { stroke-dashoffset:-56; } }
+  /* Every running glyph (rail, banner, graph, card): the dot under the spinning ring pulses. */
+  circle:has(+ .ring) { animation:pulse 1.6s ease-in-out infinite; }
   .ring { fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:14 42; animation:dash 1.4s linear infinite; }
 </style>
 </head>

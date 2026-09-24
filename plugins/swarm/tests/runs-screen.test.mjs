@@ -52,3 +52,12 @@ test("a run's tokens read once: the provider split when there is one, else the t
   const none = await runsWith(listData(listRow({ tokens: 12_000 })));
   assert.match(none.findByClass("rs")[0].textContent, /12k/);
 });
+
+// Operator 2026-09-24: "the pulse is only applied on one screen" — the rule keys on the
+// ring, so every running glyph pulses, not only the runs card.
+test("the pulse applies to the dot under every spinning ring", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/serve/page.html", import.meta.url), "utf8");
+  assert.match(css, /circle:has\(\+ \.ring\)\s*\{\s*animation:pulse/);
+  assert.doesNotMatch(css, /\.rspin circle:not\(\.ring\)/);
+});
