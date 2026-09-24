@@ -126,12 +126,12 @@
   }
 
   // The cost read-model as the mockup's Cost screen (prototype.html 922–983): one
-  // provider at a time from a chip row — multipliers only compare within a provider
-  // — then a note naming that provider's unit, then a ranked card per model, or one
+  // provider per page from the slide control — multipliers only compare within a
+  // provider — then its value hero, then a ranked card per model, or one
   // fact card when nothing is measured. Draws only: multipliers, bands and verdicts
   // arrive from the server's costView().
   function costScreen(data, h, pick) {
-    const { esc, enc } = h;
+    const { esc, enc, seg } = h;
     const all = data.sections?.length ? data.sections : [{
       provider: null, points: data.points || [], spread: data.spread || [], best: data.best, worst: data.worst,
     }];
@@ -139,32 +139,39 @@
     if (!sections.length) {
       return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
     }
-    const section = sections.find((s) => s.provider === pick) || sections[0];
     const name = (s) => s.provider || "unqualified";
+    const section = sections.find((s) => name(s) === pick) || sections[0];
     // Never "0×" for a missing multiplier — that would read as free.
     const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
-    // The hero answers "where is the value?" for every provider before the tabs narrow
-    // to one. A provider without a best says why — never its cheapest instead.
+    // One page per provider, switched like Performance's views — multipliers never
+    // compare across providers. The card names this provider's best value; without
+    // one it says why, never the cheapest instead.
+    const switcher = seg(sections.map((s) => ({ label: name(s), href: `#/cost/${enc(name(s))}` })), sections.indexOf(section));
     const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
-    const heroRow = (s) => s.best
-      ? `<div class="hrow" data-href="#/perf/model/${enc(s.best.model)}"><span class="pv">${esc(name(s))}</span><span class="nm">${esc(s.best.model)}</span><span class="val">${s.best.wtd == null ? "—" : s.best.wtd.toFixed(1)} · ${esc(fmtMult(s.best.multiplier))}</span></div>`
-      : `<div class="hrow none"><span class="pv">${esc(name(s))}</span><span class="nm">${whyNone(s)}</span></div>`;
-    const hero = `<div class="uhero chero"><div class="lbl">BEST VALUE PER PROVIDER</div><div class="hrows">${sections.map(heroRow).join("")}</div></div>`;
-    const tabs = hero + `<div class="ctabs">${sections.map((s) => `<a class="ctab${s === section ? " on" : ""}" data-cost-provider="${esc(s.provider || "")}">${esc(name(s))}</a>`).join("")}</div>`;
-    const { points, spread, best } = section;
-    const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
-    const unit = spread[0] || {};
-    const note = isMeter(unit)
-      ? "Meter weight — each model's multiplier against the cheapest measured one, banked week over week. A hatched bar is thin evidence: under 200 measured requests."
-      : `Published price relative to ${unit.baseModel || "the cheapest model"} — an API-equivalent estimate${unit.asOf ? `, rate card as of ${unit.asOf.slice(0, 10)}` : ""}.`;
-    const head = tabs + `<div class="cnote">${esc(note)}</div>`;
-    if (!spread.some((r) => r.mult != null)) {
-      return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
-    }
     // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
     // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
     const LO = Math.log10(0.5), HI = Math.log10(20);
     const pct = (m) => Math.max(2, Math.min(100, ((Math.log10(m) - LO) / (HI - LO)) * 100));
+    // The value case against this provider's top scorer: how close to its score, at what
+    // share of its cost. The cost bar shares the cards' log scale below.
+    const b = section.best, cl = `<div class="cl"><span>best value</span><span>${esc(name(section))}</span></div>`;
+    const hero = !b ? `<div class="card chero none">${cl}<div class="claim">${whyNone(section)}</div></div>` : (() => {
+      const lead = section.points.reduce((m, p) => (p.wtd ?? -1) > (m.wtd ?? -1) ? p : m, b);
+      const q = lead.wtd > 0 && b.wtd != null ? Math.round((b.wtd / lead.wtd) * 100) : null;
+      const c = b.multiplier > 0 ? Math.round(pct(b.multiplier)) : null;
+      const vbar = (label, w, val, cls) => `<div class="vbar"><span class="k">${label}</span><div class="bar ${cls}"><span style="width:${w ?? 0}%"></span></div><b>${val}</b></div>`;
+      const claim = lead === b || lead.model === b.model ? "the top score here, at the lowest cost that reaches it"
+        : lead.multiplier > 0 && q != null ? `${q}% of ${esc(lead.model)}'s score at ${Math.round((b.multiplier / lead.multiplier) * 100)}% of its cost` : "on the value frontier";
+      return `<div class="card chero" data-href="#/perf/model/${enc(b.model)}">${cl}<div class="fig">${esc(b.model)}</div><div class="claim">${claim}</div>`
+        + vbar("score", q, b.wtd == null ? "—" : b.wtd.toFixed(1), "q") + vbar("cost", c, esc(fmtMult(b.multiplier)), "c") + `</div>`;
+    })();
+    const tabs = switcher + hero;
+    const { points, spread, best } = section;
+    const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
+    const head = tabs;
+    if (!spread.some((r) => r.mult != null)) {
+      return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
+    }
     const ptOf = new Map(points.map((p) => [p.model, p]));
     const verdict = (r) => {
       const p = ptOf.get(r.model);
@@ -240,8 +247,7 @@
       return p.usage.reason || (kinds.length ? `reports ${kinds.join(", ")} — no ${week ? "weekly" : "session"} window` : "no reading");
     };
     const bar = (n) => `<div class="ubar"><span class="${tone(n)}" style="width:${n}%"></span></div>`;
-    const tabs = `<div class="ctabs">${["week", "session"].map((k) =>
-      `<a class="ctab${(week ? "week" : "session") === k ? " on" : ""}" data-usage-window="${k}">${k === "week" ? "Week" : "Session"}</a>`).join("")}</div>`;
+    const tabs = h.seg([{ label: "Week", href: "#/usage/week" }, { label: "Session", href: "#/usage/session" }], week ? 0 : 1);
     if (!rows.length) return tabs + `<div class="empty">no provider answered — run swarm usage to read them once.</div>`;
     // The hero is where the next run goes: the provider with the most left.
     const best = rows.map((p) => ({ p, r: reading(p) })).filter((x) => x.r)

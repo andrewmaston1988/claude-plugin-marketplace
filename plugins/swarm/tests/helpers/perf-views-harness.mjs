@@ -21,4 +21,6 @@ export const H = {
   enc: encodeURIComponent,
   fmtScore: (v) => (v == null ? "—" : v.toFixed(2)),
   chip: (label) => `<span class="chip">${label}</span>`,
+  // The page's segSwitcher, reduced to what a view test reads: labels, hrefs, the active one.
+  seg: (views, active) => `<div class="seg">${views.map((v, i) => `<a data-href="${v.href}"${i === active ? ' class="on"' : ""}>${v.label}</a>`).join("")}</div>`,
 };

@@ -103,14 +103,14 @@
   .chip[data-href], .chip[data-domain] { cursor:pointer; }
   .foot { padding:12px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
-  /* perf view switcher: one responsive SVG, same idiom as .cov svg.covgrid.
-     Five labels cannot fit five equal CSS columns on a phone, and this page has
-     no media queries — scaling a fixed coordinate space is how it fits a screen.
-     The indicator moves by transform, never by animating x/width (D9). */
+  /* view switcher: full width at one fixed height on every screen, pills sharing it
+     equally — scaling an SVG to the width made a two-pill switcher twice as tall as a
+     four-pill one. The indicator moves by transform, never by animating left/width (D9). */
   .seg { padding:12px 16px 0; }
-  .seg svg { width:100%; height:auto; display:block; }
-  .seg .seg-rail { fill:var(--surface-2); stroke:var(--rule); stroke-width:1; }
-  .seg .seg-ind { fill:var(--accent-soft); stroke:var(--accent); stroke-width:1; transition:transform .2s cubic-bezier(.4,0,.2,1); }
+  .seg-rail { position:relative; display:grid; grid-auto-flow:column; grid-auto-columns:1fr; height:44px; padding:3px; box-sizing:border-box; background:var(--surface-2); border:1px solid var(--rule); border-radius:22px; }
+  .seg-ind { position:absolute; top:3px; bottom:3px; left:3px; width:calc((100% - 6px) / var(--n)); box-sizing:border-box; border-radius:18px; background:var(--accent-soft); border:1px solid var(--accent); transform:translateX(calc(var(--i) * 100%)); transition:transform .2s cubic-bezier(.4,0,.2,1); }
+  .seg-label { position:relative; display:flex; align-items:center; justify-content:center; min-width:0; padding:0 6px; font-size:13px; color:var(--muted); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .seg-label.on { color:var(--ink); }
   /* aspect + domain pickers: the lists are too long for pills on a phone */
   .selrow { display:flex; gap:8px; padding:8px 16px 0; }
   /* model dashboard: four stat tiles, compressed aspect bars, widget headers that can hold a picker */
@@ -137,12 +137,8 @@
   /* coverage grid: one responsive SVG, labels inside it, scaled to the screen */
   .cov { padding:0 12px 16px; }
   .cov svg.covgrid { width:100%; height:auto; display:block; }
-  /* cost screen (mockup 922–983): provider chips, a unit note, then ranked cards —
+  /* cost screen (mockup 922–983): one provider per page, a value hero, then ranked cards —
      a hatched bar is thin evidence, an unmeasured card draws no bar at all */
-  .ctabs { display:flex; gap:6px; flex-wrap:wrap; margin:14px 16px 0; }
-  .ctab { height:30px; padding:0 12px; border-radius:15px; display:flex; align-items:center; font-size:12px; font-weight:600; background:var(--surface-2); color:var(--muted); cursor:pointer; }
-  .ctab.on { background:var(--accent); color:#fff; }
-  .cnote { margin:14px 16px 4px; font-size:12px; line-height:1.5; color:var(--muted); }
   .card.crow { margin-top:10px; padding:13px 14px; cursor:pointer; }
   .crow .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
   .crow .who { display:flex; align-items:center; gap:8px; min-width:0; }
@@ -175,13 +171,17 @@
   .uhero .ubar { margin-top:16px; height:8px; }
   .uhero .sub, .upc .sub { margin-top:10px; font-size:11.5px; line-height:1.4; color:var(--faint); }
   /* cost hero: one row per provider — its best-value model, weighted score · multiplier */
-  .chero .hrows { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
-  .chero .hrow { display:flex; align-items:baseline; gap:8px; cursor:pointer; }
-  .chero .hrow .pv { flex:none; width:64px; font-size:12px; color:var(--muted); }
-  .chero .hrow .nm { flex:1; min-width:0; font-size:15px; overflow-wrap:anywhere; }
-  .chero .hrow .val { flex:none; font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
-  .chero .hrow.none { cursor:default; }
-  .chero .hrow.none .nm { color:var(--faint); font-size:13px; }
+  .card.chero { cursor:pointer; } .card.chero.none { cursor:default; }
+  .card.chero { background:var(--accent-soft); padding:16px; }
+  .chero .fig, .chero .claim { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .chero .fig { margin-top:12px; font-size:22px; font-weight:700; letter-spacing:-.02em; }
+  .chero .claim { margin-top:6px; font-size:12.5px; color:var(--muted); }
+  .chero .vbar { margin-top:12px; display:flex; align-items:center; gap:10px; }
+  .chero .vbar .k { flex:none; width:40px; font-size:11px; color:var(--muted); }
+  .chero .vbar .bar { flex:1; height:6px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
+  .chero .vbar .bar span { display:block; height:100%; border-radius:3px; }
+  .chero .vbar .bar.q span { background:var(--accent); } .chero .vbar .bar.c span { background:var(--warn); }
+  .chero .vbar b { flex:none; width:44px; text-align:right; font-size:14px; font-variant-numeric:tabular-nums; }
   .card.upc { margin-top:10px; padding:14px; }
   .card.upc.bad { border-color:var(--bad-bg); } .card.upc.warn { border-color:var(--warn-bg); }
   .upc .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
@@ -404,7 +404,7 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, costProvider: null, usageWindow: "week" };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -961,52 +961,15 @@
     { label: "reliability", href: "#/perf/reliability", kind: "reliability" },
     { label: "leaders", href: "#/perf/leaders", kind: "leaders" },
   ];
-  // Pinned so the rendered size is checkable at design time rather than a shrug:
-  // the four labels give a 290-unit viewBox. The SVG scales to .seg's content
-  // box, not the viewport, and .seg carries 16px side padding — so at a 390px
-  // screen the labels render ~13.6px, not the 14.8px the raw viewport ratio
-  // suggests. CH is set near the font's advance on purpose — overshooting only
-  // makes a pill roomier, while undershooting collides a label with its
-  // neighbour across a 6-unit gap.
-  // INSET is the rail's own padding: the track is the full viewBox and the pills
-  // sit inside it, so the indicator never touches the rail's edge.
-  const SEG = { FS: 11, CH: 6.2, PAD: 10, GAP: 6, H: 26, INSET: 3 };
   // The switcher lives here, not in perf.js: perf.js is loaded by loadPerfJs()
   // on the four new views and the model page only, while this renders above them
   // on every perf route including rank and aspect. Keeping it in the always-loaded
   // layer means there is no branch left to forget.
   function segSwitcher(views, activeIndex) {
-    const ph = SEG.H - SEG.INSET * 2; // pill height, inside the rail
-    let x = SEG.INSET;
-    const pills = views.map((v) => {
-      const w = v.label.length * SEG.CH + SEG.PAD * 2;
-      const box = { label: v.label, href: v.href, x, w };
-      x += w + SEG.GAP;
-      return box;
-    });
-    const W = Math.max(0, x - SEG.GAP + SEG.INSET);
-    const act = pills[activeIndex];
-    const n = (v) => Number(v.toFixed(1));
-    // The rail: the track the pills sit in, so the control reads as one control
-    // rather than floating labels with a highlight behind them. Half-pixel inset
-    // so its 1-unit stroke lands on the grid instead of straddling it.
-    const rail = `<rect class="seg-rail" x="0.5" y="0.5" width="${n(W - 1)}" height="${SEG.H - 1}" rx="${(SEG.H - 1) / 2}"/>`;
-    // translate(), not an x/width transition: morph() reuses this node across
-    // renders so a transform animates, while an attribute-driven x transition is
-    // not reliably animatable in mobile Safari. Width therefore snaps.
-    const ind = act ? `<rect class="seg-ind" x="0" y="${SEG.INSET}" width="${n(act.w)}" height="${ph}" rx="${ph / 2}" transform="translate(${n(act.x)},0)"/>` : "";
-    const items = pills.map((p, i) => {
-      // The hit target is a transparent rect, not the text: a <text> element's
-      // hit area is its painted glyphs, which is not a thumb target. It spans the
-      // full rail height rather than the pill's, so the thumb target is as big as
-      // the control allows. The text above it is pointer-transparent.
-      const hit = `<rect x="${n(p.x)}" y="0" width="${n(p.w)}" height="${SEG.H}" rx="${SEG.H / 2}" fill="transparent" pointer-events="all" data-href="${esc(p.href)}" style="cursor:pointer"/>`;
-      // Explicit fill — unstyled SVG text renders black on --ground.
-      const fill = i === activeIndex ? "var(--ink)" : "var(--muted)";
-      const label = `<text class="seg-label${i === activeIndex ? " on" : ""}" x="${n(p.x + p.w / 2)}" y="${n(SEG.H / 2 + SEG.FS * 0.35)}" text-anchor="middle" font-size="${SEG.FS}" fill="${fill}" pointer-events="none">${esc(p.label)}</text>`;
-      return hit + label;
-    }).join("");
-    return `<div class="seg"><svg viewBox="0 0 ${n(W)} ${SEG.H}" preserveAspectRatio="xMinYMin meet">${rail}${ind}${items}</svg></div>`;
+    // The indicator is one pill wide and slides by whole pill widths, so --i alone places it.
+    const ind = activeIndex >= 0 ? `<span class="seg-ind"></span>` : "";
+    const pills = views.map((v, i) => `<a class="seg-label${i === activeIndex ? " on" : ""}" data-href="${esc(v.href)}">${esc(v.label)}</a>`).join("");
+    return `<div class="seg"><div class="seg-rail" style="--n:${views.length};--i:${Math.max(0, activeIndex)}">${ind}${pills}</div></div>`;
   }
   // Cost is its own screen off /api/cost, which serves with grading off: a price
   // needs no grades, only the value verdicts on each card do.
@@ -1015,7 +978,7 @@
     await loadPerfJs();
     return {
       header: headerHtml(TAB_TITLE.cost, "Relative cost within each provider"),
-      html: window.perfViews.costScreen(data, { esc, enc }, ui.costProvider),
+      html: window.perfViews.costScreen(data, { esc, enc, seg: segSwitcher }, v.which),
     };
   }
   // Usage, Cost and Performance read slow endpoints and change gradually. Each is held
@@ -1088,7 +1051,7 @@
     const n = new Set([...(usageData.usages || []).map((u) => u.provider), ...Object.keys(usageData.errors || {})]).size;
     return {
       header: headerHtml(TAB_TITLE.usage, `${n} provider${n === 1 ? "" : "s"} · allowance remaining`),
-      html: window.perfViews.usageScreen(usageData, { esc }, ui.usageWindow),
+      html: window.perfViews.usageScreen(usageData, { esc, seg: segSwitcher }, v.window),
     };
   }
   async function buildPerf(v) {
@@ -1246,8 +1209,9 @@
     const h = hash.replace(/^#/, "") || "/";
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
     // #/perf/cost is where Cost lived under Performance: old bookmarks still land.
-    if (seg[0] === "cost" || (seg[0] === "perf" && seg[1] === "cost")) return { name: "cost", project: null, run: null, leaf: null, node: null };
-    if (seg[0] === "usage") return { name: "usage", project: null, run: null, leaf: null, node: null };
+    if (seg[0] === "cost" || (seg[0] === "perf" && seg[1] === "cost")) return { name: "cost", project: null, run: null, leaf: null, node: null, which: seg[0] === "cost" ? seg[1] || null : null };
+    // The window is a lens on one payload, not a view: sameView ignores it, so the switch never re-reads providers live.
+    if (seg[0] === "usage") return { name: "usage", project: null, run: null, leaf: null, node: null, window: seg[1] === "session" ? "session" : "week" };
     if (seg[0] === "perf") return { name: "perf", project: null, run: null, leaf: null, node: null, kind: seg[1] || null, which: seg[2] || null };
     if (seg[0] === "run" && seg.length >= 3) {
       const name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "report" ? "report" : seg[3] === "node" ? "node" : "run";
@@ -1339,10 +1303,8 @@
     setTimeout(() => { ui.focusId = null; rerender(); }, 2400);
   }
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-cost-provider], [data-usage-window]");
+    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand]");
     if (!t || !main.contains(t)) return;
-    if (t.dataset.costProvider != null) { ui.costProvider = t.dataset.costProvider; requestRoute(route); return; }
-    if (t.dataset.usageWindow != null) { ui.usageWindow = t.dataset.usageWindow; requestRoute(route); return; }
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
     if (t.dataset.pretty) { ui.pretty = !ui.pretty; requestRoute(route); return; }

@@ -1,6 +1,6 @@
 // The Cost screen's renderer, run for real through perf.js (see the harness).
-// Mockup 922–983: one provider at a time from a chip row, a note naming that
-// provider's unit, then a ranked card per model — or one fact card, never both.
+// Mockup 922–983: one provider per page, its value hero,
+// then a ranked card per model — or one fact card, never both.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
@@ -15,14 +15,13 @@ const srow = (model, mult, over = {}) => ({
 const section = (provider, spread, over = {}) => ({ provider, points: [], spread, best: null, worst: null, ...over });
 const cards = (html, cls = "crow") => html.match(new RegExp(`class="card ${cls}[^"]*"`, "g")) || [];
 
-test("one chip per provider, the picked one on, the first when nothing is picked", () => {
+test("one page per provider on the Performance switcher, the picked one active, the first by default", () => {
   const { costScreen } = loadPerfViews();
   const data = { sections: [section("claude", [srow("sonnet", 1)]), section("ollama", [srow("glm", 2)])] };
   const first = costScreen(data, H);
-  assert.equal((first.match(/data-cost-provider="/g) || []).length, 2);
-  assert.match(first, /class="ctab on" data-cost-provider="claude"/);
+  assert.ok(first.includes('<div class="seg"><a data-href="#/cost/claude" class="on">claude</a><a data-href="#/cost/ollama">ollama</a></div>'));
   const picked = costScreen(data, H, "ollama");
-  assert.match(picked, /class="ctab on" data-cost-provider="ollama"/);
+  assert.ok(picked.includes('<a data-href="#/cost/ollama" class="on">'));
   assert.ok(picked.includes("glm") && !picked.includes("sonnet"), "only the picked provider's models — multipliers only compare within one");
 });
 
@@ -72,14 +71,6 @@ test("the best-value card names the margin it used", () => {
   assert.ok(html.includes("within 0.5 of the best"), "a threshold the reader cannot see is one they must trust");
 });
 
-test("the note names the provider's unit: meter weight, or a published price against its base", () => {
-  const { costScreen } = loadPerfViews();
-  const meter = costScreen({ sections: [section("ollama", [srow("glm", 1, { unit: "meter-points" })])] }, H);
-  assert.ok(meter.includes("Meter weight"));
-  const card = costScreen({ sections: [section("claude", [srow("haiku", 0.5, { unit: "published-price-relative", baseModel: "claude-sonnet-5", asOf: "2026-09-21T00:00:00.000Z" })])] }, H);
-  assert.ok(card.includes("Published price relative to claude-sonnet-5") && card.includes("2026-09-21"));
-});
-
 test("a provider with nothing measured draws one fact card, never a list of dashes", () => {
   const { costScreen } = loadPerfViews();
   const html = costScreen({ sections: [section("codex", [srow("x", null, { band: null }), srow("y", null, { band: null })])] }, H);
@@ -93,23 +84,36 @@ test("with no cost history anywhere it says how the history starts", () => {
   assert.ok(costScreen({ sections: [] }, H).includes("no cost history yet"));
 });
 
-test("the hero names each provider's best value — model, score, multiplier — across every provider", () => {
+const heroOf = (html) => html.match(/<div class="card chero[\s\S]*?(?=<div class="card c|$)/)?.[0] || "";
+
+test("the hero is the picked provider's best value alone: model, and score and cost bars against its own ceilings", () => {
   const { costScreen } = loadPerfViews();
-  const html = costScreen({ sections: [
-    section("claude", [srow("opus", 2.5)], { best: point("opus", 9.28, 2.5, { onFrontier: true }), worst: point("haiku", 3, 0.2) }),
-    section("ollama", [srow("glm", 1)]),
-  ] }, H, "claude");
-  const hero = html.match(/<div class="uhero chero">[\s\S]*?<\/div><\/div><\/div>/)?.[0] || "";
-  assert.match(hero, /BEST VALUE PER PROVIDER/);
-  assert.match(hero, /data-href="#\/perf\/model\/opus"[\s\S]*?claude[\s\S]*?opus[\s\S]*?9\.3[\s\S]*?2\.5×/);
-  assert.match(hero, /ollama[\s\S]*?not graded yet/, "a provider with no best says so — never the cheapest instead");
-  assert.ok(!html.includes("haiku"), "worst is never drawn");
+  const pts = [point("opus", 9.28, 2.5, { onFrontier: true }), point("fable", 9.5, 10)];
+  const data = { sections: [
+    section("claude", [srow("opus", 2.5), srow("fable", 10)], { points: pts, best: pts[0], worst: point("haiku", 3, 0.2) }),
+    section("ollama", [srow("glm", 1)], { best: point("glm", 8, 1) }),
+  ] };
+  const hero = heroOf(costScreen(data, H, "claude"));
+  assert.ok(hero.includes('data-href="#/perf/model/opus"'));
+  assert.ok(hero.includes('<div class="fig">opus</div>'));
+  assert.ok(hero.includes("98% of fable's score at 25% of its cost"), "measured against the provider's top scorer");
+  assert.match(hero, /bar q"><span style="width:98%">[\s\S]*?<b>9\.3<\/b>/);
+  assert.match(hero, /bar c"><span style="width:44%">[\s\S]*?<b>2\.5×<\/b>/);
+  assert.ok(!hero.includes("glm"), "another provider never appears in this one's hero");
+  assert.ok(!costScreen(data, H, "claude").includes("haiku"), "worst is never drawn");
 });
 
-test("a graded provider with no best says there is no clear best — not that nothing is graded", () => {
+test("a provider without a best says why — ungraded, or graded with no clear best", () => {
   const { costScreen } = loadPerfViews();
-  const html = costScreen({ sections: [section("ollama", [srow("glm", 1)], { points: [point("glm", 8.1, 1, { thin: true })] })] }, H);
-  const hero = html.match(/<div class="uhero chero">[\s\S]*?<\/div><\/div><\/div>/)?.[0] || "";
-  assert.match(hero, /ollama[\s\S]*?no clear best yet/);
-  assert.ok(!hero.includes("not graded yet"));
+  const bare = heroOf(costScreen({ sections: [section("ollama", [srow("glm", 1)])] }, H));
+  assert.match(bare, /class="card chero none"[\s\S]*?not graded yet/);
+  const thin = heroOf(costScreen({ sections: [section("ollama", [srow("glm", 1)], { points: [point("glm", 8.1, 1, { thin: true })] })] }, H));
+  assert.match(thin, /no clear best yet/);
+});
+
+test("when the best value is also the top scorer the hero says so, not a 100%-of-itself claim", () => {
+  const { costScreen } = loadPerfViews();
+  const pts = [point("opus", 9.3, 2.5, { onFrontier: true }), point("sonnet", 8.2, 1)];
+  const hero = heroOf(costScreen({ sections: [section("claude", [srow("opus", 2.5)], { points: pts, best: pts[0] })] }, H));
+  assert.ok(hero.includes("the top score here, at the lowest cost that reaches it"));
 });
