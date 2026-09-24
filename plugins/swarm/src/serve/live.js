@@ -82,7 +82,8 @@
   // polls only while its run is still open, and never for a run not yet fetched.
   function shouldPoll(view, run, now) {
     if (view && view.name === "runs") return true;
-    if (!run) return false;
+    // The caller's run outlives the run screens; only a view that names a run polls it.
+    if (!run || !view || !view.run) return false;
     return !runEnded(run);
   }
 

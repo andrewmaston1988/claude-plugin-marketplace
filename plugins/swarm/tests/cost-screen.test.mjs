@@ -92,3 +92,24 @@ test("with no cost history anywhere it says how the history starts", () => {
   const { costScreen } = loadPerfViews();
   assert.ok(costScreen({ sections: [] }, H).includes("no cost history yet"));
 });
+
+test("the hero names each provider's best value — model, score, multiplier — across every provider", () => {
+  const { costScreen } = loadPerfViews();
+  const html = costScreen({ sections: [
+    section("claude", [srow("opus", 2.5)], { best: point("opus", 9.28, 2.5, { onFrontier: true }), worst: point("haiku", 3, 0.2) }),
+    section("ollama", [srow("glm", 1)]),
+  ] }, H, "claude");
+  const hero = html.match(/<div class="uhero chero">[\s\S]*?<\/div><\/div><\/div>/)?.[0] || "";
+  assert.match(hero, /BEST VALUE PER PROVIDER/);
+  assert.match(hero, /data-href="#\/perf\/model\/opus"[\s\S]*?claude[\s\S]*?opus[\s\S]*?9\.3[\s\S]*?2\.5×/);
+  assert.match(hero, /ollama[\s\S]*?not graded yet/, "a provider with no best says so — never the cheapest instead");
+  assert.ok(!html.includes("haiku"), "worst is never drawn");
+});
+
+test("a graded provider with no best says there is no clear best — not that nothing is graded", () => {
+  const { costScreen } = loadPerfViews();
+  const html = costScreen({ sections: [section("ollama", [srow("glm", 1)], { points: [point("glm", 8.1, 1, { thin: true })] })] }, H);
+  const hero = html.match(/<div class="uhero chero">[\s\S]*?<\/div><\/div><\/div>/)?.[0] || "";
+  assert.match(hero, /ollama[\s\S]*?no clear best yet/);
+  assert.ok(!hero.includes("not graded yet"));
+});
