@@ -212,6 +212,27 @@
   .banner .s { margin-top:4px; font-size:11.5px; color:var(--bn-sub); }
   .banner .go { flex:none; font-size:18px; color:var(--bn-ic-fg); }
   .banner.tap { min-height:44px; }
+  /* A run directory never reaches `queued`; a single leaf does, while it waits on upstream. */
+  .banner.queued { --bn-bg:#262833; --bn-br:#505466; --bn-ic-bg:#50546a; --bn-ic-fg:#c7cad6; --bn-sub:#9aa0b1; }
+  /* leaf page: the banner, then its chips, then one card per question the screen answers */
+  .card { margin:12px 16px 0; padding:14px; border:1px solid var(--rule); border-radius:14px; background:var(--surface); }
+  .card.flush { padding:0; overflow:hidden; }
+  .card .cl { display:flex; align-items:center; justify-content:space-between; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
+  .card .cl b { font-size:14px; letter-spacing:0; color:var(--ink); font-variant-numeric:tabular-nums; }
+  .card .gr { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; font-size:12px; color:var(--muted); }
+  .card .gr + .gr { margin-top:8px; }
+  .card .gr .k { width:44px; flex:none; font-size:11px; color:var(--faint); }
+  .card .fchip { padding:4px 8px; border-radius:8px; background:var(--surface-2); color:var(--ink); font-size:12.5px; }
+  .card .cf { display:flex; justify-content:space-between; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--rule); font-size:11.5px; color:var(--faint); }
+  .card .show { color:var(--accent); cursor:pointer; }
+  .segbar { display:flex; gap:2px; height:5px; margin-top:12px; border-radius:3px; overflow:hidden; background:var(--surface-2); }
+  .legend { display:flex; flex-wrap:wrap; gap:16px; margin-top:12px; font-size:11.5px; color:var(--muted); }
+  .legend i { display:inline-block; width:8px; height:8px; margin-right:6px; border-radius:2px; }
+  .disc { min-height:46px; padding:0 14px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; cursor:pointer; }
+  .disc ~ .disc, .card .cite { border-top:1px solid var(--rule); }
+  .disc small { font-size:11.5px; color:var(--faint); }
+  .card .dbody { padding:0 14px 12px; }
+  .card .cite { padding:12px 14px; font-size:11.5px; color:var(--faint); }
   /* The mockup draws this as a flex:none footer inside a fixed phone frame. This page
      scrolls the document instead, so the same role is `fixed` — a bar appended into the
      scrolling body is below the fold on any run with more than a few waves. */
@@ -512,6 +533,11 @@
   };
   const byStateOf = (tasks) => tasks.reduce((b, t) => (b[t.state] = (b[t.state] || 0) + 1, b), {});
 
+  const tile = (kind, icon, title, sub, href) =>
+    `<div class="banner ${kind}${href ? " tap" : ""}"${href ? ` role="link" data-key="banner" data-href="${esc(href)}"` : ""}>`
+    + `<span class="ic">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`
+    + (href ? `<span class="go">›</span>` : "") + `</div>`;
+
   // One run → one verdict tile, read off the run's own facts in severity order: the
   // engine is gone, then leaves failed, then it finished, then something is quiet,
   // then it is simply running. A banner without a `sub` is decoration, so every
@@ -523,10 +549,6 @@
     const failed = n("failed", "failed:timeout", "failed:stopped", "blocked");
     const tok = fmtTok(tasks.reduce((a, t) => a + tokTotal(t.tokens), 0));
     const dhref = (run.digestPath || run.reportPath) ? `#/run/${enc(run.project)}/${enc(run.name)}/digest` : null;
-    const tile = (kind, icon, title, sub, href) =>
-      `<div class="banner ${kind}${href ? " tap" : ""}"${href ? ` role="link" data-key="banner" data-href="${esc(href)}"` : ""}>`
-      + `<span class="ic">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`
-      + (href ? `<span class="go">›</span>` : "") + `</div>`;
 
     if (run.abortedMs) return tile("bad", "✕", "Aborted — the engine is gone", `${done} of ${tasks.length} finished · ${tok} tokens`, dhref);
     if (run.stoppedMs) return tile("bad", "✗", "Stopped by hand", `${tasks.length - done} never finished · ${tok} tokens`, dhref);
@@ -743,6 +765,33 @@
     return { header, html, state: { currentRun: run, currentLeaf: leaf } };
   }
 
+  // One leaf → one verdict tile. No chevron: the leaf IS the destination.
+  function leafBannerHtml(t, leaf, now, quietSecs) {
+    const tok = `${fmtTok(tokTotal(t.tokens || leaf?.tokens))} tokens`;
+    const took = t.durationMs != null ? fmtDur(t.durationMs) : window.swarmLive.elapsedText(t, now) ?? "—";
+    const last = t.lastEventMs ? ` · last event ${ago(t.lastEventMs)}` : "";
+    const identity = identityName(t);
+    switch (t.state) {
+      case "ok": return tile("ok", "✓", `Finished clean in ${took}`, tok);
+      case "skipped": return tile("ok", "✓", "Skipped", "its condition was false — nothing ran");
+      case "failed:timeout": return tile("bad", "✗", `Timed out after ${took}`, tok + last);
+      case "failed:stopped": return tile("bad", "✗", "Stopped by hand", tok + last);
+      case "failed": return tile("bad", "✗", `Failed after ${took}`, tok + last);
+      case "blocked": return tile("bad", "⊘", "Blocked", "an upstream leaf failed, so this never ran");
+      case "aborted": return tile("bad", "✕", "Aborted — the engine is gone", tok + last);
+      case "rate-limited": return tile("slow", "⧖", "Rate-limited — waiting to retry", tok);
+      case "quota": return tile("slow", "⏳", "Out of quota — waiting for the window", tok);
+      case "pending": {
+        const after = t.after || [];
+        return after.length
+          ? tile("queued", "·", "Waiting on upstream", `Starts when ${after.join(", ")} finish${after.length === 1 ? "es" : ""}`)
+          : tile("queued", "·", "Queued", "waiting for a free slot");
+      }
+    }
+    if (quietSecs != null) return tile("slow", "!", `No output for ${fmtDur(quietSecs * 1000)}`, `${tok} so far`);
+    return tile("", "◐", `Running for ${took}`, `${identity ? `${identity} · ` : ""}${tok} so far`);
+  }
+
   function renderLeafHtml(run, leaf, id) {
     const now = Date.now();
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
@@ -751,40 +800,45 @@
      const header = `${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(identity)}</small></div>${menuBtn}`;
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
-     let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${esc(identity)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${quietSecsVal}s</span>` : ""}</div>`;
-    // What the leaf was actually asked, collapsed by default. Same section+chevron idiom
-    // as every other toggle on the page, so the whole row is the target. Omitted entirely
-    // for agentless compute/integrate nodes, which carry no prompt.
-    if (leaf?.prompt) {
-      html += `<div class="section tap" data-prompt="1"><span>prompt</span><span class="line"></span>${leaf.authored ? `<small>as authored · still in flight</small>` : ""}${chev(ui.promptOpen)}</div>`;
-      if (ui.promptOpen) html += `<div class="block"><pre class="out">${esc(leaf.prompt)}</pre></div>`;
-    }
-    html += `<div class="block"><label>graph</label><div class="meta"><span class="faint">after</span> ${t.after?.length ? t.after.map(esc).join(", ") : "— (nothing upstream)"}</div><div class="meta"><span class="faint">feeds</span> ${feeds.length ? feeds.map(esc).join(", ") : "—"}</div></div>`;
-    const elapsed = window.swarmLive.elapsedText(t, now) ?? fmtDur(t.durationMs);
-    html += `<div class="kv"><div><label>${t.state === "running" ? "elapsed" : "duration"}</label><span>${elapsed}</span></div><div><label>turns</label><span>${leaf?.numTurns ?? "—"}</span></div><div><label>last event</label><span>${t.lastEventMs ? ago(t.lastEventMs) : "—"}</span></div></div>`;
+    let html = leafBannerHtml(t, leaf, now, quiet ? quietSecsVal : null);
+    html += `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${esc(identity)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}</div>`;
+    // Position in graph: what it waited on, what it unblocks, and the way back to the rail.
+    const fchips = (ids, none) => ids.length ? ids.map((x) => `<span class="fchip">${esc(x)}</span>`).join("") : `<span>${none}</span>`;
+    const order = run.tasks.filter((x) => x.kind !== "digest").map((x) => x.id);
+    const turns = leaf?.numTurns != null ? ` · ${leaf.numTurns} turn${leaf.numTurns === 1 ? "" : "s"}` : "";
+    html += `<div class="card"><div class="cl">position in graph</div>`
+      + `<div class="gr"><span class="k">after</span>${fchips(t.after || [], "nothing upstream")}</div>`
+      + `<div class="gr"><span class="k">feeds</span>${fchips(feeds, "—")}</div>`
+      + (t.activity ? `<div class="gr"><span class="k">last</span><span>${esc(t.activity)}</span></div>` : "")
+      + `<div class="cf"><span>leaf ${order.indexOf(id) + 1} of ${order.length} · wave ${(t.depth ?? 0) + 1}${turns}</span><span class="show" data-href="#/run/${enc(run.project)}/${enc(run.name)}">Show in tree ›</span></div></div>`;
     const tk = t.tokens || leaf?.tokens;
     if (tk) {
-      const inp = tk.input || 0, outp = tk.output || 0, cc = tk.cacheCreation || 0, cr = tk.cacheRead || 0;
       // "input" means what the CLI means by it (results.mjs:369): input + cacheCreation.
       // On a Claude leaf the whole prompt is cache-written on turn 1, so `input` alone is
-      // just the uncached tail — reporting it raw showed 18 next to the CLI's 78k for the
-      // same leaf. cacheRead stays its own row: it is re-read transcript, not billable input.
-      // The headline is the processed total — the same figure the estate row shows, cacheRead
-      // included — so one leaf never reads as two numbers; the rows below it split out what was billed.
-      const billedIn = inp + cc;
-      html += `<div class="block"><label><span>tokens</span><small>${fmtTok(tokTotal(tk))}</small></label><div class="bar"><span style="flex:${billedIn};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span></div><div class="kv" style="padding:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(billedIn)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label class="faint">cache read</label><span>${cr ? fmtTok(cr) : "—"}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
+      // just the uncached tail. cacheRead is its own segment: re-read transcript, not billed.
+      const billedIn = (tk.input || 0) + (tk.cacheCreation || 0), outp = tk.output || 0, cr = tk.cacheRead || 0;
+      const seg = (n, colour) => `<span style="flex:${n};background:${colour}"></span>`;
+      const key = (colour, label, n) => `<span><i style="background:${colour}"></i>${label} ${n ? fmtTok(n) : "0"}</span>`;
+      html += `<div class="card"><div class="cl">tokens<b>${fmtTok(tokTotal(tk))}</b></div>`
+        + `<div class="segbar">${seg(billedIn, "var(--accent)")}${seg(outp, "var(--ok)")}${seg(cr, "var(--rule)")}</div>`
+        + `<div class="legend">${key("var(--accent)", "Input", billedIn)}${key("var(--ok)", "Output", outp)}${key("var(--rule)", "Cache", cr)}</div>`
+        + (!tk.cacheCreation && !cr ? `<div class="cf"><span>no cache buckets from this provider — every turn re-sends the transcript</span></div>` : "")
+        + `</div>`;
     }
-    html += `<div class="block"><label>activity</label><div class="meta">${t.activity ? esc(t.activity) : "<span class='faint'>—</span>"}</div></div>`;
-    // Raw by default; a prettify chip appears when the output carries JSON.
+    // Prompt and output: both long crafted text, collapsed by default — this screen is read
+    // for state far more often than prose. The prettify button sits inside the output row;
+    // the delegated handler resolves to the button first, so it toggles format, not the row.
     const canPretty = !!leaf?.output && (typeof leaf.outputJson === "object" && leaf.outputJson !== null || !!splitJson(leaf.output));
     const toggle = canPretty ? `<button class="chip" data-pretty="1" style="padding:4px 10px">${ui.pretty ? "raw" : "prettify"}</button>` : (leaf?.output ? "" : "appears when the leaf finishes");
-    // Collapsed like the prompt: both are long crafted text, and this view is read for
-    // state far more often than for prose. The prettify button sits inside the row; the
-    // delegated handler resolves to the button first (closest() walks up from the target),
-    // so it toggles format rather than collapsing the section.
-    html += `<div class="section tap" data-output="1"><span>output</span><span class="line"></span><small>${toggle}</small>${chev(ui.outputOpen)}</div>`;
-    if (ui.outputOpen) html += `<div class="block">${leaf?.output ? (ui.pretty && canPretty ? outputHtml(leaf) : `<pre class="out">${esc(leaf.output)}</pre>`) : "<div class='faint'>—</div>"}</div>`;
-    if (leaf?.citations) html += `<div class="block"><label>citations</label><div class="meta">checked ${leaf.citations.checked ?? 0} · drifted ${leaf.citations.drifted ?? 0} · refuted ${leaf.citations.refuted ?? 0}</div></div>`;
+    html += `<div class="card flush">`;
+    if (leaf?.prompt) {
+      html += `<div class="disc" data-prompt="1"><span>Prompt</span><small>${leaf.authored ? "as authored · still in flight" : ""}${chev(ui.promptOpen)}</small></div>`;
+      if (ui.promptOpen) html += `<div class="dbody"><pre class="out">${esc(leaf.prompt)}</pre></div>`;
+    }
+    html += `<div class="disc" data-output="1"><span>Output</span><small>${toggle}${chev(ui.outputOpen)}</small></div>`;
+    if (ui.outputOpen) html += `<div class="dbody">${leaf?.output ? (ui.pretty && canPretty ? outputHtml(leaf) : `<pre class="out">${esc(leaf.output)}</pre>`) : "<div class='faint'>—</div>"}</div>`;
+    if (leaf?.citations) html += `<div class="cite">citations · checked ${leaf.citations.checked ?? 0} · drifted ${leaf.citations.drifted ?? 0} · refuted ${leaf.citations.refuted ?? 0}</div>`;
+    html += `</div>`;
     return { header, html };
   }
 

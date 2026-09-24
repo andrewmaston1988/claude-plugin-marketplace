@@ -192,16 +192,17 @@ test("the run screen still carries both, so the fix moved the chrome rather than
 
 // ── the tones carry their weight ─────────────────────────────────────────
 
-// The grey `queued` tone ('nothing started yet') was unreachable by construction: a run
-// directory only exists once the engine has dispatched, so by the time the dashboard can
-// read one, leaves are running, finished, failed, or the run is aborted. Repointing it at
-// an orphaned run (enginePid set, process gone) was the alternative — but `runlog.mjs`
-// computes no liveness for that pid (`runLiveness` is heartbeat-based, and an engine that
-// died without a summary already lands in `abortedMs`), so it would have meant inventing a
-// probe for a tone. Deleted instead. Asserted on the mechanism: no rule AND no producer.
-test("no tone survives for a state a run directory cannot reach", () => {
+// A run directory only exists once the engine has dispatched, so a RUN banner can never
+// be `queued` ('nothing started yet'). A single LEAF can — it waits on upstream — so the
+// tone's one producer is the leaf banner. Asserted on the mechanism: the rule exists only
+// alongside that producer, and the run banner never claims a run started nothing.
+test("the queued tone is produced by the leaf banner, never by the run banner", () => {
   const src = readFileSync(PAGE, "utf8");
-  assert.ok(!/\.banner\.queued\s*\{/.test(src), "a tone rule with no producer is dead CSS");
+  assert.ok(/\.banner\.queued\s*\{/.test(src), "the leaf page's waiting tone has its rule");
+  const run = src.slice(src.indexOf("function bannerHtml("), src.indexOf("function runChromeHtml("));
+  const leaf = src.slice(src.indexOf("function leafBannerHtml("), src.indexOf("function renderLeafHtml("));
+  assert.ok(!run.includes('"queued"'), "a run banner cannot be queued");
+  assert.ok(leaf.includes('tile("queued"'), "the rule's producer is the leaf banner — without it the rule is dead CSS");
   assert.ok(!src.includes("nothing started yet"), "no branch may claim a run started nothing");
 });
 
@@ -225,7 +226,7 @@ test("every banner tone separates from the page ground and carries a legible gly
 
   const tones = [...css.matchAll(/\.banner(?:\.(\w+))?\s*\{\s*--bn-bg:(#[0-9a-f]{6}); --bn-br:(#[0-9a-f]{6}); --bn-ic-bg:(#[0-9a-f]{6}); --bn-ic-fg:(#[0-9a-f]{6});/g)]
     .map(([, name, bg, br, ic, fg]) => ({ name: name || "running", bg, br, ic, fg }));
-  assert.equal(tones.length, 4, "one rule per tone: running, ok, slow, bad");
+  assert.equal(tones.length, 5, "one rule per tone: running, ok, slow, bad, queued");
 
   for (const t of tones) {
     assert.ok(contrast(t.bg, ground) >= 1.25,
