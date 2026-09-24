@@ -27,6 +27,7 @@ const USAGE = `usage: swarm.mjs <command>
   run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
+  wait <resultsDir>          block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
   prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
@@ -635,21 +636,13 @@ function getFlag(name, args) {
 // unappendable as written: validation rejects a null universal, so an untouched
 // skeleton cannot land.
 async function cmdGradeInit(dir) {
-  dir = resolve(dir);
-  const { writeFileSync } = await import("node:fs");
-  const { buildSkeleton } = await import("../src/grade-init.mjs");
-  const leaves = listLeaves(dir, { gradeable: true });
-  if (!leaves.length) {
-    err(`swarm: no gradeable leaves with results in ${dir} — agentless nodes carry no model, so there is nothing to grade.`);
+  const { gradeInit } = await import("../src/grade-init.mjs");
+  const { error, lines } = gradeInit(dir);
+  if (error) {
+    err(error);
     return 1;
   }
-  const p = join(dir, "grades.json");
-  writeFileSync(p, JSON.stringify(buildSkeleton(leaves, { resultsDir: dir }), null, 2) + "\n");
-  out(p);
-  out(`${leaves.length} gradeable leaf/leaves. Grade the four universal aspects 1-10 on every row; leave a`);
-  out("capability aspect null unless the leaf stressed it. Drop `grades` entirely on a row whose leaf");
-  out("produced no output (failed / timeout / session-died / not-capable), then:");
-  out(`  swarm grade --file ${p}`);
+  for (const line of lines) out(line);
   return 0;
 }
 
@@ -1350,6 +1343,11 @@ async function main() {
         }
         out(renderStatus(rest[0], Date.now(), quietWarnMs));
         return 0;
+      }
+      case "wait": {
+        if (!rest[0]) { err(USAGE); return 1; }
+        const { runWaitCommand } = await import("../src/wait.mjs");
+        return await runWaitCommand(rest[0], { quietWarnSecs: getConfig().quietWarnSecs, out, err });
       }
       case "report": {
         if (!rest[0]) { err(USAGE); return 1; }

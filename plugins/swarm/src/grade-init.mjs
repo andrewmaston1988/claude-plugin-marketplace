@@ -2,7 +2,10 @@
 // field a machine can read off the leaf resolved here and every field that is
 // judgement left for the grader. Grades are ALWAYS null — an untouched skeleton
 // is unappendable by construction, so it cannot land as a grade.
+import { writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { UNIVERSAL, CAPABILITY, OUTCOMES } from "./aspects.mjs";
+import { listLeaves as defaultListLeaves } from "./results.mjs";
 
 // The placeholder a row keeps when the leaf's own record does not settle it.
 export const OUTCOME_CHOICES = `<${OUTCOMES.join(" | ")}>`;
@@ -40,6 +43,30 @@ export function tldrLine(output) {
 export function noteFor(result) {
   const line = tldrLine(result?.output);
   return line ? `leaf says: "${line}"` : "";
+}
+
+// The whole `grade --init` action — list the gradeable leaves, write the
+// skeleton, hand back the lines to print. It lives here rather than in the CLI
+// so the argv layer stays argv: `{ error }` on refusal, `{ path, lines }` on a
+// skeleton written.
+export function gradeInit(dir, { listLeaves = defaultListLeaves } = {}) {
+  const resultsDir = resolve(dir);
+  const leaves = listLeaves(resultsDir, { gradeable: true });
+  if (!leaves.length) {
+    return { error: `swarm: no gradeable leaves with results in ${resultsDir} — agentless nodes carry no model, so there is nothing to grade.` };
+  }
+  const path = join(resultsDir, "grades.json");
+  writeFileSync(path, JSON.stringify(buildSkeleton(leaves, { resultsDir }), null, 2) + "\n");
+  return {
+    path,
+    lines: [
+      path,
+      `${leaves.length} gradeable leaf/leaves. Grade the four universal aspects 1-10 on every row; leave a`,
+      "capability aspect null unless the leaf stressed it. Drop `grades` entirely on a row whose leaf",
+      "produced no output (failed / timeout / session-died / not-capable), then:",
+      `  swarm grade --file ${path}`,
+    ],
+  };
 }
 
 export function buildSkeleton(leaves, { resultsDir }) {
