@@ -213,6 +213,7 @@
   .banner .go { flex:none; font-size:18px; color:var(--bn-ic-fg); }
   .banner.tap { min-height:44px; }
   /* A run directory never reaches `queued`; a single leaf does, while it waits on upstream. */
+  .banner .ic.bare { background:none; }
   .banner.queued { --bn-bg:#262833; --bn-br:#505466; --bn-ic-bg:#50546a; --bn-ic-fg:#c7cad6; --bn-sub:#9aa0b1; }
   /* leaf page: the banner, then its chips, then one card per question the screen answers */
   .card { margin:12px 16px 0; padding:14px; border:1px solid var(--rule); border-radius:14px; background:var(--surface); }
@@ -538,7 +539,7 @@
   const SPIN = `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="var(--accent)"/><circle class="ring" cx="12" cy="12" r="9"/></svg>`;
   const tile = (kind, icon, title, sub, href) =>
     `<div class="banner ${kind}${href ? " tap" : ""}"${href ? ` role="link" data-key="banner" data-href="${esc(href)}"` : ""}>`
-    + `<span class="ic">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`
+    + `<span class="ic${icon === SPIN ? " bare" : ""}">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`
     + (href ? `<span class="go">›</span>` : "") + `</div>`;
 
   // One run → one verdict tile, read off the run's own facts in severity order: the

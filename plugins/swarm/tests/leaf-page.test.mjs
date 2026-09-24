@@ -141,6 +141,16 @@ test("a running leaf's banner carries the run tree's spinner in its status circl
   assert.equal(ring.length, 1, "the same .ring element the tree animates, inside the circle");
 });
 
+// Operator, 2026-09-24: the filled circle behind the spinner drowned it — drop it for contrast.
+test("the spinner sits on the banner itself, with no filled circle behind it", async () => {
+  const { P } = await bannerOf({ state: "running", startedMs: Date.now() - 30_000, lastEventMs: Date.now() });
+  const ic = P.findByClass("ic")[0];
+  assert.match(ic.getAttribute("class"), /\bbare\b/, "the spinner's circle is marked bare");
+  assert.match(readFileSync(PAGE, "utf8"), /\.banner \.ic\.bare\s*\{[^}]*background:\s*none/);
+  const { P: done } = await bannerOf({ state: "ok", durationMs: 1000 });
+  assert.doesNotMatch(done.findByClass("ic")[0].getAttribute("class"), /\bbare\b/, "other tones keep their circle");
+});
+
 // "Show in tree" used to be a bare link to the run: it landed at the top of the tree with
 // nothing marking which row the leaf was. It must land ON the leaf — its wave opened and
 // its row flashed — so the tap answers "where is this leaf?".
