@@ -211,10 +211,20 @@
     const { esc } = h;
     const LOW = 20, WARN = LOW * 2;
     const week = w !== "session";
-    // Anthropic reports weekly_all/weekly_scoped; codex's primary/secondary match neither, by design.
-    const fits = (k) => (week ? k === "weekly" || k.startsWith("weekly_") : k === "session");
+    // Named windows (anthropic weekly_all/weekly_scoped, ollama session/weekly) fit by
+    // kind; codex names its windows primary/secondary, so its own span places them —
+    // under a day is the session, a day or more the week.
+    const SPAN = { m: 1, h: 60, d: 1440 };
+    const spanMins = (w) => { const m = /^(\d+)([mhd])$/.exec(w || ""); return m ? +m[1] * SPAN[m[2]] : null; };
+    const fits = (l) => {
+      const k = l.kind || "";
+      if (k === "session") return !week;
+      if (k === "weekly" || k.startsWith("weekly_")) return week;
+      const span = spanMins(l.window);
+      return span != null && (span >= 1440) === week;
+    };
     // Several buckets of one window: the most-consumed is the one that stops work.
-    const limitOf = (u) => (u.limits || []).filter((l) => fits(l.kind || "")).sort((a, b) => b.percent - a.percent)[0] || null;
+    const limitOf = (u) => (u.limits || []).filter(fits).sort((a, b) => b.percent - a.percent)[0] || null;
     const tone = (n) => (n <= LOW ? "bad" : n <= WARN ? "warn" : "ok");
     const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const pad = (n) => String(n).padStart(2, "0");
