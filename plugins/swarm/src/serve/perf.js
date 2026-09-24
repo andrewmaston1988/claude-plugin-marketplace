@@ -125,67 +125,58 @@
     return tiles + costChip + aspectWidget + covWidget + relWidget;
   }
 
-  // The cost read-model as a phone screen: two verdict cards, then a ranked
-  // list. It replaced a quality×cost scatter and a log spread — two SVGs in a
-  // 342-unit viewBox that read as a sales report on a phone and were, in the
-  // operator's words, "far too cramped". The spread was already a ranking
-  // wearing a chart costume; the scatter's real payload was the frontier
-  // verdict, which every row now carries in words. Draws only: the multipliers,
-  // bands, verdicts and both card picks arrive from the server's costView().
-  function costScreen(data, h) {
+  // The cost read-model as the mockup's Cost screen (prototype.html 922–983): one
+  // provider at a time from a chip row — multipliers only compare within a provider
+  // — then a note naming that provider's unit, then a ranked card per model, or one
+  // fact card when nothing is measured. Draws only: multipliers, bands and verdicts
+  // arrive from the server's costView().
+  function costScreen(data, h, pick) {
     const { esc, enc } = h;
-    const sections = data.sections?.length ? data.sections : [{
+    const all = data.sections?.length ? data.sections : [{
       provider: null, points: data.points || [], spread: data.spread || [], best: data.best, worst: data.worst,
     }];
-    if (!sections.some((section) => section.points.length || section.spread.length)) {
+    const sections = all.filter((s) => s.points.length || s.spread.length);
+    if (!sections.length) {
       return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
     }
-    // Null-safe: `costView` only ever picks frontier participants, which always
-    // carry a multiplier — but this function is public on window.perfViews, so a
-    // caller passing an unmeasured pick must get an em dash, never a "0×" that
-    // would read as free.
+    const section = sections.find((s) => s.provider === pick) || sections[0];
+    const name = (s) => s.provider || "unqualified";
+    const tabs = `<div class="ctabs">${sections.map((s) => `<a class="ctab${s === section ? " on" : ""}" data-cost-provider="${esc(s.provider || "")}">${esc(name(s))}</a>`).join("")}</div>`;
+    const { points, spread, best, worst } = section;
+    const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
+    const unit = spread[0] || {};
+    const note = isMeter(unit)
+      ? "Meter weight — each model's multiplier against the cheapest measured one, banked week over week. A hatched bar is thin evidence: under 200 measured requests."
+      : `Published price relative to ${unit.baseModel || "the cheapest model"} — an API-equivalent estimate${unit.asOf ? `, rate card as of ${unit.asOf.slice(0, 10)}` : ""}.`;
+    const head = tabs + `<div class="cnote">${esc(note)}</div>`;
+    if (!spread.some((r) => r.mult != null)) {
+      return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
+    }
+    // Never "0×" for a missing multiplier — that would read as free.
     const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
-    const badge = (b) => b == null ? `<span class="cbadge none">—</span>` : `<span class="cbadge">${"💲".repeat(b)}</span>`;
-    // A card with no pick shows an em dash AND why — a blank reads as a broken
-    // render, and a 0× would read as free. Same rule as an unmeasured row.
-    const card = (label, pick, why, note) => {
-      // Name the rule under the pick: a threshold the reader cannot see is one
-      // they have to trust, and "why that model" is the question this card exists
-      // to answer.
-      const rule = pick && (pick.dominatedBy ? ` · beaten by ${esc(pick.dominatedBy)}` : note ? ` · ${esc(note)}` : "");
-      const detail = pick
-        ? `${esc(fmtMult(pick.multiplier))} · wtd ${pick.wtd == null ? "—" : pick.wtd.toFixed(1)}${rule}`
-        : why;
-      return `<div><label>${esc(label)}</label><span>${pick ? esc(pick.model) : "—"}</span><small>${detail}</small></div>`;
-    };
-    // Log-scaled over the same 0.5×–20× domain the deleted plots used:
-    // multipliers span decades, so a linear bar makes every cheap model a stub
-    // and hides the 1×-vs-2× difference that actually decides a seat.
+    // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
+    // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
     const LO = Math.log10(0.5), HI = Math.log10(20);
     const pct = (m) => Math.max(2, Math.min(100, ((Math.log10(m) - LO) / (HI - LO)) * 100));
-    const renderSection = (section) => {
-      const { points, spread, best, worst } = section;
-      const provider = section.provider || "unqualified";
-      const cards = `<div class="kv dash4 costcards">${card("best value", best, "nothing priced and graded yet", data.valueMargin == null ? "" : `within ${data.valueMargin} of the best`)}${card("worst value", worst, "nothing is beaten on both axes")}</div>`;
-      const ptOf = new Map(points.map((p) => [p.model, p]));
-      const firstUnm = spread.findIndex((r) => r.mult == null);
-      const rows = spread.map((r, i) => {
-        const p = ptOf.get(r.model);
-        const verdict = r.mult == null ? "unmeasured"
-          : p && p.onFrontier ? "best value"
-          : p && p.dominatedBy ? `beaten by ${esc(p.dominatedBy)}`
-          : "cost only";
-        const tip = `${esc(r.model)} · ${r.mult == null ? "unmeasured" : esc(fmtMult(r.mult))} · ${r.measuredRequests} measured of ${r.requests} requests · ${r.measuredWeeks} of ${r.weeks} weeks${r.thin ? " · thin" : ""}`;
-        const bar = r.mult == null ? `<div class="bar"></div>`
-          : `<div class="bar${r.thin ? " prov" : ""}"><span style="width:${pct(r.mult).toFixed(1)}%"></span></div>`;
-        return `<div class="arow costrow${i === firstUnm && firstUnm > 0 ? " unmfirst" : ""}${r.mult == null ? " unm" : ""}" data-href="#/perf/model/${enc(r.model)}" title="${tip}">`
-          + `<span class="alabel">${esc(r.model)}</span>${bar}`
-          + `<span class="aval valside">${badge(r.band)}${r.mult == null ? "—" : esc(fmtMult(r.mult))}</span>`
-          + `<small class="costverdict">${verdict}</small></div>`;
-      }).join("");
-      return `<div class="section"><span>${esc(provider)} cost</span><span class="line"></span></div>${cards}<div class="section"><span>cost ranking</span><span class="line"></span></div><div class="cost">${rows}</div>`;
+    const ptOf = new Map(points.map((p) => [p.model, p]));
+    const verdict = (r) => {
+      const p = ptOf.get(r.model);
+      if (best && best.model === r.model) return `best value${data.valueMargin == null ? "" : ` · within ${data.valueMargin} of the best`}`;
+      if (p && p.dominatedBy) return `beaten by ${esc(p.dominatedBy)}`;
+      if (p && p.onFrontier) return "on the frontier";
+      return "not graded — cost only";
     };
-    return sections.map(renderSection).join("");
+    let rank = 0;
+    const cards = spread.map((r) => {
+      const top = (rk, val) => `<div class="top"><span class="who"><span class="rk">${rk}</span><span class="nm">${esc(r.model)}</span></span><span class="val">${val}</span></div>`;
+      const href = `data-href="#/perf/model/${enc(r.model)}"`;
+      if (r.mult == null) return `<div class="card crow unm" ${href}>${top("·", "—")}<div class="sub">unmeasured — no price or banked history</div></div>`;
+      const evidence = [verdict(r), r.thin ? "thin evidence" : null, isMeter(r) && r.measuredRequests != null ? `${r.measuredRequests} measured requests` : null].filter(Boolean).join(" · ");
+      return `<div class="card crow" ${href}>${top(++rank, esc(fmtMult(r.mult)))}`
+        + `<div class="cbar${r.thin ? " thin" : ""}"><span style="width:${pct(r.mult).toFixed(1)}%"></span></div>`
+        + `<div class="sub">${evidence}</div></div>`;
+    }).join("");
+    return head + cards;
   }
 
   // The chip's inner text, kept out of the dashboard template: a band badge

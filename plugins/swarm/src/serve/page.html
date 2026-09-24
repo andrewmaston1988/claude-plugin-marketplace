@@ -145,25 +145,25 @@
   /* coverage grid: one responsive SVG, labels inside it, scaled to the screen */
   .cov { padding:0 12px 16px; }
   .cov svg.covgrid { width:100%; height:auto; display:block; }
-  /* cost screen: two verdict cards, then a ranked list. States, not series —
-     a hatched bar is thin evidence, an unmeasured row draws no bar at all and
-     sits below a divider, never a 0-width bar that would read as free. */
-  .cost { padding:0 12px 16px; }
-  /* the two verdict cards: ringed for a card look, headers matching .section's
-     accent so the screen reads as one system rather than three label styles */
-  .kv.costcards { gap:8px; }
-  .costcards > div { border:1px solid var(--rule); border-radius:10px; padding:12px 12px; background:var(--surface); gap:4px; }
-  .costcards label { font-size:11px; letter-spacing:.16em; color:var(--accent); }
-  .costcards span { white-space:normal; font-size:15px; }
-  .costcards small { font-size:11px; color:var(--muted); line-height:1.35; }
-  /* A cost row is read for its model name; the perf rows are read for their bars.
-     Smaller type plus a wider label column fits `deepseek-v4.1-flash:cloud`, which
-     the shared 96px/12px cell clipped to `deepseek-v4...`. */
-  .arow.costrow { grid-template-columns:124px 1fr 60px; row-gap:0; }
-  .arow.costrow .alabel { font-size:10.5px; }
-  .arow.costrow .costverdict { grid-column:1 / -1; font-size:10px; color:var(--faint); margin:0 0 4px; }
-  .arow.costrow.unmfirst { border-top:1px solid var(--rule); padding-top:8px; }
-  .arow.costrow.unm .alabel, .arow.costrow.unm .aval { color:var(--faint); }
+  /* cost screen (mockup 922–983): provider chips, a unit note, then ranked cards —
+     a hatched bar is thin evidence, an unmeasured card draws no bar at all */
+  .ctabs { display:flex; gap:6px; flex-wrap:wrap; margin:14px 16px 0; }
+  .ctab { height:30px; padding:0 12px; border-radius:15px; display:flex; align-items:center; font-size:12px; font-weight:600; background:var(--surface-2); color:var(--muted); cursor:pointer; }
+  .ctab.on { background:var(--accent); color:#fff; }
+  .cnote { margin:14px 16px 4px; font-size:12px; line-height:1.5; color:var(--muted); }
+  .card.crow { margin-top:10px; padding:13px 14px; cursor:pointer; }
+  .crow .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .crow .who { display:flex; align-items:center; gap:8px; min-width:0; }
+  .crow .rk { width:19px; height:19px; border-radius:10px; flex:none; display:flex; align-items:center; justify-content:center; background:var(--surface-2); font-size:11px; font-weight:600; color:var(--muted); }
+  .crow .nm { font-size:14px; overflow-wrap:anywhere; }
+  .crow .val { font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; flex:none; }
+  .crow .cbar { margin-top:10px; height:5px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
+  .crow .cbar span { display:block; height:5px; border-radius:3px; background:var(--accent); }
+  .crow .cbar.thin span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
+  .crow .sub, .cfact .sub { margin-top:9px; font-size:11.5px; line-height:1.4; color:var(--faint); }
+  .crow.unm .nm, .crow.unm .val { color:var(--faint); }
+  .card.cfact { padding:18px 16px; }
+  .cfact b { font-size:22px; }
   /* the cost badge rides the rank row's value side, never the name */
   .valside { display:flex; align-items:center; gap:4px; }
   .cbadge { font-size:11px; flex:none; }
@@ -255,7 +255,7 @@
 <main id="main"></main>
 <div id="menu" class="menu"><div class="panel">
   <h2>swarm dashboard</h2>
-  <nav class="nav"><a href="#/">runs</a><a href="#/perf">performance</a></nav>
+  <nav class="nav"><a href="#/">runs</a><a href="#/perf">performance</a><a href="#/cost">cost</a></nav>
   <div class="k" id="menu-url"></div>
   <div class="k" id="menu-token"></div>
   <div class="k dim">Reads ~/.swarm/runs on the PC. Read-only. Live over server-sent events; reconnects on its own.</div>
@@ -376,7 +376,7 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, costProvider: null };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -915,18 +915,17 @@
     if (bad) bits.push(`<span class="c-bad">${esc(bad)}</span>`);
     return bits.join(" · ");
   };
-  const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders", "cost"]);
+  const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders"]);
   const PERF_VIEWS = [
     { label: "rank", href: "#/perf", kind: null },
     { label: "coverage", href: "#/perf/coverage", kind: "coverage" },
     { label: "reliability", href: "#/perf/reliability", kind: "reliability" },
     { label: "leaders", href: "#/perf/leaders", kind: "leaders" },
-    { label: "cost", href: "#/perf/cost", kind: "cost" },
   ];
   // Pinned so the rendered size is checkable at design time rather than a shrug:
-  // the five labels give a 340.8-unit viewBox. The SVG scales to .seg's content
+  // the four labels give a 290-unit viewBox. The SVG scales to .seg's content
   // box, not the viewport, and .seg carries 16px side padding — so at a 390px
-  // screen the labels render ~11.6px, not the 12.6px the raw viewport ratio
+  // screen the labels render ~13.6px, not the 14.8px the raw viewport ratio
   // suggests. CH is set near the font's advance on purpose — overshooting only
   // makes a pill roomier, while undershooting collides a label with its
   // neighbour across a 6-unit gap.
@@ -970,6 +969,16 @@
     }).join("");
     return `<div class="seg"><svg viewBox="0 0 ${n(W)} ${SEG.H}" preserveAspectRatio="xMinYMin meet">${rail}${ind}${items}</svg></div>`;
   }
+  // Cost is its own screen off /api/cost, which serves with grading off: a price
+  // needs no grades, only the value verdicts on each card do.
+  async function buildCost() {
+    const data = await api("/api/cost");
+    await loadPerfJs();
+    return {
+      header: `${backBtn("#/")}<div class="title"><b>cost</b><small>Relative cost within each provider</small></div>${menuBtn}`,
+      html: window.perfViews.costScreen(data, { esc, enc }, ui.costProvider),
+    };
+  }
   async function buildPerf(kind, which) {
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
     const domain = ui.perfDomain;
@@ -1003,9 +1012,7 @@
       const h = { esc, enc, fmtScore };
       html += kind === "coverage" ? window.perfViews.coverageGrid(p.views.coverage, h)
         : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
-        : kind === "leaders" ? window.perfViews.leadersList(p.views.leaders, h)
-        : window.perfViews.costScreen(p.views.cost, h);
-      if (kind === "cost") html += `<div class="foot">cost is a model's meter weight — the multiplier against the cheapest measured model, banked week over week. A hatched bar is thin evidence: under 200 measured requests. Bands are config (<code>providers.ollama.cloud.ollama.costBands</code>).</div>`;
+        : window.perfViews.leadersList(p.views.leaders, h);
       return { header, html };
     }
     {
@@ -1124,6 +1131,8 @@
   const viewOf = (hash) => {
     const h = hash.replace(/^#/, "") || "/";
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
+    // #/perf/cost is where Cost lived under Performance: old bookmarks still land.
+    if (seg[0] === "cost" || (seg[0] === "perf" && seg[1] === "cost")) return { name: "cost", project: null, run: null, leaf: null, node: null };
     if (seg[0] === "perf") return { name: "perf", project: null, run: null, leaf: null, node: null, kind: seg[1] || null, which: seg[2] || null };
     if (seg[0] === "run" && seg.length >= 3) {
       const name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "report" ? "report" : seg[3] === "node" ? "node" : "run";
@@ -1149,6 +1158,7 @@
   }
   async function buildFor(v) {
     if (v.name === "perf") return buildPerf(v.kind, v.which);
+    if (v.name === "cost") return buildCost();
     if (v.name === "leaf") return buildLeaf(v.project, v.run, v.leaf);
     if (v.name === "digest") return buildDigest(v.project, v.run);
     if (v.name === "report") return buildReport(v.project, v.run);
@@ -1193,8 +1203,9 @@
     setTimeout(() => { ui.focusId = null; rerender(); }, 2400);
   }
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand]");
+    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-cost-provider]");
     if (!t || !main.contains(t)) return;
+    if (t.dataset.costProvider != null) { ui.costProvider = t.dataset.costProvider; requestRoute(route); return; }
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
     if (t.dataset.pretty) { ui.pretty = !ui.pretty; requestRoute(route); return; }
