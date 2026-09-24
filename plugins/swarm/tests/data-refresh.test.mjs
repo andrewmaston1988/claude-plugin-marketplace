@@ -1,8 +1,5 @@
 // Usage, Cost and Performance change gradually: each paints its last reading at once,
 // refreshes behind it on its own cadence, and repaints only when the data changed.
-// Operator 2026-09-24: "cost is refreshing every 5s or so, it blinks - it shouldn't be a
-// full page reload, just the data responsively"; "I'm thinking minutes not seconds";
-// "usage, you might want more frequency"; "perf and cost change gradually."
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPage, listData, listRow, targetRun, RUN_URL } from "./helpers/page-harness.mjs";
@@ -12,7 +9,7 @@ const COST = { sections: [], tag: "a" };
 
 function memStorage(seed = {}) {
   const m = new Map(Object.entries(seed));
-  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, map: m };
+  return { getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => { m.set(k, String(v)); }, removeItem: (k) => { m.delete(k); }, map: m };
 }
 
 async function boot(opts = {}) {
@@ -35,18 +32,19 @@ async function go(P, hash) { P.location.hash = hash; P.fireHashchange(); await P
 
 // currentRun outlives the run screen, and shouldPoll used to read it on any view — so
 // after a live run, Cost inherited the run's 5 s full rebuild and /api/cost refetch.
-test("Cost issues no refetch on the 5 s poll after a live run was visited", async () => {
-  const { P } = await boot();
+test("Cost neither refetches nor repaints on the 5 s poll after a live run was visited", async () => {
+  const { P, renders } = await boot();
   await go(P, RUN_URL);
   P.respondRun(targetRun());
   await P.flush();
   await go(P, "#/cost");
   P.respondCost(COST);
   await P.flush();
-  const before = P.costFetches().length;
+  const before = P.costFetches().length, painted = renders.cost;
   P.fireTimers(5000);
   await P.flush();
   assert.equal(P.costFetches().length, before);
+  assert.equal(renders.cost, painted, "no poll-driven rebuild");
 });
 
 test("a cached Cost reading paints at once, revalidates once, and an unchanged one repaints nothing", async () => {
@@ -107,4 +105,37 @@ test("Usage revalidates every 60000 ms by default", async () => {
   assert.equal(P.fetchLog.filter(isUsage).length, n);
   advance(1); P.fireTimers(1000); await P.flush();
   assert.equal(P.fetchLog.filter(isUsage).length, n + 1);
+});
+
+test("a failed revalidate waits out the cadence instead of retrying every tick", async () => {
+  const storage = memStorage({ "swarm.cache:/api/cost": JSON.stringify({ data: COST, at: 1_000_000_000 }) });
+  const { P, advance } = await boot({ storage });
+  await go(P, "#/cost");
+  P.fail((u) => u.startsWith("/api/cost"));
+  await P.flush();
+  const n = P.costFetches().length;
+  for (let i = 0; i < 5; i++) { advance(1000); P.fireTimers(1000); await P.flush(); }
+  assert.equal(P.costFetches().length, n, "no retry inside the cadence");
+  advance(300_000); P.fireTimers(1000); await P.flush();
+  assert.equal(P.costFetches().length, n + 1);
+});
+
+test("a tab opened straight on Cost takes its cadence from the estate scan's payload", async () => {
+  const { P, advance } = await boot();
+  await go(P, "#/cost");
+  P.respondCost(COST);
+  await P.flush();
+  P.fireTimers(5000);
+  await P.flush();
+  P.respondList({ ...listData(listRow()), statsPollMs: 60_000 });
+  await P.flush();
+  const n = P.costFetches().length;
+  advance(60_000); P.fireTimers(1000); await P.flush();
+  assert.equal(P.costFetches().length, n + 1);
+});
+
+test("the retired swarm.usage entry is swept on load", async () => {
+  const storage = memStorage({ "swarm.usage": "{}" });
+  await boot({ storage });
+  assert.equal(storage.map.has("swarm.usage"), false);
 });

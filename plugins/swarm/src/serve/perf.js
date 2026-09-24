@@ -144,10 +144,11 @@
     // Never "0×" for a missing multiplier — that would read as free.
     const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
     // The hero answers "where is the value?" for every provider before the tabs narrow
-    // to one. A provider with nothing graded says so — never its cheapest instead.
+    // to one. A provider without a best says why — never its cheapest instead.
+    const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
     const heroRow = (s) => s.best
       ? `<div class="hrow" data-href="#/perf/model/${enc(s.best.model)}"><span class="pv">${esc(name(s))}</span><span class="nm">${esc(s.best.model)}</span><span class="val">${s.best.wtd == null ? "—" : s.best.wtd.toFixed(1)} · ${esc(fmtMult(s.best.multiplier))}</span></div>`
-      : `<div class="hrow none"><span class="pv">${esc(name(s))}</span><span class="nm">not graded yet</span></div>`;
+      : `<div class="hrow none"><span class="pv">${esc(name(s))}</span><span class="nm">${whyNone(s)}</span></div>`;
     const hero = `<div class="uhero chero"><div class="lbl">BEST VALUE PER PROVIDER</div><div class="hrows">${sections.map(heroRow).join("")}</div></div>`;
     const tabs = hero + `<div class="ctabs">${sections.map((s) => `<a class="ctab${s === section ? " on" : ""}" data-cost-provider="${esc(s.provider || "")}">${esc(name(s))}</a>`).join("")}</div>`;
     const { points, spread, best } = section;

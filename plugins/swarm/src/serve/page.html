@@ -410,7 +410,7 @@
   // never mutated in place — a superseded build cannot leave a half-written mark.
   let seenActive = new Map();
   // Pre-first-fetch fallback: the config.default.json literals. Overwritten by the
-  // /api/runs payload's own clockMs/uiPollMs once the first fetch lands.
+  // /api/runs payload's own cadence keys whenever it lands — see cadencesOf().
   const tickCfg = { clockMs: 1000, uiPollMs: 5000, usagePollMs: 60000, statsPollMs: 300000 };
 
   function setHeader(html, home) { hdr.className = home ? "home" : ""; setHtml(hdr, html); }
@@ -429,15 +429,15 @@
   const chev = (open) => `<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7181" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${open ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"}"/></svg>`;
   const chevRight = `<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7181" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`;
 
+  const cadencesOf = (data) => Object.fromEntries(Object.keys(tickCfg).map((k) => [k, data[k] || tickCfg[k]]));
   async function buildRuns() {
     // expandQuery is spliced INSIDE the path api() hands to q(), so the expand
     // params and the auth token both survive — concatenating after q() mangles
     // the token and 401s the whole list.
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
     // Everything the commit needs, as values — a superseded scan writes none of it.
-    const cfg = Object.fromEntries(Object.keys(tickCfg).map((k) => [k, data[k] || tickCfg[k]]));
     const { header, home, html, labels } = renderRunsHtml(data);
-    return { header, home, html, state: { lastList: data, tickCfg: cfg, groupLabels: labels, grading: data.grading } };
+    return { header, home, html, state: { lastList: data, tickCfg: cadencesOf(data), groupLabels: labels, grading: data.grading } };
   }
   function renderRunsHtml(data) {
     // Labels merge into a fresh map — a value the commit swaps in, never a write to
@@ -1033,7 +1033,8 @@
     return { tab: "perf", path: `/api/perf${qs.toString() ? "?" + qs : ""}` };
   }
   const cadenceOf = (tab) => (tab === "usage" ? tickCfg.usagePollMs : tickCfg.statsPollMs);
-  const held = new Map();
+  const held = new Map(), tried = new Map();
+  try { localStorage.removeItem("swarm.usage"); } catch { /* no storage */ }
   function heldEntry(path) {
     if (!held.has(path)) {
       let e = null;
@@ -1046,20 +1047,34 @@
   function hold(path, data) {
     const json = JSON.stringify(data), was = heldEntry(path);
     held.set(path, { data, at: Date.now(), json });
-    try { localStorage.setItem(`swarm.cache:${path}`, JSON.stringify({ data, at: Date.now() })); } catch { /* no storage */ }
+    persist(path, JSON.stringify({ data, at: Date.now() }));
     return !was || was.json !== json;
+  }
+  // Full storage drops the other readings and retries once; they refetch when next opened.
+  function persist(path, value) {
+    const key = `swarm.cache:${path}`;
+    try { localStorage.setItem(key, value); return; } catch { /* full, or no storage */ }
+    try {
+      for (let i = localStorage.length - 1; i >= 0; i--) {
+        const k = localStorage.key(i);
+        if (k && k.startsWith("swarm.cache:") && k !== key) localStorage.removeItem(k);
+      }
+      localStorage.setItem(key, value);
+    } catch { /* no storage */ }
   }
   const revalidating = new Set();
   function revalidate(src) {
     if (revalidating.has(src.path)) return;
     revalidating.add(src.path);
+    tried.set(src.path, Date.now());
     api(src.path).then((data) => { if (hold(src.path, data) && view.name === src.tab) requestRoute(route); }, () => {})
       .finally(() => revalidating.delete(src.path));
   }
-  // A cadence tick: the committed data tab refetches once its reading has aged out.
+  // A cadence tick: the committed data tab refetches once its reading — or its last
+  // failed attempt — has aged out, so a refusing endpoint waits a cadence too.
   function revalidateDue() {
     const src = dataSource(view), e = src && heldEntry(src.path);
-    if (e && Date.now() - e.at >= cadenceOf(src.tab)) revalidate(src);
+    if (e && Date.now() - Math.max(e.at, tried.get(src.path) || 0) >= cadenceOf(src.tab)) revalidate(src);
   }
   async function viaCache(v) {
     const src = dataSource(v), e = heldEntry(src.path);
@@ -1401,9 +1416,6 @@
     return loadScript(q("/perf.js")).catch(() => {});
   }
 
-  // tickCfg starts at the config.default.json literals (declared with the other
-  // module state above) and is overwritten by the /api/runs payload's own
-  // clockMs/uiPollMs once the first fetch lands — see buildRuns().
   function startTimers() {
     setInterval(rerender, tickCfg.clockMs);
     setInterval(revalidateDue, tickCfg.clockMs);
@@ -1412,7 +1424,7 @@
     // to views with something to poll, so a finished run stops hitting the network.
     setInterval(() => { if (window.swarmLive.shouldPoll(pendingView || view, currentRun, Date.now())) requestRoute(route); }, tickCfg.uiPollMs);
     // The estate scan, which that refetch cannot stand in for: on a run view it re-requests the run's OWN route.
-    setInterval(() => { api("/api/runs").then((d) => announceFinished(d.runs)).catch(() => {}); }, tickCfg.uiPollMs);
+    setInterval(() => { api("/api/runs").then((d) => { Object.assign(tickCfg, cadencesOf(d)); announceFinished(d.runs); }).catch(() => {}); }, tickCfg.uiPollMs);
   }
 
   // Test seam for tests/page-route.test.mjs: the vm harness has no browser, so the

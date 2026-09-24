@@ -93,8 +93,6 @@ test("with no cost history anywhere it says how the history starts", () => {
   assert.ok(costScreen({ sections: [] }, H).includes("no cost history yet"));
 });
 
-// Operator 2026-09-24: "we don't need to think about worst value, suggest a hero message like
-// usage has which shows us the best value per provider".
 test("the hero names each provider's best value — model, score, multiplier — across every provider", () => {
   const { costScreen } = loadPerfViews();
   const html = costScreen({ sections: [
@@ -106,4 +104,12 @@ test("the hero names each provider's best value — model, score, multiplier —
   assert.match(hero, /data-href="#\/perf\/model\/opus"[\s\S]*?claude[\s\S]*?opus[\s\S]*?9\.3[\s\S]*?2\.5×/);
   assert.match(hero, /ollama[\s\S]*?not graded yet/, "a provider with no best says so — never the cheapest instead");
   assert.ok(!html.includes("haiku"), "worst is never drawn");
+});
+
+test("a graded provider with no best says there is no clear best — not that nothing is graded", () => {
+  const { costScreen } = loadPerfViews();
+  const html = costScreen({ sections: [section("ollama", [srow("glm", 1)], { points: [point("glm", 8.1, 1, { thin: true })] })] }, H);
+  const hero = html.match(/<div class="uhero chero">[\s\S]*?<\/div><\/div><\/div>/)?.[0] || "";
+  assert.match(hero, /ollama[\s\S]*?no clear best yet/);
+  assert.ok(!hero.includes("not graded yet"));
 });

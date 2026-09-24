@@ -13,8 +13,8 @@ const live = () => {
 };
 const open = { finishedMs: null, abortedMs: null, stoppedMs: null };
 
-test("shouldPoll: an unfinished run polls only on the run-scoped screens", () => {
+test("shouldPoll: an unfinished run polls only on a view that names a run", () => {
   const { shouldPoll } = live();
-  for (const name of ["run", "node", "leaf", "digest", "report"]) assert.equal(shouldPoll({ name }, open, 0), true, name);
-  for (const name of ["cost", "perf", "usage"]) assert.equal(shouldPoll({ name }, open, 0), false, name);
+  assert.equal(shouldPoll({ name: "leaf", run: "r1" }, open, 0), true);
+  for (const name of ["cost", "perf", "usage"]) assert.equal(shouldPoll({ name, run: null }, open, 0), false, name);
 });

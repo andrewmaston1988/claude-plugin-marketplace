@@ -71,11 +71,11 @@ test("runEnded/shouldPoll: each terminal field on its own, a run not yet fetched
   const { runEnded, shouldPoll } = loadLive();
   const open = { finishedMs: null, abortedMs: null, stoppedMs: null };
   assert.equal(runEnded(open), false);
-  assert.equal(shouldPoll({ name: "run" }, open, 0), true);
+  assert.equal(shouldPoll({ name: "run", run: "r" }, open, 0), true);
   for (const field of ["finishedMs", "abortedMs", "stoppedMs"]) {
     const ended = { ...open, [field]: 123 };
     assert.equal(runEnded(ended), true, field);
-    assert.equal(shouldPoll({ name: "run" }, ended, 0), false, field);
+    assert.equal(shouldPoll({ name: "run", run: "r" }, ended, 0), false, field);
   }
   assert.equal(shouldPoll({ name: "run" }, null, 0), false, "no run fetched yet");
   assert.equal(shouldPoll({ name: "runs" }, null, 0), true, "the estate view has no single run to end");

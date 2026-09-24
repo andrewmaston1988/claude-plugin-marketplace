@@ -234,6 +234,7 @@ export function loadPage(opts = {}) {
     costFetches: () => fetchLog.filter(isCost),
     respondLeaf: (data) => respond(isLeaf, data),
     respond: (pred, data) => respond(pred, data),
+    fail: (pred) => { const i = pendingFetches.findIndex((f) => pred(f.url)); assert.ok(i >= 0, "no pending fetch to fail"); pendingFetches.splice(i, 1)[0].resolve({ ok: false, status: 500, json: async () => ({ error: "down" }) }); },
     isPerf,
     mainText: () => main.textContent,
     // Every painted element carrying `cls`, in document order. The mini-DOM's
