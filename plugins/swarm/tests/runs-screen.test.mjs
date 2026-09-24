@@ -24,7 +24,7 @@ test("a live run is a card carrying its name, elapsed time and progress bar", as
 
 test("the header names the screen and counts live runs in a pill", async () => {
   const P = await runsWith(listData(listRow()));
-  assert.match(P.hdr.textContent, /Runs/);
+  assert.match(P.hdr.textContent, /swarm/);
   assert.match(P.hdr.textContent, /1 live/);
 });
 
