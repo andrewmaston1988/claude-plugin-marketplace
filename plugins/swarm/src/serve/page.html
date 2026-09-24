@@ -158,6 +158,16 @@
   .crow .sub, .cfact .sub { margin-top:9px; font-size:11.5px; line-height:1.4; color:var(--faint); }
   .crow.unm .nm, .crow.unm .val { color:var(--faint); }
   .card.cfact { padding:18px 16px; }
+  .card.rcard { margin-top:10px; cursor:pointer; } .card.rcard.bad { border-color:var(--bad-bg); } .card.rcard.warn { border-color:var(--warn-bg); }
+  .rcard .rh { display:flex; align-items:center; gap:8px; }
+  .rcard .rdot { width:7px; height:7px; border-radius:50%; flex:none; } .rcard .rspin { flex:none; display:flex; margin:-4px -2px; } .rcard .rspin svg { width:16px; height:16px; }
+  .rcard .nm { flex:1; min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rcard .tm { flex:none; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .rcard .rs { margin-top:8px; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rcard .rs .counts { margin-right:6px; }
+  .rcard .rbar .bar { margin-top:12px; height:5px; border-radius:3px; }
+  .livepill { flex:none; margin-right:8px; height:28px; padding:0 11px; border-radius:14px; background:var(--accent-soft); color:var(--accent); display:flex; align-items:center; gap:7px; font-size:12px; font-weight:500; }
+  .livepill i { width:6px; height:6px; border-radius:50%; background:var(--accent); }
   .cfact b { font-size:22px; }
   /* usage screen (mockup 403–484): hero on the least headroom, then a card per provider; a dim dashed card is a window not read */
   .uhero { margin:14px 16px 0; padding:18px; border-radius:16px; background:var(--accent-soft); border:1px solid var(--rule); }
@@ -264,6 +274,8 @@
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
   .flash { animation:pulse .8s ease-in-out 3; }
   @keyframes dash { to { stroke-dashoffset:-56; } }
+  /* Every running glyph (rail, banner, graph, card): the dot under the spinning ring pulses. */
+  circle:has(+ .ring) { animation:pulse 1.6s ease-in-out infinite; }
   .ring { fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:14 42; animation:dash 1.4s linear infinite; }
 </style>
 </head>
@@ -437,16 +449,15 @@
     // same falling-number defect the token figure had: a finish pushing the
     // oldest row out of its group would lower the count.
     const total = window.swarmLive.headerRunCount(data.finishedTotals || {}, active);
-    const header = `<div class="title" style="padding-left:12px"><b><span>swarm</span><small>${active.length} active · ${projects.length} project${projects.length === 1 ? "" : "s"} · ${total} run${total === 1 ? "" : "s"}</small></b></div>`;
+    const header = `<div class="title" style="padding-left:12px"><b><span>Runs</span><small>${projects.length} project${projects.length === 1 ? "" : "s"} · ${total} run${total === 1 ? "" : "s"}</small></b></div>${active.length ? `<span class="livepill"><i></i>${active.length} live</span>` : ""}`;
     let html = "";
     // Live band first: every running run, across all projects, on the first screen —
     // a busy project's finished stack must never hide another project's live run.
     for (const p of projects) {
       const live = byProject.get(p).filter((r) => r.active);
       if (!live.length) continue;
-      html += `<div class="section"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${live.length} running</small></div><ul>`;
+      html += `<div class="section"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${live.length} running</small></div>`;
       for (const r of live) html += runRow(r);
-      html += "</ul>";
     }
     // (d) A project's finished stack is collapsed unless manually opened — opt-in,
     // the inversion of a wave's opt-out — so a long estate's live band stays in reach.
@@ -486,7 +497,8 @@
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
        return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${providerMeta ? ` · ${esc(providerMeta)}` : ""}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
     }
-     return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(st, st === "run")}<div class="body"><div class="head"><span class="name">${esc(r.name)}</span><span class="meta">${elapsed}</span></div><div class="sub">${countsHtml(r.byState)}<span class="meta">${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}${providerMeta ? ` · ${esc(providerMeta)}` : ""}</span></div>${barHtml(r.byState, r.leaves)}</div></li>`;
+    return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span><span class="tm">${elapsed}</span></div>`
+      + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${providerMeta ? esc(providerMeta) : fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
   }
 
   // ── run view: rows + rail ──────────────────────────────────────────────
@@ -1203,7 +1215,7 @@
   const sameView = (a, b) => ["name", "project", "run", "leaf", "node", "kind", "which"].every((k) => (a[k] ?? null) === (b[k] ?? null));
   function skeletonFor(v) {
     const runHref = `#/run/${enc(v.project)}/${enc(v.run)}`;
-    const [title, back] = v.name === "runs" ? ["swarm", null]
+    const [title, back] = v.name === "runs" ? ["Runs", null]
       : v.name === "run" ? [v.run, "#/"]
         : v.name === "leaf" || v.name === "node" ? [v.leaf || v.node, runHref]
           : v.name === "digest" || v.name === "report" ? [v.run, runHref]
