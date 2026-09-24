@@ -185,7 +185,7 @@ A task with `"manifest": "<path>"` runs that child manifest as one node — the 
   ] }
 ```
 
-`audit-one-repo.json` is a normal manifest (its prompts may use `{{item}}`/`{{index}}` when the node has `forEach`), except: no `resultsDir`/`concurrency`/`digest` (the parent owns the run), and no `manifest` tasks of its own (one level). The node itself is an agentless container — `model`/`prompt`/`returns`/etc. belong on the child's tasks; only `after`, `when`, `forEach`, `timeoutMs` go on the node.
+`audit-one-repo.json` is a normal manifest (its prompts may use `{{item}}`/`{{index}}` when the node has `forEach`), except: no `resultsDir`/`concurrency`/`digest`/`cwd` (the parent owns the run), and no `manifest` tasks of its own (one level). The node itself is an agentless container — `model`/`prompt`/`returns`/etc. belong on the child's tasks; only `after`, `when`, `forEach`, `timeoutMs` go on the node.
 
 ### Folding a `forEach` fan-out back — `integrate.from` naming the parent
 

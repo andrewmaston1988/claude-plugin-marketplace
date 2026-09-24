@@ -36,7 +36,7 @@ test("a writer whose cwd is inside a linked worktree gets a tree of that worktre
     const linkedHead = git(["rev-parse", "HEAD"], linked);
 
     const sub = join(linked, "sub");
-    const p = writeManifest(root, { name: "linked", tasks: [
+    const p = writeManifest(root, { tasks: [
       { id: "impl", prompt: "p", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Bash", cwd: sub },
     ] });
     const plan = loadManifest(p, CFG, sub);
