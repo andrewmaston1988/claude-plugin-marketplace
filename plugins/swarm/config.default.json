@@ -63,6 +63,8 @@
     "livenessPollMs": 10000,
     "clockMs": 1000,
     "uiPollMs": 5000,
+    "usagePollMs": 60000,
+    "statsPollMs": 300000,
     "finishedPerProject": 10,
     "autoRestartOnUpdate": true,
     "tray": true

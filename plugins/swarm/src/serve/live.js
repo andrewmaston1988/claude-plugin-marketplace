@@ -80,9 +80,11 @@
 
   // The runs list has no single run to end, so it always polls; a run/leaf view
   // polls only while its run is still open, and never for a run not yet fetched.
+  const RUN_SCOPED = new Set(["run", "node", "leaf", "digest", "report"]);
   function shouldPoll(view, run, now) {
     if (view && view.name === "runs") return true;
-    if (!run) return false;
+    // The caller's run outlives the run screens; elsewhere it must not drive a refetch.
+    if (!run || !view || !RUN_SCOPED.has(view.name)) return false;
     return !runEnded(run);
   }
 

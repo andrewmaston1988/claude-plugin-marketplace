@@ -174,6 +174,14 @@
   .uhero .fig span { font-size:15px; color:var(--muted); }
   .uhero .ubar { margin-top:16px; height:8px; }
   .uhero .sub, .upc .sub { margin-top:10px; font-size:11.5px; line-height:1.4; color:var(--faint); }
+  /* cost hero: one row per provider — its best-value model, weighted score · multiplier */
+  .chero .hrows { margin-top:12px; display:flex; flex-direction:column; gap:8px; }
+  .chero .hrow { display:flex; align-items:baseline; gap:8px; cursor:pointer; }
+  .chero .hrow .pv { flex:none; width:64px; font-size:12px; color:var(--muted); }
+  .chero .hrow .nm { flex:1; min-width:0; font-size:15px; overflow-wrap:anywhere; }
+  .chero .hrow .val { flex:none; font-size:15px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .chero .hrow.none { cursor:default; }
+  .chero .hrow.none .nm { color:var(--faint); font-size:13px; }
   .card.upc { margin-top:10px; padding:14px; }
   .card.upc.bad { border-color:var(--bad-bg); } .card.upc.warn { border-color:var(--warn-bg); }
   .upc .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
@@ -403,7 +411,7 @@
   let seenActive = new Map();
   // Pre-first-fetch fallback: the config.default.json literals. Overwritten by the
   // /api/runs payload's own clockMs/uiPollMs once the first fetch lands.
-  const tickCfg = { clockMs: 1000, uiPollMs: 5000 };
+  const tickCfg = { clockMs: 1000, uiPollMs: 5000, usagePollMs: 60000, statsPollMs: 300000 };
 
   function setHeader(html, home) { hdr.className = home ? "home" : ""; setHtml(hdr, html); }
   // One header on every screen: a title over one small line — the summary on a tab
@@ -427,7 +435,7 @@
     // the token and 401s the whole list.
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
     // Everything the commit needs, as values — a superseded scan writes none of it.
-    const cfg = { clockMs: data.clockMs || tickCfg.clockMs, uiPollMs: data.uiPollMs || tickCfg.uiPollMs };
+    const cfg = Object.fromEntries(Object.keys(tickCfg).map((k) => [k, data[k] || tickCfg[k]]));
     const { header, home, html, labels } = renderRunsHtml(data);
     return { header, home, html, state: { lastList: data, tickCfg: cfg, groupLabels: labels, grading: data.grading } };
   }
@@ -1002,27 +1010,65 @@
   }
   // Cost is its own screen off /api/cost, which serves with grading off: a price
   // needs no grades, only the value verdicts on each card do.
-  async function buildCost() {
-    const data = await api("/api/cost");
+  async function buildCost(v) {
+    const data = await viaCache(v);
     await loadPerfJs();
     return {
       header: headerHtml(TAB_TITLE.cost, "Relative cost within each provider"),
       html: window.perfViews.costScreen(data, { esc, enc }, ui.costProvider),
     };
   }
-  // /api/usage reads every provider live, so it is fetched on arrival only: the
-  // Session/Week switch, ticks and reconnects redraw from the payload already held.
-  // Stale-while-revalidate: the last reading (kept across reloads) paints at once and
-  // a fresh one repaints behind it — provider usage endpoints are slow.
-  let usageData = null;
-  try { usageData = JSON.parse(localStorage.getItem("swarm.usage")) || null; } catch { /* no storage */ }
-  async function fetchUsage() {
-    usageData = await api("/api/usage");
-    try { localStorage.setItem("swarm.usage", JSON.stringify(usageData)); } catch { /* no storage */ }
+  // Usage, Cost and Performance read slow endpoints and change gradually. Each is held
+  // stale-while-revalidate: the last reading (kept across reloads) paints at once, a
+  // fresh one is fetched behind it on arrival and on the tab's cadence, and the screen
+  // repaints only when the payload changed — so a refresh never blinks. Switches and
+  // ticks redraw from the reading already held.
+  function dataSource(v) {
+    if (v.name === "usage") return { tab: "usage", path: "/api/usage" };
+    if (v.name === "cost") return { tab: "cost", path: "/api/cost" };
+    if (v.name !== "perf") return null;
+    const qs = new URLSearchParams();
+    if (ui.perfDomain) qs.set("domain", ui.perfDomain);
+    if (v.kind === "model") qs.set("model", v.which);
+    return { tab: "perf", path: `/api/perf${qs.toString() ? "?" + qs : ""}` };
   }
-  async function buildUsage() {
-    if (!usageData) await fetchUsage();
-    else if (view.name !== "usage") fetchUsage().then(() => { if (view.name === "usage") requestRoute(route); }, () => {});
+  const cadenceOf = (tab) => (tab === "usage" ? tickCfg.usagePollMs : tickCfg.statsPollMs);
+  const held = new Map();
+  function heldEntry(path) {
+    if (!held.has(path)) {
+      let e = null;
+      try { e = JSON.parse(localStorage.getItem(`swarm.cache:${path}`)); } catch { /* no storage */ }
+      held.set(path, e && "data" in e ? { ...e, json: JSON.stringify(e.data) } : null);
+    }
+    return held.get(path);
+  }
+  // Records the reading; true when it differs from the one held.
+  function hold(path, data) {
+    const json = JSON.stringify(data), was = heldEntry(path);
+    held.set(path, { data, at: Date.now(), json });
+    try { localStorage.setItem(`swarm.cache:${path}`, JSON.stringify({ data, at: Date.now() })); } catch { /* no storage */ }
+    return !was || was.json !== json;
+  }
+  const revalidating = new Set();
+  function revalidate(src) {
+    if (revalidating.has(src.path)) return;
+    revalidating.add(src.path);
+    api(src.path).then((data) => { if (hold(src.path, data) && view.name === src.tab) requestRoute(route); }, () => {})
+      .finally(() => revalidating.delete(src.path));
+  }
+  // A cadence tick: the committed data tab refetches once its reading has aged out.
+  function revalidateDue() {
+    const src = dataSource(view), e = src && heldEntry(src.path);
+    if (e && Date.now() - e.at >= cadenceOf(src.tab)) revalidate(src);
+  }
+  async function viaCache(v) {
+    const src = dataSource(v), e = heldEntry(src.path);
+    if (!e) { const data = await api(src.path); hold(src.path, data); return data; }
+    if (!sameView(v, view) || Date.now() - e.at >= cadenceOf(src.tab)) revalidate(src);
+    return e.data;
+  }
+  async function buildUsage(v) {
+    const usageData = await viaCache(v);
     await loadPerfJs();
     const n = new Set([...(usageData.usages || []).map((u) => u.provider), ...Object.keys(usageData.errors || {})]).size;
     return {
@@ -1030,13 +1076,11 @@
       html: window.perfViews.usageScreen(usageData, { esc }, ui.usageWindow),
     };
   }
-  async function buildPerf(kind, which) {
+  async function buildPerf(v) {
+    const { kind, which } = v;
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
     const domain = ui.perfDomain;
-    const qs = new URLSearchParams();
-    if (domain) qs.set("domain", domain);
-    if (model) qs.set("model", model);
-    const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
+    const p = await viaCache(v);
     const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind : TAB_TITLE.perf;
     if (!p.grading) {
       return {
@@ -1205,7 +1249,7 @@
     if ("currentRun" in s) currentRun = s.currentRun;
     if ("currentLeaf" in s) currentLeaf = s.currentLeaf;
     if ("groupLabels" in s) groupLabels = s.groupLabels;
-    if ("tickCfg" in s) { tickCfg.clockMs = s.tickCfg.clockMs; tickCfg.uiPollMs = s.tickCfg.uiPollMs; }
+    if ("tickCfg" in s) Object.assign(tickCfg, s.tickCfg);
     if ("grading" in s) $("#nav a[href='#/perf']").classList.toggle("off", !s.grading);
     if (next.header !== undefined) setHeader(next.header, next.home);
     setHtml(main, next.html);
@@ -1215,9 +1259,9 @@
     if (s.lastList) announceFinished(s.lastList.runs);
   }
   async function buildFor(v) {
-    if (v.name === "perf") return buildPerf(v.kind, v.which);
-    if (v.name === "cost") return buildCost();
-    if (v.name === "usage") return buildUsage();
+    if (v.name === "perf") return buildPerf(v);
+    if (v.name === "cost") return buildCost(v);
+    if (v.name === "usage") return buildUsage(v);
     if (v.name === "leaf") return buildLeaf(v.project, v.run, v.leaf);
     if (v.name === "digest") return buildDigest(v.project, v.run);
     if (v.name === "report") return buildReport(v.project, v.run);
@@ -1245,7 +1289,8 @@
     const v = viewOf(location.hash);
     pendingView = v;
     // No view: the skeleton paints the destination without committing to it.
-    if (!sameView(v, view) && !(v.name === "usage" && usageData)) commitView({ ...skeletonFor(v), home: v.name === "runs", tab: TAB[v.name] || "runs" });
+    const src = dataSource(v);
+    if (!sameView(v, view) && !(src && heldEntry(src.path))) commitView({ ...skeletonFor(v), home: v.name === "runs", tab: TAB[v.name] || "runs" });
     try {
       const next = await buildFor(v);
       if (!guardOk(seq, routeSeq)) return;
@@ -1361,6 +1406,7 @@
   // clockMs/uiPollMs once the first fetch lands — see buildRuns().
   function startTimers() {
     setInterval(rerender, tickCfg.clockMs);
+    setInterval(revalidateDue, tickCfg.clockMs);
     // Running rows still need a refetch to notice a run that went quiet server-side
     // (nothing writes run.log when the engine dies) — shouldPoll gates that refetch
     // to views with something to poll, so a finished run stops hitting the network.

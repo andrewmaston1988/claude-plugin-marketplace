@@ -287,7 +287,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       // reaches a path join, so a stale bookmark cannot fault the estate view.
       const expanded = new Set(url.searchParams.getAll("expand"));
       const { rows, finishedTotals } = filterRuns(s.rows, { finishedPerProject, expanded });
-      send(res, 200, { runs: rows, finishedTotals, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, grading });
+      send(res, 200, { runs: rows, finishedTotals, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, usagePollMs: dash.usagePollMs ?? 60000, statsPollMs: dash.statsPollMs ?? 300000, grading });
     },
   };
 

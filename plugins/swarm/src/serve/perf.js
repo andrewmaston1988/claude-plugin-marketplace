@@ -141,8 +141,16 @@
     }
     const section = sections.find((s) => s.provider === pick) || sections[0];
     const name = (s) => s.provider || "unqualified";
-    const tabs = `<div class="ctabs">${sections.map((s) => `<a class="ctab${s === section ? " on" : ""}" data-cost-provider="${esc(s.provider || "")}">${esc(name(s))}</a>`).join("")}</div>`;
-    const { points, spread, best, worst } = section;
+    // Never "0×" for a missing multiplier — that would read as free.
+    const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
+    // The hero answers "where is the value?" for every provider before the tabs narrow
+    // to one. A provider with nothing graded says so — never its cheapest instead.
+    const heroRow = (s) => s.best
+      ? `<div class="hrow" data-href="#/perf/model/${enc(s.best.model)}"><span class="pv">${esc(name(s))}</span><span class="nm">${esc(s.best.model)}</span><span class="val">${s.best.wtd == null ? "—" : s.best.wtd.toFixed(1)} · ${esc(fmtMult(s.best.multiplier))}</span></div>`
+      : `<div class="hrow none"><span class="pv">${esc(name(s))}</span><span class="nm">not graded yet</span></div>`;
+    const hero = `<div class="uhero chero"><div class="lbl">BEST VALUE PER PROVIDER</div><div class="hrows">${sections.map(heroRow).join("")}</div></div>`;
+    const tabs = hero + `<div class="ctabs">${sections.map((s) => `<a class="ctab${s === section ? " on" : ""}" data-cost-provider="${esc(s.provider || "")}">${esc(name(s))}</a>`).join("")}</div>`;
+    const { points, spread, best } = section;
     const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
     const unit = spread[0] || {};
     const note = isMeter(unit)
@@ -152,8 +160,6 @@
     if (!spread.some((r) => r.mult != null)) {
       return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
     }
-    // Never "0×" for a missing multiplier — that would read as free.
-    const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
     // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
     // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
     const LO = Math.log10(0.5), HI = Math.log10(20);

@@ -191,6 +191,10 @@ export function loadPage(opts = {}) {
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
     queueMicrotask: (f) => Promise.resolve().then(f), console });
   if (opts.perfViews) window.perfViews = opts.perfViews; // perf.js is never loaded here; stub the contract
+  // Absent unless a test hands one in — the page must render without storage.
+  if (opts.storage) context.localStorage = opts.storage;
+  // Date.now under the test's control, for cadence tests; `new Date()` stays real.
+  if (opts.clock) context.Date = class extends Date { static now() { return opts.clock(); } };
   vm.createContext(context);
   vm.runInContext(script, context, { filename: "page.html" });
 
@@ -206,6 +210,7 @@ export function loadPage(opts = {}) {
   const isList = (u) => /^\/api\/runs(\?|$)/.test(u);
   const isRun = (u) => /^\/api\/runs\/[^/]+\/[^/?]+(\?|$)/.test(u);
   const isPerf = (u) => u.startsWith("/api/perf");
+  const isCost = (u) => u.startsWith("/api/cost");
   const isLeaf = (u) => /^\/api\/runs\/[^/]+\/[^/]+\/leaves\//.test(u);
 
   return {
@@ -225,6 +230,8 @@ export function loadPage(opts = {}) {
     respondList: (data) => respond(isList, data),
     respondRun: (data) => respond(isRun, data),
     respondPerf: (data) => respond(isPerf, data),
+    respondCost: (data) => respond(isCost, data),
+    costFetches: () => fetchLog.filter(isCost),
     respondLeaf: (data) => respond(isLeaf, data),
     respond: (pred, data) => respond(pred, data),
     isPerf,
