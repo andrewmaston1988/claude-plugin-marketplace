@@ -70,6 +70,24 @@ test("gate PASSES a bare backgrounded dispatch with all three markers, and consu
   equal(r.consumeMarker, true, "one skill invocation authorises one dispatch");
 });
 
+// Under standing mode (swarm.always) the swarm skill is invoked once and stays
+// invoked: re-reading ~10k tokens of skill before every dispatch buys nothing, and
+// consuming the marker forces exactly that.
+test("standing mode KEEPS the swarm marker after a passing dispatch", () => {
+  const r = gateDispatch({ command: RUN, runInBackground: true, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: true, standingMode: true });
+  equal(r.block, false);
+  equal(r.consumeMarker, false, "standing mode must not consume the marker");
+});
+
+// Standing off or absent is unchanged: one invocation authorises one dispatch.
+test("with standing mode off or absent the marker is consumed per dispatch", () => {
+  for (const standingMode of [false, undefined]) {
+    const r = gateDispatch({ command: RUN, runInBackground: true, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: true, standingMode });
+    equal(r.block, false, `standingMode=${standingMode}`);
+    equal(r.consumeMarker, true, `standingMode=${standingMode}`);
+  }
+});
+
 // A dispatch that never got past the gate must not eat the marker — otherwise a
 // blocked pipe would silently disarm the next (correct) attempt.
 test("a blocked dispatch never consumes the marker", () => {
@@ -139,6 +157,40 @@ test("gate recognises the dispatch across quoting, slashes, and flags", () => {
     'node "/c/p/swarm/scripts/swarm.mjs" run manifest.json --args \'{"base":"master"}\'',
   ]) {
     equal(gateDispatch({ command, runInBackground: true, markerExists: false }).block, true, command);
+  }
+});
+
+// The operator's normal command is the PATH shim, not the raw node path — a gate
+// that only knows `node … swarm.mjs run` is bypassed by every dispatch the shim makes.
+test("gate fires on the PATH shim — `swarm run` is the normal dispatch command", () => {
+  for (const command of [
+    "swarm run manifest.json",
+    "swarm.cmd run manifest.json",
+    "swarm.ps1 run manifest.json",
+    "cd C:/repo; swarm run m.json",
+    "cd repo && swarm run m.json",
+    "swarm run m.json --force",
+    // path-qualified: the natural retry after `swarm: command not found`
+    "C:/Users/me/.local/bin/swarm.cmd run m.json",
+    "~/.local/bin/swarm run m.json",
+    "\"C:\\tools\\swarm.cmd\" run m.json",
+  ]) {
+    equal(gateDispatch({ command, runInBackground: true, markerExists: false }).block, true, command);
+  }
+});
+
+// The shim word must sit at command position — a mention of `swarm run` inside
+// another command's argument is not a dispatch.
+test("gate does NOT fire on `swarm run` text that is not the command word", () => {
+  for (const command of [
+    "swarm runs manifest.json",
+    "swarm status",
+    "grep 'swarm run' file",
+    "echo swarm run",
+    "myswarm run manifest.json",
+    "/opt/myswarm run manifest.json",
+  ]) {
+    equal(gateDispatch({ command, runInBackground: true, markerExists: false }).block, false, command);
   }
 });
 
