@@ -18,6 +18,7 @@ import { isUnderRoot } from "./roots.mjs";
 import { checkGovernance, checkRunRoots } from "./governance.mjs";
 import { runScopeKey, checkoutToplevel } from "./worktree.mjs";
 import { applyWriteGuard } from "../hooks/leaf-write-guard.mjs";
+import { manifestCwd, checkChildTopKeys } from "./manifest-top.mjs";
 
 export { isUnderRoot } from "./roots.mjs";
 export { checkRunRoots } from "./governance.mjs";
@@ -1104,11 +1105,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
     errors.push(`${nodeLabel}: child manifest '${node.manifest}' must contain a non-empty 'tasks' array`);
     return undefined;
   }
-  for (const key of ["resultsDir", "concurrency", "digest"]) {
-    if (raw[key] !== undefined) {
-      errors.push(`${nodeLabel}: child manifest '${node.manifest}' may not set ${key} — the parent owns the run`);
-    }
-  }
+  checkChildTopKeys(raw, `${nodeLabel}: child manifest '${node.manifest}' `, errors);
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && t.manifest !== undefined) {
       errors.push(
@@ -1138,8 +1135,8 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
 }
 
 // Load + validate a manifest into a normalized plan. Throws ValidationError
-// listing every problem found. `cwd` is the invoking process's cwd — the
-// default task cwd and the base for relative paths. Options: `args` (the
+// listing every problem found. `cwd` is the invoking process's cwd; a manifest's
+// own `cwd` replaces it as the default task cwd and path base. Options: `args` (the
 // --args object, substituted as {{args.<key>}} before validation),
 // `fromRegistry` (child manifest paths then resolve against the parent's dir),
 // `ref` (the pre-resolution registry name, recorded on the plan for the
@@ -1167,6 +1164,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   if (!Array.isArray(raw.tasks) || raw.tasks.length === 0) {
     throw new ValidationError(["manifest must contain a non-empty 'tasks' array"]);
   }
+  cwd = manifestCwd(raw, cwd, errors);
 
   const usedArgs = new Set();
   const argsLabel = (t) => (t?.id ? `task '${t.id}'` : "task with missing id");
@@ -1182,8 +1180,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     }
   }
   // `goal` flows into the digest prompt AND is what the report titles itself from,
-  // so an un-substituted {{args.x}} there disfigures every report's title. It was
-  // the one prompt-bound field the substitution pass skipped.
+  // so an un-substituted {{args.x}} there disfigures every report's title.
   if (typeof raw.goal === "string" && raw.goal.includes("{{")) {
     const carrier = { prompt: raw.goal };
     applyArgsToRawTasks([carrier], args, usedArgs, errors, () => "goal");

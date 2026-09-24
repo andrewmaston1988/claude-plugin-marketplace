@@ -210,13 +210,14 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
 {
   "resultsDir": null,                           // OMIT - default ~/.swarm/runs/<encoded-repo-toplevel>/<stem>-<n>/ keeps runs out of the repo entirely
   "concurrency": 4,                           // optional; at most the config ceiling (concurrency in ~/.swarm/config.json) — higher fails validate
+  "cwd": "C:/code/somerepo",                  // optional; every task runs as if swarm were launched here (relative: against the launch dir) — the run is filed under its repo
   "tasks": [{
     "id": "scan-a",                            // unique, filename-safe
     "prompt": "…",
     "provider": "ollama", "model": "glm-5.2:cloud",                  // required; the full model id (claude-opus-5, never "opus")
     "effort": "medium",                        // optional; defaults to the model's declared default or medium; validated when the provider declares levels
     "allowedTools": "Read,Grep,Glob",          // default: read-only set
-    "cwd": "C:/code/somerepo",                 // default: manifest's cwd
+    "cwd": "C:/code/somerepo",                 // default: the top-level cwd; relative resolves against it
     "workspace": "feat",                       // optional, writers only: the name of a tree SHARED with
                                                //   other leaves, which must be totally ordered by `after`.
                                                //   Omit it and a writer gets its own tree; a reader gets none.
