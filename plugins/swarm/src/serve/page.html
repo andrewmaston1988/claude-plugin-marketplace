@@ -26,18 +26,18 @@
   button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
   header { position:sticky; top:0; z-index:2; background:var(--ground); border-bottom:1px solid var(--rule); display:flex; align-items:center; gap:4px; padding:8px 8px 8px 4px; padding-top:calc(8px + env(safe-area-inset-top)); }
   header .btn { width:44px; height:44px; display:flex; align-items:center; justify-content:center; flex:none; }
-  header .title { display:flex; flex-direction:column; gap:2px; flex:1; min-width:0; }
+  header .title { display:flex; flex-direction:column; gap:4px; flex:1; min-width:0; }
   header .title b { font-size:16px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   header .title small { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   header.home .title b { font-size:18px; }
-  .section { display:flex; align-items:center; gap:10px; padding:16px 16px 6px; font-size:11px; line-height:1; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); }
+  .section { display:flex; align-items:center; gap:12px; padding:16px 16px 8px; font-size:11px; line-height:1; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); }
   .section.dim { color:var(--faint); }
   .section > span, .section small { line-height:1; display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .section > span:first-child { flex:0 1 auto; }
   .section small { flex:none; }
   .section .line { min-width:24px; }
-  .section.tap { min-height:44px; padding-top:10px; padding-bottom:10px; }
-  .section .chev { flex:none; margin-left:2px; }
+  .section.tap { min-height:44px; padding-top:12px; padding-bottom:12px; }
+  .section .chev { flex:none; margin-left:4px; }
   .section .line { flex:1; height:1px; background:var(--rule); align-self:center; }
   .section small { letter-spacing:0; text-transform:none; color:var(--muted); font-size:11px; }
   header.home .title b { display:flex; align-items:baseline; gap:12px; }
@@ -45,12 +45,12 @@
   ul { list-style:none; margin:0; padding:0; }
   .row { display:flex; align-items:stretch; min-height:44px; }
   .row .rail { width:var(--rail); flex:none; }
-  .row .body { flex:1; min-width:0; padding:10px 16px 10px 0; border-bottom:1px solid var(--rule); display:flex; flex-direction:column; gap:6px; }
+  .row .body { flex:1; min-width:0; padding:12px 16px 12px 0; border-bottom:1px solid var(--rule); display:flex; flex-direction:column; gap:8px; }
   .row .head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; }
   .row .name { font-size:15px; font-weight:650; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .row .meta { font-size:12px; color:var(--muted); white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis; }
   .row .sub { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; }
-  .counts { display:inline-flex; align-items:center; gap:10px; vertical-align:middle; }
+  .counts { display:inline-flex; align-items:center; gap:8px; vertical-align:middle; }
   .c-ok { color:var(--ok); } .c-run { color:var(--accent); } .c-warn { color:var(--warn); } .c-bad { color:var(--bad); } .c-pend { color:var(--faint); }
   .bar { display:flex; height:3px; overflow:hidden; background:var(--surface-2); }
   .bar span { display:block; }
@@ -62,40 +62,34 @@
   /* --rail is set per run by drawRail from the widest open wave, so lanes never
      run under the row text; the rows' spacer and the overlay share the variable. */
   .graph svg.overlay { position:absolute; left:0; top:0; width:var(--rail); pointer-events:none; overflow:visible; }
-  .wave-label { padding:12px 16px 2px var(--rail); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); display:flex; gap:10px; }
+  .wave-label { padding:12px 16px 4px var(--rail); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); display:flex; gap:8px; }
   .wave-label.live { color:var(--accent); }
   .wave-label small { letter-spacing:0; text-transform:none; }
-  .leaf .body { padding:8px 12px 8px 0; flex-direction:row; align-items:center; gap:10px; }
-  .leaf .txt { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
+  .leaf .body { padding:8px 12px 8px 0; flex-direction:row; align-items:center; gap:8px; }
+  .leaf .txt { flex:1; min-width:0; display:flex; flex-direction:column; gap:4px; }
   .leaf .txt .name { font-size:14px; }
   .leaf .txt .meta { white-space:normal; overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; }
-  .leaf .right { display:flex; flex-direction:column; align-items:flex-end; gap:2px; font-size:12px; color:var(--muted); white-space:nowrap; }
+  .leaf .right { display:flex; flex-direction:column; align-items:flex-end; gap:4px; font-size:12px; color:var(--muted); white-space:nowrap; }
   .leaf.quiet .body { background:var(--warn-bg); }
   .leaf.quiet .txt .meta { color:var(--warn); }
-  .strip { display:flex; flex-wrap:wrap; gap:3px; align-items:center; }
+  .strip { display:flex; flex-wrap:wrap; gap:4px; align-items:center; }
   .strip i { display:block; width:8px; height:8px; border-radius:50%; background:var(--rule); }
   .strip i.sq { border-radius:2px; }
   .strip i.ok { background:var(--ok); } .strip i.run { background:var(--accent); animation:pulse 1.6s ease-in-out infinite; } .strip i.warn { background:var(--warn); } .strip i.bad { background:var(--bad); }
   .strip .more { font-size:11px; color:var(--faint); margin-left:4px; }
   .chev { flex:none; }
-  .digest { display:flex; width:100%; align-items:center; gap:12px; padding:12px 16px; min-height:44px; border-bottom:1px solid var(--ok); background:var(--ok-bg); }
-  .digest .g { font-size:20px; color:var(--ok); flex:none; }
-  .digest .txt { flex:1 1 auto; min-width:0; display:flex; flex-direction:column; gap:2px; }
-  .digest .meta { font-size:12px; color:var(--muted); }
-  .digest .meta .counts { display:inline-flex; }
-  .digest b { font-size:14px; font-weight:650; }
-  .totals { display:flex; align-items:center; justify-content:space-between; gap:10px; padding:12px 16px; border-bottom:1px solid var(--rule); font-size:13px; line-height:1; }
+  .totals { display:flex; align-items:center; justify-content:space-between; gap:8px; padding:12px 16px; border-bottom:1px solid var(--rule); font-size:13px; line-height:1; }
   .totals > * { line-height:1; }
   .totals .bar { width:150px; flex:none; }
   .counts, .counts > span, .meta { line-height:1; }
   .row .sub { line-height:1; }
   .row .sub .meta { line-height:1; }
   /* leaf view */
-  .kv { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); padding:14px 16px; border-bottom:1px solid var(--rule); gap:8px; }
-  .kv div { display:flex; flex-direction:column; gap:3px; min-width:0; }
+  .kv { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); padding:16px 16px; gap:8px; }
+  .kv div { display:flex; flex-direction:column; gap:4px; min-width:0; }
   .kv label { font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
   .kv span { font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .block { display:flex; flex-direction:column; gap:8px; padding:14px 16px; border-bottom:1px solid var(--rule); }
+  .block { display:flex; flex-direction:column; gap:8px; padding:16px 16px; }
   .block label { display:flex; justify-content:space-between; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
   .block label small { letter-spacing:0; text-transform:none; }
   .menu .nav { display:flex; flex-direction:column; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); }
@@ -103,10 +97,10 @@
   .menu .nav a:last-child { border-bottom:0; }
   .menu .nav a.off { color:var(--faint); }
   .menu .nav a.off::after { content:"off"; margin-left:auto; font-size:10px; letter-spacing:.14em; text-transform:uppercase; }
-  .note { margin:12px 16px; padding:10px 12px; border:1px solid var(--rule); border-radius:6px; font-size:12px; color:var(--muted); }
+  .note { margin:12px 16px; padding:12px 12px; border:1px solid var(--rule); border-radius:6px; font-size:12px; color:var(--muted); }
   .note code { color:var(--ink); }
   /* performance view: one ranking list, whichever table feeds it */
-  .rank .body { gap:5px; }
+  .rank .body { gap:4px; }
   .rank .head .name { font-size:14px; }
   .rank .head .val { font-size:15px; font-weight:650; white-space:nowrap; }
   .rank .head .val.none { color:var(--faint); font-weight:400; }
@@ -115,7 +109,7 @@
   .rank .bar.prov span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
   .rank .meta .tag { color:var(--faint); }
   .chip[data-href], .chip[data-domain] { cursor:pointer; }
-  .foot { padding:10px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
+  .foot { padding:12px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
   /* perf view switcher: one responsive SVG, same idiom as .cov svg.covgrid.
      Five labels cannot fit five equal CSS columns on a phone, and this page has
@@ -132,7 +126,7 @@
   .kv.dash4 span small { font-size:12px; color:var(--muted); }
   .section .secsel { margin-left:auto; text-transform:none; letter-spacing:0; }
   .section .secsel .sel { padding:4px 8px; font-size:11px; }
-  .aspects { padding:4px 16px 12px; display:flex; flex-direction:column; gap:6px; }
+  .aspects { padding:4px 16px 12px; display:flex; flex-direction:column; gap:8px; }
   .arow { display:grid; grid-template-columns:96px 1fr 64px; align-items:center; gap:8px; min-height:22px; cursor:pointer; }
   .arow .alabel { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .arow .bar { height:6px; border-radius:3px; }
@@ -141,8 +135,8 @@
   .arow .aval { font-size:12px; text-align:right; white-space:nowrap; }
   .arow .aval small { color:var(--faint); }
   .arow.none .aval { color:var(--faint); }
-  .sel { flex:1; min-width:0; font:inherit; font-size:12px; color:var(--ink); background:var(--surface-2); border:1px solid var(--rule); border-radius:8px; padding:8px 10px; }
-  .chip { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); background:var(--surface-2); border-radius:999px; padding:6px 10px; }
+  .sel { flex:1; min-width:0; font:inherit; font-size:12px; color:var(--ink); background:var(--surface-2); border:1px solid var(--rule); border-radius:8px; padding:8px 12px; }
+  .chip { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); background:var(--surface-2); border-radius:999px; padding:8px 12px; }
   .chip.run { color:var(--accent); background:var(--accent-soft); }
   .chip.ok { color:var(--ok); background:var(--ok-bg); }
   .chip.bad { color:var(--bad); background:var(--bad-bg); }
@@ -151,27 +145,45 @@
   /* coverage grid: one responsive SVG, labels inside it, scaled to the screen */
   .cov { padding:0 12px 16px; }
   .cov svg.covgrid { width:100%; height:auto; display:block; }
-  /* cost screen: two verdict cards, then a ranked list. States, not series —
-     a hatched bar is thin evidence, an unmeasured row draws no bar at all and
-     sits below a divider, never a 0-width bar that would read as free. */
-  .cost { padding:0 12px 16px; }
-  /* the two verdict cards: ringed for a card look, headers matching .section's
-     accent so the screen reads as one system rather than three label styles */
-  .kv.costcards { border-bottom:none; gap:10px; }
-  .costcards > div { border:1px solid var(--rule); border-radius:10px; padding:10px 12px; background:var(--surface); gap:4px; }
-  .costcards label { font-size:11px; letter-spacing:.16em; color:var(--accent); }
-  .costcards span { white-space:normal; font-size:15px; }
-  .costcards small { font-size:11px; color:var(--muted); line-height:1.35; }
-  /* A cost row is read for its model name; the perf rows are read for their bars.
-     Smaller type plus a wider label column fits `deepseek-v4.1-flash:cloud`, which
-     the shared 96px/12px cell clipped to `deepseek-v4...`. */
-  .arow.costrow { grid-template-columns:124px 1fr 60px; row-gap:0; }
-  .arow.costrow .alabel { font-size:10.5px; }
-  .arow.costrow .costverdict { grid-column:1 / -1; font-size:10px; color:var(--faint); margin:-2px 0 4px; }
-  .arow.costrow.unmfirst { border-top:1px solid var(--rule); padding-top:6px; }
-  .arow.costrow.unm .alabel, .arow.costrow.unm .aval { color:var(--faint); }
+  /* cost screen (mockup 922–983): provider chips, a unit note, then ranked cards —
+     a hatched bar is thin evidence, an unmeasured card draws no bar at all */
+  .ctabs { display:flex; gap:6px; flex-wrap:wrap; margin:14px 16px 0; }
+  .ctab { height:30px; padding:0 12px; border-radius:15px; display:flex; align-items:center; font-size:12px; font-weight:600; background:var(--surface-2); color:var(--muted); cursor:pointer; }
+  .ctab.on { background:var(--accent); color:#fff; }
+  .cnote { margin:14px 16px 4px; font-size:12px; line-height:1.5; color:var(--muted); }
+  .card.crow { margin-top:10px; padding:13px 14px; cursor:pointer; }
+  .crow .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .crow .who { display:flex; align-items:center; gap:8px; min-width:0; }
+  .crow .rk { width:19px; height:19px; border-radius:10px; flex:none; display:flex; align-items:center; justify-content:center; background:var(--surface-2); font-size:11px; font-weight:600; color:var(--muted); }
+  .crow .nm { font-size:14px; overflow-wrap:anywhere; }
+  .crow .val { font-size:19px; font-weight:700; font-variant-numeric:tabular-nums; flex:none; }
+  .crow .cbar { margin-top:10px; height:5px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
+  .crow .cbar span { display:block; height:5px; border-radius:3px; background:var(--accent); }
+  .crow .cbar.thin span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
+  .crow .sub, .cfact .sub { margin-top:9px; font-size:11.5px; line-height:1.4; color:var(--faint); }
+  .crow.unm .nm, .crow.unm .val { color:var(--faint); }
+  .card.cfact { padding:18px 16px; }
+  .cfact b { font-size:22px; }
+  /* usage screen (mockup 403–484): hero on the least headroom, then a card per provider; a dim dashed card is a window not read */
+  .uhero { margin:14px 16px 0; padding:18px; border-radius:16px; background:var(--accent-soft); border:1px solid var(--rule); }
+  .uhero .lbl { font-size:11px; letter-spacing:.06em; color:var(--muted); }
+  .uhero .fig { margin-top:14px; display:flex; align-items:baseline; gap:9px; }
+  .uhero .fig b { font-size:44px; font-variant-numeric:tabular-nums; letter-spacing:-.04em; }
+  .uhero .fig span { font-size:15px; color:var(--muted); }
+  .uhero .ubar { margin-top:16px; height:8px; }
+  .uhero .sub, .upc .sub { margin-top:10px; font-size:11.5px; line-height:1.4; color:var(--faint); }
+  .card.upc { margin-top:10px; padding:14px; }
+  .card.upc.bad { border-color:var(--bad-bg); } .card.upc.warn { border-color:var(--warn-bg); }
+  .upc .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .upc .nm { font-size:14.5px; }
+  .upc .val { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .upc .val.bad { color:var(--bad); } .upc .val.warn { color:var(--warn); }
+  .card.upc.unread { border-style:dashed; background:none; } .upc.unread .nm { color:var(--faint); }
+  .ubar { margin-top:11px; height:5px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
+  .ubar span { display:block; height:100%; border-radius:3px; background:var(--accent); }
+  .ubar span.warn { background:var(--warn); } .ubar span.bad { background:var(--bad); }
   /* the cost badge rides the rank row's value side, never the name */
-  .valside { display:flex; align-items:center; gap:5px; }
+  .valside { display:flex; align-items:center; gap:4px; }
   .cbadge { font-size:11px; flex:none; }
   .cbadge.none { color:var(--faint); }
   /* leaders: podium marks after the name — trophy, silver, bronze; the winner's row is lifted */
@@ -188,21 +200,68 @@
   .json .jr > dt { flex:none; color:var(--accent); min-width:0; }
   .json .jr > dt::after { content:":"; color:var(--faint); }
   .json .jr > dd { margin:0; flex:1; min-width:0; }
-  .json .jr.nested { flex-direction:column; gap:2px; }
+  .json .jr.nested { flex-direction:column; gap:4px; }
   .json .jr.nested > dd { padding-left:8px; border-left:1px solid var(--rule); }
-  .json .ja { list-style:none; display:flex; flex-direction:column; gap:6px; }
-  .json .ja > li { border-left:2px solid var(--rule); padding-left:10px; }
-  .json .ja > li::before { content:counter(item) ""; counter-increment:item; color:var(--faint); margin-right:6px; font-size:11px; }
+  .json .ja { list-style:none; display:flex; flex-direction:column; gap:8px; }
+  .json .ja > li { border-left:2px solid var(--rule); padding-left:12px; }
+  .json .ja > li::before { content:counter(item) ""; counter-increment:item; color:var(--faint); margin-right:8px; font-size:11px; }
   .json .ja { counter-reset:item; }
   .json .jv { color:var(--ink); white-space:pre-wrap; }
-  .json dd > .jo, .json dd > .ja { padding-left:6px; margin-top:4px; }
+  .json dd > .jo, .json dd > .ja { padding-left:8px; margin-top:4px; }
   .empty { padding:24px 16px; color:var(--faint); font-size:13px; }
   .menu { position:fixed; inset:0; background:rgba(16,18,25,.85); z-index:5; display:none; }
   .menu.open { display:block; }
-  .menu .panel { position:absolute; right:0; top:0; bottom:0; width:min(320px, 85vw); background:var(--surface); border-left:1px solid var(--rule); padding:16px; display:flex; flex-direction:column; gap:14px; padding-top:calc(16px + env(safe-area-inset-top)); }
+  .menu .panel { position:absolute; right:0; top:0; bottom:0; width:min(320px, 85vw); background:var(--surface); border-left:1px solid var(--rule); padding:16px; display:flex; flex-direction:column; gap:16px; padding-top:calc(16px + env(safe-area-inset-top)); }
   .menu .panel h2 { margin:0; font-size:14px; font-weight:700; }
   .menu .panel .k { font-size:12px; color:var(--muted); word-break:break-all; }
   iframe.digestframe { width:100%; height:calc(100vh - 100px); border:0; background:var(--ground); }
+  /* banner — the run's one-line verdict, one tone per state. Tones are the mockup's
+     literals; they are deliberately their own scale, not the --ok/--warn/--bad chips,
+     because a banner is a surface and a chip is ink on one. */
+  .banner { --bn-bg:#292a3d; --bn-br:#585680; --bn-ic-bg:#5d5a87; --bn-ic-fg:#b3a9ff; --bn-sub:#9e95e8;
+    display:flex; align-items:center; gap:12px; margin:12px 16px; padding:12px 16px; border-radius:14px;
+    background:var(--bn-bg); border:1px solid var(--bn-br); }
+  .banner.ok     { --bn-bg:#1a2e2c; --bn-br:#2d644f; --bn-ic-bg:#2f6853; --bn-ic-fg:#57d69b; --bn-sub:#8faf9e; }
+  .banner.slow   { --bn-bg:#302a23; --bn-br:#6a5735; --bn-ic-bg:#705b37; --bn-ic-fg:#e5b75c; --bn-sub:#b79a63; }
+  .banner.bad    { --bn-bg:#36272b; --bn-br:#7c4e4b; --bn-ic-bg:#83514e; --bn-ic-fg:#eda196; --bn-sub:#c08b80; }
+  .banner .ic { width:34px; height:34px; border-radius:17px; flex:none; display:flex; align-items:center; justify-content:center; font-size:16px; font-weight:600; background:var(--bn-ic-bg); color:var(--bn-ic-fg); }
+  .banner .txt { flex:1; min-width:0; }
+  .banner .t { font-size:14.5px; font-weight:600; }
+  .banner .s { margin-top:4px; font-size:11.5px; color:var(--bn-sub); }
+  .banner .go { flex:none; font-size:18px; color:var(--bn-ic-fg); }
+  .banner.tap { min-height:44px; }
+  /* A run directory never reaches `queued`; a single leaf does, while it waits on upstream. */
+  .banner .ic.bare { background:none; }
+  .banner.queued { --bn-bg:#262833; --bn-br:#505466; --bn-ic-bg:#50546a; --bn-ic-fg:#c7cad6; --bn-sub:#9aa0b1; }
+  /* leaf page: the banner, then its chips, then one card per question the screen answers */
+  .card { margin:12px 16px 0; padding:14px; border:1px solid var(--rule); border-radius:14px; background:var(--surface); }
+  .card.flush { padding:0; overflow:hidden; }
+  .card .cl { display:flex; align-items:center; justify-content:space-between; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
+  .card .cl b { font-size:14px; letter-spacing:0; color:var(--ink); font-variant-numeric:tabular-nums; }
+  .card .gr { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; font-size:12px; color:var(--muted); }
+  .card .gr + .gr { margin-top:8px; }
+  .card .gr .k { width:44px; flex:none; font-size:11px; color:var(--faint); }
+  .card .act { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  .card .fchip { padding:4px 8px; border-radius:8px; background:var(--surface-2); color:var(--ink); font-size:12.5px; }
+  .card .cf { display:flex; justify-content:space-between; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--rule); font-size:11.5px; color:var(--faint); }
+  .card .show { color:var(--accent); cursor:pointer; }
+  .segbar { display:flex; gap:2px; height:5px; margin-top:12px; border-radius:3px; overflow:hidden; background:var(--surface-2); }
+  .legend { display:flex; flex-wrap:wrap; gap:16px; margin-top:12px; font-size:11.5px; color:var(--muted); }
+  .legend i { display:inline-block; width:8px; height:8px; margin-right:6px; border-radius:2px; }
+  .disc { min-height:46px; padding:0 14px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; cursor:pointer; }
+  .disc ~ .disc, .card .cite { border-top:1px solid var(--rule); }
+  .disc small { font-size:11.5px; color:var(--faint); }
+  .card .dbody { padding:0 14px 12px; }
+  .card .cite { padding:12px 14px; font-size:11.5px; color:var(--faint); }
+  /* The mockup draws this as a flex:none footer inside a fixed phone frame. This page
+     scrolls the document instead, so the same role is `fixed` — a bar appended into the
+     scrolling body is below the fold on any run with more than a few waves. */
+  .actionbar { position:fixed; left:0; right:0; bottom:0; z-index:3; display:flex; gap:8px;
+    padding:12px 16px calc(12px + env(safe-area-inset-bottom));
+    background:var(--ground); border-top:1px solid var(--rule); }
+  .actionbar .primary { flex:1; height:46px; border-radius:12px; background:var(--accent); color:var(--ground);
+    display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; }
+  main:has(.actionbar) { padding-bottom:84px; }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
   .flash { animation:pulse .8s ease-in-out 3; }
   @keyframes dash { to { stroke-dashoffset:-56; } }
@@ -214,7 +273,7 @@
 <main id="main"></main>
 <div id="menu" class="menu"><div class="panel">
   <h2>swarm dashboard</h2>
-  <nav class="nav"><a href="#/">runs</a><a href="#/perf">performance</a></nav>
+  <nav class="nav"><a href="#/">runs</a><a href="#/perf">performance</a><a href="#/cost">cost</a><a href="#/usage">usage</a></nav>
   <div class="k" id="menu-url"></div>
   <div class="k" id="menu-token"></div>
   <div class="k dim">Reads ~/.swarm/runs on the PC. Read-only. Live over server-sent events; reconnects on its own.</div>
@@ -335,7 +394,7 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, costProvider: null, usageWindow: "week" };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -494,21 +553,66 @@
   };
   const byStateOf = (tasks) => tasks.reduce((b, t) => (b[t.state] = (b[t.state] || 0) + 1, b), {});
 
-  // `run` carries run-level metadata (finishedMs/digestPath/quietWarnMs/project/name);
-  // `tasks`/`waves` is the graph to draw, which the node screen (h) passes as its own
-  // subgraph rather than run.tasks/run.waves — the one parameter this needs to be
-  // reusable for both screens.
+  // The rail's running glyph — same geometry and .ring animation as dot() — sized into a banner circle.
+  const SPIN = `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="var(--accent)"/><circle class="ring" cx="12" cy="12" r="9"/></svg>`;
+  const tile = (kind, icon, title, sub, href) =>
+    `<div class="banner ${kind}${href ? " tap" : ""}"${href ? ` role="link" data-key="banner" data-href="${esc(href)}"` : ""}>`
+    + `<span class="ic${icon === SPIN ? " bare" : ""}">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`
+    + (href ? `<span class="go">›</span>` : "") + `</div>`;
+
+  // One run → one verdict tile, read off the run's own facts in severity order: the
+  // engine is gone, then leaves failed, then it finished, then something is quiet,
+  // then it is simply running. A banner without a `sub` is decoration, so every
+  // branch states its reason.
+  function bannerHtml(run, tasks, now, quietWarn) {
+    const b = byStateOf(tasks);
+    const n = (...ks) => ks.reduce((a, k) => a + (b[k] || 0), 0);
+    const done = n("ok", "skipped");
+    const failed = n("failed", "failed:timeout", "failed:stopped", "blocked");
+    const tok = fmtTok(tasks.reduce((a, t) => a + tokTotal(t.tokens), 0));
+    const dhref = (run.digestPath || run.reportPath) ? `#/run/${enc(run.project)}/${enc(run.name)}/digest` : null;
+
+    if (run.abortedMs) return tile("bad", "✕", "Aborted — the engine is gone", `${done} of ${tasks.length} finished · ${tok} tokens`, dhref);
+    if (run.stoppedMs) return tile("bad", "✗", "Stopped by hand", `${tasks.length - done} never finished · ${tok} tokens`, dhref);
+    if (failed) return tile("bad", "✗", `${failed} of ${tasks.length} failed`, `${tok} tokens · ${run.finishedMs ? ago(run.finishedMs) : "still running"}`, dhref);
+    if (run.finishedMs) return tile("ok", "✓", run.digestPath ? "Digest ready" : "Finished", `${done} of ${tasks.length} leaves · ${tok} tokens`, dhref);
+    // The longest quiet stretch is the single most useful fact about a live run that
+    // has one; below the threshold there is nothing to warn about.
+    const quiet = tasks
+      .map((t) => ({ t, s: window.swarmLive.quietSecs(t, now) }))
+      .filter((x) => x.s != null && x.s * 1000 > quietWarn)
+      .sort((a, x) => x.s - a.s)[0];
+    if (quiet) return tile("slow", "!", `${quiet.t.id} has been quiet for ${fmtDur(quiet.s * 1000)}`, "longest quiet stretch of this run", null);
+    // The floor. A run directory only exists once the engine has dispatched, so whatever
+    // anything can read one, a leaf is running, done, failed, or the run is aborted —
+    // there is no reachable run that has started nothing to give a tone of its own. A live
+    // run with no leaf running (between waves, engine alive) is still a live run.
+    const running = n("running", "retrying");
+    return tile("", SPIN, `${running} running`, `${done} of ${tasks.length} done · ${tok} tokens`, null);
+  }
+
+  // The RUN screen's chrome: the verdict tile, then the one action that screen exists
+  // for. Deliberately not part of renderRunHtml — the node screen shares that renderer
+  // with a manifest node's SUBGRAPH, and a run-level verdict over one node's leaf counts
+  // (finishedMs/digestPath mixed with a subset of tasks) is a lie, not a summary.
+  function runChromeHtml(run, tasks) {
+    let html = bannerHtml(run, tasks, Date.now(), run.quietWarnMs || 60000);
+    // report.html only — the digest is already one tap away from the banner.
+    if (run.reportHtmlPath)
+      html += `<div class="actionbar"><a class="primary" href="#/run/${enc(run.project)}/${enc(run.name)}/report">Open report</a></div>`;
+    return html;
+  }
+
+  // The graph, and only the graph. `run` is read for project/name alone (row hrefs) —
+  // no verdict, no action bar, so a subgraph renders identically to a whole run.
   function renderRunHtml(run, tasks, waves) {
     const now = Date.now();
+    const focus = ui.focusId;
+    const inFocus = (x) => focus === x || (focus || "").startsWith(x + "~");
+    if (focus) { const w = waves.findIndex((ids) => ids.some(inFocus)); if (w >= 0) ui.closedWaves.delete(w); }
     const rows = buildRows(tasks, waves);
     const quietWarn = run.quietWarnMs || 60000;
     let html = "";
-    const finished = !!run.finishedMs;
-    if (finished && (run.digestPath || run.reportPath)) {
-      const b = byStateOf(tasks);
-      const dhref = `#/run/${enc(run.project)}/${enc(run.name)}/digest`;
-      html += `<div class="digest tap" role="link" data-key="digest" data-href="${esc(dhref)}"><span class="g">✓</span><div class="txt"><b>Digest</b><span class="meta">${tasks.length} leaves · ${countsHtml(b)}${run.reportPath ? " · report" : ""}</span></div><svg class="chev" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4fc98a" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg></div>`;
-    }
     const totalsByState = byStateOf(tasks);
     const total = tasks.reduce((n, t) => n + tokTotal(t.tokens), 0);
     html += `<div class="totals">${countsHtml(totalsByState)}<span class="meta">${fmtTok(total)}</span>${barHtml(totalsByState, tasks.length)}</div>`;
@@ -542,7 +646,7 @@
         // screen, never flattened inline; its dot strip is the row's own summary.
         const t = r.task;
         const href = `#/run/${enc(run.project)}/${enc(run.name)}/node/${enc(t.id)}`;
-         html += `<li class="row leaf tap" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(identityName(t))} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
+         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(identityName(t))} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       const t = r.task;
@@ -552,7 +656,7 @@
        const identity = identityName(t);
        const sub = quiet ? `quiet ${quietSecs}s · ${esc(identity)}` : t.state === "running" && t.activity ? `${esc(identity)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(identity);
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
-      html += `<li class="row leaf tap${quiet ? " quiet" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
+      html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
     html += `</ul></div>`;
     return { html, rows };
@@ -620,7 +724,7 @@
   async function buildRun(project, name) {
     const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
     const { html, rows } = renderRunHtml(run, run.tasks, run.waves);
-    return { header: runHeaderHtml(run, Date.now()), html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
+    return { header: runHeaderHtml(run, Date.now()), html: runChromeHtml(run, run.tasks) + html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
   }
 
   // A manifest node's own screen: the same graph renderer, fed the task's own
@@ -661,7 +765,7 @@
     if (view.name === "run" && currentRun) {
       setHeader(runHeaderHtml(currentRun, now));
       const { html, rows } = renderRunHtml(currentRun, currentRun.tasks, currentRun.waves);
-      setHtml(main, html);
+      setHtml(main, runChromeHtml(currentRun, currentRun.tasks) + html);
       drawRail(currentRun.tasks, rows);
       return;
     }
@@ -686,6 +790,33 @@
     return { header, html, state: { currentRun: run, currentLeaf: leaf } };
   }
 
+  // One leaf → one verdict tile. No chevron: the leaf IS the destination.
+  function leafBannerHtml(t, leaf, now, quietSecs) {
+    const tok = `${fmtTok(tokTotal(t.tokens || leaf?.tokens))} tokens`;
+    const took = t.durationMs != null ? fmtDur(t.durationMs) : window.swarmLive.elapsedText(t, now) ?? "—";
+    const last = t.lastEventMs ? ` · last event ${ago(t.lastEventMs)}` : "";
+    const identity = identityName(t);
+    switch (t.state) {
+      case "ok": return tile("ok", "✓", `Finished clean in ${took}`, tok);
+      case "skipped": return tile("ok", "✓", "Skipped", "its condition was false — nothing ran");
+      case "failed:timeout": return tile("bad", "✗", `Timed out after ${took}`, tok + last);
+      case "failed:stopped": return tile("bad", "✗", "Stopped by hand", tok + last);
+      case "failed": return tile("bad", "✗", `Failed after ${took}`, tok + last);
+      case "blocked": return tile("bad", "⊘", "Blocked", "an upstream leaf failed, so this never ran");
+      case "aborted": return tile("bad", "✕", "Aborted — the engine is gone", tok + last);
+      case "rate-limited": return tile("slow", "⧖", "Rate-limited — waiting to retry", tok);
+      case "quota": return tile("slow", "⏳", "Out of quota — waiting for the window", tok);
+      case "pending": {
+        const after = t.after || [];
+        return after.length
+          ? tile("queued", "·", "Waiting on upstream", `Starts when ${after.join(", ")} finish${after.length === 1 ? "es" : ""}`)
+          : tile("queued", "·", "Queued", "waiting for a free slot");
+      }
+    }
+    if (quietSecs != null) return tile("slow", "!", `No output for ${fmtDur(quietSecs * 1000)}`, `${tok} so far`);
+    return tile("", SPIN, `Running for ${took}`, `${identity ? `${identity} · ` : ""}${tok} so far`);
+  }
+
   function renderLeafHtml(run, leaf, id) {
     const now = Date.now();
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
@@ -694,40 +825,49 @@
      const header = `${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(identity)}</small></div>${menuBtn}`;
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
-     let html = `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${esc(identity)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}${quiet ? `<span class="chip warn">quiet ${quietSecsVal}s</span>` : ""}</div>`;
-    // What the leaf was actually asked, collapsed by default. Same section+chevron idiom
-    // as every other toggle on the page, so the whole row is the target. Omitted entirely
-    // for agentless compute/integrate nodes, which carry no prompt.
-    if (leaf?.prompt) {
-      html += `<div class="section tap" data-prompt="1"><span>prompt</span><span class="line"></span>${leaf.authored ? `<small>as authored · still in flight</small>` : ""}${chev(ui.promptOpen)}</div>`;
-      if (ui.promptOpen) html += `<div class="block"><pre class="out">${esc(leaf.prompt)}</pre></div>`;
-    }
-    html += `<div class="block"><label>graph</label><div class="meta"><span class="faint">after</span> ${t.after?.length ? t.after.map(esc).join(", ") : "— (nothing upstream)"}</div><div class="meta"><span class="faint">feeds</span> ${feeds.length ? feeds.map(esc).join(", ") : "—"}</div></div>`;
-    const elapsed = window.swarmLive.elapsedText(t, now) ?? fmtDur(t.durationMs);
-    html += `<div class="kv"><div><label>${t.state === "running" ? "elapsed" : "duration"}</label><span>${elapsed}</span></div><div><label>turns</label><span>${leaf?.numTurns ?? "—"}</span></div><div><label>last event</label><span>${t.lastEventMs ? ago(t.lastEventMs) : "—"}</span></div></div>`;
+    let html = leafBannerHtml(t, leaf, now, quiet ? quietSecsVal : null);
+    html += `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${esc(identity)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}</div>`;
+    // Position in graph: what it waited on, what it unblocks, and the way back to the rail.
+    const fchips = (ids, none) => ids.length ? ids.map((x) => `<span class="fchip">${esc(x)}</span>`).join("") : `<span>${none}</span>`;
+    const order = run.tasks.filter((x) => x.kind !== "digest").map((x) => x.id);
+    const turns = leaf?.numTurns != null ? ` · ${leaf.numTurns} turn${leaf.numTurns === 1 ? "" : "s"}` : "";
+    html += `<div class="card"><div class="cl">position in graph</div>`
+      + `<div class="gr"><span class="k">after</span>${fchips(t.after || [], "nothing upstream")}</div>`
+      + `<div class="gr"><span class="k">feeds</span>${fchips(feeds, "—")}</div>`
+      + (t.activity ? `<div class="gr"><span class="k">last</span><span class="act">${esc(t.activity)}</span></div>` : "")
+      + `<div class="cf"><span>leaf ${order.indexOf(id) + 1} of ${order.length} · wave ${(t.depth ?? 0) + 1}${turns}</span><span class="show" data-focus="${esc(id)}" data-href="#/run/${enc(run.project)}/${enc(run.name)}">Show in tree ›</span></div></div>`;
     const tk = t.tokens || leaf?.tokens;
     if (tk) {
-      const inp = tk.input || 0, outp = tk.output || 0, cc = tk.cacheCreation || 0, cr = tk.cacheRead || 0;
       // "input" means what the CLI means by it (results.mjs:369): input + cacheCreation.
       // On a Claude leaf the whole prompt is cache-written on turn 1, so `input` alone is
-      // just the uncached tail — reporting it raw showed 18 next to the CLI's 78k for the
-      // same leaf. cacheRead stays its own row: it is re-read transcript, not billable input.
-      // The headline is the processed total — the same figure the estate row shows, cacheRead
-      // included — so one leaf never reads as two numbers; the rows below it split out what was billed.
-      const billedIn = inp + cc;
-      html += `<div class="block"><label><span>tokens</span><small>${fmtTok(tokTotal(tk))}</small></label><div class="bar"><span style="flex:${billedIn};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span></div><div class="kv" style="padding:0;border:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(billedIn)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label class="faint">cache read</label><span>${cr ? fmtTok(cr) : "—"}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
+      // just the uncached tail. cacheRead is its own segment: re-read transcript, not billed.
+      const billedIn = (tk.input || 0) + (tk.cacheCreation || 0), outp = tk.output || 0, cr = tk.cacheRead || 0;
+      // A live Ollama tick is a running total — the whole prompt as input, no output, no cache —
+      // and the split only exists in the final result. Zeros drawn from it would be a claim.
+      const noSplit = LIVE.has(t.state) && !outp && !cr && !tk.cacheCreation;
+      const seg = (n, colour) => `<span style="flex:${n};background:${colour}"></span>`;
+      const key = (colour, label, n) => `<span><i style="background:${colour}"></i>${label} ${n ? fmtTok(n) : "0"}</span>`;
+      html += `<div class="card"><div class="cl">tokens<b>${fmtTok(tokTotal(tk))}</b></div>`
+        + (noSplit ? `<div class="cf"><span>running total — the input / output / cache split arrives when the leaf finishes</span></div>` : "")
+        + (noSplit ? "" : `<div class="segbar">${seg(billedIn, "var(--accent)")}${seg(outp, "var(--ok)")}${seg(cr, "var(--rule)")}</div>`
+          + `<div class="legend">${key("var(--accent)", "Input", billedIn)}${key("var(--ok)", "Output", outp)}${key("var(--rule)", "Cache", cr)}</div>`)
+        + (!noSplit && !tk.cacheCreation && !cr ? `<div class="cf"><span>no cache buckets from this provider — every turn re-sends the transcript</span></div>` : "")
+        + `</div>`;
     }
-    html += `<div class="block"><label>activity</label><div class="meta">${t.activity ? esc(t.activity) : "<span class='faint'>—</span>"}</div></div>`;
-    // Raw by default; a prettify chip appears when the output carries JSON.
+    // Prompt and output: both long crafted text, collapsed by default — this screen is read
+    // for state far more often than prose. The prettify button sits inside the output row;
+    // the delegated handler resolves to the button first, so it toggles format, not the row.
     const canPretty = !!leaf?.output && (typeof leaf.outputJson === "object" && leaf.outputJson !== null || !!splitJson(leaf.output));
     const toggle = canPretty ? `<button class="chip" data-pretty="1" style="padding:4px 10px">${ui.pretty ? "raw" : "prettify"}</button>` : (leaf?.output ? "" : "appears when the leaf finishes");
-    // Collapsed like the prompt: both are long crafted text, and this view is read for
-    // state far more often than for prose. The prettify button sits inside the row; the
-    // delegated handler resolves to the button first (closest() walks up from the target),
-    // so it toggles format rather than collapsing the section.
-    html += `<div class="section tap" data-output="1"><span>output</span><span class="line"></span><small>${toggle}</small>${chev(ui.outputOpen)}</div>`;
-    if (ui.outputOpen) html += `<div class="block">${leaf?.output ? (ui.pretty && canPretty ? outputHtml(leaf) : `<pre class="out">${esc(leaf.output)}</pre>`) : "<div class='faint'>—</div>"}</div>`;
-    if (leaf?.citations) html += `<div class="block"><label>citations</label><div class="meta">checked ${leaf.citations.checked ?? 0} · drifted ${leaf.citations.drifted ?? 0} · refuted ${leaf.citations.refuted ?? 0}</div></div>`;
+    html += `<div class="card flush">`;
+    if (leaf?.prompt) {
+      html += `<div class="disc" data-prompt="1"><span>Prompt</span><small>${leaf.authored ? "as authored · still in flight" : ""}${chev(ui.promptOpen)}</small></div>`;
+      if (ui.promptOpen) html += `<div class="dbody"><pre class="out">${esc(leaf.prompt)}</pre></div>`;
+    }
+    html += `<div class="disc" data-output="1"><span>Output</span><small>${toggle}${chev(ui.outputOpen)}</small></div>`;
+    if (ui.outputOpen) html += `<div class="dbody">${leaf?.output ? (ui.pretty && canPretty ? outputHtml(leaf) : `<pre class="out">${esc(leaf.output)}</pre>`) : "<div class='faint'>—</div>"}</div>`;
+    if (leaf?.citations) html += `<div class="cite">citations · checked ${leaf.citations.checked ?? 0} · drifted ${leaf.citations.drifted ?? 0} · refuted ${leaf.citations.refuted ?? 0}</div>`;
+    html += `</div>`;
     return { header, html };
   }
 
@@ -793,18 +933,17 @@
     if (bad) bits.push(`<span class="c-bad">${esc(bad)}</span>`);
     return bits.join(" · ");
   };
-  const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders", "cost"]);
+  const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders"]);
   const PERF_VIEWS = [
     { label: "rank", href: "#/perf", kind: null },
     { label: "coverage", href: "#/perf/coverage", kind: "coverage" },
     { label: "reliability", href: "#/perf/reliability", kind: "reliability" },
     { label: "leaders", href: "#/perf/leaders", kind: "leaders" },
-    { label: "cost", href: "#/perf/cost", kind: "cost" },
   ];
   // Pinned so the rendered size is checkable at design time rather than a shrug:
-  // the five labels give a 340.8-unit viewBox. The SVG scales to .seg's content
+  // the four labels give a 290-unit viewBox. The SVG scales to .seg's content
   // box, not the viewport, and .seg carries 16px side padding — so at a 390px
-  // screen the labels render ~11.6px, not the 12.6px the raw viewport ratio
+  // screen the labels render ~13.6px, not the 14.8px the raw viewport ratio
   // suggests. CH is set near the font's advance on purpose — overshooting only
   // makes a pill roomier, while undershooting collides a label with its
   // neighbour across a 6-unit gap.
@@ -848,6 +987,28 @@
     }).join("");
     return `<div class="seg"><svg viewBox="0 0 ${n(W)} ${SEG.H}" preserveAspectRatio="xMinYMin meet">${rail}${ind}${items}</svg></div>`;
   }
+  // Cost is its own screen off /api/cost, which serves with grading off: a price
+  // needs no grades, only the value verdicts on each card do.
+  async function buildCost() {
+    const data = await api("/api/cost");
+    await loadPerfJs();
+    return {
+      header: `${backBtn("#/")}<div class="title"><b>cost</b><small>Relative cost within each provider</small></div>${menuBtn}`,
+      html: window.perfViews.costScreen(data, { esc, enc }, ui.costProvider),
+    };
+  }
+  // /api/usage reads every provider live, so it is fetched on arrival only: the
+  // Session/Week switch, ticks and reconnects redraw from the payload already held.
+  let usageData = null;
+  async function buildUsage() {
+    if (view.name !== "usage" || !usageData) usageData = await api("/api/usage");
+    await loadPerfJs();
+    const n = new Set([...(usageData.usages || []).map((u) => u.provider), ...Object.keys(usageData.errors || {})]).size;
+    return {
+      header: `${backBtn("#/")}<div class="title"><b>usage</b><small>${n} provider${n === 1 ? "" : "s"} · allowance remaining</small></div>${menuBtn}`,
+      html: window.perfViews.usageScreen(usageData, { esc }, ui.usageWindow),
+    };
+  }
   async function buildPerf(kind, which) {
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
     const domain = ui.perfDomain;
@@ -881,9 +1042,7 @@
       const h = { esc, enc, fmtScore };
       html += kind === "coverage" ? window.perfViews.coverageGrid(p.views.coverage, h)
         : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
-        : kind === "leaders" ? window.perfViews.leadersList(p.views.leaders, h)
-        : window.perfViews.costScreen(p.views.cost, h);
-      if (kind === "cost") html += `<div class="foot">cost is a model's meter weight — the multiplier against the cheapest measured model, banked week over week. A hatched bar is thin evidence: under 200 measured requests. Bands are config (<code>providers.ollama.cloud.ollama.costBands</code>).</div>`;
+        : window.perfViews.leadersList(p.views.leaders, h);
       return { header, html };
     }
     {
@@ -953,6 +1112,13 @@
     };
   }
 
+  function buildReport(project, name) {
+    return {
+      header: `${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(name)}</b><small>report</small></div>${menuBtn}`,
+      html: `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/report`))}"></iframe>`,
+    };
+  }
+
   // The one home for the seenActive advance, and the whole transition response: it
   // swaps a whole new map synchronously, so whichever of the tick and a list build
   // arrives first consumes the transition and the other cannot announce it again off
@@ -995,9 +1161,12 @@
   const viewOf = (hash) => {
     const h = hash.replace(/^#/, "") || "/";
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
+    // #/perf/cost is where Cost lived under Performance: old bookmarks still land.
+    if (seg[0] === "cost" || (seg[0] === "perf" && seg[1] === "cost")) return { name: "cost", project: null, run: null, leaf: null, node: null };
+    if (seg[0] === "usage") return { name: "usage", project: null, run: null, leaf: null, node: null };
     if (seg[0] === "perf") return { name: "perf", project: null, run: null, leaf: null, node: null, kind: seg[1] || null, which: seg[2] || null };
     if (seg[0] === "run" && seg.length >= 3) {
-      const name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "node" ? "node" : "run";
+      const name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "report" ? "report" : seg[3] === "node" ? "node" : "run";
       return { name, project: seg[1], run: seg[2], leaf: name === "leaf" ? seg[4] || null : null, node: name === "node" ? seg[4] || null : null };
     }
     return { name: "runs", project: null, run: null, leaf: null, node: null };
@@ -1014,13 +1183,17 @@
     if (next.header !== undefined) setHeader(next.header, next.home);
     setHtml(main, next.html);
     next.draw?.();
+    if (ui.focusScroll && view.name === "run") { ui.focusScroll = false; main.querySelector?.(".flash")?.scrollIntoView?.({ block: "center" }); }
     // Past the route guard: a superseded build neither celebrates nor advances.
     if (s.lastList) announceFinished(s.lastList.runs);
   }
   async function buildFor(v) {
     if (v.name === "perf") return buildPerf(v.kind, v.which);
+    if (v.name === "cost") return buildCost();
+    if (v.name === "usage") return buildUsage();
     if (v.name === "leaf") return buildLeaf(v.project, v.run, v.leaf);
     if (v.name === "digest") return buildDigest(v.project, v.run);
+    if (v.name === "report") return buildReport(v.project, v.run);
     if (v.name === "node") return buildNode(v.project, v.run, v.node);
     if (v.name === "run") return buildRun(v.project, v.run);
     return buildRuns();
@@ -1054,9 +1227,18 @@
     if (t.dataset.nav != null) { location.hash = t.value; return; }
     if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; requestRoute(route); }
   });
+  // "Show in tree": the run screen opens the leaf's wave, flashes its row and scrolls to it.
+  // The flash is a render-time class, not a classList.add — each tick's morph would strip it.
+  function focusLeaf(id) {
+    ui.focusId = id;
+    ui.focusScroll = true;
+    setTimeout(() => { ui.focusId = null; rerender(); }, 2400);
+  }
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand]");
+    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-cost-provider], [data-usage-window]");
     if (!t || !main.contains(t)) return;
+    if (t.dataset.costProvider != null) { ui.costProvider = t.dataset.costProvider; requestRoute(route); return; }
+    if (t.dataset.usageWindow != null) { ui.usageWindow = t.dataset.usageWindow; requestRoute(route); return; }
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
     if (t.dataset.pretty) { ui.pretty = !ui.pretty; requestRoute(route); return; }
@@ -1068,7 +1250,7 @@
     // Collapsing also drops the expansion, so reopening starts capped again — a stale
     // expansion could otherwise keep a 300-row payload on every poll.
     if (t.dataset.project) { const p = t.dataset.project; if (ui.openProjects.has(p)) { ui.openProjects.delete(p); ui.expandedProjects.delete(p); } else ui.openProjects.add(p); requestRoute(route); return; }
-    if (t.dataset.href) { location.hash = t.dataset.href; return; }
+    if (t.dataset.href) { if (t.dataset.focus) focusLeaf(t.dataset.focus); location.hash = t.dataset.href; return; }
     if (t.dataset.wave != null) {
       const w = Number(t.dataset.wave);
       const isOpen = t.classList.contains("wave-label");

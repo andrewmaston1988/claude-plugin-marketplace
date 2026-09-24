@@ -295,6 +295,9 @@ export function readRun(dir, { now = Date.now(), quietWarnMs = 60_000, heartbeat
     totals: { byState },
     digestPath: optional("digest.md"),
     reportPath: optional("report.md"),
+    // The long-form report a digest leaf may render itself. Distinct from
+    // reportPath: this one is already HTML and is served raw, not through mdToHtml.
+    reportHtmlPath: optional("report.html"),
     summaryPath: optional("summary.json"),
   };
 }

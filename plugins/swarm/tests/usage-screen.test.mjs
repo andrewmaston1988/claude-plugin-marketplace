@@ -1,0 +1,103 @@
+// The Usage screen's renderer, run for real through perf.js. A limit's `percent`
+// is percent USED; every figure on screen is what is LEFT.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
+
+const lim = (kind, percent, over = {}) => ({ kind, percent, resetsAt: null, scope: null, window: null, ...over });
+const usage = (provider, limits, over = {}) => ({ provider, state: "ok", provenance: "live", limits, ...over });
+const LIVE = {
+  usages: [
+    usage("anthropic", [lim("session", 3), lim("weekly_all", 88), lim("weekly_scoped", 5, { scope: "Fable" })]),
+    usage("ollama", [lim("session", 37.1), lim("weekly", 28.3)]),
+    usage("codex", [lim("codex primary", 0, { window: "5h" }), lim("codex secondary", 100, { window: "7d", resetsAt: "2026-09-26T09:00:00" })], { state: "exhausted" }),
+  ],
+  errors: {},
+};
+// The same payload with codex's dead allowance left out, for the reading tests.
+const READABLE = { usages: LIVE.usages.slice(0, 2), errors: {} };
+const pcards = (html) => html.match(/class="card upc[^"]*"/g) || [];
+
+// Operator, 2026-09-24: the hero is where the next run goes — the MOST left, not the least.
+test("the hero names the provider with the MOST left this session, as percent left", () => {
+  const html = loadPerfViews().usageScreen(READABLE, H, "session");
+  assert.match(html, /MOST LEFT THIS SESSION · ANTHROPIC/);
+  assert.match(html, /class="uhero[^"]*"[\s\S]*?<b>97%<\/b>/, "3% used is 97% left");
+});
+
+test("Week reads anthropic's weekly_* buckets, the most-consumed one winning", () => {
+  const html = loadPerfViews().usageScreen(READABLE, H, "week");
+  assert.match(html, /MOST LEFT THIS WEEK · OLLAMA/);
+  assert.match(html, /<b>72%<\/b>/, "ollama's plain weekly reads");
+  assert.match(html, /class="nm">anthropic<\/span><span class="val bad">12%</, "weekly_all at 88% used beats weekly_scoped at 5%");
+});
+
+// Operator, 2026-09-24: alphabetical — the hero already carries the ranking.
+test("one card per provider in alphabetical order, each with its percent left and a bar", () => {
+  const html = loadPerfViews().usageScreen(LIVE, H, "session");
+  assert.equal(pcards(html).length, 3);
+  const order = [...html.matchAll(/class="nm">([^<]+)</g)].map((m) => m[1]);
+  assert.deepEqual(order, ["anthropic", "codex", "ollama"]);
+  assert.ok(html.includes("97%"));
+});
+
+// Operator, 2026-09-24: an exhausted provider is dead, and reads as such — never a blank card.
+// Its note is when it comes back; 0% and red already say it ran out.
+test("an exhausted provider reads 0% left in either window, noting when it resets", () => {
+  for (const w of ["week", "session"]) {
+    const html = loadPerfViews().usageScreen(LIVE, H, w);
+    assert.equal((html.match(/class="card upc unread"/g) || []).length, 0, w);
+    assert.match(html, /class="nm">codex<\/span><span class="val bad">0%</);
+    assert.match(html, /class="nm">codex<\/span>[\s\S]*?<div class="sub">resets Sat 09:00<\/div>/);
+    assert.ok(!html.includes("exhausted"), "0% in red already says it");
+  }
+});
+
+test("a provider that reports neither window, and is not exhausted, stays a dim card naming what it did report", () => {
+  const html = loadPerfViews().usageScreen({ usages: [usage("codex", [lim("codex primary", 10, { window: "5h" })])] }, H, "week");
+  assert.match(html, /not read — reports codex primary — no weekly window/);
+});
+
+test("a provider whose read failed keeps its card, naming the error", () => {
+  const html = loadPerfViews().usageScreen({ usages: [], errors: { claude: "token expired" } }, H, "session");
+  assert.equal(pcards(html).length, 1);
+  assert.ok(html.includes("not read — token expired"));
+  assert.ok(!html.includes("uhero"), "no reading, no hero");
+});
+
+test("bands: 20 or less left is bad, 40 or less warn, else ok", () => {
+  const { usageScreen } = loadPerfViews();
+  const tone = (used) => usageScreen({ usages: [usage("p", [lim("session", used)])] }, H, "session").match(/class="card upc (\w+)"/)[1];
+  assert.equal(tone(80), "bad");
+  assert.equal(tone(60), "warn");
+  assert.equal(tone(59), "ok");
+});
+
+// Operator, 2026-09-24: where a figure was read from is our plumbing, not the user's concern.
+test("the card's note is the reset time alone — never where the figure was read from", () => {
+  const at = new Date(Date.now() + 3_600_000);
+  const html = loadPerfViews().usageScreen({ usages: [usage("ollama", [lim("session", 10, { resetsAt: at.toISOString() })], { provenance: "cache" })] }, H, "session");
+  const hh = String(at.getHours()).padStart(2, "0");
+  assert.match(html, new RegExp(`<div class="sub">resets \\w{3} ${hh}:\\d{2}</div>`));
+  assert.ok(!html.includes("cache"));
+});
+
+// Operator, 2026-09-24: Week first, and the default.
+test("the switch reads Week then Session, Week on when nothing is chosen", () => {
+  const html = loadPerfViews().usageScreen(READABLE, H);
+  assert.match(html, /class="ctab on" data-usage-window="week">Week<\/a><a class="ctab" data-usage-window="session"/);
+  assert.match(html, /MOST LEFT THIS WEEK/);
+});
+
+test("with no provider in the payload it says how the screen fills", () => {
+  assert.ok(loadPerfViews().usageScreen({ usages: [], errors: {} }, H, "session").includes("no provider answered"));
+});
+
+// The most-left provider is only the best of those read — an unread one may have more.
+test("the hero names a provider that went unread", () => {
+  const { usageScreen } = loadPerfViews();
+  const html = usageScreen({ usages: [usage("ollama", [lim("session", 10)])], errors: { claude: "token expired" } }, H, "session");
+  assert.ok(html.includes("claude not read"));
+  const all = usageScreen({ usages: [usage("ollama", [lim("session", 10)])] }, H, "session");
+  assert.ok(!all.includes("not read"));
+});

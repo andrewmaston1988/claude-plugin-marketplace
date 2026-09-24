@@ -1229,7 +1229,7 @@ test("token total: estate row, page tokTotal and the leaf detail panel agree for
   // The panel's headline is lifted from page.html's own template and evaluated, not
   // recomputed here: the previous version added the three figures up itself, which is true
   // by arithmetic whatever the page prints. RED when the headline drops cacheRead.
-  const headlineExpr = src.match(/<span>tokens<\/span><small>\$\{fmtTok\((.+?)\)\}<\/small>/)[1];
+  const headlineExpr = src.match(/tokens<b>\$\{fmtTok\((.+?)\)\}<\/b>/)[1];
   const billedIn = tokens.input + tokens.cacheCreation;
   const headline = new Function("t", "tk", "inp", "outp", "cc", "cr", "billedIn", "tokTotal", `return ${headlineExpr};`)(
     tokens, tokens, tokens.input, tokens.output, tokens.cacheCreation, tokens.cacheRead, billedIn, tokTotal);

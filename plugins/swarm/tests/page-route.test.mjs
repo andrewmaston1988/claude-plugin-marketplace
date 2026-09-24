@@ -318,21 +318,6 @@ test("forEach run: one rail dot per session row, none for the forEach label, and
   assert.equal(name.textContent, "chain[0] walk");
 });
 
-test("cost view: the fifth pill routes, the server's screen draws, and the foot names the config", async () => {
-  const P = loadPage({ perfViews: { costScreen: () => `<div class="cost">the cards and the list</div>` } });
-  await P.flush();
-  P.respondList(listData(listRow()));
-  await P.flush();
-  P.location.hash = "#/perf/cost";
-  P.fireHashchange();
-  await P.flush();
-  P.respondPerf(perfPayload());
-  await P.flush();
-  assert.ok(P.screenText().includes("the cards and the list"), "the perf.js widget rendered");
-  assert.equal(activeSegLabel(P.main), "cost", "the cost pill is the selected view");
-  assert.ok(P.screenText().includes("providers.ollama.cloud.ollama.costBands"), "the foot names the config key");
-});
-
 // ── the perf view switcher ────────────────────────────────────────────────
 // It lives in page.html (not perf.js), so this harness reaches it through the
 // real render path — which is also what makes the cold-load row below possible.
@@ -356,7 +341,7 @@ const gotoPerf = async (P, hash) => {
 };
 
 test("switcher: one pill per view, exactly one active, and it matches the route", async () => {
-  const cases = [["#/perf", "rank"], ["#/perf/coverage", "coverage"], ["#/perf/reliability", "reliability"], ["#/perf/leaders", "leaders"], ["#/perf/cost", "cost"]];
+  const cases = [["#/perf", "rank"], ["#/perf/coverage", "coverage"], ["#/perf/reliability", "reliability"], ["#/perf/leaders", "leaders"]];
   for (const [hash, label] of cases) {
     const P = loadPage({ perfViews: Object.fromEntries(["coverageGrid", "reliabilityBars", "leadersList", "costScreen"].map((k) => [k, () => "<div></div>"])) });
     await P.flush();
@@ -406,9 +391,9 @@ test("switcher: the indicator sits on the active pill, pills tile without overla
   assert.ok(rank.ind.h < rank.railBox.h, `the indicator is inset within the rail (${rank.ind.h} < ${rank.railBox.h}), never the full track height`);
   // The moving part: an indicator rendered at a constant x looks right on the
   // default view and wrong on every other one.
-  const cost = await geo("#/perf/cost");
-  assert.notEqual(cost.ind.x, rank.ind.x, "the indicator moves with the active view");
-  assert.deepEqual({ x: cost.ind.x, w: cost.ind.w }, { x: pill(cost, "#/perf/cost").x, w: pill(cost, "#/perf/cost").w }, "…onto the cost pill's box");
+  const leaders = await geo("#/perf/leaders");
+  assert.notEqual(leaders.ind.x, rank.ind.x, "the indicator moves with the active view");
+  assert.deepEqual({ x: leaders.ind.x, w: leaders.ind.w }, { x: pill(leaders, "#/perf/leaders").x, w: pill(leaders, "#/perf/leaders").w }, "…onto the leaders pill's box");
 });
 
 test("switcher: renders on a COLD #/perf load with window.perfViews never stubbed", async () => {
@@ -421,7 +406,7 @@ test("switcher: renders on a COLD #/perf load with window.perfViews never stubbe
   P.respondList(listData(listRow()));
   await P.flush();
   await gotoPerf(P, "#/perf");
-  assert.equal(segLabels(P.main).length, 5, "the switcher rendered without perf.js being loaded at all");
+  assert.equal(segLabels(P.main).length, 4, "the switcher rendered without perf.js being loaded at all");
   assert.equal(activeSegLabel(P.main), "rank");
 });
 

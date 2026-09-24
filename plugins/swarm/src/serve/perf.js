@@ -1,5 +1,5 @@
 // Performance-page widgets: coverage grid, reliability bars, leaders list,
-// cost screen.
+// cost screen, usage screen.
 // Loaded as a served static <script>, not bundled with page.html, so each
 // widget takes its data and the page's own helpers as parameters — no
 // closure over page.html's IIFE. window.perfViews is the whole contract.
@@ -125,67 +125,58 @@
     return tiles + costChip + aspectWidget + covWidget + relWidget;
   }
 
-  // The cost read-model as a phone screen: two verdict cards, then a ranked
-  // list. It replaced a quality×cost scatter and a log spread — two SVGs in a
-  // 342-unit viewBox that read as a sales report on a phone and were, in the
-  // operator's words, "far too cramped". The spread was already a ranking
-  // wearing a chart costume; the scatter's real payload was the frontier
-  // verdict, which every row now carries in words. Draws only: the multipliers,
-  // bands, verdicts and both card picks arrive from the server's costView().
-  function costScreen(data, h) {
+  // The cost read-model as the mockup's Cost screen (prototype.html 922–983): one
+  // provider at a time from a chip row — multipliers only compare within a provider
+  // — then a note naming that provider's unit, then a ranked card per model, or one
+  // fact card when nothing is measured. Draws only: multipliers, bands and verdicts
+  // arrive from the server's costView().
+  function costScreen(data, h, pick) {
     const { esc, enc } = h;
-    const sections = data.sections?.length ? data.sections : [{
+    const all = data.sections?.length ? data.sections : [{
       provider: null, points: data.points || [], spread: data.spread || [], best: data.best, worst: data.worst,
     }];
-    if (!sections.some((section) => section.points.length || section.spread.length)) {
+    const sections = all.filter((s) => s.points.length || s.spread.length);
+    if (!sections.length) {
       return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
     }
-    // Null-safe: `costView` only ever picks frontier participants, which always
-    // carry a multiplier — but this function is public on window.perfViews, so a
-    // caller passing an unmeasured pick must get an em dash, never a "0×" that
-    // would read as free.
+    const section = sections.find((s) => s.provider === pick) || sections[0];
+    const name = (s) => s.provider || "unqualified";
+    const tabs = `<div class="ctabs">${sections.map((s) => `<a class="ctab${s === section ? " on" : ""}" data-cost-provider="${esc(s.provider || "")}">${esc(name(s))}</a>`).join("")}</div>`;
+    const { points, spread, best, worst } = section;
+    const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
+    const unit = spread[0] || {};
+    const note = isMeter(unit)
+      ? "Meter weight — each model's multiplier against the cheapest measured one, banked week over week. A hatched bar is thin evidence: under 200 measured requests."
+      : `Published price relative to ${unit.baseModel || "the cheapest model"} — an API-equivalent estimate${unit.asOf ? `, rate card as of ${unit.asOf.slice(0, 10)}` : ""}.`;
+    const head = tabs + `<div class="cnote">${esc(note)}</div>`;
+    if (!spread.some((r) => r.mult != null)) {
+      return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
+    }
+    // Never "0×" for a missing multiplier — that would read as free.
     const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
-    const badge = (b) => b == null ? `<span class="cbadge none">—</span>` : `<span class="cbadge">${"💲".repeat(b)}</span>`;
-    // A card with no pick shows an em dash AND why — a blank reads as a broken
-    // render, and a 0× would read as free. Same rule as an unmeasured row.
-    const card = (label, pick, why, note) => {
-      // Name the rule under the pick: a threshold the reader cannot see is one
-      // they have to trust, and "why that model" is the question this card exists
-      // to answer.
-      const rule = pick && (pick.dominatedBy ? ` · beaten by ${esc(pick.dominatedBy)}` : note ? ` · ${esc(note)}` : "");
-      const detail = pick
-        ? `${esc(fmtMult(pick.multiplier))} · wtd ${pick.wtd == null ? "—" : pick.wtd.toFixed(1)}${rule}`
-        : why;
-      return `<div><label>${esc(label)}</label><span>${pick ? esc(pick.model) : "—"}</span><small>${detail}</small></div>`;
-    };
-    // Log-scaled over the same 0.5×–20× domain the deleted plots used:
-    // multipliers span decades, so a linear bar makes every cheap model a stub
-    // and hides the 1×-vs-2× difference that actually decides a seat.
+    // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
+    // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
     const LO = Math.log10(0.5), HI = Math.log10(20);
     const pct = (m) => Math.max(2, Math.min(100, ((Math.log10(m) - LO) / (HI - LO)) * 100));
-    const renderSection = (section) => {
-      const { points, spread, best, worst } = section;
-      const provider = section.provider || "unqualified";
-      const cards = `<div class="kv dash4 costcards">${card("best value", best, "nothing priced and graded yet", data.valueMargin == null ? "" : `within ${data.valueMargin} of the best`)}${card("worst value", worst, "nothing is beaten on both axes")}</div>`;
-      const ptOf = new Map(points.map((p) => [p.model, p]));
-      const firstUnm = spread.findIndex((r) => r.mult == null);
-      const rows = spread.map((r, i) => {
-        const p = ptOf.get(r.model);
-        const verdict = r.mult == null ? "unmeasured"
-          : p && p.onFrontier ? "best value"
-          : p && p.dominatedBy ? `beaten by ${esc(p.dominatedBy)}`
-          : "cost only";
-        const tip = `${esc(r.model)} · ${r.mult == null ? "unmeasured" : esc(fmtMult(r.mult))} · ${r.measuredRequests} measured of ${r.requests} requests · ${r.measuredWeeks} of ${r.weeks} weeks${r.thin ? " · thin" : ""}`;
-        const bar = r.mult == null ? `<div class="bar"></div>`
-          : `<div class="bar${r.thin ? " prov" : ""}"><span style="width:${pct(r.mult).toFixed(1)}%"></span></div>`;
-        return `<div class="arow costrow${i === firstUnm && firstUnm > 0 ? " unmfirst" : ""}${r.mult == null ? " unm" : ""}" data-href="#/perf/model/${enc(r.model)}" title="${tip}">`
-          + `<span class="alabel">${esc(r.model)}</span>${bar}`
-          + `<span class="aval valside">${badge(r.band)}${r.mult == null ? "—" : esc(fmtMult(r.mult))}</span>`
-          + `<small class="costverdict">${verdict}</small></div>`;
-      }).join("");
-      return `<div class="section"><span>${esc(provider)} cost</span><span class="line"></span></div>${cards}<div class="section"><span>cost ranking</span><span class="line"></span></div><div class="cost">${rows}</div>`;
+    const ptOf = new Map(points.map((p) => [p.model, p]));
+    const verdict = (r) => {
+      const p = ptOf.get(r.model);
+      if (best && best.model === r.model) return `best value${data.valueMargin == null ? "" : ` · within ${data.valueMargin} of the best`}`;
+      if (p && p.dominatedBy) return `beaten by ${esc(p.dominatedBy)}`;
+      if (p && p.onFrontier) return "on the frontier";
+      return "not graded — cost only";
     };
-    return sections.map(renderSection).join("");
+    let rank = 0;
+    const cards = spread.map((r) => {
+      const top = (rk, val) => `<div class="top"><span class="who"><span class="rk">${rk}</span><span class="nm">${esc(r.model)}</span></span><span class="val">${val}</span></div>`;
+      const href = `data-href="#/perf/model/${enc(r.model)}"`;
+      if (r.mult == null) return `<div class="card crow unm" ${href}>${top("·", "—")}<div class="sub">unmeasured — no price or banked history</div></div>`;
+      const evidence = [verdict(r), r.thin ? "thin evidence" : null, isMeter(r) && r.measuredRequests != null ? `${r.measuredRequests} measured requests` : null].filter(Boolean).join(" · ");
+      return `<div class="card crow" ${href}>${top(++rank, esc(fmtMult(r.mult)))}`
+        + `<div class="cbar${r.thin ? " thin" : ""}"><span style="width:${pct(r.mult).toFixed(1)}%"></span></div>`
+        + `<div class="sub">${evidence}</div></div>`;
+    }).join("");
+    return head + cards;
   }
 
   // The chip's inner text, kept out of the dashboard template: a band badge
@@ -197,5 +188,75 @@
     return `<span class="cbadge">${"💲".repeat(cost.band)}</span> ${fmtMult(cost.multiplier)} · ${verdict}${cost.thin ? " · thin evidence" : ""}`;
   }
 
-  window.perfViews = { coverageGrid, reliabilityBars, leadersList, modelDashboard, costScreen };
+  // The Usage screen (mockup 403–484): a Session/Week switch, a hero naming the
+  // provider with the least headroom, then a card per provider. A limit's percent
+  // is USED; every figure drawn is what is LEFT.
+  function usageScreen(data, h, w) {
+    const { esc } = h;
+    const LOW = 20, WARN = LOW * 2;
+    const week = w !== "session";
+    // Anthropic reports weekly_all/weekly_scoped; codex's primary/secondary match neither, by design.
+    const fits = (k) => (week ? k === "weekly" || k.startsWith("weekly_") : k === "session");
+    // Several buckets of one window: the most-consumed is the one that stops work.
+    const limitOf = (u) => (u.limits || []).filter((l) => fits(l.kind || "")).sort((a, b) => b.percent - a.percent)[0] || null;
+    const tone = (n) => (n <= LOW ? "bad" : n <= WARN ? "warn" : "ok");
+    const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const pad = (n) => String(n).padStart(2, "0");
+    const resets = (iso) => {
+      const d = new Date(iso);
+      if (Number.isNaN(+d)) return null;
+      const day = +d - Date.now() < 6 * 86_400_000 ? DAYS[d.getDay()] : `${d.getDate()}/${d.getMonth() + 1}`;
+      return `resets ${day} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    // The roster is what the read named — answered or failed — alphabetical; the hero ranks.
+    const seen = new Set();
+    const rows = [];
+    for (const u of data.usages || []) if (!seen.has(u.provider)) { seen.add(u.provider); rows.push({ provider: u.provider, usage: u }); }
+    for (const [provider, error] of Object.entries(data.errors || {})) if (!seen.has(provider)) { seen.add(provider); rows.push({ provider, error }); }
+    rows.sort((a, b) => a.provider.localeCompare(b.provider));
+    const reading = (p) => {
+      // Exhausted is dead in every window: 0% left. The note is when it is back — the LAST
+      // spent limit to reset; red 0% already says it ran out.
+      if (p.usage?.state === "exhausted") {
+        const back = (p.usage.limits || []).filter((l) => l.percent >= 100 && l.resetsAt).map((l) => l.resetsAt).sort().pop();
+        return { left: 0, note: back ? resets(back) : "" };
+      }
+      const l = p.usage && limitOf(p.usage);
+      if (!l) return null;
+      const left = Math.max(0, Math.min(100, Math.round(100 - l.percent)));
+      return { left, note: l.resetsAt ? resets(l.resetsAt) : "" };
+    };
+    // No figure is not a zero: the card stays, dim, saying why.
+    const whyNot = (p) => {
+      if (p.error) return p.error;
+      const kinds = [...new Set((p.usage.limits || []).map((l) => l.kind).filter(Boolean))];
+      return p.usage.reason || (kinds.length ? `reports ${kinds.join(", ")} — no ${week ? "weekly" : "session"} window` : "no reading");
+    };
+    const bar = (n) => `<div class="ubar"><span class="${tone(n)}" style="width:${n}%"></span></div>`;
+    const tabs = `<div class="ctabs">${["week", "session"].map((k) =>
+      `<a class="ctab${(week ? "week" : "session") === k ? " on" : ""}" data-usage-window="${k}">${k === "week" ? "Week" : "Session"}</a>`).join("")}</div>`;
+    if (!rows.length) return tabs + `<div class="empty">no provider answered — run swarm usage to read them once.</div>`;
+    // The hero is where the next run goes: the provider with the most left.
+    const best = rows.map((p) => ({ p, r: reading(p) })).filter((x) => x.r)
+      .reduce((a, b) => (a && a.r.left >= b.r.left ? a : b), null);
+    // "Every provider" is only true when every provider was read.
+    const unread = rows.filter((p) => !reading(p)).map((p) => p.provider);
+    const heroNote = (n) => (n <= LOW ? "Every provider is low — throttle before the next big run."
+      : n <= WARN ? "Enough for a medium run, not a full swarm."
+        : unread.length ? `Room for a full swarm — ${unread.join(", ")} not read.` : "Room for a full swarm.");
+    const hero = best
+      ? `<div class="uhero ${tone(best.r.left)}"><div class="lbl">MOST LEFT THIS ${week ? "WEEK" : "SESSION"} · ${esc(best.p.provider.toUpperCase())}</div>`
+        + `<div class="fig"><b>${best.r.left}%</b><span>left</span></div>${bar(best.r.left)}<div class="sub">${esc(heroNote(best.r.left))}</div></div>`
+      : "";
+    const cards = rows.map((p) => {
+      const r = reading(p);
+      const nm = `<span class="nm">${esc(p.provider)}</span>`;
+      if (!r) return `<div class="card upc unread"><div class="top">${nm}</div><div class="sub">${esc(`not read — ${whyNot(p)}`)}</div></div>`;
+      return `<div class="card upc ${tone(r.left)}"><div class="top">${nm}<span class="val ${tone(r.left)}">${r.left}%</span></div>${bar(r.left)}`
+        + (r.note ? `<div class="sub">${esc(r.note)}</div>` : "") + "</div>";
+    }).join("");
+    return tabs + hero + `<div class="section"><span>providers</span><span class="line"></span></div>` + cards;
+  }
+
+  window.perfViews = { coverageGrid, reliabilityBars, leadersList, modelDashboard, costScreen, usageScreen };
 })();

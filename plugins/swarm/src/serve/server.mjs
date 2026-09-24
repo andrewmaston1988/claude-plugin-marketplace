@@ -136,7 +136,7 @@ const MANIFEST = {
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000 }) {
+export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
@@ -347,6 +347,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const i = ranked.findIndex((c) => c.model === model);
     return i < 0 ? null : { position: i + 1, of: ranked.length };
   };
+  const costOf = (rows, domain) => {
+    const ollama = providerConfig(cfg, "ollama");
+    return costView(rows, costRows(), { domain, bands: resolveBands(ollama?.cloud?.ollama?.costBands), valueMargin: ollama?.cloud?.ollama?.valueMargin });
+  };
   const perf = (res, url) => {
     const q = (k) => url.searchParams.get(k) || undefined;
     const aspect = q("aspect"), model = q("model"), domain = q("domain");
@@ -356,9 +360,6 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const live = dedupe(rows);
     const domains = [...new Set(live.map((r) => r.domain).filter(Boolean))].sort();
     const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
-    const ollama = providerConfig(cfg, "ollama");
-    const bands = resolveBands(ollama?.cloud?.ollama?.costBands);
-    const valueMargin = ollama?.cloud?.ollama?.valueMargin;
     send(res, 200, {
       grading, path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
       aspects: ASPECTS, universals: UNIVERSAL, domains,
@@ -369,7 +370,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       report: report.aspects,
       views: {
         coverage: coverage(report), reliability: reliability(live), leaders: leaders(report),
-        cost: costView(rows, costRows(), { domain, bands, valueMargin }),
+        cost: costOf(rows, domain),
       },
     });
   };
@@ -410,6 +411,13 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       return send(res, 200, readFileSync(LIVE_JS, "utf8"), "text/javascript; charset=utf-8");
     }
     if (p === "/api/perf") return perf(res, url);
+    // Grading-independent: prices exist without grades, so only the value verdicts need the store.
+    if (p === "/api/cost") return send(res, 200, costOf(grading ? scoreRows() : []));
+    // A live read of every provider: swarm.mjs injects it, since importing swarm.mjs here deadlocks on its top-level await.
+    if (p === "/api/usage") {
+      if (!_readProviderUsage) throw new Error("no _readProviderUsage seam wired");
+      return send(res, 200, await _readProviderUsage(cfg, { live: true }));
+    }
     if (routes[p]) return await routes[p](res, url);
 
     // A trailing slash is what the URL parser leaves behind after collapsing an
@@ -429,6 +437,13 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       // estate scan here ran on every run/node/leaf fetch including the 5 s poll.
       const { groupOf, labelOf } = projectGrouping(_projectKeys(home));
       return send(res, 200, { ...run, groupLabel: labelOf(groupOf(run.project)) });
+    }
+    // Already HTML — served as written, never through mdToHtml. 20 runs on disk
+    // carry one and nothing could reach them before this route existed.
+    if (seg.length === 3 && seg[2] === "report") {
+      const file = join(dir, "report.html");
+      if (!existsSync(file)) return notFound(res);
+      return send(res, 200, readFileSync(file, "utf8"), "text/html; charset=utf-8");
     }
     if (seg.length === 3 && seg[2] === "digest") {
       const md = ["report.md", "digest.md"].map((f) => join(dir, f)).find(existsSync);
