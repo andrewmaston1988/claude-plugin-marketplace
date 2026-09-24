@@ -137,12 +137,11 @@
   /* coverage grid: one responsive SVG, labels inside it, scaled to the screen */
   .cov { padding:0 12px 16px; }
   .cov svg.covgrid { width:100%; height:auto; display:block; }
-  /* cost screen (mockup 922–983): provider chips, a unit note, then ranked cards —
+  /* cost screen (mockup 922–983): one provider per page, a value hero, then ranked cards —
      a hatched bar is thin evidence, an unmeasured card draws no bar at all */
   .ctabs { display:flex; gap:6px; flex-wrap:wrap; margin:14px 16px 0; }
   .ctab { height:30px; padding:0 12px; border-radius:15px; display:flex; align-items:center; font-size:12px; font-weight:600; background:var(--surface-2); color:var(--muted); cursor:pointer; }
   .ctab.on { background:var(--accent); color:#fff; }
-  .cnote { margin:14px 16px 4px; font-size:12px; line-height:1.5; color:var(--muted); }
   .card.crow { margin-top:10px; padding:13px 14px; cursor:pointer; }
   .crow .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
   .crow .who { display:flex; align-items:center; gap:8px; min-width:0; }
@@ -177,7 +176,8 @@
   /* cost hero: one row per provider — its best-value model, weighted score · multiplier */
   .card.chero { cursor:pointer; } .card.chero.none { cursor:default; }
   .card.chero { background:var(--accent-soft); padding:16px; }
-  .chero .fig { margin-top:12px; font-size:22px; font-weight:700; letter-spacing:-.02em; overflow-wrap:anywhere; }
+  .chero .fig, .chero .claim { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .chero .fig { margin-top:12px; font-size:22px; font-weight:700; letter-spacing:-.02em; }
   .chero .claim { margin-top:6px; font-size:12.5px; color:var(--muted); }
   .chero .vbar { margin-top:12px; display:flex; align-items:center; gap:10px; }
   .chero .vbar .k { flex:none; width:40px; font-size:11px; color:var(--muted); }

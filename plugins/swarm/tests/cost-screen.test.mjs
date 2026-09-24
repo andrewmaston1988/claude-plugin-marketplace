@@ -1,6 +1,6 @@
 // The Cost screen's renderer, run for real through perf.js (see the harness).
-// Mockup 922–983: one provider at a time from a chip row, a note naming that
-// provider's unit, then a ranked card per model — or one fact card, never both.
+// Mockup 922–983: one provider per page, its value hero,
+// then a ranked card per model — or one fact card, never both.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
@@ -71,14 +71,6 @@ test("the best-value card names the margin it used", () => {
   assert.ok(html.includes("within 0.5 of the best"), "a threshold the reader cannot see is one they must trust");
 });
 
-test("the note names the provider's unit: meter weight, or a published price against its base", () => {
-  const { costScreen } = loadPerfViews();
-  const meter = costScreen({ sections: [section("ollama", [srow("glm", 1, { unit: "meter-points" })])] }, H);
-  assert.ok(meter.includes("Meter weight"));
-  const card = costScreen({ sections: [section("claude", [srow("haiku", 0.5, { unit: "published-price-relative", baseModel: "claude-sonnet-5", asOf: "2026-09-21T00:00:00.000Z" })])] }, H);
-  assert.ok(card.includes("Published price relative to claude-sonnet-5") && card.includes("2026-09-21"));
-});
-
 test("a provider with nothing measured draws one fact card, never a list of dashes", () => {
   const { costScreen } = loadPerfViews();
   const html = costScreen({ sections: [section("codex", [srow("x", null, { band: null }), srow("y", null, { band: null })])] }, H);
@@ -92,7 +84,7 @@ test("with no cost history anywhere it says how the history starts", () => {
   assert.ok(costScreen({ sections: [] }, H).includes("no cost history yet"));
 });
 
-const heroOf = (html) => html.match(/<div class="card chero[\s\S]*?(?=<div class="cnote">)/)?.[0] || "";
+const heroOf = (html) => html.match(/<div class="card chero[\s\S]*?(?=<div class="card c|$)/)?.[0] || "";
 
 test("the hero is the picked provider's best value alone: model, and score and cost bars against its own ceilings", () => {
   const { costScreen } = loadPerfViews();

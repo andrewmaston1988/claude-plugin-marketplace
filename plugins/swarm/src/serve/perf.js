@@ -126,8 +126,8 @@
   }
 
   // The cost read-model as the mockup's Cost screen (prototype.html 922–983): one
-  // provider at a time from a chip row — multipliers only compare within a provider
-  // — then a note naming that provider's unit, then a ranked card per model, or one
+  // provider per page from the slide control — multipliers only compare within a
+  // provider — then its value hero, then a ranked card per model, or one
   // fact card when nothing is measured. Draws only: multipliers, bands and verdicts
   // arrive from the server's costView().
   function costScreen(data, h, pick) {
@@ -168,11 +168,7 @@
     const tabs = switcher + hero;
     const { points, spread, best } = section;
     const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
-    const unit = spread[0] || {};
-    const note = isMeter(unit)
-      ? "Meter weight — each model's multiplier against the cheapest measured one, banked week over week. A hatched bar is thin evidence: under 200 measured requests."
-      : `Published price relative to ${unit.baseModel || "the cheapest model"} — an API-equivalent estimate${unit.asOf ? `, rate card as of ${unit.asOf.slice(0, 10)}` : ""}.`;
-    const head = tabs + `<div class="cnote">${esc(note)}</div>`;
+    const head = tabs;
     if (!spread.some((r) => r.mult != null)) {
       return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
     }
