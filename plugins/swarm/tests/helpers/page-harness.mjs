@@ -139,7 +139,8 @@ export function loadPage(opts = {}) {
 
   const location = { hash: "", search: "", origin: "http://localhost" };
   const winListeners = {};
-  const window = { addEventListener: (t, f) => { (winListeners[t] ||= []).push(f); } };
+  const scrolls = [];
+  const window = { addEventListener: (t, f) => { (winListeners[t] ||= []).push(f); }, scrollTo: (x, y) => scrolls.push([x, y]) };
   let esListeners = {};
   const esInstances = [];
   const fetchLog = [];
@@ -214,7 +215,7 @@ export function loadPage(opts = {}) {
   const isLeaf = (u) => /^\/api\/runs\/[^/]+\/[^/]+\/leaves\//.test(u);
 
   return {
-    location, hdr, main, nav, perfTab: chrome["#nav a[href='#/perf']"], flush,
+    location, hdr, main, nav, perfTab: chrome["#nav a[href='#/perf']"], flush, scrolls,
     fireHashchange: () => winListeners.hashchange.forEach((f) => f()),
     fireSse: (t, d) => (esListeners[t] || []).forEach((f) => f({ data: d || "{}" })),
     esCount: () => esInstances.length,

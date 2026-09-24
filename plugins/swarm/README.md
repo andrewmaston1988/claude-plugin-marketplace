@@ -488,9 +488,10 @@ one cheap fluke leaf outrank a well-evidenced model.
 **Best value is a threshold, never a ratio.** The card names the *cheapest* model still
 worth seating: on the frontier, within `valueMargin` (default `0.5`) of the best frontier
 quality, and not thin — the margin used is printed, so the pick is judgeable. Cost bands
-(`providers.ollama.cloud.ollama.costBands`, default `[2, 5]`) render `💲`/`💲💲`/`💲💲💲` on the
-dashboard and model detail views; unmeasured renders `—`, never a blank that would read as
-dominated. Badges never appear on leaf/run rows (the terminal keeps plain `$`/`$$`/`$$$`).
+(`providers.ollama.cloud.ollama.costBands`, default `[2, 5]`) render `$`/`$$`/`$$$` in the terminal. The
+dashboard and model detail views draw one to five coins instead, tinted per provider and scaled
+within that provider's own measured range (cheapest 1, dearest 5, log-spaced); unmeasured renders `—`, never a blank that would read as
+dominated. Badges never appear on leaf/run rows (the terminal keeps its plain `$` bands).
 
 ## Dashboard
 

@@ -75,8 +75,8 @@
     return `${legend}<div style="height:8px"></div><ul class="rank">${rows}</ul>`;
   }
 
-  // Top-k per aspect, in the report's own weighted order. Provisional entries
-  // reuse the page's existing dashed-bar treatment (page.html's .rank .bar.prov).
+  // Top-k per aspect, in the report's own weighted order, as the Rank screen's podium
+  // cards; a provisional entry takes the dashed bar (page.html's .crow .cbar.thin).
   function leadersList(data, h) {
     const { esc, enc, fmtScore } = h;
     if (!data.length) return `<div class="empty">no graded leaves yet.</div>`;
@@ -84,35 +84,46 @@
       if (!a.top.length) {
         return `<div class="section dim"><span>${esc(a.aspect)}</span><span class="line"></span></div><div class="empty">n=0 — nothing graded on ${esc(a.aspect)} yet.</div>`;
       }
-      const rows = a.top.map((t, i) => `<li class="row tap p${i + 1}${i === 0 ? " lead" : ""}" data-key="${esc(a.aspect + ":" + t.model)}" data-href="#/perf/model/${enc(t.model)}"><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${esc(t.model)}</span><span class="val">${fmtScore(t.weighted)}</span></div><div class="meta">n=${t.n}${t.provisional ? ` · <span class="tag">provisional n&lt;5</span>` : ""}</div><div class="bar${t.provisional ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, ((t.weighted ?? 0) / 10) * 100))}%"></span></div></div></li>`).join("");
-      return `<div class="section"><span>${esc(a.aspect)}</span><span class="line"></span></div><ul class="rank">${rows}</ul>`;
+      const rows = a.top.map((t, i) => `<div class="card crow p${i + 1}" data-key="${esc(a.aspect + ":" + t.model)}" data-href="#/perf/model/${enc(t.model)}">`
+        + `<div class="top"><span class="who">${h.rankBadge(i + 1, i + 1)}<span class="nm">${esc(t.model)}</span></span><span class="val">${fmtScore(t.weighted)}</span></div>`
+        + `<div class="cbar${t.provisional ? " thin" : ""}"><span style="width:${Math.max(0, Math.min(100, ((t.weighted ?? 0) / 10) * 100))}%"></span></div>`
+        + `<div class="sub">n=${t.n}${t.provisional ? ` · <span class="tag">provisional n&lt;5</span>` : ""}</div></div>`).join("");
+      return `<div class="section"><span>${esc(a.aspect)}</span><span class="line"></span></div><div class="rlist${h.compact ? " compact" : ""}">${rows}</div>`;
     }).join("");
   }
 
-  // One model's page as a dashboard: stat tiles, its cost chip, compressed
+  // One model's page as a dashboard: a hero card (graded, completed, overall, its cost coins, trophy or #n), compressed
   // aspect bars (with the domain picker in the widget header), its coverage
   // row, its reliability bar.
   function modelDashboard(data, h) {
     const { esc, enc, fmtScore } = h;
     const { model, overall, rank, aspects, coverage, reliability, domainSelect, domain, cost } = data;
-    const medal = rank ? (["🏆", "🥈", "🥉"][rank.position - 1] || `#${rank.position}`) : "—";
+    const place = rank && rank.position <= 3 ? rank.position : 0;
     const rel = reliability[0];
     const total = rel ? rel.total : 0;
     const done = rel ? (rel.byOutcome.completed || 0) : 0;
-    const tiles = `<div class="kv dash4">
-      <div><label>overall</label><span>${fmtScore(overall ? overall.combined : null)} <small>${esc(medal)}${rank ? ` of ${rank.of}` : ""}</small></span></div>
-      <div><label>graded leaves</label><span>${total}</span></div>
-      <div><label>completed</label><span>${total ? Math.round((done / total) * 100) + "%" : "—"}</span></div>
-      <div><label>domain</label><span>${esc(domain || "all")}</span></div>
+    // Cost is the model's coins within its provider plus one verdict chip — a bare
+    // multiplier means nothing without its neighbours, so that stays on the Cost screen.
+    const verdict = cost?.value === "best" ? ["best value", "good"] : cost?.value === "worst" ? ["worst value", "bad"] : cost?.onFrontier ? ["frontier", "front"] : null;
+    // The bottom row is chips: the provider(s) first, in brand colour, then the value verdict.
+    const providers = cost?.provider ? [cost.provider] : overall?.providers || [];
+    const chips = providers.map((p) => `<span class="pchip ${esc(p)}">${esc(p)}</span>`).join("") + (verdict ? `<span class="vchip ${verdict[1]}">${verdict[0]}</span>` : "");
+    // Below the podium the position reads RAG: 4th green, amber midway, last red.
+    const rag = (pos, of) => {
+      const t = of > 4 ? Math.max(0, Math.min(1, (pos - 4) / (of - 4))) : 0;
+      return t <= 0.5
+        ? `color-mix(in oklab, var(--warn) ${Math.round(t * 200)}%, var(--ok))`
+        : `color-mix(in oklab, var(--bad) ${Math.round((t - 0.5) * 200)}%, var(--warn))`;
+    };
+    const hero = `<div class="card mhero${place ? ` p${place}` : rank ? ` rag" style="--rag:${rag(rank.position, rank.of)}` : ""}">
+      <div class="stats"><div class="figs">
+        <div><label>graded</label><b>${total}</b></div>
+        <div><label>completed</label><b>${total ? Math.round((done / total) * 100) + "%" : "—"}</b></div>
+        <div><label>overall</label><b>${fmtScore(overall ? overall.combined : null)}</b></div>
+        <div class="cost">${cost == null ? "" : h.badge(cost, 0.25)}</div>
+      </div>${chips ? `<div class="chipsl">${chips}</div>` : ""}</div>
+      <div class="show">${place ? h.trophy(place) : rank ? `<span class="no">${rank.position}</span>` : ""}</div>
     </div>`;
-    // This is one of the two places a cost badge may appear (the perf rank
-    // lists are the other). Unmeasured reads as an em dash, never blank.
-    // Null-safe: `costView` only ever picks frontier participants, which always
-    // carry a multiplier — but this function is public on window.perfViews, so a
-    // caller passing an unmeasured pick must get an em dash, never a "0×" that
-    // would read as free.
-    const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
-    const costChip = cost == null ? "" : `<div class="chips" style="padding-bottom:0"><span class="chip">${costChipInner(cost, esc, fmtMult)}</span></div>`;
     const rows = aspects.map((a) => {
       const c = a.cell;
       const w = c && c.weighted != null ? Math.max(0, Math.min(100, (c.weighted / 10) * 100)) : 0;
@@ -122,7 +133,7 @@
     const aspectWidget = `<div class="section"><span>aspects</span><span class="line"></span>${domainSelect ? `<span class="secsel">${domainSelect}</span>` : ""}</div><div class="aspects">${rows}</div>`;
     const covWidget = `<div class="section"><span>coverage</span><span class="line"></span></div>${coverageGrid(coverage, h)}`;
     const relWidget = `<div class="section"><span>reliability</span><span class="line"></span></div>${reliabilityBars(reliability, h)}`;
-    return tiles + costChip + aspectWidget + covWidget + relWidget;
+    return hero + aspectWidget + covWidget + relWidget;
   }
 
   // The cost read-model as the mockup's Cost screen (prototype.html 922–983): one
@@ -191,15 +202,6 @@
         + `<div class="sub">${evidence}</div></div>`;
     }).join("");
     return head + cards;
-  }
-
-  // The chip's inner text, kept out of the dashboard template: a band badge
-  // plus the frontier verdict (or the honest "uncompared" for a priced model
-  // with no grades).
-  function costChipInner(cost, esc, fmtMult) {
-    if (cost.band == null) return `<span class="cbadge none">—</span> cost — not yet measured`;
-    const verdict = cost.onFrontier ? "on the frontier" : cost.dominatedBy ? `dominated by ${esc(cost.dominatedBy)}` : "not graded — cost only";
-    return `<span class="cbadge">${"💲".repeat(cost.band)}</span> ${fmtMult(cost.multiplier)} · ${verdict}${cost.thin ? " · thin evidence" : ""}`;
   }
 
   // The Usage screen (mockup 403–484): a Session/Week switch, a hero naming the

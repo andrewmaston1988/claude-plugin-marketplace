@@ -488,6 +488,18 @@ export function band(mult, bands = DEFAULT_COST_BANDS) {
   return 3;
 }
 
+// Dashboard coins: 1–5 across ONE provider's own measured range (cheapest 1,
+// dearest 5), spaced on a log scale because multipliers span orders of magnitude.
+// Providers never share an axis, so a mid-priced Claude model is not squashed by
+// a 273× Ollama outlier. A provider with a single price reads 1. Unmeasured is null.
+export const MAX_COINS = 5;
+export function coins(mult, range) {
+  if (!range || mult == null || !Number.isFinite(mult) || mult <= 0) return null;
+  if (range.hi <= range.lo) return 1;
+  const t = Math.log(mult / range.lo) / Math.log(range.hi / range.lo);
+  return 1 + Math.round(Math.max(0, Math.min(1, t)) * (MAX_COINS - 1));
+}
+
 // The band boundaries are arbitrary numbers, so they are config
 // (`providers.ollama.cloud.ollama.costBands`), not constants. Anything malformed falls
 // back to the default rather than inventing an edge out of a string.

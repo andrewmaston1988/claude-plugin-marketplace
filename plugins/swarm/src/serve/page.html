@@ -14,6 +14,7 @@
 <style>
   :root {
     --ground:#101219; --surface:#181b24; --surface-2:#1e222d; --ink:#e7e9f1; --muted:#9aa0b1; --faint:#6b7181; --rule:#2b3040;
+    --gold:#e3b341; --silver:#b9c0cc; --bronze:#c98a5b;
     --accent:#8e7ff2; --accent-soft:#241f3d; --ok:#4fc98a; --ok-bg:#123324; --warn:#e0aa4e; --warn-bg:#33280f; --bad:#e8776a; --bad-bg:#341916;
     --mono:"SF Mono","Cascadia Code","JetBrains Mono",Consolas,ui-monospace,monospace;
     --rail:56px;
@@ -112,12 +113,32 @@
   .seg-label { position:relative; display:flex; align-items:center; justify-content:center; min-width:0; padding:0 6px; font-size:13px; color:var(--muted); cursor:pointer; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .seg-label.on { color:var(--ink); }
   /* aspect + domain pickers: the lists are too long for pills on a phone */
-  .selrow { display:flex; gap:8px; padding:8px 16px 0; }
+  .selrow { display:flex; align-items:center; gap:8px; padding:10px 16px 0; }
   /* model dashboard: four stat tiles, compressed aspect bars, widget headers that can hold a picker */
-  .kv.dash4 { grid-template-columns:repeat(2, minmax(0,1fr)); }
-  .kv.dash4 span small { font-size:12px; color:var(--muted); }
+    /* model hero: its standing as the showpiece — the trophy on the podium, the big #n below it */
+  .card.mhero { display:flex; align-items:stretch; gap:14px; padding:18px; background:var(--accent-soft); }
+  /* figures pinned to the top, coins to the bottom, the disc centred between */
+  .mhero .stats { flex:1; min-width:0; display:flex; flex-direction:column; justify-content:space-between; }
+  .mhero .figs { display:grid; grid-template-columns:repeat(2, minmax(0,1fr)); gap:10px; }
+  /* the coin stack fills its cell to the height of a label plus its figure, grounded at the bottom */
+  .mhero .figs .cost { display:flex; align-items:flex-end; }
+  .mhero .figs label { display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
+  .mhero .figs b { display:block; margin-top:4px; font-size:24px; font-variant-numeric:tabular-nums; letter-spacing:-.02em; white-space:nowrap; }
+  .mhero .figs small { font-size:12px; font-weight:400; color:var(--muted); letter-spacing:0; }
+  .mhero .chipsl { margin-top:14px; display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  /* the standing sits in a disc: trophy on the podium, the bare position below it */
+  .mhero .show { flex:none; align-self:center; width:112px; height:112px; border-radius:50%; box-sizing:border-box; display:flex; align-items:center; justify-content:center; background:var(--surface-2); border:2px solid var(--rule); }
+  .mhero.p1 .show { border-color:var(--gold); background:color-mix(in srgb, var(--gold) 12%, var(--surface)); }
+  .mhero.p2 .show { border-color:var(--silver); background:color-mix(in srgb, var(--silver) 12%, var(--surface)); }
+  .mhero.p3 .show { border-color:var(--bronze); background:color-mix(in srgb, var(--bronze) 12%, var(--surface)); }
+  .mhero .show svg { height:88px; width:auto; display:block; }
+  /* optically centred: no trailing letter-spacing, the line box trimmed to the digits (cap height to baseline) */
+  .mhero .show .no { font-size:44px; font-weight:800; line-height:1; letter-spacing:0; text-box:trim-both cap alphabetic; color:var(--ink); font-variant-numeric:tabular-nums; }
+  /* below the podium the card and disc wear a RAG wash in place of a medal */
+  .mhero.rag { border-color:color-mix(in srgb, var(--rag) 50%, var(--rule)); background:color-mix(in srgb, var(--rag) 8%, var(--surface)); }
+  .mhero.rag .show { border-color:var(--rag); background:color-mix(in srgb, var(--rag) 18%, var(--surface)); }
   .section .secsel { margin-left:auto; text-transform:none; letter-spacing:0; }
-  .section .secsel .sel { padding:4px 8px; font-size:11px; }
+  .section .secsel .sel { height:auto; padding:4px 24px 4px 8px; font-size:11px; background-position:right 8px center; }
   .aspects { padding:4px 16px 12px; display:flex; flex-direction:column; gap:8px; }
   .arow { display:grid; grid-template-columns:96px 1fr 64px; align-items:center; gap:8px; min-height:22px; cursor:pointer; }
   .arow .alabel { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -127,7 +148,8 @@
   .arow .aval { font-size:12px; text-align:right; white-space:nowrap; }
   .arow .aval small { color:var(--faint); }
   .arow.none .aval { color:var(--faint); }
-  .sel { flex:1; min-width:0; font:inherit; font-size:12px; color:var(--ink); background:var(--surface-2); border:1px solid var(--rule); border-radius:8px; padding:8px 12px; }
+  /* 36px = the slide control's pill height, so the two rows line up; own chevron, not the platform's */
+  .sel { flex:1; min-width:0; height:36px; box-sizing:border-box; font:inherit; font-size:12px; color:var(--ink); background:var(--surface-2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%239aa0b1' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 12px center; border:1px solid var(--rule); border-radius:10px; padding:0 30px 0 12px; appearance:none; -webkit-appearance:none; }
   .chip { display:inline-flex; align-items:center; gap:8px; font-size:12px; color:var(--muted); background:var(--surface-2); border-radius:999px; padding:8px 12px; }
   .chip.run { color:var(--accent); background:var(--accent-soft); }
   .chip.ok { color:var(--ok); background:var(--ok-bg); }
@@ -150,6 +172,18 @@
   .crow .cbar.thin span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
   .crow .sub, .cfact .sub { margin-top:9px; font-size:11.5px; line-height:1.4; color:var(--faint); }
   .crow.unm .nm, .crow.unm .val { color:var(--faint); }
+  .crow .val.none { color:var(--faint); font-weight:400; }
+  .chk { flex:none; display:flex; align-items:center; gap:6px; font-size:12px; color:var(--muted); cursor:pointer; }
+  .chk input { margin:0; accent-color:var(--accent); }
+  .rlist.compact .crow { margin-top:6px; padding:9px 12px; } .rlist.compact .crow:first-child { margin-top:10px; }
+  .rlist.compact .cbar, .rlist.compact .sub { display:none; }
+  .rlist.compact .val { font-size:15px; }
+  /* rank: the podium wears its medal on the badge, the card edge and a faint wash */
+  .crow .rk.trophy { width:auto; height:auto; background:none; border-radius:0; }
+  .rk.trophy svg { height:38px; width:auto; display:block; } .rlist.compact .rk.trophy svg { height:26px; }
+  .crow.p1, .mhero.p1 { border-color:color-mix(in srgb, var(--gold) 55%, var(--rule)); background:color-mix(in srgb, var(--gold) 7%, var(--surface)); }
+  .crow.p2, .mhero.p2 { border-color:color-mix(in srgb, var(--silver) 45%, var(--rule)); background:color-mix(in srgb, var(--silver) 7%, var(--surface)); }
+  .crow.p3, .mhero.p3 { border-color:color-mix(in srgb, var(--bronze) 45%, var(--rule)); background:color-mix(in srgb, var(--bronze) 7%, var(--surface)); }
   .card.cfact { padding:18px 16px; }
   .card.rcard { margin-top:10px; cursor:pointer; } .card.rcard.bad { border-color:var(--bad-bg); } .card.rcard.warn { border-color:var(--warn-bg); }
   .rcard .rh { display:flex; align-items:center; gap:8px; }
@@ -194,15 +228,20 @@
   .ubar span { display:block; height:100%; border-radius:3px; background:var(--accent); }
   .ubar span.warn { background:var(--warn); } .ubar span.bad { background:var(--bad); }
   /* the cost badge rides the rank row's value side, never the name */
-  .valside { display:flex; align-items:center; gap:4px; }
+  .valside { display:flex; align-items:baseline; gap:4px; }
   .cbadge { font-size:11px; flex:none; }
   .cbadge.none { color:var(--faint); }
-  /* leaders: podium marks after the name — trophy, silver, bronze; the winner's row is lifted */
-  .rank .row.lead { background:var(--surface-2); }
-  .rank .row.lead .name { color:var(--ink); font-weight:600; }
-  .rank .row.p1 .name::after { content:" 🏆"; }
-  .rank .row.p2 .name::after { content:" 🥈"; }
-  .rank .row.p3 .name::after { content:" 🥉"; }
+  .cbadge.coins { display:inline-flex; align-items:flex-end; }
+  /* one gold coin, tinted per provider; an unknown provider stays gold */
+  /* provider brand colours: the chips wear these; the coins are tinted to match */
+  :root { --p-claude:#d97757; --p-codex:#3fb68b; --p-ollama:#c3c8d0; }
+  /* hero chips: one shape, coloured by --pc (provider brand, or the value verdict) */
+  .pchip, .vchip { font-size:11px; padding:3px 9px; border-radius:999px; color:var(--pc, var(--muted)); background:color-mix(in srgb, var(--pc, var(--muted)) 16%, transparent); border:1px solid color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); }
+  .pchip.claude { --pc:var(--p-claude); } .pchip.codex { --pc:var(--p-codex); } .pchip.ollama { --pc:var(--p-ollama); }
+  .vchip.good { --pc:var(--ok); } .vchip.bad { --pc:var(--bad); } .vchip.front { --pc:var(--accent); }
+  .coins.claude svg { filter:hue-rotate(-24deg) saturate(.9); }
+  .coins.codex svg { filter:hue-rotate(125deg) saturate(.8); }
+  .coins.ollama svg { filter:grayscale(1) brightness(1.2); }
   pre.out { margin:0; white-space:pre-wrap; word-break:break-word; font-size:12px; line-height:1.5; color:var(--ink); max-height:60vh; overflow:auto; }
   .json { font-size:12px; line-height:1.5; max-height:70vh; overflow:auto; word-break:break-word; }
   .json dl, .json ol { margin:0; padding:0; }
@@ -286,6 +325,24 @@
 </style>
 </head>
 <body>
+<svg id="trophy-art" width="0" height="0" style="position:absolute" aria-hidden="true"></svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+  <linearGradient id="coin-edge" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffd94d"/><stop offset=".28" stop-color="#f3b516"/><stop offset=".65" stop-color="#bd6c05"/><stop offset="1" stop-color="#7b3900"/></linearGradient>
+  <radialGradient id="coin-face" cx="32%" cy="22%" r="85%"><stop offset="0" stop-color="#fff5a8"/><stop offset=".25" stop-color="#ffd94b"/><stop offset=".68" stop-color="#efa716"/><stop offset="1" stop-color="#c67606"/></radialGradient>
+  <linearGradient id="coin-robot" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#a75b00"/><stop offset="1" stop-color="#713400"/></linearGradient>
+  <filter id="coin-shadow" x="-30%" y="-50%" width="160%" height="220%"><feGaussianBlur stdDeviation="3"/></filter>
+  <g id="coin">
+    <path d="M-55 0 C-55 13-31 24 0 24S55 13 55 0v13 C55 27 31 38 0 38S-55 27-55 13Z" fill="url(#coin-edge)" stroke="#713400" stroke-width="2"/>
+    <path d="M-46 12v13 M-39 15v14 M-32 17v15 M-25 19v15 M-18 21v15 M-11 22v15 M-4 23v15 M3 23v15 M10 22v15 M17 21v15 M24 19v15 M31 17v15 M38 15v14 M45 12v13" stroke="#ffe269" stroke-width="1.4" opacity=".65"/>
+    <ellipse rx="55" ry="24" fill="#ffc62e" stroke="#713400" stroke-width="2"/>
+    <ellipse rx="49" ry="20" fill="url(#coin-face)" stroke="#d18708" stroke-width="2"/>
+    <ellipse rx="44" ry="16.5" fill="none" stroke="#ffe76b" stroke-width="1.5" opacity=".8"/>
+    <g fill="url(#coin-robot)" stroke="#6f3500" stroke-width=".7"><rect x="-20" y="-9" width="40" height="18" rx="6"/><rect x="-25" y="-5" width="6" height="10" rx="2"/><rect x="19" y="-5" width="6" height="10" rx="2"/><path d="M0-9V-15"/><ellipse cy="-16" rx="4" ry="2.7"/></g>
+    <rect x="-14" y="-5.5" width="28" height="11" rx="3" fill="#ffd84b" stroke="#a55b00" stroke-width="1"/>
+    <circle cx="-7" cy="0" r="2.6" fill="#8a4500"/><circle cx="7" cy="0" r="2.6" fill="#8a4500"/>
+    <path d="M-39-7 C-28-18 10-21 35-10" fill="none" stroke="#fff8bd" stroke-width="2.2" stroke-linecap="round" opacity=".8"/>
+  </g>
+</defs></svg>
 <header id="hdr" class="home"></header>
 <main id="main"></main>
 <nav id="nav" class="bnav"><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>swarm</a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>performance</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>cost</a></nav>
@@ -404,7 +461,9 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false };
+  // Per screen: Rank opens as cards, Leaders as the compact list.
+  const compactPref = (screen, dflt) => { try { const v = localStorage.getItem(`swarm.perfCompact.${screen}`); return v == null ? dflt : v === "1"; } catch { return dflt; } };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, compact: { rank: compactPref("rank", false), leaders: compactPref("leaders", true) } };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -940,18 +999,71 @@
   // run rows: a run is being read, not compared, and badges there are clutter
   // (operator's correction, 2026-09-09). An unmeasured tier shows —, never a
   // blank that would read as dominated; absence is not evidence.
-  const modelBadge = (c) => c && c.band != null ? `<span class="cbadge">${"💲".repeat(c.band)}</span>` : `<span class="cbadge none">—</span>`;
-  const rankRow = ({ key, href, label, val, sub, frac, prov, none, place, badge }) => `<li class="row tap${place ? ` p${place}${place === 1 ? " lead" : ""}` : ""}" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}><div class="rail" style="width:16px"></div><div class="body"><div class="head"><span class="name">${label}</span><span class="valside">${badge === undefined ? "" : modelBadge(badge)}<span class="val${none ? " none" : ""}">${val}</span></span></div><div class="meta">${sub}</div><div class="bar${prov ? " prov" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div></div></li>`;
-  // podium: the first three rows wear the medals (rank and per-aspect lists; never a model's own page)
-  const rankList = (rows, { podium = false } = {}) => `<ul class="rank">${rows.map((r, i) => rankRow(podium && i < 3 ? { ...r, place: i + 1 } : r)).join("")}</ul>`;
-  const badOutcomes = (o) => Object.entries(o || {}).filter(([k, v]) => v > 0 && k !== "completed").map(([k, v]) => `${k} ${v}`).join(", ");
+  // Cost is a stack of 1–5 coins, scaled within the provider (server-side `coins`) (the symbol in the page's hidden defs), each
+  // coin 21 units above the last with a little hand-stacked jitter.
+  const COIN_JITTER = [[88, -1], [84, 1.4], [93, -1.7], [86, 1], [94, -1.2]];
+  // The podium trophy: one figure, a palette per metal (operator-supplied), drawn
+  // once into #trophy-art and <use>d per card.
+  const TROPHY_METALS = { gold: {"metal":["#8a4300","#ffd12a","#fff170","#d68100","#ffe04a","#7a3500"],"face":["#fff8b0","#ffd52a","#b65f00"],"line":"#713500","rim":"#ffcf27","top":"#ffe45a","visorLine":"#854100","visor":"#ffdd4d","glass":"#fff29a","eye":"#683000","medLine":"#c97600","screen":"#8b4300","screenLit":"#ffd94a","pupil":"#653000","shine":"#ffe66a","numeral":"#542600"}, silver: {"metal":["#555d63","#d9e0e5","#ffffff","#8e989f","#e8edf0","#4a5055"],"face":["#ffffff","#dfe5e9","#737d84"],"line":"#4e565b","rim":"#cbd2d8","top":"#eef3f6","visorLine":"#626b71","visor":"#dce3e7","glass":"#f8fbfc","eye":"#444b50","medLine":"#7d878e","screen":"#5b646a","screenLit":"#e7ecef","pupil":"#41484d","shine":"#ffffff","numeral":"#4f585e"}, bronze: {"metal":["#5f2d16","#d98a4a","#f4bd82","#8e421f","#d98243","#4b2111"],"face":["#ffd2a0","#c9793e","#713218"],"line":"#572813","rim":"#a85d28","top":"#e2a05f","visorLine":"#6d3219","visor":"#c77a42","glass":"#efbd8c","eye":"#4c2212","medLine":"#8f4825","screen":"#6c3219","screenLit":"#d28a50","pupil":"#4e2413","shine":"#f3c08a","numeral":"#542600"} };
+  const trophyDefs = (m, c) => `<linearGradient id="tr-${m}-metal" x1="0" x2="1">${c.metal.map((col, i) => `<stop offset="${[0, .18, .35, .58, .78, 1][i]}" stop-color="${col}"/>`).join("")}</linearGradient>
+      <radialGradient id="tr-${m}-face" cx=".3" cy=".2">${c.face.map((col, i) => `<stop offset="${[0, .35, 1][i]}" stop-color="${col}"/>`).join("")}</radialGradient>
+      <g id="trophy-${m}">
+        <ellipse cx="150" cy="409" rx="105" ry="9" opacity=".18" filter="url(#tr-blur)"/>
+        <ellipse cx="150" cy="389" rx="91" ry="15" fill="${c.rim}" stroke="${c.line}" stroke-width="4"/>
+        <path d="M59 389 L59 402 C59 412 100 419 150 419 C200 419 241 412 241 402 L241 389 C241 398 200 405 150 405 C100 405 59 398 59 389Z" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/>
+        <path d="M82 329 L91 389 C108 394 128 397 150 397 C172 397 192 394 209 389 L218 329 C196 336 174 339 150 339 C126 339 104 336 82 329Z" fill="url(#tr-black)" stroke="#080808" stroke-width="4"/>
+        <path d="M105 350 Q150 355 195 350 L191 380 Q150 387 109 380Z" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="3"/>
+        <ellipse cx="150" cy="316" rx="79" ry="14" fill="${c.top}" stroke="${c.line}" stroke-width="4"/>
+        <path d="M150 48V30" stroke="${c.line}" stroke-width="8"/><circle cx="150" cy="22" r="11" fill="url(#tr-${m}-face)" stroke="${c.line}" stroke-width="3"/>
+        <rect x="69" y="48" width="162" height="94" rx="42" fill="url(#tr-${m}-face)" stroke="${c.line}" stroke-width="4"/>
+        <rect x="53" y="78" width="25" height="39" rx="12" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/><rect x="222" y="78" width="25" height="39" rx="12" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/>
+        <rect x="91" y="67" width="118" height="56" rx="18" fill="${c.visor}" stroke="${c.visorLine}" stroke-width="4"/>
+        <rect x="99" y="75" width="102" height="40" rx="13" fill="${c.glass}" opacity=".72"/>
+        <circle cx="125" cy="95" r="9" fill="${c.eye}"/><circle cx="175" cy="95" r="9" fill="${c.eye}"/>
+        <rect x="128" y="141" width="44" height="20" rx="7" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/>
+        <path d="M104 161Q150 145 196 161L207 236Q150 258 93 236Z" fill="url(#tr-${m}-face)" stroke="${c.line}" stroke-width="4"/>
+        <circle cx="92" cy="178" r="20" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/><circle cx="208" cy="178" r="20" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/>
+        <path d="M80 187Q62 209 82 231Q94 242 112 232" fill="none" stroke="${c.line}" stroke-width="24" stroke-linecap="round"/><path d="M80 187Q62 209 82 231Q94 242 112 232" fill="none" stroke="url(#tr-${m}-metal)" stroke-width="17" stroke-linecap="round"/>
+        <path d="M220 187Q238 209 218 231Q206 242 188 232" fill="none" stroke="${c.line}" stroke-width="24" stroke-linecap="round"/><path d="M220 187Q238 209 218 231Q206 242 188 232" fill="none" stroke="url(#tr-${m}-metal)" stroke-width="17" stroke-linecap="round"/>
+        <circle cx="150" cy="207" r="48" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/><circle cx="150" cy="207" r="39" fill="url(#tr-${m}-face)" stroke="${c.medLine}" stroke-width="2"/>
+        <rect x="128" y="193" width="44" height="28" rx="7" fill="${c.screen}"/><rect x="135" y="200" width="30" height="14" rx="4" fill="${c.screenLit}"/><circle cx="143" cy="207" r="3" fill="${c.pupil}"/><circle cx="157" cy="207" r="3" fill="${c.pupil}"/><path d="M150 193v-9" stroke="${c.screen}" stroke-width="4"/><circle cx="150" cy="181" r="4" fill="${c.screen}"/>
+        <path d="M111 245Q150 260 189 245L181 267Q150 278 119 267Z" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/>
+        <path d="M126 263Q116 286 120 304H143L148 268Z" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/><path d="M174 263Q184 286 180 304H157L152 268Z" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/>
+        <path d="M120 296Q103 301 102 315H145Q145 299 133 296Z" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/><path d="M180 296Q197 301 198 315H155Q155 299 167 296Z" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/>
+        <path d="M71 316 L71 331 C71 340 106 346 150 346 C194 346 229 340 229 331 L229 316 C229 324 194 330 150 330 C106 330 71 324 71 316Z" fill="url(#tr-${m}-metal)" stroke="${c.line}" stroke-width="4"/>
+        <path d="M74 324 C94 334 118 337 150 337 C182 337 206 334 226 324" fill="none" stroke="${c.shine}" stroke-width="2.5" opacity=".8"/>
+      </g>`;
+  $("#trophy-art").innerHTML = `<defs><linearGradient id="tr-black"><stop stop-color="#353535"/><stop offset=".2" stop-color="#080808"/><stop offset=".72" stop-color="#222"/><stop offset="1" stop-color="#050505"/></linearGradient>  <filter id="tr-blur"><feGaussianBlur stdDeviation="5"/></filter>${Object.entries(TROPHY_METALS).map(([m, c]) => trophyDefs(m, c)).join("")}</defs>`;
+  const TROPHY_OF = { 1: "gold", 2: "silver", 3: "bronze" };
+  const trophy = (place) => `<svg viewBox="48 6 204 418" aria-label="${["first", "second", "third"][place - 1]}"><use href="#trophy-${TROPHY_OF[place]}"/><text x="150" y="377" text-anchor="middle" font-family="Georgia,serif" font-size="27" font-weight="bold" fill="${TROPHY_METALS[TROPHY_OF[place]].numeral}">${"I".repeat(place)}</text></svg>`;
+  const rankBadge = (pos, place) => place ? `<span class="rk trophy">${trophy(place)}</span>` : `<span class="rk">${pos}</span>`;
+  const COIN_SCALE = 0.17;
+  const stackTop = (n) => 108 - 21 * (n - 1) - 26;
+  const coinStack = (n, scale = COIN_SCALE) => {
+    const top = stackTop(n), h = 152 - top;
+    const uses = COIN_JITTER.slice(0, n).map(([x, r], i) => `<use href="#coin" transform="translate(${x} ${108 - 21 * i}) rotate(${r})"/>`).join("");
+    return `<svg viewBox="26 ${top} 128 ${h}" width="${Math.round(128 * scale)}" height="${Math.round(h * scale)}"><ellipse cx="90" cy="140" rx="62" ry="9" fill="#6b4300" opacity=".22" filter="url(#coin-shadow)"/>${uses}</svg>`;
+  };
+  // Every badge box is a full five-stack tall, coins grounded at its foot, so
+  // stacks side by side share a baseline and read as different heights.
+  const MAX_COINS = 5;
+  const modelBadge = (c, scale) => c && c.coins != null
+    ? `<span class="cbadge coins${c.provider ? ` ${esc(c.provider)}` : ""}" data-coins="${c.coins}" style="height:${Math.round((152 - stackTop(MAX_COINS)) * (scale ?? COIN_SCALE))}px" title="cost ${c.coins} of 5 within ${esc(c.provider || "its provider")}" aria-label="cost ${c.coins} of 5">${coinStack(c.coins, scale)}</span>`
+    : `<span class="cbadge none">—</span>`;
+  const rankRow = ({ key, href, label, val, sub, frac, prov, none, place, pos, badge }) => `<div class="card crow${place ? ` p${place}` : ""}" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}>`
+    + `<div class="top"><span class="who">${rankBadge(pos, place)}<span class="nm">${label}</span></span><span class="valside">${badge === undefined ? "" : modelBadge(badge)}<span class="val${none ? " none" : ""}">${val}</span></span></div>`
+    + `<div class="cbar${prov ? " thin" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div><div class="sub">${sub}</div></div>`;
+  // podium: the first three cards wear the medals (rank and per-aspect lists; never a model's own page)
+  const rankList = (rows, { podium = false } = {}) => `<div class="rlist${ui.compact.rank ? " compact" : ""}">${rows.map((r, i) => rankRow({ ...r, pos: i + 1, place: podium && i < 3 ? i + 1 : 0 })).join("")}</div>`;
   const fmtScore = (v) => (v == null ? "—" : v.toFixed(2));
+  // Failed / timeout / session-died are not about the model — they live on its page. Wrong is,
+  // as a share of the graded attempts; it is already inside the score, so never a raw count.
   const cellSub = (c, extra) => {
     const bits = [`n=${c.n}`, ...(extra || [])];
     if (c.n === 0) bits.push(`<span class="tag">no grades — outcomes only</span>`);
     else if (c.provisional) bits.push(`<span class="tag">provisional n&lt;5</span>`);
-    const bad = badOutcomes(c.outcomes);
-    if (bad) bits.push(`<span class="c-bad">${esc(bad)}</span>`);
+    const o = c.outcomes || {}, graded = (o.completed || 0) + (o.wrong || 0);
+    if (o.wrong) bits.push(`wrong ${((o.wrong / graded) * 100).toFixed(1)}%`);
     return bits.join(" · ");
   };
   const NEW_PERF_KINDS = new Set(["coverage", "reliability", "leaders"]);
@@ -1066,10 +1178,10 @@
         html: `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`,
       };
     }
-    const rankTag = `${model && p.rank ? ` ${["🏆", "🥈", "🥉"][p.rank.position - 1] || `<span class="tag">#${p.rank.position}</span>`}` : ""}`;
     const summary = `${p.rows} graded leaves · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}`;
-    const header = kind ? headerHtml(title + rankTag, crumbs({ name: "perf", kind }, model || aspect || title)) : headerHtml(title, summary);
+    const header = kind ? headerHtml(title, crumbs({ name: "perf", kind }, model || aspect || title)) : headerHtml(title, summary);
     const sel = (attr, opts, current) => `<select class="sel" ${attr}>${opts.map(([v, label]) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
+    const compactChk = (screen) => `<label class="chk"><input type="checkbox" data-compact="${screen}"${ui.compact[screen] ? " checked" : ""}>compact</label>`;
     const domainSel = () => p.domains.length > 1 ? sel('data-domain-select', [["", "all domains"], ...p.domains.map((d) => [d, d])], domain || "") : "";
     let html = "";
     if (!model) {
@@ -1079,12 +1191,13 @@
       html += segSwitcher(PERF_VIEWS, active);
     }
     if (NEW_PERF_KINDS.has(kind)) {
-      if (p.domains.length > 1) html += `<div class="selrow">${domainSel()}</div>`;
-      html += `<div style="height:12px"></div>`;
+      const row = domainSel() + (kind === "leaders" ? compactChk("leaders") : "");
+      if (row) html += `<div class="selrow">${row}</div>`;
+      if (kind !== "leaders") html += `<div style="height:12px"></div>`;
       // The one DOM touch a build makes: a cached script load (appends once, reused
       // after), never a screen paint — nothing shows until commitView lands the markup.
       await loadPerfJs();
-      const h = { esc, enc, fmtScore };
+      const h = { esc, enc, fmtScore, compact: ui.compact.leaders, rankBadge };
       html += kind === "coverage" ? window.perfViews.coverageGrid(p.views.coverage, h)
         : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
         : window.perfViews.leadersList(p.views.leaders, h);
@@ -1094,10 +1207,11 @@
       // Aspect picker (overall, the universals, then the capability columns) and
       // the domain filter share one row; a model's own page keeps just the domain.
       const aspectSel = model ? "" : sel('data-nav', [["#/perf", "overall"], ...p.aspects.map((a) => [`#/perf/aspect/${enc(a)}`, a])], aspect ? `#/perf/aspect/${enc(aspect)}` : "#/perf");
-      const row = model ? "" : aspectSel + domainSel();
+      const row = model ? "" : aspectSel + domainSel() + compactChk("rank");
       if (row) html += `<div class="selrow">${row}</div>`;
     }
-    html += `<div style="height:12px"></div>`;
+    // A ranking needs no spacer: its first card's own margin keeps the card-to-card gap.
+    if (model) html += `<div style="height:12px"></div>`;
     // The badge's source: the server's cost points, plus the spread for a model
     // priced but graded nowhere (its cost is real; its quality is simply not compared).
     const costByModel = new Map();
@@ -1112,7 +1226,7 @@
     for (const s of p.views.cost.spread) {
       if (pricedQualityKeys.has(costKey(s))) continue;
       const list = costByModel.get(s.model) || [];
-      list.push({ multiplier: s.mult, band: s.band, onFrontier: false, dominatedBy: null, thin: s.thin });
+      list.push({ provider: s.provider, multiplier: s.mult, band: s.band, coins: s.coins, onFrontier: false, dominatedBy: null, thin: s.thin });
       costByModel.set(s.model, list);
     }
     // A quality row can have several provider-local cost entries. There is no
@@ -1120,13 +1234,14 @@
     // entries in their provider sections.
     const costOf = new Map([...costByModel].filter(([, entries]) => entries.length === 1).map(([model, entries]) => [model, entries[0]]));
     if (model) {
-      // One model as a dashboard: tiles, compressed aspect bars, its coverage row, its reliability bar.
+      // One model as a dashboard: a hero card, compressed aspect bars, its coverage row, its reliability bar.
       await loadPerfJs();
-      const h = { esc, enc, fmtScore };
+      const h = { esc, enc, fmtScore, badge: modelBadge, trophy };
       const cov = p.views.coverage;
       html += window.perfViews.modelDashboard({
         model, overall: p.overall[0] || null, rank: p.rank || null, domain, domainSelect: domainSel(),
-        cost: costOf.get(model) || null,
+        // best/worst value are per provider section, the same picks the Cost screen's hero makes
+        cost: costOf.has(model) ? { ...costOf.get(model), value: p.views.cost.sections.some((s) => s.best?.model === model) ? "best" : p.views.cost.sections.some((s) => s.worst?.model === model) ? "worst" : null } : null,
         aspects: p.report.map((a) => ({ aspect: a.aspect, universal: a.universal, cell: a.cells.find((x) => x.model === model) || null })),
         coverage: { aspects: cov.aspects, models: cov.models.filter((m) => m === model), cells: cov.cells.filter((c) => c.model === model) },
         reliability: p.views.reliability.filter((r) => r.model === model),
@@ -1269,7 +1384,10 @@
     pendingView = v;
     // No view: the skeleton paints the destination without committing to it.
     const src = dataSource(v);
-    if (!sameView(v, view) && !(src && heldEntry(src.path))) commitView({ ...skeletonFor(v), home: v.name === "runs", tab: TAB[v.name] || "runs" });
+    const moved = !sameView(v, view);
+    if (moved && !(src && heldEntry(src.path))) commitView({ ...skeletonFor(v), home: v.name === "runs", tab: TAB[v.name] || "runs" });
+    // A new screen opens at its top; a refresh of the same one keeps the reader's place.
+    if (moved) window.scrollTo(0, 0);
     try {
       const next = await buildFor(v);
       if (!guardOk(seq, routeSeq)) return;
@@ -1291,6 +1409,13 @@
   // them by kind instead: a group's kids are always inline, a node is a plain nav row.
   main.addEventListener("change", (e) => {
     const t = e.target;
+    if (t.dataset?.compact != null) {
+      const screen = t.dataset.compact;
+      ui.compact[screen] = t.checked;
+      try { localStorage.setItem(`swarm.perfCompact.${screen}`, t.checked ? "1" : "0"); } catch { /* no storage */ }
+      requestRoute(route);
+      return;
+    }
     if (!(t instanceof HTMLSelectElement)) return;
     if (t.dataset.nav != null) { location.hash = t.value; return; }
     if (t.dataset.domainSelect != null) { ui.perfDomain = t.value || null; requestRoute(route); }

@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, readFileSync, appendFileSync, existsSync } from "n
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  usageHistoryPath, appendSnapshot, readSnapshots, splitWeeks, costPerModel, multipliers, band,
+  usageHistoryPath, appendSnapshot, readSnapshots, splitWeeks, costPerModel, multipliers, band, coins,
   resolveBands, normalizeCostObservation, codexUnpricedObservation, relativeCostRows, DEFAULT_COST_BANDS,
   ollamaCloudCostRows, costRowsFor, costSections, costUnitLabel, rateCardRows, COST_PROVIDERS, RATE_CARDS,
   CODEX_RATE_CARD, CLAUDE_RATE_CARD,
@@ -557,4 +557,16 @@ test("rate cards: shipped staleAfter dates are still in the future", () => {
     ok(Date.parse(`${card.staleAfter}T23:59:59.999Z`) > Date.now(),
       `RED: ${card.provider}'s rate card is past ${card.staleAfter}; re-read the published price table`);
   }
+});
+
+test("coins: 1–5 log-spaced across one provider's range; a lone price reads 1; unmeasured → null", () => {
+  const claude = { lo: 0.5, hi: 5 };
+  equal(coins(0.5, claude), 1, "the provider's cheapest is one coin");
+  equal(coins(1, claude), 2);
+  equal(coins(2.5, claude), 4);
+  equal(coins(5, claude), 5, "the provider's dearest is five coins");
+  equal(coins(2.3, { lo: 1, hi: 273 }), 2, "log spacing: 2.3x of a 273x range sits near the bottom, not at 1% of it");
+  equal(coins(7, { lo: 7, hi: 7 }), 1);
+  equal(coins(null, claude), null);
+  equal(coins(3, null), null);
 });
