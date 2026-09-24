@@ -27,6 +27,7 @@ const USAGE = `usage: swarm.mjs <command>
   run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
+  wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
   prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
@@ -631,42 +632,17 @@ function getFlag(name, args) {
   return i < 0 ? undefined : args[i + 1];
 }
 
-// `grade --init` — one skeleton row per model leaf, every grade null. It is
-// deliberately unappendable as written: validation rejects a null universal, so
-// an untouched skeleton cannot land.
+// `grade --init` — one skeleton row per model leaf. It is deliberately
+// unappendable as written: validation rejects a null universal, so an untouched
+// skeleton cannot land.
 async function cmdGradeInit(dir) {
-  dir = resolve(dir);
-  const { writeFileSync } = await import("node:fs");
-  const { UNIVERSAL, CAPABILITY, OUTCOMES } = await import("../src/aspects.mjs");
-  const leaves = listLeaves(dir, { gradeable: true });
-  if (!leaves.length) {
-    err(`swarm: no gradeable leaves with results in ${dir} — agentless nodes carry no model, so there is nothing to grade.`);
+  const { gradeInit } = await import("../src/grade-init.mjs");
+  const { error, lines } = gradeInit(dir);
+  if (error) {
+    err(error);
     return 1;
   }
-  const skeleton = {
-    resultsDir: dir,
-    session: "<this session's id>",
-    rows: leaves.map((l) => ({
-      leaf: l.id,
-      ...(l.provider ? { provider: l.provider } : {}),
-      model: l.model,
-      read: { result: l.resultPath, transcript: l.transcriptPath },
-      domain: "<one lowercase token: the language or ecosystem the leaf worked in — rust, godot, node, python, docs. Not the repo, not the task>",
-      outcome: `<${OUTCOMES.join(" | ")}>`,
-      note: "",
-      grades: {
-        ...Object.fromEntries(UNIVERSAL.map((a) => [a, null])),
-        ...Object.fromEntries(CAPABILITY.map((a) => [a, null])),
-      },
-    })),
-  };
-  const p = join(dir, "grades.json");
-  writeFileSync(p, JSON.stringify(skeleton, null, 2) + "\n");
-  out(p);
-  out(`${leaves.length} gradeable leaf/leaves. Grade the four universal aspects 1-10 on every row; leave a`);
-  out("capability aspect null unless the leaf stressed it. Drop `grades` entirely on a row whose leaf");
-  out("produced no output (failed / timeout / session-died / not-capable), then:");
-  out(`  swarm grade --file ${p}`);
+  for (const line of lines) out(line);
   return 0;
 }
 
@@ -1367,6 +1343,11 @@ async function main() {
         }
         out(renderStatus(rest[0], Date.now(), quietWarnMs));
         return 0;
+      }
+      case "wait": {
+        if (!rest[0]) { err(USAGE); return 1; }
+        const { runWaitCommand } = await import("../src/wait.mjs");
+        return await runWaitCommand(rest[0], { quietWarnSecs: getConfig().quietWarnSecs, timeoutSecs: Number(getFlag("timeout", rest)) || null, out, err });
       }
       case "report": {
         if (!rest[0]) { err(USAGE); return 1; }
