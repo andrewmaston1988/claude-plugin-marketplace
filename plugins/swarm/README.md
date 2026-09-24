@@ -493,6 +493,31 @@ dashboard and model detail views draw one to five coins instead, tinted per prov
 within that provider's own measured range (cheapest 1, dearest 5, log-spaced); unmeasured renders `—`, never a blank that would read as
 dominated. Badges never appear on leaf/run rows (the terminal keeps its plain `$` bands).
 
+### Rate cards — pulled, not typed
+
+Ollama's list is *measured* from its weekly meter. Codex's and Claude's are *published*, and
+swarm reads them off the vendors' own pricing pages rather than anyone transcribing a
+number: both serve markdown at `<page URL>.md`, so a refresh is a table parse.
+
+```bash
+swarm refresh-prices             # re-read both tables, bank them at ~/.swarm/rate-cards.json
+swarm refresh-prices --dry-run   # parse and report what moved, write nothing
+```
+
+- **The shipped cards are seeds, not the source of truth** — the last hand-read of each
+  table, so a fresh or offline install still ranks honestly. The first refresh supersedes
+  them, and a fixture test pins each seed against the page it was read off, so a seed
+  cannot drift from the table unnoticed.
+- **A stale card refreshes itself.** Cards carry a `staleAfter` (the vendor's published
+  expiry, else 90 days from the read); past it, `swarm cost` re-reads before ranking. No
+  flag gates it — ranking on prices the vendor has already changed is never what anyone
+  wants. Offline, the cached card stands and its banner says so.
+- **A parse that comes back empty or implausible is refused, never banked** — that failure
+  has no symptom except every model silently reading `unpriced`.
+- **A family does not share one price.** Every row is its own published line: `sonnet-4-6`
+  bills $3/$15 against `sonnet-5`'s $2/$10, and `opus-5-5` undercuts `opus-5`. A dated id
+  (`claude-haiku-4-5-20251001`) prices as the undated row the table publishes.
+
 ## Dashboard
 
 A read-only web dashboard over `~/.swarm/runs`, built for a phone on your LAN: every

@@ -95,3 +95,13 @@ export function createSnapshotWriter({
     prevLines = Math.max(lines, fillTo);
   };
 }
+
+// Line writers. Here rather than in the CLI entry point so a command split out
+// of it still shares one definition.
+export function out(line) {
+  process.stdout.write(line + "\n");
+}
+
+export function err(line) {
+  process.stderr.write(line + "\n");
+}

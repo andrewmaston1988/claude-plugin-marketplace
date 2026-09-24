@@ -15,6 +15,7 @@ import { inferStoredIdentity } from "./results.mjs";
 import { costObservation as validateCostObservation } from "./contracts.mjs";
 import { deriveCloudName } from "./discovery.mjs";
 import { provenanceBanner } from "./usage.mjs";
+import { RATE_CARDS, rateCardBanner, resolveRatePrice } from "./rate-card.mjs";
 
 export function usageHistoryPath(env = process.env) {
   return join(swarmHome(env), "usage-history.jsonl");
@@ -327,93 +328,24 @@ export function ollamaCloudCostRows(snaps) {
 // row that says `unpriced` — a wrong price ranks models wrongly for ever and
 // nothing downstream can tell it from a sourced one.
 //
-// A subscription seat pays a flat fee, so even a sourced per-token figure is an
-// equivalence rather than a bill. Rows priced from these tables are labelled
-// `api-equivalent estimate`, never `billed`.
+// The cards themselves, their provenance and their refresh live in rate-card.mjs;
+// this file owns only what turns a card into ranked rows.
+export { RATE_CARDS };
+export { CODEX_RATE_CARD, CLAUDE_RATE_CARD, RATE_CARD_STALE_WINDOW_DAYS } from "./rate-card.mjs";
 
-// openai.com help centre, "ChatGPT Rate Card (Enterprise token-based pricing)",
-// the *ChatGPT Work and Codex models* table — the one that governs Codex CLI
-// usage, not the Chat table above it. Read 2026-09-21.
-// Cards with no published expiry are re-read after this deliberately short window.
-export const RATE_CARD_STALE_WINDOW_DAYS = 90;
-
-function defaultRateCardStaleAfter(asOf) {
-  const date = new Date(`${asOf}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + RATE_CARD_STALE_WINDOW_DAYS);
-  return date.toISOString().slice(0, 10);
-}
-
-// Sol's $4.00 is promotional "at least through November 21, 2026".
-export const CODEX_RATE_CARD = {
-  provider: "codex",
-  baseModel: "gpt-5.6-luna",
-  unit: "published-price-relative",
-  source: "codex-rate-card",
-  asOf: "2026-09-21",
-  staleAfter: "2026-11-21", // Published promo floor, not the default window.
-  prices: {
-    "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, output: 1.2 },
-    "gpt-5.6-terra": { input: 2, cachedInput: 0.2, output: 12 },
-    "gpt-5.6-sol": { input: 4, cachedInput: 0.4, output: 20 },
-    "gpt-5.5": { input: 5, cachedInput: 0.5, output: 30 },
-    "gpt-6-astra": { input: 10, cachedInput: 1, output: 50 },
-  },
-};
-
-// Anthropic's published $/Mtok table (the model reference bundled with the
-// claude-code-guide skill), read 2026-09-21. A family shares its tier's price
-// (operator, 2026-09-21: "claude doesn't vary prices for a model family as far
-// as I know"), so sonnet-4-6 carries sonnet's figures and opus-4-8 opus's rather
-// than numbers of their own. Cache-read is published for Fable alone, so the
-// field is absent elsewhere instead of guessed — a guessed cache rate would
-// mis-rank long-context work permanently.
-export const CLAUDE_RATE_CARD = {
-  provider: "claude",
-  baseModel: "claude-sonnet-5",
-  unit: "published-price-relative",
-  source: "anthropic-rate-card",
-  asOf: "2026-09-21",
-  // No published expiry: this is the default 90-day shelf life from asOf.
-  staleAfter: defaultRateCardStaleAfter("2026-09-21"),
-  prices: {
-    "claude-haiku-4-5-20251001": { input: 1, output: 5 },
-    "claude-sonnet-5": { input: 2, output: 10 },
-    "claude-sonnet-4-6": { input: 2, output: 10, via: "claude-sonnet-5" },
-    "claude-opus-5": { input: 5, output: 25 },
-    "claude-opus-4-8": { input: 5, output: 25, via: "claude-opus-5" },
-    "claude-fable-5-1": { input: 10, cachedInput: 0.25, output: 50 },
-  },
-};
-
-export const RATE_CARDS = { codex: CODEX_RATE_CARD, claude: CLAUDE_RATE_CARD };
 // The meter's provider id. Ollama's list is the one measured rather than
 // published, which is why the three stay separate even though the labels rhyme.
 export const METER_PROVIDER = "ollama";
 export const COST_PROVIDERS = [METER_PROVIDER, ...Object.keys(RATE_CARDS)];
 
-function rateCardStaleAfter(card) {
-  if (card.staleAfter) return card.staleAfter;
-  return defaultRateCardStaleAfter(card.asOf);
-}
-
-function rateCardBanner(card) {
-  const staleAfter = rateCardStaleAfter(card);
-  const staleAt = Date.parse(`${staleAfter}T23:59:59.999Z`);
-  const stale = Date.now() > staleAt;
-  return provenanceBanner({
-    provenance: stale ? "cached" : "live",
-    ...(stale ? { reason: "stale-rate-card" } : {}),
-    provider: card.provider,
-    lastSeen: card.asOf,
-    refresh: "    Refresh: re-read the published rate card",
-  });
-}
-
 // One row per model the caller names, plus one per model the table prices. A
 // model absent from the table is `unpriced` — a row the page can draw, because
 // a blank panel reads as broken and an unpriced row reads as honest.
 function rateCardObservation(card, model) {
-  const listed = Object.hasOwn(card.prices, model);
+  // A dated id (`claude-haiku-4-5-20251001`) prices as the undated row the table
+  // publishes; nothing shorter than a whole segment matches.
+  const found = resolveRatePrice(card.prices, model);
+  const listed = Boolean(found);
   return normalizeCostObservation({
     provider: card.provider,
     model,
@@ -426,16 +358,21 @@ function rateCardObservation(card, model) {
     // dominated, and for every Codex model cached input is exactly 0.1x input,
     // so that column yields the identical ratio. Output does not — an
     // output-basis card puts astra at 41.67x rather than 50x.
-    ...(listed ? { value: card.prices[model].input } : {}),
-    ...(listed && card.prices[model].via ? { pricedVia: card.prices[model].via } : {}),
+    ...(listed ? { value: found.price.input } : {}),
+    ...(listed && found.price.via ? { pricedVia: found.price.via } : {}),
   });
 }
 
+// The roster decides what gets a row; the table only decides what it costs. Before
+// the cards were fetched they held the dispatchable models and nothing else, so
+// listing every priced model was the same set — a refreshed card carries the
+// vendor's whole back catalogue, and a cost table listing gpt-3.5-turbo is noise.
+// With no roster to go on, the table is still the best answer available.
 export function rateCardRows(card, models = []) {
-  const named = [...new Set([
-    ...models.filter((model) => typeof model === "string" && model.trim()),
-    ...Object.keys(card.prices),
-  ])];
+  const asked = models.filter((model) => typeof model === "string" && model.trim());
+  // The base model is always listed: it IS the unit, and a list whose 1x row is
+  // missing cannot say what its multipliers are relative to.
+  const named = [...new Set(asked.length ? [card.baseModel, ...asked] : Object.keys(card.prices))];
   return relativeCostRows(
     named.map((model) => rateCardObservation(card, model)),
     { baseModels: { [card.provider]: card.baseModel } },
