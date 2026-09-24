@@ -12,7 +12,7 @@ import { ok, equal } from "node:assert/strict";
 import {
   mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync,
 } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -224,10 +224,23 @@ const PLAN_MIN = "# feat-x\n\n## Goal\n\nLand feat-x.\n\n## Current Status\n\n- 
 const FAILING_SMOKE = "# Repo\n\n## Smoke check\n\n```bash\nexit 9\n```\n";
 
 // getPaths() derives config.json AND pipeline.db from the home dir, so an
-// isolated home keeps the real ~/.pipeline out of the test.
+// isolated home keeps the real ~/.pipeline out of the test. On Linux it reads
+// the XDG dirs instead, so those are dropped and the DB sits under ~/.local/share.
+function dbFile(home) {
+  return process.platform === "linux"
+    ? join(home, ".local", "share", "pipeline", "pipeline.db")
+    : join(home, ".pipeline", "pipeline.db");
+}
+
+function homeEnv(home) {
+  const env = { ...process.env, USERPROFILE: home, HOME: home };
+  for (const k of ["XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_STATE_HOME"]) delete env[k];
+  return env;
+}
+
 function makeHome() {
   const home = mkdtempSync(join(tmpdir(), "merge-exit-home-"));
-  mkdirSync(join(home, ".pipeline"), { recursive: true });
+  mkdirSync(dirname(dbFile(home)), { recursive: true });
   return home;
 }
 
@@ -270,14 +283,14 @@ function runMerge(repo, home, branches, extraArgs = []) {
     MERGE_MJS, "--branches", branches, "--project-dir", repo,
     "--target-branch", "master", ...extraArgs,
   ], {
-    env: { ...process.env, USERPROFILE: home, HOME: home },
+    env: homeEnv(home),
     encoding: "utf8",
     timeout: 60_000,
   });
 }
 
 function seedRow(home, repo, { feature = "feat-x", stage, qaPass = null } = {}) {
-  const db = connectPath(join(home, ".pipeline", "pipeline.db"));
+  const db = connectPath(dbFile(home));
   try {
     const project = basename(repo);
     projectAdd(db, { name: project, rootPath: repo });
