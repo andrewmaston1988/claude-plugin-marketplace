@@ -17,14 +17,21 @@
 // the operator's only view of a run that may spend millions of tokens).
 //
 // Three markers, two lifetimes: the swarm marker is consumed per dispatch (each
-// dispatch is a fresh spend and must re-meet the offer gate); the grouping markers
-// are not (reading is not consent — once read, the reasoning applies to every
-// manifest the session goes on to author).
+// dispatch is a fresh spend and must re-meet the offer gate) — except under standing
+// mode (`swarm.always`), where the skill was invoked for the standing arrangement
+// itself and re-invoking it before every dispatch buys nothing; the grouping markers
+// are never consumed (reading is not consent — once read, the reasoning applies to
+// every manifest the session goes on to author).
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 
 const SWARM_HOME = process.env.SWARM_HOME || path.join(os.homedir(), ".swarm");
+const CONFIG = path.join(SWARM_HOME, "config.json");
+
+function readJSON(p) {
+  try { return JSON.parse(fs.readFileSync(p, "utf8")); } catch { return null; }
+}
 
 export function markerPath(sessionId, home = SWARM_HOME) {
   return path.join(home, `.skill-ack-${sessionId}`);
@@ -69,7 +76,7 @@ const BARE_HINT =
   'Dispatch the engine BARE via Bash with run_in_background: true — no pipe, no redirect, no nohup, no trailing &. The live progress frames are the operator\'s only view of a run that may spend millions of tokens, and a decorated dispatch buffers them into nothing. "Keeping the tool result tidy" is already solved by run_in_background: the frames never enter the transcript.';
 
 // Pure decision, so the harness is not needed to test it.
-export function gateDispatch({ command, runInBackground, markerExists, groupingMarkerExists, shapeMarkerExists }) {
+export function gateDispatch({ command, runInBackground, markerExists, groupingMarkerExists, shapeMarkerExists, standingMode }) {
   const cmd = String(command || "");
   if (!DISPATCH_RE.test(cmd)) return { block: false };
 
@@ -107,8 +114,9 @@ export function gateDispatch({ command, runInBackground, markerExists, groupingM
   }
 
   // One skill invocation authorises one dispatch. A second wave is a fresh spend and
-  // must meet the offer gate again.
-  return { block: false, consumeMarker: true };
+  // must meet the offer gate again — unless the standing arrangement is already the
+  // consent, in which case the marker stays armed.
+  return { block: false, consumeMarker: !standingMode };
 }
 
 async function main() {
@@ -130,6 +138,7 @@ async function main() {
     markerExists: fs.existsSync(marker),
     groupingMarkerExists: fs.existsSync(groupingMarkerPath(sessionId)),
     shapeMarkerExists: fs.existsSync(shapeMarkerPath(sessionId)),
+    standingMode: readJSON(CONFIG)?.swarm?.always === true,
   });
 
   if (decision.block) {

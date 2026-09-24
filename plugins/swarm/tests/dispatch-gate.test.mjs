@@ -70,6 +70,24 @@ test("gate PASSES a bare backgrounded dispatch with all three markers, and consu
   equal(r.consumeMarker, true, "one skill invocation authorises one dispatch");
 });
 
+// Under standing mode (swarm.always) the swarm skill is invoked once and stays
+// invoked: re-reading ~10k tokens of skill before every dispatch buys nothing, and
+// consuming the marker forces exactly that.
+test("standing mode KEEPS the swarm marker after a passing dispatch", () => {
+  const r = gateDispatch({ command: RUN, runInBackground: true, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: true, standingMode: true });
+  equal(r.block, false);
+  equal(r.consumeMarker, false, "standing mode must not consume the marker");
+});
+
+// Standing off or absent is unchanged: one invocation authorises one dispatch.
+test("with standing mode off or absent the marker is consumed per dispatch", () => {
+  for (const standingMode of [false, undefined]) {
+    const r = gateDispatch({ command: RUN, runInBackground: true, markerExists: true, groupingMarkerExists: true, shapeMarkerExists: true, standingMode });
+    equal(r.block, false, `standingMode=${standingMode}`);
+    equal(r.consumeMarker, true, `standingMode=${standingMode}`);
+  }
+});
+
 // A dispatch that never got past the gate must not eat the marker — otherwise a
 // blocked pipe would silently disarm the next (correct) attempt.
 test("a blocked dispatch never consumes the marker", () => {
