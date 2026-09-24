@@ -208,24 +208,23 @@
       const day = +d - Date.now() < 6 * 86_400_000 ? DAYS[d.getDay()] : `${d.getDate()}/${d.getMonth() + 1}`;
       return `resets ${day} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
     };
-    // The roster is what the read named — answered or failed — in payload order.
+    // The roster is what the read named — answered or failed — alphabetical; the hero ranks.
     const seen = new Set();
     const rows = [];
     for (const u of data.usages || []) if (!seen.has(u.provider)) { seen.add(u.provider); rows.push({ provider: u.provider, usage: u }); }
     for (const [provider, error] of Object.entries(data.errors || {})) if (!seen.has(provider)) { seen.add(provider); rows.push({ provider, error }); }
+    rows.sort((a, b) => a.provider.localeCompare(b.provider));
     const reading = (p) => {
-      // Exhausted is dead in every window: 0% left, naming the limit that ran out, never relabelled.
+      // Exhausted is dead in every window: 0% left. The note is when it is back — the LAST
+      // spent limit to reset; red 0% already says it ran out.
       if (p.usage?.state === "exhausted") {
-        const out = (p.usage.limits || []).filter((l) => l.percent >= 100)
-          .map((l) => `${l.kind}${l.window ? ` (${l.window})` : ""} at 100%`);
-        return { left: 0, note: `exhausted${out.length ? ` — ${out.join(", ")}` : ""}` };
+        const back = (p.usage.limits || []).filter((l) => l.percent >= 100 && l.resetsAt).map((l) => l.resetsAt).sort().pop();
+        return { left: 0, note: back ? resets(back) : "" };
       }
       const l = p.usage && limitOf(p.usage);
       if (!l) return null;
       const left = Math.max(0, Math.min(100, Math.round(100 - l.percent)));
-      const note = [l.resetsAt ? resets(l.resetsAt) : null,
-        p.usage.provenance && p.usage.provenance !== "live" ? `read from ${p.usage.provenance}` : null].filter(Boolean).join(" · ");
-      return { left, note };
+      return { left, note: l.resetsAt ? resets(l.resetsAt) : "" };
     };
     // No figure is not a zero: the card stays, dim, saying why.
     const whyNot = (p) => {
@@ -237,16 +236,17 @@
     const tabs = `<div class="ctabs">${["week", "session"].map((k) =>
       `<a class="ctab${(week ? "week" : "session") === k ? " on" : ""}" data-usage-window="${k}">${k === "week" ? "Week" : "Session"}</a>`).join("")}</div>`;
     if (!rows.length) return tabs + `<div class="empty">no provider answered — run swarm usage to read them once.</div>`;
-    const low = rows.map((p) => ({ p, r: reading(p) })).filter((x) => x.r)
-      .reduce((a, b) => (a && a.r.left <= b.r.left ? a : b), null);
+    // The hero is where the next run goes: the provider with the most left.
+    const best = rows.map((p) => ({ p, r: reading(p) })).filter((x) => x.r)
+      .reduce((a, b) => (a && a.r.left >= b.r.left ? a : b), null);
     // "Every provider" is only true when every provider was read.
     const unread = rows.filter((p) => !reading(p)).map((p) => p.provider);
-    const heroNote = (n) => (n <= LOW ? "Throttle or switch provider before the next big run."
+    const heroNote = (n) => (n <= LOW ? "Every provider is low — throttle before the next big run."
       : n <= WARN ? "Enough for a medium run, not a full swarm."
-        : unread.length ? `Comfortable headroom where read — ${unread.join(", ")} not read.` : "Comfortable headroom across every provider.");
-    const hero = low
-      ? `<div class="uhero ${tone(low.r.left)}"><div class="lbl">LOWEST THIS ${week ? "WEEK" : "SESSION"} · ${esc(low.p.provider.toUpperCase())}</div>`
-        + `<div class="fig"><b>${low.r.left}%</b><span>left</span></div>${bar(low.r.left)}<div class="sub">${esc(heroNote(low.r.left))}</div></div>`
+        : unread.length ? `Room for a full swarm — ${unread.join(", ")} not read.` : "Room for a full swarm.");
+    const hero = best
+      ? `<div class="uhero ${tone(best.r.left)}"><div class="lbl">MOST LEFT THIS ${week ? "WEEK" : "SESSION"} · ${esc(best.p.provider.toUpperCase())}</div>`
+        + `<div class="fig"><b>${best.r.left}%</b><span>left</span></div>${bar(best.r.left)}<div class="sub">${esc(heroNote(best.r.left))}</div></div>`
       : "";
     const cards = rows.map((p) => {
       const r = reading(p);
