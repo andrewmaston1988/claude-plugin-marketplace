@@ -74,22 +74,46 @@ function readOAuthToken(credentialsPath) {
   }
 }
 
-export async function fetchUsageLimits({ fetch, url = DEFAULT_USAGE_URL, credentialsPath }) {
+export async function fetchUsageLimits({ fetch, url = DEFAULT_USAGE_URL, credentialsPath, onRetryAfter }) {
   const token = readOAuthToken(credentialsPath);
   if (!token) return null;
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      const secs = Number(res.headers?.get?.("retry-after"));
+      if (secs > 0) onRetryAfter?.(secs * 1000);
+      return null;
+    }
     return parseUsageLimits(await res.json());
   } catch {
     return null;
   }
 }
 
+// The last good reading, re-read at `nowMs`: a bucket whose reset has passed has
+// refilled, so it reads 0% rather than its stale fill (which could ground dispatch).
+function staleReading(cached, nowMs) {
+  const limits = cached.result.limits.map((l) => ({
+    kind: l.kind, severity: l.severity, resets_at: l.resetsAt,
+    percent: l.resetsAt && Date.parse(l.resetsAt) <= nowMs ? 0 : l.percent,
+    scope: l.scope ? { model: { display_name: l.scope } } : null,
+  }));
+  return { ...parseUsageLimits({ limits }), source: "stale", asOfMs: cached.ts };
+}
+
+function writeCache(cachePath, entry) {
+  try {
+    mkdirSync(dirname(cachePath), { recursive: true });
+    writeFileSync(cachePath, JSON.stringify(entry));
+  } catch { /* cache is garnish */ }
+}
+
 // Cached best-effort quota check. Cache lives under the swarm home so repeated
-// runs (and the `quota` subcommand) within TTL don't re-query.
+// runs (and the `quota` subcommand) within TTL don't re-query. A refused fetch
+// serves the last good reading (source "stale"), and a Retry-After is honoured —
+// asking again sooner only extends the endpoint's rate limit.
 export async function checkQuota({
   cfg = {},
   fetch,
@@ -98,19 +122,19 @@ export async function checkQuota({
   now = () => Date.now(),
 }) {
   const ttlMs = (cfg.quotaCacheSecs ?? 300) * 1000;
+  let cached = null;
   if (cachePath && existsSync(cachePath)) {
-    try {
-      const cached = JSON.parse(readFileSync(cachePath, "utf8"));
-      if (now() - cached.ts < ttlMs && cached.result) return { ...cached.result, source: "cache" };
-    } catch { /* corrupt cache — refetch */ }
+    try { cached = JSON.parse(readFileSync(cachePath, "utf8")); } catch { /* corrupt cache — refetch */ }
   }
-  const parsed = await fetchUsageLimits({ fetch, url: cfg.quotaUsageUrl || DEFAULT_USAGE_URL, credentialsPath });
-  if (!parsed) return null;
-  if (cachePath) {
-    try {
-      mkdirSync(dirname(cachePath), { recursive: true });
-      writeFileSync(cachePath, JSON.stringify({ ts: now(), result: parsed }));
-    } catch { /* cache is garnish */ }
+  if (cached?.result && now() - cached.ts < ttlMs) return { ...cached.result, source: "cache" };
+  const stale = () => (cached?.result?.limits?.length ? staleReading(cached, now()) : null);
+  if (cached?.retryAfter > now()) return stale();
+  let retryMs = 0;
+  const parsed = await fetchUsageLimits({ fetch, url: cfg.quotaUsageUrl || DEFAULT_USAGE_URL, credentialsPath, onRetryAfter: (ms) => { retryMs = ms; } });
+  if (!parsed) {
+    if (retryMs && cachePath) writeCache(cachePath, { ...cached, retryAfter: now() + retryMs });
+    return stale();
   }
+  if (cachePath) writeCache(cachePath, { ts: now(), result: parsed });
   return { ...parsed, source: "endpoint" };
 }

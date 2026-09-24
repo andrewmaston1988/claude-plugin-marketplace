@@ -39,7 +39,7 @@ export const AVAILABILITY_STATES = new Set(["available", "unavailable", "unknown
 // caveat. `live` this process fetched it, `partial` it fetched half, `cached`
 // from a store this process did not fill, `cache` Anthropic's self-healing TTL
 // cache, `none` no reading, `unknown` a provider that never declared one.
-export const PROVENANCE_STATES = new Set(["live", "partial", "cached", "cache", "none", "unknown"]);
+export const PROVENANCE_STATES = new Set(["live", "partial", "cached", "cache", "none", "unknown", "stale"]);
 // What makes an ollama model a cloud one. Discovery and the provider descriptor each
 // carried their own copy of this.
 export const OLLAMA_CLOUD_RE = /(:|-)cloud$/i;
