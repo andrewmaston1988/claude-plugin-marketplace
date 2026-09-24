@@ -46,3 +46,27 @@ test("a clock tick mid-navigation keeps the skeleton, never the screen being lef
   assert.equal(P.findByClass("skeleton").length, 1);
   assert.doesNotMatch(P.mainText(), /LISTRUN/);
 });
+
+// Operator 2026-09-24: "why doesn't the usage tab just have a cache and then reload from
+// cache and then lazy load the new data?"
+test("a return to Usage paints the last reading at once, then the fresh one", async () => {
+  const P = loadPage({ perfViews: { usageScreen: (d) => `<div class="stub">${d.tag}</div>` } });
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.location.hash = "#/usage"; P.fireHashchange();
+  await P.flush();
+  P.respond(isUsage, { usages: [], errors: {}, tag: "first" });
+  await P.flush();
+  P.location.hash = "#/"; P.fireHashchange();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.location.hash = "#/usage"; P.fireHashchange();
+  await P.flush();
+  assert.equal(P.findByClass("skeleton").length, 0, "no skeleton when a reading is cached");
+  assert.match(P.findByClass("stub")[0].textContent, /first/);
+  P.respond(isUsage, { usages: [], errors: {}, tag: "second" });
+  await P.flush();
+  assert.match(P.findByClass("stub")[0].textContent, /second/);
+});

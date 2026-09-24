@@ -279,7 +279,7 @@
 <body>
 <header id="hdr" class="home"></header>
 <main id="main"></main>
-<nav id="nav" class="bnav"><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>Runs</a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>Usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>Perf</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>Cost</a></nav>
+<nav id="nav" class="bnav"><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>Swarm</a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>Usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>Perf</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>Cost</a></nav>
 <script>
 (() => {
   const TOKEN = new URLSearchParams(location.search).get("t");
@@ -408,10 +408,10 @@
   // One header on every screen: a title over one small line — the summary on a tab
   // screen, the tappable trail on a child — so the bar never changes shape.
   const headerHtml = (title, sub, extra = "") => `<div class="title"><b>${title}</b><small>${sub || "&nbsp;"}</small></div>${extra}`;
-  const TAB_TITLE = { runs: "Runs", usage: "Usage", perf: "Performance", cost: "Cost" };
+  const TAB_TITLE = { runs: "Swarm", usage: "Usage", perf: "Performance", cost: "Cost" };
   function trailOf(v) {
-    if (v.name === "run") return [["Runs", "#/"]];
-    if (["leaf", "node", "digest", "report"].includes(v.name)) return [["Runs", "#/"], [v.run, `#/run/${enc(v.project)}/${enc(v.run)}`]];
+    if (v.name === "run") return [[TAB_TITLE.runs, "#/"]];
+    if (["leaf", "node", "digest", "report"].includes(v.name)) return [[TAB_TITLE.runs, "#/"], [v.run, `#/run/${enc(v.project)}/${enc(v.run)}`]];
     if (v.name === "perf" && v.kind) return [["Performance", "#/perf"]];
     return null;
   }
@@ -457,7 +457,7 @@
     // same falling-number defect the token figure had: a finish pushing the
     // oldest row out of its group would lower the count.
     const total = window.swarmLive.headerRunCount(data.finishedTotals || {}, active);
-    const header = headerHtml("Runs", `${projects.length} project${projects.length === 1 ? "" : "s"} · ${total} run${total === 1 ? "" : "s"}`, active.length ? `<span class="livepill"><i></i>${active.length} live</span>` : "");
+    const header = headerHtml(TAB_TITLE.runs, `${projects.length} project${projects.length === 1 ? "" : "s"} · ${total} run${total === 1 ? "" : "s"}`, active.length ? `<span class="livepill"><i></i>${active.length} live</span>` : "");
     let html = "";
     // Live band first: every running run, across all projects, on the first screen —
     // a busy project's finished stack must never hide another project's live run.
@@ -834,7 +834,7 @@
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
     const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
      const identity = identityName(t) || "agentless";
-     const header = childHeader({ name: "leaf", project: run.project, run: run.name }, `<span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}`, id);
+     const header = childHeader({ name: "leaf", project: run.project, run: run.name }, esc(id), id);
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
     let html = leafBannerHtml(t, leaf, now, quiet ? quietSecsVal : null);
@@ -1011,9 +1011,17 @@
   }
   // /api/usage reads every provider live, so it is fetched on arrival only: the
   // Session/Week switch, ticks and reconnects redraw from the payload already held.
+  // Stale-while-revalidate: the last reading (kept across reloads) paints at once and
+  // a fresh one repaints behind it — provider usage endpoints are slow.
   let usageData = null;
+  try { usageData = JSON.parse(localStorage.getItem("swarm.usage")) || null; } catch { /* no storage */ }
+  async function fetchUsage() {
+    usageData = await api("/api/usage");
+    try { localStorage.setItem("swarm.usage", JSON.stringify(usageData)); } catch { /* no storage */ }
+  }
   async function buildUsage() {
-    if (view.name !== "usage" || !usageData) usageData = await api("/api/usage");
+    if (!usageData) await fetchUsage();
+    else if (view.name !== "usage") fetchUsage().then(() => { if (view.name === "usage") requestRoute(route); }, () => {});
     await loadPerfJs();
     const n = new Set([...(usageData.usages || []).map((u) => u.provider), ...Object.keys(usageData.errors || {})]).size;
     return {
@@ -1236,7 +1244,7 @@
     const v = viewOf(location.hash);
     pendingView = v;
     // No view: the skeleton paints the destination without committing to it.
-    if (!sameView(v, view)) commitView({ ...skeletonFor(v), home: v.name === "runs", tab: TAB[v.name] || "runs" });
+    if (!sameView(v, view) && !(v.name === "usage" && usageData)) commitView({ ...skeletonFor(v), home: v.name === "runs", tab: TAB[v.name] || "runs" });
     try {
       const next = await buildFor(v);
       if (!guardOk(seq, routeSeq)) return;
