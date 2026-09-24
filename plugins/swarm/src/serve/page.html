@@ -85,11 +85,11 @@
   .row .sub { line-height:1; }
   .row .sub .meta { line-height:1; }
   /* leaf view */
-  .kv { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); padding:16px 16px; border-bottom:1px solid var(--rule); gap:8px; }
+  .kv { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); padding:16px 16px; gap:8px; }
   .kv div { display:flex; flex-direction:column; gap:4px; min-width:0; }
   .kv label { font-size:10px; letter-spacing:.14em; text-transform:uppercase; color:var(--faint); }
   .kv span { font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .block { display:flex; flex-direction:column; gap:8px; padding:16px 16px; border-bottom:1px solid var(--rule); }
+  .block { display:flex; flex-direction:column; gap:8px; padding:16px 16px; }
   .block label { display:flex; justify-content:space-between; font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
   .block label small { letter-spacing:0; text-transform:none; }
   .menu .nav { display:flex; flex-direction:column; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); }
@@ -151,7 +151,7 @@
   .cost { padding:0 12px 16px; }
   /* the two verdict cards: ringed for a card look, headers matching .section's
      accent so the screen reads as one system rather than three label styles */
-  .kv.costcards { border-bottom:none; gap:8px; }
+  .kv.costcards { gap:8px; }
   .costcards > div { border:1px solid var(--rule); border-radius:10px; padding:12px 12px; background:var(--surface); gap:4px; }
   .costcards label { font-size:11px; letter-spacing:.16em; color:var(--accent); }
   .costcards span { white-space:normal; font-size:15px; }
@@ -772,7 +772,7 @@
       // The headline is the processed total — the same figure the estate row shows, cacheRead
       // included — so one leaf never reads as two numbers; the rows below it split out what was billed.
       const billedIn = inp + cc;
-      html += `<div class="block"><label><span>tokens</span><small>${fmtTok(tokTotal(tk))}</small></label><div class="bar"><span style="flex:${billedIn};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span></div><div class="kv" style="padding:0;border:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(billedIn)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label class="faint">cache read</label><span>${cr ? fmtTok(cr) : "—"}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
+      html += `<div class="block"><label><span>tokens</span><small>${fmtTok(tokTotal(tk))}</small></label><div class="bar"><span style="flex:${billedIn};background:var(--accent)"></span><span style="flex:${outp};background:var(--ok)"></span></div><div class="kv" style="padding:0"><div><label style="color:var(--accent)">input</label><span>${fmtTok(billedIn)}</span></div><div><label style="color:var(--ok)">output</label><span>${fmtTok(outp)}</span></div><div><label class="faint">cache read</label><span>${cr ? fmtTok(cr) : "—"}</span></div></div>${!cc && !cr ? `<div class="faint" style="font-size:12px">no cache buckets from this provider — every turn re-sends the transcript</div>` : ""}</div>`;
     }
     html += `<div class="block"><label>activity</label><div class="meta">${t.activity ? esc(t.activity) : "<span class='faint'>—</span>"}</div></div>`;
     // Raw by default; a prettify chip appears when the output carries JSON.
