@@ -48,6 +48,7 @@ import {
   step6bArchiveOrphanedPlans,
 } from "./plan-files.mjs";
 import { step0bProgress, step9Cleanup } from "./progress.mjs";
+import { readSmokeCommand, step8Smoke } from "./smoke.mjs";
 import { loadPipelineConfig } from "../../../src/pipeline-config.mjs";
 import { getPaths } from "../../../src/paths.mjs";
 import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../src/worktree-paths.mjs";
@@ -330,36 +331,6 @@ export async function step7CommitProject(projectDir, branches, { plansDir = null
   const title = `Close ${branches.map(branchSlug).join(", ")}: update plans, move to complete/`;
   await gitCommitWithRetry(projectDir, "-m", title);
   logOut(`[7] Committed: ${title}`);
-  return true;
-}
-
-// ── Step 8 — Smoke check ──────────────────────────────────────────────────────
-
-function readSmokeCommand(projectClaudeMd) {
-  if (!existsSync(projectClaudeMd)) return null;
-  const text = readFileSync(projectClaudeMd, "utf8");
-  // Find the smoke heading, then scan forward within its section for a code fence.
-  // Handles prose between heading and fence (e.g. "Run this command:\n```bash\n...").
-  const sectionM = /^#+\s+smoke\b[^\n]*/im.exec(text);
-  if (!sectionM) return null;
-  const after = text.slice(sectionM.index + sectionM[0].length);
-  const nextHeading = /^#+\s+/m.exec(after);
-  const section = nextHeading ? after.slice(0, nextHeading.index) : after;
-  const fenceM = /```(?:bash|sh|powershell|pwsh)?\n([^\n]+)/i.exec(section);
-  return fenceM ? fenceM[1].trim() : null;
-}
-
-function step8Smoke(projectDir, smokeCmd) {
-  if (!smokeCmd) { logOut("[8] No smoke command provided; skipping"); return true; }
-  logOut(`[8] Running: ${smokeCmd}`);
-  const result = spawnSync(smokeCmd, { shell: true, cwd: projectDir, encoding: "utf8" });
-  if (result.status !== 0) {
-    logErr(`BLOCKER: smoke check failed (exit ${result.status})`);
-    if (result.stdout) logErr(result.stdout.slice(-2000));
-    if (result.stderr) logErr(result.stderr.slice(-2000));
-    return false;
-  }
-  logOut("[8] Smoke check passed");
   return true;
 }
 
