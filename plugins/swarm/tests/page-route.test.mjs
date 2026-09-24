@@ -183,7 +183,7 @@ function stripStringsAndComments(js) {
 }
 
 // ── cost badges + the leaf chip ──────────────────────────────────────────
-// Badge placement is a hard rule: 💲 bands live ONLY on the perf pages and
+// Badge placement is a hard rule: coin bands live ONLY on the perf pages and
 // the model detail view. Run and leaf rows read a run; they are never
 // compared, so a badge there is clutter. These tests fail if a later edit
 // scatters badges back onto them.
@@ -192,7 +192,7 @@ const allNodes = (el, out = []) => { for (const n of el.childNodes || []) { out.
 const badgesIn = (el) => allNodes(el).filter((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes("cbadge"));
 const chipHref = (el, href) => allNodes(el).find((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes("chip") && n.getAttribute("data-href") === href);
 
-// A /api/perf payload with one measured model (4.4× → band 2 → 💲💲) and one
+// A /api/perf payload with one measured model (two coins within its provider) and one
 // unmeasured tier (band null → the em dash, never a blank that reads as
 // dominated).
 const perfPayload = () => ({
@@ -211,11 +211,11 @@ const perfPayload = () => ({
     cost: {
       bands: [2, 5],
       points: [
-        { model: "m-dear", wtd: 7.9, n: 6, multiplier: 4.4, band: 2, onFrontier: true, dominatedBy: null, thin: false },
+        { model: "m-dear", wtd: 7.9, n: 6, multiplier: 4.4, band: 2, coins: 2, onFrontier: true, dominatedBy: null, thin: false },
         { model: "sonnet", wtd: 7.2, n: 2, multiplier: null, band: null, onFrontier: false, dominatedBy: null, thin: false },
       ],
       spread: [
-        { model: "m-dear", mult: 4.4, band: 2, requests: 300, measuredRequests: 300, weeks: 1, measuredWeeks: 1, thin: false },
+        { model: "m-dear", mult: 4.4, band: 2, coins: 2, requests: 300, measuredRequests: 300, weeks: 1, measuredWeeks: 1, thin: false },
         { model: "sonnet", mult: null, band: null, requests: 150, measuredRequests: 0, weeks: 1, measuredWeeks: 0, thin: true },
       ],
     },
@@ -234,8 +234,13 @@ test("badges: the perf overall list carries the band badge and the unmeasured em
   await P.flush();
   const badges = badgesIn(P.main);
   assert.equal(badges.length, 2, "one badge per ranked row");
-  assert.deepEqual(badges.map((b) => b.textContent), ["💲💲", "—"],
-    "measured reads its band (💲💲 at 4.4×), unmeasured reads —, never a blank");
+  assert.deepEqual(badges.map((b) => b.getAttribute("data-coins") || b.textContent), ["2", "—"],
+    "measured reads its coins, unmeasured reads —, never a blank");
+  const coins = allNodes(badges[0]).filter((n) => n.nodeType === 1 && n.tagName?.toLowerCase() === "use");
+  assert.equal(coins.length, 2, "two coins stack two <use>s");
+  const svg = allNodes(badges[0]).find((n) => n.tagName?.toLowerCase() === "svg");
+  assert.equal(badges[0].getAttribute("style"), "height:26px", "the box is a full five-stack tall, so every stack shares its foot");
+  assert.equal(svg.getAttribute("height"), "15", "a two-stack is shorter than its box");
 });
 
 test("badges: provider-local cost points do not collapse into one ambiguous model badge", async () => {
@@ -274,7 +279,7 @@ test("badges: run rows and leaf rows carry none — the screen a run is READ on 
   await P.flush();
   assert.ok(P.screenText().includes("TARGETRUN"), "the run screen painted");
   assert.equal(badgesIn(P.main).length + badgesIn(P.hdr).length, 0, "no badge on the run screen");
-  assert.ok(!P.screenText().includes("💲"), "no 💲 glyph anywhere on the run screen");
+  assert.ok(!P.main.innerHTML.includes("#coin"), "no coin anywhere on the run screen");
   // The leaf: the model chip is now a link, and it stays PLAIN TEXT — no badge rides it.
   P.location.hash = "#/run/C--code-tgt/TARGETRUN/leaf/leaf-a";
   P.fireHashchange();
@@ -286,7 +291,7 @@ test("badges: run rows and leaf rows carry none — the screen a run is READ on 
   assert.ok(chip, "the leaf's model chip is clickable, navigating to that model's breakdown");
   assert.equal(chip.textContent, "glm", "the chip stays plain text");
   assert.equal(badgesIn(P.main).length + badgesIn(P.hdr).length, 0, "no badge on the leaf screen");
-  assert.ok(!P.screenText().includes("💲"), "no 💲 glyph anywhere on the leaf screen");
+  assert.ok(!P.main.innerHTML.includes("#coin"), "no coin anywhere on the leaf screen");
 });
 
 test("forEach run: one rail dot per session row, none for the forEach label, and no dot strip on it (T14)", async () => {
@@ -611,4 +616,24 @@ test("Test 10: a hung list request times out into the error panel and frees the 
   const before = P.listFetches().length;
   P.fireSse("runs"); await P.flush();
   assert.equal(P.listFetches().length - before, 1, "the next event starts a new fetch");
+});
+
+test("scroll: a navigation to another screen opens at the top; a refresh of the same screen keeps its place", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(listData(listRow()));
+  await P.flush();
+  P.location.hash = "#/perf";
+  P.fireHashchange();
+  await P.flush();
+  P.respondPerf(perfPayload());
+  await P.flush();
+  const settled = P.scrolls.length;
+  P.fireHashchange();
+  await P.flush();
+  assert.equal(P.scrolls.length, settled, "re-routing the screen already showing does not jump to the top");
+  P.location.hash = "#/perf/model/m-dear";
+  P.fireHashchange();
+  await P.flush();
+  assert.deepEqual(P.scrolls.slice(settled), [[0, 0]], "tapping a model from a scrolled list opens its page at the hero");
 });

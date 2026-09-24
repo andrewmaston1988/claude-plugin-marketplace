@@ -3,7 +3,7 @@
 import { OUTCOMES } from "../aspects.mjs";
 import { overall } from "../scores.mjs";
 import { identityOf } from "../contracts.mjs";
-import { band, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
+import { band, coins, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
 
 const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
 
@@ -116,6 +116,14 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
     if (costDomain === undefined && domains.size > 1) return null;
     return matches.find((r) => r.mult != null) || matches[0];
   };
+  // One coin range per provider and cost domain — the axes that share a unit.
+  const rangeKey = (r) => `${providerKey(r)}|${r.costDomain || "legacy"}`;
+  const ranges = new Map();
+  for (const r of costs) {
+    if (r.mult == null || !Number.isFinite(r.mult) || r.mult <= 0) continue;
+    const k = rangeKey(r), g = ranges.get(k);
+    ranges.set(k, g ? { lo: Math.min(g.lo, r.mult), hi: Math.max(g.hi, r.mult) } : { lo: r.mult, hi: r.mult });
+  }
   const isMeter = (r) => !r?.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
   const quality = overall(rows, { domain, combineProviders: true }).cells.filter((c) => c.combined != null);
   const points = quality.flatMap((cell) => {
@@ -135,6 +143,7 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
         n: cell.n,
         multiplier: evidence?.mult ?? null,
         band: evidence?.mult == null ? null : band(evidence.mult, bands),
+        coins: evidence ? coins(evidence.mult, ranges.get(rangeKey(evidence))) : null,
         onFrontier: false,
         dominatedBy: null,
         thin: Boolean(evidence && isMeter(evidence) && evidence.measuredRequests < THIN_REQUESTS),
@@ -151,7 +160,7 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
   const spread = costs
     .map((r) => ({
       ...(identityOf(r).provider ? { provider: identityOf(r).provider } : {}),
-      model: r.model, label: displayOf(identityOf(r)), mult: r.mult, band: band(r.mult, bands),
+      model: r.model, label: displayOf(identityOf(r)), mult: r.mult, band: band(r.mult, bands), coins: coins(r.mult, ranges.get(rangeKey(r))),
       requests: r.requests, measuredRequests: r.measuredRequests,
       weeks: r.weeks, measuredWeeks: r.measuredWeeks,
       thin: isMeter(r) && r.measuredRequests < THIN_REQUESTS,
