@@ -48,6 +48,7 @@ import {
   step6bArchiveOrphanedPlans,
 } from "./plan-files.mjs";
 import { step0bProgress, step9Cleanup } from "./progress.mjs";
+import { readSmokeCommand, step8Smoke } from "./smoke.mjs";
 import { loadPipelineConfig } from "../../../src/pipeline-config.mjs";
 import { getPaths } from "../../../src/paths.mjs";
 import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../src/worktree-paths.mjs";
@@ -56,6 +57,17 @@ import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../src/wo
 
 function logOut(msg) { process.stdout.write(msg + "\n"); }
 function logErr(msg) { process.stderr.write(msg + "\n"); }
+
+// Steps that fail on their own terms (rebase, DoD gate, smoke) abort with their
+// own exit code. Thrown, never `return`ed: a return inside the try skips the
+// trailing process.exit, the process falls off the end at 0, and a caller reads
+// the rolled-back merge as landed.
+class MergeAbort extends Error {
+  constructor(code, message) {
+    super(message);
+    this.exitCode = code;
+  }
+}
 
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
@@ -322,36 +334,6 @@ export async function step7CommitProject(projectDir, branches, { plansDir = null
   return true;
 }
 
-// ── Step 8 — Smoke check ──────────────────────────────────────────────────────
-
-function readSmokeCommand(projectClaudeMd) {
-  if (!existsSync(projectClaudeMd)) return null;
-  const text = readFileSync(projectClaudeMd, "utf8");
-  // Find the smoke heading, then scan forward within its section for a code fence.
-  // Handles prose between heading and fence (e.g. "Run this command:\n```bash\n...").
-  const sectionM = /^#+\s+smoke\b[^\n]*/im.exec(text);
-  if (!sectionM) return null;
-  const after = text.slice(sectionM.index + sectionM[0].length);
-  const nextHeading = /^#+\s+/m.exec(after);
-  const section = nextHeading ? after.slice(0, nextHeading.index) : after;
-  const fenceM = /```(?:bash|sh|powershell|pwsh)?\n([^\n]+)/i.exec(section);
-  return fenceM ? fenceM[1].trim() : null;
-}
-
-function step8Smoke(projectDir, smokeCmd) {
-  if (!smokeCmd) { logOut("[8] No smoke command provided; skipping"); return true; }
-  logOut(`[8] Running: ${smokeCmd}`);
-  const result = spawnSync(smokeCmd, { shell: true, cwd: projectDir, encoding: "utf8" });
-  if (result.status !== 0) {
-    logErr(`BLOCKER: smoke check failed (exit ${result.status})`);
-    if (result.stdout) logErr(result.stdout.slice(-2000));
-    if (result.stderr) logErr(result.stderr.slice(-2000));
-    return false;
-  }
-  logOut("[8] Smoke check passed");
-  return true;
-}
-
 // ── Arg parsing ───────────────────────────────────────────────────────────────
 
 function parseArgs(argv) {
@@ -481,7 +463,7 @@ async function main() {
       logOut("[0a] --no-rebase: skipping rebase as requested by operator");
     } else {
       const rebaseOk = await step0aRebase(projectDir, branches, targetBranch);
-      if (!rebaseOk) { exitCode = 3; return; }
+      if (!rebaseOk) throw new MergeAbort(3, "step 0a (rebase)");
     }
     mark(0, "done");
 
@@ -498,7 +480,7 @@ async function main() {
     });
     if (blockers.length) {
       for (const b of blockers) logErr(`BLOCKER: ${b}`);
-      exitCode = 4; return;
+      throw new MergeAbort(4, `step 2 (definition of done) — ${blockers.length} blocker(s)`);
     }
     mark(2, "done");
 
@@ -538,14 +520,19 @@ async function main() {
     if (!args.skipSmoke) {
       mark(8, "inprogress");
       const smokeCmd = readSmokeCommand(join(projectDir, "CLAUDE.md"));
-      if (!step8Smoke(projectDir, smokeCmd)) { exitCode = 5; return; }
+      if (!step8Smoke(projectDir, smokeCmd)) throw new MergeAbort(5, "step 8 (smoke check)");
       mark(8, "done");
     }
 
     logOut("merge.mjs — complete");
   } catch (e) {
-    logErr(`[merge] Unexpected error: ${e.message ?? e}`);
-    exitCode = 6;
+    if (e instanceof MergeAbort) {
+      logErr(`[merge] aborted at ${e.message}`);
+      exitCode = e.exitCode;
+    } else {
+      logErr(`[merge] Unexpected error: ${e.message ?? e}`);
+      exitCode = 6;
+    }
   } finally {
     // Rollback on failure (not smoke failure — that's operator-recoverable)
     if (exitCode !== 0 && exitCode !== 5) {
@@ -557,7 +544,8 @@ async function main() {
         if (co.code !== 0) {
           logErr(`  BLOCKER — could not checkout '${projectPreBranch}': ${co.stderr.trim()}; skipping reset`);
           close(db);
-          process.exit(exitCode);
+          setTimeout(() => process.exit(exitCode), 150);
+          return;
         }
       }
       logErr(`  project (${projectPreBranch}) -> ${projectPreSha.slice(0, 7)}`);
@@ -569,9 +557,14 @@ async function main() {
     close(db);
   }
 
-  process.exit(exitCode);
+  // Exit on a timer, per the plugin convention: a bare process.exit can drop a
+  // piped stderr on Windows, and these exits are the failure report.
+  setTimeout(() => process.exit(exitCode), 150);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch(e => { logErr(`[fatal] ${e.message ?? e}`); process.exit(6); });
+  main().catch(e => {
+    logErr(`[fatal] ${e.message ?? e}`);
+    setTimeout(() => process.exit(6), 150);
+  });
 }
