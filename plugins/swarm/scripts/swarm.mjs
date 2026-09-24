@@ -15,7 +15,7 @@ import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder } from "../src/prune.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, repoOfWorktree, reposOfTrees } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim } from "../src/ui.mjs";
 import { modelLine, effortsCell } from "../src/model-row.mjs";
@@ -577,15 +577,6 @@ async function cmdStop(rest) {
   return 1;
 }
 
-// A worktree's own `.git` file names its repo's common dir — no need for the
-// run record to carry `repo` at all, so long as at least one kept tree is
-// still on disk to ask.
-function repoOfWorktree(spawnSync, worktreePath) {
-  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: worktreePath, encoding: "utf8", windowsHide: true });
-  if (r.status !== 0) return null;
-  return dirname(resolve(worktreePath, (r.stdout || "").trim()));
-}
-
 async function cmdPrune(rest) {
   // The dir is the first non-flag arg, so `prune --dry-run <dir>` and
   // `prune <dir> --dry-run` mean the same thing.
@@ -614,7 +605,7 @@ async function cmdPrune(rest) {
   // Resolve each tree's own repo: one scalar attributed a second repo's tree to the
   // first and `git worktree remove` then silently failed against the wrong cwd.
   const keptWithRepo = worktreesKept.map((wt) => ({ ...wt, repo: wt.repo || repoOfWorktree(spawnSync, wt.path) }));
-  const repos = [...new Set([...keptWithRepo.map((wt) => wt.repo), ...reposFromManifest(fs, dir)].filter(Boolean))];
+  const repos = [...new Set([...keptWithRepo.map((wt) => wt.repo), ...reposFromManifest(fs, dir), ...reposOfTrees(fs, dir, spawnSync)].filter(Boolean))];
   if (!repos.length) {
     err(`swarm: could not resolve the repo for ${dir} — no kept worktree survives and manifest.json has no cwd.`);
     return 1;
