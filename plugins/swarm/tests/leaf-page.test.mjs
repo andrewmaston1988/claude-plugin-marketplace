@@ -105,3 +105,38 @@ test("every card is the same surface: 1px border, radius 14", () => {
   assert.match(css[1], /border:\s*1px solid/);
   assert.match(css[1], /border-radius:\s*14px/);
 });
+
+// A live tick from an Ollama leaf carries the whole prompt as input_tokens and
+// output_tokens:0, with no cache field — the split only exists in the final result.
+// Drawing it live painted Output 0 / Cache 0 on every running leaf.
+test("a running leaf whose ticks carry no split shows the total and says the split comes at the end", async () => {
+  const P = await paintLeaf({ state: "running", startedMs: Date.now() - 30_000, lastEventMs: Date.now(), tokens: { input: 6_707_164, output: 0, cacheCreation: 0, cacheRead: 0 } });
+  assert.equal(P.findByClass("segbar").length, 0, "no bar drawn from a split that does not exist yet");
+  const text = P.screenText();
+  assert.ok(!text.includes("Output 0"), "never claims zero output mid-run");
+  assert.ok(text.includes("6.7M") && text.includes("split arrives when the leaf finishes"));
+});
+
+test("a running leaf whose ticks DO carry output still draws the split", async () => {
+  const P = await paintLeaf({ state: "running", startedMs: Date.now() - 30_000, lastEventMs: Date.now(), tokens: { input: 100, cacheCreation: 900, output: 50, cacheRead: 3000 } });
+  assert.equal(P.findByClass("segbar").length, 1);
+});
+
+test("the activity line stays on one line and ellipsises rather than wrapping", async () => {
+  const P = await paintLeaf({ state: "running", startedMs: Date.now() - 30_000, lastEventMs: Date.now(), activity: "Bash rm -rf src/stonk/__pycache__ && PYTHONP…" });
+  assert.equal(P.findByClass("act").length, 1, "the activity text is its own element");
+  const css = readFileSync(PAGE, "utf8").match(/\.card \.act\s*\{([^}]*)\}/);
+  assert.ok(css, ".act carries its own rule");
+  assert.match(css[1], /white-space:\s*nowrap/);
+  assert.match(css[1], /text-overflow:\s*ellipsis/);
+  assert.match(css[1], /overflow:\s*hidden/);
+  assert.match(css[1], /min-width:\s*0/, "a flex child without min-width:0 refuses to shrink, so it never ellipsises");
+});
+
+test("a running leaf's banner carries the run tree's spinner in its status circle", async () => {
+  const { P } = await bannerOf({ state: "running", startedMs: Date.now() - 30_000, lastEventMs: Date.now() });
+  const ic = P.findByClass("ic")[0];
+  const ring = [];
+  (function walk(n) { if (n.nodeType !== 1) return; if ((n.getAttribute("class") || "").split(/\s+/).includes("ring")) ring.push(n); n.childNodes.forEach(walk); })(ic);
+  assert.equal(ring.length, 1, "the same .ring element the tree animates, inside the circle");
+});

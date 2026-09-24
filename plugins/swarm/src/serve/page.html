@@ -222,6 +222,7 @@
   .card .gr { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; font-size:12px; color:var(--muted); }
   .card .gr + .gr { margin-top:8px; }
   .card .gr .k { width:44px; flex:none; font-size:11px; color:var(--faint); }
+  .card .act { flex:1; min-width:0; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
   .card .fchip { padding:4px 8px; border-radius:8px; background:var(--surface-2); color:var(--ink); font-size:12.5px; }
   .card .cf { display:flex; justify-content:space-between; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--rule); font-size:11.5px; color:var(--faint); }
   .card .show { color:var(--accent); cursor:pointer; }
@@ -533,6 +534,8 @@
   };
   const byStateOf = (tasks) => tasks.reduce((b, t) => (b[t.state] = (b[t.state] || 0) + 1, b), {});
 
+  // The rail's running glyph — same geometry and .ring animation as dot() — sized into a banner circle.
+  const SPIN = `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="var(--accent)"/><circle class="ring" cx="12" cy="12" r="9"/></svg>`;
   const tile = (kind, icon, title, sub, href) =>
     `<div class="banner ${kind}${href ? " tap" : ""}"${href ? ` role="link" data-key="banner" data-href="${esc(href)}"` : ""}>`
     + `<span class="ic">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`
@@ -566,7 +569,7 @@
     // there is no reachable run that has started nothing to give a tone of its own. A live
     // run with no leaf running (between waves, engine alive) is still a live run.
     const running = n("running", "retrying");
-    return tile("", "◐", `${running} running`, `${done} of ${tasks.length} done · ${tok} tokens`, null);
+    return tile("", SPIN, `${running} running`, `${done} of ${tasks.length} done · ${tok} tokens`, null);
   }
 
   // The RUN screen's chrome: the verdict tile, then the one action that screen exists
@@ -789,7 +792,7 @@
       }
     }
     if (quietSecs != null) return tile("slow", "!", `No output for ${fmtDur(quietSecs * 1000)}`, `${tok} so far`);
-    return tile("", "◐", `Running for ${took}`, `${identity ? `${identity} · ` : ""}${tok} so far`);
+    return tile("", SPIN, `Running for ${took}`, `${identity ? `${identity} · ` : ""}${tok} so far`);
   }
 
   function renderLeafHtml(run, leaf, id) {
@@ -809,7 +812,7 @@
     html += `<div class="card"><div class="cl">position in graph</div>`
       + `<div class="gr"><span class="k">after</span>${fchips(t.after || [], "nothing upstream")}</div>`
       + `<div class="gr"><span class="k">feeds</span>${fchips(feeds, "—")}</div>`
-      + (t.activity ? `<div class="gr"><span class="k">last</span><span>${esc(t.activity)}</span></div>` : "")
+      + (t.activity ? `<div class="gr"><span class="k">last</span><span class="act">${esc(t.activity)}</span></div>` : "")
       + `<div class="cf"><span>leaf ${order.indexOf(id) + 1} of ${order.length} · wave ${(t.depth ?? 0) + 1}${turns}</span><span class="show" data-href="#/run/${enc(run.project)}/${enc(run.name)}">Show in tree ›</span></div></div>`;
     const tk = t.tokens || leaf?.tokens;
     if (tk) {
@@ -817,12 +820,16 @@
       // On a Claude leaf the whole prompt is cache-written on turn 1, so `input` alone is
       // just the uncached tail. cacheRead is its own segment: re-read transcript, not billed.
       const billedIn = (tk.input || 0) + (tk.cacheCreation || 0), outp = tk.output || 0, cr = tk.cacheRead || 0;
+      // A live Ollama tick is a running total — the whole prompt as input, no output, no cache —
+      // and the split only exists in the final result. Zeros drawn from it would be a claim.
+      const noSplit = LIVE.has(t.state) && !outp && !cr && !tk.cacheCreation;
       const seg = (n, colour) => `<span style="flex:${n};background:${colour}"></span>`;
       const key = (colour, label, n) => `<span><i style="background:${colour}"></i>${label} ${n ? fmtTok(n) : "0"}</span>`;
       html += `<div class="card"><div class="cl">tokens<b>${fmtTok(tokTotal(tk))}</b></div>`
-        + `<div class="segbar">${seg(billedIn, "var(--accent)")}${seg(outp, "var(--ok)")}${seg(cr, "var(--rule)")}</div>`
-        + `<div class="legend">${key("var(--accent)", "Input", billedIn)}${key("var(--ok)", "Output", outp)}${key("var(--rule)", "Cache", cr)}</div>`
-        + (!tk.cacheCreation && !cr ? `<div class="cf"><span>no cache buckets from this provider — every turn re-sends the transcript</span></div>` : "")
+        + (noSplit ? `<div class="cf"><span>running total — the input / output / cache split arrives when the leaf finishes</span></div>` : "")
+        + (noSplit ? "" : `<div class="segbar">${seg(billedIn, "var(--accent)")}${seg(outp, "var(--ok)")}${seg(cr, "var(--rule)")}</div>`
+          + `<div class="legend">${key("var(--accent)", "Input", billedIn)}${key("var(--ok)", "Output", outp)}${key("var(--rule)", "Cache", cr)}</div>`)
+        + (!noSplit && !tk.cacheCreation && !cr ? `<div class="cf"><span>no cache buckets from this provider — every turn re-sends the transcript</span></div>` : "")
         + `</div>`;
     }
     // Prompt and output: both long crafted text, collapsed by default — this screen is read
