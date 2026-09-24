@@ -54,9 +54,9 @@ const encodeCwd = (p) => String(p).replace(/[\\/:]/g, "-"); // same rule as the 
 
 const listDir = (p) => { try { return readdirSync(p); } catch { return []; } };
 
+// Model only — the provider adds no information the bar's width can pay for.
 export function identityLabel(task) {
-  const model = String(task?.model || "").replace(/:cloud$/, "");
-  return task?.provider ? `${task.provider}/${model}` : model;
+  return String(task?.model || "").replace(/:cloud$/, "");
 }
 
 export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), session = sessionInfo() } = {}) {
@@ -76,9 +76,11 @@ export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), s
       const running = rr.tasks.filter((t) => t.state === "running" || t.state === "retrying").map((t) => t.id);
       let ok = 0, failed = 0, quiet = 0;
       const model = new Map();
+      const leafTokens = new Map();
       const providerTokens = new Map();
       for (const t of rr.tasks) {
         model.set(t.id, identityLabel(t));
+        leafTokens.set(t.id, tokenTotal(t.tokens));
         const provider = t.provider || "unknown";
         providerTokens.set(provider, (providerTokens.get(provider) || 0) + tokenTotal(t.tokens));
         if (t.state === "ok" || t.state === "skipped") ok++;
@@ -88,7 +90,7 @@ export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), s
       }
       const total = rr.tasks.length;
       const { tokens, launcher } = runMeta(join(rd, "run.log"));
-      out.push({ run, ok, failed, total, running, quiet, model, tokens, providerTokens, mine: mine(cwdDir, launcher) });
+      out.push({ run, ok, failed, total, running, quiet, model, leafTokens, tokens, providerTokens, mine: mine(cwdDir, launcher) });
     }
   }
   return out;
@@ -107,12 +109,19 @@ export function render(opts = {}) {
   const parts = [];
   let stalest = null;
   runs.sort((a, b) => (a.run < b.run ? -1 : a.run > b.run ? 1 : 0));
-  for (const { run, ok, failed, total, running, quiet, model, tokens } of runs) {
+  for (const { run, ok, failed, total, running, quiet, model, leafTokens, tokens } of runs) {
     const short = run.replaceAll("scenario-", "").replaceAll("-impl-1", "").replaceAll("-1", "");
     // ✓ all leaves done (green), ◐ a leaf is live, ○ nothing running, not done
     const [sym, col] = ok === total ? ["✓", G] : running.length ? ["◐", BLUE] : ["○", BLUE];
-    // the models seated on the live leaves, deduped
-    const agents = [...new Set(running.map((id) => model.get(id)).filter(Boolean))].join(",");
+    // The models seated on the live leaves, deduped. One run owns the whole bar, so it
+    // lists them all; several runs share it, so each names only its fullest leaf's model
+    // — the one deepest into its context — and counts the rest.
+    const seated = [...new Set(running.map((id) => model.get(id)).filter(Boolean))];
+    const deepest = () => model.get(running.reduce((a, b) =>
+      (leafTokens?.get(b) || 0) > (leafTokens?.get(a) || 0) ? b : a));
+    const agents = runs.length === 1 || seated.length <= 1
+      ? seated.join(", ")
+      : `${deepest()} (+${seated.length - 1} more)`;
     const tail = [agents, formatTokens(tokens)].filter(Boolean).join(" ");
     parts.push(`${short} ${col}${ok}/${total} ${sym}${X}` + (failed ? ` ${Y}✗${failed}${X}` : "") + (tail ? ` ${D}${tail}${X}` : ""));
     if (quiet > QUIET_FLAG_MS && (stalest === null || quiet > stalest.quiet)) {

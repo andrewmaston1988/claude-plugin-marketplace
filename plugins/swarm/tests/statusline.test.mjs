@@ -234,3 +234,61 @@ test("row 10: a run dispatched by the real scheduler is attributed to its sessio
     rmSync(scratch, { recursive: true, force: true });
   }
 });
+
+// One run per directory, each with two live leaves on different models and
+// different context depths — the fixture the model-label rules are read off.
+function fleetRuns({ now, runs }) {
+  const home = mkdtempSync(join(tmpdir(), "swarm-labels-"));
+  for (const { name, leaves } of runs) {
+    const rd = join(home, "runs", "C--code-x", name);
+    mkdirSync(rd, { recursive: true });
+    const ts = new Date(now - 60_000).toISOString();
+    const lines = [JSON.stringify({
+      ts, event: "run-start", pid: 1, launcher: "sess-1",
+      tasks: leaves.map(({ id, model }) => ({ id, provider: "ollama", model })),
+    })];
+    for (const { id, input } of leaves) {
+      lines.push(JSON.stringify({
+        ts: new Date(now).toISOString(), id, state: "running",
+        tokens: { input, output: 0, cacheCreation: 0, cacheRead: 0 },
+      }));
+    }
+    writeFileSync(join(rd, "run.log"), lines.join("\n") + "\n");
+    const t = now / 1000;
+    utimesSync(join(rd, "run.log"), t, t);
+    touchHeartbeat(rd, new Date(now).toISOString(), 1);
+    utimesSync(heartbeatPath(rd), t, t);
+  }
+  return home;
+}
+
+const LEAVES = [{ id: "a", model: "glm-5.2:cloud", input: 400 }, { id: "b", model: "minimax-m3:cloud", input: 9000 }];
+
+test("fleet bar: a lone run lists every seated model, by model alone — no provider prefix", () => {
+  const now = Date.now();
+  const home = fleetRuns({ now, runs: [{ name: "solo-1", leaves: LEAVES }] });
+  try {
+    const line = renderFleet({ home, now, session: { session_id: "sess-1" } }).replace(/\x1b\[[0-9;]*m/g, "");
+    assert.match(line, /glm-5\.2, minimax-m3/, `both models, in full: ${line}`);
+    assert.doesNotMatch(line, /ollama/, `the provider is gone: ${line}`);
+    assert.doesNotMatch(line, /more\)/, `a lone run never condenses: ${line}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("fleet bar: with several runs each names its deepest-context model and counts the rest", () => {
+  const now = Date.now();
+  const home = fleetRuns({ now, runs: [
+    { name: "one-1", leaves: LEAVES },
+    // reversed depths: the same two models, but glm-5.2 is the fuller leaf here
+    { name: "two-1", leaves: [{ id: "c", model: "glm-5.2:cloud", input: 9000 }, { id: "d", model: "minimax-m3:cloud", input: 400 }] },
+  ] });
+  try {
+    const line = renderFleet({ home, now, session: { session_id: "sess-1" } }).replace(/\x1b\[[0-9;]*m/g, "");
+    assert.match(line, /one 0\/2 ◐ minimax-m3 \(\+1 more\)/, `deepest leaf's model wins: ${line}`);
+    assert.match(line, /two 0\/2 ◐ glm-5\.2 \(\+1 more\)/, `and it is per-run, not global: ${line}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
