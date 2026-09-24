@@ -104,9 +104,9 @@ test("the hero is the picked provider's best value alone: model, and score and c
   const hero = heroOf(costScreen(data, H, "claude"));
   assert.ok(hero.includes('data-href="#/perf/model/opus"'));
   assert.ok(hero.includes('<div class="fig">opus</div>'));
-  assert.match(hero, /98% of the top score at 25% of the top cost/);
+  assert.ok(hero.includes("98% of fable's score at 25% of its cost"), "measured against the provider's top scorer");
   assert.match(hero, /bar q"><span style="width:98%">[\s\S]*?<b>9\.3<\/b>/);
-  assert.match(hero, /bar c"><span style="width:25%">[\s\S]*?<b>2\.5×<\/b>/);
+  assert.match(hero, /bar c"><span style="width:44%">[\s\S]*?<b>2\.5×<\/b>/);
   assert.ok(!hero.includes("glm"), "another provider never appears in this one's hero");
   assert.ok(!costScreen(data, H, "claude").includes("haiku"), "worst is never drawn");
 });
@@ -117,4 +117,11 @@ test("a provider without a best says why — ungraded, or graded with no clear b
   assert.match(bare, /class="card chero none"[\s\S]*?not graded yet/);
   const thin = heroOf(costScreen({ sections: [section("ollama", [srow("glm", 1)], { points: [point("glm", 8.1, 1, { thin: true })] })] }, H));
   assert.match(thin, /no clear best yet/);
+});
+
+test("when the best value is also the top scorer the hero says so, not a 100%-of-itself claim", () => {
+  const { costScreen } = loadPerfViews();
+  const pts = [point("opus", 9.3, 2.5, { onFrontier: true }), point("sonnet", 8.2, 1)];
+  const hero = heroOf(costScreen({ sections: [section("claude", [srow("opus", 2.5)], { points: pts, best: pts[0] })] }, H));
+  assert.ok(hero.includes("the top score here, at the lowest cost that reaches it"));
 });

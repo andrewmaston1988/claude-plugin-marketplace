@@ -148,15 +148,20 @@
     // one it says why, never the cheapest instead.
     const switcher = seg(sections.map((s) => ({ label: name(s), href: `#/cost/${enc(name(s))}` })), sections.indexOf(section));
     const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
-    // The value case as two bars against this provider's own ceilings: how close to
-    // its top score, at what share of its top cost.
+    // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
+    // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
+    const LO = Math.log10(0.5), HI = Math.log10(20);
+    const pct = (m) => Math.max(2, Math.min(100, ((Math.log10(m) - LO) / (HI - LO)) * 100));
+    // The value case against this provider's top scorer: how close to its score, at what
+    // share of its cost. The cost bar shares the cards' log scale below.
     const b = section.best, cl = `<div class="cl"><span>best value</span><span>${esc(name(section))}</span></div>`;
-    const top = (k) => Math.max(0, ...section.points.map((p) => p[k] ?? 0));
-    const share = (v, max) => (max > 0 && v != null ? Math.round((v / max) * 100) : null);
     const hero = !b ? `<div class="card chero none">${cl}<div class="claim">${whyNone(section)}</div></div>` : (() => {
-      const q = share(b.wtd, top("wtd")), c = share(b.multiplier, top("multiplier"));
+      const lead = section.points.reduce((m, p) => (p.wtd ?? -1) > (m.wtd ?? -1) ? p : m, b);
+      const q = lead.wtd > 0 && b.wtd != null ? Math.round((b.wtd / lead.wtd) * 100) : null;
+      const c = b.multiplier > 0 ? Math.round(pct(b.multiplier)) : null;
       const vbar = (label, w, val, cls) => `<div class="vbar"><span class="k">${label}</span><div class="bar ${cls}"><span style="width:${w ?? 0}%"></span></div><b>${val}</b></div>`;
-      const claim = q == null || c == null ? "on the value frontier" : `${q}% of the top score at ${c}% of the top cost`;
+      const claim = lead === b || lead.model === b.model ? "the top score here, at the lowest cost that reaches it"
+        : lead.multiplier > 0 && q != null ? `${q}% of ${esc(lead.model)}'s score at ${Math.round((b.multiplier / lead.multiplier) * 100)}% of its cost` : "on the value frontier";
       return `<div class="card chero" data-href="#/perf/model/${enc(b.model)}">${cl}<div class="fig">${esc(b.model)}</div><div class="claim">${claim}</div>`
         + vbar("score", q, b.wtd == null ? "—" : b.wtd.toFixed(1), "q") + vbar("cost", c, esc(fmtMult(b.multiplier)), "c") + `</div>`;
     })();
@@ -171,10 +176,6 @@
     if (!spread.some((r) => r.mult != null)) {
       return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
     }
-    // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
-    // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
-    const LO = Math.log10(0.5), HI = Math.log10(20);
-    const pct = (m) => Math.max(2, Math.min(100, ((Math.log10(m) - LO) / (HI - LO)) * 100));
     const ptOf = new Map(points.map((p) => [p.model, p]));
     const verdict = (r) => {
       const p = ptOf.get(r.model);
