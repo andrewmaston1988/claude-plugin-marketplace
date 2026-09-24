@@ -71,6 +71,6 @@ export async function readClaudeUsage(context = {}) {
   if (!q || !q.limits?.length) {
     return marked("anthropic usage endpoint unreachable, or no Claude Code credentials", new Date(nowMs).toISOString());
   }
-  const provenance = q.source === "cache" ? "cache" : q.source === "endpoint" ? "live" : "unknown";
-  return claudeSnapshot(q, provenance, new Date(nowMs).toISOString());
+  const provenance = { cache: "cache", endpoint: "live", stale: "stale" }[q.source] || "unknown";
+  return claudeSnapshot(q, provenance, new Date(q.asOfMs ?? nowMs).toISOString());
 }

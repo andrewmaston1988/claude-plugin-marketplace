@@ -250,7 +250,8 @@
       : "";
     const cards = rows.map((p) => {
       const r = reading(p);
-      const nm = `<span class="nm">${esc(p.provider)}</span>`;
+      // A held-over reading (the endpoint refused a fresh one) keeps its figures, tagged.
+      const nm = `<span class="nm">${esc(p.provider)}${p.usage?.provenance === "stale" ? '<span class="chip warn stale">stale</span>' : ""}</span>`;
       if (!r) return `<div class="card upc unread"><div class="top">${nm}</div><div class="sub">${esc(`not read — ${whyNot(p)}`)}</div></div>`;
       return `<div class="card upc ${tone(r.left)}"><div class="top">${nm}<span class="val ${tone(r.left)}">${r.left}%</span></div>${bar(r.left)}`
         + (r.note ? `<div class="sub">${esc(r.note)}</div>` : "") + "</div>";

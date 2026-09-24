@@ -101,3 +101,11 @@ test("the hero names a provider that went unread", () => {
   const all = usageScreen({ usages: [usage("ollama", [lim("session", 10)])] }, H, "session");
   assert.ok(!all.includes("not read"));
 });
+
+// Operator 2026-09-24: "it should show the last value it is cached" … "And show e.g. [stale]" … "Chip".
+test("a held-over reading keeps its figure and carries a stale chip; a live one does not", () => {
+  const stale = { usages: [usage("anthropic", [lim("session", 40)], { provenance: "stale" }), READABLE.usages[1]], errors: {} };
+  const html = loadPerfViews().usageScreen(stale, H, "session");
+  assert.match(html, /anthropic<span class="chip warn stale">stale<\/span>[\s\S]*?60%/);
+  assert.equal((html.match(/chip warn stale/g) || []).length, 1, "only the held-over provider is chipped");
+});

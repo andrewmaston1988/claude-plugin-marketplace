@@ -104,9 +104,10 @@ test("normalized records name missing required fields", () => {
 // The token list is read off the shipped sources, not memory: live
 // (codex-usage), cached/none (ollama-usage), cache (usage.mjs's Anthropic TTL
 // cache read), unknown (normalizeProviderUsage's generic path), partial (a
-// half-failed codex read).
+// half-failed codex read), stale (quota.mjs's last good Anthropic reading served
+// while the endpoint refuses).
 test("providerUsageSnapshot: every shipped provenance token is accepted, a typo is not", () => {
-  const SHIPPED = ["live", "cached", "cache", "none", "unknown", "partial"];
+  const SHIPPED = ["live", "cached", "cache", "none", "unknown", "partial", "stale"];
   deepEqual([...PROVENANCE_STATES].sort(), [...SHIPPED].sort());
   for (const provenance of SHIPPED) equal(usageSnapshot({ provenance }).provenance, provenance);
   throws(() => usageSnapshot({ provenance: "Live" }), /provenance.*one of/);
