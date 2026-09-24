@@ -93,8 +93,8 @@ test("tapping a provider chip redraws the screen for that provider", async () =>
   assert.match(readFileSync(PAGE, "utf8"), /e\.target\.closest\("[^"]*\[data-cost-provider\]/);
 });
 
-test("Cost is reached from the menu, and has left the Performance switcher", () => {
+test("Cost is reached from the bottom nav, and has left the Performance switcher", () => {
   const src = readFileSync(PAGE, "utf8");
-  assert.match(src, /<nav class="nav">[^]*?href="#\/cost"/);
+  assert.match(src, /<nav id="nav"[^]*?href="#\/cost"/);
   assert.doesNotMatch(src, /href: "#\/perf\/cost"/);
 });

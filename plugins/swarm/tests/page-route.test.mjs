@@ -50,7 +50,10 @@ test("Test 2: a superseded list build writes no shared state and fires no celebr
   assert.equal(snap.currentRun.name, "TARGETRUN", "currentRun is the run from the committed navigation");
 });
 
-test("Test 3: a 1 s tick mid-navigation repaints the committed screen, not the pending one", async () => {
+// Navigation paints the destination's skeleton at once, so the screen on the glass
+// mid-navigation is that skeleton: the tick must leave it alone, neither flipping back
+// to the screen being left nor drawing the pending one from stale data.
+test("Test 3: a 1 s tick mid-navigation repaints neither the committed screen nor the pending one", async () => {
   const P = loadPage();
   await P.flush();
   P.respondList(listData(listRow()));
@@ -68,7 +71,8 @@ test("Test 3: a 1 s tick mid-navigation repaints the committed screen, not the p
   const s = P.seam();
   assert.ok(s, "test seam present (window.__swarmPage)");
   s.rerender(); // the 1 s clock fires here, between navigation and commit
-  assert.ok(P.screenText().includes("TARGETRUN"), "the tick repainted the run — the screen on the glass, not the pending list");
+  assert.ok(!P.screenText().includes("TARGETRUN"), "the tick did not flip back to the run being left");
+  assert.equal(P.findByClass("skeleton").length, 1, "the list's skeleton is still what is on the glass");
 });
 
 test("Test 4: event-driven routes coalesce; a hashchange is never coalesced away", async () => {
