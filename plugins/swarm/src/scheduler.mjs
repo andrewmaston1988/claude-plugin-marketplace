@@ -15,6 +15,7 @@ import {
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
   renderProvenance, touchHeartbeat, stopPath, recordedSessionRecords, heartbeatPath, transcriptPath,
 } from "./results.mjs";
+import { cacheHit, pinKey, writeTaskResult } from "./task-key.mjs";
 import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
@@ -767,16 +768,14 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     if (heartbeat.ref) heartbeat.ref();
   };
 
-  // Resume: an existing ok result satisfies the task without re-running it —
-  // its recorded duration and tokens still count in roster and summary.
-  //
-  // A cached result is only valid if every input that produced it is unchanged.
-  // For a dependent, the inputs ARE its dependencies' outputs — so a task whose
-  // upstream is re-executing must re-execute too, however good its own last run
-  // looked. Skipping on `prior.ok` alone let a verifier keep a verdict about
-  // findings that no longer existed, and re-stamped digest.md with the previous
-  // pass's body while reporting success. Invalidation is transitive: in A → B → C,
-  // a re-running A invalidates C, which never names A.
+  // Resume: an existing ok result satisfies the task without re-running it — its
+  // recorded duration and tokens still count. Only when the task key recorded
+  // with it matches today's task (task-key.mjs): the run dir is named after the
+  // manifest FILE, so `prior.ok` alone replayed an edited prompt's old output,
+  // and let a verifier keep a verdict about findings that no longer existed.
+  // For a dependent the inputs ARE its deps' outputs, so a re-executing upstream
+  // invalidates it whatever its own last run looked like — transitively, since
+  // in A → B → C a re-running A invalidates C, which never names A.
   let cachedIds = new Set();
   if (ask) {
     // Every task but the one being interrogated is frozen out of scheduling —
@@ -793,8 +792,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     }
   } else if (!force) {
     for (const t of tasks) {
-      const prior = readResult(plan.resultsDir, t.id);
-      if (prior && prior.ok === true) cachedIds.add(t.id);
+      if (cacheHit(plan.resultsDir, t, readResult(plan.resultsDir, t.id))) cachedIds.add(t.id);
     }
     // `after` is the complete dependency graph: validation rejects a {{result:}}
     // or forEach.from/when.from reference to a non-dependency, so nothing can
@@ -940,7 +938,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     } catch (e) {
       result = { id: task.id, model: task.model, ...durableIdentity(task), ok: false, exit: null, durationMs: io.now() - t0, output: `compute failed: ${e.message}` };
     }
-    writeResult(plan.resultsDir, task.id, result);
+    writeTaskResult(plan.resultsDir, task, result);
     record(task, result.ok ? "ok" : "failed", result.durationMs);
   };
 
@@ -971,7 +969,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     } catch (e) {
       result = { id: task.id, model: task.model, ...durableIdentity(task), ok: false, exit: null, durationMs: io.now() - t0, output: `integrate failed: ${e.message}` };
     }
-    writeResult(plan.resultsDir, task.id, result);
+    writeTaskResult(plan.resultsDir, task, result);
     record(task, result.ok ? "ok" : "failed", result.durationMs);
   };
 
@@ -1030,10 +1028,10 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       state.set(c.id, "pending");
       if (!force) {
         const prior = readResult(plan.resultsDir, c.id);
-        if (prior && prior.ok === true) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
+        if (cacheHit(plan.resultsDir, c, prior)) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
       }
     }
-    task.when = undefined;
+    pinKey(task); task.when = undefined;
     task.forEach = undefined;
     task.childPlan = undefined; // the clones carry it; the parent is now pure aggregate
     task.after = clones.map((c) => c.id);
@@ -1093,12 +1091,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       state.set(c.id, "pending");
       if (!force) {
         const prior = readResult(plan.resultsDir, c.id);
-        if (prior && prior.ok === true) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
+        if (cacheHit(plan.resultsDir, c, prior)) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
       }
     }
     const dependedOn = new Set(node.childPlan.tasks.flatMap((c) => c.after.filter((d) => locals.has(d))));
     const sinks = node.childPlan.tasks.filter((c) => !dependedOn.has(c.id)).map((c) => ({ local: c.id, full: remap(c.id) }));
-    node.when = undefined;
+    pinKey(node); node.when = undefined;
     node.childPlan = undefined;
     node.after = spliced.map((c) => c.id);
     node.aggregateManifest = { sinks };
@@ -1112,7 +1110,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       id: task.id, model: task.model, ...durableIdentity(task), ok: true, exit: 0, durationMs: 0,
       output: JSON.stringify(outputJson), outputJson, children: task.after.length,
     };
-    writeResult(plan.resultsDir, task.id, result);
+    writeTaskResult(plan.resultsDir, task, result);
     record(task, "ok", 0);
   };
 
@@ -1127,7 +1125,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       clones: task.after.length,
       ...(task.aggregate.truncated && { truncated: { kept: task.aggregate.kept, total: task.aggregate.total } }),
     };
-    writeResult(plan.resultsDir, task.id, result);
+    writeTaskResult(plan.resultsDir, task, result);
     record(task, "ok", 0);
   };
 
@@ -1329,7 +1327,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         result.worktree = { kept: true, branch: wt.branch, path: wt.path, name: wt.name, pending: true };
       }
 
-      writeResult(plan.resultsDir, task.id, result);
+      writeTaskResult(plan.resultsDir, task, result);
 
       // D4/D5: land the valve's kill as a park, not a retry — it never
       // touches attempts, so it can never exhaust a leaf's retry budget.
