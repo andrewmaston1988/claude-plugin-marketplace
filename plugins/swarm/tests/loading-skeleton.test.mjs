@@ -20,7 +20,7 @@ test("a navigation paints its skeleton before the data lands, then swaps it out"
   P.fireHashchange();
   assert.equal(P.findByClass("skeleton").length, 1, "the frame paints in the same turn as the tap");
   assert.equal(P.findByClass("hero").length, 1, "usage's skeleton is shaped like usage");
-  assert.match(P.hdr.textContent, /usage/, "the header names the destination at once");
+  assert.match(P.hdr.textContent, /Usage/, "the header names the destination at once");
   assert.equal(P.nav.getAttribute("data-on"), "usage");
   await P.flush();
   P.respond(isUsage, { usages: [], errors: {} });

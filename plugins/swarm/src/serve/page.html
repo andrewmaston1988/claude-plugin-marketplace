@@ -24,12 +24,11 @@
   main { overflow-x:hidden; padding-bottom:calc(64px + env(safe-area-inset-bottom)); }
   a { color:var(--accent); text-decoration:none; }
   button { font:inherit; color:inherit; background:none; border:0; padding:0; cursor:pointer; }
-  header { position:sticky; top:0; z-index:2; background:var(--ground); border-bottom:1px solid var(--rule); display:flex; align-items:center; gap:4px; padding:8px 8px 8px 4px; padding-top:calc(8px + env(safe-area-inset-top)); }
-  header .btn { width:44px; height:44px; display:flex; align-items:center; justify-content:center; flex:none; }
+  header { position:sticky; top:0; z-index:2; background:var(--ground); border-bottom:1px solid var(--rule); display:flex; align-items:center; gap:8px; min-height:60px; box-sizing:border-box; padding:8px 8px 8px 16px; padding-top:calc(8px + env(safe-area-inset-top)); }
   header .title { display:flex; flex-direction:column; gap:4px; flex:1; min-width:0; }
-  header .title b { font-size:16px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  header .title b { font-size:18px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   header .title small { font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  header.home .title b { font-size:18px; }
+  header .title small .crumb { color:var(--muted); text-decoration:none; } header .title small i { font-style:normal; color:var(--faint); margin:0 6px; }
   .section { display:flex; align-items:center; gap:12px; padding:16px 16px 8px; font-size:11px; line-height:1; letter-spacing:.16em; text-transform:uppercase; color:var(--accent); }
   .section.dim { color:var(--faint); }
   .section > span, .section small { line-height:1; display:block; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -40,8 +39,6 @@
   .section .chev { flex:none; margin-left:4px; }
   .section .line { flex:1; height:1px; background:var(--rule); align-self:center; }
   .section small { letter-spacing:0; text-transform:none; color:var(--muted); font-size:11px; }
-  header.home .title b { display:flex; align-items:baseline; gap:12px; }
-  header.home .title b small { font-weight:400; font-size:12px; color:var(--muted); }
   ul { list-style:none; margin:0; padding:0; }
   .row { display:flex; align-items:stretch; min-height:44px; }
   .row .rail { width:var(--rail); flex:none; }
@@ -408,7 +405,18 @@
   const tickCfg = { clockMs: 1000, uiPollMs: 5000 };
 
   function setHeader(html, home) { hdr.className = home ? "home" : ""; setHtml(hdr, html); }
-  const backBtn = (href) => `<a class="btn" href="${href}" aria-label="back"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#9aa0b1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg></a>`;
+  // One header on every screen: a title over one small line — the summary on a tab
+  // screen, the tappable trail on a child — so the bar never changes shape.
+  const headerHtml = (title, sub, extra = "") => `<div class="title"><b>${title}</b><small>${sub || "&nbsp;"}</small></div>${extra}`;
+  const TAB_TITLE = { runs: "Runs", usage: "Usage", perf: "Performance", cost: "Cost" };
+  function trailOf(v) {
+    if (v.name === "run") return [["Runs", "#/"]];
+    if (["leaf", "node", "digest", "report"].includes(v.name)) return [["Runs", "#/"], [v.run, `#/run/${enc(v.project)}/${enc(v.run)}`]];
+    if (v.name === "perf" && v.kind) return [["Performance", "#/perf"]];
+    return null;
+  }
+  const crumbs = (v, here) => trailOf(v).map(([label, href]) => `<a class="crumb" href="${href}">${esc(label)}</a><i>›</i>`).join("") + esc(here);
+  const childHeader = (v, title, here = title) => headerHtml(title, crumbs(v, here));
   const chev = (open) => `<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7181" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${open ? "M6 15l6-6 6 6" : "M6 9l6 6 6-6"}"/></svg>`;
   const chevRight = `<svg class="chev" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#6b7181" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>`;
 
@@ -449,7 +457,7 @@
     // same falling-number defect the token figure had: a finish pushing the
     // oldest row out of its group would lower the count.
     const total = window.swarmLive.headerRunCount(data.finishedTotals || {}, active);
-    const header = `<div class="title" style="padding-left:12px"><b><span>Runs</span><small>${projects.length} project${projects.length === 1 ? "" : "s"} · ${total} run${total === 1 ? "" : "s"}</small></b></div>${active.length ? `<span class="livepill"><i></i>${active.length} live</span>` : ""}`;
+    const header = headerHtml("Runs", `${projects.length} project${projects.length === 1 ? "" : "s"} · ${total} run${total === 1 ? "" : "s"}`, active.length ? `<span class="livepill"><i></i>${active.length} live</span>` : "");
     let html = "";
     // Live band first: every running run, across all projects, on the first screen —
     // a busy project's finished stack must never hide another project's live run.
@@ -716,11 +724,9 @@
     setSvg(svg, out);
   }
 
-  // Header markup is pure — rerender() calls it on every clock tick without a fetch,
-  // so the elapsed/ago text moves without a network round trip.
+  // Pure: rerender() repaints it on every clock tick without a fetch.
   function runHeaderHtml(run, now) {
-    const elapsed = run.finishedMs ? `done ${ago(run.finishedMs)} · ${fmtDur(run.finishedMs - run.startedMs)}` : run.abortedMs ? `aborted · engine gone · ${ago(run.abortedMs)}` : run.stoppedMs ? `stopped · ${ago(run.stoppedMs)}` : run.startedMs ? fmtDur(now - run.startedMs) : "";
-    return `${backBtn("#/")}<div class="title"><b>${esc(run.name)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${elapsed} · ${run.tasks.length} leaves · ${run.waves.length} wave${run.waves.length === 1 ? "" : "s"}</small></div>`;
+    return childHeader({ name: "run" }, esc(run.name), run.name);
   }
 
   let currentRun = null;
@@ -745,7 +751,7 @@
     const { tasks, waves } = nodeSubgraph(run, id);
     const { html, rows } = renderRunHtml(run, tasks, waves);
     return {
-      header: `${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(id)}</b><small>${esc(run.groupLabel || shortProject(project))} · ${esc(name)} · ${tasks.length} node${tasks.length === 1 ? "" : "s"}</small></div>`,
+      header: childHeader({ name: "node", project, run: name }, esc(id), id),
       html, state: { currentRun: run }, draw: () => drawRail(tasks, rows),
     };
   }
@@ -828,7 +834,7 @@
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
     const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
      const identity = identityName(t) || "agentless";
-     const header = `${backBtn(`#/run/${enc(run.project)}/${enc(run.name)}`)}<div class="title"><b><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}</b><small>${esc(run.groupLabel || shortProject(run.project))} · ${esc(run.name)} · wave ${(t.depth ?? 0) + 1} · ${esc(identity)}</small></div>`;
+     const header = childHeader({ name: "leaf", project: run.project, run: run.name }, `<span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"}</span> ${esc(id)}`, id);
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
     let html = leafBannerHtml(t, leaf, now, quiet ? quietSecsVal : null);
@@ -999,7 +1005,7 @@
     const data = await api("/api/cost");
     await loadPerfJs();
     return {
-      header: `${backBtn("#/")}<div class="title"><b>cost</b><small>Relative cost within each provider</small></div>`,
+      header: headerHtml("Cost", "Relative cost within each provider"),
       html: window.perfViews.costScreen(data, { esc, enc }, ui.costProvider),
     };
   }
@@ -1011,7 +1017,7 @@
     await loadPerfJs();
     const n = new Set([...(usageData.usages || []).map((u) => u.provider), ...Object.keys(usageData.errors || {})]).size;
     return {
-      header: `${backBtn("#/")}<div class="title"><b>usage</b><small>${n} provider${n === 1 ? "" : "s"} · allowance remaining</small></div>`,
+      header: headerHtml("Usage", `${n} provider${n === 1 ? "" : "s"} · allowance remaining`),
       html: window.perfViews.usageScreen(usageData, { esc }, ui.usageWindow),
     };
   }
@@ -1022,14 +1028,16 @@
     if (domain) qs.set("domain", domain);
     if (model) qs.set("model", model);
     const p = await api(`/api/perf${qs.toString() ? "?" + qs : ""}`);
-    const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind : "performance";
+    const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind[0].toUpperCase() + kind.slice(1) : "Performance";
     if (!p.grading) {
       return {
-        header: `${backBtn("#/")}<div class="title"><b>performance</b><small>off</small></div>`,
+        header: headerHtml("Performance", "grading off"),
         html: `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`,
       };
     }
-    const header = `${backBtn(model || aspect ? "#/perf" : "#/")}<div class="title"><b>${title}${model && p.rank ? ` ${["🏆", "🥈", "🥉"][p.rank.position - 1] || `<span class="tag">#${p.rank.position}</span>`}` : ""}</b><small>${p.rows} graded leaves · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}</small></div>`;
+    const rankTag = `${model && p.rank ? ` ${["🏆", "🥈", "🥉"][p.rank.position - 1] || `<span class="tag">#${p.rank.position}</span>`}` : ""}`;
+    const summary = `${p.rows} graded leaves · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}`;
+    const header = kind ? headerHtml(title + rankTag, crumbs({ name: "perf", kind }, model || aspect || title)) : headerHtml(title, summary);
     const sel = (attr, opts, current) => `<select class="sel" ${attr}>${opts.map(([v, label]) => `<option value="${esc(v)}"${v === current ? " selected" : ""}>${esc(label)}</option>`).join("")}</select>`;
     const domainSel = () => p.domains.length > 1 ? sel('data-domain-select', [["", "all domains"], ...p.domains.map((d) => [d, d])], domain || "") : "";
     let html = "";
@@ -1113,14 +1121,14 @@
 
   function buildDigest(project, name) {
     return {
-      header: `${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(name)}</b><small>digest</small></div>`,
+      header: childHeader({ name: "digest", project, run: name }, "Digest"),
       html: `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/digest`))}"></iframe>`,
     };
   }
 
   function buildReport(project, name) {
     return {
-      header: `${backBtn(`#/run/${enc(project)}/${enc(name)}`)}<div class="title"><b>${esc(name)}</b><small>report</small></div>`,
+      header: childHeader({ name: "report", project, run: name }, "Report"),
       html: `<iframe class="digestframe" src="${esc(q(`/api/runs/${enc(project)}/${enc(name)}/report`))}"></iframe>`,
     };
   }
@@ -1214,17 +1222,12 @@
   // already showing keeps its content.
   const sameView = (a, b) => ["name", "project", "run", "leaf", "node", "kind", "which"].every((k) => (a[k] ?? null) === (b[k] ?? null));
   function skeletonFor(v) {
-    const runHref = `#/run/${enc(v.project)}/${enc(v.run)}`;
-    const [title, back] = v.name === "runs" ? ["Runs", null]
-      : v.name === "run" ? [v.run, "#/"]
-        : v.name === "leaf" || v.name === "node" ? [v.leaf || v.node, runHref]
-          : v.name === "digest" || v.name === "report" ? [v.run, runHref]
-            : [{ perf: "performance" }[v.name] || v.name, "#/"];
+    const title = TAB_TITLE[v.name] || { run: v.run, leaf: v.leaf, node: v.node, digest: "Digest", report: "Report" }[v.name];
     const blocks = v.name === "usage" ? '<div class="sk hero"></div>' + '<div class="sk"></div>'.repeat(3)
       : v.name === "runs" ? '<div class="sk label"></div>' + '<div class="sk"></div>'.repeat(4)
         : '<div class="sk"></div>'.repeat(5);
     return {
-      header: `${back ? backBtn(back) : ""}<div class="title"${back ? "" : ' style="padding-left:12px"'}><b>${esc(title)}</b><small>&nbsp;</small></div>`,
+      header: trailOf(v) ? childHeader(v, esc(title || v.kind || ""), title || v.which || v.kind || "") : headerHtml(esc(title), ""),
       html: `<div class="skeleton">${blocks}</div>`,
     };
   }
