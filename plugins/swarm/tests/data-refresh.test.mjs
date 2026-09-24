@@ -108,7 +108,8 @@ test("Usage revalidates every 60000 ms by default", async () => {
 });
 
 test("a failed revalidate waits out the cadence instead of retrying every tick", async () => {
-  const storage = memStorage({ "swarm.cache:/api/cost": JSON.stringify({ data: COST, at: 1_000_000_000 }) });
+  // Aged past its cadence, so only the failed attempt itself can hold the next one back.
+  const storage = memStorage({ "swarm.cache:/api/cost": JSON.stringify({ data: COST, at: 1_000_000_000 - 400_000 }) });
   const { P, advance } = await boot({ storage });
   await go(P, "#/cost");
   P.fail((u) => u.startsWith("/api/cost"));
