@@ -11,13 +11,13 @@ import { inferStoredIdentity } from "./contracts.mjs";
 //   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
 //                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
-//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks?, repoToplevel? }
+//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks?, repoToplevel?, key? }
 //                       (coverage = { status: "complete"|"incomplete"|"unparseable", required, read, missed[] }
 //                        when the task declared mustRead — a shortfall is recorded, never fails the leaf)
 //                       (asks = [{question, answer, ok, provider?, runner?, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
 //                        the leaf's own ok/output never change because a later ask failed)
 //   results/<id>.ask.log  plain-text Q/A transcript, appended on every ask against this leaf
-//                       (prompt = the exact final string sent to the leaf; absent on compute/aggregate rows)
+//                       (prompt = the exact final string sent to the leaf; absent on compute/aggregate rows; key = the task-definition hash resume reuses this result against — task-key.mjs)
 //                       (citations = { checked, drifted, refuted } when N3 verified them; each cited finding is
 //                        annotated citation:"verified"|"drift"|"refuted" in output. citationRefuted = [{path,reason}]
 //                        for the kept-but-unverified findings — a citation never fails a leaf)
@@ -27,7 +27,7 @@ import { inferStoredIdentity } from "./contracts.mjs";
 //                       (costUsd only for real-key-billed leaves — these rows ARE the estimate corpus)
 //   run.log             JSONL, tailable mid-run:
 //                         { ts, event: "run-start", tasks: [{ id, provider?, runner?, model }], ask? }   ask = the interrogated task id
-//                         { ts, id, state, durationMs?, tokens?, note? }   state changes
+//                         { ts, id, state, durationMs?, tokens?, note? }   state changes; a cache-miss { ts, id, event: "cache-miss", priorKey, reason } says resume re-ran a task whose definition changed
 //                         { ts, id, event: "tokens", tokens }       live usage ticks
 //                         { ts, id, event: "session", provider?, runner?, sessionId }   the leaf's session, as soon as its stream names it — resume reads it
 //                         { ts, event: "expand", id, provider?, runner?, model, clones, truncated?, total? }   forEach expansion
