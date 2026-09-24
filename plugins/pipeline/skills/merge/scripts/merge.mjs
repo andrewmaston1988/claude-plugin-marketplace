@@ -57,6 +57,17 @@ import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../src/wo
 function logOut(msg) { process.stdout.write(msg + "\n"); }
 function logErr(msg) { process.stderr.write(msg + "\n"); }
 
+// Steps that fail on their own terms (rebase, DoD gate, smoke) abort with their
+// own exit code. Thrown, never `return`ed: a return inside the try skips the
+// trailing process.exit, the process falls off the end at 0, and a caller reads
+// the rolled-back merge as landed.
+class MergeAbort extends Error {
+  constructor(code, message) {
+    super(message);
+    this.exitCode = code;
+  }
+}
+
 // ── Path helpers ──────────────────────────────────────────────────────────────
 
 function worktreePath(projectDir, slug) {
@@ -481,7 +492,7 @@ async function main() {
       logOut("[0a] --no-rebase: skipping rebase as requested by operator");
     } else {
       const rebaseOk = await step0aRebase(projectDir, branches, targetBranch);
-      if (!rebaseOk) { exitCode = 3; return; }
+      if (!rebaseOk) throw new MergeAbort(3, "step 0a (rebase)");
     }
     mark(0, "done");
 
@@ -498,7 +509,7 @@ async function main() {
     });
     if (blockers.length) {
       for (const b of blockers) logErr(`BLOCKER: ${b}`);
-      exitCode = 4; return;
+      throw new MergeAbort(4, `step 2 (definition of done) — ${blockers.length} blocker(s)`);
     }
     mark(2, "done");
 
@@ -538,14 +549,19 @@ async function main() {
     if (!args.skipSmoke) {
       mark(8, "inprogress");
       const smokeCmd = readSmokeCommand(join(projectDir, "CLAUDE.md"));
-      if (!step8Smoke(projectDir, smokeCmd)) { exitCode = 5; return; }
+      if (!step8Smoke(projectDir, smokeCmd)) throw new MergeAbort(5, "step 8 (smoke check)");
       mark(8, "done");
     }
 
     logOut("merge.mjs — complete");
   } catch (e) {
-    logErr(`[merge] Unexpected error: ${e.message ?? e}`);
-    exitCode = 6;
+    if (e instanceof MergeAbort) {
+      logErr(`[merge] aborted at ${e.message}`);
+      exitCode = e.exitCode;
+    } else {
+      logErr(`[merge] Unexpected error: ${e.message ?? e}`);
+      exitCode = 6;
+    }
   } finally {
     // Rollback on failure (not smoke failure — that's operator-recoverable)
     if (exitCode !== 0 && exitCode !== 5) {
@@ -557,7 +573,8 @@ async function main() {
         if (co.code !== 0) {
           logErr(`  BLOCKER — could not checkout '${projectPreBranch}': ${co.stderr.trim()}; skipping reset`);
           close(db);
-          process.exit(exitCode);
+          setTimeout(() => process.exit(exitCode), 150);
+          return;
         }
       }
       logErr(`  project (${projectPreBranch}) -> ${projectPreSha.slice(0, 7)}`);
@@ -569,9 +586,14 @@ async function main() {
     close(db);
   }
 
-  process.exit(exitCode);
+  // Exit on a timer, per the plugin convention: a bare process.exit can drop a
+  // piped stderr on Windows, and these exits are the failure report.
+  setTimeout(() => process.exit(exitCode), 150);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  main().catch(e => { logErr(`[fatal] ${e.message ?? e}`); process.exit(6); });
+  main().catch(e => {
+    logErr(`[fatal] ${e.message ?? e}`);
+    setTimeout(() => process.exit(6), 150);
+  });
 }

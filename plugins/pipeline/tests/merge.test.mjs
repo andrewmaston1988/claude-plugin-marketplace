@@ -12,9 +12,11 @@ import { ok, equal } from "node:assert/strict";
 import {
   mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, basename } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
+import { connectPath, close, projectAdd, rowAdd, rowUpdate } from "../src/db/index.mjs";
 
 // Capture every gh-related spawn call; let everything else (git) fall
 // through to real spawnSync. The caller provides a PR list response that
@@ -205,5 +207,157 @@ test("step5: no open PR + no hook → local squash-merge path runs", async () =>
   } finally {
     rmSync(repoTmp, { recursive: true, force: true });
     rmSync(cfgTmp, { recursive: true, force: true });
+  }
+});
+
+// ── Exit-code contract: a failed merge must never exit 0 ──────────────────────
+//
+// Callers branch on merge.mjs's exit code — run-merge.mjs hands the invocation to
+// a background agent, hooks and sessions read it directly. Every failure path
+// must exit non-zero with the failure on stderr, and must not print the success
+// line. Exit 0 after a rollback reads as "landed" when nothing did.
+
+const MERGE_MJS = fileURLToPath(new URL("../skills/merge/scripts/merge.mjs", import.meta.url));
+const SUCCESS_LINE = "merge.mjs — complete";
+
+const PLAN_MIN = "# feat-x\n\n## Goal\n\nLand feat-x.\n\n## Current Status\n\n- in progress\n";
+const FAILING_SMOKE = "# Repo\n\n## Smoke check\n\n```bash\nexit 9\n```\n";
+
+// getPaths() derives config.json AND pipeline.db from the home dir, so an
+// isolated home keeps the real ~/.pipeline out of the test.
+function makeHome() {
+  const home = mkdtempSync(join(tmpdir(), "merge-exit-home-"));
+  mkdirSync(join(home, ".pipeline"), { recursive: true });
+  return home;
+}
+
+// merge.mjs takes the project name from basename(projectDir), and project names
+// are validated as [a-z0-9][a-z0-9_-]* — so the repo dir must be a fixed,
+// lowercase name inside the tmpdir, not the mkdtemp basename.
+function makeRepoDir() {
+  const tmp = mkdtempSync(join(tmpdir(), "merge-exit-"));
+  const repo = join(tmp, "repo");
+  mkdirSync(repo, { recursive: true });
+  return { tmp, repo };
+}
+
+// master carries the seed files; the feature branch is one commit ahead of it so
+// step 5 takes the squash path rather than the already-integrated one.
+function makeMergeRepo(dir, { feature = "feat-x", plan = null, claudeMd = null } = {}) {
+  const git = (...args) => spawnSync("git", ["-C", dir, ...args], { encoding: "utf8" });
+  git("init", "--initial-branch=master");
+  git("config", "user.email", "test@test");
+  git("config", "user.name", "test");
+  git("config", "commit.gpgsign", "false");
+  writeFileSync(join(dir, "README.md"), "init\n");
+  if (plan) {
+    mkdirSync(join(dir, "plans"), { recursive: true });
+    writeFileSync(join(dir, "plans", `${feature}.md`), plan, "utf8");
+  }
+  if (claudeMd) writeFileSync(join(dir, "CLAUDE.md"), claudeMd, "utf8");
+  git("add", "-A");
+  git("commit", "-m", "seed");
+  git("checkout", "-b", `autonomous/${feature}`);
+  writeFileSync(join(dir, "feature.txt"), "feat\n");
+  git("add", "feature.txt");
+  git("commit", "-m", "feat");
+  git("checkout", "master");
+  return dir;
+}
+
+function runMerge(repo, home, branches, extraArgs = []) {
+  return spawnSync(process.execPath, [
+    MERGE_MJS, "--branches", branches, "--project-dir", repo,
+    "--target-branch", "master", ...extraArgs,
+  ], {
+    env: { ...process.env, USERPROFILE: home, HOME: home },
+    encoding: "utf8",
+    timeout: 60_000,
+  });
+}
+
+function seedRow(home, repo, { feature = "feat-x", stage, qaPass = null } = {}) {
+  const db = connectPath(join(home, ".pipeline", "pipeline.db"));
+  try {
+    const project = basename(repo);
+    projectAdd(db, { name: project, rootPath: repo });
+    rowAdd(db, project, {
+      feature,
+      planFile: join(repo, "plans", `${feature}.md`),
+      stage,
+    });
+    if (qaPass !== null) rowUpdate(db, project, feature, { qa_pass: qaPass });
+  } finally { close(db); }
+}
+
+test("merge.mjs: step 0a failure exits non-zero, prints no success line", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeMergeRepo(repo, { feature: "feat-x" });
+    const r = runMerge(repo, home, "autonomous/ghost-branch");
+
+    equal(r.status, 3, `step 0a failure must exit 3; stdout=${r.stdout} stderr=${r.stderr}`);
+    ok(!r.stdout.includes(SUCCESS_LINE), `success line printed on a failed merge: ${r.stdout}`);
+    ok(/BLOCKER/.test(r.stderr), `failure not reported on stderr: ${r.stderr}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("merge.mjs: step 2 blocker exits non-zero (after rollback), no success line", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeMergeRepo(repo, { feature: "feat-x", plan: PLAN_MIN });
+    seedRow(home, repo, { stage: "queued" });
+    const r = runMerge(repo, home, "autonomous/feat-x", ["--no-rebase"]);
+
+    equal(r.status, 4, `DoD blocker must exit 4; stdout=${r.stdout} stderr=${r.stderr}`);
+    ok(!r.stdout.includes(SUCCESS_LINE), `success line printed on a blocked merge: ${r.stdout}`);
+    ok(/BLOCKER: autonomous\/feat-x: pipeline stage/.test(r.stderr),
+      `blocker not reported on stderr: ${r.stderr}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("merge.mjs: failed smoke check exits non-zero, no success line", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeMergeRepo(repo, { feature: "feat-x", plan: PLAN_MIN, claudeMd: FAILING_SMOKE });
+    seedRow(home, repo, { stage: "merge", qaPass: 1 });
+    const r = runMerge(repo, home, "autonomous/feat-x", ["--no-rebase"]);
+
+    equal(r.status, 5, `smoke failure must exit 5; stdout=${r.stdout} stderr=${r.stderr}`);
+    ok(!r.stdout.includes(SUCCESS_LINE), `success line printed on a failed merge: ${r.stdout}`);
+    ok(/BLOCKER: smoke check failed/.test(r.stderr), `smoke failure not on stderr: ${r.stderr}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// The contract only holds if the clean path is untouched: same exit code, same
+// success line, one commit on the target.
+test("merge.mjs: successful local merge still exits 0 and prints the success line", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeMergeRepo(repo, { feature: "feat-x", plan: PLAN_MIN });
+    seedRow(home, repo, { stage: "merge", qaPass: 1 });
+    const before = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+    const r = runMerge(repo, home, "autonomous/feat-x", ["--no-rebase"]);
+
+    equal(r.status, 0, `clean merge must exit 0; stderr=${r.stderr}`);
+    ok(r.stdout.includes(SUCCESS_LINE), `success line missing: ${r.stdout}`);
+    const after = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+    ok(after !== before, "successful merge should land a commit on the target branch");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
   }
 });
