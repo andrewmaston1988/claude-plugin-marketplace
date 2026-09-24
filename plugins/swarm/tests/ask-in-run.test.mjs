@@ -183,7 +183,7 @@ test("Q6: ask in a kept worktree reuses it without calling prepareIsolation", as
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 2, goal: "",
       tasks: [{
         id: "impl", prompt: "implement", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
-        cwd: repo, originalCwd: repo, worktreeName: "impl", repoToplevel: repo,
+        cwd: repo, originalCwd: repo, worktreeName: "impl", checkoutToplevel: repo,
         timeoutMs: 5000, after: [],
       }],
     };
@@ -227,7 +227,7 @@ test("Q8: ask preserves the prior summary and status for every other task, inclu
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 4, goal: "",
       tasks: [
-        { id: "wt", prompt: "do wt", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash", cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo, timeoutMs: 5000, after: [] },
+        { id: "wt", prompt: "do wt", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash", cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo, timeoutMs: 5000, after: [] },
         schedTask("b"),
         schedTask("c"),
       ],

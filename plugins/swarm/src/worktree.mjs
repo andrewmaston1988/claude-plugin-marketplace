@@ -223,14 +223,14 @@ export function checkoutToplevel(cwd) {
 //
 // The mkdir is load-bearing for the same reason. A writer whose declared cwd is gitignored
 // (build/, .claude/worktrees/x) has no such directory in the tree and cannot spawn without it.
-export function treeCwd(tree, repoToplevel, originalCwd) {
+export function treeCwd(tree, checkoutToplevel, originalCwd) {
   // No repo recorded means no depth to preserve, so the tree root IS the leaf's cwd. Only a
-  // hand-built plan reaches this: normalisation sets repoToplevel on every writer, which is
+  // hand-built plan reaches this: normalisation sets checkoutToplevel on every writer, which is
   // what stops a real writer silently landing at its root.
-  if (!repoToplevel) return tree;
-  const rel = relative(repoToplevel, originalCwd);
+  if (!checkoutToplevel) return tree;
+  const rel = relative(checkoutToplevel, originalCwd);
   if (rel === ".." || rel.startsWith("../") || rel.startsWith("..\\") || isAbsolute(rel)) {
-    throw new Error(`cwd ${originalCwd} is outside its repo ${repoToplevel} — a task with a tree must sit inside its repoToplevel`);
+    throw new Error(`cwd ${originalCwd} is outside its repo ${checkoutToplevel} — a task with a tree must sit inside its checkoutToplevel`);
   }
   const p = join(tree, rel);
   mkdirSync(p, { recursive: true });

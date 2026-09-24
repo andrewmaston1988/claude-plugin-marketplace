@@ -1991,7 +1991,7 @@ test("a reader is normalised with no tree and its cwd untouched", () => {
     const t = inDir(dir, { tasks: [claudeTask()] }).tasks[0];
     equal(t.worktreeName, undefined);
     equal(t.branchScope, undefined);
-    equal(t.repoToplevel, undefined, "a reader needs no repo: it is not getting a tree from one");
+    equal(t.checkoutToplevel, undefined, "a reader needs no repo: it is not getting a tree from one");
     equal(t.cwd, t.originalCwd);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -2103,9 +2103,9 @@ test("a writer in a second repo carries THAT repo, while the run stays filed und
       bashTask({ id: "there", cwd: other }),
     ] }, "two.json", { io });
     const by = Object.fromEntries(plan.tasks.map((t) => [t.id, t]));
-    equal(by.here.repoToplevel, dir);
-    equal(by.there.repoToplevel, other);
-    notEqual(by.there.repoToplevel, by.here.repoToplevel, "one repo for both branches the wrong tree");
+    equal(by.here.checkoutToplevel, dir);
+    equal(by.there.checkoutToplevel, other);
+    notEqual(by.there.checkoutToplevel, by.here.checkoutToplevel, "one repo for both branches the wrong tree");
     equal(plan.repoToplevel, dir, "the run is filed under the dispatching repo, not the task's");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -2164,7 +2164,7 @@ test("workspace: a writer gets one tree named by it, on a run-scoped branch", ()
     const [t] = loadManifest(p, CFG, dir).tasks;
     equal(t.worktreeName, "feat");
     ok(t.branchScope, "a derived branch is run-scoped so a kept tree cannot block the next run");
-    equal(t.repoToplevel !== undefined, true);
+    equal(t.checkoutToplevel !== undefined, true);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

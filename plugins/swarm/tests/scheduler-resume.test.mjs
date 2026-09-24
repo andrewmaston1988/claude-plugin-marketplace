@@ -104,7 +104,7 @@ test("R1: a leaf reseated onto another provider dispatches with no resume", asyn
   const repo = initRepo();
   const dir = tmp();
   try {
-    const p = plan(dir, [task("prose", { cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo })]);
+    const p = plan(dir, [task("prose", { cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo })]);
     initResultsDir(p.resultsDir);
     // Nine turns down on the old seat, so only the provider predicate can drop
     // this session — the turn predicate has nothing to bite on.
@@ -134,7 +134,7 @@ test("R2: a session whose attempt completed no turn is not resumed — same prov
   const repo = initRepo();
   const dir = tmp();
   try {
-    const p = plan(dir, [task("prose", { cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo })]);
+    const p = plan(dir, [task("prose", { cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo })]);
     initResultsDir(p.resultsDir);
     // prose.json verbatim in shape: died at turn.failed, exit 1, no tokens, no
     // numTurns key, no session on the result — the id exists only as a run.log
@@ -169,7 +169,7 @@ test("R3: a same-provider leaf that completed turns before dying still resumes",
   const repo = initRepo();
   const dir = tmp();
   try {
-    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo })]);
+    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo })]);
     initResultsDir(p.resultsDir);
     // Forty minutes of work, committed as it went, then the timeout. This is the
     // case the resume carve-out exists for.
@@ -195,7 +195,7 @@ test("R4: a leaf with no recorded session starts cold and claims no decline", as
   const repo = initRepo();
   const dir = tmp();
   try {
-    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo })]);
+    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo })]);
     initResultsDir(p.resultsDir);
     // A tree from an earlier generation, but no result and no session record for
     // this leaf: there is nothing to decline, so nothing may be claimed.
@@ -235,7 +235,7 @@ test("R6: --force still resets the tree and clears every session", async () => {
   const repo = initRepo();
   const dir = tmp();
   try {
-    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo })]);
+    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo })]);
     initResultsDir(p.resultsDir);
     writeResult(p.resultsDir, "impl", priorAttempt("impl", { numTurns: 40, tokens: TURNS, sessionId: OLLAMA_SID }));
     appendRunLog(p.resultsDir, {
@@ -324,7 +324,7 @@ test("Z-codex: a codex leaf that failed at zero turns dispatches with no resume"
   const dir = tmp();
   try {
     const p = plan(dir, [task("prose", {
-      ...CODEX_SEAT, cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo,
+      ...CODEX_SEAT, cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo,
     })]);
     initResultsDir(p.resultsDir);
     // The prior attempt exactly as the fixed engine records it: the count rides
@@ -359,7 +359,7 @@ test("U1: an absent turn count behaves as today — the session is still resumed
   const repo = initRepo();
   const dir = tmp();
   try {
-    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo })]);
+    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo })]);
     initResultsDir(p.resultsDir);
     // Every result written before the field existed: no numTurns key at all, and
     // no turn text in the output either. Unknown is NOT zero — treating it as
@@ -385,7 +385,7 @@ test("U2: a turn count in the field wins over a zero in the output text", async 
   const repo = initRepo();
   const dir = tmp();
   try {
-    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo })]);
+    const p = plan(dir, [task("impl", { cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo })]);
     initResultsDir(p.resultsDir);
     // The field says forty turns landed; the raw output happens to contain a
     // "num_turns": 0 from some other event. Only a reader still scanning the

@@ -1161,7 +1161,7 @@ test("a private-mode leaf spawns at the same depth inside its worktree; an expli
     const spawn2 = fakeSpawnFactory((call) => { cwds.push(call.opts.cwd); return {}; });
     const sub = join(repo, "sub");
     const p = plan(repo, [
-      task("gen", { cwd: sub, originalCwd: sub, allowedTools: "Bash",         worktreeName: "gen", branchScope: "scope1", repoToplevel: repo }),
+      task("gen", { cwd: sub, originalCwd: sub, allowedTools: "Bash",         worktreeName: "gen", branchScope: "scope1", checkoutToplevel: repo }),
     ], { resultsDir: join(dir, "run"), concurrency: 1 });
     await runPlan(p, CFG, makeIo(spawn2));
     equal(cwds.length, 1);
@@ -2782,7 +2782,7 @@ test("a hand-built writer with no worktreeName still gets a tree", async () => {
   const dir = tmp();
   const collectCalls = [];
   try {
-    const p = plan(dir, [task("a", { allowedTools: "Bash", cwd: dir, repoToplevel: dir })]);
+    const p = plan(dir, [task("a", { allowedTools: "Bash", cwd: dir, checkoutToplevel: dir })]);
     const io = makeIo(fakeSpawnFactory(() => ({ ok: true, output: "done" })),
       { worktree: fakeWorktree(collectCalls) });
     const r = await runPlan(p, CFG, io);
@@ -3729,7 +3729,7 @@ test("a writer under <repo>/sub spawns at <tree>/sub, not at the tree root", asy
     });
     const p = plan(repo, [task("a", {
       cwd: join(repo, "sub"), originalCwd: join(repo, "sub"), allowedTools: "Bash",
-      worktreeName: "a", repoToplevel: repo,
+      worktreeName: "a", checkoutToplevel: repo,
     })], { resultsDir: join(dir, "run"), concurrency: 1 });
     await runPlan(p, CFG, makeIo(spawn));
     equal(resolve(seen.cwd), join(p.resultsDir, "wt-a", "sub"));
@@ -3756,7 +3756,7 @@ test("a writer whose declared cwd is gitignored still spawns: the tree gets the 
     });
     const p = plan(repo, [task("a", {
       cwd: join(repo, ".cache"), originalCwd: join(repo, ".cache"), allowedTools: "Bash",
-      worktreeName: "a", repoToplevel: repo,
+      worktreeName: "a", checkoutToplevel: repo,
     })], { resultsDir: join(dir, "run"), concurrency: 1 });
     await runPlan(p, CFG, makeIo(spawn));
     equal(resolve(seen.cwd), join(p.resultsDir, "wt-a", ".cache"));
@@ -3773,7 +3773,7 @@ test("a writer lands on the run-scoped literal branch, never the unscoped one", 
   try {
     const spawn = fakeSpawnFactory((call) => { writeFileSync(join(call.opts.cwd, "out.txt"), "x\n"); return {}; });
     const p = plan(repo, [
-      task("gen", { cwd: repo, originalCwd: repo, allowedTools: "Bash",         worktreeName: "gen", branchScope: "scope1", repoToplevel: repo }),
+      task("gen", { cwd: repo, originalCwd: repo, allowedTools: "Bash",         worktreeName: "gen", branchScope: "scope1", checkoutToplevel: repo }),
     ], { resultsDir: join(dir, "run"), concurrency: 1 });
     await runPlan(p, CFG, makeIo(spawn));
     ok(spawnSync("git", ["branch", "--list", "swarm/scope1/gen"], { cwd: repo, encoding: "utf8" }).stdout.includes("swarm/scope1/gen"));
@@ -3789,7 +3789,7 @@ function privateLeaf(id, repo, over = {}) {
   return task(id, {
     cwd: repo, originalCwd: repo, allowedTools: "Bash",
     worktreeName: id,
-    repoToplevel: repo, ...over,
+    checkoutToplevel: repo, ...over,
   });
 }
 
