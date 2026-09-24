@@ -1,0 +1,36 @@
+// The runs screen in the leaf/Usage flavour: live runs are cards, the header names
+// the screen and carries a live pill; finished stacks stay compact rows.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { loadPage, listData, listRow } from "./helpers/page-harness.mjs";
+
+async function runsWith(data) {
+  const P = loadPage();
+  await P.flush();
+  P.respondList(data);
+  await P.flush();
+  return P;
+}
+
+test("a live run is a card carrying its name, elapsed time and progress bar", async () => {
+  const P = await runsWith(listData(listRow()));
+  const cards = P.findByClass("rcard");
+  assert.equal(cards.length, 1);
+  assert.match(cards[0].textContent, /LISTRUN/);
+  assert.equal(cards[0].getAttribute("data-href"), "#/run/C--code-listproj/LISTRUN");
+  assert.equal(P.findByClass("rbar").length, 1);
+  assert.equal(P.findByClass("row").length, 0, "no rail row for a live run");
+});
+
+test("the header names the screen and counts live runs in a pill", async () => {
+  const P = await runsWith(listData(listRow()));
+  assert.match(P.hdr.textContent, /Runs/);
+  assert.match(P.hdr.textContent, /1 live/);
+});
+
+test("with nothing running there is no live pill", async () => {
+  const done = listRow({ active: false, finishedMs: Date.now(), byState: { ok: 1 } });
+  const P = await runsWith({ ...listData(done), finishedTotals: { "C--code-listproj": 1 } });
+  assert.doesNotMatch(P.hdr.textContent, /live/);
+  assert.equal(P.findByClass("rcard").length, 0);
+});
