@@ -67,13 +67,15 @@ test("#/usage fetches /api/usage once and draws the screen, Week first", async (
 test("the Session/Week switch redraws from the payload already held — no second live read", async () => {
   const calls = [];
   const P = await openUsage(calls);
-  P.main.contains = () => true;
-  const tab = { dataset: { usageWindow: "session" }, classList: { contains: () => false } };
-  P.main.listeners.click.forEach((f) => f({ target: { closest: () => tab } }));
+  P.location.hash = "#/usage/session";
+  P.fireHashchange();
   await P.flush();
   assert.equal(calls.at(-1), "session");
+  P.location.hash = "#/usage/week";
+  P.fireHashchange();
+  await P.flush();
+  assert.equal(calls.at(-1), "week");
   assert.equal(usageFetches(P), 1);
-  assert.match(readFileSync(PAGE, "utf8"), /e\.target\.closest\("[^"]*\[data-usage-window\]/);
 });
 
 test("ticks and SSE events never re-read usage; a fresh navigation does", async () => {

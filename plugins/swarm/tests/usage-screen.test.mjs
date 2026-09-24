@@ -85,7 +85,7 @@ test("the card's note is the reset time alone — never where the figure was rea
 // Operator, 2026-09-24: Week first, and the default.
 test("the switch reads Week then Session, Week on when nothing is chosen", () => {
   const html = loadPerfViews().usageScreen(READABLE, H);
-  assert.match(html, /class="ctab on" data-usage-window="week">Week<\/a><a class="ctab" data-usage-window="session"/);
+  assert.ok(html.includes('<div class="seg"><a data-href="#/usage/week" class="on">Week</a><a data-href="#/usage/session">Session</a></div>'));
   assert.match(html, /MOST LEFT THIS WEEK/);
 });
 

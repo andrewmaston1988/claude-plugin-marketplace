@@ -325,16 +325,14 @@ test("forEach run: one rail dot per session row, none for the forEach label, and
 // ── the perf view switcher ────────────────────────────────────────────────
 // It lives in page.html (not perf.js), so this harness reaches it through the
 // real render path — which is also what makes the cold-load row below possible.
-const segTags = (el, tag) => allNodes(el).filter((n) => n.nodeType === 1 && n.tagName === tag);
-const segLabels = (el) => segTags(el, "TEXT").filter((n) => (n.getAttribute("class") || "").startsWith("seg-label"));
+const segEls = (el, cls) => allNodes(el).filter((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes(cls));
+const segLabels = (el) => segEls(el, "seg-label");
 const activeSegLabel = (el) => {
   const on = segLabels(el).filter((n) => (n.getAttribute("class") || "").split(/\s+/).includes("on"));
   assert.equal(on.length, 1, `exactly one pill must be active, found ${on.length}`);
   return on[0].textContent;
 };
-const segHits = (el) => segTags(el, "RECT").filter((n) => n.getAttribute("data-href"));
-const indicator = (el) => segTags(el, "RECT").find((n) => (n.getAttribute("class") || "") === "seg-ind");
-const rail = (el) => segTags(el, "RECT").find((n) => (n.getAttribute("class") || "") === "seg-rail");
+const railVars = (el) => Object.fromEntries((segEls(el, "seg-rail")[0].getAttribute("style") || "").split(";").filter(Boolean).map((d) => d.split(":")));
 
 const gotoPerf = async (P, hash) => {
   P.location.hash = hash;
@@ -354,50 +352,32 @@ test("switcher: one pill per view, exactly one active, and it matches the route"
     await gotoPerf(P, hash);
     assert.equal(segLabels(P.main).length, cases.length, `${hash}: one label per view — a dropped view still renders "correctly" otherwise`);
     assert.equal(activeSegLabel(P.main), label, `${hash}: the active pill`);
-    const hit = segHits(P.main).find((r) => r.getAttribute("data-href") === hash);
-    assert.ok(hit, `${hash}: a transparent hit rect carries the route — a <text> hit area is glyphs only, not a thumb target`);
+    assert.ok(segLabels(P.main).some((a) => a.getAttribute("data-href") === hash), `${hash}: the pill itself carries the route, so the whole cell is the thumb target`);
   }
 });
 
-test("switcher: the indicator sits on the active pill, pills tile without overlapping, and nothing is drawn outside the canvas", async () => {
-  const geo = async (hash) => {
+test("switcher: the indicator sits on the active pill and moves with the route", async () => {
+  const vars = async (hash) => {
     const P = loadPage({ perfViews: Object.fromEntries(["coverageGrid", "reliabilityBars", "leadersList", "costScreen"].map((k) => [k, () => "<div></div>"])) });
     await P.flush();
     P.respondList(listData(listRow()));
     await P.flush();
     await gotoPerf(P, hash);
-    const hits = segHits(P.main).map((r) => ({ x: Number(r.getAttribute("x")), w: Number(r.getAttribute("width")), href: r.getAttribute("data-href") }));
-    const ind = indicator(P.main);
-    const tx = Number(/translate\(([-\d.]+)/.exec(ind.getAttribute("transform"))[1]);
-    const svg = segTags(P.main, "SVG")[0];
-    const vbW = Number(svg.getAttribute("viewBox").split(" ")[2]);
-    const r = rail(P.main);
-    const railBox = r ? { x: Number(r.getAttribute("x")), w: Number(r.getAttribute("width")), h: Number(r.getAttribute("height")) } : null;
-    return { hits, ind: { x: tx, w: Number(ind.getAttribute("width")), h: Number(ind.getAttribute("height")) }, vbW, railBox };
+    assert.equal(segEls(P.main, "seg-ind").length, 1, "one indicator");
+    return railVars(P.main);
   };
-  const rank = await geo("#/perf");
-  const pill = (g, href) => g.hits.find((h) => h.href === href);
-  assert.deepEqual({ x: rank.ind.x, w: rank.ind.w }, { x: pill(rank, "#/perf").x, w: pill(rank, "#/perf").w }, "the indicator is the active pill's box");
-  for (let i = 1; i < rank.hits.length; i++) {
-    assert.ok(rank.hits[i].x >= rank.hits[i - 1].x + rank.hits[i - 1].w, `pill ${i} starts at or after pill ${i - 1} ends — no overlap`);
-  }
-  const last = rank.hits[rank.hits.length - 1];
-  assert.ok(rank.vbW >= last.x + last.w, "the viewBox covers the last pill — the one way a scaled layout can still clip");
-  // The rail is what makes this read as one control rather than floating labels
-  // with a highlight behind them. It shipped missing once; nothing caught it.
-  assert.ok(rank.railBox, "a rail rect is drawn");
-  const first = rank.hits[0];
-  assert.ok(first.x >= rank.railBox.x, "the first pill starts inside the rail, not on its edge");
-  assert.ok(last.x + last.w <= rank.railBox.x + rank.railBox.w, "and the last pill ends inside it");
-  // HEIGHT, not width: an indicator's width is one pill's and is always narrower
-  // than the track, so a width comparison passes even when the indicator fills
-  // the rail top-to-bottom and the track disappears behind it.
-  assert.ok(rank.ind.h < rank.railBox.h, `the indicator is inset within the rail (${rank.ind.h} < ${rank.railBox.h}), never the full track height`);
-  // The moving part: an indicator rendered at a constant x looks right on the
-  // default view and wrong on every other one.
-  const leaders = await geo("#/perf/leaders");
-  assert.notEqual(leaders.ind.x, rank.ind.x, "the indicator moves with the active view");
-  assert.deepEqual({ x: leaders.ind.x, w: leaders.ind.w }, { x: pill(leaders, "#/perf/leaders").x, w: pill(leaders, "#/perf/leaders").w }, "…onto the leaders pill's box");
+  assert.deepEqual(await vars("#/perf"), { "--n": "4", "--i": "0" });
+  assert.deepEqual(await vars("#/perf/leaders"), { "--n": "4", "--i": "3" }, "an indicator at a constant index looks right on the default view and wrong on every other one");
+});
+
+// Operator, 2026-09-24: "stretch them horizontally but not vertically" — a width-scaled
+// switcher grew taller the fewer pills it had. One fixed height, whatever the count.
+test("switcher: a fixed height and equal-width pills, never scaled to its label count", () => {
+  const css = readFileSync(PAGE, "utf8");
+  const rule = /\.seg-rail \{([^}]*)\}/.exec(css)?.[1] || "";
+  assert.match(rule, /height:\d+px/);
+  assert.match(rule, /grid-auto-columns:1fr/);
+  assert.ok(!css.includes(".seg svg"), "no width-scaled SVG left behind");
 });
 
 test("switcher: renders on a COLD #/perf load with window.perfViews never stubbed", async () => {

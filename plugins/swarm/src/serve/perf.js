@@ -247,8 +247,7 @@
       return p.usage.reason || (kinds.length ? `reports ${kinds.join(", ")} — no ${week ? "weekly" : "session"} window` : "no reading");
     };
     const bar = (n) => `<div class="ubar"><span class="${tone(n)}" style="width:${n}%"></span></div>`;
-    const tabs = `<div class="ctabs">${["week", "session"].map((k) =>
-      `<a class="ctab${(week ? "week" : "session") === k ? " on" : ""}" data-usage-window="${k}">${k === "week" ? "Week" : "Session"}</a>`).join("")}</div>`;
+    const tabs = h.seg([{ label: "Week", href: "#/usage/week" }, { label: "Session", href: "#/usage/session" }], week ? 0 : 1);
     if (!rows.length) return tabs + `<div class="empty">no provider answered — run swarm usage to read them once.</div>`;
     // The hero is where the next run goes: the provider with the most left.
     const best = rows.map((p) => ({ p, r: reading(p) })).filter((x) => x.r)
