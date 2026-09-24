@@ -210,6 +210,13 @@ export function runScopeKey(s) {
   return createHash("sha1").update(process.platform === "win32" ? p.toLowerCase() : p).digest("hex").slice(0, 12);
 }
 
+// The checkout containing `cwd` — a linked worktree answers with itself — or null outside
+// git. A writer's tree is cut from this checkout's HEAD, so its depth is measured from here.
+export function checkoutToplevel(cwd) {
+  const r = git(["rev-parse", "--show-toplevel"], cwd, { timeout: 60000 });
+  return r.status === 0 && r.stdout ? r.stdout : null;
+}
+
 // The leaf sits at the same depth in its tree as in the live checkout, so cwd-relative prompt
 // paths still resolve. This is every WRITER's cwd mapper, not a snapshot detail: without it a
 // leaf that declared a subdirectory lands at the tree root instead.

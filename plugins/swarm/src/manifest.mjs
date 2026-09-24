@@ -16,7 +16,7 @@ import { providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
 import { checkGovernance, checkRunRoots } from "./governance.mjs";
-import { runScopeKey } from "./worktree.mjs";
+import { runScopeKey, checkoutToplevel } from "./worktree.mjs";
 import { applyWriteGuard } from "../hooks/leaf-write-guard.mjs";
 
 export { isUnderRoot } from "./roots.mjs";
@@ -90,11 +90,10 @@ function namesEqual(a, b) {
 // repo, git missing) or the repo is bare — the real implementation behind
 // io.repoToplevel.
 //
-// NOT `rev-parse --show-toplevel`: a linked worktree answers that with ITSELF, so
-// dispatching from inside a leaf's worktree filed the run under the worktree and
-// nested run homes inside each other. `worktree list` names the main worktree
-// first by definition, and survives --separate-git-dir where stripping `.git`
-// off --git-common-dir would not.
+// Files the RUN, so NOT `--show-toplevel`: a linked worktree answers that with ITSELF and
+// nested run homes inside each other. A writer's tree depth is `checkoutToplevel`'s job.
+// `worktree list` names the main worktree first by definition, and survives
+// --separate-git-dir where stripping `.git` off --git-common-dir would not.
 export function realRepoToplevel(cwd) {
   const result = nodeSpawnSync("git", ["worktree", "list", "--porcelain"], { cwd, encoding: "utf8" });
   if (result.status !== 0 || !result.stdout) return null;
@@ -130,6 +129,7 @@ function defaultManifestIo() {
     spawnSync: (command, opts) => nodeSpawnSync(command, { shell: true, encoding: "utf8", ...opts }),
     stdout: (line) => console.log(line),
     repoToplevel: realRepoToplevel,
+    checkoutToplevel,
     platform: process.platform,
   };
 }
@@ -931,7 +931,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
   // Many tasks share a cwd; ask git once per directory.
   const tops = new Map();
   const repoTop = (dir) => {
-    if (!tops.has(dir)) tops.set(dir, io.repoToplevel(dir));
+    if (!tops.has(dir)) tops.set(dir, io.checkoutToplevel(dir));
     return tops.get(dir);
   };
   return rawTasks.map((t) => {

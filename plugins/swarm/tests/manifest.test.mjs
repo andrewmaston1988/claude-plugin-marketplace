@@ -2004,7 +2004,7 @@ test("a reader outside any repo loads: only a writer needs one", () => {
   const dir = tmp();
   const bare = join(dir, "bare");
   mkdirSync(bare);
-  const io = { repoToplevel: (c) => (c === bare ? null : dir) };
+  const top = (c) => (c === bare ? null : dir), io = { repoToplevel: top, checkoutToplevel: top };
   try {
     equal(loadManifest(writeManifest(dir, { tasks: [claudeTask({ cwd: bare })] }), CFG, dir, { io }).tasks.length, 1);
 
@@ -2097,7 +2097,7 @@ test("a writer in a second repo carries THAT repo, while the run stays filed und
   try {
     mkdirSync(join(dir, "sub"), { recursive: true });
     // Two real repos: the dispatch cwd and the task's own.
-    const io = { repoToplevel: (d) => (String(d).startsWith(other) ? other : dir) };
+    const top = (d) => (String(d).startsWith(other) ? other : dir), io = { repoToplevel: top, checkoutToplevel: top };
     const plan = inDir(dir, { tasks: [
       bashTask({ id: "here" }),
       bashTask({ id: "there", cwd: other }),
@@ -2119,7 +2119,7 @@ test("writers sharing a cwd ask git for its toplevel once, not once per task", (
     const sub = join(dir, "sub");
     mkdirSync(sub, { recursive: true });
     const calls = [];
-    const io = { repoToplevel: (d) => { calls.push(String(d)); return dir; } };
+    const io = { repoToplevel: () => dir, checkoutToplevel: (d) => { calls.push(String(d)); return dir; } };
     const tasks = Array.from({ length: 10 }, (_, i) => bashTask({ id: `t${i}`, cwd: "sub" }));
     inDir(dir, { tasks }, "memo.json", { io });
     equal(calls.filter((d) => d === sub).length, 1,
