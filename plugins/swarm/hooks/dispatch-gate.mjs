@@ -45,17 +45,11 @@ export function shapeMarkerPath(sessionId, home = SWARM_HOME) {
   return path.join(home, `.shape-ack-${sessionId}`);
 }
 
-// Two spellings reach the engine: the raw `node … swarm.mjs run` and the PATH shim
-// the operator actually types, `swarm run` (installed as swarm.cmd / swarm.ps1 on
-// Windows). Matching only the raw form left every shim dispatch ungated — the shim
-// IS the normal command, so the gate has to know it.
-//
-// Anchored on command position: the invocation must itself be the command word — at
-// the start, or right after `;`, `&&`, `||`, `|`, or `(` — so the phrase quoted inside
-// a `gh pr create --body` or `git commit -m` argument (observed 2026-09-06) does not
-// read as a dispatch, and `myswarm run` (no separator, wrong command word) does not
-// either. `run\b` keeps `swarm runs` out.
-const DISPATCH_WORD = String.raw`(?:node(?:\.exe)?\s+["']?[^"'\s]*swarm\.mjs["']?|swarm(?:\.cmd|\.ps1)?)`;
+// Two spellings reach the engine: `node … swarm.mjs run` and the PATH shim `swarm run`
+// (swarm.cmd / swarm.ps1), bare or path-qualified. Anchored on command position — start,
+// or after `;`, `&&`, `||`, `|`, `(` — so the phrase inside a `git commit -m` argument
+// (observed 2026-09-06) is not a dispatch.
+const DISPATCH_WORD = String.raw`(?:node(?:\.exe)?\s+["']?[^"'\s]*swarm\.mjs["']?|["']?(?:[^"'\s]*[\\/])?swarm(?:\.cmd|\.ps1)?["']?)`;
 const DISPATCH_RE = new RegExp(
   String.raw`(?:^|;|&&|\|\||\||\()\s*(?:nohup\s+)?${DISPATCH_WORD}\s+run\b`,
 );

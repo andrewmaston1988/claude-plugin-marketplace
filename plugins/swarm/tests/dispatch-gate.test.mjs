@@ -170,6 +170,10 @@ test("gate fires on the PATH shim — `swarm run` is the normal dispatch command
     "cd C:/repo; swarm run m.json",
     "cd repo && swarm run m.json",
     "swarm run m.json --force",
+    // path-qualified: the natural retry after `swarm: command not found`
+    "C:/Users/me/.local/bin/swarm.cmd run m.json",
+    "~/.local/bin/swarm run m.json",
+    "\"C:\\tools\\swarm.cmd\" run m.json",
   ]) {
     equal(gateDispatch({ command, runInBackground: true, markerExists: false }).block, true, command);
   }
@@ -184,6 +188,7 @@ test("gate does NOT fire on `swarm run` text that is not the command word", () =
     "grep 'swarm run' file",
     "echo swarm run",
     "myswarm run manifest.json",
+    "/opt/myswarm run manifest.json",
   ]) {
     equal(gateDispatch({ command, runInBackground: true, markerExists: false }).block, false, command);
   }
