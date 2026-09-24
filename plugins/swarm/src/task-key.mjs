@@ -16,7 +16,7 @@ const KEY_FIELDS = [
   "allowedTools", "cwd", "outputDir", "workspace", "worktreeName", "branchName",
   "contextWindow", "verifyCitations", "returns", "mustRead", "settings",
   "compute", "depAliases", "integrate", "forEach", "childPlan",
-  "manifestItem", "manifestIndex",
+  "manifestItem", "manifestIndex", "leafGuard",
 ];
 
 // Key-order-independent, like manifest.mjs's canonicalize: the same definition
@@ -35,10 +35,16 @@ export function taskKey(task) {
   return createHash("sha256").update(JSON.stringify(def)).digest("hex").slice(0, 16);
 }
 
-// The scheduler's only path for writing a task's own result, so no call site can
-// forget the key. Clone definitions differ per item, so a clone's key is its own.
+// Expansion strips forEach/childPlan off a parent before its aggregate is written;
+// pin the key first, or the parent never matches and its dependents re-run forever.
+export function pinKey(task) {
+  task.pinnedKey ??= taskKey(task);
+}
+
+// Every ok:true result must go through here — a keyless one reads as legacy and is
+// never invalidated. Clone definitions differ per item, so a clone's key is its own.
 export function writeTaskResult(resultsDir, task, result) {
-  return writeResult(resultsDir, task.id, { ...result, key: taskKey(task) });
+  return writeResult(resultsDir, task.id, { ...result, key: task.pinnedKey ?? taskKey(task) });
 }
 
 // Reusable only when the recorded key matches. A result carrying NO key predates

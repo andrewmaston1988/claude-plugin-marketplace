@@ -15,7 +15,7 @@ import {
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
   renderProvenance, touchHeartbeat, stopPath, recordedSessionRecords, heartbeatPath, transcriptPath,
 } from "./results.mjs";
-import { cacheHit, writeTaskResult } from "./task-key.mjs";
+import { cacheHit, pinKey, writeTaskResult } from "./task-key.mjs";
 import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
@@ -1031,7 +1031,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         if (cacheHit(plan.resultsDir, c, prior)) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
       }
     }
-    task.when = undefined;
+    pinKey(task); task.when = undefined;
     task.forEach = undefined;
     task.childPlan = undefined; // the clones carry it; the parent is now pure aggregate
     task.after = clones.map((c) => c.id);
@@ -1096,7 +1096,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     }
     const dependedOn = new Set(node.childPlan.tasks.flatMap((c) => c.after.filter((d) => locals.has(d))));
     const sinks = node.childPlan.tasks.filter((c) => !dependedOn.has(c.id)).map((c) => ({ local: c.id, full: remap(c.id) }));
-    node.when = undefined;
+    pinKey(node); node.when = undefined;
     node.childPlan = undefined;
     node.after = spliced.map((c) => c.id);
     node.aggregateManifest = { sinks };

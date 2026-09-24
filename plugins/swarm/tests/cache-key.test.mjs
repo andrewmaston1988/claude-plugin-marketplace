@@ -158,3 +158,27 @@ test("resume: a dependent of a re-run task re-runs too", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// Expansion strips forEach off the parent before its aggregate result is written;
+// keyed on the stripped task, the parent never matched and every dependent re-ran.
+test("resume: an unchanged forEach manifest replays whole — parent and its dependent included", async () => {
+  const dir = tmp();
+  try {
+    const body = {
+      tasks: [
+        { id: "src", prompt: "list files", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "fix", prompt: "fix {{item.f}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["src"], forEach: { from: "src", maxItems: 5 } },
+        { id: "dep", prompt: "check {{result:fix}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["fix"] },
+      ],
+    };
+    const reply = (call) => (promptOf(call).startsWith("list files") ? { output: JSON.stringify([{ f: "a.mjs" }]) } : { output: "done" });
+    await runPlan(loadPlan(dir, body), CFG, makeIo(fakeSpawnFactory(reply)));
+    const second = loadPlan(dir, body);
+    const spawn = fakeSpawnFactory(reply);
+    await runPlan(second, CFG, makeIo(spawn));
+    equal(spawn.calls.length, 0, "an unchanged forEach parent must not invalidate its dependents");
+    ok(!logOf(second).includes('"event":"cache-miss"'), "nothing changed, so nothing may be logged as changed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
