@@ -182,3 +182,33 @@ test("resume: an unchanged forEach manifest replays whole — parent and its dep
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// A forEach manifest node's childPlan is stripped off the parent at expansion, so the
+// same pin must hold for it: unpinned, the parent never matched and its dependent re-ran.
+test("resume: an unchanged forEach manifest node replays whole — parent and its dependent included", async () => {
+  const dir = tmp();
+  try {
+    gitInit(dir);
+    writeFileSync(join(dir, "child.json"), JSON.stringify({
+      tasks: [{ id: "one", prompt: "audit {{item}}", provider: "claude", model: "claude-haiku-4-5-20251001" }],
+    }));
+    const body = {
+      tasks: [
+        { id: "src", prompt: "list repos", provider: "claude", model: "claude-haiku-4-5-20251001" },
+        { id: "audit", manifest: "child.json", after: ["src"], forEach: { from: "src", maxItems: 5 } },
+        { id: "dep", prompt: "check {{result:audit}}", provider: "claude", model: "claude-haiku-4-5-20251001", after: ["audit"] },
+      ],
+    };
+    const reply = (call) => (promptOf(call).startsWith("list repos") ? { output: JSON.stringify(["r1", "r2"]) } : { output: "done" });
+    const first = fakeSpawnFactory(reply);
+    await runPlan(loadPlan(dir, body), CFG, makeIo(first));
+    equal(first.calls.length, 4, "src, two child clones, dep");
+    const second = loadPlan(dir, body);
+    const spawn = fakeSpawnFactory(reply);
+    await runPlan(second, CFG, makeIo(spawn));
+    equal(spawn.calls.length, 0, "an unchanged manifest node must not invalidate its dependents");
+    ok(!logOf(second).includes('"event":"cache-miss"'), "nothing changed, so nothing may be logged as changed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
