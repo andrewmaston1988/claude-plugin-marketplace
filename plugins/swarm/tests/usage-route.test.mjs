@@ -57,10 +57,10 @@ async function openUsage(calls = []) {
 
 const usageFetches = (P) => P.fetchLog.filter(isUsage).length;
 
-test("#/usage fetches /api/usage once and draws the screen, Session first", async () => {
+test("#/usage fetches /api/usage once and draws the screen, Week first", async () => {
   const P = await openUsage();
   assert.equal(usageFetches(P), 1);
-  assert.ok(P.screenText().includes("usage:live:session"));
+  assert.ok(P.screenText().includes("usage:live:week"));
   assert.ok(P.screenText().includes("allowance remaining"));
 });
 
@@ -68,10 +68,10 @@ test("the Session/Week switch redraws from the payload already held — no secon
   const calls = [];
   const P = await openUsage(calls);
   P.main.contains = () => true;
-  const tab = { dataset: { usageWindow: "week" }, classList: { contains: () => false } };
+  const tab = { dataset: { usageWindow: "session" }, classList: { contains: () => false } };
   P.main.listeners.click.forEach((f) => f({ target: { closest: () => tab } }));
   await P.flush();
-  assert.equal(calls.at(-1), "week");
+  assert.equal(calls.at(-1), "session");
   assert.equal(usageFetches(P), 1);
   assert.match(readFileSync(PAGE, "utf8"), /e\.target\.closest\("[^"]*\[data-usage-window\]/);
 });

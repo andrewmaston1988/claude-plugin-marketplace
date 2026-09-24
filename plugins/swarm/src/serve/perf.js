@@ -194,7 +194,7 @@
   function usageScreen(data, h, w) {
     const { esc } = h;
     const LOW = 20, WARN = LOW * 2;
-    const week = w === "week";
+    const week = w !== "session";
     // Anthropic reports weekly_all/weekly_scoped; codex's primary/secondary match neither, by design.
     const fits = (k) => (week ? k === "weekly" || k.startsWith("weekly_") : k === "session");
     // Several buckets of one window: the most-consumed is the one that stops work.
@@ -214,23 +214,27 @@
     for (const u of data.usages || []) if (!seen.has(u.provider)) { seen.add(u.provider); rows.push({ provider: u.provider, usage: u }); }
     for (const [provider, error] of Object.entries(data.errors || {})) if (!seen.has(provider)) { seen.add(provider); rows.push({ provider, error }); }
     const reading = (p) => {
+      // Exhausted is dead in every window: 0% left, naming the limit that ran out, never relabelled.
+      if (p.usage?.state === "exhausted") {
+        const out = (p.usage.limits || []).filter((l) => l.percent >= 100)
+          .map((l) => `${l.kind}${l.window ? ` (${l.window})` : ""} at 100%`);
+        return { left: 0, note: `exhausted${out.length ? ` — ${out.join(", ")}` : ""}` };
+      }
       const l = p.usage && limitOf(p.usage);
       if (!l) return null;
       const left = Math.max(0, Math.min(100, Math.round(100 - l.percent)));
       const note = [l.resetsAt ? resets(l.resetsAt) : null,
-        p.usage.provenance && p.usage.provenance !== "live" ? `read from ${p.usage.provenance}` : null,
-        p.usage.state === "exhausted" ? "exhausted" : null].filter(Boolean).join(" · ");
+        p.usage.provenance && p.usage.provenance !== "live" ? `read from ${p.usage.provenance}` : null].filter(Boolean).join(" · ");
       return { left, note };
     };
     // No figure is not a zero: the card stays, dim, saying why.
     const whyNot = (p) => {
       if (p.error) return p.error;
       const kinds = [...new Set((p.usage.limits || []).map((l) => l.kind).filter(Boolean))];
-      const why = p.usage.reason || (kinds.length ? `reports ${kinds.join(", ")} — no ${week ? "weekly" : "session"} window` : "no reading");
-      return p.usage.state === "exhausted" ? `${why} · exhausted` : why;
+      return p.usage.reason || (kinds.length ? `reports ${kinds.join(", ")} — no ${week ? "weekly" : "session"} window` : "no reading");
     };
     const bar = (n) => `<div class="ubar"><span class="${tone(n)}" style="width:${n}%"></span></div>`;
-    const tabs = `<div class="ctabs">${["session", "week"].map((k) =>
+    const tabs = `<div class="ctabs">${["week", "session"].map((k) =>
       `<a class="ctab${(week ? "week" : "session") === k ? " on" : ""}" data-usage-window="${k}">${k === "week" ? "Week" : "Session"}</a>`).join("")}</div>`;
     if (!rows.length) return tabs + `<div class="empty">no provider answered — run swarm usage to read them once.</div>`;
     const low = rows.map((p) => ({ p, r: reading(p) })).filter((x) => x.r)
