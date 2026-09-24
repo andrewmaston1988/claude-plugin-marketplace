@@ -1190,7 +1190,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
           });
           // Every tree-holding leaf sits at its declared depth. Unconditionally: the old
           // mode test skipped this for a hand-written tree and landed it at the root.
-          taskCwd = defaultWorktree.treeCwd(wt.path, task.repoToplevel, task.originalCwd);
+          taskCwd = defaultWorktree.treeCwd(wt.path, task.checkoutToplevel, task.originalCwd);
           if (wt.reused) appendRunLog(plan.resultsDir, {
             ts: new Date().toISOString(), event: "worktree-resume", id: task.id,
             reset: force, session: resumeId ? "resumed" : "fresh", ...(declined && { declined }),
@@ -1270,7 +1270,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       }
       result.cwd = taskCwd;
       result.originalCwd = task.originalCwd;
-      if (task.repoToplevel) result.repoToplevel = task.repoToplevel;
+      if (task.checkoutToplevel) result.checkoutToplevel = task.checkoutToplevel;
       result.allowedTools = task.allowedTools;
 
       // returns-validation failures are semantic — the leaf itself ran fine.

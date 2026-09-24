@@ -1011,9 +1011,9 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
     // ONE derivation, for every leaf. A leaf that can write gets a tree; a leaf that
     // cannot reads the live repo where it was pointed. There is no second branch for an
     // explicitly-spelled tree, because there is no explicit spelling: that split is what
-    // left `isolationMode`, `branchScope` and `repoToplevel` unset on every hand-written
+    // left `isolationMode`, `branchScope` and `checkoutToplevel` unset on every hand-written
     // `"isolation": "worktree"`, landing the leaf at its tree root instead of its depth.
-    let repoToplevel;
+    let checkoutToplevel;
     let branchScope;
     if (!isCompute && !isManifest && !isIntegrate && hasWriteTools(t.allowedTools)) {
       const top = repoTop(originalCwd);
@@ -1022,7 +1022,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
           `${l}: task cwd '${originalCwd}' is not inside a git repository, so it cannot get a worktree — ` +
           `point cwd into a repo, or drop the write tools and read it in place (e.g. "allowedTools": "Read,Grep,Glob")`);
       } else {
-        repoToplevel = top;
+        checkoutToplevel = top;
         // Run-scoped branch: a kept tree from an earlier run of this manifest must not
         // block this one. An explicit `branch` opts out by naming a stable one instead —
         // that is what naming it means, so the author owns the collision.
@@ -1059,7 +1059,7 @@ function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutMs, erro
       allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || DEFAULT_TOOLS,
       cwd: originalCwd,
       originalCwd,
-      ...(repoToplevel !== undefined && { repoToplevel }),
+      ...(checkoutToplevel !== undefined && { checkoutToplevel }),
       ...(branchScope !== undefined && { branchScope }),
       ...(t.workspace !== undefined && { workspace: t.workspace }),
       ...(worktreeName !== undefined && { worktreeName }),

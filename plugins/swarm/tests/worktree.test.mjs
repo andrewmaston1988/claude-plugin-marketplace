@@ -430,7 +430,7 @@ test("scheduler resume: a failed isolated leaf re-enters its kept worktree AND r
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
       tasks: [{
         id: "impl", prompt: "do it", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
-        cwd: repo, originalCwd: repo, worktreeName: "wt", repoToplevel: repo, timeoutMs: 5000, after: [],
+        cwd: repo, originalCwd: repo, worktreeName: "wt", checkoutToplevel: repo, timeoutMs: 5000, after: [],
       }],
     };
     const first = await runPlan(p, CFG, io);
@@ -468,7 +468,7 @@ test("scheduler integration: a writer runs IN its worktree; summary lists kept b
       goal: "",
       tasks: [{
         id: "impl", prompt: "implement", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
-        cwd: repo, originalCwd: repo, worktreeName: "impl", repoToplevel: repo,
+        cwd: repo, originalCwd: repo, worktreeName: "impl", checkoutToplevel: repo,
         timeoutMs: 5000, after: [],
       }],
     };
@@ -695,13 +695,13 @@ test("scheduler integration: an integrate node merges sibling branches into the 
     const io = makeIo(spawn);
     const leaf = (id, over) => ({
       id, prompt: "p", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
-      cwd: repo, originalCwd: repo, repoToplevel: repo, timeoutMs: 5000, after: [], ...over,
+      cwd: repo, originalCwd: repo, checkoutToplevel: repo, timeoutMs: 5000, after: [], ...over,
     });
     // An agentless node that creates `into`'s tree and merges the named branches into it.
     // This is how a tree starts from another task's commits now that `from` is gone.
     const seed = (id, into, from) => ({
       id, model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
-      repoToplevel: repo, timeoutMs: 5000, after: [...from], worktreeName: into, integrate: { into, from },
+      checkoutToplevel: repo, timeoutMs: 5000, after: [...from], worktreeName: into, integrate: { into, from },
     });
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
@@ -712,7 +712,7 @@ test("scheduler integration: an integrate node merges sibling branches into the 
         seed("seed-my", "my", ["helper"]),
         leaf("my", { after: ["seed-my"], worktreeName: "my" }),
         { id: "join", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
-          repoToplevel: repo, timeoutMs: 5000, after: ["mx", "my"], worktreeName: "feat",
+          checkoutToplevel: repo, timeoutMs: 5000, after: ["mx", "my"], worktreeName: "feat",
           integrate: { into: "feat", from: ["mx", "my"] } },
       ],
     };
@@ -744,13 +744,13 @@ test("groupFinal is the task nothing else in the group depends on, even across o
     const io = makeIo(spawn);
     const leaf = (id, over) => ({
       id, prompt: "p", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Edit,Bash",
-      cwd: repo, originalCwd: repo, repoToplevel: repo, timeoutMs: 5000, after: [], ...over,
+      cwd: repo, originalCwd: repo, checkoutToplevel: repo, timeoutMs: 5000, after: [], ...over,
     });
     // An agentless node that creates `into`'s tree and merges the named branches into it.
     // This is how a tree starts from another task's commits now that `from` is gone.
     const seed = (id, into, from) => ({
       id, model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
-      repoToplevel: repo, timeoutMs: 5000, after: [...from], worktreeName: into, integrate: { into, from },
+      checkoutToplevel: repo, timeoutMs: 5000, after: [...from], worktreeName: into, integrate: { into, from },
     });
     // feat = [helper, cleanup]; cleanup reaches helper ONLY through mx, which is
     // in a different group. A same-group-only dep scan makes helper the

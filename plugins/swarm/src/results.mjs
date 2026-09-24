@@ -11,7 +11,7 @@ import { inferStoredIdentity } from "./contracts.mjs";
 //   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
 //                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
-//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks?, repoToplevel?, key? }
+//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks?, checkoutToplevel?, key? }
 //                       (coverage = { status: "complete"|"incomplete"|"unparseable", required, read, missed[] }
 //                        when the task declared mustRead — a shortfall is recorded, never fails the leaf)
 //                       (asks = [{question, answer, ok, provider?, runner?, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
