@@ -35,7 +35,6 @@ import {
   gitCommitWithRetry,
   gitMergeSquashWithRetry,
   gitCheckoutWithRetry,
-  gitWorktreeWithRetry,
   detectDefaultBranch,
   step0aRebase,
 } from "./rebase.mjs";
@@ -49,6 +48,7 @@ import {
 } from "./plan-files.mjs";
 import { step0bProgress, step9Cleanup } from "./progress.mjs";
 import { readSmokeCommand, step8Smoke } from "./smoke.mjs";
+import { cleanupBranch, pushTarget } from "./land.mjs";
 import { loadPipelineConfig } from "../../../src/pipeline-config.mjs";
 import { getPaths } from "../../../src/paths.mjs";
 import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../src/worktree-paths.mjs";
@@ -57,6 +57,9 @@ import { orchestratorWorktreePath, resolveHookFirstToken } from "../../../src/wo
 
 function logOut(msg) { process.stdout.write(msg + "\n"); }
 function logErr(msg) { process.stderr.write(msg + "\n"); }
+// Exit on a timer, per the plugin convention: a bare process.exit can drop a
+// piped stderr on Windows, and these exits are the failure report.
+function exitSoon(code) { setTimeout(() => process.exit(code), 150); }
 
 // Steps that fail on their own terms (rebase, DoD gate, smoke) abort with their
 // own exit code. Thrown, never `return`ed: a return inside the try skips the
@@ -290,16 +293,7 @@ export async function step5SquashMerge(db, project, projectDir, branches, planFi
     }
 
     // Cleanup worktree and local branch — shared regardless of merge path.
-    // Non-fatal: hook may have already deleted the remote branch.
-    const wt = worktreePath(projectDir, slug);
-    if (existsSync(wt)) {
-      const r = await gitWorktreeWithRetry(projectDir, "remove", "--force", wt);
-      if (r.code !== 0) logErr(`[5] WARN: worktree remove failed for ${wt}: ${r.stderr.trim()}`);
-      else logOut(`[5] Removed worktree: ${wt}`);
-    }
-    const branchDel = runGit(["branch", "-D", branch], projectDir, { check: false });
-    if (branchDel.code !== 0) logErr(`[5] WARN: branch delete failed for ${branch}: ${branchDel.stderr.trim()}`);
-    else logOut(`[5] Deleted branch: ${branch}`);
+    await cleanupBranch(projectDir, branch, worktreePath(projectDir, slug), { log: logOut, err: logErr });
   }
 }
 
@@ -371,7 +365,7 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
 
-  if (!args.branches) { logErr("BLOCKER: --branches required"); process.exit(2); }
+  if (!args.branches) { logErr("BLOCKER: --branches required"); return exitSoon(2); }
 
   const projectDir = args.projectDir ?? process.cwd();
   const project = projectName(projectDir);
@@ -381,7 +375,7 @@ async function main() {
     ?? `merge_${now.getFullYear()}${String(now.getMonth()+1).padStart(2,"0")}${String(now.getDate()).padStart(2,"0")}-${String(now.getHours()).padStart(2,"0")}${String(now.getMinutes()).padStart(2,"0")}`;
 
   const branches = args.branches.split(",").map(b => b.trim()).filter(Boolean);
-  if (!branches.length) { logErr("BLOCKER: no branches given"); process.exit(2); }
+  if (!branches.length) { logErr("BLOCKER: no branches given"); return exitSoon(2); }
 
   // Resolve target branch: CLI > DB > auto-detected default
   let targetBranch = args.targetBranch;
@@ -407,7 +401,7 @@ async function main() {
 
   if (args.dryRun) {
     logOut("[dry-run] would execute Steps 0a-9; exiting without changes");
-    process.exit(0);
+    return exitSoon(0);
   }
 
   // Pre-check: refuse if project has staged or unstaged changes
@@ -416,14 +410,14 @@ async function main() {
     logErr(`BLOCKER: project has staged changes — abort to avoid mixing state`);
     logErr(`  staged files:\n${staged}`);
     logErr("  Resolve manually (commit or `git restore --staged <files>`) and retry.");
-    process.exit(2);
+    return exitSoon(2);
   }
   const unstaged = runGit(["diff", "--name-only"], projectDir, { check: false }).stdout.trim();
   if (unstaged) {
     logErr(`BLOCKER: project has unstaged changes — abort to protect working tree`);
     logErr(`  unstaged files:\n${unstaged}`);
     logErr("  Stash or commit these changes before merging.");
-    process.exit(2);
+    return exitSoon(2);
   }
 
   // Capture pre-merge HEAD for rollback
@@ -440,7 +434,7 @@ async function main() {
         logErr(`BLOCKER: row '${slug}' has stage=merge but qa_pass=NULL`);
         logErr(`  A row cannot reach merge without a test verdict.`);
         logErr(`  This indicates a bypass of the test→merge transition gate.`);
-        close(db); process.exit(2);
+        close(db); return exitSoon(2);
       }
     }
   } catch (e) {
@@ -514,6 +508,7 @@ async function main() {
     // Step 7 — commit project (idx 7)
     mark(7, "inprogress");
     await step7CommitProject(projectDir, branches, { plansDir: args.plansDir });
+    if (!pushTarget(projectDir, targetBranch, { log: logOut, err: logErr })) throw new MergeAbort(7, "step 7b (push)");
     mark(7, "done");
 
     // Step 8 — smoke check (idx 8)
@@ -534,8 +529,8 @@ async function main() {
       exitCode = 6;
     }
   } finally {
-    // Rollback on failure (not smoke failure — that's operator-recoverable)
-    if (exitCode !== 0 && exitCode !== 5) {
+    // Rollback on failure — not smoke (5) or push (7): the merge landed, and they are operator-recoverable
+    if (![0, 5, 7].includes(exitCode)) {
       logErr(`[rollback] merge failed (exit=${exitCode}); resetting project head`);
       const curBranch = runGit(["rev-parse", "--abbrev-ref", "HEAD"], projectDir, { check: false }).stdout.trim();
       if (curBranch !== projectPreBranch) {
@@ -544,8 +539,7 @@ async function main() {
         if (co.code !== 0) {
           logErr(`  BLOCKER — could not checkout '${projectPreBranch}': ${co.stderr.trim()}; skipping reset`);
           close(db);
-          setTimeout(() => process.exit(exitCode), 150);
-          return;
+          return exitSoon(exitCode);
         }
       }
       logErr(`  project (${projectPreBranch}) -> ${projectPreSha.slice(0, 7)}`);
@@ -557,14 +551,12 @@ async function main() {
     close(db);
   }
 
-  // Exit on a timer, per the plugin convention: a bare process.exit can drop a
-  // piped stderr on Windows, and these exits are the failure report.
-  setTimeout(() => process.exit(exitCode), 150);
+  exitSoon(exitCode);
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   main().catch(e => {
     logErr(`[fatal] ${e.message ?? e}`);
-    setTimeout(() => process.exit(6), 150);
+    exitSoon(6);
   });
 }

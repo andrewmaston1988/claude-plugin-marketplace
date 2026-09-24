@@ -374,3 +374,66 @@ test("merge.mjs: successful local merge still exits 0 and prints the success lin
     rmSync(home, { recursive: true, force: true });
   }
 });
+// Operator, 2026-09-24: a local merge pushes. Unpushed, the next sync to origin
+// discards it silently — the squash and the plan-close commit both.
+function addOrigin(tmp, repo, url = null) {
+  const bare = url ?? join(tmp, "origin.git");
+  if (!url) spawnSync("git", ["init", "--bare", "--initial-branch=master", bare], { encoding: "utf8" });
+  spawnSync("git", ["-C", repo, "remote", "add", "origin", bare], { encoding: "utf8" });
+  if (!url) spawnSync("git", ["-C", repo, "push", "origin", "master"], { encoding: "utf8" });
+  return bare;
+}
+
+test("merge.mjs: a local merge pushes the target, so origin holds every commit it made", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeMergeRepo(repo, { feature: "feat-x", plan: PLAN_MIN });
+    const bare = addOrigin(tmp, repo);
+    seedRow(home, repo, { stage: "merge", qaPass: 1 });
+    const r = runMerge(repo, home, "autonomous/feat-x", ["--no-rebase"]);
+
+    equal(r.status, 0, `clean merge must exit 0; stderr=${r.stderr}`);
+    const local = spawnSync("git", ["-C", repo, "rev-parse", "master"], { encoding: "utf8" }).stdout.trim();
+    const remote = spawnSync("git", ["-C", bare, "rev-parse", "master"], { encoding: "utf8" }).stdout.trim();
+    equal(remote, local, "origin's master must match local master after the merge");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("merge.mjs: a failed push exits 7 and keeps the local merge", () => {
+  const { tmp, repo } = makeRepoDir();
+  const home = makeHome();
+  try {
+    makeMergeRepo(repo, { feature: "feat-x", plan: PLAN_MIN });
+    addOrigin(tmp, repo, join(tmp, "no-such-remote.git"));
+    seedRow(home, repo, { stage: "merge", qaPass: 1 });
+    const before = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+    const r = runMerge(repo, home, "autonomous/feat-x", ["--no-rebase"]);
+
+    equal(r.status, 7, `push failure must exit 7; stdout=${r.stdout} stderr=${r.stderr}`);
+    ok(!r.stdout.includes(SUCCESS_LINE), `success line printed on an unpushed merge: ${r.stdout}`);
+    ok(/BLOCKER: push/.test(r.stderr), `push failure not on stderr: ${r.stderr}`);
+    const after = spawnSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" }).stdout.trim();
+    ok(after !== before, "the merge landed locally and must not be rolled back");
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("cleanupBranch: a branch already gone (a hook deleted it) is skipped, not reported as a failed delete", async () => {
+  const { tmp, repo } = makeRepoDir();
+  try {
+    makeMergeRepo(repo, { feature: "feat-x" });
+    spawnSync("git", ["-C", repo, "branch", "-D", "autonomous/feat-x"], { encoding: "utf8" });
+    const { cleanupBranch } = await import("../skills/merge/scripts/land.mjs");
+    const errs = [];
+    await cleanupBranch(repo, "autonomous/feat-x", join(tmp, "no-worktree"), { log: () => {}, err: (m) => errs.push(m) });
+    equal(errs.length, 0, `no warning for a branch that is already gone: ${errs}`);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+});
