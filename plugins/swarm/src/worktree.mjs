@@ -216,6 +216,13 @@ export function runScopeKey(s) {
 //
 // The mkdir is load-bearing for the same reason. A writer whose declared cwd is gitignored
 // (build/, .claude/worktrees/x) has no such directory in the tree and cannot spawn without it.
+// The checkout containing `cwd` — a linked worktree answers with itself — or null outside
+// git. A writer's tree is cut from this checkout's HEAD, so its depth is measured from here.
+export function checkoutToplevel(cwd) {
+  const r = git(["rev-parse", "--show-toplevel"], cwd, { timeout: 60000 });
+  return r.status === 0 && r.stdout ? r.stdout : null;
+}
+
 export function treeCwd(tree, repoToplevel, originalCwd) {
   // No repo recorded means no depth to preserve, so the tree root IS the leaf's cwd. Only a
   // hand-built plan reaches this: normalisation sets repoToplevel on every writer, which is
