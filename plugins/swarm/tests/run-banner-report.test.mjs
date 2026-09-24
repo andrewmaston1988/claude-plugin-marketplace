@@ -93,7 +93,7 @@ test("the action bar is pinned to the viewport, not appended into the scroll", (
   const css = readFileSync(PAGE, "utf8").match(/\.actionbar\s*\{([^}]*)\}/);
   assert.ok(css, ".actionbar must carry its own rule");
   assert.match(css[1], /position:\s*fixed/, "a bar that scrolls with the body is unreachable on a long run");
-  assert.match(css[1], /bottom:\s*0/, "pinned to the bottom edge");
+  assert.match(css[1], /bottom:\s*calc\(57px/, "pinned just above the 56px bottom nav and its rule");
   assert.match(readFileSync(PAGE, "utf8"), /main:has\(\.actionbar\)\s*\{[^}]*padding-bottom/,
     "the pinned bar must reserve its own space, or it covers the last row");
 });

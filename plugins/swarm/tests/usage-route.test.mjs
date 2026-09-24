@@ -95,6 +95,6 @@ test("ticks and SSE events never re-read usage; a fresh navigation does", async 
   assert.equal(usageFetches(P), 2);
 });
 
-test("Usage is reached from the menu", () => {
-  assert.match(readFileSync(PAGE, "utf8"), /<nav class="nav">[^]*?href="#\/usage"/);
+test("Usage is reached from the bottom nav", () => {
+  assert.match(readFileSync(PAGE, "utf8"), /<nav id="nav"[^]*?href="#\/usage"/);
 });

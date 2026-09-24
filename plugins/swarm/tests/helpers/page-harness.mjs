@@ -133,11 +133,9 @@ export function loadPage(opts = {}) {
   const ids = new Map();
   const hdr = makeElement("header", ids); hdr.setAttribute("id", "hdr");
   const main = makeElement("main", ids); main.setAttribute("id", "main");
-  makeElement("div", ids).setAttribute("id", "menu");
-  // The compound menu selectors: pre-resolved stubs, one per selector page.html
-  // uses at boot or while drawing the runs list.
-  const chrome = {};
-  for (const sel of ["#menu-close", "#menu .nav", "#menu .nav a[href='#/perf']", "#menu-url", "#menu-token"]) chrome[sel] = makeElement("div", ids);
+  const nav = makeElement("nav", ids); nav.setAttribute("id", "nav");
+  // The compound nav selector: a pre-resolved stub, since querySelector here only resolves ids.
+  const chrome = { "#nav a[href='#/perf']": makeElement("a", ids) };
 
   const location = { hash: "", search: "", origin: "http://localhost" };
   const winListeners = {};
@@ -211,7 +209,7 @@ export function loadPage(opts = {}) {
   const isLeaf = (u) => /^\/api\/runs\/[^/]+\/[^/]+\/leaves\//.test(u);
 
   return {
-    location, hdr, main, flush,
+    location, hdr, main, nav, perfTab: chrome["#nav a[href='#/perf']"], flush,
     fireHashchange: () => winListeners.hashchange.forEach((f) => f()),
     fireSse: (t, d) => (esListeners[t] || []).forEach((f) => f({ data: d || "{}" })),
     esCount: () => esInstances.length,
