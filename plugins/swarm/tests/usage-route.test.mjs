@@ -35,8 +35,10 @@ test("/api/usage answers from the injected live reader", async () => {
 });
 
 test("the dashboard command wires the real reader into the server", () => {
-  const src = readFileSync(new URL("../scripts/swarm.mjs", import.meta.url), "utf8");
-  assert.match(src, /createServer\(\{.*_readProviderUsage: readProviderUsage/);
+  const cli = readFileSync(new URL("../scripts/swarm.mjs", import.meta.url), "utf8");
+  const serve = readFileSync(new URL("../scripts/cmd-serve.mjs", import.meta.url), "utf8");
+  assert.match(cli, /cmdServe\(rest, \{ readProviderUsage \}\)/, "the dispatcher hands serve the real reader");
+  assert.match(serve, /createServer\(\{.*_readProviderUsage: readProviderUsage/, "and serve hands it to the server");
 });
 
 // ── the page ─────────────────────────────────────────────────────────────
