@@ -13,9 +13,10 @@ import { effectivePlanDoc, resolveWorktreeName, makeReaches, isAgentless } from 
 import {
   initResultsDir, resultPath, writeResult, readResult, writeSummary, readSummary,
   writeManifestSnapshot, writeDigestMd, appendRunLog, renderRoster, formatTokens,
-  renderProvenance, touchHeartbeat, stopPath, recordedSessionRecords, heartbeatPath, transcriptPath,
+  renderProvenance, stopPath, recordedSessionRecords, heartbeatPath, transcriptPath,
 } from "./results.mjs";
 import { cacheHit, pinKey, writeTaskResult } from "./task-key.mjs";
+import { startHeartbeat } from "./heartbeat.mjs";
 import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
@@ -828,9 +829,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // Coverage shortfalls kept (D9), surfaced in the same loud closing channel.
   const coverageGaps = [];
   const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
-  touchHeartbeat(plan.resultsDir, started, process.pid);
+  const beat = startHeartbeat(plan.resultsDir, started, heartbeatMs);
   const heartbeat = setInterval(() => {
-    touchHeartbeat(plan.resultsDir, new Date().toISOString(), process.pid);
     if (!stopRequested && existsSync(stopPath(plan.resultsDir))) requestStop("stop-file");
     // Valve (D4): a deliberate, targeted kill — cheaper than the whole run
     // dying to an OOM. Only when there is a second running leaf to fall back
@@ -1522,7 +1522,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     }
   }
   } finally {
-    clearInterval(heartbeat);
+    clearInterval(heartbeat); beat.stop();
     process.off("SIGINT", sigintHandler);
     process.off("SIGTERM", sigtermHandler);
   }
