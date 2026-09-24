@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
-import { EXIT_CLEAN, EXIT_DEAD, EXIT_FAILED, settledCode, waitForRun } from "../src/wait.mjs";
+import { EXIT_CLEAN, EXIT_DEAD, EXIT_FAILED, EXIT_TIMEOUT, settledCode, waitForRun } from "../src/wait.mjs";
 
 const NOW = Date.parse("2026-09-05T01:10:00Z");
 
@@ -142,4 +142,12 @@ test("swarm wait CLI exits 1 on a failed leaf and on a missing run.log", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("swarm wait gives up after --timeout with exit 3, leaving the run alone", async () => {
+  const s = scripted([runOf({ states: { a: "running" } })]);
+  const r = await waitForRun("/run", { ...s.opts, timeoutMs: 12_000 });
+  equal(r.code, EXIT_TIMEOUT, "a run still going at the deadline is neither clean nor failed");
+  equal(s.reads.length, 4, "it polls until the deadline passes, then stops");
+  ok(/still running/.test(r.message), "it says the run is still going");
 });

@@ -27,7 +27,7 @@ const USAGE = `usage: swarm.mjs <command>
   run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
-  wait <resultsDir>          block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died)
+  wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
   prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
   report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
@@ -1347,7 +1347,7 @@ async function main() {
       case "wait": {
         if (!rest[0]) { err(USAGE); return 1; }
         const { runWaitCommand } = await import("../src/wait.mjs");
-        return await runWaitCommand(rest[0], { quietWarnSecs: getConfig().quietWarnSecs, out, err });
+        return await runWaitCommand(rest[0], { quietWarnSecs: getConfig().quietWarnSecs, timeoutSecs: Number(getFlag("timeout", rest)) || null, out, err });
       }
       case "report": {
         if (!rest[0]) { err(USAGE); return 1; }
