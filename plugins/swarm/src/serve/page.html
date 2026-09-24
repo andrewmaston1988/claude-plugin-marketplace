@@ -746,6 +746,9 @@
   // every state it reads — view, lastList, currentRun, currentLeaf, ui — is assigned
   // in commitView alone; a build that fetched here would make this a racing renderer.
   function rerender() {
+    // Mid-navigation the committed view is the screen being left: redrawing it would
+    // flip back over the destination's skeleton until its data lands.
+    if (pendingView && !sameView(pendingView, view)) return;
     const now = Date.now();
     if (view.name === "runs" && lastList) {
       const { header, home, html } = renderRunsHtml(lastList);

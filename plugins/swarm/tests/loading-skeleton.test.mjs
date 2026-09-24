@@ -34,3 +34,15 @@ test("re-routing to the screen already showing never blanks it", async () => {
   P.fireHashchange();
   assert.equal(P.findByClass("skeleton").length, 0);
 });
+
+// The clock tick redraws the COMMITTED screen; mid-navigation that is the one being
+// left, so a tick used to flip Runs back over Usage's skeleton until usage landed.
+test("a clock tick mid-navigation keeps the skeleton, never the screen being left", async () => {
+  const P = await onRuns();
+  P.location.hash = "#/usage";
+  P.fireHashchange();
+  await P.flush();
+  P.seam().rerender();
+  assert.equal(P.findByClass("skeleton").length, 1);
+  assert.doesNotMatch(P.mainText(), /LISTRUN/);
+});
