@@ -1,4 +1,4 @@
-import { join, resolve, sep } from "node:path";
+import { join, resolve, dirname, sep } from "node:path";
 
 // Every byte under `path`, walked with the injected `fs` — real `node:fs` in
 // production, a scripted stand-in in tests. Missing/unreadable entries count as
@@ -25,6 +25,23 @@ function dirSize(fs, path) {
     }
   }
   return total;
+}
+
+// A worktree's own `.git` file names its repo's common dir — no need for the
+// run record to carry `repo` at all, so long as at least one kept tree is
+// still on disk to ask.
+export function repoOfWorktree(spawnSync, worktreePath) {
+  const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd: worktreePath, encoding: "utf8", windowsHide: true });
+  if (r.status !== 0) return null;
+  return dirname(resolve(worktreePath, (r.stdout || "").trim()));
+}
+
+// Every tree still sitting in the run dir, asked for its repo — the summary may
+// have recorded none, and the manifest's cwd may be a worktree long since removed.
+export function reposOfTrees(fs, dir, spawnSync) {
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && fs.existsSync(join(dir, e.name, ".git")))
+    .map((e) => repoOfWorktree(spawnSync, join(dir, e.name)));
 }
 
 // `git worktree list --porcelain` parsed with the injected git, mirroring
