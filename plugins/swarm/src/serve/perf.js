@@ -1,5 +1,5 @@
 // Performance-page widgets: coverage grid, reliability bars, leaders list,
-// cost screen.
+// cost screen, usage screen.
 // Loaded as a served static <script>, not bundled with page.html, so each
 // widget takes its data and the page's own helpers as parameters — no
 // closure over page.html's IIFE. window.perfViews is the whole contract.
@@ -188,5 +188,71 @@
     return `<span class="cbadge">${"💲".repeat(cost.band)}</span> ${fmtMult(cost.multiplier)} · ${verdict}${cost.thin ? " · thin evidence" : ""}`;
   }
 
-  window.perfViews = { coverageGrid, reliabilityBars, leadersList, modelDashboard, costScreen };
+  // The Usage screen (mockup 403–484): a Session/Week switch, a hero naming the
+  // provider with the least headroom, then a card per provider. A limit's percent
+  // is USED; every figure drawn is what is LEFT.
+  function usageScreen(data, h, w) {
+    const { esc } = h;
+    const LOW = 20, WARN = LOW * 2;
+    const week = w === "week";
+    // Anthropic reports weekly_all/weekly_scoped; codex's primary/secondary match neither, by design.
+    const fits = (k) => (week ? k === "weekly" || k.startsWith("weekly_") : k === "session");
+    // Several buckets of one window: the most-consumed is the one that stops work.
+    const limitOf = (u) => (u.limits || []).filter((l) => fits(l.kind || "")).sort((a, b) => b.percent - a.percent)[0] || null;
+    const tone = (n) => (n <= LOW ? "bad" : n <= WARN ? "warn" : "ok");
+    const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+    const pad = (n) => String(n).padStart(2, "0");
+    const resets = (iso) => {
+      const d = new Date(iso);
+      if (Number.isNaN(+d)) return null;
+      const day = +d - Date.now() < 6 * 86_400_000 ? DAYS[d.getDay()] : `${d.getDate()}/${d.getMonth() + 1}`;
+      return `resets ${day} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    // The roster is what the read named — answered or failed — in payload order.
+    const seen = new Set();
+    const rows = [];
+    for (const u of data.usages || []) if (!seen.has(u.provider)) { seen.add(u.provider); rows.push({ provider: u.provider, usage: u }); }
+    for (const [provider, error] of Object.entries(data.errors || {})) if (!seen.has(provider)) { seen.add(provider); rows.push({ provider, error }); }
+    const reading = (p) => {
+      const l = p.usage && limitOf(p.usage);
+      if (!l) return null;
+      const left = Math.max(0, Math.min(100, Math.round(100 - l.percent)));
+      const note = [l.resetsAt ? resets(l.resetsAt) : null,
+        p.usage.provenance && p.usage.provenance !== "live" ? `read from ${p.usage.provenance}` : null,
+        p.usage.state === "exhausted" ? "exhausted" : null].filter(Boolean).join(" · ");
+      return { left, note };
+    };
+    // No figure is not a zero: the card stays, dim, saying why.
+    const whyNot = (p) => {
+      if (p.error) return p.error;
+      const kinds = [...new Set((p.usage.limits || []).map((l) => l.kind).filter(Boolean))];
+      const why = p.usage.reason || (kinds.length ? `reports ${kinds.join(", ")} — no ${week ? "weekly" : "session"} window` : "no reading");
+      return p.usage.state === "exhausted" ? `${why} · exhausted` : why;
+    };
+    const bar = (n) => `<div class="ubar"><span class="${tone(n)}" style="width:${n}%"></span></div>`;
+    const tabs = `<div class="ctabs">${["session", "week"].map((k) =>
+      `<a class="ctab${(week ? "week" : "session") === k ? " on" : ""}" data-usage-window="${k}">${k === "week" ? "Week" : "Session"}</a>`).join("")}</div>`;
+    if (!rows.length) return tabs + `<div class="empty">no provider answered — run swarm usage to read them once.</div>`;
+    const low = rows.map((p) => ({ p, r: reading(p) })).filter((x) => x.r)
+      .reduce((a, b) => (a && a.r.left <= b.r.left ? a : b), null);
+    // "Every provider" is only true when every provider was read.
+    const unread = rows.filter((p) => !reading(p)).map((p) => p.provider);
+    const heroNote = (n) => (n <= LOW ? "Throttle or switch provider before the next big run."
+      : n <= WARN ? "Enough for a medium run, not a full swarm."
+        : unread.length ? `Comfortable headroom where read — ${unread.join(", ")} not read.` : "Comfortable headroom across every provider.");
+    const hero = low
+      ? `<div class="uhero ${tone(low.r.left)}"><div class="lbl">LOWEST THIS ${week ? "WEEK" : "SESSION"} · ${esc(low.p.provider.toUpperCase())}</div>`
+        + `<div class="fig"><b>${low.r.left}%</b><span>left</span></div>${bar(low.r.left)}<div class="sub">${esc(heroNote(low.r.left))}</div></div>`
+      : "";
+    const cards = rows.map((p) => {
+      const r = reading(p);
+      const nm = `<span class="nm">${esc(p.provider)}</span>`;
+      if (!r) return `<div class="card upc unread"><div class="top">${nm}</div><div class="sub">${esc(`not read — ${whyNot(p)}`)}</div></div>`;
+      return `<div class="card upc ${tone(r.left)}"><div class="top">${nm}<span class="val ${tone(r.left)}">${r.left}%</span></div>${bar(r.left)}`
+        + (r.note ? `<div class="sub">${esc(r.note)}</div>` : "") + "</div>";
+    }).join("");
+    return tabs + hero + `<div class="section"><span>providers</span><span class="line"></span></div>` + cards;
+  }
+
+  window.perfViews = { coverageGrid, reliabilityBars, leadersList, modelDashboard, costScreen, usageScreen };
 })();

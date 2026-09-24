@@ -164,6 +164,24 @@
   .crow.unm .nm, .crow.unm .val { color:var(--faint); }
   .card.cfact { padding:18px 16px; }
   .cfact b { font-size:22px; }
+  /* usage screen (mockup 403–484): hero on the least headroom, then a card per provider; a dim dashed card is a window not read */
+  .uhero { margin:14px 16px 0; padding:18px; border-radius:16px; background:var(--accent-soft); border:1px solid var(--rule); }
+  .uhero .lbl { font-size:11px; letter-spacing:.06em; color:var(--muted); }
+  .uhero .fig { margin-top:14px; display:flex; align-items:baseline; gap:9px; }
+  .uhero .fig b { font-size:44px; font-variant-numeric:tabular-nums; letter-spacing:-.04em; }
+  .uhero .fig span { font-size:15px; color:var(--muted); }
+  .uhero .ubar { margin-top:16px; height:8px; }
+  .uhero .sub, .upc .sub { margin-top:10px; font-size:11.5px; line-height:1.4; color:var(--faint); }
+  .card.upc { margin-top:10px; padding:14px; }
+  .card.upc.bad { border-color:var(--bad-bg); } .card.upc.warn { border-color:var(--warn-bg); }
+  .upc .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .upc .nm { font-size:14.5px; }
+  .upc .val { font-size:20px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .upc .val.bad { color:var(--bad); } .upc .val.warn { color:var(--warn); }
+  .card.upc.unread { border-style:dashed; background:none; } .upc.unread .nm { color:var(--faint); }
+  .ubar { margin-top:11px; height:5px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
+  .ubar span { display:block; height:100%; border-radius:3px; background:var(--accent); }
+  .ubar span.warn { background:var(--warn); } .ubar span.bad { background:var(--bad); }
   /* the cost badge rides the rank row's value side, never the name */
   .valside { display:flex; align-items:center; gap:4px; }
   .cbadge { font-size:11px; flex:none; }
@@ -255,7 +273,7 @@
 <main id="main"></main>
 <div id="menu" class="menu"><div class="panel">
   <h2>swarm dashboard</h2>
-  <nav class="nav"><a href="#/">runs</a><a href="#/perf">performance</a><a href="#/cost">cost</a></nav>
+  <nav class="nav"><a href="#/">runs</a><a href="#/perf">performance</a><a href="#/cost">cost</a><a href="#/usage">usage</a></nav>
   <div class="k" id="menu-url"></div>
   <div class="k" id="menu-token"></div>
   <div class="k dim">Reads ~/.swarm/runs on the PC. Read-only. Live over server-sent events; reconnects on its own.</div>
@@ -376,7 +394,7 @@
 
   // ── views ──────────────────────────────────────────────────────────────
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, costProvider: null };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, costProvider: null, usageWindow: "session" };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -979,6 +997,18 @@
       html: window.perfViews.costScreen(data, { esc, enc }, ui.costProvider),
     };
   }
+  // /api/usage reads every provider live, so it is fetched on arrival only: the
+  // Session/Week switch, ticks and reconnects redraw from the payload already held.
+  let usageData = null;
+  async function buildUsage() {
+    if (view.name !== "usage" || !usageData) usageData = await api("/api/usage");
+    await loadPerfJs();
+    const n = new Set([...(usageData.usages || []).map((u) => u.provider), ...Object.keys(usageData.errors || {})]).size;
+    return {
+      header: `${backBtn("#/")}<div class="title"><b>usage</b><small>${n} provider${n === 1 ? "" : "s"} · allowance remaining</small></div>${menuBtn}`,
+      html: window.perfViews.usageScreen(usageData, { esc }, ui.usageWindow),
+    };
+  }
   async function buildPerf(kind, which) {
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
     const domain = ui.perfDomain;
@@ -1133,6 +1163,7 @@
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
     // #/perf/cost is where Cost lived under Performance: old bookmarks still land.
     if (seg[0] === "cost" || (seg[0] === "perf" && seg[1] === "cost")) return { name: "cost", project: null, run: null, leaf: null, node: null };
+    if (seg[0] === "usage") return { name: "usage", project: null, run: null, leaf: null, node: null };
     if (seg[0] === "perf") return { name: "perf", project: null, run: null, leaf: null, node: null, kind: seg[1] || null, which: seg[2] || null };
     if (seg[0] === "run" && seg.length >= 3) {
       const name = seg[3] === "leaf" ? "leaf" : seg[3] === "digest" ? "digest" : seg[3] === "report" ? "report" : seg[3] === "node" ? "node" : "run";
@@ -1159,6 +1190,7 @@
   async function buildFor(v) {
     if (v.name === "perf") return buildPerf(v.kind, v.which);
     if (v.name === "cost") return buildCost();
+    if (v.name === "usage") return buildUsage();
     if (v.name === "leaf") return buildLeaf(v.project, v.run, v.leaf);
     if (v.name === "digest") return buildDigest(v.project, v.run);
     if (v.name === "report") return buildReport(v.project, v.run);
@@ -1203,9 +1235,10 @@
     setTimeout(() => { ui.focusId = null; rerender(); }, 2400);
   }
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-cost-provider]");
+    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-cost-provider], [data-usage-window]");
     if (!t || !main.contains(t)) return;
     if (t.dataset.costProvider != null) { ui.costProvider = t.dataset.costProvider; requestRoute(route); return; }
+    if (t.dataset.usageWindow != null) { ui.usageWindow = t.dataset.usageWindow; requestRoute(route); return; }
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
     if (t.dataset.pretty) { ui.pretty = !ui.pretty; requestRoute(route); return; }

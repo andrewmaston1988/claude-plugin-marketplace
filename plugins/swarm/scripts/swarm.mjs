@@ -1161,7 +1161,7 @@ async function cmdServe(rest) {
   if (process.env.NODE_TEST_CONTEXT && process.env.SWARM_SERVE_TEST_CRASH === "before-listen") {
     process.nextTick(() => { throw new Error("SWARM_SERVE_TEST_CRASH=before-listen"); });
   }
-  const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`) });
+  const server = createServer({ home, cfg, log: (m) => err(`dashboard: ${m}`), _readProviderUsage: readProviderUsage });
   const bind = cfg.dashboard?.bind ?? "0.0.0.0";
   // SSE streams never "finish", so they cannot count as in-flight for the
   // handover drain — they are ended outright at handover and the browser

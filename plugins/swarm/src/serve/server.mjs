@@ -136,7 +136,7 @@ const MANIFEST = {
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000 }) {
+export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
@@ -413,6 +413,11 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (p === "/api/perf") return perf(res, url);
     // Grading-independent: prices exist without grades, so only the value verdicts need the store.
     if (p === "/api/cost") return send(res, 200, costOf(grading ? scoreRows() : []));
+    // A live read of every provider: swarm.mjs injects it, since importing swarm.mjs here deadlocks on its top-level await.
+    if (p === "/api/usage") {
+      if (!_readProviderUsage) throw new Error("no _readProviderUsage seam wired");
+      return send(res, 200, await _readProviderUsage(cfg, { live: true }));
+    }
     if (routes[p]) return await routes[p](res, url);
 
     // A trailing slash is what the URL parser leaves behind after collapsing an
