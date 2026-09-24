@@ -1335,7 +1335,9 @@
     return { name: "runs", project: null, run: null, leaf: null, node: null };
   };
   function commitView(next) {
-    if (next.view) { Object.assign(view, next.view); pendingView = null; }
+    // Replaced whole, never merged: a field the last screen named (perf `kind`, cost
+    // `which`) left behind makes every poll of this one read as a navigation.
+    if (next.view) { for (const k of Object.keys(view)) delete view[k]; Object.assign(view, next.view); pendingView = null; }
     const tab = next.view ? TAB[view.name] || "runs" : next.tab;
     if (tab) $("#nav").setAttribute("data-on", tab);
     const s = next.state || {};

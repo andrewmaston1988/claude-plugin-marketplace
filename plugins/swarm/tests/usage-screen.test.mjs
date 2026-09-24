@@ -16,6 +16,12 @@ const LIVE = {
 };
 // The same payload with codex's dead allowance left out, for the reading tests.
 const READABLE = { usages: LIVE.usages.slice(0, 2), errors: {} };
+// Operator, 2026-09-24: "primary is weekly, secondary is session or vice versa" — the span decides.
+test("codex primary/secondary land in Session and Week by their own window span", () => {
+  const codex = { usages: [usage("codex", [lim("codex primary", 41, { window: "5h" }), lim("codex secondary", 6, { window: "7d" })])], errors: {} };
+  assert.match(loadPerfViews().usageScreen(codex, H, "session"), /<b>59%<\/b>/, "the 5h window is the session");
+  assert.match(loadPerfViews().usageScreen(codex, H, "week"), /<b>94%<\/b>/, "the 7d window is the week");
+});
 const pcards = (html) => html.match(/class="card upc[^"]*"/g) || [];
 
 // Operator, 2026-09-24: the hero is where the next run goes — the MOST left, not the least.
