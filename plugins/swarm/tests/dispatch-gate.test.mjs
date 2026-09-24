@@ -142,6 +142,35 @@ test("gate recognises the dispatch across quoting, slashes, and flags", () => {
   }
 });
 
+// The operator's normal command is the PATH shim, not the raw node path — a gate
+// that only knows `node … swarm.mjs run` is bypassed by every dispatch the shim makes.
+test("gate fires on the PATH shim — `swarm run` is the normal dispatch command", () => {
+  for (const command of [
+    "swarm run manifest.json",
+    "swarm.cmd run manifest.json",
+    "swarm.ps1 run manifest.json",
+    "cd C:/repo; swarm run m.json",
+    "cd repo && swarm run m.json",
+    "swarm run m.json --force",
+  ]) {
+    equal(gateDispatch({ command, runInBackground: true, markerExists: false }).block, true, command);
+  }
+});
+
+// The shim word must sit at command position — a mention of `swarm run` inside
+// another command's argument is not a dispatch.
+test("gate does NOT fire on `swarm run` text that is not the command word", () => {
+  for (const command of [
+    "swarm runs manifest.json",
+    "swarm status",
+    "grep 'swarm run' file",
+    "echo swarm run",
+    "myswarm run manifest.json",
+  ]) {
+    equal(gateDispatch({ command, runInBackground: true, markerExists: false }).block, false, command);
+  }
+});
+
 // Fail open: a malformed payload must never wedge the session.
 test("gate fails open on a missing or empty command", () => {
   equal(gateDispatch({ command: undefined, runInBackground: true, markerExists: false }).block, false);
