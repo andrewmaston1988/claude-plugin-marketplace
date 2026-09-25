@@ -1,11 +1,10 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { isSentinelModel } from "./manifest.mjs";
+import { cloneId, childId } from "./leaf-ids.mjs";
 
-// IDs are minted by scheduler.mjs as `<task>[<index>]` and
-// `<manifest-node>~<child-id>`. Keep this projection aligned with those shapes.
 function clonesFor(base, resultIds) {
-  const prefix = `${base}[`;
+  const prefix = cloneId(base, "").slice(0, -1);
   return resultIds.filter((id) => {
     if (!id.startsWith(prefix) || !id.endsWith("]")) return false;
     const index = id.slice(prefix.length, -1);
@@ -28,10 +27,10 @@ function manifestResultIds(manifest, resultIds) {
     for (const parentId of expanded) {
       for (const child of task.child) {
         if (typeof child?.id !== "string") continue;
-        const childId = `${parentId}~${child.id}`;
-        allowed.add(childId);
+        const cid = childId(parentId, child.id);
+        allowed.add(cid);
         if (child.forEach) {
-          for (const cloneId of clonesFor(childId, resultIds)) allowed.add(cloneId);
+          for (const clone of clonesFor(cid, resultIds)) allowed.add(clone);
         }
       }
     }

@@ -5,6 +5,8 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { DIGEST_ID } from "./digest.mjs";
+import { cloneId, childId } from "./leaf-ids.mjs";
+export { cloneId, childId };
 import { readHeartbeat, inferStoredIdentity } from "./results.mjs";
 
 const CLONE_RE = /^(.+)\[(\d+)\]$/;
@@ -80,7 +82,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
     if (entry.event === "expand") {
       // forEach clones join the roster directly under their parent
       const rows = Array.from({ length: entry.clones || 0 }, (_, i) => ({
-        id: `${entry.id}[${i}]`, model: entry.model || "?",
+        id: cloneId(entry.id, i), model: entry.model || "?",
         ...(entry.provider ? { provider: entry.provider } : {}),
         ...(entry.runner ? { runner: entry.runner } : {}),
       }));
@@ -207,7 +209,7 @@ export function topology(tasks, manifest) {
     if (t.kind === "child") {
       r.kind = "child";
       r.parent = t.parent;
-      r.after = t.def.after?.length ? t.def.after.map((a) => `${t.node}~${a}`) : t.upstream;
+      r.after = t.def.after?.length ? t.def.after.map((a) => childId(t.node, a)) : t.upstream;
     } else if (t.kind === "clone" || t.kind === "container") {
       r.kind = t.kind;
       r.parent = t.parent;
