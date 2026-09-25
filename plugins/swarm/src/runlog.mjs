@@ -5,11 +5,9 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { DIGEST_ID } from "./digest.mjs";
-import { cloneId, childId } from "./leaf-ids.mjs";
-export { cloneId, childId };
+import { cloneId, childId, parseCloneId } from "./leaf-ids.mjs";
+export { cloneId, childId, parseCloneId };
 import { readHeartbeat, inferStoredIdentity } from "./results.mjs";
-
-const CLONE_RE = /^(.+)\[(\d+)\]$/;
 
 // Non-terminal, non-doomed: a leaf waiting out a backoff or model fallback. Lives here
 // rather than in the scheduler because it is state vocabulary, and two modules read it.
@@ -168,10 +166,10 @@ export function resolveTaskId(id, tasks) {
     }
   }
   // Guarded on the base being a task: an id that merely ends in [n] is not a clone.
-  const clone = CLONE_RE.exec(id);
-  if (clone && defs.has(clone[1])) {
-    const def = defs.get(clone[1]);
-    return { kind: def.child ? "container" : "clone", def, parent: clone[1], forEach: def, index: Number(clone[2]) };
+  const clone = parseCloneId(id);
+  if (clone && defs.has(clone.parent)) {
+    const def = defs.get(clone.parent);
+    return { kind: def.child ? "container" : "clone", def, parent: clone.parent, forEach: def, index: Number(clone.index) };
   }
   return { kind: "unknown", def: null, parent: null };
 }

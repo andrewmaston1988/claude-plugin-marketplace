@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal, workTokens } from "./stream.mjs";
@@ -94,7 +94,7 @@ export function transcriptPath(dir, id) {
   return join(dir, "results", `${id}.log`);
 }
 
-// Every leaf a run wrote a result for, with both paths. `gradeable` is the
+// Manifest leaves with both paths; without a manifest, every result is included. `gradeable` is the
 // grading store's scope: a gradeable leaf is one a real model ran (sentinel-model nodes produce no row).
 export function listLeaves(dir, { gradeable = false } = {}) {
   return listLeavesFrom(dir, { gradeable }, { readResult, resultPath, transcriptPath });

@@ -1,21 +1,20 @@
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { isSentinelModel } from "./manifest.mjs";
-import { cloneId, childId } from "./leaf-ids.mjs";
+import { childId, parseCloneId, DIGEST_ID } from "./leaf-ids.mjs";
 
 function clonesFor(base, resultIds) {
-  const prefix = cloneId(base, "").slice(0, -1);
   return resultIds.filter((id) => {
-    if (!id.startsWith(prefix) || !id.endsWith("]")) return false;
-    const index = id.slice(prefix.length, -1);
-    const n = Number(index);
-    return Number.isSafeInteger(n) && n >= 0 && String(n) === index;
+    const clone = parseCloneId(id);
+    if (clone?.parent !== base) return false;
+    const n = Number(clone.index);
+    return Number.isSafeInteger(n) && n >= 0 && String(n) === clone.index;
   });
 }
 
 function manifestResultIds(manifest, resultIds) {
-  const allowed = new Set();
-  if (!Array.isArray(manifest?.tasks)) return allowed;
+  if (!Array.isArray(manifest?.tasks)) return;
+  const allowed = new Set(manifest.digest ? [DIGEST_ID] : []);
 
   for (const task of manifest.tasks) {
     if (typeof task?.id !== "string") continue;
@@ -46,7 +45,7 @@ export function listLeavesFrom(dir, { gradeable = false } = {}, { readResult, re
   let allowed;
   if (existsSync(manifestPath)) {
     let manifest;
-    try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); } catch { manifest = {}; }
+    try { manifest = JSON.parse(readFileSync(manifestPath, "utf8")); } catch { /* legacy fallback */ }
     allowed = manifestResultIds(manifest, files.map((f) => f.slice(0, -".json".length)));
   }
   return files

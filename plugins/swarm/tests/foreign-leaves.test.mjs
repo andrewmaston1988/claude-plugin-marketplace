@@ -53,6 +53,30 @@ test("listLeaves keeps every result when a legacy run has no manifest", () => {
   }
 });
 
+test("listLeaves keeps the digest result and excludes foreign results", () => {
+  const dir = runDir();
+  try {
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify({ tasks: [{ id: "current" }], digest: { model: "m" } }));
+    for (const id of ["current", "__digest", "old"]) result(dir, id);
+    deepEqual(listLeaves(dir).map((leaf) => leaf.id).sort(), ["__digest", "current"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("listLeaves treats corrupt and tasks-less manifests as absent", () => {
+  const dir = runDir();
+  try {
+    for (const id of ["current", "old"]) result(dir, id);
+    writeFileSync(join(dir, "manifest.json"), "{");
+    deepEqual(listLeaves(dir).map((leaf) => leaf.id).sort(), ["current", "old"]);
+    writeFileSync(join(dir, "manifest.json"), JSON.stringify({ digest: { model: "m" } }));
+    deepEqual(listLeaves(dir).map((leaf) => leaf.id).sort(), ["current", "old"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("the grade nudge count excludes results outside the run manifest", () => {
   const dir = runDir();
   try {

@@ -30,7 +30,7 @@ import { evalExpr, evalBool } from "./expr.mjs";
 import { validateValue } from "./schema.mjs";
 import { extractCitations, verifyCitations, citationErrorLines, annotateCitations } from "./citations.mjs";
 import { removeCachedModel, ENTITLEMENT_RE } from "./discovery.mjs";
-import { ALIVE_STATES, cloneId, childId } from "./runlog.mjs";
+import { ALIVE_STATES, cloneId, childId, parseCloneId } from "./runlog.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
@@ -629,7 +629,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // A forEach parent named in integrate.from owns no branch itself — its clones
   // do. A clone's own id is never authored into integrate.from (it doesn't
   // exist until expansion), so its protection is inherited from its parent.
-  const cloneParentOf = (id) => { const m = /^(.+)\[\d+\]$/.exec(id); return m?.[1]; };
+  const cloneParentOf = (id) => parseCloneId(id)?.parent;
   const isIntegrateSourceId = (id) => integrateSources.has(id) || integrateSources.has(cloneParentOf(id));
 
   // integrate.from naming a forEach parent means every clone that expanded
