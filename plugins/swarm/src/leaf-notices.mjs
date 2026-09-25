@@ -1,9 +1,5 @@
-// Engine-authored prompt text, appended to every leaf's prompt after the
-// author's own words and their substituted data. Two failures motivated it, and
-// both are silent: a leaf that leaves its findings mid-transcript loses them (the
-// recorded output is the FINAL message), and a codex leaf handed Claude tool
-// names hunts for tools it does not have (codex exposes a shell, and allowedTools
-// only picks the sandbox — it never reaches the model).
+// Engine-authored prompt text, appended after the author's own: only a leaf's
+// FINAL message is kept, and a codex leaf has a shell rather than Claude tools.
 import { codexSandbox } from "./codex.mjs";
 
 const FINAL_MESSAGE =
