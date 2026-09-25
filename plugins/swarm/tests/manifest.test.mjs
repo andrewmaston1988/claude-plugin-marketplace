@@ -5,6 +5,7 @@ import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { ValidationError, DEFAULT_TOOLS, isUnderRoot, hasWriteTools, guardFor } from "../src/manifest.mjs";
 import { buildDigestTask } from "../src/digest.mjs";
+import { buildDispatch } from "../src/dispatch.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask } from "./helpers/manifest-fixtures.mjs";
 import { getUsage, resetUsageMemo, saveCookie } from "../src/ollama-usage.mjs";
@@ -507,6 +508,86 @@ test("win32 command-line check: digest.instructions just under the cap passes", 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── generated-digest dispatch validation ──────────────────────────────────────
+
+// A report digest under Codex is the case the engine used to discover at RUN time
+// with durationMs: 0 — the win32 length helper swallows every buildDispatch throw.
+const codexCfg = (dir) => ({
+  ...CFG,
+  providers: { claude: { enabled: true, allowedRoots: [dir] }, codex: { enabled: true, path: "codex", allowedRoots: [dir] } },
+});
+
+const codexReportManifest = (dir) => writeManifest(dir, {
+  resultsDir: "out",
+  tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex" }],
+  digest: { provider: "codex", model: "gpt-5-codex", report: true },
+});
+
+test("generated digest: a Codex report manifest validates, and its argv carries no Claude settings", () => {
+  const dir = tmp();
+  try {
+    const plan = loadManifest(codexReportManifest(dir), codexCfg(dir), dir);
+    equal(plan.digest.provider, "codex");
+    const digestTask = buildDigestTask(plan);
+    const dispatch = buildDispatch(digestTask, digestTask.prompt, codexCfg(dir));
+    ok(dispatch.argv.includes("--sandbox"), dispatch.argv.join(" "));
+    ok(!dispatch.argv.includes("--settings"), "a Claude settings payload must never reach Codex");
+    ok(!("settings" in digestTask));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The dispatch contract is platform-independent; only the LENGTH measurement is
+// win32-specific. On an injected non-win32 platform the old path checked nothing.
+test("generated digest: the dispatch check runs off win32 too", () => {
+  const dir = tmp();
+  try {
+    const plan = loadManifest(codexReportManifest(dir), codexCfg(dir), dir, { io: { platform: "linux" } });
+    equal(plan.digest.provider, "codex");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// An incompatible generated dispatch must be a VALIDATION error, not a task that
+// dies in the scheduler: the engine's own task has no second reporter, which is
+// how the Codex settings rejection reached the operator as a zero-duration failure.
+test("generated digest: an incompatible generated dispatch fails validation, naming the digest", () => {
+  const dir = tmp();
+  try {
+    const runnerRegistry = {
+      resolve: () => ({ id: "broken", buildInvocation: () => { throw new Error("cannot translate the digest"); } }),
+    };
+    const manifest = writeManifest(dir, {
+      resultsDir: "out",
+      tasks: [claudeTask()],
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", report: true },
+    });
+    // win32's platform-injected path proves the error is not the length helper's,
+    // and the injected registry proves it comes from the dispatch construction.
+    for (const platform of ["win32", "linux"]) {
+      const errs = errorsOf(() => loadManifest(manifest, CFG, dir, {
+        io: { platform, spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {} },
+        runnerRegistry,
+      }));
+      ok(errs.some((e) => /digest/.test(e) && /cannot be dispatched/.test(e) && /cannot translate the digest/.test(e)), errs.join("\n"));
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ...and the digest's own governance denial is reported ONCE, not twice: the
+// dispatch check rebuilds the same dispatch from the same config, so an ungated
+// rebuild would report the identical denial a second time.
+test("generated digest: a governance-denied digest is not reported twice", () => {
+  const dir = tmp();
+  try {
+    const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [dir] }, codex: { enabled: true, allowedRoots: [] } } };
+    const errs = errorsOf(() => loadManifest(codexReportManifest(dir), cfg, dir));
+    // The leaf's denial and the digest's — one each, and no dispatch-contract error
+    // on top of them.
+    ok(errs.some((e) => /^task 'codex'/.test(e)), errs.join("\n"));
+    equal(errs.filter((e) => /^digest:/.test(e)).length, 1, errs.join("\n"));
+    ok(!errs.some((e) => /cannot be dispatched/.test(e)), errs.join("\n"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 // ── headroom (:cloud weekly-allowance preflight) ──────────────────────────────
@@ -2384,7 +2465,10 @@ test("write guard: the emitted command actually denies when a shell runs it", ()
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("write guard: present on the report-mode digest, absent on the read-only one", () => {
+// The generated digest carries the engine's write INTENT as typed targets; the
+// Claude runner is what turns them into the injected PreToolUse guard, so the guard
+// is asserted on the invocation rather than on the task.
+test("write guard: present on the report-mode digest invocation, absent on the read-only one", () => {
   const dir = tmp();
   try {
     const body = (report) => ({
@@ -2394,13 +2478,23 @@ test("write guard: present on the report-mode digest, absent on the read-only on
     });
 
     const p1 = writeManifest(dir, body(false), "plain.json");
-    equal(buildDigestTask(loadManifest(p1, CFG, dir)).settings, undefined, "a Read-only digest writes nothing to guard");
+    const readOnly = buildDigestTask(loadManifest(p1, CFG, dir));
+    equal("writeRoots" in readOnly, false, "a Read-only digest writes nothing to guard");
+    equal(readOnly.settings, undefined);
+    const readOnlyInvocation = buildDispatch(readOnly, readOnly.prompt, CFG, { _mcpTools: () => [] });
+    ok(!readOnlyInvocation.argv.includes("--settings"), readOnlyInvocation.argv.join(" "));
 
     const p2 = writeManifest(dir, body(true), "report.json");
     const plan = loadManifest(p2, CFG, dir);
     const digestTask = buildDigestTask(plan);
-    const command = digestTask.settings?.hooks?.PreToolUse?.[0]?.hooks?.[0]?.command;
-    ok(command, `the report digest holds Write, so it must carry the guard: ${JSON.stringify(digestTask.settings)}`);
+    deepEqual(digestTask.writeRoots, [
+      { path: join(plan.resultsDir, "scratch-__digest"), kind: "directory" },
+      { path: join(plan.resultsDir, "report.md"), kind: "file" },
+    ]);
+    equal(digestTask.settings, undefined, "the task itself carries no provider wire format");
+    const invocation = buildDispatch(digestTask, digestTask.prompt, CFG, { _mcpTools: () => [] });
+    const command = JSON.parse(invocation.argv[invocation.argv.indexOf("--settings") + 1])
+      .hooks.PreToolUse[0].hooks[0].command;
     match(command, /leaf-write-guard\.mjs/);
     // Its drafting directory and the one file it may write.
     match(command, /scratch-__digest/);
