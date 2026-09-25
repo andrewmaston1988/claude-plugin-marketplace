@@ -10,6 +10,7 @@ import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createRunnerRegistry } from "./runners.mjs";
 import { defaultCodexRunnerAdapter } from "./codex.mjs";
 import { isUnderRoot } from "./roots.mjs";
+import { applyWriteGuard } from "../hooks/leaf-write-guard.mjs";
 import { runnerParserFactories } from "./stream.mjs";
 
 // Build the argv + env for one task dispatch. Pure — no process interaction.
@@ -34,13 +35,22 @@ export function mcpTools(_read = () => readFileSync(join(homedir(), ".claude.jso
 function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpTools) {
   const claudePath = cfg.claudePath || "claude";
   const ollama = providerConfig(cfg, "ollama");
+  // The engine's typed write targets reach this runner as a flat root list: the
+  // injected PreToolUse guard treats an exact path as inside its own root, so a
+  // `file` target confines writes to that one file and a `directory` target to
+  // that subtree. Merged through applyWriteGuard so a task's own PreToolUse hooks
+  // cannot displace the engine's entry.
+  const writePaths = Array.isArray(task.writeRoots)
+    ? task.writeRoots.map((target) => target?.path).filter((p) => typeof p === "string" && p)
+    : [];
+  const taskSettings = writePaths.length ? applyWriteGuard(task.settings, writePaths) : task.settings;
   // disable1mContext: false means the CONFIG default is the 1M window; a task's
   // own `settings` still wins (deepMerge, task second) so a leaf can opt back
   // out (or in) regardless of the operator's default.
   const base = providerId === "claude" && isClaudeModel(task.model) && cfg.disable1mContext === false
     ? { env: { CLAUDE_CODE_DISABLE_1M_CONTEXT: "0" } }
     : null;
-  const settings = base || task.settings ? deepMerge(base || {}, task.settings || {}) : null;
+  const settings = base || taskSettings ? deepMerge(base || {}, taskSettings || {}) : null;
   // `[1m]` is matched by the CLI on the model name; provider endpoints still need
   // the bare id, so this suffix must never reach ANTHROPIC_MODEL.
   const cliModel = task.contextWindow === CONTEXT_WINDOW_1M ? `${task.model}[1m]` : task.model;

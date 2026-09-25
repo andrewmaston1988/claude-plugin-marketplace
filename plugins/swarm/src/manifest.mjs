@@ -5,7 +5,7 @@ import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { CONTEXT_WINDOW_1M, CONTEXT_WINDOWS } from "./contracts.mjs";
 import { declaredEfforts, effortFor, isValidEffort } from "./models.mjs";
-import { buildDispatch, toSpawnable, windowsCommandLineLength, transcriptRunner } from "./dispatch.mjs";
+import { buildDispatch, createDispatchRegistry, toSpawnable, windowsCommandLineLength, runnerOf, transcriptRunner } from "./dispatch.mjs";
 import { withLeafNotices } from "./leaf-notices.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
@@ -1145,7 +1145,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
 // `await getUsage(cfg)` — so callers that can fetch inject it and tests can
 // inject a fake; the default is the cache-only usageFromCache, which never
 // touches the network, so validation stays offline unless the caller fetches).
-export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, cache = [], io, headroom = usageFromCache(cfg), providerRegistry = PROVIDERS } = {}) {
+export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistry = false, ref, cache = [], io, headroom = usageFromCache(cfg), providerRegistry = PROVIDERS, runnerRegistry } = {}) {
   const errors = [];
   const warnings = [];
   const resolvedIo = { ...defaultManifestIo(), ...io };
@@ -1253,6 +1253,10 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   validateMustReadRunners(tasks, cfg, resolvedIo, errors, label, providerRegistry);
 
   let digest;
+  // Set when the digest's own governance check already refused its cwd — the
+  // dispatch-contract check below reconstructs the same dispatch from the same
+  // config, so it would report that denial a second time.
+  let digestGovernanceDenied = false;
   if (raw.digest !== undefined) {
     if (!raw.digest || typeof raw.digest !== "object" || !raw.digest.model) {
       errors.push("digest block must be an object with a 'model'");
@@ -1262,7 +1266,9 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
         ...(raw.digest.provider !== undefined && { provider: raw.digest.provider }),
       }, cfg, cache, "digest", errors, providerRegistry);
       if (digestIdentity) {
+        const before = errors.length;
         checkGovernance(digestIdentity.provider, raw.digest.model, cwd, "digest", cfg, errors);
+        digestGovernanceDenied = errors.length > before;
         checkHeadroom(digestIdentity.provider, raw.digest.model, "digest", headroom, errors, warnings);
       }
       checkDenylist(raw.digest.model, "digest", cfg, errors);
@@ -1286,6 +1292,23 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   if (digest) {
     const digestTask = buildDigestTask({ tasks, resultsDir, goal: raw.goal || "", digest, cwd });
     checkCommandLineLengths([digestTask], cfg, resolvedIo, errors, () => "digest");
+    // ...and the same dispatch is built once more, because the engine's own task
+    // has no second reporter: the measurement above swallows a dispatch exception
+    // (every ordinary task reports its own problems through normalization), which
+    // is exactly how a provider that cannot accept the digest surfaced only as a
+    // zero-duration runtime failure. Built on EVERY platform with the registries
+    // execution will use; the dispatch contract is platform-independent and only
+    // the length measurement is win32-specific. Pure — nothing is spawned.
+    if (digest.provider && !digestGovernanceDenied) {
+      const effectiveRunnerRegistry = runnerRegistry || createDispatchRegistry({ providerRegistry }).runnerRegistry;
+      try {
+        buildDispatch(digestTask, measurablePrompt(digestTask.prompt, cfg), cfg, {
+          providerRegistry, runnerRegistry: effectiveRunnerRegistry, cache,
+        });
+      } catch (e) {
+        errors.push(`digest: the generated digest for provider '${digest.provider}' cannot be dispatched: ${e.message}`);
+      }
+    }
   }
 
   if (errors.length) throw new ValidationError(errors);
