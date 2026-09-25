@@ -17,7 +17,7 @@ import {
 } from "./results.mjs";
 import { cacheHit, pinKey, writeTaskResult } from "./task-key.mjs";
 import { startHeartbeat } from "./heartbeat.mjs";
-import { parseReadCalls, computeCoverage, coverageErrorLines, TEMPLATE_RE } from "./coverage.mjs";
+import { parseReadCalls, computeCoverage, coverageRetryBlock, TEMPLATE_RE } from "./coverage.mjs";
 import { projectRun, formatEstimate } from "./estimate.mjs";
 import {
   createRunnerParser, addTokens, emptyTokens, tokenTotal, workTokens,
@@ -237,9 +237,7 @@ async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks,
   if (refuted1) blocks.push(
     `Some citations in your output could not be verified against the actual files:\n  - ${citationErrorLines(a1.cite.refuted).join("\n  - ")}`,
   );
-  if (covMiss1) blocks.push(
-    `You did not read everything this task requires. Read each of the following with the Read tool, exactly as stated, then give your corrected answer:\n  - ${coverageErrorLines(a1.cov.gaps, { indexErrors: a1.cov.errors }).join("\n  - ")}`,
-  );
+  if (covMiss1) blocks.push(coverageRetryBlock(a1.cov.gaps, { indexErrors: a1.cov.errors, runner }));
   // A mustRead-only task may be a prose leaf: demanding JSON there would replace its answer.
   const closing = task.returns
     ? "Reply with ONLY the corrected JSON — no prose, no fences."

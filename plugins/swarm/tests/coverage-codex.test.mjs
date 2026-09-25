@@ -6,7 +6,7 @@ import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { parseReadCalls, computeCoverage } from "../src/coverage.mjs";
+import { parseReadCalls, computeCoverage, coverageErrorLines, coverageRetryBlock } from "../src/coverage.mjs";
 import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { runPlan } from "../src/scheduler.mjs";
@@ -249,5 +249,51 @@ test("validate: a codex mustRead task is accepted under any launch config; a wra
     const ollamaMan = writeMan(dir, { tasks: [{ id: "o", prompt: "x", provider: "ollama", model: "glm-4.6:cloud", allowedTools: "Read", mustRead: ["README.md"] }] }, "ollama.json");
     const errs = manErrors(() => loadManifest(ollamaMan, cfg, dir));
     ok(errs.some((e) => /runner 'ollama' is not supported/.test(e)), errs.join("\n"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── 11. teaching ──────────────────────────────────────────────────────────────
+
+test("teaching: a codex leaf's retry names a shell command — never `Read offset` or the Read tool", () => {
+  const gaps = [{ path: "C:/a.mjs", ranges: [[1, 9], [41, 50]] }];
+  // claude keeps its own tool, unchanged
+  const claude = coverageErrorLines(gaps);
+  ok(claude.every((l) => /Read offset \d+ limit \d+/.test(l)), claude.join("\n"));
+  ok(coverageRetryBlock(gaps).includes("with the Read tool"), coverageRetryBlock(gaps));
+
+  const codex = coverageErrorLines(gaps, { runner: "codex" });
+  equal(codex.length, 2, codex.join("\n"));
+  ok(codex[0].includes(`sed -n '1,9p'`), codex[0]);
+  ok(codex[1].includes(`sed -n '41,50p'`), codex[1]);
+  const block = coverageRetryBlock(gaps, { runner: "codex" });
+  ok(!block.includes("Read tool"), block);
+  ok(!block.includes("Read offset"), block);
+  ok(block.includes(`sed -n '41,50p'`), block);
+});
+
+test("integration: a codex leaf that missed its mustRead is re-asked for a shell command, not a Read tool call", async () => {
+  const dir = tmp();
+  try {
+    const WANTED = writeLines(dir, "wanted.mjs", 3);
+    const OTHER = writeLines(dir, "other.mjs", 3);
+    const out = transcript(
+      event(cmdRun(`type ${dbl(OTHER)}`), { output: "x\nx\nx\n" }),
+      JSON.stringify({ type: "item.completed", item: { id: "m1", type: "agent_message", text: "done" } }),
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }),
+    );
+    const spawn = fakeSpawnFactory(() => ({ output: out }));
+    const p = {
+      cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, goal: "",
+      tasks: [{
+        id: "a", prompt: "do a", provider: "codex", model: "gpt-5-codex", allowedTools: "Read",
+        cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [], mustRead: [WANTED],
+      }],
+    };
+    await runPlan(p, CODEX_CFG(dir), makeIo(spawn));
+    equal(spawn.calls.length, 2, "a coverage miss re-asks once");
+    const prompt = spawn.calls[1].args.at(-1);
+    ok(prompt.includes(`sed -n '1,3p'`), prompt);
+    ok(!prompt.includes("Read tool"), prompt);
+    ok(!prompt.includes("Read offset"), prompt);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

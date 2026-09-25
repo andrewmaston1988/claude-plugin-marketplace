@@ -333,10 +333,17 @@ export function computeCoverage(entries, reads, opts) {
 // Retry teaching: one "- <path> lines a-b: Read offset a limit n" per uncovered
 // range, a range over 2000 lines split into consecutive 2000-line reads, plus any
 // resolve/index errors. Capped like citations.
-export function coverageErrorLines(gaps, { indexErrors = [] } = {}) {
+export function coverageErrorLines(gaps, { indexErrors = [], runner = "claude" } = {}) {
   const lines = [];
   for (const { path, ranges } of gaps) {
     for (const [a, b] of ranges) {
+      if (runner === "codex") {
+        // The read allowlist, so the re-ask names a command the parser counts. Not
+        // split at 2000 lines like Claude's: codex's cap is BYTES, and a line split
+        // buys no guarantee the window fits it.
+        lines.push(`${path} lines ${a}-${b}: sed -n '${a},${b}p' "${path}"`);
+        continue;
+      }
       for (let s = a; s <= b; s += READ_DEFAULT_LINES) {
         const e = Math.min(s + READ_DEFAULT_LINES - 1, b);
         lines.push(`${path} lines ${s}-${e}: Read offset ${s} limit ${e - s + 1}`);
@@ -346,6 +353,16 @@ export function coverageErrorLines(gaps, { indexErrors = [] } = {}) {
   for (const e of indexErrors) lines.push(e);
   if (lines.length > MAX_ERROR_LINES) return [...lines.slice(0, MAX_ERROR_LINES), `…and ${lines.length - MAX_ERROR_LINES} more`];
   return lines;
+}
+
+// The whole re-ask paragraph, one definition for the scheduler and the CLI. The
+// sentence has to name the leaf's OWN reader: a codex leaf has no Read tool.
+export function coverageRetryBlock(gaps, { indexErrors = [], runner = "claude" } = {}) {
+  const how = runner === "codex"
+    ? "Run the command shown for each of the following, exactly as stated"
+    : "Read each of the following with the Read tool, exactly as stated";
+  return `You did not read everything this task requires. ${how}, then give your corrected answer:` +
+    `\n  - ${coverageErrorLines(gaps, { indexErrors, runner }).join("\n  - ")}`;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────
