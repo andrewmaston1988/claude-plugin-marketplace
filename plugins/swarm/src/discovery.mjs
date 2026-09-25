@@ -118,29 +118,37 @@ export const LINEAGE_ALIASES = Object.freeze({ "kimi-k-code": "kimi-k" });
 function parseLineage(name, suffix) {
   let base = name;
   const tagSuffix = "-" + suffix.replace(/^:/, "");
-  if (base.endsWith(suffix)) base = base.slice(0, -suffix.length);
-  else if (base.includes(":") && base.endsWith(tagSuffix)) base = base.slice(0, -tagSuffix.length);
+  if (suffix && base.endsWith(suffix)) base = base.slice(0, -suffix.length);
+  else if (suffix && base.includes(":") && base.endsWith(tagSuffix)) base = base.slice(0, -tagSuffix.length);
   const [stem, tag] = base.split(":");
   const segments = stem.split("-");
   if (tag) segments.push(tag);
   const lineage = [];
   const version = [];
+  let mergeNumeric = false;
   for (const seg of segments) {
     const m = /^([a-z]*)(\d+(\.\d+)*)$/.exec(seg);
-    if (!m) { lineage.push(seg); continue; }
+    if (!m) { lineage.push(seg); mergeNumeric = false; continue; }
     if (m[1]) lineage.push(m[1]);
-    version.push(m[2].split(".").map(Number));
+    const numbers = m[2].split(".").map(Number);
+    const pureNumeric = !m[1] && /^\d+$/.test(seg) && numbers[0] < 1000;
+    if (pureNumeric && mergeNumeric) version.at(-1).push(numbers[0]);
+    else version.push(numbers);
+    mergeNumeric = pureNumeric;
   }
   const nameLineage = lineage.join("-");
   return { lineage: LINEAGE_ALIASES[nameLineage] || nameLineage, version };
 }
 
-// Element-wise compare; a strict prefix of the other is incomparable (NaN) —
-// `k3` vs `k3:0901` is a variant fork, not an ordering.
+// Zero-padded compare lets 5 equal 5.0 and sort below 5.1.
 function cmpIntArrays(x, y) {
-  const n = Math.min(x.length, y.length);
-  for (let i = 0; i < n; i++) if (x[i] !== y[i]) return x[i] > y[i] ? 1 : -1;
-  return x.length === y.length ? 0 : NaN;
+  const n = Math.max(x.length, y.length);
+  for (let i = 0; i < n; i++) {
+    const a = x[i] ?? 0;
+    const b = y[i] ?? 0;
+    if (a !== b) return a > b ? 1 : -1;
+  }
+  return 0;
 }
 
 function cmpVersions(a, b) {
