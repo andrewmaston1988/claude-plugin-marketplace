@@ -23,7 +23,10 @@ const ANCHOR = `${SEPARATOR}${FINAL_MESSAGE}`;
 // that quotes these words mid-text is the author's, not a previous telling.
 function blockAt(text) {
   const at = text.lastIndexOf(ANCHOR);
-  return at !== -1 && at === text.length - ANCHOR.length ? at : -1;
+  if (at === -1) return -1;
+  const tail = text.slice(at + ANCHOR.length);
+  const sandbox = tail.slice(tail.lastIndexOf(" ") + 1, -1);
+  return tail === "" || tail === `\n${codexToolLine(sandbox)}` ? at : -1;
 }
 
 /** Append the notice to a leaf's prompt. Idempotent — a prompt that already

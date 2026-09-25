@@ -9,7 +9,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
-import { withoutLeafNotices } from "../src/leaf-notices.mjs";
+import { withLeafNotices, withoutLeafNotices } from "../src/leaf-notices.mjs";
 import { fakeSpawnFactory, makeIo, sentPrompt } from "./helpers/fake-io.mjs";
 
 // The notices verbatim: these literals are the spec, so a wording change is a
@@ -189,6 +189,13 @@ test("a prompt that already carries the block is not given it twice", async () =
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// A codex block ends with its tool line, not the anchor — it must still read as the block.
+test("a codex prompt carrying its block is neither told twice nor left unstripped", () => {
+  const told = `author text\n\n${FINAL}\n${codexLine("read-only")}`;
+  equal(withLeafNotices(told, { allowedTools: "Read,Grep,Glob" }, {}, "codex"), told);
+  equal(withoutLeafNotices(told), "author text");
 });
 
 test("results/<id>.json records the prompt the leaf actually saw", async () => {
