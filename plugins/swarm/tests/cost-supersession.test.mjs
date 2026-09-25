@@ -124,8 +124,13 @@ test("costScreen hides superseded cards and never names one as the hero leader",
 
 test("the perf model page keeps the cost chip for a superseded model", () => {
   const { modelDashboard } = loadPerfViews();
+  const old = "claude-opus-5";
+  const current = "claude-opus-5-5";
+  const rows = [...grades(old, 10), ...grades(current, 8), ...grades("claude-haiku-5", 7)];
+  const view = costView(rows, [cost(old, 1), cost(current, 4), cost("claude-haiku-5", 3)]);
+  const costPoint = view.points.find((row) => row.model === old);
   const html = modelDashboard({
-    model: "claude-opus-5",
+    model: old,
     overall: null,
     rank: null,
     aspects: [],
@@ -133,8 +138,11 @@ test("the perf model page keeps the cost chip for a superseded model", () => {
     reliability: [],
     domainSelect: null,
     domain: null,
-    cost: { provider: "claude", onFrontier: true, supersededBy: "claude-opus-5-5" },
-  }, { ...H, badge: () => "<b>cost chip</b>" });
+    cost: costPoint,
+  }, { ...H, badge: (point) => `<span class="cbadge coins" data-coins="${point.coins}"></span>` });
 
-  equal(html.includes("cost chip"), true);
+  equal(costPoint.supersededBy, current);
+  equal(costPoint.coins > 0, true);
+  equal(html.includes(`data-coins="${costPoint.coins}"`), true);
+  equal(html.includes('<span class="vchip front">frontier</span>'), true);
 });
