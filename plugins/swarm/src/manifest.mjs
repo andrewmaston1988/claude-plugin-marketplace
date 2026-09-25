@@ -5,13 +5,13 @@ import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { CONTEXT_WINDOW_1M, CONTEXT_WINDOWS } from "./contracts.mjs";
 import { declaredEfforts, effortFor, isValidEffort } from "./models.mjs";
-import { buildDispatch, toSpawnable, windowsCommandLineLength, runnerOf } from "./dispatch.mjs";
+import { buildDispatch, toSpawnable, windowsCommandLineLength, transcriptRunner } from "./dispatch.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
 import { provenanceBanner, formatResetTime } from "./usage.mjs";
 import { parseExpr, collectDepRefs, collectIdents } from "./expr.mjs";
 import { validateSchemaShape } from "./schema.mjs";
-import { TEMPLATE_RE } from "./coverage.mjs";
+import { TEMPLATE_RE, TRANSCRIPT_RUNNERS } from "./coverage.mjs";
 import { providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
@@ -839,19 +839,19 @@ function validateMustRead(rawTasks, errors, label) {
   }
 }
 
-// The runner check: mustRead is proven from the claude stream-json transcript,
-// so a task on any other runner can never be checked. Takes `io` for signature
-// parity with checkCommandLineLengths but deliberately does NOT gate on
-// io.platform — a codex task with mustRead must be rejected on every platform,
-// not just Windows.
-function validateMustReadRunners(tasks, cfg, io, errors, label) {
+// The runner check: mustRead is proven from the leaf's own transcript, which
+// coverage.mjs parses for TRANSCRIPT_RUNNERS only — a launch wrapper's unknown
+// stdout has nothing to read. Takes `io` for signature parity with
+// checkCommandLineLengths but deliberately does NOT gate on io.platform: an
+// unsupported runner is rejected everywhere, not just on Windows.
+function validateMustReadRunners(tasks, cfg, io, errors, label, providerRegistry) {
   for (const t of tasks) {
     if (!Array.isArray(t.mustRead)) continue;
-    const runner = runnerOf(t, cfg);
-    if (runner !== "claude") {
+    const runner = transcriptRunner(t, cfg, providerRegistry);
+    if (!TRANSCRIPT_RUNNERS.has(runner)) {
       errors.push(
-        `${label(t)}: mustRead is checked from the claude stream-json transcript; runner '${runner}' is not supported — ` +
-        `run this task on a Claude or :cloud model, or drop mustRead`);
+        `${label(t)}: mustRead is checked from the leaf's own transcript; runner '${runner}' is not supported — ` +
+        `run this task on a Claude, :cloud or codex model, or drop mustRead`);
     }
   }
 }
@@ -1130,7 +1130,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
     defaultTimeoutMs: node.timeoutMs ?? raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, io, errors, label);
-  validateMustReadRunners(tasks, cfg, io, errors, label);
+  validateMustReadRunners(tasks, cfg, io, errors, label, providerRegistry);
   return { tasks };
 }
 
@@ -1250,7 +1250,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
     defaultTimeoutMs: raw.timeoutMs ?? cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
   });
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
-  validateMustReadRunners(tasks, cfg, resolvedIo, errors, label);
+  validateMustReadRunners(tasks, cfg, resolvedIo, errors, label, providerRegistry);
 
   let digest;
   if (raw.digest !== undefined) {

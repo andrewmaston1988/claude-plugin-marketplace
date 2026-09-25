@@ -182,8 +182,8 @@ export function buildDispatch(task, prompt, cfg = {}, options = {}) {
   };
 }
 
-// The runner whose transcript a leaf produces; only "claude" stream-json is
-// understood by mustRead, anything else fails closed at validate. Every model runs
+// The runner whose transcript a leaf produces; claude stream-json and codex exec
+// transcripts are understood by mustRead, anything else fails closed at validate. Every model runs
 // through the claude CLI except a launch-mode wrapper that isn't claude — its
 // stdout is unknown, so the wrapper's name is returned to trigger the rejection.
 export function runnerOf(task, cfg) {
@@ -194,6 +194,15 @@ export function runnerOf(task, cfg) {
     return bin.toLowerCase() === "claude" ? "claude" : (bin || "unknown");
   }
   return "claude"; // env mode dispatches the claude CLI verbatim
+}
+
+// What runnerOf cannot know: a provider whose adapter owns its own binary writes a
+// transcript runnerOf names "claude" and coverage.mjs would parse as stream-json.
+// Only codex does today. Every other provider wraps the claude CLI, so runnerOf
+// still answers — including ollama's launcher, whose stdout is not ours to read.
+export function transcriptRunner(task, cfg, providerRegistry) {
+  const declared = task?.provider ? providerRegistry?.get?.(task.provider)?.runnerId : null;
+  return declared === "codex" ? "codex" : runnerOf(task, cfg);
 }
 
 // ── Windows spawn resolution ──────────────────────────────────────────────────
