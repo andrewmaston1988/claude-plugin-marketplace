@@ -20,8 +20,13 @@ function fakeRun(dir) {
   write("icons", { id: "icons", provider: "ollama", model: "glm-5.2:cloud", ok: true, exit: 0, durationMs: 41000, numTurns: 6, output: "…" });
   write("pack", { id: "pack", provider: "ollama", model: "kimi-k2.7-code:cloud", ok: true, exit: 0, durationMs: 90000, numTurns: 12, output: "…" });
   write("verdict", { id: "verdict", provider: "claude", model: "claude-sonnet-5", ok: true, exit: 0, durationMs: 5000, output: "…" });
-  writeFileSync(join(run, "manifest.json"), JSON.stringify({ tasks: [{ id: "icons", effort: null }] }));
+  writeManifest(run, ["icons", "pack", "verdict"]);
   return run;
+}
+
+// grade --init lists only leaves the run's manifest names, so a fixture adding results names them too.
+function writeManifest(run, ids) {
+  writeFileSync(join(run, "manifest.json"), JSON.stringify({ tasks: ids.map((id) => ({ id, effort: null })) }));
 }
 
 test("grade --init: one row per model leaf, Claude leaves included", () => {
@@ -55,6 +60,7 @@ test("grade skeletons and stored rows preserve provider identity", () => {
       id: "same-codex", provider: "codex", runner: "codex", model: "same-model",
       ok: true, exit: 0, durationMs: 1000, output: "…",
     }));
+    writeManifest(run, ["icons", "pack", "verdict", "same-ollama", "same-codex"]);
     const home = join(dir, "home");
     const init = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: home } });
     equal(init.status, 0, init.stderr);
@@ -270,6 +276,7 @@ test("grade --init: a sentinel-model (compute) result gets no row", () => {
   try {
     const run = fakeRun(dir);
     writeFileSync(join(run, "results", "dedupe.json"), JSON.stringify({ id: "dedupe", model: "compute", ok: true }));
+    writeManifest(run, ["icons", "pack", "verdict", "dedupe"]);
     const r = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
