@@ -16,6 +16,7 @@ import {
 } from "../src/codex.mjs";
 import { isUnderRoot } from "../src/roots.mjs";
 import { createCodexStreamParser, createRunnerParser } from "../src/stream.mjs";
+import { addDirsOf } from "./helpers/fake-io.mjs";
 import { assertProviderAdapterContract } from "./helpers/provider-contract.mjs";
 import { assertRunnerAdapterContract } from "./helpers/runner-contract.mjs";
 
@@ -86,8 +87,6 @@ test("Codex runner invocation is sandboxed, resumable, and contract-valid", () =
 });
 
 // ── engine writeRoots → native directory arguments ────────────────────────────
-
-const addDirsOf = (argv) => argv.reduce((acc, v, i) => (v === "--add-dir" ? [...acc, argv[i + 1]] : acc), []);
 
 // A `file` target has no file-level equivalent in `--add-dir`, so it contributes
 // its containing directory; a `directory` target contributes itself.

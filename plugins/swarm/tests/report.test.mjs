@@ -3,16 +3,17 @@
 // leaf writes report.md, the ENGINE prepends the provenance header to it, and the
 // agent-facing digest.md is unaffected either way.
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { deepEqual, equal, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { runPlan } from "../src/scheduler.mjs";
 import { buildDigestTask, scratchPath, DIGEST_ID } from "../src/digest.mjs";
 import { writeResult } from "../src/results.mjs";
-import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
+import { normalizeForCompare } from "../src/roots.mjs";
+import { addDirsOf, fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 
 const SHIM = fileURLToPath(new URL("./shims/codex-shim.mjs", import.meta.url));
 
@@ -148,15 +149,27 @@ function codexPlanWith(dir, report) {
 // built runs it (so the shim's own exec-flag placement rule adjudicates it), and
 // the JSONL it prints is what the engine's codex parser consumes. A shim that
 // refuses the argv would otherwise surface as an opaque zero-output digest.
+//
+// The shim is launched in the digest's cwd, so the spawn itself proves that
+// directory exists when Codex starts; and it writes report.md only where the
+// emitted argv actually granted write access, so a wrong --add-dir cannot leave
+// both artifacts behind and pass.
 function codexSpawn(dir, { writesReport = true, output = CODEX_DIGEST_TEXT } = {}) {
   const shimRuns = [];
+  const reportFile = join(dir, "run", "report.md");
   const spawn = fakeSpawnFactory((call) => {
     if (!call.args.includes("exec")) return { output: streamOut(`finding from leaf`, `s-${shimRuns.length}`) };
+    const granted = addDirsOf(call.args);
+    const reportDir = normalizeForCompare(dirname(reportFile));
+    const permitted = granted.some((d) => normalizeForCompare(d) === reportDir);
     const shim = spawnSync(process.execPath, [SHIM, ...call.args], {
-      encoding: "utf8", env: { ...process.env, SWARM_CODEX_SHIM_OUTPUT: output },
+      encoding: "utf8", cwd: call.opts.cwd, env: { ...process.env, SWARM_CODEX_SHIM_OUTPUT: output },
     });
-    shimRuns.push({ call, status: shim.status, stderr: shim.stderr });
-    if (writesReport) writeFileSync(join(dir, "run", "report.md"), "# Callers of frobnicate\n\nBoth leaves ran.\n");
+    shimRuns.push({
+      call, granted, permitted, cwdExisted: existsSync(call.opts.cwd),
+      status: shim.status, stderr: shim.stderr, spawnError: shim.error?.message ?? null,
+    });
+    if (writesReport && permitted) writeFileSync(reportFile, "# Callers of frobnicate\n\nBoth leaves ran.\n");
     return { output: shim.stdout, exit: shim.status };
   });
   return { spawn, shimRuns };
@@ -172,16 +185,21 @@ test("Codex integration: the digest launches from its scratch cwd and writes dig
     const r = await runPlan(p, CODEX_CFG, makeIo(spawn));
 
     equal(shimRuns.length, 1, "the digest's emitted argv must run the shim exactly once");
-    equal(shimRuns[0].status, 0, `the shim refused the emitted argv: ${shimRuns[0].stderr}`);
+    // The shim runs IN the digest's cwd, so this is the launch that `codex exec`
+    // would make: the directory has to be there, not merely named.
+    ok(shimRuns[0].cwdExisted, `the digest's cwd must exist when codex launches: ${shimRuns[0].call.opts.cwd}`);
+    equal(shimRuns[0].status, 0, `codex could not start: ${shimRuns[0].spawnError || shimRuns[0].stderr}`);
 
     const call = digestCallOf(spawn);
     equal(call.cmd, "codex");
     equal(call.opts.cwd, scratchPath(p.resultsDir), "the digest drafts in its own scratch directory");
-    ok(existsSync(scratchPath(p.resultsDir)), "the scratch cwd must exist before the digest is spawned");
 
-    // The provider translation, asserted on the argv the run actually used.
+    // The provider translation, asserted on the argv the run actually used. The
+    // exact directory matters: --add-dir is what makes the report writable, so a
+    // directory that merely exists would leave the artifact to the fake's whim.
     equal(call.args[call.args.indexOf("--sandbox") + 1], "workspace-write");
-    ok(call.args.includes("--add-dir"), call.args.join(" "));
+    deepEqual(shimRuns[0].granted, [p.resultsDir], "the results dir is the digest's one writable directory");
+    ok(shimRuns[0].permitted, "the report path must fall under a directory the argv granted");
     ok(call.args.includes("--skip-git-repo-check"), call.args.join(" "));
     ok(!call.args.includes("--settings"), `Codex must never receive Claude settings: ${call.args.join(" ")}`);
 
@@ -220,7 +238,7 @@ test("Codex integration: a read-only digest configuration stays read-only end to
     const call = digestCallOf(spawn);
     equal(call.opts.cwd, dir, "a read-only digest reads the dispatching repo in place");
     equal(call.args[call.args.indexOf("--sandbox") + 1], "read-only");
-    ok(!call.args.includes("--add-dir"), call.args.join(" "));
+    deepEqual(shimRuns[0].granted, [], "a read-only digest has nothing to make writable");
     ok(!call.args.includes("--skip-git-repo-check"), call.args.join(" "));
     ok(!call.args.includes("--settings"), call.args.join(" "));
 
@@ -254,8 +272,10 @@ test("Codex integration: resume re-dispatches only the failed digest", async () 
     const r = await runPlan(p, CODEX_CFG, makeIo(spawn));
 
     equal(spawn.calls.length, 1, `only the digest may re-dispatch: ${spawn.calls.map((c) => c.cmd).join(", ")}`);
-    equal(shimRuns[0].status, 0, shimRuns[0].stderr);
+    ok(shimRuns[0].cwdExisted, `the resumed digest's cwd must exist: ${shimRuns[0].call.opts.cwd}`);
+    equal(shimRuns[0].status, 0, shimRuns[0].spawnError || shimRuns[0].stderr);
     equal(digestCallOf(spawn).opts.cwd, scratchPath(p.resultsDir));
+    deepEqual(shimRuns[0].granted, [p.resultsDir], "the resumed dispatch grants the same directory");
     const resumed = r.summary.tasks.filter((t) => t.state === "skipped").map((t) => t.id);
     equal(resumed.length, p.tasks.length - 1, `every successful leaf stays skipped: ${resumed.join(", ")}`);
     ok(readFileSync(join(p.resultsDir, "digest.md"), "utf8").includes(CODEX_DIGEST_TEXT));
