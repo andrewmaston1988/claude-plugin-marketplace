@@ -125,7 +125,7 @@ The engine appends its own notice block to every leaf's prompt, after your text:
 
 ### Prompt length on Windows
 
-A leaf's `prompt` is measured through the CreateProcess-quoted command line at `swarm validate` time; a prompt over ~32k characters on Windows fails validation — point the leaf at a file holding its instructions instead of inlining it.
+A leaf's `prompt` is measured through the CreateProcess-quoted command line at `swarm validate` time, the engine's own notice included; a prompt over ~32k characters on Windows fails validation — point the leaf at a file holding its instructions instead of inlining it.
 
 ### Schema-guaranteed leaf output — `returns`
 
