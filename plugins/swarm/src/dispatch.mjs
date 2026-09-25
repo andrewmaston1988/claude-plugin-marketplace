@@ -196,6 +196,15 @@ export function runnerOf(task, cfg) {
   return "claude"; // env mode dispatches the claude CLI verbatim
 }
 
+// What runnerOf cannot know: a provider whose adapter owns its own binary writes a
+// transcript runnerOf names "claude" and coverage.mjs would parse as stream-json.
+// Only codex does today. Every other provider wraps the claude CLI, so runnerOf
+// still answers — including ollama's launcher, whose stdout is not ours to read.
+export function transcriptRunner(task, cfg, providerRegistry) {
+  const declared = task?.provider ? providerRegistry?.get?.(task.provider)?.runnerId : null;
+  return declared === "codex" ? "codex" : runnerOf(task, cfg);
+}
+
 // ── Windows spawn resolution ──────────────────────────────────────────────────
 // Node's spawn() rejects .bat/.cmd directly (EINVAL), and shell:true would let
 // cmd.exe re-parse the args — mangling any prompt containing quotes. Following

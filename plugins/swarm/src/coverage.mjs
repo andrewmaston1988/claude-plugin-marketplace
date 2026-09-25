@@ -8,6 +8,9 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 export const READ_DEFAULT_LINES = 2000; // the Read tool's own default page
+// The runners whose transcript this module parses. The one list: manifest validation
+// refuses a mustRead task on any other, so a check can never silently pass.
+export const TRANSCRIPT_RUNNERS = new Set(["claude", "codex"]);
 const MAX_ERROR_LINES = 10;             // citations.mjs cap discipline: teach, don't flood
 
 const win32 = () => process.platform === "win32";

@@ -7,6 +7,11 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { parseReadCalls, computeCoverage } from "../src/coverage.mjs";
+import { ValidationError } from "../src/manifest.mjs";
+import { loadManifest } from "./helpers/repo-io.mjs";
+import { runPlan } from "../src/scheduler.mjs";
+import { readResult } from "../src/results.mjs";
+import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 
 function tmp() { return mkdtempSync(join(tmpdir(), "swarm-codex-cov-")); }
 const writeLines = (dir, name, n) => { const p = join(dir, name); writeFileSync(p, "x\n".repeat(n)); return p; };
@@ -182,5 +187,67 @@ test("codex: an empty or torn transcript (no thread.started / turn.started) → 
     // a start event with nothing after it is parseable and reads nothing
     deepEqual(readsOf(JSON.stringify({ type: "turn.started" }) + "\n", dir), []);
     equal(computeCoverage([F], readsOf("", dir), { cwd: dir }).status, "unparseable");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── 9. routing (scheduler) ────────────────────────────────────────────────────
+
+const CODEX_CFG = (cwd) => ({
+  providers: { codex: { enabled: true, path: "codex", allowedRoots: [cwd] } },
+  concurrency: 4, timeoutMs: 600000, resultInlineCap: 4000, worktreeBranchPrefix: "swarm/",
+});
+
+test("integration: a codex-seated mustRead task is checked from its exec transcript — the dispatch runner, not runnerOf's claude default", async () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 3);
+    const out = [
+      JSON.stringify({ type: "thread.started", thread_id: "t-int" }),
+      ...event(cmdRun(`type ${dbl(F)}`), { output: "x\nx\nx\n" }),
+      JSON.stringify({ type: "item.completed", item: { id: "m1", type: "agent_message", text: "read it" } }),
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 1, output_tokens: 1 } }),
+    ].join("\n") + "\n";
+    const spawn = fakeSpawnFactory(() => ({ output: out }));
+    const p = {
+      cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, goal: "",
+      tasks: [{
+        id: "a", prompt: "do a", provider: "codex", model: "gpt-5-codex", allowedTools: "Read",
+        cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [], mustRead: [F],
+      }],
+    };
+    await runPlan(p, CODEX_CFG(dir), makeIo(spawn));
+    equal(spawn.calls.length, 1, "the transcript parses on the first pass — no re-ask");
+    const res = readResult(p.resultsDir, "a");
+    equal(res.runner, "codex");
+    deepEqual(
+      { status: res.coverage.status, required: res.coverage.required, read: res.coverage.read },
+      { status: "complete", required: 1, read: 1 },
+    );
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── 10. validation ────────────────────────────────────────────────────────────
+
+const writeMan = (dir, body, name = "plan.json") => { const p = join(dir, name); writeFileSync(p, JSON.stringify(body)); return p; };
+function manErrors(fn) {
+  try { fn(); } catch (e) { ok(e instanceof ValidationError, `expected ValidationError, got ${e}`); return e.errors; }
+  throw new Error("expected loadManifest to throw");
+}
+
+test("validate: a codex mustRead task is accepted under any launch config; a wrapper that is neither claude nor codex is still refused", () => {
+  const dir = tmp();
+  try {
+    const cfg = {
+      // the ollama launcher's stdout is unknown, so an ollama leaf is refused — but a
+      // codex task dispatches its own binary and that config is not its business.
+      provider: { mode: "launch", launchCmd: "ollama launch claude --model {model} -- {args}", allowedRoots: [dir] },
+      providers: { claude: { enabled: true, allowedRoots: [dir] }, codex: { enabled: true, allowedRoots: [dir] } },
+      concurrency: 4, timeoutMs: 600000, resultInlineCap: 4000,
+    };
+    const codexMan = writeMan(dir, { tasks: [{ id: "c", prompt: "x", provider: "codex", model: "gpt-5-codex", allowedTools: "Read", mustRead: ["README.md"] }] });
+    loadManifest(codexMan, cfg, dir); // must not throw
+    const ollamaMan = writeMan(dir, { tasks: [{ id: "o", prompt: "x", provider: "ollama", model: "glm-4.6:cloud", allowedTools: "Read", mustRead: ["README.md"] }] }, "ollama.json");
+    const errs = manErrors(() => loadManifest(ollamaMan, cfg, dir));
+    ok(errs.some((e) => /runner 'ollama' is not supported/.test(e)), errs.join("\n"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

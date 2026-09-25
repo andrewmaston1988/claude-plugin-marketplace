@@ -3,7 +3,7 @@ import { freemem } from "node:os";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { storedTurnCount } from "./contracts.mjs";
-import { buildDispatch, createDispatchRegistry, toSpawnable, runnerOf } from "./dispatch.mjs";
+import { buildDispatch, createDispatchRegistry, toSpawnable } from "./dispatch.mjs";
 import { isClaudeModel } from "./models.mjs";
 import {
   buildDigestTask, DIGEST_ID,
@@ -137,7 +137,7 @@ function tryParseJson(output) {
 // resumed session. Afterwards a schema miss is fatal; a refuted citation or coverage
 // shortfall only annotates (the checker may be wrong). Runs before worktree collection.
 async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks, runtime) {
-  const runner = runnerOf(task, cfg);
+  const runner = r.runner; // the runner that wrote this transcript — never runnerOf's claude default
   // Coverage is proven from the leaf's OWN transcript: parse its Read calls and
   // check them against `mustRead`. The transcript on disk already holds the full
   // attempt history of the session (resume appends, D10), so a re-ask's reads are
@@ -147,7 +147,7 @@ async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io, hooks,
     if (!task.mustRead) return null;
     let text = "";
     try { text = readFileSync(transcriptPath(resultsDir, task.id), "utf8"); } catch { /* unparseable */ }
-    const reads = parseReadCalls(text, runner);
+    const reads = parseReadCalls(text, runner, { cwd: taskCwd });
     return computeCoverage(task.mustRead, reads, {
       cwd: taskCwd,
       substitute: (s) => substituteTemplates(s, resultsDir, cfg.resultInlineCap ?? 4000).prompt,
