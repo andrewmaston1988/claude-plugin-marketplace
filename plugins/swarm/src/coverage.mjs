@@ -65,11 +65,8 @@ export function parseReadCalls(text, runner, { cwd } = {}) {
 // come out, so checkCoverage and everything downstream stay shared.
 
 // Codex middle-truncates a command's output before the MODEL sees it, so
-// `aggregated_output` (the event field) is not what the model read. The budget is
-// the model's 10,000-token truncation_policy (models-manager/models.json:18) at
-// ~4 bytes/token (utils/string/src/truncate.rs:77), split half head / half tail
-// with a marker between (truncate.rs:127) — so a dump inside 40,000 bytes reached
-// the model whole, and a larger one only as its first and last ~20,000 bytes.
+// `aggregated_output` (the event field) is not what the model read: inside this
+// budget it arrived whole, past it only as the first and last halves.
 // https://raw.githubusercontent.com/openai/codex/rust-v0.156.1/codex-rs/core/src/tools/events.rs:390
 const CODEX_MODEL_OUTPUT_BYTES = 40_000;
 const CODEX_SHELLS = new Set(["cmd", "powershell", "pwsh", "bash", "sh"]);
@@ -91,8 +88,11 @@ function parseCodexReadCalls(text, cwd) {
     const payload = codexShellPayload(String(item.command || ""));
     if (!payload) continue;
     const specs = [];
-    for (const pipeline of codexPipelines(payload)) {
-      if (pipeline.includes("|")) continue; // the model saw the last stage's output, not the file
+    // A pipe or an output redirect means the model saw another program's output or a
+    // file's, never this one's. `2>&1` merges streams and is neither, so it is stripped
+    // BEFORE the chain split — the `&` inside it would otherwise cut the command in two.
+    for (const pipeline of codexPipelines(payload.replace(/\d*>&\d+/g, ""))) {
+      if (pipeline.includes("|") || pipeline.includes(">")) continue;
       const spec = codexReadSpec(pipeline);
       if (spec) specs.push(spec);
     }
@@ -355,8 +355,8 @@ export function coverageErrorLines(gaps, { indexErrors = [], runner = "claude" }
   return lines;
 }
 
-// The whole re-ask paragraph, one definition for the scheduler and the CLI. The
-// sentence has to name the leaf's OWN reader: a codex leaf has no Read tool.
+// The whole re-ask paragraph in one place. The sentence has to name the leaf's
+// OWN reader: a codex leaf has no Read tool.
 export function coverageRetryBlock(gaps, { indexErrors = [], runner = "claude" } = {}) {
   const how = runner === "codex"
     ? "Run the command shown for each of the following, exactly as stated"

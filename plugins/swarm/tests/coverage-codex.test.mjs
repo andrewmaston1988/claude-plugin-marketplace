@@ -116,6 +116,23 @@ test("codex: findstr / rg cover nothing, and neither does a piped dump (the pipe
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("codex: a shell redirect covers nothing — the bytes went to a file, not to the model", () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 3);
+    const OUT = join(dir, "out.txt");
+    deepEqual(readsOf(transcript(event(cmdRun(`type ${dbl(F)} > ${dbl(OUT)}`), { output: "" })), dir), []);
+    deepEqual(readsOf(transcript(event(cmdRun(`type ${dbl(F)} > nul`), { output: "" })), dir), []);
+    deepEqual(readsOf(transcript(event(cmdRun(`sed -n 1,50p ${dbl(F)} >> ${dbl(OUT)}`), { output: "" })), dir), []);
+    // a redirect in ONE segment does not poison its siblings
+    const mixed = readsOf(transcript(event(cmdRun(`type ${dbl(F)} > ${dbl(OUT)} & type ${dbl(F)}`), { output: "x\nx\nx\n" })), dir);
+    deepEqual(mixed.map((r) => r.file), [F]);
+    // an fd merge is not an output redirect — the dump still reached the model
+    const merged = readsOf(transcript(event(cmdRun(`type ${dbl(F)} 2>&1`), { output: "x\nx\nx\n" })), dir);
+    deepEqual(merged, [{ file: F, offset: 1, limit: Infinity }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // ── 5. ranges ─────────────────────────────────────────────────────────────────
 
 test("codex: `sed -n '10,40p'` covers 10-40 only; `Get-Content -TotalCount 20` covers 1-20", () => {
