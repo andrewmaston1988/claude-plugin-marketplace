@@ -322,9 +322,9 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
     // shim saw the dispatch args: --effort passed for scan-b, models verbatim
     const calls = readFileSync(shimLog, "utf8").trim().split("\n").map((l) => JSON.parse(l));
     equal(calls.length, 4);
-    const scanB = calls.find((c) => c.argv[c.argv.indexOf("-p") + 1] === "look b");
+    const scanB = calls.find((c) => c.argv[c.argv.indexOf("-p") + 1].startsWith("look b\n\n"));
     equal(scanB.argv[scanB.argv.indexOf("--effort") + 1], "high");
-    const scanC = calls.find((c) => c.argv[c.argv.indexOf("-p") + 1] === "look c");
+    const scanC = calls.find((c) => c.argv[c.argv.indexOf("-p") + 1].startsWith("look c\n\n"));
     equal(scanC.argv[scanC.argv.indexOf("--effort") + 1], "high");
     const digestCall = calls.find((c) => c.argv[c.argv.indexOf("-p") + 1].includes("digest stage"));
     ok(digestCall, "digest dispatched via claude");
@@ -1723,7 +1723,7 @@ test("run: named manifest end-to-end — args substituted into the dispatched le
     });
     equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
     const call = JSON.parse(readFileSync(shimLog, "utf8").trim());
-    equal(call.argv[call.argv.indexOf("-p") + 1], "say hello");
+    equal(call.argv[call.argv.indexOf("-p") + 1].split("\n\n")[0], "say hello");
     const res = JSON.parse(readFileSync(join(dir, "out", "results", "a.json"), "utf8"));
     equal(res.ok, true);
   } finally {
