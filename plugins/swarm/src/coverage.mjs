@@ -1,6 +1,8 @@
 // Proof from a leaf's own transcript that it Read what `mustRead` declared.
-// Only claude stream-json is understood; any other runner fails closed (null → total miss).
-// Only `Read` counts: Bash output is truncated to a preview, and only Read carries offset/limit.
+// Two runners are understood — claude stream-json (`Read` tool calls) and codex
+// (shell commands in exec events); any other runner fails closed (null → total miss).
+// Only real reads count: Claude's Bash output is truncated to a preview, and codex's
+// searches are not reads, so neither is mistaken for the file itself.
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -19,8 +21,11 @@ const samePath = (a, b) => {
 // [{ file, offset, limit }] | null. null = unsupported runner or an unparseable
 // transcript (zero assistant events in non-empty text) — the caller treats null
 // as a total miss, never as "read nothing, so an empty requirement is complete".
-export function parseReadCalls(text, runner) {
+// `cwd` is the leaf's own, for a codex command that names a relative path.
+export function parseReadCalls(text, runner, { cwd } = {}) {
+  if (runner === "codex") return parseCodexReadCalls(text, cwd);
   if (runner !== "claude") return null;
+
   const reads = [];
   const resultOk = new Map(); // tool_use_id -> the paired result was not an error
   let sawAssistant = false;
@@ -48,6 +53,151 @@ export function parseReadCalls(text, runner) {
   // is the silent pass this checker exists to prevent. A Read with no paired
   // result (leaf cut mid-call) does not count either.
   return reads.filter((r) => resultOk.get(r.id) === true).map(({ file, offset, limit }) => ({ file, offset, limit }));
+}
+
+// ── codex ─────────────────────────────────────────────────────────────────────
+// Codex has no Read tool: a leaf reads with a shell command, and the transcript
+// records it as an item.completed / command_execution event carrying `command`,
+// `exit_code` and `aggregated_output`. The same [{file, offset, limit}] windows
+// come out, so checkCoverage and everything downstream stay shared.
+
+// Codex middle-truncates a command's output before the MODEL sees it, so
+// `aggregated_output` (the event field) is not what the model read. The budget is
+// the model's 10,000-token truncation_policy (models-manager/models.json:18) at
+// ~4 bytes/token (utils/string/src/truncate.rs:77), split half head / half tail
+// with a marker between (truncate.rs:127) — so a dump inside 40,000 bytes reached
+// the model whole, and a larger one only as its first and last ~20,000 bytes.
+// https://raw.githubusercontent.com/openai/codex/rust-v0.156.1/codex-rs/core/src/tools/events.rs:390
+const CODEX_MODEL_OUTPUT_BYTES = 40_000;
+const CODEX_SHELLS = new Set(["cmd", "powershell", "pwsh", "bash", "sh"]);
+
+function parseCodexReadCalls(text, cwd) {
+  const reads = [];
+  let sawStart = false;
+  for (const raw of String(text ?? "").split(/\r?\n/)) {
+    const t = raw.trim();
+    if (!t.startsWith("{")) continue; // "Reading additional input from stdin...", or a torn write
+    let evt;
+    try { evt = JSON.parse(t); } catch { continue; }
+    if (evt.type === "thread.started" || evt.type === "turn.started") { sawStart = true; continue; }
+    // An item.started twin carries exit_code null; only a completed, exit-0 command
+    // ran — the codex analogue of "an errored Read read nothing".
+    if (evt.type !== "item.completed") continue;
+    const item = evt.item;
+    if (item?.type !== "command_execution" || item.exit_code !== 0) continue;
+    const payload = codexShellPayload(String(item.command || ""));
+    if (!payload) continue;
+    const specs = [];
+    for (const pipeline of codexPipelines(payload)) {
+      if (pipeline.includes("|")) continue; // the model saw the last stage's output, not the file
+      const spec = codexReadSpec(pipeline);
+      if (spec) specs.push(spec);
+    }
+    if (!specs.length) continue;
+    const output = String(item.aggregated_output ?? "");
+    // One command's output is shared by every segment, so the cap rules on the
+    // command: past it, only a lone read's bytes can be told apart.
+    if (specs.length > 1 && Buffer.byteLength(output, "utf8") > CODEX_MODEL_OUTPUT_BYTES) continue;
+    for (const spec of specs) {
+      for (const w of codexWindows(output, spec)) {
+        reads.push({ file: codexPath(spec.path, cwd), offset: w.offset, limit: w.limit });
+      }
+    }
+  }
+  return sawStart ? reads : null;
+}
+
+// `"C:\WINDOWS\system32\cmd.exe" /c "<payload>"` → `<payload>`; null when the
+// command is not a shell wrapper. Matched on the exe BASENAME after stripping its
+// quotes: a literal `cmd.exe /c` substring occurs in 0 of the 49 commands in the
+// real transcript, and the wrapper path arrives with doubled separators.
+function codexShellPayload(command) {
+  const m = /^\s*(?:"([^"]*)"|'([^']*)'|(\S+))\s+(\/c|-c|-lc|-command)\s+([\s\S]*)$/i.exec(command);
+  if (!m) return null;
+  const exe = (m[1] ?? m[2] ?? m[3] ?? "").replace(/\.(exe|cmd|bat|com)$/i, "").split(/[\\/]/).pop().toLowerCase();
+  if (!CODEX_SHELLS.has(exe)) return null;
+  const payload = m[5].trim();
+  const q = payload[0];
+  return payload ? (q === '"' || q === "'") && payload.length > 1 && payload.endsWith(q) ? payload.slice(1, -1) : payload : null;
+}
+
+// cmd chains with & / &&, POSIX with `;`. Quote-aware so a path containing & survives.
+function codexPipelines(payload) {
+  const out = [];
+  let cur = "", quote = null;
+  for (const ch of payload) {
+    if (quote) { if (ch === quote) quote = null; }
+    else if (ch === '"' || ch === "'") quote = ch;
+    else if (ch === "&" || ch === ";") { out.push(cur); cur = ""; continue; }
+    cur += ch;
+  }
+  out.push(cur);
+  return out;
+}
+
+const codexTokens = (pipeline) => pipeline.match(/"[^"]*"|'[^']*'|\S+/g) || [];
+const unquote = (s) => String(s ?? "").replace(/["']/g, "");
+
+// The read allowlist; everything else — findstr, rg, grep, dir, pytest — is not a
+// read, exactly as Grep is not a Read for claude. Fails closed: an unrecognised
+// shape is an honest `incomplete` with teaching, never a false `complete`.
+function codexReadSpec(pipeline) {
+  const toks = codexTokens(pipeline);
+  if (toks.length < 2) return null;
+  const cmd = unquote(toks[0]).split(/[\\/]/).pop().toLowerCase();
+  const rest = toks.slice(1).map(unquote);
+  const firstPath = (...skip) => rest.find((t, i) => !skip.includes(i) && !t.startsWith("-"));
+  if (cmd === "sed") {                                  // sed -n '<a>,<b>p' <path>
+    const i = rest.indexOf("-n");
+    const m = /^(\d+),(\d+)p$/.exec(rest[i + 1] ?? "");
+    if (i === -1 || !m || !firstPath(i + 1)) return null;
+    return { path: firstPath(i + 1), a: Number(m[1]), b: Number(m[2]) };
+  }
+  if (cmd === "head") {                                 // head -n <n> <path>
+    const i = rest.indexOf("-n");
+    const n = Number(rest[i + 1]);
+    if (i === -1 || !Number.isInteger(n) || n < 1 || !firstPath(i + 1)) return null;
+    return { path: firstPath(i + 1), a: 1, b: n };
+  }
+  if (cmd === "get-content") {
+    const i = rest.findIndex((t) => /^-totalcount$/i.test(t)); // Get-Content <path> -TotalCount <n>
+    if (i !== -1) {
+      const n = Number(rest[i + 1]);
+      const path = firstPath(i, i + 1);
+      return Number.isInteger(n) && n >= 1 && path ? { path, a: 1, b: n } : null;
+    }
+    // -Head/-Tail/-First/-Last page too, and a window this parser does not read is not a read.
+    if (rest.some((t) => /^-(head|tail|first|last)$/i.test(t))) return null;
+  } else if (cmd !== "type" && cmd !== "cat") return null;
+  const path = firstPath();
+  return path ? { path, a: 1, b: Infinity } : null;
+}
+
+// The parsed command carries doubled separators (`C:\\Users\\…`) and a quoted
+// wrapper peels to `\"C:\…\"`; cmd tolerates both, a path compare does not.
+function codexPath(raw, cwd) {
+  const cleaned = unquote(raw).replace(/\\{2,}/g, "\\").replace(/^\\+(?=[A-Za-z]:)/, "");
+  return isAbsoluteish(cleaned) ? cleaned : resolve(cwd || ".", cleaned);
+}
+
+// What the model actually saw of one command's output: all of it inside the cap;
+// past it, the head and tail halves only, so just the lines ending inside each half
+// are proven read (a line cut by the boundary is not).
+function codexWindows(output, spec) {
+  const whole = spec.b === Infinity;
+  const bytes = Buffer.from(output, "utf8");
+  if (bytes.length <= CODEX_MODEL_OUTPUT_BYTES) {
+    return [{ offset: spec.a, limit: whole ? Infinity : spec.b - spec.a + 1 }];
+  }
+  const half = CODEX_MODEL_OUTPUT_BYTES / 2;
+  const count = (s) => (s.match(/\n/g) || []).length;
+  const head = count(bytes.subarray(0, half).toString("utf8"));
+  const tail = Math.max(0, count(bytes.subarray(bytes.length - half).toString("utf8")) - 1);
+  const end = whole ? countLines(output) : spec.b;
+  const windows = [];
+  if (head > 0) windows.push({ offset: spec.a, limit: head });
+  if (tail > 0) windows.push({ offset: end - tail + 1, limit: tail });
+  return windows;
 }
 
 // { required: [{ path, ranges, whole }], missed: [strings], errors: [teaching lines] }
