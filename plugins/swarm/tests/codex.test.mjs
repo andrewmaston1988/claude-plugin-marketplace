@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import { deepEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join, sep } from "node:path";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import {
   buildCodexInvocation,
@@ -11,6 +14,7 @@ import {
   discoverCodexModels,
   normalizeCodexModel,
 } from "../src/codex.mjs";
+import { isUnderRoot } from "../src/roots.mjs";
 import { createCodexStreamParser, createRunnerParser } from "../src/stream.mjs";
 import { assertProviderAdapterContract } from "./helpers/provider-contract.mjs";
 import { assertRunnerAdapterContract } from "./helpers/runner-contract.mjs";
@@ -79,6 +83,172 @@ test("Codex runner invocation is sandboxed, resumable, and contract-valid", () =
   equal(shim.status, 0, shim.stderr);
   throws(() => buildCodexInvocation({ model: "gpt-5-codex", sandbox: "danger-full-access" }, "x"), /read-only or workspace-write/);
   assertRunnerAdapterContract(createCodexRunnerAdapter(), { task: { provider: "codex", model: "gpt-5-codex" } });
+});
+
+// ── engine writeRoots → native directory arguments ────────────────────────────
+
+const addDirsOf = (argv) => argv.reduce((acc, v, i) => (v === "--add-dir" ? [...acc, argv[i + 1]] : acc), []);
+
+// A `file` target has no file-level equivalent in `--add-dir`, so it contributes
+// its containing directory; a `directory` target contributes itself.
+test("Codex: writeRoots map a file target to its directory and a directory target to itself", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
+  try {
+    const run = join(dir, "run");
+    const invocation = buildCodexInvocation({
+      model: "gpt-5-codex", allowedTools: "Read,Write",
+      cwd: join(dir, "repo"), originalCwd: join(dir, "repo"),
+      writeRoots: [
+        { path: join(run, "scratch-__digest"), kind: "directory" },
+        { path: join(run, "report.md"), kind: "file" },
+      ],
+    }, "write the report", {});
+    deepEqual(addDirsOf(invocation.argv), [join(run, "scratch-__digest"), run]);
+    ok(!invocation.argv.includes("--settings"), "Codex must never receive a Claude settings payload");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Two spellings of one directory must not produce two `--add-dir` arguments: a
+// trailing separator and a `.` segment are the portable half of the comparison,
+// win32 casing the platform half.
+test("Codex: writeRoots de-duplicate against the primary cwd and against each other", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
+  try {
+    const run = join(dir, "run");
+    const invocation = buildCodexInvocation({
+      model: "gpt-5-codex", allowedTools: "Read,Write",
+      cwd: join(dir, "repo"), originalCwd: join(dir, "repo"),
+      additionalDirs: [join(run, ".")],
+      writeRoots: [
+        { path: join(run, "report.md"), kind: "file" },      // → run, already an additionalDir
+        { path: join(run, "scratch-__digest") + sep, kind: "directory" },
+        { path: join(run, "scratch-__digest"), kind: "directory" }, // same dir, no separator
+        { path: join(dir, "repo", "notes.md"), kind: "file" },      // → the primary cwd
+      ],
+    }, "write the report", {});
+    // The FIRST spelling of a directory wins and is emitted verbatim; the later
+    // spellings fold onto it through normalizeForCompare.
+    deepEqual(addDirsOf(invocation.argv), [join(run, "."), join(run, "scratch-__digest") + sep]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Casing is folded by normalizeForCompare on win32 only; on posix two cased
+// spellings are genuinely two directories.
+test("Codex: win32 casing cannot produce a duplicate --add-dir", { skip: process.platform !== "win32" }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
+  try {
+    const run = join(dir, "run");
+    const invocation = buildCodexInvocation({
+      model: "gpt-5-codex", allowedTools: "Read,Write",
+      cwd: join(dir, "repo"), originalCwd: join(dir, "repo"),
+      additionalDirs: [run.toUpperCase()],
+      writeRoots: [{ path: join(run.toLowerCase(), "report.md"), kind: "file" }],
+    }, "write the report", {});
+    deepEqual(addDirsOf(invocation.argv), [run.toUpperCase()]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Ordinary leaves must keep their argv byte-for-byte: configured entries first,
+// in order, and the write-target directories appended after them.
+test("Codex: additionalDirs keep their order and write targets append after them", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
+  try {
+    const run = join(dir, "run");
+    const invocation = buildCodexInvocation({
+      model: "gpt-5-codex", allowedTools: "Read,Write",
+      cwd: join(dir, "repo"), originalCwd: join(dir, "repo"),
+      additionalDirs: [join(dir, "first"), join(dir, "second")],
+      writeRoots: [{ path: join(run, "report.md"), kind: "file" }],
+    }, "p", {});
+    deepEqual(addDirsOf(invocation.argv), [join(dir, "first"), join(dir, "second"), run]);
+    // Without the targets the argv is exactly what it was before this feature.
+    const withoutTargets = buildCodexInvocation({
+      model: "gpt-5-codex", allowedTools: "Read,Write",
+      cwd: join(dir, "repo"), originalCwd: join(dir, "repo"),
+      additionalDirs: [join(dir, "first"), join(dir, "second")],
+    }, "p", {});
+    deepEqual(withoutTargets.argv, [
+      "codex", "exec", "--json", "--model", "gpt-5-codex", "-c", 'model_reasoning_effort="medium"',
+      "--sandbox", "workspace-write",
+      "--add-dir", join(dir, "first"), "--add-dir", join(dir, "second"),
+      "p",
+    ]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The accepted breadth, asserted rather than assumed: --add-dir grants a whole
+// directory, so every directory the digest's OWN targets contribute stays at or
+// under the run-private results dir. A configured additionalDirs entry is an
+// independent pre-existing input and is outside this claim.
+test("Codex: every --add-dir the write targets contribute stays under resultsDir", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
+  try {
+    const resultsDir = join(dir, "run");
+    const invocation = buildCodexInvocation({
+      model: "gpt-5-codex", allowedTools: "Read,Write", isDigest: true,
+      cwd: join(resultsDir, "scratch-__digest"), originalCwd: dir,
+      writeRoots: [
+        { path: join(resultsDir, "scratch-__digest"), kind: "directory" },
+        { path: join(resultsDir, "report.md"), kind: "file" },
+      ],
+    }, "write the report", {});
+    // No additionalDirs configured, so every --add-dir here came from the targets.
+    const contributed = addDirsOf(invocation.argv);
+    ok(contributed.length >= 1, invocation.argv.join(" "));
+    for (const d of contributed) ok(isUnderRoot(d, resultsDir), `${d} is outside ${resultsDir}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// `codex exec` refuses to start outside a Git repository, and the report digest's
+// cwd is engine scratch. The allowance is scoped to the generated digest, placed
+// with the other exec flags — the shim rejects exec options after `resume`.
+test("Codex: --skip-git-repo-check is emitted for the digest only, before resume", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
+  try {
+    const resultsDir = join(dir, "run");
+    const digest = buildCodexInvocation({
+      model: "gpt-5-codex", effort: "high", allowedTools: "Read,Write", isDigest: true,
+      cwd: join(resultsDir, "scratch-__digest"), originalCwd: dir, resume: "thread-9",
+      writeRoots: [
+        { path: join(resultsDir, "scratch-__digest"), kind: "directory" },
+        { path: join(resultsDir, "report.md"), kind: "file" },
+      ],
+    }, "write the report", {});
+    const flagAt = digest.argv.indexOf("--skip-git-repo-check");
+    const resumeAt = digest.argv.indexOf("resume");
+    ok(flagAt > 0 && resumeAt > flagAt, `must precede resume: ${digest.argv.join(" ")}`);
+    equal(digest.argv[resumeAt + 1], "thread-9");
+    const shim = spawnSync(process.execPath, [SHIM, ...digest.argv.slice(1)], { encoding: "utf8" });
+    equal(shim.status, 0, `the shim rejects exec options after resume: ${shim.stderr}`);
+    equal(digest.argv[digest.argv.indexOf("--sandbox") + 1], "workspace-write");
+
+    // An ordinary Codex leaf keeps the repo-root gate: same cwd, no allowance.
+    const leaf = buildCodexInvocation({
+      model: "gpt-5-codex", allowedTools: "Read,Write", cwd: dir, originalCwd: dir,
+    }, "inspect", {});
+    ok(!leaf.argv.includes("--skip-git-repo-check"), leaf.argv.join(" "));
+
+    // ...and neither does a digest that launches in place.
+    const inPlace = buildCodexInvocation({
+      model: "gpt-5-codex", allowedTools: "Read", isDigest: true, cwd: dir, originalCwd: dir,
+    }, "summarize", {});
+    ok(!inPlace.argv.includes("--skip-git-repo-check"), inPlace.argv.join(" "));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The digest's sandbox follows the same write-capability rule as any other task:
+// no report block, no Write, so read-only — and nothing to add. It also stays in
+// the dispatching repo (buildDigestTask gives a read-only digest plan.cwd), which
+// is why it needs no launch allowance either.
+test("Codex: a read-only digest is read-only sandboxed, with no --add-dir and no allowance", () => {
+  const invocation = buildCodexInvocation({
+    model: "gpt-5-codex", allowedTools: "Read", isDigest: true,
+    cwd: "C:/work", originalCwd: "C:/work",
+  }, "summarize", {});
+  equal(invocation.argv[invocation.argv.indexOf("--sandbox") + 1], "read-only");
+  deepEqual(addDirsOf(invocation.argv), []);
+  ok(!invocation.argv.includes("--skip-git-repo-check"));
+  ok(!invocation.argv.includes("--settings"));
 });
 
 test("Codex parser normalizes JSONL text, usage, and terminal failure", () => {
