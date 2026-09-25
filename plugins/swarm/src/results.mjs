@@ -1,10 +1,10 @@
-import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join, resolve, basename } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { tokenTotal, workTokens } from "./stream.mjs";
-import { isSentinelModel } from "./manifest.mjs";
 import { readRun } from "./runlog.mjs";
 import { inferStoredIdentity } from "./contracts.mjs";
+import { listLeavesFrom } from "./leaf-list.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -94,24 +94,10 @@ export function transcriptPath(dir, id) {
   return join(dir, "results", `${id}.log`);
 }
 
-// Every leaf a run wrote a result for, with both paths. `gradeable` is the
+// Manifest leaves with both paths; without a manifest, every result is included. `gradeable` is the
 // grading store's scope: a gradeable leaf is one a real model ran (sentinel-model nodes produce no row).
 export function listLeaves(dir, { gradeable = false } = {}) {
-  const resultsRoot = join(dir, "results");
-  if (!existsSync(resultsRoot)) return [];
-  return readdirSync(resultsRoot)
-    .filter((f) => f.endsWith(".json"))
-    .map((f) => {
-      const id = f.slice(0, -".json".length);
-      const result = readResult(dir, id);
-      return result && {
-         id, model: result.model,
-         ...(result.provider && { provider: result.provider }),
-         ...(result.runner && { runner: result.runner }),
-         result, resultPath: resultPath(dir, id), transcriptPath: transcriptPath(dir, id),
-       };
-    })
-    .filter((leaf) => leaf && (!gradeable || (leaf.model && !isSentinelModel(leaf.model))));
+  return listLeavesFrom(dir, { gradeable }, { readResult, resultPath, transcriptPath });
 }
 
 // The mechanical block a score row copies — a projection of an existing result,

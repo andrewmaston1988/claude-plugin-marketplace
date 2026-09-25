@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { equal, ok } from "node:assert/strict";
+import { deepEqual, equal, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -22,7 +22,8 @@ function fakeRun(dir) {
   write("slow", { id: "slow", model: "kimi-k2.7-code:cloud", ok: false, exit: null, timedOut: true, durationMs: 600000, output: "was mid-edit" });
   write("broke", { id: "broke", model: "sonnet", ok: false, exit: 1, durationMs: 9000, output: "TypeError: x is not a function" });
   write("silent", { id: "silent", model: "haiku", ok: true, exit: 0, durationMs: 3000, output: "" });
-  writeFileSync(join(run, "manifest.json"), JSON.stringify({ tasks: [{ id: "clean" }] }));
+  write("old", { id: "old", model: "haiku", ok: true, exit: 0, output: "from an earlier run" });
+  writeFileSync(join(run, "manifest.json"), JSON.stringify({ tasks: ["clean", "slow", "broke", "silent"].map((id) => ({ id })) }));
   return run;
 }
 
@@ -102,6 +103,7 @@ test("grade --init writes pre-filled rows and still refuses to be appended unfil
     const r = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
+    deepEqual(batch.rows.map((row) => row.leaf).sort(), ["broke", "clean", "silent", "slow"], "only leaves from this run's manifest get grade rows");
     const by = Object.fromEntries(batch.rows.map((row) => [row.leaf, row]));
     equal(by.clean.outcome, "completed", "clean leaf");
     equal(by.clean.note, 'leaf says: "TL;DR: moved the icons across."', "clean leaf note");

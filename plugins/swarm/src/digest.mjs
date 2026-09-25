@@ -2,8 +2,9 @@ import { join } from "node:path";
 import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { resultPath } from "./results.mjs";
 import { applyWriteGuard } from "../hooks/leaf-write-guard.mjs";
+import { DIGEST_ID } from "./leaf-ids.mjs";
 
-export const DIGEST_ID = "__digest";
+export { DIGEST_ID };
 
 // The digest leaf RETURNS text; the ENGINE writes digest.md from its output.
 // The leaf therefore needs only Read — never Write. Report mode is the one

@@ -5,9 +5,9 @@
 import { readFileSync, readdirSync, statSync, existsSync } from "node:fs";
 import { join, resolve, basename, dirname } from "node:path";
 import { DIGEST_ID } from "./digest.mjs";
+import { cloneId, childId, parseCloneId } from "./leaf-ids.mjs";
+export { cloneId, childId, parseCloneId };
 import { readHeartbeat, inferStoredIdentity } from "./results.mjs";
-
-const CLONE_RE = /^(.+)\[(\d+)\]$/;
 
 // Non-terminal, non-doomed: a leaf waiting out a backoff or model fallback. Lives here
 // rather than in the scheduler because it is state vocabulary, and two modules read it.
@@ -80,7 +80,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
     if (entry.event === "expand") {
       // forEach clones join the roster directly under their parent
       const rows = Array.from({ length: entry.clones || 0 }, (_, i) => ({
-        id: `${entry.id}[${i}]`, model: entry.model || "?",
+        id: cloneId(entry.id, i), model: entry.model || "?",
         ...(entry.provider ? { provider: entry.provider } : {}),
         ...(entry.runner ? { runner: entry.runner } : {}),
       }));
@@ -166,10 +166,10 @@ export function resolveTaskId(id, tasks) {
     }
   }
   // Guarded on the base being a task: an id that merely ends in [n] is not a clone.
-  const clone = CLONE_RE.exec(id);
-  if (clone && defs.has(clone[1])) {
-    const def = defs.get(clone[1]);
-    return { kind: def.child ? "container" : "clone", def, parent: clone[1], forEach: def, index: Number(clone[2]) };
+  const clone = parseCloneId(id);
+  if (clone && defs.has(clone.parent)) {
+    const def = defs.get(clone.parent);
+    return { kind: def.child ? "container" : "clone", def, parent: clone.parent, forEach: def, index: Number(clone.index) };
   }
   return { kind: "unknown", def: null, parent: null };
 }
@@ -207,7 +207,7 @@ export function topology(tasks, manifest) {
     if (t.kind === "child") {
       r.kind = "child";
       r.parent = t.parent;
-      r.after = t.def.after?.length ? t.def.after.map((a) => `${t.node}~${a}`) : t.upstream;
+      r.after = t.def.after?.length ? t.def.after.map((a) => childId(t.node, a)) : t.upstream;
     } else if (t.kind === "clone" || t.kind === "container") {
       r.kind = t.kind;
       r.parent = t.parent;
