@@ -44,7 +44,7 @@ test("costView marks superseded point and spread rows before verdicts and fronti
   equal(point("claude-opus-5").supersededBy, "claude-opus-5-5");
   equal(spread("claude-opus-5").supersededBy, "claude-opus-5-5");
   equal(point("claude-opus-5").dominatedBy, null);
-  equal(point("claude-opus-5").onFrontier, false);
+  equal(point("claude-opus-5").onFrontier, true);
   equal(point("claude-haiku-5").dominatedBy, null);
   equal(point("claude-haiku-5").onFrontier, true);
   equal(view.best.model, "claude-opus-5-5");
@@ -78,6 +78,23 @@ test("a denylisted newest model does not hide its elder in costView", () => {
 
   equal(view.points.find((row) => row.model === old).supersededBy, undefined);
   equal(view.spread.find((row) => row.model === old).supersededBy, undefined);
+});
+
+test("superseded points get verdicts from visible rows but never dominate them", () => {
+  const old = "claude-opus-5";
+  const current = "claude-opus-5-5";
+  const visible = "claude-haiku-5";
+  const rows = [...grades(old, 4), ...grades(current, 6), ...grades(visible, 5)];
+  const view = costView(rows, [cost(old, 4), cost(current, 5), cost(visible, 3)]);
+  const point = (model) => view.points.find((row) => row.model === model);
+
+  equal(point(old).supersededBy, current);
+  equal(point(old).onFrontier, false);
+  equal(point(old).dominatedBy, `claude/${visible}`);
+  equal(point(current).onFrontier, true);
+  equal(point(current).dominatedBy, null);
+  equal(point(visible).onFrontier, true);
+  equal(point(visible).dominatedBy, null);
 });
 
 test("costScreen hides superseded cards and never names one as the hero leader", () => {

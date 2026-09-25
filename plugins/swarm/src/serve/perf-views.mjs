@@ -215,7 +215,8 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
   for (const sectionProvider of providers) {
     const sectionPoints = points.filter((point) => providerKey(point) === sectionProvider);
     const participants = sectionPoints.filter((point) => !point.supersededBy && point.wtd != null && point.multiplier != null);
-    for (const point of participants) {
+    const comparable = sectionPoints.filter((point) => point.wtd != null && point.multiplier != null);
+    for (const point of comparable) {
       const dominator = participants.find((other) => other !== point
         && other.costDomain === point.costDomain
         && other.wtd > point.wtd
