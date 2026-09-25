@@ -40,7 +40,7 @@ export const TOOLS = [
   {
     name: "list_peers",
     description:
-      "List other Claude Code instances running on this machine. Returns their ID, working directory, git repo, and summary.",
+      "List other Claude Code instances running on this machine, plus your own row, marked. Returns their ID, working directory, git repo, and summary.",
     inputSchema: {
       type: "object",
       properties: {
