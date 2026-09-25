@@ -480,10 +480,10 @@ carried measurable weekly segments (cached readings bank nothing).
 - **The multiplier's floor is a measured model with ≥ 200 measured requests.** A model with
   no history is **unmeasured** — excluded from comparison entirely, neither free nor dear.
 
-The multiplier is the per-request meter weight against that floor, printed beside the
-grades, never collapsed into one number. A model is **dominated** when another is strictly
-higher-scoring *and* strictly cheaper — the only comparison made, since a ratio would let
-one cheap fluke leaf outrank a well-evidenced model.
+The dashboard Cost screen shows current generations only; Performance keeps all generations. The multiplier is
+the per-request meter weight against that floor, printed beside the grades, never collapsed into one number. A
+model is **dominated** when another is strictly higher-scoring *and* strictly cheaper — the only comparison made,
+since a ratio would let one cheap fluke leaf outrank a well-evidenced model.
 
 **Best value is a threshold, never a ratio.** The card names the *cheapest* model still
 worth seating: on the frontier, within `valueMargin` (default `0.5`) of the best frontier

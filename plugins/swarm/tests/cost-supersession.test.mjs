@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { equal } from "node:assert/strict";
 import { costView } from "../src/serve/perf-views.mjs";
+import { H, loadPerfViews } from "./helpers/perf-views-harness.mjs";
 
 const grades = (model, score) => Array.from({ length: 6 }, (_, i) => ({
   resultsDir: "C:/runs/cost-supersession",
@@ -65,4 +66,46 @@ test("costView never chooses a superseded row as worst", () => {
 
   equal(view.worst?.model, "claude-sonnet-5");
   equal(view.points.find((row) => row.model === "claude-opus-5").supersededBy, "claude-opus-5-5");
+});
+
+test("costScreen hides superseded cards and never names one as the hero leader", () => {
+  const { costScreen } = loadPerfViews();
+  const old = "claude-opus-5";
+  const current = "claude-opus-5-5";
+  const html = costScreen({ sections: [{
+    provider: "claude",
+    points: [
+      { model: old, wtd: 10, multiplier: 1, onFrontier: true, dominatedBy: null, supersededBy: current },
+      { model: current, wtd: 8, multiplier: 4, onFrontier: true, dominatedBy: null },
+      { model: "claude-haiku-5", wtd: 7, multiplier: 3, onFrontier: true, dominatedBy: null },
+    ],
+    spread: [
+      { model: old, mult: 1, supersededBy: current },
+      { model: current, mult: 4 },
+      { model: "claude-haiku-5", mult: 3 },
+    ],
+    best: { model: current, wtd: 8, multiplier: 4 },
+    worst: null,
+  }] }, H, "claude");
+
+  equal(html.includes(`data-href="#/perf/model/${old}"`), false);
+  equal(html.includes("claude-opus-5's score"), false);
+  equal(html.includes('data-href="#/perf/model/claude-haiku-5"'), true);
+});
+
+test("the perf model page keeps the cost chip for a superseded model", () => {
+  const { modelDashboard } = loadPerfViews();
+  const html = modelDashboard({
+    model: "claude-opus-5",
+    overall: null,
+    rank: null,
+    aspects: [],
+    coverage: { aspects: [], models: [], cells: [] },
+    reliability: [],
+    domainSelect: null,
+    domain: null,
+    cost: { provider: "claude", onFrontier: true, supersededBy: "claude-opus-5-5" },
+  }, { ...H, badge: () => "<b>cost chip</b>" });
+
+  equal(html.includes("cost chip"), true);
 });

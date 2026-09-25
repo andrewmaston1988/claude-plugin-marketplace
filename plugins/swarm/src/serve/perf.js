@@ -146,7 +146,11 @@
     const all = data.sections?.length ? data.sections : [{
       provider: null, points: data.points || [], spread: data.spread || [], best: data.best, worst: data.worst,
     }];
-    const sections = all.filter((s) => s.points.length || s.spread.length);
+    const sections = all.map((s) => ({
+      ...s,
+      points: s.points.filter((p) => !p.supersededBy),
+      spread: s.spread.filter((r) => !r.supersededBy),
+    })).filter((s) => s.points.length || s.spread.length);
     if (!sections.length) {
       return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
     }
