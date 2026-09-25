@@ -322,7 +322,9 @@ function writeEffortArg(args, effort) {
   args.push("-c", `model_reasoning_effort=${JSON.stringify(effort.trim())}`);
 }
 
-function writeSandboxArg(args, task, context) {
+/** The sandbox a codex task runs under. Exported so the engine's prompt notice
+ *  names the same word the dispatch will actually pass. */
+export function codexSandbox(task, context) {
   const cfg = providerConfig(context?.config || context?.cfg || {}, "codex");
   const writeCapable = task.write === true || task.writeCapable === true || task.worktreeName ||
     /(?:^|,)(?:Write|Edit|Bash)(?:,|$)/.test(String(task.allowedTools || ""));
@@ -330,7 +332,11 @@ function writeSandboxArg(args, task, context) {
   if (!["read-only", "workspace-write"].includes(sandbox)) {
     throw new Error(`Codex sandbox must be read-only or workspace-write, got '${sandbox}'`);
   }
-  args.push("--sandbox", sandbox);
+  return sandbox;
+}
+
+function writeSandboxArg(args, task, context) {
+  args.push("--sandbox", codexSandbox(task, context));
 }
 
 /** Build native `codex exec --json` argv. */

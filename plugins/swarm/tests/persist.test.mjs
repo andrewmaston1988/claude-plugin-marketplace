@@ -9,7 +9,8 @@ import { loadManifest } from "./helpers/repo-io.mjs";
 import { writeManifestSnapshot, readResult } from "../src/results.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
-import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
+import { fakeSpawnFactory, makeIo, promptOf, sentPrompt } from "./helpers/fake-io.mjs";
+import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 
 const CFG = {
   provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },
@@ -227,8 +228,8 @@ test("leaf result records the exact prompt sent ({{result:dep}} inlined)", async
     const spawn = fakeSpawnFactory((call) => promptOf(call).startsWith("emit") ? { output: "XYZZY" } : { output: "ok" });
     await runPlan(plan, CFG, makeIo(spawn));
     const b = readResult(plan.resultsDir, "b");
-    equal(b.prompt, "check XYZZY carefully");
-    const sent = spawn.calls.map(promptOf).find((p) => p.startsWith("check"));
+    equal(withoutLeafNotices(b.prompt), "check XYZZY carefully");
+    const sent = spawn.calls.map(sentPrompt).find((p) => p.startsWith("check"));
     equal(b.prompt, sent, "persisted prompt is byte-equal to the sent prompt");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -247,8 +248,8 @@ test("forEach clones each record their item-substituted prompt", async () => {
     const spawn = fakeSpawnFactory((call) =>
       promptOf(call) === "list files" ? { output: JSON.stringify([{ f: "a.mjs" }, { f: "b.mjs" }]) } : { output: "done" });
     await runPlan(plan, CFG, makeIo(spawn));
-    equal(readResult(plan.resultsDir, "fix[0]").prompt, "fix a.mjs");
-    equal(readResult(plan.resultsDir, "fix[1]").prompt, "fix b.mjs");
+    equal(withoutLeafNotices(readResult(plan.resultsDir, "fix[0]").prompt), "fix a.mjs");
+    equal(withoutLeafNotices(readResult(plan.resultsDir, "fix[1]").prompt), "fix b.mjs");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -270,8 +271,8 @@ test("spliced child leaves record their remapped prompts; digest records its pro
     });
     const spawn = fakeSpawnFactory((call) => promptOf(call) === "child scan" ? { output: "SCANOUT" } : { output: "d" });
     await runPlan(plan, CFG, makeIo(spawn));
-    equal(readResult(plan.resultsDir, "node~scan").prompt, "child scan");
-    equal(readResult(plan.resultsDir, "node~sum").prompt, "sum of SCANOUT");
+    equal(withoutLeafNotices(readResult(plan.resultsDir, "node~scan").prompt), "child scan");
+    equal(withoutLeafNotices(readResult(plan.resultsDir, "node~sum").prompt), "sum of SCANOUT");
     const digest = readResult(plan.resultsDir, DIGEST_ID);
     ok(typeof digest.prompt === "string" && digest.prompt.length > 0, "digest prompt persisted");
   } finally {
@@ -312,7 +313,7 @@ test("resume: snapshot re-written at each dispatch; skipped leaves keep their pe
     await runPlan(plan, CFG, makeIo(spawn2));
     equal(snapshotOf(plan).tasks[0].prompt, "say hello");
     equal(spawn2.calls.length, 0, "prior ok result skipped, not re-run");
-    equal(readResult(plan.resultsDir, "a").prompt, "say hello", "skipped leaf keeps its prompt");
+    equal(withoutLeafNotices(readResult(plan.resultsDir, "a").prompt), "say hello", "skipped leaf keeps its prompt");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

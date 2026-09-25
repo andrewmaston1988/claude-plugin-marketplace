@@ -3,6 +3,7 @@ import { freemem } from "node:os";
 import { join, basename } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { storedTurnCount } from "./contracts.mjs";
+import { withLeafNotices } from "./leaf-notices.mjs";
 import { buildDispatch, createDispatchRegistry, toSpawnable } from "./dispatch.mjs";
 import { isClaudeModel } from "./models.mjs";
 import {
@@ -1201,14 +1202,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         }
       }
 
-      let prompt = task.prompt;
-      let promptTruncations = [];
-      if (!task.promptFinal) {
-        const sub = substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
-        prompt = sub.prompt;
-        promptTruncations = sub.truncations;
-        notePromptTruncations(task, promptTruncations);
-      }
+      // promptFinal is a forEach clone, substituted at clone time; the engine's
+      // own notice rides last either way, and only once.
+      const sub = task.promptFinal ? null : substituteTemplates(task.prompt, plan.resultsDir, cfg.resultInlineCap ?? 4000);
+      const promptTruncations = sub ? sub.truncations : [];
+      if (sub) notePromptTruncations(task, promptTruncations);
+      const prompt = withLeafNotices(sub ? sub.prompt : task.prompt, task, cfg, durableIdentity(task).runner);
       // Resume appends: a resumed leaf's session holds every earlier Read, so its
       // transcript must too (coverage checks the whole attempt history). A fresh
       // run (or --force) truncates.

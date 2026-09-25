@@ -3,12 +3,13 @@
 // findings left mid-transcript, and a codex leaf refusing a Claude tool list.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
-import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
+import { fakeSpawnFactory, makeIo, sentPrompt } from "./helpers/fake-io.mjs";
 
 // The notices verbatim: these literals are the spec, so a wording change is a
 // deliberate edit here, never a silent drift in the engine.
@@ -53,14 +54,19 @@ function plan(dir, tasks, over = {}) {
   return { cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, tasks, goal: "", ...over };
 }
 
-// The string the runner was actually given — claude rides `-p`, codex takes it
-// positionally. Never strips: these assertions are about the notice itself.
-function sentPrompt(call) {
-  const args = call.args ?? call.argv;
-  const i = args.indexOf("-p");
-  return i >= 0 ? args[i + 1] : args[args.length - 1];
+// A write-capable codex task is given a worktree, so its cwd must be a repo.
+function initRepo() {
+  const repo = mkdtempSync(join(tmpdir(), "swarm-notices-repo-"));
+  spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo, windowsHide: true });
+  writeFileSync(join(repo, "a.txt"), "hello\n");
+  spawnSync("git", ["add", "."], { cwd: repo, windowsHide: true });
+  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+    "commit", "-q", "-m", "init"], { cwd: repo, windowsHide: true });
+  return repo;
 }
 
+// These assertions are about the notice itself, so they read the raw prompt:
+// `sentPrompt` never strips where `promptOf` does.
 const occurrences = (haystack, needle) => haystack.split(needle).length - 1;
 
 test("every claude leaf's prompt ends with the final-message notice", async () => {
@@ -108,7 +114,8 @@ test("author text stays first and byte-identical, even after substitution", asyn
 for (const [allowedTools, sandbox] of [["Read,Grep,Glob", "read-only"], ["Read,Grep,Glob,Bash", "workspace-write"]]) {
   test(`a codex leaf is told it has a shell only, sandbox ${sandbox}`, async () => {
     const dir = tmp();
-    const cwd = tmpdir();
+    // Only a write-capable leaf is given a worktree, so only that case needs a repo.
+    const cwd = allowedTools.includes("Bash") ? initRepo() : tmp();
     try {
       const cfg = {
         providers: {
@@ -127,6 +134,7 @@ for (const [allowedTools, sandbox] of [["Read,Grep,Glob", "read-only"], ["Read,G
       equal(sentPrompt(spawn.calls[0]), `author text\n\n${FINAL}\n${codexLine(sandbox)}`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
+      rmSync(cwd, { recursive: true, force: true });
     }
   });
 }
