@@ -3,9 +3,10 @@
 // coverage.test.mjs, which is over the 500-line bar and may not grow.
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { parseReadCalls, computeCoverage, coverageErrorLines, coverageRetryBlock } from "../src/coverage.mjs";
 import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
@@ -13,6 +14,8 @@ import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 
+const FIXTURES = fileURLToPath(new URL("./fixtures/coverage/", import.meta.url));
+const fixture = (f) => readFileSync(join(FIXTURES, f), "utf8");
 function tmp() { return mkdtempSync(join(tmpdir(), "swarm-codex-cov-")); }
 const writeLines = (dir, name, n) => { const p = join(dir, name); writeFileSync(p, "x\n".repeat(n)); return p; };
 
@@ -171,7 +174,23 @@ test("codex: a whole-file dump past the model-visible cap covers head + tail onl
     const small = writeLines(dir, "small.mjs", 100);
     const inside = readsOf(transcript(event(cmdRun(`type ${dbl(small)}`), { output: "x\n".repeat(100) })), dir);
     deepEqual(inside, [{ file: small, offset: 1, limit: Infinity }]);
+    // chained past the cap: every segment shares the one output, so no segment's bytes
+    // can be told apart — the whole command credits nothing
+    const chained = readsOf(transcript(event(cmdRun(`type ${dbl(F)} & type ${dbl(small)}`), { output: content })), dir);
+    deepEqual(chained, []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("parseReadCalls: a trimmed slice of the REAL rv-plan transcript yields only the reads it performed", () => {
+  // The real exec stream, verbatim: one absolute whole-file `type`; three exit-1
+  // `type`s; findstr and rg on absolute and relative paths; every item.started twin.
+  // mutation: dropping the exit-0 gate → 3 reads; letting a search count → 3.
+  const reads = parseReadCalls(fixture("rv-plan.codex.jsonl"), "codex", { cwd: "C:/code/scout" });
+  equal(reads.length, 1);
+  deepEqual(reads[0], {
+    file: "C:\\code\\claude\\skills\\code-review\\principles_cross_cutting.md",
+    offset: 1, limit: Infinity,
+  });
 });
 
 // ── 8. unparseable ────────────────────────────────────────────────────────────
