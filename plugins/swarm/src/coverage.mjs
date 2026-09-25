@@ -6,6 +6,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { parseJsonObjectLine } from "./jsonl.mjs";
 
 export const READ_DEFAULT_LINES = 2000; // the Read tool's own default page
 // The runners whose transcript this module parses. The one list: manifest validation
@@ -67,7 +68,7 @@ export function parseReadCalls(text, runner, { cwd } = {}) {
 // Codex middle-truncates a command's output before the MODEL sees it, so
 // `aggregated_output` (the event field) is not what the model read: inside this
 // budget it arrived whole, past it only as the first and last halves.
-// https://raw.githubusercontent.com/openai/codex/rust-v0.156.1/codex-rs/core/src/tools/events.rs:390
+// rust-v0.156.1: codex-rs/models-manager/models.json sets truncation_policy tokens limit 10000; codex-rs/utils/string/src/truncate.rs uses APPROX_BYTES_PER_TOKEN = 4.
 const CODEX_MODEL_OUTPUT_BYTES = 40_000;
 const CODEX_SHELLS = new Set(["cmd", "powershell", "pwsh", "bash", "sh"]);
 
@@ -75,10 +76,8 @@ function parseCodexReadCalls(text, cwd) {
   const reads = [];
   let sawStart = false;
   for (const raw of String(text ?? "").split(/\r?\n/)) {
-    const t = raw.trim();
-    if (!t.startsWith("{")) continue; // "Reading additional input from stdin...", or a torn write
-    let evt;
-    try { evt = JSON.parse(t); } catch { continue; }
+    const evt = parseJsonObjectLine(raw);
+    if (!evt) continue;
     if (evt.type === "thread.started" || evt.type === "turn.started") { sawStart = true; continue; }
     // An item.started twin carries exit_code null; only a completed, exit-0 command
     // ran — the codex analogue of "an errored Read read nothing".
@@ -190,7 +189,8 @@ function codexWindows(output, spec) {
   const whole = spec.b === Infinity;
   const bytes = Buffer.from(output, "utf8");
   if (bytes.length <= CODEX_MODEL_OUTPUT_BYTES) {
-    return [{ offset: spec.a, limit: whole ? Infinity : spec.b - spec.a + 1 }];
+    const limit = Math.min(whole ? Infinity : spec.b - spec.a + 1, countLines(output));
+    return limit > 0 ? [{ offset: spec.a, limit }] : [];
   }
   const half = CODEX_MODEL_OUTPUT_BYTES / 2;
   const count = (s) => (s.match(/\n/g) || []).length;
@@ -330,6 +330,29 @@ export function computeCoverage(entries, reads, opts) {
   };
 }
 
+function codexRanges(path, start, end) {
+  let sizes;
+  try {
+    sizes = (readFileSync(path, "utf8").match(/[^\n]*\n|[^\n]+$/g) || [])
+      .map((line) => Buffer.byteLength(line, "utf8"));
+  } catch {
+    sizes = [];
+  }
+  const ranges = [];
+  let first = start, bytes = 0;
+  for (let line = start; line <= end; line++) {
+    const size = sizes[line - 1] ?? 0;
+    if (bytes && bytes + size > CODEX_MODEL_OUTPUT_BYTES) {
+      ranges.push([first, line - 1]);
+      first = line;
+      bytes = 0;
+    }
+    bytes += size;
+  }
+  if (first <= end) ranges.push([first, end]);
+  return ranges;
+}
+
 // Retry teaching: one "- <path> lines a-b: Read offset a limit n" per uncovered
 // range, a range over 2000 lines split into consecutive 2000-line reads, plus any
 // resolve/index errors. Capped like citations.
@@ -338,10 +361,9 @@ export function coverageErrorLines(gaps, { indexErrors = [], runner = "claude" }
   for (const { path, ranges } of gaps) {
     for (const [a, b] of ranges) {
       if (runner === "codex") {
-        // The read allowlist, so the re-ask names a command the parser counts. Not
-        // split at 2000 lines like Claude's: codex's cap is BYTES, and a line split
-        // buys no guarantee the window fits it.
-        lines.push(`${path} lines ${a}-${b}: sed -n '${a},${b}p' "${path}"`);
+        for (const [start, end] of codexRanges(path, a, b)) {
+          lines.push(`${path} lines ${start}-${end}: sed -n '${start},${end}p' "${path}"`);
+        }
         continue;
       }
       for (let s = a; s <= b; s += READ_DEFAULT_LINES) {

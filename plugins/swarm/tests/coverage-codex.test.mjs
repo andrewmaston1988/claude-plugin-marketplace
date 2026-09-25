@@ -52,11 +52,11 @@ test("codex: a quoted-exe cmd wrapper `type <abs>` at exit 0 covers a whole-file
   try {
     const F = writeLines(dir, "f.mjs", 3);
     const reads = readsOf(transcript(event(cmdRun(`type ${dbl(F)}`), { output: "x\nx\nx\n" })), dir);
-    deepEqual(reads, [{ file: F, offset: 1, limit: Infinity }]);
+    deepEqual(reads, [{ file: F, offset: 1, limit: 3 }]);
     equal(computeCoverage([F], reads, { cwd: dir }).status, "complete");
     // the bash wrapper: the same read through `-c` (not `-lc`)
     const bash = readsOf(transcript(event(bashRun(`cat ${dbl(F)}`), { output: "x\nx\nx\n" })), dir);
-    deepEqual(bash, [{ file: F, offset: 1, limit: Infinity }]);
+    deepEqual(bash, [{ file: F, offset: 1, limit: 3 }]);
     equal(computeCoverage([F], bash, { cwd: dir }).status, "complete");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -70,8 +70,8 @@ test("codex: `type A & type B` in one payload covers both files", () => {
     const B = writeLines(dir, "b.mjs", 4);
     const reads = readsOf(transcript(event(cmdRun(`type ${dbl(A)} & type ${dbl(B)}`), { output: "x\nx\nx\nx\nx\nx\n" })), dir);
     deepEqual(reads, [
-      { file: A, offset: 1, limit: Infinity },
-      { file: B, offset: 1, limit: Infinity },
+      { file: A, offset: 1, limit: 6 },
+      { file: B, offset: 1, limit: 6 },
     ]);
     equal(computeCoverage([A, B], reads, { cwd: dir }).status, "complete");
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -112,7 +112,7 @@ test("codex: findstr / rg cover nothing, and neither does a piped dump (the pipe
     deepEqual(piped, []);
     // a piped segment does not poison its siblings
     const mixed = readsOf(transcript(event(cmdRun(`type ${dbl(F)} & rg -n x ${dbl(F)} | findstr y`), { output: "x\n" })), dir);
-    deepEqual(mixed.map((r) => r.file), [F]);
+    deepEqual(mixed, [{ file: F, offset: 1, limit: 1 }]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -129,7 +129,7 @@ test("codex: a shell redirect covers nothing — the bytes went to a file, not t
     deepEqual(mixed.map((r) => r.file), [F]);
     // an fd merge is not an output redirect — the dump still reached the model
     const merged = readsOf(transcript(event(cmdRun(`type ${dbl(F)} 2>&1`), { output: "x\nx\nx\n" })), dir);
-    deepEqual(merged, [{ file: F, offset: 1, limit: Infinity }]);
+    deepEqual(merged, [{ file: F, offset: 1, limit: 3 }]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -151,6 +151,19 @@ test("codex: `sed -n '10,40p'` covers 10-40 only; `Get-Content -TotalCount 20` c
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("codex: a successful short read credits only the complete lines in its output", () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 260);
+    const empty = readsOf(transcript(event(bashRun(`sed -n '200,260p' ${dbl(F)}`))), dir);
+    equal(computeCoverage([{ path: F, lines: [[200, 260]] }], empty, { cwd: dir }).status, "incomplete");
+    const three = readsOf(transcript(event(bashRun(`sed -n '200,260p' ${dbl(F)}`), { output: "a\nb\nc\n" })), dir);
+    deepEqual(three, [{ file: F, offset: 200, limit: 3 }]);
+    const head = readsOf(transcript(event(bashRun(`head -n 5000 ${dbl(F)}`), { output: "a\nb\n" })), dir);
+    deepEqual(head, [{ file: F, offset: 1, limit: 2 }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // ── 6. paths ──────────────────────────────────────────────────────────────────
 
 test("codex: a relative path resolves against the task cwd; a doubled-separator absolute matches the single-separator mustRead entry", () => {
@@ -158,10 +171,10 @@ test("codex: a relative path resolves against the task cwd; a doubled-separator 
   try {
     const F = writeLines(dir, "f.mjs", 3);
     const rel = readsOf(transcript(event(cmdRun("type f.mjs"), { output: "x\nx\nx\n" })), dir);
-    deepEqual(rel, [{ file: F, offset: 1, limit: Infinity }]);
+    deepEqual(rel, [{ file: F, offset: 1, limit: 3 }]);
     equal(computeCoverage([F], rel, { cwd: dir }).status, "complete");
     const abs = readsOf(transcript(event(cmdRun(`type ${dbl(F)}`), { output: "x\nx\nx\n" })), dir);
-    deepEqual(abs, [{ file: F, offset: 1, limit: Infinity }]);
+    deepEqual(abs, [{ file: F, offset: 1, limit: 3 }]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -190,7 +203,7 @@ test("codex: a whole-file dump past the model-visible cap covers head + tail onl
     // just inside the cap: the same dump is one whole-file window
     const small = writeLines(dir, "small.mjs", 100);
     const inside = readsOf(transcript(event(cmdRun(`type ${dbl(small)}`), { output: "x\n".repeat(100) })), dir);
-    deepEqual(inside, [{ file: small, offset: 1, limit: Infinity }]);
+    deepEqual(inside, [{ file: small, offset: 1, limit: 100 }]);
     // chained past the cap: every segment shares the one output, so no segment's bytes
     // can be told apart — the whole command credits nothing
     const chained = readsOf(transcript(event(cmdRun(`type ${dbl(F)} & type ${dbl(small)}`), { output: content })), dir);
@@ -206,7 +219,7 @@ test("parseReadCalls: a trimmed slice of the REAL rv-plan transcript yields only
   equal(reads.length, 1);
   deepEqual(reads[0], {
     file: "C:\\code\\claude\\skills\\code-review\\principles_cross_cutting.md",
-    offset: 1, limit: Infinity,
+    offset: 1, limit: 71,
   });
 });
 
@@ -305,6 +318,16 @@ test("teaching: a codex leaf's retry names a shell command — never `Read offse
   ok(!block.includes("Read tool"), block);
   ok(!block.includes("Read offset"), block);
   ok(block.includes(`sed -n '41,50p'`), block);
+});
+
+test("teaching: codex re-asks split ranges at the model-visible byte cap", () => {
+  const dir = tmp();
+  try {
+    const F = join(dir, "large.mjs");
+    writeFileSync(F, `${"x".repeat(25000)}\n`.repeat(3));
+    const lines = coverageErrorLines([{ path: F, ranges: [[1, 3]] }], { runner: "codex" });
+    deepEqual(lines.map((line) => line.match(/lines (\d+-\d+):/)[1]), ["1-1", "2-2", "3-3"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("integration: a codex leaf that missed its mustRead is re-asked for a shell command, not a Read tool call", async () => {

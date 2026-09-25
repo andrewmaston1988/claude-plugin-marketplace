@@ -182,8 +182,8 @@ export function buildDispatch(task, prompt, cfg = {}, options = {}) {
   };
 }
 
-// The runner whose transcript a leaf produces; only "claude" stream-json is
-// understood by mustRead, anything else fails closed at validate. Every model runs
+// The runner whose transcript a leaf produces; claude stream-json and codex exec
+// transcripts are understood by mustRead, anything else fails closed at validate. Every model runs
 // through the claude CLI except a launch-mode wrapper that isn't claude — its
 // stdout is unknown, so the wrapper's name is returned to trigger the rejection.
 export function runnerOf(task, cfg) {

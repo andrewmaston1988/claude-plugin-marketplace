@@ -1,4 +1,5 @@
 import { runnerEvent } from "./contracts.mjs";
+import { parseJsonObjectLine } from "./jsonl.mjs";
 
 // Incremental parser for `claude -p --output-format stream-json` stdout, plus
 // token bookkeeping. The engine feeds raw chunks as they arrive; anything that
@@ -95,14 +96,8 @@ export function describeToolUse(block) {
 export function createStreamParser({ onUsage, onResult, onActivity, onInit, onStop } = {}) {
   let buf = "";
   const handleLine = (line) => {
-    const t = line.trim();
-    if (!t.startsWith("{")) return;
-    let evt;
-    try {
-      evt = JSON.parse(t);
-    } catch {
-      return; // not an event line — plain output or torn write
-    }
+    const evt = parseJsonObjectLine(line);
+    if (!evt) return;
     if (evt.type === "system" && evt.subtype === "init") {
       onInit?.(evt);
     } else if (evt.type === "assistant") {
@@ -306,15 +301,8 @@ export function createCodexStreamParser({ emit: emitCallback, onEvent, onSession
   };
 
   const handleLine = (line) => {
-    const trimmed = line.trim();
-    if (!trimmed.startsWith("{")) return;
-    let event;
-    try {
-      event = JSON.parse(trimmed);
-    } catch {
-      return;
-    }
-    if (!event || typeof event !== "object") return;
+    const event = parseJsonObjectLine(line);
+    if (!event) return;
 
     const nextSession = sessionFrom(event);
     if (nextSession && !sessionId) {

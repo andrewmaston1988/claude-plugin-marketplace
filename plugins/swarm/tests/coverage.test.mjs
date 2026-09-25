@@ -86,9 +86,9 @@ test("parseReadCalls: non-JSON lines and a torn final line are skipped, not fata
   equal(reads.length, 1);
 });
 
-test("parseReadCalls: runner other than claude → null", () => {
+test("parseReadCalls: runner other than claude or codex → null", () => {
   const [asst, user] = readTurns([{ file: "C:/a.mjs" }]);
-  equal(parseReadCalls(asst + "\n" + user, "codex"), null);
+  equal(parseReadCalls(asst + "\n" + user, "ollama"), null);
 });
 
 test("parseReadCalls: non-empty text with zero assistant events → null (codex-shaped item events)", () => {
