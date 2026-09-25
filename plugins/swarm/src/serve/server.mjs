@@ -355,7 +355,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       bands: resolveBands(ollama?.cloud?.ollama?.costBands),
       valueMargin: ollama?.cloud?.ollama?.valueMargin,
       isDenylisted: (model) => Boolean(matchDenylist(model, cfg)),
-      cloudSuffix: ollama.cloudSuffix || ":cloud",
+      cloudSuffix: ollama?.cloudSuffix || ":cloud",
     });
   };
   const perf = (res, url) => {
