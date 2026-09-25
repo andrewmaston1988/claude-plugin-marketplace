@@ -268,6 +268,18 @@ test("no generated digest carries provider-specific settings, for any provider",
   }
 });
 
+// The typed policy is worth nothing if the builder still branches per provider —
+// that is the defect this replaces, one level up. Asserted as EQUALITY across
+// providers, so any provider-conditional shape here fails rather than passing as
+// one shape per provider.
+test("a report digest's shape is identical whichever provider will run it", () => {
+  const shape = (provider) => {
+    const t = buildDigestTask(plan({ digest: { provider, model: "m", report: true } }));
+    return { prompt: t.prompt, cwd: t.cwd, allowedTools: t.allowedTools, writeRoots: t.writeRoots, after: t.after };
+  };
+  deepEqual(shape("claude"), shape("codex"));
+});
+
 // Regression pin: only report mode has anything to write, so only report mode
 // gets a policy at all. An empty writeRoots on a read-only digest would make a
 // provider emit an add-dir it never needed.
