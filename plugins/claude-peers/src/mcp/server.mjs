@@ -252,34 +252,44 @@ export function createPeersServer({
 
   // --- tool handlers ---
 
+  // One row's shape, rendered here so the caller's own row and every other
+  // peer's come off the same builder.
+  function renderPeer(p) {
+    // The reported working directory wins: the registered `cwd` is only
+    // ever where the session LAUNCHED — fixed when the MCP server spawns,
+    // and unmoved by the agent's own `cd`, so a session that created a
+    // worktree mid-run reports the checkout it started in.
+    const parts = [`ID: ${p.id}`, `PID: ${p.pid}`, `CWD: ${p.work_cwd || p.cwd}`];
+    // The checkout the session was launched against, and what repo scope
+    // groups on — deliberately NOT the worktree above it, so a fleet
+    // working one repository from separate trees still finds each other.
+    if (p.git_root) parts.push(`Checkout: ${p.git_root}`);
+    if (p.tty) parts.push(`TTY: ${p.tty}`);
+    if (p.summary) parts.push(`Summary: ${wrapAt(p.summary)}`);
+    // Distinct from Last seen, which the heartbeat bumps every few
+    // seconds: a summary can be hours older than the liveness beside it
+    // and still read as current. Covers the working directory too — one
+    // call sets both.
+    if (p.summary) parts.push(`Summary set: ${p.summary_updated_at ?? "unknown"}`);
+    parts.push(`Last seen: ${p.last_seen}`);
+    return parts.join("\n  ");
+  }
+
   const toolHandlers = {
     async list_peers(args) {
       const scope = args.scope;
       try {
-        const peers = await brokerFetch("/list-peers", {
-          scope, cwd: _cwd, git_root: myGitRoot, exclude_id: myId,
+        // Self is NOT excluded: a session that cannot see its own row cannot
+        // see that its summary is stale, missing, or sitting on a registration
+        // the broker has lost — hiding it made all three look normal.
+        const all = await brokerFetch("/list-peers", {
+          scope, cwd: _cwd, git_root: myGitRoot,
         });
+        const self = all.filter((p) => p.id === myId);
+        const others = all.filter((p) => p.id !== myId);
+        const peers = [...self, ...others];
         if (peers.length === 0) return text(`No other Claude Code instances found (scope: ${scope}).`);
-        const lines = peers.map((p) => {
-          // The reported working directory wins: the registered `cwd` is only
-          // ever where the session LAUNCHED — fixed when the MCP server spawns,
-          // and unmoved by the agent's own `cd`, so a session that created a
-          // worktree mid-run reports the checkout it started in.
-          const parts = [`ID: ${p.id}`, `PID: ${p.pid}`, `CWD: ${p.work_cwd || p.cwd}`];
-          // The checkout the session was launched against, and what repo scope
-          // groups on — deliberately NOT the worktree above it, so a fleet
-          // working one repository from separate trees still finds each other.
-          if (p.git_root) parts.push(`Checkout: ${p.git_root}`);
-          if (p.tty) parts.push(`TTY: ${p.tty}`);
-          if (p.summary) parts.push(`Summary: ${wrapAt(p.summary)}`);
-          // Distinct from Last seen, which the heartbeat bumps every few
-          // seconds: a summary can be hours older than the liveness beside it
-          // and still read as current. Covers the working directory too — one
-          // call sets both.
-          if (p.summary) parts.push(`Summary set: ${p.summary_updated_at ?? "unknown"}`);
-          parts.push(`Last seen: ${p.last_seen}`);
-          return parts.join("\n  ");
-        });
+        const lines = peers.map((p) => (p.id === myId ? `[This agent (${p.id})]\n  ${renderPeer(p)}` : renderPeer(p)));
         return text(`Found ${peers.length} peer(s) (scope: ${scope}):\n\n${lines.join("\n\n")}`);
       } catch (e) {
         return errText("Error listing peers", e);

@@ -403,3 +403,48 @@ test('no source file references process.env.HOME', () => {
   walk(path.join(root, 'bin'));
   assert.deepEqual(offenders, []);
 });
+
+// --- the caller's own row --------------------------------------------------
+//
+// list_peers excluded self, so a session could not see its own published
+// summary, its age, or that its row had gone missing — and the session least
+// able to notice a broken row is the one it belongs to.
+
+const SELF = { id: 'me000001', pid: 1, cwd: 'C:/mine', git_root: 'C:/mine', tty: null, summary: 'my own work', summary_updated_at: '2026-08-23T10:00:00.000Z', registered_at: 't', last_seen: 't' };
+const OTHER_A = { id: 'aa11bb22', pid: 2, cwd: 'C:/x', git_root: 'C:/x', tty: null, summary: 'doing y', registered_at: 't', last_seen: 't' };
+const OTHER_B = { id: 'cc33dd44', pid: 3, cwd: 'C:/z', git_root: 'C:/z', tty: null, summary: 'doing z', registered_at: 't', last_seen: 't' };
+
+async function listWith(peers, calls = []) {
+  const { server } = makeServer({
+    fetchImpl: async (url, init) => {
+      if (String(url).endsWith('/register')) return okJson({ id: 'me000001' });
+      calls.push({ url: String(url), body: JSON.parse(init.body) });
+      return okJson(peers);
+    },
+  });
+  await server._register();
+  const res = await server._onRequest('tools/call', { name: 'list_peers', arguments: { scope: 'machine' } });
+  return res.content[0].text;
+}
+
+test('list_peers shows the caller its own row, first and labelled', async () => {
+  const text = await listWith([OTHER_A, SELF, OTHER_B]);
+  assert.match(text, /\[This agent \(me000001\)\]/, "the caller's own row must be present and marked");
+  assert.match(text, /Summary: my own work/);
+  assert.match(text, /Summary set: 2026-08-23T10:00:00\.000Z/);
+  // Presence is asserted BEFORE order: indexOf returns -1 for an absent row and
+  // -1 sorts before every index, so an ordering check alone would pass against
+  // code that never rendered self at all.
+  const self = text.indexOf('[This agent (me000001)]');
+  const other = text.indexOf('aa11bb22');
+  assert.notEqual(other, -1, 'the other peer must be present');
+  assert.ok(self < other, "the caller's own row is rendered first");
+});
+
+test('list_peers does not ask the broker to exclude the caller', async () => {
+  const calls = [];
+  await listWith([SELF, OTHER_A], calls);
+  const req = calls.find((c) => c.url.endsWith('/list-peers'));
+  assert.ok(req, 'no /list-peers request was made');
+  assert.equal('exclude_id' in req.body, false);
+});
