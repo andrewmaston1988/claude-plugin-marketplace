@@ -448,3 +448,15 @@ test('list_peers does not ask the broker to exclude the caller', async () => {
   assert.ok(req, 'no /list-peers request was made');
   assert.equal('exclude_id' in req.body, false);
 });
+
+test('the count line reports OTHER peers, not the total including self', async () => {
+  const text = await listWith([OTHER_A, SELF, OTHER_B]);
+  assert.match(text, /Found 2 peer\(s\) \(scope: machine\)/, 'three rows, two of them peers');
+});
+
+test('a caller alone on the machine sees its own row and is told there are no others', async () => {
+  const text = await listWith([SELF]);
+  assert.match(text, /\[This agent \(me000001\)\]/);
+  assert.match(text, /Summary: my own work/);
+  assert.match(text, /No other Claude Code instances found \(scope: machine\)\./);
+});

@@ -287,10 +287,13 @@ export function createPeersServer({
         });
         const self = all.filter((p) => p.id === myId);
         const others = all.filter((p) => p.id !== myId);
-        const peers = [...self, ...others];
-        if (peers.length === 0) return text(`No other Claude Code instances found (scope: ${scope}).`);
-        const lines = peers.map((p) => (p.id === myId ? `[This agent (${p.id})]\n  ${renderPeer(p)}` : renderPeer(p)));
-        return text(`Found ${peers.length} peer(s) (scope: ${scope}):\n\n${lines.join("\n\n")}`);
+        const rows = [...self, ...others].map((p) => (p.id === myId ? `[This agent (${p.id})]\n  ${renderPeer(p)}` : renderPeer(p)));
+        // Counts OTHERS: the caller is not a peer to itself, and quietly changing
+        // what N means would alter every existing reader of the line.
+        if (others.length === 0) {
+          return text([...rows, `No other Claude Code instances found (scope: ${scope}).`].join("\n\n"));
+        }
+        return text(`Found ${others.length} peer(s) (scope: ${scope}):\n\n${rows.join("\n\n")}`);
       } catch (e) {
         return errText("Error listing peers", e);
       }
