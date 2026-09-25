@@ -119,6 +119,10 @@ path instead of this field. Codex tasks reject `contextWindow`, and Ollama `laun
 rejects it because the launcher validates the suffixed model name before Claude Code can
 interpret `[1m]`.
 
+### What the engine already says in every prompt
+
+The engine appends its own notice block to every leaf's prompt, after your text: that only a leaf's **FINAL** message is recorded as its result (findings left mid-transcript are lost), and, on a codex leaf, that it has a shell rather than `Read`/`Grep`/`Glob` and which sandbox it runs in. Don't restate either — the notice is already there, and a prompt that repeats it spends tokens telling the leaf what it was just told.
+
 ### Prompt length on Windows
 
 A leaf's `prompt` is measured through the CreateProcess-quoted command line at `swarm validate` time; a prompt over ~32k characters on Windows fails validation — point the leaf at a file holding its instructions instead of inlining it.
