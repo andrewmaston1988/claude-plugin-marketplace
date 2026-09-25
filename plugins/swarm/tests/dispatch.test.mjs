@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { equal, deepEqual, ok, throws } from "node:assert/strict";
+import { equal, deepEqual, ok, throws, match } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -154,6 +154,57 @@ test("cfg.claudePath overrides the executable", () => {
   equal(d.argv[0], "X:/bin/claude.exe");
 });
 
+// ── engine writeRoots → provider translation ──────────────────────────────────
+
+// The report digest states the engine's write INTENT as typed targets; Claude's
+// primitive for confining a write is the injected PreToolUse guard, rooted at each
+// target's own path — exact-file for a `file` target, subtree for a `directory`.
+test("engine writeRoots reach Claude as the injected guard, rooted at every target path", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-writeroots-"));
+  try {
+    const scratch = join(dir, "run", "scratch-__digest");
+    const report = join(dir, "run", "report.md");
+    const d = buildDispatch(task({
+      provider: "claude", model: "claude-sonnet-5",
+      writeRoots: [{ path: scratch, kind: "directory" }, { path: report, kind: "file" }],
+    }), "p", CFG, { _mcpTools: NO_MCP });
+    const i = d.argv.indexOf("--settings");
+    ok(i > 0, `the guard rides --settings: ${d.argv.join(" ")}`);
+    const entry = JSON.parse(d.argv[i + 1]).hooks.PreToolUse[0];
+    equal(entry.matcher, "Write|Edit|NotebookEdit");
+    match(entry.hooks[0].command, /leaf-write-guard\.mjs/);
+    ok(entry.hooks[0].command.includes(scratch), entry.hooks[0].command);
+    ok(entry.hooks[0].command.includes(report), entry.hooks[0].command);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The engine's entry is PREPENDED, so a task's own hook cannot displace the guard
+// that contains it — and unrelated settings survive the merge.
+test("Claude: a task's own hooks and settings cannot displace the engine write guard", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-writeroots-"));
+  try {
+    const root = join(dir, "run");
+    const own = { matcher: "Write", hooks: [{ type: "command", command: "echo own" }] };
+    const d = buildDispatch(task({
+      provider: "claude", model: "claude-sonnet-5",
+      writeRoots: [{ path: root, kind: "directory" }],
+      settings: { hooks: { PreToolUse: [own] }, env: { OTHER: "x" } },
+    }), "p", CFG, { _mcpTools: NO_MCP });
+    const settings = JSON.parse(d.argv[d.argv.indexOf("--settings") + 1]);
+    equal(settings.hooks.PreToolUse.length, 2);
+    match(settings.hooks.PreToolUse[0].hooks[0].command, /leaf-write-guard\.mjs/);
+    deepEqual(settings.hooks.PreToolUse[1], own);
+    equal(settings.env.OTHER, "x");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// An ordinary leaf carries no writeRoots, so its --settings behavior is untouched:
+// no guard, and no --settings at all when it authored none.
+test("an ordinary leaf with no writeRoots gets no guard and no --settings", () => {
+  const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
+  ok(!d.argv.includes("--settings"));
+});
+
 test("Codex dispatch: provider registry selects exact fresh argv, runner, and parser", () => {
   const root = process.cwd();
   const cfg = {
@@ -199,6 +250,49 @@ test("Codex leaf with no manifest effort dispatches medium", () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// The engine's write targets reach Codex as native directory arguments: a `file`
+// target contributes its containing directory, because --add-dir has no file-level
+// equivalent. Anything already writable — the primary cwd — is not repeated.
+test("Codex dispatch: writeRoots become workspace-write plus de-duplicated --add-dir pairs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
+  try {
+    const run = join(dir, "run");
+    const cfg = { providers: { codex: { enabled: true, path: "codex", sandbox: "workspace-write", allowedRoots: [dir] } } };
+    const d = buildDispatch({
+      provider: "codex", model: "gpt-5-codex", effort: "high", allowedTools: "Read,Write",
+      cwd: join(dir, "repo"), originalCwd: join(dir, "repo"),
+      writeRoots: [
+        { path: join(run, "scratch-__digest"), kind: "directory" },
+        { path: join(run, "report.md"), kind: "file" },
+        // already covered by the pair above — the file target's own directory
+        { path: join(run, "report-again.md"), kind: "file" },
+      ],
+    }, "write the report", cfg);
+    equal(d.argv[d.argv.indexOf("--sandbox") + 1], "workspace-write");
+    const addDirs = d.argv.reduce((acc, v, i) => (v === "--add-dir" ? [...acc, d.argv[i + 1]] : acc), []);
+    deepEqual(addDirs, [join(run, "scratch-__digest"), run]);
+    equal(d.runner, "codex");
+    equal(d.parser, "codex");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The adapter boundary is unchanged and deliberately so: an authored Claude-settings
+// object is still refused on the Codex path, while the engine's typed targets are not.
+test("Codex dispatch: authored settings are still refused, writeRoots are not", () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
+  try {
+    const cfg = { providers: { codex: { enabled: true, path: "codex", allowedRoots: [dir] } } };
+    const base = { provider: "codex", model: "gpt-5-codex", allowedTools: "Read", cwd: dir, originalCwd: dir };
+    throws(
+      () => buildDispatch({ ...base, settings: { env: { X: "1" } } }, "inspect", cfg),
+      /Codex tasks do not accept Claude-only settings/
+    );
+    const d = buildDispatch({ ...base, allowedTools: "Read,Write", writeRoots: [{ path: join(dir, "run", "report.md"), kind: "file" }] }, "inspect", cfg);
+    ok(d.argv.includes("--add-dir"), d.argv.join(" "));
+    ok(!d.argv.includes("--settings"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("Codex dispatch refuses contextWindow instead of ignoring it", () => {

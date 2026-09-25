@@ -17,7 +17,8 @@ function send(value) {
 function validateExecArgv() {
   const resumeIndex = argv.indexOf("resume");
   if (resumeIndex < 0) return;
-  const unsupported = argv.slice(resumeIndex + 1).find((value) => value === "--sandbox" || value === "--add-dir");
+  const execFlags = ["--sandbox", "--add-dir", "--skip-git-repo-check"];
+  const unsupported = argv.slice(resumeIndex + 1).find((value) => execFlags.includes(value));
   if (unsupported) {
     process.stderr.write(`unsupported resume option: ${unsupported}\n`);
     process.exit(2);
