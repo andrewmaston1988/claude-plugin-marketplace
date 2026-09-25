@@ -10,7 +10,8 @@ import { writeResult, appendRunLog } from "./results.mjs";
 // already names the file the key lives in), `after`/`when` (graph and gating —
 // a re-running dep invalidates through the scheduler's fixed point, and a gate
 // change cannot alter the output of a run that already passed it), and
-// `timeoutMs`/retries (schedule, not work).
+// `timeoutMs`/retries (schedule, not work) — nor the engine's own dispatch text,
+// the leaf notices, which rides the prompt rather than being part of it.
 const KEY_FIELDS = [
   "prompt", "model", "provider", "fallbackModel", "fallbackProvider", "effort",
   "allowedTools", "cwd", "outputDir", "workspace", "worktreeName", "branchName",

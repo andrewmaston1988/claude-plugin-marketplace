@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { buildDispatch, toSpawnable, windowsCommandLineLength } from "../src/dispatch.mjs";
+import { withLeafNotices } from "../src/leaf-notices.mjs";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-cmdline-"));
@@ -92,6 +93,27 @@ test("win32 command-line check: a 20,000-char prompt of quote characters fails (
     throws(
       () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
       (e) => /task 'quotey'/.test(e.message) && /command line/.test(e.message)
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("win32 command-line check: the engine's notice is measured, so a prompt that fits alone can still be refused", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "plan.json");
+    const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
+    const task = { id: "edge", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob" };
+    const len = (text) => windowsCommandLineLength(buildDispatch({ ...task, prompt: text }, text, cfg).argv);
+    // The line grows 1:1 with an all-x prompt, so one measurement lands on the cap.
+    const n = 30000 + (32000 - len("x".repeat(30000)));
+    ok(len("x".repeat(n)) <= 32000, "the author's prompt alone fits under the cap");
+    ok(len(withLeafNotices("x".repeat(n), task, cfg, "claude")) > 32000, "the notice is what tips it over");
+    writeFileSync(p, JSON.stringify({ tasks: [{ ...task, prompt: "x".repeat(n) }] }));
+    throws(
+      () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
+      (e) => /task 'edge'/.test(e.message) && /command line/.test(e.message)
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

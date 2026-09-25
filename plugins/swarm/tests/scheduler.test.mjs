@@ -1140,7 +1140,7 @@ test("open-model dispatch passes env trio through real spawn (shim log)", async 
     equal(entry.env.ANTHROPIC_MODEL, "minimax-m3:cloud");
     equal(entry.env.ANTHROPIC_BASE_URL, "http://127.0.0.1:65500");
     equal(entry.env.ANTHROPIC_API_KEY, "ollama");
-    deepEqual(entry.argv.slice(0, 2), ["-p", "do o"]);
+    ok(entry.argv[0] === "-p" && entry.argv[1].startsWith("do o")); // engine notice rides after
     ok(entry.cwd.toLowerCase().startsWith(workCwd.toLowerCase().slice(0, 8)));
     equal(readResult(p.resultsDir, "o").output, "open-leaf-done");
     equal(r.summary.tasks[0].state, "ok");

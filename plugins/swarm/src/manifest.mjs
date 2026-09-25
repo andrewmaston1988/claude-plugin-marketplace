@@ -6,6 +6,7 @@ import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { CONTEXT_WINDOW_1M, CONTEXT_WINDOWS } from "./contracts.mjs";
 import { declaredEfforts, effortFor, isValidEffort } from "./models.mjs";
 import { buildDispatch, toSpawnable, windowsCommandLineLength, transcriptRunner } from "./dispatch.mjs";
+import { withLeafNotices } from "./leaf-notices.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
 import { provenanceBanner, formatResetTime } from "./usage.mjs";
@@ -470,11 +471,9 @@ function measurablePrompt(prompt, cfg) {
     .replace(ITEM_TEMPLATE_RE_G, () => "x".repeat(FOREACH_ITEM_MAX));
 }
 
-// win32 only: the real command line the scheduler would spawn for each
-// leaf, measured through buildDispatch + toSpawnable (so the cmd /d /s /c
-// wrapper toSpawnable adds for a .cmd/.bat launcher is counted) with
-// CreateProcess quoting (windowsCommandLineLength) — a plain join
-// undercounts a quote-heavy prompt or the --settings JSON.
+// win32 only: the command line the scheduler would spawn for each leaf, the
+// engine's own notice included — measured through buildDispatch + toSpawnable in
+// CreateProcess quoting, so what validates is what spawns.
 function checkCommandLineLengths(tasks, cfg, io, errors, label) {
   if (io.platform !== "win32") return;
   // `resolveExecutable` shells out to `where` (up to 5s) per distinct command —
@@ -486,18 +485,19 @@ function checkCommandLineLengths(tasks, cfg, io, errors, label) {
     // A malformed task (missing prompt/model) is already reported by
     // validateTaskShapes — measuring it here would dispatch garbage argv.
     if (typeof t.model !== "string" || !t.model || typeof t.prompt !== "string") continue;
-    const prompt = measurablePrompt(t.prompt, cfg);
+    const author = measurablePrompt(t.prompt, cfg);
     let dispatch;
     try {
-      dispatch = buildDispatch(t, prompt, cfg);
+      dispatch = buildDispatch(t, author, cfg);
+      const sent = withLeafNotices(author, t, cfg, dispatch.runner);
+      dispatch = sent === author ? dispatch : buildDispatch(t, sent, cfg);
     } catch {
       // Provider identity, enabled-state, governance, and task-policy errors
       // are reported by normalization. They must not escape as an unlabelled
       // dispatch exception while the validator is collecting all diagnostics.
       continue;
     }
-    const { argv } = dispatch;
-    const { cmd, args } = toSpawnable(argv, { _platform: io.platform, _cache: resolveCache });
+    const { cmd, args } = toSpawnable(dispatch.argv, { _platform: io.platform, _cache: resolveCache });
     const len = windowsCommandLineLength([cmd, ...args]);
     if (len > WIN_CMDLINE_MAX) {
       errors.push(

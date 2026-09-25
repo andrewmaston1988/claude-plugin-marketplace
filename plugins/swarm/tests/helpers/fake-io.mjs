@@ -3,6 +3,7 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { withoutLeafNotices } from "../../src/leaf-notices.mjs";
 
 // handler(call, index) -> { exit=0, output="", delayMs=1, outputAtMs? } | undefined
 // outputAtMs emits output early (before close at delayMs) so tests can observe
@@ -71,11 +72,20 @@ export function makeIo(spawn, over = {}) {
   };
 }
 
-// Extract the -p prompt from a recorded shim/fake call's argv.
-export function promptOf(call) {
+// The prompt a recorded call actually carried: claude rides `-p`, codex takes it
+// positionally. Never strips — the engine's own notice is part of what was sent.
+export function sentPrompt(call) {
   const args = call.args ?? call.argv;
   const i = args.indexOf("-p");
-  return i >= 0 ? args[i + 1] : undefined;
+  return i >= 0 ? args[i + 1] : args[args.length - 1];
+}
+
+// The prompt the MANIFEST authored — the engine's trailing notice stripped, since
+// every stub here discriminates on the authored text. Undefined on a call with no
+// prompt of its own (codex's argv tail is not one).
+export function promptOf(call) {
+  const args = call.args ?? call.argv;
+  return args.indexOf("-p") >= 0 ? withoutLeafNotices(sentPrompt(call)) : undefined;
 }
 
 // A canned claude stream-json transcript for a resumed ask: init on s-2, then the answer.

@@ -11,6 +11,7 @@ import { loadManifest } from "./helpers/repo-io.mjs";
 import { readResult, resultPath } from "../src/results.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
+import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 
 const CFG = {
   provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },
@@ -59,7 +60,7 @@ test("resume: a task whose prompt changed re-runs instead of replaying the cache
     const spawn = fakeSpawnFactory(() => ({ output: "two" }));
     await runPlan(second, CFG, makeIo(spawn));
     equal(spawn.calls.length, 1, "a changed prompt must dispatch a leaf, not replay the cached result");
-    equal(readResult(second.resultsDir, "a").prompt, "say TWO");
+    equal(withoutLeafNotices(readResult(second.resultsDir, "a").prompt), "say TWO");
     ok(logOf(second).includes('"event":"cache-miss"'), "the run log must say why the task re-ran");
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -129,11 +130,11 @@ test("resume: a forEach clone whose item changed re-runs, not the cached clone",
     const list = (files) => (call) =>
       promptOf(call).startsWith("list files") ? { output: JSON.stringify(files) } : { output: "done" };
     await runPlan(first, CFG, makeIo(fakeSpawnFactory(list([{ f: "a.mjs" }]))));
-    equal(readResult(first.resultsDir, "fix[0]").prompt, "fix a.mjs");
+    equal(withoutLeafNotices(readResult(first.resultsDir, "fix[0]").prompt), "fix a.mjs");
     const second = loadPlan(dir, body("list files again"));
     const spawn = fakeSpawnFactory(list([{ f: "b.mjs" }]));
     await runPlan(second, CFG, makeIo(spawn));
-    equal(readResult(second.resultsDir, "fix[0]").prompt, "fix b.mjs", "a clone whose item changed must re-run");
+    equal(withoutLeafNotices(readResult(second.resultsDir, "fix[0]").prompt), "fix b.mjs", "a clone whose item changed must re-run");
     ok(spawn.calls.some((c) => promptOf(c) === "fix b.mjs"), "the changed clone reached a leaf");
   } finally {
     rmSync(dir, { recursive: true, force: true });
