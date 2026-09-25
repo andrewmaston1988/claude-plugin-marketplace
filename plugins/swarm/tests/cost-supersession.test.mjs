@@ -68,6 +68,18 @@ test("costView never chooses a superseded row as worst", () => {
   equal(view.points.find((row) => row.model === "claude-opus-5").supersededBy, "claude-opus-5-5");
 });
 
+test("a denylisted newest model does not hide its elder in costView", () => {
+  const old = "claude-opus-5";
+  const newest = "claude-opus-5-5";
+  const rows = [...grades(old, 7), ...grades(newest, 8)];
+  const view = costView(rows, [cost(old, 2), cost(newest, 1)], {
+    isDenylisted: (model) => model === newest,
+  });
+
+  equal(view.points.find((row) => row.model === old).supersededBy, undefined);
+  equal(view.spread.find((row) => row.model === old).supersededBy, undefined);
+});
+
 test("costScreen hides superseded cards and never names one as the hero leader", () => {
   const { costScreen } = loadPerfViews();
   const old = "claude-opus-5";
