@@ -287,7 +287,12 @@ export function createPeersServer({
         });
         const self = all.filter((p) => p.id === myId);
         const others = all.filter((p) => p.id !== myId);
-        const rows = [...self, ...others].map((p) => (p.id === myId ? `[This agent (${p.id})]\n  ${renderPeer(p)}` : renderPeer(p)));
+        let selfRow = null;
+        if (self.length) selfRow = `[This agent (${self[0].id})]\n  ${renderPeer(self[0])}`;
+        // An absent own row is itself worth showing: a row the broker dropped
+        // or reaped is otherwise indistinguishable from a healthy one.
+        else if (myId) selfRow = `[This agent (${myId})] — not in the broker's registry`;
+        const rows = [selfRow, ...others.map(renderPeer)].filter(Boolean);
         // Counts OTHERS: the caller is not a peer to itself, and quietly changing
         // what N means would alter every existing reader of the line.
         if (others.length === 0) {

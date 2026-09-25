@@ -460,3 +460,10 @@ test('a caller alone on the machine sees its own row and is told there are no ot
   assert.match(text, /Summary: my own work/);
   assert.match(text, /No other Claude Code instances found \(scope: machine\)\./);
 });
+
+test('a caller whose row is gone from the registry is told so, above the peers', async () => {
+  const text = await listWith([OTHER_A, OTHER_B]);
+  assert.match(text, /\[This agent \(me000001\)\] — not in the broker's registry/);
+  assert.match(text, /Found 2 peer\(s\) \(scope: machine\)/);
+  assert.ok(text.indexOf('registry') < text.indexOf('aa11bb22'), 'the missing-self line comes first');
+});
