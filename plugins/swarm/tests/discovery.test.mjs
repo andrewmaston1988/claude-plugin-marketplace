@@ -266,7 +266,7 @@ test("collapseFamilies: variant tags and size tags are lineage, not versions", (
     { model: "deepseek-v4-flash:preview-cloud" },
   ]);
   const byName = Object.fromEntries(out.map((m) => [m.model, m]));
-  equal(byName["kimi-k2.7-code:cloud"].supersededBy, undefined); // -code is its own lineage
+  equal(byName["kimi-k2.7-code:cloud"].supersededBy, "kimi-k3:cloud");
   equal(byName["gpt-oss:20b-cloud"].supersededBy, undefined);
   equal(byName["gpt-oss:120b-cloud"].supersededBy, undefined);
   equal(byName["deepseek-v4-flash:0731-cloud"].supersededBy, "deepseek-v4-flash:0830-cloud");

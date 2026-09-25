@@ -113,6 +113,8 @@ export function sortModelsBySize(models) {
 // matches alpha-prefix + digit-tail (`k2.6` → lineage "k", version 2.6) or is
 // pure lineage (variant words like `code`, size tags like `31b`). Two entries
 // compete only when their lineage segments match exactly.
+export const LINEAGE_ALIASES = Object.freeze({ "kimi-k-code": "kimi-k" });
+
 function parseLineage(name, suffix) {
   let base = name;
   const tagSuffix = "-" + suffix.replace(/^:/, "");
@@ -129,7 +131,8 @@ function parseLineage(name, suffix) {
     if (m[1]) lineage.push(m[1]);
     version.push(m[2].split(".").map(Number));
   }
-  return { lineage: lineage.join("-"), version };
+  const nameLineage = lineage.join("-");
+  return { lineage: LINEAGE_ALIASES[nameLineage] || nameLineage, version };
 }
 
 // Element-wise compare; a strict prefix of the other is incomparable (NaN) —
