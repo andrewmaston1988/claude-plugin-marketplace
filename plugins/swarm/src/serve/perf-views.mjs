@@ -105,7 +105,7 @@ export function leaders(report, k = 3) {
 // remains attached to its provider and compatible cost domain. A model with
 // no multiplier is UNMEASURED, not free: it stays in `points` with
 // `multiplier: null` so the page can draw it as a void, never a 0×.
-export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_COST_BANDS, valueMargin, isDenylisted = () => false } = {}) {
+export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_COST_BANDS, valueMargin, isDenylisted = () => false, cloudSuffix = ":cloud" } = {}) {
   bands = resolveBands(bands, DEFAULT_COST_BANDS);
   const margin = resolveValueMargin(valueMargin);
   const costs = costRows.filter((row) => costDomain === undefined || row.costDomain === costDomain);
@@ -182,7 +182,7 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
     familyNames.set(provider, names);
   }
   for (const [provider, names] of familyNames) {
-    const suffix = provider === "ollama" ? ":cloud" : "";
+    const suffix = provider === "ollama" ? cloudSuffix : "";
     const families = collapseFamilies([...names].map((model) => ({ model })), suffix);
     const visible = new Set(visibleModels(families, { isDenylisted }).map((row) => row.model));
     const supersededBy = new Map(families

@@ -97,6 +97,16 @@ test("superseded points get verdicts from visible rows but never dominate them",
   equal(point(visible).dominatedBy, null);
 });
 
+test("costView uses the configured Ollama cloud suffix for model families", () => {
+  const old = "kimi-k3:0901-local";
+  const current = "kimi-k3.1:local";
+  const rows = [...grades(old, 7), ...grades(current, 8)].map((row) => ({ ...row, provider: "ollama" }));
+  const costs = [cost(old, 2), cost(current, 1)].map((row) => ({ ...row, provider: "ollama" }));
+  const view = costView(rows, costs, { cloudSuffix: ":local" });
+
+  equal(view.points.find((row) => row.model === old).supersededBy, current);
+});
+
 test("costScreen hides superseded cards and never names one as the hero leader", () => {
   const { costScreen } = loadPerfViews();
   const old = "claude-opus-5";
