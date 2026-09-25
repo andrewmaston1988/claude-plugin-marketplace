@@ -131,7 +131,7 @@ function parseLineage(name, suffix) {
     if (!m) { lineage.push(seg); mergeNumeric = false; continue; }
     if (m[1]) lineage.push(m[1]);
     const numbers = m[2].split(".").map(Number);
-    const pureNumeric = !m[1] && /^\d+$/.test(seg) && numbers[0] < 1000;
+    const pureNumeric = !m[1] && /^\d+$/.test(seg) && !/^\d{4,}$/.test(seg);
     if (pureNumeric && mergeNumeric) version.at(-1).push(numbers[0]);
     else version.push(numbers);
     mergeNumeric = pureNumeric;

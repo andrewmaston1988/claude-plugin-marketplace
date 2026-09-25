@@ -36,6 +36,17 @@ test("version comparison pads numeric prefixes but preserves tag forks", () => {
   equal(byName["deepseek-v4-flash:0830-cloud"].supersededBy, "deepseek-v4.1-flash:cloud");
 });
 
+test("zero-padded date stamps do not supersede real OpenAI generations", () => {
+  const models = collapseFamilies([
+    { model: "gpt-4.1" },
+    { model: "gpt-4-0613" },
+    { model: "gpt-5" },
+  ], "");
+  const byName = Object.fromEntries(models.map((model) => [model.model, model]));
+  equal(byName["gpt-4.1"].supersededBy, "gpt-5");
+  equal(byName["gpt-4-0613"].supersededBy, "gpt-4.1");
+});
+
 test("Claude dash-separated versions compare as major and minor numbers", () => {
   const models = collapseFamilies([
     { model: "claude-opus-4-5" },
