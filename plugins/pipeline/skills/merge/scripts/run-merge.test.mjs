@@ -21,6 +21,7 @@ import {
   mutexConflict,
   taskLines,
   DRIVER_STEPS,
+  resolveTargetBranch,
 } from "./run-merge.mjs";
 
 // ── Scenario 2 — branch parsing ───────────────────────────────────────────────
@@ -276,7 +277,45 @@ function tmpRepo(branch = "autonomous/feat-x") {
   return dir;
 }
 
-async function runMain(dir, config, { branch = "autonomous/feat-x", projectRow = null } = {}) {
+test("resolveTargetBranch: explicit target beats origin/HEAD", () => {
+  const dir = tmpRepo();
+  try {
+    const g = (...a) => spawnSync("git", ["-c", "core.hooksPath=", ...a], { cwd: dir, encoding: "utf8" });
+    g("update-ref", "refs/remotes/origin/main", "HEAD");
+    g("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    equal(resolveTargetBranch("noproj", "feat-x", dir, "release"), "release");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveTargetBranch: explicit target beats the pipeline row override", () => {
+  const dir = tmpRepo();
+  const oldPath = process.env.PATH;
+  try {
+    writeFileSync(join(dir, "pipeline.cmd"), '@echo {"target_branch":"develop"}\r\n');
+    process.env.PATH = `${dir};${oldPath}`;
+    equal(resolveTargetBranch("noproj", "feat-x", dir, "release"), "release");
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resolveTargetBranch: absent or empty explicit target preserves origin/HEAD", () => {
+  const dir = tmpRepo();
+  try {
+    const g = (...a) => spawnSync("git", ["-c", "core.hooksPath=", ...a], { cwd: dir, encoding: "utf8" });
+    g("update-ref", "refs/remotes/origin/main", "HEAD");
+    g("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    equal(resolveTargetBranch("noproj", "feat-x", dir, undefined), "main");
+    equal(resolveTargetBranch("noproj", "feat-x", dir, ""), "main");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+async function runMain(dir, config, { branch = "autonomous/feat-x", projectRow = null, extraArgs = [] } = {}) {
   let buf = "";
   const write = process.stdout.write;
   const ewrite = process.stderr.write;
@@ -284,7 +323,7 @@ async function runMain(dir, config, { branch = "autonomous/feat-x", projectRow =
   process.stderr.write = (s) => { buf += s; return true; };
   try {
     await main({
-      _argv:       ["--branches", branch, "--project-dir", dir, "--dry-run"],
+      _argv:       ["--branches", branch, "--project-dir", dir, "--dry-run", ...extraArgs],
       _config:     config,
       _projectRow: projectRow,
     });
@@ -294,6 +333,21 @@ async function runMain(dir, config, { branch = "autonomous/feat-x", projectRow =
   }
   return buf;
 }
+
+test("main: explicit target is reported and carried into the merge command", async () => {
+  const dir = tmpRepo();
+  try {
+    const g = (...a) => spawnSync("git", ["-c", "core.hooksPath=", ...a], { cwd: dir, encoding: "utf8" });
+    g("update-ref", "refs/remotes/origin/main", "HEAD");
+    g("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main");
+    g("branch", "release");
+    const outText = await runMain(dir, { plansDir: "{root}/plans" }, { extraArgs: ["--target-branch", "release"] });
+    match(outText, /targetBranch:\s+release/);
+    match(outText, /--target-branch "release"/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("PAUSE: an unresolvable template stops the merge instead of reaching --plans-dir", async () => {
   const dir = tmpRepo();

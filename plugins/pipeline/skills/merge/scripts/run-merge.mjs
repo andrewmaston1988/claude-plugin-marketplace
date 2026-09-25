@@ -98,7 +98,8 @@ function git(args, cwd) {
   return r.status === 0 ? (r.stdout ?? "").trim() : "";
 }
 
-export function resolveTargetBranch(project, feature, projectDir) {
+export function resolveTargetBranch(project, feature, projectDir, explicit) {
+  if (typeof explicit === "string" && explicit.length > 0) return explicit;
   const override = queryRow(project, feature, "target_branch");
   if (override) return override;
   const head = git(["symbolic-ref", "refs/remotes/origin/HEAD"], projectDir);
@@ -286,7 +287,12 @@ export async function main({ _argv, _config, _projectRow } = {}) {
     return 1;
   }
 
-  const targetBranch = resolveTargetBranch(project, featureOf(branches[0]), projectDir);
+  const targetBranch = resolveTargetBranch(
+    project,
+    featureOf(branches[0]),
+    projectDir,
+    getFlag("target-branch", argv),
+  );
   // One resolver, four precedence tiers — see REFERENCE.md. The driver used to hand-roll a
   // {project}-only substitution here, which saw neither plansDirs[<project>] nor the project
   // row's plans_dir column.
