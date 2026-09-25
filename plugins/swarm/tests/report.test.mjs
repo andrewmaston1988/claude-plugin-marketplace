@@ -4,12 +4,17 @@
 // agent-facing digest.md is unaffected either way.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { runPlan } from "../src/scheduler.mjs";
-import { buildDigestTask } from "../src/digest.mjs";
+import { buildDigestTask, scratchPath, DIGEST_ID } from "../src/digest.mjs";
+import { writeResult } from "../src/results.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
+
+const SHIM = fileURLToPath(new URL("./shims/codex-shim.mjs", import.meta.url));
 
 const tmp = () => mkdtempSync(join(tmpdir(), "swarm-report-"));
 
@@ -112,5 +117,149 @@ test("integration: without a report block nothing is written and the digest is u
     equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "DIGEST TEXT");
     // nothing was asked for, so nothing is missing — no false alarm
     equal(r.reportMissing, false, "a run that never wanted a report must not warn about one");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── Codex report mode, end to end ─────────────────────────────────────────────
+
+const CODEX_CFG = {
+  ...CFG,
+  providers: {
+    claude: { enabled: true, allowedRoots: [tmpdir()] },
+    codex: { enabled: true, path: "codex", sandbox: "workspace-write", allowedRoots: [tmpdir()] },
+  },
+};
+
+const CODEX_DIGEST_TEXT = "CODEX DIGEST TEXT";
+
+// Same real buildDigestTask, dispatched through the Codex runner instead.
+function codexPlanWith(dir, report) {
+  const tasks = [leaf("scan-a", dir), leaf("scan-b", dir)];
+  const p = {
+    cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, tasks,
+    goal: "find every caller of frobnicate",
+    digest: { provider: "codex", model: "gpt-5-codex", instructions: "", ...(report && { report }) },
+  };
+  p.tasks = [...tasks, buildDigestTask(p)];
+  return p;
+}
+
+// The digest's spawn is driven through the REAL codex shim: the argv the engine
+// built runs it (so the shim's own exec-flag placement rule adjudicates it), and
+// the JSONL it prints is what the engine's codex parser consumes. A shim that
+// refuses the argv would otherwise surface as an opaque zero-output digest.
+function codexSpawn(dir, { writesReport = true, output = CODEX_DIGEST_TEXT } = {}) {
+  const shimRuns = [];
+  const spawn = fakeSpawnFactory((call) => {
+    if (!call.args.includes("exec")) return { output: streamOut(`finding from leaf`, `s-${shimRuns.length}`) };
+    const shim = spawnSync(process.execPath, [SHIM, ...call.args], {
+      encoding: "utf8", env: { ...process.env, SWARM_CODEX_SHIM_OUTPUT: output },
+    });
+    shimRuns.push({ call, status: shim.status, stderr: shim.stderr });
+    if (writesReport) writeFileSync(join(dir, "run", "report.md"), "# Callers of frobnicate\n\nBoth leaves ran.\n");
+    return { output: shim.stdout, exit: shim.status };
+  });
+  return { spawn, shimRuns };
+}
+
+const digestCallOf = (spawn) => spawn.calls.find((c) => c.args.includes("exec"));
+
+test("Codex integration: the digest launches from its scratch cwd and writes digest.md from real JSONL", async () => {
+  const dir = tmp();
+  try {
+    const p = codexPlanWith(dir, true);
+    const { spawn, shimRuns } = codexSpawn(dir);
+    const r = await runPlan(p, CODEX_CFG, makeIo(spawn));
+
+    equal(shimRuns.length, 1, "the digest's emitted argv must run the shim exactly once");
+    equal(shimRuns[0].status, 0, `the shim refused the emitted argv: ${shimRuns[0].stderr}`);
+
+    const call = digestCallOf(spawn);
+    equal(call.cmd, "codex");
+    equal(call.opts.cwd, scratchPath(p.resultsDir), "the digest drafts in its own scratch directory");
+    ok(existsSync(scratchPath(p.resultsDir)), "the scratch cwd must exist before the digest is spawned");
+
+    // The provider translation, asserted on the argv the run actually used.
+    equal(call.args[call.args.indexOf("--sandbox") + 1], "workspace-write");
+    ok(call.args.includes("--add-dir"), call.args.join(" "));
+    ok(call.args.includes("--skip-git-repo-check"), call.args.join(" "));
+    ok(!call.args.includes("--settings"), `Codex must never receive Claude settings: ${call.args.join(" ")}`);
+
+    equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), CODEX_DIGEST_TEXT);
+    equal(r.digestFailed, false);
+    equal(r.reportMissing, false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("Codex integration: the report carries the leaf's title and the engine's run footnote", async () => {
+  const dir = tmp();
+  try {
+    const p = codexPlanWith(dir, true);
+    const { spawn } = codexSpawn(dir);
+    const r = await runPlan(p, CODEX_CFG, makeIo(spawn));
+
+    ok(r.reportPath, "runPlan must return the report path");
+    const md = readFileSync(r.reportPath, "utf8");
+    ok(md.startsWith("# Callers of frobnicate"), md.slice(0, 120));
+    ok(md.indexOf("*Run:") > md.indexOf("Both leaves ran."), "the Run footnote is at the bottom");
+    ok(md.includes("scan-a") && md.includes("scan-b"), "the footnote names each leaf");
+    ok(!md.includes(DIGEST_ID), "the digest node is not in the footnote");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// No report block means a read-only digest: it keeps the repo-root gate it does
+// not need to leave, so it gets no writable directory and no launch allowance.
+test("Codex integration: a read-only digest configuration stays read-only end to end", async () => {
+  const dir = tmp();
+  try {
+    const p = codexPlanWith(dir, false);
+    const { spawn, shimRuns } = codexSpawn(dir, { writesReport: false });
+    const r = await runPlan(p, CODEX_CFG, makeIo(spawn));
+
+    equal(shimRuns[0].status, 0, shimRuns[0].stderr);
+    const call = digestCallOf(spawn);
+    equal(call.opts.cwd, dir, "a read-only digest reads the dispatching repo in place");
+    equal(call.args[call.args.indexOf("--sandbox") + 1], "read-only");
+    ok(!call.args.includes("--add-dir"), call.args.join(" "));
+    ok(!call.args.includes("--skip-git-repo-check"), call.args.join(" "));
+    ok(!call.args.includes("--settings"), call.args.join(" "));
+
+    equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), CODEX_DIGEST_TEXT);
+    equal(r.reportPath ?? null, null);
+    equal(r.reportMissing, false, "nothing was asked for, so nothing is missing");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The failed audit's shape, reproduced: the six leaves completed, __digest died
+// with durationMs 0 and the provider-settings rejection. A resume must re-dispatch
+// ONLY the digest and land both artifacts.
+test("Codex integration: resume re-dispatches only the failed digest", async () => {
+  const dir = tmp();
+  try {
+    const p = codexPlanWith(dir, true);
+    mkdirSync(join(p.resultsDir, "results"), { recursive: true });
+    for (const t of p.tasks.filter((t) => t.id !== DIGEST_ID)) {
+      writeResult(p.resultsDir, t.id, {
+        id: t.id, model: t.model, provider: t.provider, ok: true, exit: 0, durationMs: 12,
+        output: `finding from ${t.id}`, sessionId: `s-${t.id}`,
+      });
+    }
+    writeResult(p.resultsDir, DIGEST_ID, {
+      id: DIGEST_ID, model: "gpt-5-codex", provider: "codex", ok: false, exit: null, durationMs: 0,
+      output: "dispatch error: provider 'codex' rejected task: Codex tasks do not accept Claude-only settings",
+      errorCode: "DISPATCH_ERROR",
+    });
+
+    const { spawn, shimRuns } = codexSpawn(dir);
+    const r = await runPlan(p, CODEX_CFG, makeIo(spawn));
+
+    equal(spawn.calls.length, 1, `only the digest may re-dispatch: ${spawn.calls.map((c) => c.cmd).join(", ")}`);
+    equal(shimRuns[0].status, 0, shimRuns[0].stderr);
+    equal(digestCallOf(spawn).opts.cwd, scratchPath(p.resultsDir));
+    const resumed = r.summary.tasks.filter((t) => t.state === "skipped").map((t) => t.id);
+    equal(resumed.length, p.tasks.length - 1, `every successful leaf stays skipped: ${resumed.join(", ")}`);
+    ok(readFileSync(join(p.resultsDir, "digest.md"), "utf8").includes(CODEX_DIGEST_TEXT));
+    ok(existsSync(join(p.resultsDir, "report.md")), "the report the failed run never produced");
+    equal(r.digestFailed, false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -539,12 +539,21 @@ test("generated digest: a Codex report manifest validates, and its argv carries 
 });
 
 // The dispatch contract is platform-independent; only the LENGTH measurement is
-// win32-specific. On an injected non-win32 platform the old path checked nothing.
-test("generated digest: the dispatch check runs off win32 too", () => {
+// win32-specific. So a digest the length helper would reject on win32 still
+// validates off win32 — the new check did not become a second win32 gate.
+test("generated digest: the dispatch check is not the win32 length check", () => {
   const dir = tmp();
   try {
-    const plan = loadManifest(codexReportManifest(dir), codexCfg(dir), dir, { io: { platform: "linux" } });
+    const cfg = { ...codexCfg(dir), codexPath: "C:\\fake\\codex.exe" };
+    const long = writeManifest(dir, {
+      resultsDir: "out",
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex" }],
+      digest: { provider: "codex", model: "gpt-5-codex", report: true, instructions: "x".repeat(32000) },
+    }, "long.json");
+    const plan = loadManifest(long, cfg, dir, { io: { platform: "linux" } });
     equal(plan.digest.provider, "codex");
+    throws(() => loadManifest(long, cfg, dir, { io: { platform: "win32" } }),
+      (e) => /digest/.test(e.message) && /command line/.test(e.message));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
