@@ -3,6 +3,7 @@
 import { OUTCOMES } from "../aspects.mjs";
 import { overall } from "../scores.mjs";
 import { identityOf } from "../contracts.mjs";
+import { collapseFamilies, visibleModels } from "../discovery.mjs";
 import { band, coins, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
 
 const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
@@ -104,7 +105,7 @@ export function leaders(report, k = 3) {
 // remains attached to its provider and compatible cost domain. A model with
 // no multiplier is UNMEASURED, not free: it stays in `points` with
 // `multiplier: null` so the page can draw it as a void, never a 0×.
-export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_COST_BANDS, valueMargin } = {}) {
+export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_COST_BANDS, valueMargin, isDenylisted = () => false, cloudSuffix = ":cloud" } = {}) {
   bands = resolveBands(bands, DEFAULT_COST_BANDS);
   const margin = resolveValueMargin(valueMargin);
   const costs = costRows.filter((row) => costDomain === undefined || row.costDomain === costDomain);
@@ -173,6 +174,26 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
       ...(r.baseModel !== undefined ? { baseModel: r.baseModel } : {}),
     }))
     .sort((a, z) => (a.mult ?? Infinity) - (z.mult ?? Infinity) || compareIdentity(a, z));
+  const familyNames = new Map();
+  for (const row of [...points, ...spread]) {
+    const provider = providerKey(row);
+    const names = familyNames.get(provider) || new Set();
+    names.add(row.model);
+    familyNames.set(provider, names);
+  }
+  for (const [provider, names] of familyNames) {
+    const suffix = provider === "ollama" ? cloudSuffix : "";
+    const families = collapseFamilies([...names].map((model) => ({ model })), suffix);
+    const visible = new Set(visibleModels(families, { isDenylisted }).map((row) => row.model));
+    const supersededBy = new Map(families
+      .filter((row) => !visible.has(row.model) && row.supersededBy)
+      .map((row) => [row.model, row.supersededBy]));
+    for (const row of [...points, ...spread]) {
+      if (providerKey(row) === provider && supersededBy.has(row.model)) {
+        row.supersededBy = supersededBy.get(row.model);
+      }
+    }
+  }
 
   // Verdicts are intentionally local. A single global best/worst would imply
   // that (say) an Ollama meter point and a Codex plan-rate point share a cost
@@ -182,19 +203,20 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
   const verdicts = (sectionPoints, sectionSpread) => {
     const domains = new Set(sectionSpread.map((row) => row.costDomain || "legacy"));
     if (domains.size > 1) return { best: null, worst: null };
-    const candidates = sectionPoints.filter((p) => p.onFrontier && p.multiplier != null && !p.thin);
+    const candidates = sectionPoints.filter((p) => !p.supersededBy && p.onFrontier && p.multiplier != null && !p.thin);
     const topWtd = candidates.reduce((m, p) => (p.wtd > m ? p.wtd : m), -Infinity);
     const best = candidates.filter((p) => p.wtd >= topWtd - margin)
       .sort((a, z) => a.multiplier - z.multiplier || z.wtd - a.wtd || compareIdentity(a, z))[0] ?? null;
-    const worst = sectionPoints.filter((p) => p.dominatedBy != null)
+    const worst = sectionPoints.filter((p) => !p.supersededBy && p.dominatedBy != null)
       .sort((a, z) => z.multiplier - a.multiplier || a.wtd - z.wtd || compareIdentity(a, z))[0] ?? null;
     return { best, worst };
   };
   const providers = [...new Set([...points, ...costs].map(providerKey))].sort();
   for (const sectionProvider of providers) {
     const sectionPoints = points.filter((point) => providerKey(point) === sectionProvider);
-    const participants = sectionPoints.filter((point) => point.wtd != null && point.multiplier != null);
-    for (const point of participants) {
+    const participants = sectionPoints.filter((point) => !point.supersededBy && point.wtd != null && point.multiplier != null);
+    const comparable = sectionPoints.filter((point) => point.wtd != null && point.multiplier != null);
+    for (const point of comparable) {
       const dominator = participants.find((other) => other !== point
         && other.costDomain === point.costDomain
         && other.wtd > point.wtd

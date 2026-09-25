@@ -19,6 +19,7 @@ import { projectGrouping } from "./grouping.mjs";
 import { buildSnapshot, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
 import { providerConfig } from "../providers.mjs";
+import { matchDenylist } from "../manifest.mjs";
 
 const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
 const PERF_JS = fileURLToPath(new URL("./perf.js", import.meta.url));
@@ -349,7 +350,13 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   };
   const costOf = (rows, domain) => {
     const ollama = providerConfig(cfg, "ollama");
-    return costView(rows, costRows(), { domain, bands: resolveBands(ollama?.cloud?.ollama?.costBands), valueMargin: ollama?.cloud?.ollama?.valueMargin });
+    return costView(rows, costRows(), {
+      domain,
+      bands: resolveBands(ollama?.cloud?.ollama?.costBands),
+      valueMargin: ollama?.cloud?.ollama?.valueMargin,
+      isDenylisted: (model) => Boolean(matchDenylist(model, cfg)),
+      cloudSuffix: ollama?.cloudSuffix || ":cloud",
+    });
   };
   const perf = (res, url) => {
     const q = (k) => url.searchParams.get(k) || undefined;
