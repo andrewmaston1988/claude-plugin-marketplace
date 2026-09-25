@@ -23,18 +23,25 @@ export function leafNotices({ runner, sandbox } = {}) {
 const SEPARATOR = "\n\n";
 const ANCHOR = `${SEPARATOR}${FINAL_MESSAGE}`;
 
+// The engine only ever appends its block, so the block is the TAIL: a prompt
+// that quotes these words mid-text is the author's, not a previous telling.
+function blockAt(text) {
+  const at = text.lastIndexOf(ANCHOR);
+  return at !== -1 && at === text.length - ANCHOR.length ? at : -1;
+}
+
 /** Append the notice to a leaf's prompt. Idempotent — a prompt that already
- *  carries the block is returned unchanged, so no leaf is ever told twice. */
+ *  ends with the block is returned unchanged, so no leaf is ever told twice. */
 export function withLeafNotices(prompt, task, cfg, runner) {
   const text = String(prompt ?? "");
-  if (text.includes(ANCHOR)) return text;
+  if (blockAt(text) !== -1) return text;
   return text + SEPARATOR + leafNotices({ runner, sandbox: sandboxFor(task, cfg, runner) });
 }
 
 /** The author's prompt, with the engine's block removed. */
 export function withoutLeafNotices(prompt) {
   const text = String(prompt ?? "");
-  const at = text.indexOf(ANCHOR);
+  const at = blockAt(text);
   return at === -1 ? text : text.slice(0, at);
 }
 

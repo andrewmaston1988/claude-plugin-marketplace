@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
+import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 import { fakeSpawnFactory, makeIo, sentPrompt } from "./helpers/fake-io.mjs";
 
 // The notices verbatim: these literals are the spec, so a wording change is a
@@ -156,6 +157,23 @@ test("a forEach clone carries the notice exactly once", async () => {
       equal(occurrences(sentPrompt(call), FINAL), 1, "the engine never repeats itself");
       ok(sentPrompt(call).endsWith(FINAL));
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The anchor's words are the author's too. Only the block at the TAIL is the
+// engine's, so a prompt quoting it mid-text is told once and read back whole.
+test("a prompt quoting the anchor mid-text keeps it, and still gets the block at the tail", async () => {
+  const dir = tmp();
+  try {
+    const authored = `read this:\n\n${FINAL}\nthen act`;
+    const spawn = fakeSpawnFactory(() => ({ output: "done" }));
+    const p = plan(dir, [task("a", { prompt: authored })]);
+    await runPlan(p, CFG, makeIo(spawn));
+    const sent = sentPrompt(spawn.calls[0]);
+    ok(sent.endsWith(`\n\n${FINAL}`), "the engine's block still lands last");
+    equal(withoutLeafNotices(sent), authored, "the author's own words survive the strip");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
