@@ -220,6 +220,11 @@ async function cmdModels(rest = [], {
   ].filter((m) => providerEnabled(registry, cfg, m) && !isDenylisted(m.model)), { cloudSuffix: ollama.cloudSuffix });
   const visible = new Set(visibleProviderModels(liveRoster, { isDenylisted }).map(identityKey));
   const shown = showAll ? liveRoster : liveRoster.filter((m) => visible.has(identityKey(m)));
+  // `swarm models` is step 1 of the skill, so a fresh install meets an empty roster before
+  // it ever meets a validation refusal. The footer alone is a dead end; name the way out.
+  if (!shown.length) {
+    write(dim("no launchable models — run /swarm:swarm setup to enable a provider and set allowedRoots"));
+  }
   const { readRows, scoresPath, frontier } = await import("../src/scores.mjs");
   const costRows = await meterCostRows(env);
   const multOf = new Map(costRows.map((r) => [r.model, r.mult]));

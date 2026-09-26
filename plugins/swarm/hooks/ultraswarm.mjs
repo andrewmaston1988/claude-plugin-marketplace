@@ -25,19 +25,59 @@ function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
 
-export function standingBlock(mode) {
+// The block is OPERATOR-LOCKED (2026-09-26) in scout's shape — identity line, a nested
+// non-negotiable trigger, The Rule, and a Red Flags table of rationalisations. Do not
+// reflow, reword or "improve" a line of it: tests/ultraswarm.test.mjs transcribes the
+// locked text verbatim, so any edit outside an operator decision fails there first.
+const IDENTITY = 'You have swarm. The operator has decided in advance: swarm is PRE-AUTHORISED.';
+
+function blockLines(mode, identity) {
   return [
     '<EXTREMELY_IMPORTANT>',
-    'Standing mode is ON (swarm.always): the swarm skill is PRE-AUTHORISED. RUN IT.',
-    'Invoke Skill(swarm); read orchestrating-agents and executing-swarms — that reasoning',
-    'is what makes the manifest defensible. Then models, author, validate, dispatch.',
-    'Emit none of it: no grouping block, no gate statement, no caveat paragraph.',
-    'Ask none of it: the offer gate, adversarial review, and every other settled call are',
-    'ANSWERED — presenting one back for approval is the defect.',
-    'Solo only on conversational turns, a single bounded question, or a trivial edit.',
+    identity,
+    'It spreads cost across providers, optimises spend, offloads and compresses carried',
+    'context, and applies committee judgement. The trade-off is settled — not yours to weigh.',
+    '',
+    '<EXTREMELY-IMPORTANT>',
+    'If there is even a 1% chance work can be delegated, fanned out, or judged by',
+    'another model, you ABSOLUTELY MUST swarm it.',
+    'This is not negotiable. You cannot rationalise your way out of it.',
+    '</EXTREMELY-IMPORTANT>',
+    '',
+    '## The Rule',
+    '**Before any delegable work**: invoke Skill(swarm:swarm), read orchestrating-agents',
+    'and executing-swarms, then models -> author -> validate -> dispatch. Emit none of the',
+    'reasoning. Ask none of the settled calls: presenting one back for approval is the defect.',
+    'Solo ONLY for a conversational reply, a single one-read question, or a trivial edit.',
+    '',
+    '## Red Flags',
+    '| Thought | Reality |',
+    '|---|---|',
+    '| "Inline is quicker" | The operator decided in advance. Period. |',
+    '| "It\'s too small to swarm" | Size is not the test. The decision is already made. |',
+    '| "A leaf will do it worse" | You verify every leaf; committee judgement beats one pass. |',
+    '| "I\'ll check with the operator first" | They answered in advance. Asking back is the defect. |',
+    '| "I know the command, I can skip the skill" | The command arrives without the rules that govern it. |',
+    '| "An Agent/Workflow will do" | Swarm is the fan-out tier; Agent only for one run that must be on Anthropic. |',
+    '| "I\'ll peek at the leaf\'s log" | One status check, then hands-off until the notification. |',
+    '',
     `Mode: ${mode}`,
     '</EXTREMELY_IMPORTANT>',
-  ].join('\n');
+  ];
+}
+
+export function standingBlock(mode) {
+  return blockLines(mode, IDENTITY).join('\n');
+}
+
+// A fresh install has no config file at all, so nothing here can be pre-authorised yet: the
+// same block carries the setup route where the standing claim would sit, and every other
+// line stays — the operator, 2026-09-26: "It shouldnt swap anything; it should show the
+// message when swarm is not yet configured."
+const SETUP_IDENTITY = 'You have the swarm plugin but it is not configured, the operator has installed it and expects it to work. The first thing that you must do is run /swarm:swarm setup';
+
+function setupBlock(mode) {
+  return blockLines(mode, SETUP_IDENTITY).join('\n');
 }
 
 // Every id that could own roots: the canonical blocks the operator wrote, plus the two ids
@@ -50,19 +90,24 @@ function providerIds(config) {
     .filter((id) => id !== 'claude');
 }
 
+// Roots are resolved per provider rather than read off the block, so a provider that names
+// none inherits the top-level list. The legacy `provider.allowedRoots` concat stays: this
+// hook reads RAW config.json, and addLegacyProviderView never runs on a file off disk.
+// Empty means the install never ran setup — nothing is dispatchable, whatever the mode says.
+function configuredRoots(config) {
+  return [...new Set(providerIds(config)
+    .filter((id) => providerConfig(config, id)?.enabled !== false)
+    .flatMap((id) => allowedRootsFor(config, id).roots || [])
+    .concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
+}
+
 // cwd under any allowed root -> alternative models are launchable here. Lazy import:
 // manifest.mjs is the governance source of truth but heavy for a per-prompt hook.
 //
 // Claude is EXCLUDED here and included by the run-level gate. The two are not the same
 // question: this one is "is the alternative-model path armed?", not "where may swarm run".
-// Roots are resolved per provider rather than read off the block, so a provider that names
-// none inherits the top-level list. The legacy `provider.allowedRoots` concat stays: this
-// hook reads RAW config.json, and addLegacyProviderView never runs on a file off disk.
 export async function modeFor({ cwd, config }) {
-  const roots = [...new Set(providerIds(config)
-    .filter((id) => providerConfig(config, id)?.enabled !== false)
-    .flatMap((id) => allowedRootsFor(config, id).roots || [])
-    .concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
+  const roots = configuredRoots(config);
   if (!roots.length || !cwd) return MODE_ANTHROPIC;
   const { isUnderRoot } = await import('../src/manifest.mjs');
   return roots.some((r) => isUnderRoot(cwd, r)) ? MODE_CLOUD : MODE_ANTHROPIC;
@@ -75,11 +120,16 @@ const KEYWORD_RE = /(^|[^\w./-])ultraswarm(?![\w./-])/i;
 // `usage` is readCachedUsage()'s array; the caller reads it, so this stays pure
 // and an absent argument behaves exactly as before usage existed.
 export async function decide({ event, prompt = '', cwd, config, usage = [] }) {
-  const armed = event === 'SessionStart' ? config?.swarm?.always === true
+  // SessionStart alone may fire without swarm.always: an install with no roots dispatches
+  // nothing, so the session has to learn the way out before it tries. The keyword event is
+  // unchanged — a user asking for the swarm on a prompt still gets the standing block.
+  const unconfigured = event === 'SessionStart' && !configuredRoots(config).length;
+  const armed = event === 'SessionStart' ? config?.swarm?.always === true || unconfigured
     : event === 'UserPromptSubmit' ? KEYWORD_RE.test(prompt)
       : false;
   if (!armed) return null;
-  const block = standingBlock(await modeFor({ cwd, config }));
+  const mode = await modeFor({ cwd, config });
+  const block = unconfigured ? setupBlock(mode) : standingBlock(mode);
   const lines = notableLines(usage);
   return lines.length ? `${block}\n${lines.join('\n')}` : block;
 }

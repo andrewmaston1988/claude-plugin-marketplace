@@ -32,18 +32,79 @@ test("modeFor: cloud under an allowed root (either slash style, any case), Anthr
   equal(await modeFor({ cwd: "C:/code/x", config: null }), MODE_ANTHROPIC);
 });
 
-test("standingBlock mirrors the superpowers dispatcher: wrapped, pre-authorised, ceremony named, one mode bracket, no question", () => {
+// The operator-locked wording (2026-09-26), transcribed here as literals rather than
+// referenced through an exported constant: a shared constant would move with the hook and
+// the pin would never bite. Any edit to the block — a reflowed line, a dropped table row —
+// fails this row, which is the point of "LOCKED".
+const LOCKED_BLOCK = (mode) => `<EXTREMELY_IMPORTANT>
+You have swarm. The operator has decided in advance: swarm is PRE-AUTHORISED.
+It spreads cost across providers, optimises spend, offloads and compresses carried
+context, and applies committee judgement. The trade-off is settled — not yours to weigh.
+
+<EXTREMELY-IMPORTANT>
+If there is even a 1% chance work can be delegated, fanned out, or judged by
+another model, you ABSOLUTELY MUST swarm it.
+This is not negotiable. You cannot rationalise your way out of it.
+</EXTREMELY-IMPORTANT>
+
+## The Rule
+**Before any delegable work**: invoke Skill(swarm:swarm), read orchestrating-agents
+and executing-swarms, then models -> author -> validate -> dispatch. Emit none of the
+reasoning. Ask none of the settled calls: presenting one back for approval is the defect.
+Solo ONLY for a conversational reply, a single one-read question, or a trivial edit.
+
+## Red Flags
+| Thought | Reality |
+|---|---|
+| "Inline is quicker" | The operator decided in advance. Period. |
+| "It's too small to swarm" | Size is not the test. The decision is already made. |
+| "A leaf will do it worse" | You verify every leaf; committee judgement beats one pass. |
+| "I'll check with the operator first" | They answered in advance. Asking back is the defect. |
+| "I know the command, I can skip the skill" | The command arrives without the rules that govern it. |
+| "An Agent/Workflow will do" | Swarm is the fan-out tier; Agent only for one run that must be on Anthropic. |
+| "I'll peek at the leaf's log" | One status check, then hands-off until the notification. |
+
+Mode: ${mode}
+</EXTREMELY_IMPORTANT>`;
+
+test("standingBlock is the locked wording, verbatim, for either mode", () => {
   for (const mode of [MODE_CLOUD, MODE_ANTHROPIC]) {
     const block = standingBlock(mode);
+    equal(block, LOCKED_BLOCK(mode));
     match(block, /^<EXTREMELY_IMPORTANT>\n[\s\S]*\n<\/EXTREMELY_IMPORTANT>$/);
-    ok(block.includes("PRE-AUTHORISED"));
-    ok(block.includes("Skill(swarm)"));
-    for (const step of ["orchestrating-agents", "executing-swarms", "models", "validate"]) ok(block.includes(step), step);
     equal((block.match(/\[[^\]]+\]/g) || []).length, 1, "exactly one mode bracket");
-    ok(block.includes(mode));
     ok(!/AskUserQuestion/.test(block), "no question");
-    ok(block.length < 800, `under 800 chars, got ${block.length}`);
   }
+});
+
+// R8b — a fresh install gets nothing at SessionStart today, so the session learns the
+// plugin is installed but unrouted only by failing at it. The setup sentence rides INSIDE
+// the block, and every other locked line stays: the operator's call was "it shouldnt swap
+// anything; it should show the message when swarm is not yet configured".
+const SETUP_LINE = "You have the swarm plugin but it is not configured, the operator has installed it and expects it to work. The first thing that you must do is run /swarm:swarm setup";
+
+test("decide: R8b — an unconfigured install is told to run setup, inside the block", async () => {
+  for (const [label, config] of [["no config file", null], ["no allowedRoots", { providers: { ollama: { enabled: true } } }]]) {
+    // swarm.always is NOT set in either: the setup message is not gated on standing mode.
+    const out = await decide({ event: "SessionStart", cwd: "C:/code/x", config });
+    ok(out, `${label}: an unconfigured install must hear something at SessionStart`);
+    const open = out.indexOf("<EXTREMELY_IMPORTANT>");
+    const close = out.indexOf("</EXTREMELY_IMPORTANT>");
+    ok(open === 0 && close > open, `${label}: the setup sentence must sit inside the block: ${out}`);
+    ok(out.slice(open, close).includes("/swarm:swarm setup"), `${label}: no setup route in the block: ${out}`);
+    ok(out.split("\n")[1] === SETUP_LINE, `${label}: the block opens on the setup sentence: ${out.split("\n")[1]}`);
+    ok(!out.includes("You have swarm. The operator has decided in advance"), `${label}: no standing claim on an unconfigured install`);
+    // Everything below the identity line is still the locked block, unchanged.
+    for (const line of LOCKED_BLOCK(MODE_ANTHROPIC).split("\n").slice(2)) {
+      ok(out.includes(line), `${label}: the block lost a line: ${line}`);
+    }
+  }
+});
+
+test("decide: R8b — a configured install's block carries no setup sentence", async () => {
+  const out = await decide({ event: "SessionStart", cwd: "C:/code/x", config: armed });
+  equal(out, standingBlock(MODE_CLOUD));
+  ok(!out.includes("/swarm:swarm setup"), out);
 });
 
 test("the hook never probes and reads no models cache — the block carries no model list", () => {

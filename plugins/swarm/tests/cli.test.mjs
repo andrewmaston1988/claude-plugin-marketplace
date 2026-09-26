@@ -1217,10 +1217,12 @@ test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare
   }
 });
 
-test("standing mode: C5 decide() is null outside swarm.always — config absent and explicitly false", async () => {
+test("standing mode: C5 decide() is null outside swarm.always once a root exists — and NOT silent without one", async () => {
   const cwd = "C:/code/x";
-  equal(await hookDecide({ event: "SessionStart", cwd, config: undefined }), null);
+  // R8b took the absent-config case out of this pin: with no roots nothing dispatches, so
+  // SessionStart speaks. The silence rule now binds a CONFIGURED install that is unarmed.
   equal(await hookDecide({ event: "SessionStart", cwd, config: { swarm: { always: false }, provider: { allowedRoots: ["C:/code"] } } }), null);
+  ok((await hookDecide({ event: "SessionStart", cwd, config: undefined })).includes("/swarm:swarm setup"));
 });
 
 test("unknown command and missing args exit 1 with usage", () => {
