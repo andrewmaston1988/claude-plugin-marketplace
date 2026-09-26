@@ -11,6 +11,8 @@ The arguments are: $ARGUMENTS
 
 **`setup`** → read [references/setup.md](references/setup.md) and follow it — materialise, explain and edit the operator's config. Nothing below applies to a setup call: no offer gate, no manifest, no dispatch.
 
+**Not configured yet** — no `~/.swarm/config.json`, or no `allowedRoots` in it: read [references/setup.md](references/setup.md) and run `/swarm:swarm setup` before anything below, because until the roots are written nothing dispatches and every command here refuses.
+
 Swarm runs work in headless provider sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Enabled providers supply capable alternative models (including Ollama `:cloud` and opt-in Codex) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context.
 
 **Core principle:** the smarts live in the plan and the leaves; the plumbing has none. A manifest you could not defend line by line is a manifest you should not dispatch.
