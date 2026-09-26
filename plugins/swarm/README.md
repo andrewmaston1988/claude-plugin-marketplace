@@ -118,7 +118,7 @@ swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/m
 swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
 swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
 swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
-swarm quota                # Anthropic utilization per limit window
+swarm quota                # Anthropic plus cached cloud-provider utilization
 swarm usage [--provider X] # live usage from enabled provider capabilities
 swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
 swarm grade --init <resultsDir>   # write grades.json — one skeleton row per provider leaf
@@ -409,14 +409,16 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
   recovers. An engine with nothing else running still starts one leaf — degrades to serial
   rather than stalling.
 
-`swarm quota` reports Anthropic utilization and the legacy Ollama cloud cache. Use
-`swarm usage` for live readings from every enabled provider capability:
+`swarm quota` reports Anthropic utilization, the legacy Ollama cloud cache, and a cached Codex
+row when Codex is enabled. It does not spawn Codex to refresh that row. Use `swarm usage` for live
+readings from every enabled provider capability:
 
 ```
 anthropic session: 42% — resets Sun 6 Sep, 19:00
 anthropic weekly_all: 71% — resets Sat 12 Sep, 01:00
 ollama session: 12% — resets Sun 6 Sep, 13:00
 ollama weekly: 87% — resets Tue 8 Sep, 01:00
+codex five_hour: 24% — resets Sun 6 Sep, 19:00
 ```
 
 `quota` fetches Anthropic live and reads the legacy Ollama cloud cache (its cookie needs a
@@ -612,9 +614,10 @@ session without the config flag.
 
 Two `PreToolUse` hooks intercept the tools that fan work out without going through swarm.
 Both are speed bumps by default — they fire at most **twice per session** and a retry passes
-straight through — and both become **hard blocks with no budget** under standing mode
-(`swarm.always`), where swarm is already pre-authorised and the other tool is the wrong reach.
-Both stay silent in pipeline child sessions (`CORRELATION_ID`).
+straight through. Under standing mode (`swarm.always`), the Agent nudge becomes a **hard block
+with no budget**; the Workflow nudge does so only when an alternative provider is armed, because
+without one swarm has nowhere to send the work. Both stay silent in pipeline child sessions
+(`CORRELATION_ID`).
 
 | Hook | Tool | Fires when | Disable |
 |---|---|---|---|
