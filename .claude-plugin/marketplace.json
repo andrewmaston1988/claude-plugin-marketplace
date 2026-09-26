@@ -68,6 +68,15 @@
         "name": "Andrew Maston",
         "email": "andrew.maston1988@gmail.com"
       }
+    },
+    {
+      "name": "voice",
+      "description": "Per-operator dictionary mined from their own transcripts — cues injected only on a matching prompt, plus a SessionStart profile",
+      "source": "./plugins/voice",
+      "author": {
+        "name": "Andrew Maston",
+        "email": "andrew.maston1988@gmail.com"
+      }
     }
   ]
 }
