@@ -418,11 +418,12 @@ anthropic session: 42% — resets Sun 6 Sep, 19:00
 anthropic weekly_all: 71% — resets Sat 12 Sep, 01:00
 ollama session: 12% — resets Sun 6 Sep, 13:00
 ollama weekly: 87% — resets Tue 8 Sep, 01:00
-codex five_hour: 24% — resets Sun 6 Sep, 19:00
+codex primary (5h): 24% — resets Sun 6 Sep, 19:00
+codex secondary (7d): 58% — resets Fri 11 Sep, 09:00
 ```
 
 `quota` fetches Anthropic live and reads the legacy Ollama cloud cache (its cookie needs a
-human, so it must not stall on one). `usage` asks enabled provider adapters for live
+human, so it must not stall on one) and the cached Codex reading. `usage` asks enabled provider adapters for live
 readings. Exit code 1 means **Anthropic** exhausted specifically.
 
 **`swarm ollama-usage`** owns the `:cloud` side's fetch and cookie — zero-dependency,
