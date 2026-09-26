@@ -143,7 +143,7 @@
   // (`rankCells`), so this view only splits on it — the ranked list and the
   // toggle can never disagree about which rows are gone.
   function rankScreen(cells, h) {
-    const { esc, enc, fmtScore, cellSub, rankList, costOf, universals } = h;
+    const { esc, enc, fmtScore, cellSub, rankList, universals } = h;
     const short = (a) => a.slice(0, 5);
     const rows = (list) => list.map((c) => ({
       key: `m:${c.model}`,
@@ -154,7 +154,6 @@
       sub: cellSub(c, universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)),
       frac: (c.combined ?? 0) / 10,
       prov: c.provisional,
-      badge: costOf.get(c.model) ?? null,
     }));
     const listed = cells.filter((c) => !c.supersededBy);
     const held = cells.filter((c) => c.supersededBy);
@@ -231,7 +230,7 @@
       const evidence = [verdict(r), r.thin ? "thin evidence" : null, isMeter(r) && r.measuredRequests != null ? `${r.measuredRequests} measured requests` : null].filter(Boolean).join(" · ");
       return `<div class="card crow" ${href}>${top(++rank, esc(fmtMult(r.mult)))}`
         + `<div class="cbar${r.thin ? " thin" : ""}"><span style="width:${pct(r.mult).toFixed(1)}%"></span></div>`
-        + `<div class="sub">${evidence}</div></div>`;
+        + `<div class="cfoot"><div class="sub">${evidence}</div>${h.badge ? h.badge(r) : ""}</div></div>`;
     }).join("");
     return head + cards;
   }

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Rank-row geometry probe: does every perf rank row put the grade's vertical
-// centre on the rank marker's centre, and the coin stack's foot on the grade's
-// text baseline?
+// centre on the rank marker's centre? Rank rows carry no coin badge (coins live
+// on the cost screen); the probe fails if one reappears.
 //
 // Real browser, real layout — the geometry is a fact about a layout engine, so
 // it is measured in one rather than reasoned about. An in-process dashboard over
@@ -236,7 +236,7 @@ async function main() {
       const seen = await measure(client, pass);
       if (seen.length < MODELS.length) failures.push(`${pass.name}: only ${seen.length} rows rendered, expected ${MODELS.length}`);
       if (!seen.some((r) => r.trophy)) failures.push(`${pass.name}: no trophy row rendered`);
-      if (!seen.some((r) => r.kind === "coins")) failures.push(`${pass.name}: no coin stack rendered`);
+      if (seen.some((r) => r.kind !== "no-badge")) failures.push(`${pass.name}: a rank row carries a coin badge`);
       for (const r of seen) {
         rows++;
         const parts = [];

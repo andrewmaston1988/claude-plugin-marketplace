@@ -305,10 +305,10 @@ test("page wiring: the runs fetch splices expandQuery inside q()'s argument, and
   assert.match(page, /openProjects\.delete\(p\)[^\n}]*expandedProjects\.delete\(p\)/, "the collapse branch drops the group's expansion");
 });
 
-test("identityHtml shows escaped model text followed by an accessible provider logo", () => {
+test("identityHtml shows an accessible provider logo followed by escaped model text", () => {
   const { identityHtml, identityLabel } = loadLive();
   const task = { provider: "claude", model: "opus<test>" };
   assert.equal(identityLabel(task), "claude/opus<test>");
-  assert.match(identityHtml(task), /opus&lt;test&gt; <svg[^>]*role="img"[^>]*aria-label="claude"/);
+  assert.match(identityHtml(task), /^<svg[^>]*role="img"[^>]*aria-label="claude"[\s\S]*<\/svg>opus&lt;test&gt;$/);
   assert.equal(identityHtml({ model: "plain<&" }), "plain&lt;&amp;");
 });

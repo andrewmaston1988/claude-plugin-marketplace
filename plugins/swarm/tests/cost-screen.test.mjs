@@ -125,3 +125,12 @@ test("Cost switcher carries provider logos and keeps labels escaped", () => {
   assert.match(html, /unknown&quot;&gt;&lt;script&gt;/);
   assert.doesNotMatch(html, /<script>/);
 });
+
+test("each measured card carries its coin badge in the bottom-right corner; an unmeasured card carries none", () => {
+  const { costScreen } = loadPerfViews();
+  const badge = (r) => `<span class="cbadge coins" data-coins="${r.coins}"></span>`;
+  const html = costScreen({ sections: [section("ollama", [srow("a", 1, { coins: 1 }), srow("b", 3, { coins: 3 }), srow("c", null)])] }, { ...H, badge });
+  assert.match(html, /<div class="cfoot"><div class="sub">[^<]*<\/div><span class="cbadge coins" data-coins="1"><\/span><\/div><\/div>/);
+  assert.match(html, /<div class="cfoot"><div class="sub">[^<]*<\/div><span class="cbadge coins" data-coins="3"><\/span><\/div><\/div>/);
+  assert.equal((html.match(/class="cbadge/g) || []).length, 2, "the unmeasured card has no badge");
+});

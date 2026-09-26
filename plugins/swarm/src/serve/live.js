@@ -48,7 +48,7 @@
   const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const identityHtml = (task) => {
     const model = escapeHtml(task?.model);
-    return task?.provider && task?.model ? `${model} ${window.swarmLogos?.providerLogo(task.provider, { label: task.provider }) ?? ""}` : model;
+    return task?.provider && task?.model ? `${window.swarmLogos?.providerLogo(task.provider, { label: task.provider }) ?? ""}${model}` : model;
   };
 
   // page.html's existing ago() thresholds, verbatim, with `now` injected in place
