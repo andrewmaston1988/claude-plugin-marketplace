@@ -146,10 +146,10 @@ function validateDispatchPolicy(task, identity, adapter, cfg) {
   const canonicalBlock = cfg?.providers?.[identity.provider] && typeof cfg.providers[identity.provider] === "object";
   const rootGate = identity.provider === "codex" || canonicalBlock || (Array.isArray(roots) && roots.length > 0);
   const cwd = task.originalCwd || task.cwd;
-  // The `!== "claude"` conjunct is deliberate and is NOT the rule ask.mjs applies — an ask
-  // gates every provider including Claude (ask.mjs:44-46). The two disagree on purpose;
-  // unifying them is a governance decision with its own blast radius, not a refactor.
-  if (rootGate && identity.provider !== "claude" && (!cwd || !Array.isArray(roots) || !roots.some((root) => isUnderRoot(cwd, root)))) {
+  // Every provider is gated here, Claude included — the same rule ask.mjs and
+  // governance.mjs apply. Gating Claude is defence in depth (normalization's
+  // checkGovernance refuses it first), but the layers must not disagree on exemptions.
+  if (rootGate && (!cwd || !Array.isArray(roots) || !roots.some((root) => isUnderRoot(cwd, root)))) {
     throw new Error(
       `governance: provider '${identity.provider}' model '${identity.model}' cannot dispatch from '${cwd}' — ` +
       `cwd is not under any ${deniedBy} entry`

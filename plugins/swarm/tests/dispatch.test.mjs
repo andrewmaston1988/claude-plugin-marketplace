@@ -351,14 +351,20 @@ test("dispatch: a provider armed only at the top level is still root-gated", () 
   }
 });
 
-// The Claude exemption on this path is a governance decision with its own blast radius, not
-// an oversight of the sweep — ask.mjs gates Claude and this does not. Out of scope; pinned
-// so the refactor cannot quietly move it either way.
-test("dispatch: a top-level list does not remove Claude's dispatch-path exemption", () => {
+// One rule across dispatch, ask.mjs and governance.mjs: every provider is root-gated,
+// Claude included. Gating Claude is defence in depth — normalization's checkGovernance
+// already refuses it — but the three layers must not disagree about who is exempt.
+test("dispatch: a Claude task from outside allowedRoots is refused, like every other provider", () => {
   const root = mkdtempSync(join(tmpdir(), "swarm-dispatch-roots-"));
   try {
-    const cfg = { allowedRoots: ["C:/nowhere-at-all"], providers: { claude: { enabled: true } } };
-    ok(buildDispatch(task({ cwd: root, originalCwd: root }), "p", cfg, { _mcpTools: NO_MCP }).argv.length > 0);
+    const cfg = { allowedRoots: [root], providers: { claude: { enabled: true } } };
+    const base = task({ cwd: root, originalCwd: root });
+    equal(buildDispatch(base, "p", cfg, { _mcpTools: NO_MCP }).argv[0], "claude");
+    const outside = resolve(root, "..", "swarm-claude-outside-root");
+    throws(
+      () => buildDispatch({ ...base, cwd: outside, originalCwd: outside }, "blocked", cfg, { _mcpTools: NO_MCP }),
+      /allowedRoots|governance/i
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

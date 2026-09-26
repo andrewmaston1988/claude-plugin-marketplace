@@ -104,7 +104,8 @@ test("win32 command-line check: the engine's notice is measured, so a prompt tha
   try {
     const p = join(dir, "plan.json");
     const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
-    const task = { id: "edge", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob" };
+    // cwd is required: Claude is root-gated at dispatch like every other provider.
+    const task = { id: "edge", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob", cwd: dir, originalCwd: dir };
     const len = (text) => windowsCommandLineLength(buildDispatch({ ...task, prompt: text }, text, cfg).argv);
     // The line grows 1:1 with an all-x prompt, so one measurement lands on the cap.
     const n = 30000 + (32000 - len("x".repeat(30000)));

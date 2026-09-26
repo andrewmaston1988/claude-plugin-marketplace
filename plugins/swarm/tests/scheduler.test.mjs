@@ -1953,7 +1953,7 @@ test("a Claude quota failure does not fail-fast an unrelated provider", async ()
     const cwd = tmpdir();
     const cfg = {
       providers: {
-        claude: { enabled: true },
+        claude: { enabled: true, allowedRoots: [cwd] },
         ollama: { enabled: true, mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [cwd] },
         codex: { enabled: false, allowedRoots: [cwd] },
       },
@@ -1983,7 +1983,7 @@ test("a Claude quota failure does not fail-fast an unrelated provider", async ()
 
 const MIXED_CFG = (cwd) => ({
   providers: {
-    claude: { enabled: true },
+    claude: { enabled: true, allowedRoots: [cwd] },
     ollama: { enabled: true, mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [cwd] },
     codex: { enabled: true, path: "codex", allowedRoots: [cwd] },
   },
