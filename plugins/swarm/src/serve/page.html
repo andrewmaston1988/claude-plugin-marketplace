@@ -101,7 +101,7 @@
   .rank .bar span { background:var(--accent); }
   .rank .bar.prov span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
   .rank .meta .tag { color:var(--faint); }
-  .chip[data-href], .chip[data-domain] { cursor:pointer; }
+  .chip[data-href], .chip[data-domain], .pchip[data-href], .vchip[data-href] { cursor:pointer; } .chips.hero { padding:0 16px; gap:6px; }
   .foot { padding:12px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
   /* view switcher: full width at one fixed height on every screen, pills sharing it
@@ -235,9 +235,9 @@
   /* one gold coin, tinted per provider; an unknown provider stays gold */
   /* provider brand colours: the chips wear these; the coins are tinted to match */
   :root { --p-claude:#d97757; --p-codex:#3fb68b; --p-ollama:#c3c8d0; }
-  /* hero chips: one shape, coloured by --pc (provider brand, or the value verdict). A chip leading with its disc drops its left and vertical padding, so the disc is the pill's full inner height and forms its rounded start; a provider with no logo wears .pinit, a disc holding its initial */ .pchip, .vchip { font-size:11px; padding:3px 9px; border-radius:999px; color:var(--pc, var(--muted)); background:color-mix(in srgb, var(--pc, var(--muted)) 16%, transparent); border:1px solid color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); } .pchip:has(>.pdisc) { padding:0 10px 0 0; display:inline-flex; align-items:center; gap:.15em; } .pchip:has(>.pdisc) .pdisc { width:1.5em; height:1.5em; margin-right:0; vertical-align:0; } .pinit { display:inline-flex; align-items:center; justify-content:center; flex:none; width:1.8em; height:1.8em; font-size:.75em; font-weight:600; border-radius:50%; color:var(--fg); background:color-mix(in srgb, var(--muted) 22%, transparent); border:1px solid color-mix(in srgb, var(--muted) 45%, transparent); }
-  /* the runs-tile chip stack: overlapping discs, largest tokens first, in z order. .pdisc's shadow and pulse are CSS — a <filter> def per chip would repeat ids across every chip in the page */ .pchip.claude { --pc:var(--p-claude); } .pchip.codex { --pc:var(--p-codex); } .pchip.ollama { --pc:var(--p-ollama); } .plogo { width:1.35em; height:1.35em; vertical-align:-.35em; margin-right:.15em; } .pstack { display:inline-flex; align-items:center; flex:none; } .pitem { display:inline-flex; border-radius:50%; } .pitem+.pitem { margin-inline-start:-.5em; } .pitem.dim .pdisc { opacity:.4; } .pitem.pulse .pdisc { animation:chipPulse 3.6s ease-in-out infinite; } .pdisc { transform-box:fill-box; transform-origin:center; filter:drop-shadow(0 1.5px 1.5px rgb(0 0 0/.24)); }
-  .vchip.good { --pc:var(--ok); } .vchip.bad { --pc:var(--bad); } .vchip.front { --pc:var(--accent); }
+  /* hero chips: one shape, coloured by --pc (provider brand, or the value verdict). A chip leading with its disc drops its left and vertical padding, so the disc is the pill's full inner height and forms its rounded start; a provider with no logo wears .pinit, a disc holding its initial */ .pchip, .vchip { font-size:11px; padding:3px 9px; border-radius:999px; color:var(--pc, var(--muted)); background:color-mix(in srgb, var(--pc, var(--muted)) 16%, transparent); border:1px solid color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); } .pchip:has(>.pdisc) { padding:0 10px 0 0; border:0; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); display:inline-flex; align-items:center; gap:.4em; } .pchip:has(>.pdisc) .pdisc { width:calc(1lh + 8px); height:calc(1lh + 8px); margin:0; vertical-align:0; } .pinit { display:inline-flex; align-items:center; justify-content:center; flex:none; width:1.8em; height:1.8em; font-size:.75em; font-weight:600; border-radius:50%; color:var(--ink); background:color-mix(in srgb, var(--muted) 22%, transparent); border:1px solid color-mix(in srgb, var(--muted) 45%, transparent); }
+  /* the runs-tile chip stack: overlapping discs, largest tokens rightmost and on top. .pdisc's shadow and pulse are CSS — a <filter> def per chip would repeat ids across every chip in the page */ .pchip.claude { --pc:var(--p-claude); } .pchip.codex { --pc:var(--p-codex); } .pchip.ollama { --pc:var(--p-ollama); } .plogo { width:1.35em; height:1.35em; vertical-align:-.35em; margin-right:.15em; } .pstack { isolation:isolate; display:inline-flex; flex-direction:row-reverse; align-items:center; flex:none; } .pstack:not(:has(.pulse)) { opacity:.5; } .pitem { display:inline-flex; border-radius:50%; } .pitem+.pitem { margin-inline-end:-.6em; } .pitem.dim .pdisc { opacity:.4; } .pitem.pulse .pdisc { animation:chipPulse 3.6s ease-in-out infinite; } .pchip .pdisc { filter:none; } .row .meta:has(.pdisc) { overflow:clip; overflow-clip-margin:1px; } .pdisc { transform-box:fill-box; transform-origin:center; filter:drop-shadow(0 1.5px 1.5px rgb(0 0 0/.24)); }
+  .vchip.good, .vchip.ok { --pc:var(--ok); } .vchip.bad { --pc:var(--bad); } .vchip.run { --pc:var(--accent); } .vchip.warn { --pc:var(--warn); } .vchip.front { --pc:var(--accent); }
   .coins.claude svg { filter:hue-rotate(-24deg) saturate(.9); }
   .coins.codex svg { filter:hue-rotate(125deg) saturate(.8); }
   .coins.ollama svg { filter:grayscale(1) brightness(1.2); }
@@ -623,7 +623,7 @@
   const stateOfGroup = (kids) => window.swarmLive.stateOfGroup(kids);
   // A clone session reads `X[i] local`, the clone's id faint; the full id stays the key.
   const sessionName = (id) => { const tilde = id.lastIndexOf("~"); return tilde > 0 ? `<span class="faint">${esc(id.slice(0, tilde))}</span> ${esc(id.slice(tilde + 1))}` : esc(id); };
-  const identityName = (task) => window.swarmLive?.identityLabel ? window.swarmLive.identityLabel(task) : (task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || "")); const identityHtml = (task) => window.swarmLive?.identityHtml ? window.swarmLive.identityHtml(task) : esc(identityName(task));
+  const identityName = (task) => window.swarmLive?.identityLabel ? window.swarmLive.identityLabel(task) : (task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || "")); const identityHtml = (task, o) => window.swarmLive?.identityHtml ? window.swarmLive.identityHtml(task, o) : esc(identityName(task));
   const stripHtml = (kids, sq) => {
     const max = 40;
     const dots = kids.slice(0, max).map((k) => `<i class="${sq ? "sq " : ""}${cls(k.state)}"></i>`).join("");
@@ -724,14 +724,14 @@
         // screen, never flattened inline; its dot strip is the row's own summary.
         const t = r.task;
         const href = `#/run/${enc(run.project)}/${enc(run.name)}/node/${enc(t.id)}`;
-         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${identityHtml(t)} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
+         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${identityHtml(t, { chip: true })} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       const t = r.task;
       const quietSecs = window.swarmLive.quietSecs(t, now);
       const quiet = quietSecs != null && quietSecs * 1000 > quietWarn;
       const right = window.swarmLive.elapsedText(t, now) ?? t.state;
-       const identity = identityName(t) ? identityHtml(t) : "";
+       const identity = identityName(t) ? identityHtml(t, { chip: true }) : "";
        const sub = quiet ? `quiet ${quietSecs}s · ${identity}` : t.state === "running" && t.activity ? `${identity} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : identity;
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
       html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
@@ -900,12 +900,12 @@
     const now = Date.now();
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
     const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
-     const identity = identityName(t) ? identityHtml(t) : "agentless";
+     const identity = identityName(t) ? identityHtml(t) : "agentless"; const modelHref = `#/perf/model/${enc(t.model)}`, idChip = identityHtml(t, { chip: true, href: modelHref });
      const header = childHeader({ name: "leaf", project: run.project, run: run.name }, esc(id), id);
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
     let html = leafBannerHtml(t, leaf, now, quiet ? quietSecsVal : null);
-    html += `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${identity}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}</div>`;
+    html += `<div class="chips hero"><span class="vchip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? (idChip.startsWith("<span class=\"pchip") ? idChip : `<span class="vchip" data-href="${modelHref}">${identity}</span>`) : ""}${t.kind && t.kind !== "leaf" ? `<span class="vchip">${esc(t.kind)}</span>` : ""}</div>`;
     // Position in graph: what it waited on, what it unblocks, and the way back to the rail.
     const fchips = (ids, none) => ids.length ? ids.map((x) => `<span class="fchip">${esc(x)}</span>`).join("") : `<span>${none}</span>`;
     const order = run.tasks.filter((x) => x.kind !== "digest").map((x) => x.id);

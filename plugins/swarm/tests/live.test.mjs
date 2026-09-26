@@ -305,10 +305,11 @@ test("page wiring: the runs fetch splices expandQuery inside q()'s argument, and
   assert.match(page, /openProjects\.delete\(p\)[^\n}]*expandedProjects\.delete\(p\)/, "the collapse branch drops the group's expansion");
 });
 
-test("identityHtml shows an accessible provider logo followed by escaped model text", () => {
+test("identityHtml shows the provider logo with escaped model text; the run and leaf screens wear the provider chip", () => {
   const { identityHtml, identityLabel } = loadLive();
   const task = { provider: "claude", model: "opus<test>" };
   assert.equal(identityLabel(task), "claude/opus<test>");
-  assert.match(identityHtml(task), /^<svg[^>]*role="img"[^>]*aria-label="claude"[\s\S]*<\/svg>opus&lt;test&gt;$/);
+  assert.match(identityHtml(task), /^<svg class="plogo"[^>]*role="img"[^>]*aria-label="claude"[\s\S]*<\/svg>opus&lt;test&gt;$/);
+  assert.match(identityHtml(task, { chip: true, href: "#/x" }), /^<span class="pchip claude" data-href="#\/x"><svg class="plogo pdisc"[\s\S]*<\/svg>opus&lt;test&gt;<\/span>$/, "the leaf page wears the chip");
   assert.equal(identityHtml({ model: "plain<&" }), "plain&lt;&amp;");
 });

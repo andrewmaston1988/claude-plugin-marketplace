@@ -190,7 +190,7 @@ function stripStringsAndComments(js) {
 
 const allNodes = (el, out = []) => { for (const n of el.childNodes || []) { out.push(n); allNodes(n, out); } return out; };
 const badgesIn = (el) => allNodes(el).filter((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes("cbadge"));
-const chipHref = (el, href) => allNodes(el).find((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes("chip") && n.getAttribute("data-href") === href);
+const chipHref = (el, href) => allNodes(el).find((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).some((c) => ["chip", "vchip", "pchip"].includes(c)) && n.getAttribute("data-href") === href);
 
 // A /api/perf payload with one measured model (two coins within its provider) and one
 // unmeasured tier (band null → the em dash, never a blank that reads as

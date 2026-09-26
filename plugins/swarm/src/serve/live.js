@@ -46,9 +46,12 @@
 
   const identityLabel = (task) => task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || "");
   const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const identityHtml = (task) => {
+  const identityHtml = (task, { chip, href } = {}) => {
     const model = escapeHtml(task?.model);
-    return task?.provider && task?.model ? `${window.swarmLogos?.providerLogo(task.provider, { label: task.provider }) ?? ""}${model}` : model;
+    if (!(task?.provider && task?.model)) return model;
+    const disc = chip && window.swarmLogos?.providerLogo(task.provider, { chip: true, label: task.provider });
+    if (disc) return `<span class="pchip ${escapeHtml(String(task.provider).toLowerCase())}"${href ? ` data-href="${escapeHtml(href)}"` : ""}>${disc}${model}</span>`;
+    return `${window.swarmLogos?.providerLogo(task.provider, { label: task.provider }) ?? ""}${model}`;
   };
 
   // page.html's existing ago() thresholds, verbatim, with `now` injected in place
