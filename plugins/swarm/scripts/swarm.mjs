@@ -117,7 +117,7 @@ async function costBands(cfg = getConfig()) {
 // the explicit operator command; hooks and validation use the cache-only path.
 export async function readProviderUsage(cfg, { registry = defaultProviderRegistry(), live = false, provider, env = process.env, fetchImpl = globalThis.fetch, quotaCheck } = {}) {
   const { getUsage } = await import("../src/ollama-usage.mjs");
-  const { normalizeProviderUsage } = await import("../src/usage.mjs");
+  const { normalizeProviderUsage, writeCodexUsageCache } = await import("../src/usage.mjs");
   const usages = [];
   const errors = {};
   for (const adapter of registry.list()) {
@@ -128,6 +128,9 @@ export async function readProviderUsage(cfg, { registry = defaultProviderRegistr
       const reading = live && adapter.id === "ollama"
         ? await getUsage(cfg, { gate: false, env, _fetch: fetchImpl })
         : await readUsage({ config: cfg, env, fetch: fetchImpl, usageOptIn: live, ...(quotaCheck && { quotaCheck }) });
+      // Only the live read pays for Codex's app-server process; the reading is
+      // banked here so `quota` can show Codex without spawning one of its own.
+      if (live && adapter.id === "codex") writeCodexUsageCache(reading, env);
       if (reading == null) continue;
       usages.push(normalizeProviderUsage(adapter.id, reading));
     } catch (error) {
@@ -1148,7 +1151,7 @@ async function main() {
         // `quota` must not stall on one. Both print through usageLines, so the
         // subcommand and the standing-mode hook can never word this differently.
         const { checkQuota } = await import("../src/quota.mjs");
-        const { normalizeAnthropic, normalizeOllama, usageLines, notableLines } = await import("../src/usage.mjs");
+        const { normalizeAnthropic, normalizeOllama, normalizeCodex, codexUsageFromCache, usageLines, notableLines } = await import("../src/usage.mjs");
         const cfg = getConfig();
         const q = await checkQuota({
           cfg,
@@ -1165,6 +1168,15 @@ async function main() {
           const reading = usageFromCache(cfg);
           if (reading.state === "unknown") out("ollama: no reading yet — run `swarm ollama-usage --cookie '<value>'`");
           else usages.push(normalizeOllama(reading));
+        }
+
+        // Codex on the same terms as Ollama, and for a stronger reason: its reading
+        // costs an app-server process, so the figure comes from the cache `swarm
+        // usage` banked — this command never spawns one.
+        if (providerConfig(cfg, "codex").enabled === true) {
+          const cached = codexUsageFromCache();
+          if (cached) usages.push(normalizeCodex(cached));
+          else out("codex: no cached reading yet — run `swarm usage --provider codex`");
         }
 
         for (const line of usageLines(usages)) out(line);

@@ -8,16 +8,17 @@
 // cloud provider is then one reader, not another command and another cache and
 // another warning string.
 //
-// Split as the rest of this plugin splits: `normalize*` are pure over a reading,
-// `readCachedUsage` is the one function that touches disk. It is called from a
-// UserPromptSubmit hook, so it must never fetch, never block and never throw; a
-// provider it cannot read is `unknown` and says nothing at all.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+// Split as the rest of this plugin splits: `normalize*` are pure over a reading;
+// the disk lives in `readCachedUsage` and the Codex cache pair below. The former
+// is called from a UserPromptSubmit hook, so it must never fetch, never block and
+// never throw; a provider it cannot read is `unknown` and says nothing at all.
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { providerUsageSnapshot } from "./contracts.mjs";
 
 export const QUOTA_CACHE_FILENAME = "quota-cache.json";
+export const CODEX_USAGE_CACHE_FILENAME = "codex-usage.json";
 
 // A limit window, uniform across providers. `scope` is Anthropic's per-model
 // bucket; cloud providers have no equivalent and leave it null. `window` is the
@@ -155,6 +156,35 @@ export function normalizeCodex(reading, options = {}) {
     state: codexExhausted(source.buckets) ? "exhausted" : limits.length ? "ok" : "unknown",
     limits,
   };
+}
+
+// A Codex reading costs an app-server process, so only the command whose job the
+// fetch is (`swarm usage`) pays it, and the reading lands here. Everything else
+// that wants to SHOW Codex figures — `quota`, and anything later — reads this
+// file, which is why it can never stall on a process it does not need.
+export function codexUsageFromCache(env = process.env) {
+  let cached;
+  try {
+    cached = JSON.parse(readFileSync(join(swarmHome(env), CODEX_USAGE_CACHE_FILENAME), "utf8"));
+  } catch {
+    return null;
+  }
+  if (cached?.provider !== "codex" || !Array.isArray(cached.buckets)) return null;
+  // THIS process did not fetch it, and saying `live` would suppress the banner
+  // that exists to mark exactly that. A failed half keeps its own provenance.
+  return { ...cached, provenance: cached.provenance === "live" ? "cached" : cached.provenance };
+}
+
+export function writeCodexUsageCache(reading, env = process.env) {
+  if (reading?.provider !== "codex" || !Array.isArray(reading.buckets)) return;
+  const path = join(swarmHome(env), CODEX_USAGE_CACHE_FILENAME);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(`${path}.tmp`, JSON.stringify(reading));
+    renameSync(`${path}.tmp`, path);
+  } catch {
+    // Best-effort: a cache nothing can read is a missing figure, never a failure.
+  }
 }
 
 // Providers whose reading needs its own shape read. Anything absent here takes the

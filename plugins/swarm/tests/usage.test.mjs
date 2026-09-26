@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   normalizeAnthropic, normalizeOllama, readCachedUsage, usageLines, notableLines,
-  formatResetTime, QUOTA_CACHE_FILENAME, normalizeCodex,
+  formatResetTime, QUOTA_CACHE_FILENAME, normalizeCodex, codexUsageFromCache, writeCodexUsageCache,
 } from "../src/usage.mjs";
 import { createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
 import { providerUsageSnapshot } from "../src/contracts.mjs";
@@ -217,6 +217,48 @@ test("readCachedUsage: G11 never throws — missing cache, corrupt cache, a prov
     const blowsUp = { usageFromCache: () => { throw new Error("boom"); } };
     const out = await readCachedUsage(cfg, { now: NOW, cachePath: corrupt, _ollama: blowsUp });
     deepEqual(out.map((u) => u.state), ["unknown", "unknown"]);
+  });
+});
+
+// ---- the Codex cache: written by the one command whose job the fetch is -----
+
+const CODEX_READING = {
+  provider: "codex",
+  source: "codex-app-server",
+  provenance: "live",
+  asOf: "2026-09-26T10:00:00.000Z",
+  buckets: [{ kind: "rate-limit", limitId: "session", primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1790000000 } }],
+};
+
+test("codex cache: C1 a stored reading reads back as cached, and renders through usageLines", async () => {
+  await withHome(async (home) => {
+    const env = { SWARM_HOME: home };
+    equal(codexUsageFromCache(env), null, "no file is no reading, never a throw");
+
+    writeCodexUsageCache(CODEX_READING, env);
+    const cached = codexUsageFromCache(env);
+    // This process did not fetch it: "live" would suppress the banner that says so.
+    equal(cached.provenance, "cached");
+    equal(cached.buckets.length, 1);
+    ok(usageLines([normalizeCodex(cached)])[0].startsWith("codex session primary"), usageLines([normalizeCodex(cached)])[0]);
+  });
+});
+
+test("codex cache: C2 a foreign or corrupt file is no reading, and a write never throws", async () => {
+  await withHome(async (home) => {
+    const env = { SWARM_HOME: home };
+    const path = join(home, "codex-usage.json");
+    writeFileSync(path, JSON.stringify({ provider: "ollama", buckets: [] }));
+    equal(codexUsageFromCache(env), null, "another provider's file is not a Codex reading");
+    writeFileSync(path, "{not json");
+    equal(codexUsageFromCache(env), null);
+    rmSync(path);
+
+    writeCodexUsageCache(null, env);
+    writeCodexUsageCache({ provider: "ollama", buckets: [] }, env);
+    writeCodexUsageCache(CODEX_READING, env);
+    ok(existsSync(path), "a well-formed reading is written atomically, .tmp renamed away");
+    equal(existsSync(path + ".tmp"), false);
   });
 });
 
@@ -472,6 +514,37 @@ test("cmdUsage: a claude adapter's reading is walked, selected, and gates the ex
   // `anthropic` selects the same reading by its display name.
   const alias = await read(["--provider", "anthropic"]);
   ok(alias.lines.some((l) => l.startsWith("anthropic probe-marker")), alias.lines.join(" | "));
+});
+
+// `swarm usage` is the command whose job the Codex fetch is, so it is the one
+// that banks the reading `quota` renders. Without this write the row is
+// unreachable in a real install, however correct the reader is.
+test("cmdUsage: a live Codex reading is banked for the cache-only readers", async () => {
+  await withHome(async (home) => {
+    const codex = {
+      id: "codex",
+      runnerId: "codex",
+      enabled: () => true,
+      validateTask: () => [],
+      capabilities: {
+        readUsage: async () => normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" } })),
+      },
+    };
+    const registry = createProviderRegistry([codex]);
+    const cfg = { providers: { codex: { enabled: true } } };
+    const env = { SWARM_HOME: home };
+
+    await cmdUsage([], { cfg, env, registry, fetchImpl: async () => ({ ok: true }), write: () => {} });
+    const cached = codexUsageFromCache(env);
+    ok(cached, "the live read must land in the cache");
+    equal(cached.provenance, "cached");
+    ok(usageLines([normalizeCodex(cached)])[0].startsWith("codex primary"), usageLines([normalizeCodex(cached)])[0]);
+
+    // A cache-only walk is not a fetch and must leave the banked reading alone.
+    rmSync(join(home, "codex-usage.json"));
+    await readCachedUsage(cfg, { env, providerRegistry: registry, cachePath: join(home, QUOTA_CACHE_FILENAME) });
+    equal(codexUsageFromCache(env), null, "nothing but the live read refreshes the cache");
+  });
 });
 
 // The `quota` seam plumbs to the real adapter: cmdUsage's injected reading must
