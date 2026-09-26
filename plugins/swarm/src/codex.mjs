@@ -276,7 +276,9 @@ async function makeClient(config, options) {
   return {
     client: createCodexAppServerClient({
       executable: options.executable || cfg.path || "codex",
-      args: options.args || ["app-server", "--stdio"],
+      // Same config key the usage reader spawns with: discovery and usage must
+      // reach the same app-server, or a non-default one works for one and not the other.
+      args: options.args || cfg.appServerArgs,
       timeoutMs: options.timeoutMs ?? cfg.timeoutMs ?? 10_000,
       spawnImpl: options.spawnImpl || options._spawn,
       env: options.env,

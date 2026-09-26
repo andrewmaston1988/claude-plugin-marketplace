@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { deepEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
@@ -31,6 +32,44 @@ test("Codex app-server discovery initializes, follows cursors, and normalizes de
   deepEqual(models.map((model) => model.model), ["gpt-5-codex", "gpt-5-mini"]);
   deepEqual(models.map((model) => model.provider), ["codex", "codex"]);
   equal(models[0].runner, "codex");
+});
+
+// A stand-in child that answers initialize + model/list, so an injected spawnImpl
+// can record the argv discovery really hands the process.
+function recordingSpawn(seen) {
+  return (cmd, args) => {
+    seen.push([cmd, ...args]);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = {
+      write(line) {
+        const message = JSON.parse(line);
+        const result = message.method === "initialize"
+          ? { serverInfo: { name: "stub" } }
+          : { data: [{ id: "gpt-5-codex" }], nextCursor: null };
+        setImmediate(() => child.stdout.emit("data", `${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n`));
+      },
+    };
+    child.kill = () => {};
+    return child;
+  };
+}
+
+// Discovery reads args off the same config block the usage reader does — a
+// non-default appServerArgs that works for usage must work for model/list too.
+test("Codex discovery spawns the app-server with the configured args", async () => {
+  const seen = [];
+  const spawnImpl = recordingSpawn(seen);
+  const models = await discoverCodexModels(
+    { providers: { codex: { path: "/opt/codex", appServerArgs: ["app-server", "--stdio", "--strict-config"] } } },
+    { spawnImpl }
+  );
+  deepEqual(models.map((model) => model.model), ["gpt-5-codex"], "the configured args must still reach a working app-server");
+  deepEqual(seen[0], ["/opt/codex", "app-server", "--stdio", "--strict-config"]);
+
+  await discoverCodexModels({ providers: { codex: { path: "/opt/codex" } } }, { spawnImpl });
+  deepEqual(seen[1], ["/opt/codex", "app-server", "--stdio"], "an unconfigured provider keeps the documented default");
 });
 
 test("Codex discovery deduplicates model rows from an injected client", async () => {
