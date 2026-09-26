@@ -14,6 +14,7 @@ const asPosix = { _path: posix };
 
 test("isUnderRoot: a filesystem-root entry still matches its descendants", () => {
   equal(isUnderRoot("/tmp/leaf", "/", asPosix), true);
+  // Controls, not pins: both hold with or without the root fix. The first line is the pin.
   equal(isUnderRoot("/", "/", asPosix), true);
   equal(isUnderRoot("/tmp", "/etc", asPosix), false);
 });
