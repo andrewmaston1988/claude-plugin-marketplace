@@ -78,10 +78,10 @@ test("a spent session window zeroes Session and leaves Week its own reading", ()
   ], { state: "exhausted" })], errors: {} };
   const { usageScreen } = loadPerfViews();
   const week = usageScreen(codex, H, "week");
-  assert.match(week, /class="nm">codex<\/span><span class="val ok">56%</, "44% used is 56% left");
+  assert.match(week, /class="nm">(?:<svg[\s\S]*?<\/svg>)?codex<\/span><span class="val ok">56%</, "44% used is 56% left");
   assert.match(week, new RegExp(`<div class="sub">${weekly.note}</div>`), "the weekly window's own reset, not the session's");
   const session = usageScreen(codex, H, "session");
-  assert.match(session, /class="nm">codex<\/span><span class="val bad">0%</);
+  assert.match(session, /class="nm">(?:<svg[\s\S]*?<\/svg>)?codex<\/span><span class="val bad">0%</);
   assert.match(session, new RegExp(`<div class="sub">${sess.note}</div>`), "dead here, back when the session window is");
 });
 

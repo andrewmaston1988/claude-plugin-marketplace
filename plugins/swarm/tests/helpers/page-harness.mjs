@@ -175,9 +175,9 @@ export function loadPage(opts = {}) {
     // window.swarmLive, window.swarmLogos and window.perfViews. A test that hands in
     // perfViews owns that contract, so the real perf script stays out of its way.
     head: { appendChild: (s) => {
-      if (/live.js(?|$)/.test(s.src)) vm.runInContext(LIVE_JS, context, { filename: "live.js" });
-      else if (/logos.js(?|$)/.test(s.src)) vm.runInContext(LOGOS_JS, context, { filename: "logos.js" });
-      else if (/perf.js(?|$)/.test(s.src) && !opts.perfViews) vm.runInContext(PERF_JS, context, { filename: "perf.js" });
+      if (/live\.js(\?|$)/.test(s.src)) vm.runInContext(LIVE_JS, context, { filename: "live.js" });
+      else if (/logos\.js(\?|$)/.test(s.src)) vm.runInContext(LOGOS_JS, context, { filename: "logos.js" });
+      else if (/perf\.js(\?|$)/.test(s.src) && !opts.perfViews) vm.runInContext(PERF_JS, context, { filename: "perf.js" });
       s.onload && s.onload();
     } },
   };
