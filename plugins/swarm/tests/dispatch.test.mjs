@@ -380,17 +380,20 @@ test("toSpawnable peels a node .cmd shim, expanding %~dp0", { skip: process.plat
   }
 });
 
-test("toSpawnable falls back to cmd /c for an opaque .cmd", { skip: process.platform !== "win32" }, () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-shim-"));
-  try {
-    const cmdPath = join(dir, "claude.cmd");
-    writeFileSync(cmdPath, `@echo off\r\necho hello\r\n`);
-    const { cmd, args } = toSpawnable([cmdPath, "-p", "hi"]);
-    ok(/cmd(\.exe)?$/i.test(cmd));
-    deepEqual(args, ["/d", "/s", "/c", cmdPath, "-p", "hi"]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
+// An opaque .cmd cannot be peeled to a node script, and cmd.exe re-parses the argv it is
+// handed — a prompt containing quotes comes out mangled. Refusing names what to fix instead.
+test("toSpawnable refuses an opaque .cmd instead of routing it through cmd.exe", () => {
+  const cmdPath = join(tmpdir(), "swarm-opaque-shim", "claude.cmd");
+  const io = { _platform: "win32", _readFileSync: () => "@echo off\r\necho hello\r\n" };
+  throws(
+    () => toSpawnable([cmdPath, "-p", "hi"], io),
+    (e) => e.message.includes(cmdPath) && /not a node shim/.test(e.message)
+  );
+  // An unreadable shim is no more peelable than an opaque one — same refusal, not a fallthrough.
+  throws(
+    () => toSpawnable([cmdPath, "-p", "hi"], { _platform: "win32", _readFileSync: () => { throw new Error("EACCES"); } }),
+    (e) => e.message.includes(cmdPath) && /not a node shim/.test(e.message)
+  );
 });
 
 test("toSpawnable passes .exe and pathless resolution through untouched", { skip: process.platform !== "win32" }, () => {
