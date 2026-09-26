@@ -1177,6 +1177,62 @@ test("quota: C0b every line is prefixed anthropic, not claude", async () => {
   }
 });
 
+// Item 3: Codex rides the same split as Ollama — `swarm usage` pays for the
+// app-server process and caches the reading, `quota` renders what the cache
+// holds. A spawn here would stall the command on a process it does not need.
+// The spy is the proof: a node executable that only logs when it actually runs.
+function codexSpawnSpy(dir, home, extra = {}) {
+  const log = join(dir, "codex-spawn.log");
+  const spy = join(dir, "codex-spy.mjs");
+  writeFileSync(spy, `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(log)}, "spawned\\n");\n`);
+  gateHome(home, {
+    providers: {
+      claude: { allowedRoots: [tmpdir()] },
+      ollama: { enabled: true },
+      codex: { enabled: true, path: process.execPath, appServerArgs: [spy] },
+      ...extra,
+    },
+  });
+  return log;
+}
+
+const CODEX_CACHED = {
+  provider: "codex",
+  source: "codex-app-server",
+  provenance: "live",
+  asOf: "2026-09-26T10:00:00.000Z",
+  buckets: [{ kind: "rate-limit", limitId: "session", primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1790000000 } }],
+};
+
+test("quota: prints the cached Codex row and never spawns the app-server", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const spawnLog = codexSpawnSpy(dir, home);
+    writeFileSync(join(home, "codex-usage.json"), JSON.stringify(CODEX_CACHED));
+    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
+    equal(r.status, 0, r.stderr + r.stdout);
+    ok(r.stdout.includes("codex session primary (5h) (session): 20%"), r.stdout);
+    equal(existsSync(spawnLog), false, `quota must not spawn the Codex app-server:\n${r.stdout}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("quota: names the missing Codex reading rather than fetching one", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const spawnLog = codexSpawnSpy(dir, home);
+    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr + r.stdout);
+    ok(r.stdout.includes("codex: no cached reading yet"), r.stdout);
+    equal(existsSync(spawnLog), false, `quota must not spawn the Codex app-server:\n${r.stdout}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // settingsUrl points `models`' meter fetch at this stub; null = the meter is
 // unconfigured and every /settings hit gets the catch-all "{}" JSON.
 function modelsStubServer(settingsHtml = null) {
