@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { deepEqual, equal, match, ok, rejects, throws } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,6 +16,7 @@ import {
   normalizeCodexModel,
 } from "../src/codex.mjs";
 import { isUnderRoot } from "../src/roots.mjs";
+import { declaredEfforts, effortFor } from "../src/models.mjs";
 import { createCodexStreamParser, createRunnerParser } from "../src/stream.mjs";
 import { addDirsOf } from "./helpers/fake-io.mjs";
 import { assertProviderAdapterContract } from "./helpers/provider-contract.mjs";
@@ -31,6 +33,44 @@ test("Codex app-server discovery initializes, follows cursors, and normalizes de
   deepEqual(models.map((model) => model.model), ["gpt-5-codex", "gpt-5-mini"]);
   deepEqual(models.map((model) => model.provider), ["codex", "codex"]);
   equal(models[0].runner, "codex");
+});
+
+// A stand-in child that answers initialize + model/list, so an injected spawnImpl
+// can record the argv discovery really hands the process.
+function recordingSpawn(seen) {
+  return (cmd, args) => {
+    seen.push([cmd, ...args]);
+    const child = new EventEmitter();
+    child.stdout = new EventEmitter();
+    child.stderr = new EventEmitter();
+    child.stdin = {
+      write(line) {
+        const message = JSON.parse(line);
+        const result = message.method === "initialize"
+          ? { serverInfo: { name: "stub" } }
+          : { data: [{ id: "gpt-5-codex" }], nextCursor: null };
+        setImmediate(() => child.stdout.emit("data", `${JSON.stringify({ jsonrpc: "2.0", id: message.id, result })}\n`));
+      },
+    };
+    child.kill = () => {};
+    return child;
+  };
+}
+
+// Discovery reads args off the same config block the usage reader does — a
+// non-default appServerArgs that works for usage must work for model/list too.
+test("Codex discovery spawns the app-server with the configured args", async () => {
+  const seen = [];
+  const spawnImpl = recordingSpawn(seen);
+  const models = await discoverCodexModels(
+    { providers: { codex: { path: "/opt/codex", appServerArgs: ["app-server", "--stdio", "--strict-config"] } } },
+    { spawnImpl }
+  );
+  deepEqual(models.map((model) => model.model), ["gpt-5-codex"], "the configured args must still reach a working app-server");
+  deepEqual(seen[0], ["/opt/codex", "app-server", "--stdio", "--strict-config"]);
+
+  await discoverCodexModels({ providers: { codex: { path: "/opt/codex" } } }, { spawnImpl });
+  deepEqual(seen[1], ["/opt/codex", "app-server", "--stdio"], "an unconfigured provider keeps the documented default");
 });
 
 test("Codex discovery deduplicates model rows from an injected client", async () => {
@@ -63,6 +103,29 @@ test("Codex model normalization preserves optional capabilities", () => {
     modalities: ["text"],
     isDefault: true,
   });
+});
+
+// The advertised default is the whole point of forwarding `efforts`: without it
+// `effortFor` falls to "medium" and a leaf that named no effort runs at a setting
+// the provider never chose.
+test("Codex model normalization carries the advertised default effort", () => {
+  const descriptor = normalizeCodexModel({
+    id: "gpt-5-codex",
+    supportedReasoningEfforts: ["low", "high"],
+    defaultReasoningEffort: "high",
+  });
+  deepEqual(descriptor, {
+    provider: "codex",
+    model: "gpt-5-codex",
+    runner: "codex",
+    efforts: ["low", "high"],
+    defaultEffort: "high",
+  });
+  equal(effortFor({}, declaredEfforts("gpt-5-codex", "codex", [descriptor])), "high");
+  equal(effortFor({ effort: "low" }, declaredEfforts("gpt-5-codex", "codex", [descriptor])), "low");
+
+  // An undeclared default stays absent rather than becoming a wrong one.
+  equal(normalizeCodexModel({ id: "gpt-5-mini", defaultReasoningEffort: "  " }).defaultEffort, undefined);
 });
 
 test("Codex runner invocation is sandboxed, resumable, and contract-valid", () => {
@@ -309,6 +372,36 @@ test("Codex parser output is the final agent message, never reasoning or interim
   equal(parser.result().output, '{"ok":true}');
 });
 
+// A chunk boundary lands wherever the OS put it, so a multibyte character can be
+// split across two chunks. Decoded per-chunk it becomes U+FFFD — in a JSONL line
+// that is a silently corrupted payload, not a parse failure anything reports.
+test("Codex app-server decodes a character split across stdout chunks", async () => {
+  const child = {
+    stdin: { write() {} },
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    on() {},
+    kill() {},
+  };
+  const client = createCodexAppServerClient({ spawnImpl: () => child });
+  const id = "gpt-é🙂-codex";
+  const bytes = Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { data: [{ id }] } })}\n`, "utf8");
+  // Cut at every UTF-8 continuation byte: each chunk then begins mid-character.
+  const chunks = [];
+  let start = 0;
+  for (let i = 1; i < bytes.length; i++) {
+    if ((bytes[i] & 0xc0) === 0x80) { chunks.push(bytes.subarray(start, i)); start = i; }
+  }
+  chunks.push(bytes.subarray(start));
+  ok(chunks.length > 2, "the fixture must really split characters, or it proves nothing");
+
+  const pending = client.request("model/list");
+  for (const chunk of chunks) child.stdout.emit("data", chunk);
+  const result = await pending;
+  equal(result.data[0].id, id);
+  ok(!result.data[0].id.includes("�"), `split decode corrupted the payload: ${JSON.stringify(result.data[0].id)}`);
+});
+
 test("Codex app-server rejects a request when stdin fails synchronously", async () => {
   const child = {
     stdin: { write() { throw new Error("broken pipe"); } },
@@ -325,6 +418,46 @@ test("Codex app-server rejects a request when stdin fails synchronously", async 
 test("Codex runner parser registry exposes both provider factories", () => {
   ok(createRunnerParser("codex", { emit: () => {} }));
   ok(createRunnerParser("claude", { emit: () => {} }));
+});
+
+// "Every preflight when the provider is enabled": the probe reports the account's
+// own answer, so it reads usage with no opt-in and spawns the app-server exactly as
+// the Claude preflight reads Anthropic's quota. A reading that never arrived is a
+// refusal, not a pass — nothing else here would notice a logged-out Codex.
+test("Codex preflight reads usage unasked, and refuses only a spent account", async () => {
+  const adapter = createCodexProviderAdapter();
+  const context = { config: { providers: { codex: { enabled: true } } } };
+  const clientFor = (limits) => ({
+    async initialize() {},
+    async request(method) {
+      if (method === "account/rateLimits/read") return limits;
+      if (method === "account/usage/read") return { summary: { inputTokens: 1 } };
+      throw new Error(`unexpected ${method}`);
+    },
+  });
+  const limits = (usedPercent) => ({ rateLimitsByLimitId: { five_hour: { primary: { usedPercent } } } });
+
+  const ok = await adapter.capabilities.preflight({ ...context, client: clientFor(limits(12)) });
+  equal(ok.ok, true);
+  equal(ok.usage.provider, "codex", "the probe reports the reading it made");
+
+  const spent = await adapter.capabilities.preflight({ ...context, tasks: [{ id: "spent" }], client: clientFor(limits(100)) });
+  equal(spent.ok, false);
+  match(spent.error, /usage is exhausted/);
+  match(spent.error, /spent/, "the refusal names the leaves it grounds");
+  // The exemption the usage gate already states: a fallback leaf rides through.
+  const spared = await adapter.capabilities.preflight({ ...context, tasks: [{ id: "c", fallbackModel: "gpt-5-mini" }], client: clientFor(limits(100)) });
+  equal(spared.ok, true);
+
+  const dead = await adapter.capabilities.preflight({
+    ...context,
+    client: { async initialize() {}, async request() { throw new Error("spawn codex ENOENT"); } },
+  });
+  // Like Claude's (operator, 2026-09-26): an unreadable meter dispatches.
+  equal(dead.ok, true, dead.error);
+
+  // The standing hook stays cache-only: no client and no opt-in is still no spawn.
+  equal(await adapter.capabilities.readUsage({ config: {} }), null);
 });
 
 test("Codex provider adapter passes the concrete provider contract", async () => {

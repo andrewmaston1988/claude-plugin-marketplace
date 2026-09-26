@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { equal, deepEqual, throws } from "node:assert/strict";
+import { equal, deepEqual, ok, throws } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -16,18 +16,41 @@ function tmp() {
 // new machine arrives with. Same precedent as #302, where 1,380 green fixture tests
 // sat on top of a shipped config that refused every task. The values below are the
 // same ones loadConfig materialises — that is the point of pinning them twice.
-test("the shipped config.default.json turns on the host provider and nothing else", () => {
+test("the shipped config.default.json turns on no provider until setup does", () => {
   const shipped = JSON.parse(readFileSync(fileURLToPath(new URL("../config.default.json", import.meta.url)), "utf8"));
-  equal(shipped.providers.claude.enabled, true, "Claude is the host swarm runs inside today — a fresh install that can dispatch nothing is a worse first run than one that over-enables its own host");
+  equal(shipped.providers.claude.enabled, false, "governance refuses a provider with no roots, so a shipped Claude-on default is not a working first run — it is a roots refusal before setup has run. The setup walk enables Claude when it sets the roots");
   equal(shipped.providers.ollama.enabled, false, "a fresh install must not arrive with Ollama already on — a work machine with no Ollama gets an enabled provider and never a question");
   equal(shipped.providers.codex.enabled, false);
+});
+
+// The engine has no `setup` subcommand: `references/setup.md` IS the wizard, so the walk
+// in that file is the only thing that turns Claude on. A fresh install ships it off, and
+// a walk that never writes the key leaves a machine that can dispatch nothing.
+test("the setup walk enables Claude with the roots, not before them", () => {
+  const doc = readFileSync(fileURLToPath(new URL("../skills/swarm/references/setup.md", import.meta.url)), "utf8");
+  const stage = (from, to) => {
+    const start = doc.indexOf(`### ${from}`);
+    const end = doc.indexOf(`### ${to}`, start + 1);
+    return doc.slice(start, end === -1 ? undefined : end);
+  };
+  const stage1 = stage("Stage 1 —", "Stage 1b —");
+  const stage2 = stage("Stage 2 —", "Stage 3 —");
+
+  ok(
+    stage2.includes("providers.claude.enabled"),
+    "Stage 2 writes the roots; Claude is enabled with them, so Stage 2 is the stage that must write providers.claude.enabled",
+  );
+  ok(
+    !/on by default/.test(stage1),
+    "no provider is on by default — Stage 1 must not tell the operator Claude is already enabled",
+  );
 });
 
 test("loadConfig returns shipped defaults when user config is missing", () => {
   const dir = tmp();
   try {
     const cfg = loadConfig(join(dir, "nope.json"));
-    equal(cfg.providers.claude.enabled, true);
+    equal(cfg.providers.claude.enabled, false);
     equal(cfg.providers.ollama.enabled, false);
     equal(cfg.providers.ollama.name, "ollama");
     equal(cfg.providers.ollama.mode, "env");
@@ -118,6 +141,27 @@ test("a top-level allowedRoots is validated like the per-provider one", () => {
     }
     writeFileSync(p, JSON.stringify({ allowedRoots: ["C:/code"] }));
     deepEqual(loadConfig(p).allowedRoots, ["C:/code"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A relative root resolves against whatever cwd the launcher happened to have, so one
+// config gates a different directory per invocation. Refused at load, not at dispatch.
+test("a relative allowedRoots entry is refused at load, naming the key and the value", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ allowedRoots: ["code"] }));
+    throws(() => loadConfig(p), (e) => e.message.includes("allowedRoots") && e.message.includes("'code'") && e.message.includes("absolute"));
+    // "~" is the spelling a user reaches for first, and resolve() does not expand it —
+    // it lands under the launcher's cwd as a literal "~" directory.
+    writeFileSync(p, JSON.stringify({ providers: { codex: { allowedRoots: ["C:/code", "~/code"] } } }));
+    throws(() => loadConfig(p), (e) => e.message.includes("providers.codex.allowedRoots") && e.message.includes("'~/code'"));
+    // The windows drive spelling counts as absolute off win32 too, so a config authored
+    // on one host still loads on the other.
+    writeFileSync(p, JSON.stringify({ allowedRoots: ["C:/code", "/srv/code"] }));
+    deepEqual(loadConfig(p).allowedRoots, ["C:/code", "/srv/code"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

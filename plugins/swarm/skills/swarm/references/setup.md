@@ -58,11 +58,13 @@ whole command exists to remove, and it silently picks a stale build.
 **Probe, show the result, then ask** — and it comes before roots, because asking which roots are
 cleared for a provider the operator does not want is wasted.
 
-The provider that is activating swarm is the **host**, and it is on by default: a swarm that can
-dispatch nothing at all on a fresh install is a worse first run than one that over-enables the
-host it is running inside. Everything else is opt-in. When detection cannot say what the host is
-(no `SWARM_HOST`, no host marker in the environment), nothing is assumed — every provider is
-asked about, host or not. Failing towards asking, never towards enabling.
+Nothing is on out of the box — the shipped `config.default.json` has every provider
+`enabled: false`. The provider that is activating swarm is the **host**, and it is the one
+provider this stage does not ask about: Stage 2 turns it on with the roots, because a provider
+with no roots is refused, so enabling it before the roots exist buys a refusal rather than a
+dispatch. Everything else is opt-in. When detection cannot say what the host is (no
+`SWARM_HOST`, no host marker in the environment), nothing is assumed — every provider is asked
+about, host or not. Failing towards asking, never towards enabling.
 
 Ask the engine which host it sees, rather than reading the environment yourself — the same
 module the status-line resolver uses, so both agree:
@@ -76,8 +78,9 @@ directory — the one Stage 0 already located. An absolute path is not an option
 refuses a bare `C:/…` (`ERR_UNSUPPORTED_ESM_URL_SCHEME`, received protocol `c:`) and needs a
 `file:///C:/…` URL instead. `cd` to the plugin root and the paths just work.
 
-`claude` here means `providers.claude` needs no question — say that it is on and why (it is what
-is running swarm). `unknown` means ask about every provider, Claude included.
+`claude` here means `providers.claude` needs no question in this stage — say that it is what is
+running swarm, and that it is turned on in Stage 2 with the roots. `unknown` means ask about
+every provider, Claude included.
 
 For each non-host provider, the probe result IS the content of the question, not a preamble to
 it. The probe is the engine's own — the same one the run-time preflight uses, not a second
@@ -118,8 +121,9 @@ Codex — no probe available for this provider.
 *wanted* — a work machine is exactly the case where the route exists and is off-limits. So the
 probe result leads the question; the answer is still the operator's.
 
-Write `providers.<id>.enabled` with the `Edit` tool. `providers.ollama.enabled: false` is the
-shipped default, so declining an untouched file means writing nothing.
+Write `providers.<id>.enabled` with the `Edit` tool. `providers.ollama.enabled: false` and
+`providers.claude.enabled: false` are the shipped defaults, so declining an untouched file means
+writing nothing — the host's `true` is written in Stage 2, with the roots.
 
 ### Stage 1b — enable provider capabilities (`providers.<name>.*`)
 
@@ -169,6 +173,12 @@ So this stage is not optional and has no Claude-only fallback — **with no list
 provider dispatches nothing**. Absent is not the same as `[]`: an empty list is the operator
 deliberately denying everything, and the two refusals read differently. Do not suggest a root;
 the operator names it.
+
+**Claude is enabled here, with the roots.** Once the operator has named at least one root, write
+`providers.claude.enabled: true` with the `Edit` tool and say that you did — the shipped `false`
+is what keeps a fresh install from refusing every task against a roots list nobody has filled in
+yet. If the operator names no root at all, leave it off and say plainly that swarm will dispatch
+nothing until they name one; that is a real answer, not a stage left unfinished.
 
 ### Stage 3 — standing consent (`swarm.always`)
 
@@ -297,6 +307,7 @@ from the appendix. If no, close.
 |---|---|---|
 | `allowedRoots` | *(unset)* | Stage 2. The root list for EVERY provider, Claude included. Unset = unconfigured, which dispatches nothing; `[]` = denied on purpose, which is a different refusal. |
 | `providers.<name>.allowedRoots` | *(unset)* | Narrowing only — intersected with `allowedRoots`, so it can never add or widen a root. Set it when one provider must be held to less than the default. |
+| `providers.claude.enabled` | `false` | Stage 2. The host provider, turned on WITH the roots — governance refuses a provider that has no roots, so a fresh install ships it off and the walk enables it as the roots land. |
 | `providers.ollama.enabled` | `false` | Stage 1. Turns the Ollama provider on for dispatch. `false` is the shipped default, so declining an untouched file writes nothing; the probe result leads the question but never flips this on its own. |
 | `providers.ollama.url` | `http://localhost:11434` | Ollama endpoint the `:cloud` leaves talk to; pinged before an Ollama run, unreachable = refuse. |
 | `providers.ollama.mode` | `env` | `env` = plain `claude -p` with the Ollama endpoint and model injected; `launch` = shell out through `launchCmd`. |
@@ -320,7 +331,7 @@ from the appendix. If no, close.
 | `worktreeBranchPrefix` | `swarm/` | Branch prefix for worktree-isolated leaves. |
 | `modelDenylist` | `[]` | Case-insensitive substrings; matching models fail `validate` and vanish from `models`. |
 | `notifyCmd` | `null` | Stage 6. |
-| `quotaPreflight` | `true` | Before a run with Claude leaves, read Anthropic's usage with Claude Code's own sign-in; refuse when a window is exhausted. |
+| `quotaPreflight` | `true` | Before dispatch, read usage for every enabled provider with its own credentials; refuse when usage is exhausted. `false` skips every provider's usage preflight, including Codex. |
 | `quotaWarnPct` | `80` | Warn once when the worst window is at or past this percent. |
 | `quotaCacheSecs` | `300` | How long one usage read is reused. |
 | `quotaPatterns` | four strings | Output substrings that classify a failed leaf as quota-hit. |

@@ -59,6 +59,32 @@ test("an exhausted provider reads 0% left in either window, noting when it reset
   }
 });
 
+// Operator, 2026-09-26: "When the codex session usage expires it takes out the weekly usage
+// too" — "Real weekly left". A spent window zeroes its own tab and any SHORTER one, never a
+// longer one: the spent 5h session says nothing about the week, and each tab still names its
+// OWN window's reset.
+test("a spent session window zeroes Session and leaves Week its own reading", () => {
+  const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+  // Both windows get a distinct hour, so a tab showing the wrong limit's reset cannot pass.
+  const at = (h) => {
+    const d = new Date(Date.now() + h * 3_600_000);
+    const pad = (n) => String(n).padStart(2, "0");
+    return { iso: d.toISOString(), note: `resets ${DAYS[d.getDay()]} ${pad(d.getHours())}:${pad(d.getMinutes())}` };
+  };
+  const sess = at(2), weekly = at(29);
+  const codex = { usages: [usage("codex", [
+    lim("codex primary", 100, { window: "5h", resetsAt: sess.iso }),
+    lim("codex secondary", 44, { window: "7d", resetsAt: weekly.iso }),
+  ], { state: "exhausted" })], errors: {} };
+  const { usageScreen } = loadPerfViews();
+  const week = usageScreen(codex, H, "week");
+  assert.match(week, /class="nm">codex<\/span><span class="val ok">56%</, "44% used is 56% left");
+  assert.match(week, new RegExp(`<div class="sub">${weekly.note}</div>`), "the weekly window's own reset, not the session's");
+  const session = usageScreen(codex, H, "session");
+  assert.match(session, /class="nm">codex<\/span><span class="val bad">0%</);
+  assert.match(session, new RegExp(`<div class="sub">${sess.note}</div>`), "dead here, back when the session window is");
+});
+
 test("a provider that reports neither window, and is not exhausted, stays a dim card naming what it did report", () => {
   const html = loadPerfViews().usageScreen({ usages: [usage("codex", [lim("codex primary", 10, { window: "5h" })])] }, H, "week");
   assert.match(html, /not read — reports codex primary — no weekly window/);

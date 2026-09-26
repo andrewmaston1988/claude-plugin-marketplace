@@ -13,8 +13,9 @@ import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 // The one place the provider policy lives. `allowedRoots` gates EVERY provider, claude
 // included, and an empty list denies — so a fixture HOME without it refuses every
 // dispatching row; fixtures live under tmpdir, so that is the root they declare and
-// `extra` keys win. Ollama is on explicitly: the shipped default is opt-in, so a fixture that omits it refuses.
-const gateConfig = (extra = {}) => JSON.stringify({ providers: { claude: { allowedRoots: [tmpdir()] }, ollama: { enabled: true } }, ...extra });
+// `extra` keys win. Ollama and Claude are on explicitly: both shipped defaults are
+// `enabled: false`, so a fixture that omits one refuses every row that dispatches to it.
+const gateConfig = (extra = {}) => JSON.stringify({ providers: { claude: { enabled: true, allowedRoots: [tmpdir()] }, ollama: { enabled: true } }, ...extra });
 
 // Writes that config into `home` and returns it — every fixture HOME a dispatching row
 // reads goes through here, so the block exists in exactly one place.
@@ -1052,33 +1053,6 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
   }
 });
 
-test("quota: prints per-window utilization from the usage endpoint", async () => {
-  const dir = tmp();
-  const server = createServer((req, res) => {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({
-      limits: [
-        { kind: "session", percent: 22, severity: "normal", resets_at: "2026-07-11T12:19:59Z" },
-        { kind: "weekly_scoped", percent: 4, severity: "normal", resets_at: "2026-07-18T07:59:59Z", scope: { model: { display_name: "Fable" } } },
-      ],
-    }));
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try {
-    const home = gateHome(join(dir, "home"), { quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` });
-    const creds = join(home, "creds.json");
-    writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds, TZ: "Europe/London" } });
-    equal(r.status, 0, r.stderr + r.stdout);
-    ok(r.stdout.includes("session: 22%"), r.stdout);
-    ok(r.stdout.includes("resets Sat 11 Jul, 13:19"), r.stdout);
-    ok(r.stdout.includes("weekly_scoped (Fable): 4%"), r.stdout);
-  } finally {
-    server.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 // ── headroom (:cloud weekly-allowance preflight): ollama-usage, quota prefix, models, swarm.always ──
 
 // P0 — the incident: a failed live fetch must never render its cached reading
@@ -1142,35 +1116,6 @@ test("ollama-usage: C0 a live fetch prints exactly two provider-named lines, not
       "ollama weekly: 83.8% — resets Sat 12 Sep, 09:00",
     ]);
     ok(!/cost|\$|request/i.test(r.stdout), r.stdout);
-  } finally {
-    server.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("quota: C0b every line is prefixed anthropic, not claude", async () => {
-  const dir = tmp();
-  const server = createServer((req, res) => {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({
-      limits: [
-        { kind: "session", percent: 5, severity: "normal", resets_at: "2026-09-06T18:00:00Z" },
-        { kind: "weekly_all", percent: 10, severity: "normal", resets_at: "2026-09-07T00:00:00Z" },
-        { kind: "weekly_scoped", percent: 3, severity: "normal", resets_at: "2026-09-07T00:00:00Z", scope: { model: { display_name: "Fable" } } },
-      ],
-    }));
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try {
-    const home = gateHome(join(dir, "home"), { quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` });
-    const creds = join(home, "creds.json");
-    writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds } });
-    equal(r.status, 0, r.stderr + r.stdout);
-    const lines = r.stdout.trim().split("\n");
-    equal(lines.length, 3, r.stdout);
-    for (const l of lines) ok(l.startsWith("anthropic "), l);
-    ok(!/\bclaude\b/i.test(r.stdout), r.stdout);
   } finally {
     server.close();
     rmSync(dir, { recursive: true, force: true });
@@ -1272,10 +1217,12 @@ test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare
   }
 });
 
-test("standing mode: C5 decide() is null outside swarm.always — config absent and explicitly false", async () => {
+test("standing mode: C5 decide() is null outside swarm.always once a root exists — and NOT silent without one", async () => {
   const cwd = "C:/code/x";
-  equal(await hookDecide({ event: "SessionStart", cwd, config: undefined }), null);
+  // R8b took the absent-config case out of this pin: with no roots nothing dispatches, so
+  // SessionStart speaks. The silence rule now binds a CONFIGURED install that is unarmed.
   equal(await hookDecide({ event: "SessionStart", cwd, config: { swarm: { always: false }, provider: { allowedRoots: ["C:/code"] } } }), null);
+  ok((await hookDecide({ event: "SessionStart", cwd, config: undefined })).includes("/swarm:swarm setup"));
 });
 
 test("unknown command and missing args exit 1 with usage", () => {

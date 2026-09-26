@@ -86,6 +86,30 @@ and need the configured `codex` app-server command.
 <!-- swarm-bootstrap-exception: the only sanctioned engine-path instruction in the tree -->
 Working in a clone of this marketplace, run instead: `node plugins/swarm/scripts/swarm.mjs install`.
 
+### Codex
+
+Swarm installs into Codex from this same tree — one shared `skills/`, `src/` and `bin/`,
+with `.codex-plugin/plugin.json` as the only extra manifest.
+
+```bash
+codex plugin marketplace add <path to this repo>
+codex plugin add swarm@andrewmaston1988-claude-plugins
+```
+
+The marketplace name is shared with the Claude install deliberately, so `swarm@<marketplace>`
+is one identity on both hosts and `swarm install` resolves either. Codex has no registry
+file, so the resolver reads `~/.codex/config.toml` for the enabling entry and resolves the
+newest enabled install itself. `SWARM_PLUGIN_REGISTRY` still names a Claude-shaped registry,
+and setting it suppresses the Codex lookup.
+
+**Swarm's tool-gating hooks are Claude-only, and the Codex manifest declares none.** Codex's
+hook runtime is fully built — the event set, the `type: "command"` schemas and
+`CLAUDE_PLUGIN_ROOT` are all in the 0.156.1 binary — but `feature.plugin_hooks` is `false`
+and server-controlled, and `--enable plugin_hooks` does not flip it. A plugin-declared hook
+cannot run, so declaring one would promise enforcement that never happens. Under Codex,
+`dispatch-gate`, `foreground-guard` and `leaf-guard` do not fire: a Codex leaf is
+unguarded, and the governance roots in `~/.swarm/config.json` are the only containment.
+
 ## Usage
 
 ```bash
@@ -94,7 +118,7 @@ swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/m
 swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
 swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
 swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
-swarm quota                # Anthropic utilization per limit window
+swarm quota                # Anthropic plus cached cloud-provider utilization
 swarm usage [--provider X] # live usage from enabled provider capabilities
 swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
 swarm grade --init <resultsDir>   # write grades.json — one skeleton row per provider leaf
@@ -374,10 +398,10 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
   marks every still-pending undefended Claude leaf `quota`. Re-running after reset skips
   `ok` work.
 - **Quota preflight**: with Claude leaves present, the engine queries Anthropic's usage
-  endpoint first (free, local OAuth creds, cached `quotaCacheSecs`). Exhausted quota with
-  undefended Claude leaves aborts before dispatch; ≥`quotaWarnPct` (80) warns and proceeds.
-  Best-effort — any endpoint failure and the run proceeds. Disable with
-  `"quotaPreflight": false`.
+  endpoint first (free, local credentials, cached `quotaCacheSecs`). Exhausted quota with
+  undefended leaves aborts before dispatch; ≥`quotaWarnPct` (80) warns and proceeds. Best-effort —
+  any endpoint failure and the run proceeds. `"quotaPreflight": false` skips every provider's
+  usage preflight, including Codex.
 - **Memory pressure parks, it doesn't fail.** Below `minFreeMemMb` (2048) a pending leaf
   waits (`retrying`, unlimited); below `valveFreeMemMb` (1024) with >1 leaf running, the
   engine stops its own newest leaf (classified `memory`, not a failure). Both redrive once
@@ -385,18 +409,21 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
   recovers. An engine with nothing else running still starts one leaf — degrades to serial
   rather than stalling.
 
-`swarm quota` reports Anthropic utilization and the legacy Ollama cloud cache. Use
-`swarm usage` for live readings from every enabled provider capability:
+`swarm quota` reports Anthropic utilization, the legacy Ollama cloud cache, and a cached Codex
+row when Codex is enabled. It does not spawn Codex to refresh that row. Use `swarm usage` for live
+readings from every enabled provider capability:
 
 ```
-anthropic session: 42% — resets Sun 6 Sep, 19:00
-anthropic weekly_all: 71% — resets Sat 12 Sep, 01:00
+claude session: 42% — resets Sun 6 Sep, 19:00
+claude weekly_all: 71% — resets Sat 12 Sep, 01:00
 ollama session: 12% — resets Sun 6 Sep, 13:00
 ollama weekly: 87% — resets Tue 8 Sep, 01:00
+codex session: 24% — resets Sun 6 Sep, 19:00
+codex weekly: 58% — resets Fri 11 Sep, 09:00
 ```
 
 `quota` fetches Anthropic live and reads the legacy Ollama cloud cache (its cookie needs a
-human, so it must not stall on one). `usage` asks enabled provider adapters for live
+human, so it must not stall on one) and the cached Codex reading. `usage` asks enabled provider adapters for live
 readings. Exit code 1 means **Anthropic** exhausted specifically.
 
 **`swarm ollama-usage`** owns the `:cloud` side's fetch and cookie — zero-dependency,
@@ -588,9 +615,10 @@ session without the config flag.
 
 Two `PreToolUse` hooks intercept the tools that fan work out without going through swarm.
 Both are speed bumps by default — they fire at most **twice per session** and a retry passes
-straight through — and both become **hard blocks with no budget** under standing mode
-(`swarm.always`), where swarm is already pre-authorised and the other tool is the wrong reach.
-Both stay silent in pipeline child sessions (`CORRELATION_ID`).
+straight through. Under standing mode (`swarm.always`), the Agent nudge becomes a **hard block
+with no budget**; the Workflow nudge does so only when an alternative provider is armed, because
+without one swarm has nowhere to send the work. Both stay silent in pipeline child sessions
+(`CORRELATION_ID`).
 
 | Hook | Tool | Fires when | Disable |
 |---|---|---|---|

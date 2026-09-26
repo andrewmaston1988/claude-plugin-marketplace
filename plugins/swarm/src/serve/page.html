@@ -1257,9 +1257,8 @@
     } else {
       if (!p.overall.length) html += `<div class="empty">no graded leaves under ${esc(p.path)} yet.</div>`;
       else {
-        const short = (a) => a.slice(0, 5);
-        html += rankList(p.overall.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.combined), none: c.combined == null, sub: cellSub(c, p.universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), frac: (c.combined ?? 0) / 10, prov: c.provisional, badge: costOf.get(c.model) ?? null })), { podium: true });
-        html += `<div class="foot">overall = mean of the four universal weighted scores; capability aspects excluded — they are graded only where a leaf stressed them.</div>`;
+        await loadPerfJs();
+        html += window.perfViews.rankScreen(p.overall, { esc, enc, fmtScore, cellSub, rankList, costOf, universals: p.universals });
       }
     }
     return { header, html };

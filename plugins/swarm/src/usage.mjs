@@ -8,16 +8,17 @@
 // cloud provider is then one reader, not another command and another cache and
 // another warning string.
 //
-// Split as the rest of this plugin splits: `normalize*` are pure over a reading,
-// `readCachedUsage` is the one function that touches disk. It is called from a
-// UserPromptSubmit hook, so it must never fetch, never block and never throw; a
-// provider it cannot read is `unknown` and says nothing at all.
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+// Split as the rest of this plugin splits: `normalize*` are pure over a reading;
+// the disk lives in `readCachedUsage` and the Codex cache pair below. The former
+// is called from a UserPromptSubmit hook, so it must never fetch, never block and
+// never throw; a provider it cannot read is `unknown` and says nothing at all.
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { providerUsageSnapshot } from "./contracts.mjs";
 
 export const QUOTA_CACHE_FILENAME = "quota-cache.json";
+export const CODEX_USAGE_CACHE_FILENAME = "codex-usage.json";
 
 // A limit window, uniform across providers. `scope` is Anthropic's per-model
 // bucket; cloud providers have no equivalent and leave it null. `window` is the
@@ -94,9 +95,10 @@ function toInstant(value) {
   return new Date(value < 1e11 ? value * 1000 : value).toISOString();
 }
 
-// The payload's own answer to "what does this bucket measure". Printed, never
-// mapped: `primary`/`secondary` are not established to BE session/weekly, and a
-// wrong window name is worse than an opaque one.
+// A window's length is its name: `primary`/`secondary` are payload slots, not
+// windows, and never print. 5h is Claude's session, 7d its weekly.
+const NAMED_WINDOWS = { 300: "session", 10080: "weekly" };
+
 function windowLabel(mins) {
   if (typeof mins !== "number" || !Number.isFinite(mins) || mins <= 0) return null;
   if (mins % 1440 === 0) return `${mins / 1440}d`;
@@ -112,15 +114,17 @@ function codexLimitBuckets(buckets) {
     const entries = ["primary", "secondary"].filter((name) => bucket[name] && typeof bucket[name] === "object")
       .map((name) => [name, bucket[name]]);
     if (!entries.length) entries.push(["", bucket]);
-    for (const [name, value] of entries) {
+    for (const [, value] of entries) {
       const percent = value.usedPercent ?? value.used_percent ?? value.percent;
       if (typeof percent !== "number") continue;
+      const mins = value.windowDurationMins ?? value.window_duration_mins;
+      const named = NAMED_WINDOWS[mins];
       limits.push(limit(
-        name ? `${id} ${name}` : id,
+        named || id,
         percent,
         toInstant(value.resetsAt ?? value.resets_at ?? null),
         id,
-        windowLabel(value.windowDurationMins ?? value.window_duration_mins),
+        named ? null : windowLabel(mins),
       ));
     }
   }
@@ -155,6 +159,35 @@ export function normalizeCodex(reading, options = {}) {
     state: codexExhausted(source.buckets) ? "exhausted" : limits.length ? "ok" : "unknown",
     limits,
   };
+}
+
+// A Codex reading costs an app-server process, so only the command whose job the
+// fetch is (`swarm usage`) pays it, and the reading lands here. Everything else
+// that wants to SHOW Codex figures — `quota`, and anything later — reads this
+// file, which is why it can never stall on a process it does not need.
+export function codexUsageFromCache(env = process.env) {
+  let cached;
+  try {
+    cached = JSON.parse(readFileSync(join(swarmHome(env), CODEX_USAGE_CACHE_FILENAME), "utf8"));
+  } catch {
+    return null;
+  }
+  if (cached?.provider !== "codex" || !Array.isArray(cached.buckets)) return null;
+  // THIS process did not fetch it, and saying `live` would suppress the banner
+  // that exists to mark exactly that. A failed half keeps its own provenance.
+  return { ...cached, provenance: cached.provenance === "live" ? "cached" : cached.provenance };
+}
+
+export function writeCodexUsageCache(reading, env = process.env) {
+  if (reading?.provider !== "codex" || !Array.isArray(reading.buckets)) return;
+  const path = join(swarmHome(env), CODEX_USAGE_CACHE_FILENAME);
+  try {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(`${path}.tmp`, JSON.stringify(reading));
+    renameSync(`${path}.tmp`, path);
+  } catch {
+    // Best-effort: a cache nothing can read is a missing figure, never a failure.
+  }
 }
 
 // Providers whose reading needs its own shape read. Anything absent here takes the
@@ -321,11 +354,12 @@ export function usageLines(usages, { timeZone } = {}) {
   for (const u of usages) {
     for (const l of u.limits) {
       const kind = stripProviderPrefix(u.provider, l.kind);
-      const scope = l.scope && !restatesProvider(u.provider, l.scope) ? l.scope : null;
+      const scope = l.scope && !restatesProvider(u.provider, l.scope) && l.scope !== kind ? l.scope : null;
       const label = [kind, l.window && `(${l.window})`, scope && `(${scope})`].filter(Boolean).join(" ");
       const formatted = formatResetTime(l.resetsAt, { timeZone });
       const resets = formatted ? ` — resets ${formatted}` : "";
-      lines.push(`${u.provider}${label ? ` ${label}` : ""}: ${l.percent}%${resets}`);
+      const name = u.provider === "anthropic" ? "claude" : u.provider;
+      lines.push(`${name}${label ? ` ${label}` : ""}: ${l.percent}%${resets}`);
     }
   }
   return lines;

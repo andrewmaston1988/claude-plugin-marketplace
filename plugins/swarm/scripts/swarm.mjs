@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, swarmHome, getConfig } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
-import { readModelsCache as readProviderModelsCache, refreshModelsCache, writeCompositeModelsCache, visibleModels, probeTopModels } from "../src/discovery.mjs";
+import { readModelsCache as readProviderModelsCache, refreshModelsCache, writeCompositeModelsCache, collapseRoster, visibleModels, probeTopModels } from "../src/discovery.mjs";
 import { providerConfig } from "../src/providers.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
@@ -117,7 +117,7 @@ async function costBands(cfg = getConfig()) {
 // the explicit operator command; hooks and validation use the cache-only path.
 export async function readProviderUsage(cfg, { registry = defaultProviderRegistry(), live = false, provider, env = process.env, fetchImpl = globalThis.fetch, quotaCheck } = {}) {
   const { getUsage } = await import("../src/ollama-usage.mjs");
-  const { normalizeProviderUsage } = await import("../src/usage.mjs");
+  const { normalizeProviderUsage, writeCodexUsageCache } = await import("../src/usage.mjs");
   const usages = [];
   const errors = {};
   for (const adapter of registry.list()) {
@@ -128,6 +128,9 @@ export async function readProviderUsage(cfg, { registry = defaultProviderRegistr
       const reading = live && adapter.id === "ollama"
         ? await getUsage(cfg, { gate: false, env, _fetch: fetchImpl })
         : await readUsage({ config: cfg, env, fetch: fetchImpl, usageOptIn: live, ...(quotaCheck && { quotaCheck }) });
+      // Only the live read pays for Codex's app-server process; the reading is
+      // banked here so `quota` can show Codex without spawning one of its own.
+      if (live && adapter.id === "codex") writeCodexUsageCache(reading, env);
       if (reading == null) continue;
       usages.push(normalizeProviderUsage(adapter.id, reading));
     } catch (error) {
@@ -208,12 +211,20 @@ async function cmdModels(rest = [], {
     ...roster.filter((m) => (m.provider || "ollama") !== "ollama"),
     ...cachedOllama,
   ], env);
-  const liveRoster = [
+  // The one collapse site for every provider — without it a Codex or Claude
+  // roster prints a superseded generation beside the model that replaced it,
+  // and `--all` has no `supersededBy` to mark the row with.
+  const liveRoster = collapseRoster([
     ...roster.filter((m) => (m.provider || "ollama") !== "ollama"),
     ...liveOllama,
-  ].filter((m) => providerEnabled(registry, cfg, m) && !isDenylisted(m.model));
+  ].filter((m) => providerEnabled(registry, cfg, m) && !isDenylisted(m.model)), { cloudSuffix: ollama.cloudSuffix });
   const visible = new Set(visibleProviderModels(liveRoster, { isDenylisted }).map(identityKey));
   const shown = showAll ? liveRoster : liveRoster.filter((m) => visible.has(identityKey(m)));
+  // `swarm models` is step 1 of the skill, so a fresh install meets an empty roster before
+  // it ever meets a validation refusal. The footer alone is a dead end; name the way out.
+  if (!shown.length) {
+    write(dim("no launchable models — run /swarm:swarm setup to enable a provider and set allowedRoots"));
+  }
   const { readRows, scoresPath, frontier } = await import("../src/scores.mjs");
   const costRows = await meterCostRows(env);
   const multOf = new Map(costRows.map((r) => [r.model, r.mult]));
@@ -268,7 +279,8 @@ function seatedModels(plan) {
 async function launchableRoster(cfg, { env = process.env, registry = defaultProviderRegistry() } = {}) {
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
   const cached = readProviderModelsCache(env)?.models || [];
-  const enabled = cached.filter((m) => providerEnabled(registry, cfg, m));
+  const enabled = collapseRoster(cached.filter((m) => providerEnabled(registry, cfg, m)),
+    { cloudSuffix: providerConfig(cfg, "ollama")?.cloudSuffix });
   const visible = new Set(visibleProviderModels(enabled, { isDenylisted }).map(identityKey));
   const offered = enabled.filter((m) => !isDenylisted(m.model));
   return offered.filter((m) => visible.has(identityKey(m)));
@@ -1143,40 +1155,13 @@ async function main() {
       case "usage":
         return await cmdUsage(rest);
       case "quota": {
-        // Anthropic is fetched (its credential renews itself); every cloud
-        // provider is read from cache, because its cookie needs a human and
-        // `quota` must not stall on one. Both print through usageLines, so the
-        // subcommand and the standing-mode hook can never word this differently.
-        const { checkQuota } = await import("../src/quota.mjs");
-        const { normalizeAnthropic, normalizeOllama, usageLines, notableLines } = await import("../src/usage.mjs");
-        const cfg = getConfig();
-        const q = await checkQuota({
-          cfg,
-          fetch: (...a) => globalThis.fetch(...a),
+        const { printQuota } = await import("../src/quota.mjs");
+        return await printQuota({
+          cfg: getConfig(),
+          out,
           cachePath: join(swarmHome(), "quota-cache.json"),
-          ...(process.env.SWARM_CREDENTIALS && { credentialsPath: process.env.SWARM_CREDENTIALS }),
+          credentialsPath: process.env.SWARM_CREDENTIALS,
         });
-        const usages = [];
-        if (q) usages.push(normalizeAnthropic(q));
-        else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
-
-        const { usageFromCache, ollamaCloudConfig } = await import("../src/ollama-usage.mjs");
-        if (ollamaCloudConfig(cfg).enabled === true) {
-          const reading = usageFromCache(cfg);
-          if (reading.state === "unknown") out("ollama: no reading yet — run `swarm ollama-usage --cookie '<value>'`");
-          else usages.push(normalizeOllama(reading));
-        }
-
-        for (const line of usageLines(usages)) out(line);
-        // Anthropic severity is its own vocabulary and has no cross-provider
-        // equivalent, so it stays an Anthropic-only annotation.
-        for (const l of q?.limits || []) {
-          if (l.severity && l.severity !== "normal") out(`anthropic ${l.kind}: [${l.severity}]`);
-        }
-        for (const line of notableLines(usages)) out(line);
-        // Exit code keeps its documented meaning: Anthropic exhausted. A cloud
-        // provider's state is reported, never conflated with it.
-        return q?.exhausted ? 1 : 0;
       }
       case "ollama-usage": {
         const { saveCookie, loadCookie, getUsage, ollamaCloudConfig } = await import("../src/ollama-usage.mjs");

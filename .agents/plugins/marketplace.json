@@ -1,0 +1,19 @@
+{
+  "name": "andrewmaston1988-claude-plugins",
+  "interface": {
+    "displayName": "Andrew Maston's Plugins"
+  },
+  "plugins": [
+    {
+      "name": "swarm",
+      "source": {
+        "source": "local",
+        "path": "./plugins/swarm"
+      },
+      "policy": {
+        "installation": "AVAILABLE"
+      },
+      "category": "Developer Tools"
+    }
+  ]
+}

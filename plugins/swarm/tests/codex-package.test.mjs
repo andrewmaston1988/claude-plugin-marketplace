@@ -112,3 +112,40 @@ test("no skills/, src/ or tests/ is duplicated under .codex-plugin/", () => {
   );
   deepEqual(duplicatedSharedDirs(), [], "the shipped tree duplicates a shared directory under .codex-plugin/");
 });
+
+// ── the marketplace index Codex installs from ─────────────────────────────────
+const repoRoot = new URL("../../../", import.meta.url);
+const marketplaceURL = new URL(".agents/plugins/marketplace.json", repoRoot);
+const claudeMarketplaceURL = new URL(".claude-plugin/marketplace.json", repoRoot);
+
+test("the repo carries a Codex marketplace index that points at the real swarm plugin", () => {
+  ok(
+    existsSync(fileURLToPath(marketplaceURL)),
+    ".agents/plugins/marketplace.json does not exist — `codex plugin marketplace add` has nothing to read",
+  );
+  const m = readJson(marketplaceURL);
+  ok(typeof m.name === "string" && m.name.length > 0, "marketplace name must be a non-empty string");
+
+  const swarm = (m.plugins ?? []).find((p) => p.name === "swarm");
+  ok(swarm, "the marketplace index does not list a plugin named swarm");
+  equal(swarm.source.source, "local");
+  equal(swarm.source.path, "./plugins/swarm");
+  // The path is what Codex copies; a stale one installs nothing and says nothing.
+  ok(
+    existsSync(fileURLToPath(new URL(`${swarm.source.path}/.codex-plugin/plugin.json`, repoRoot))),
+    `${swarm.source.path} does not resolve to a directory holding .codex-plugin/plugin.json`,
+  );
+});
+
+test("one plugin identity across both hosts: the resolver's key is swarm@<shared marketplace name>", () => {
+  // The marketplace name is baked into `[plugins."swarm@<name>"]` in every user's
+  // config.toml AND into the Claude registry key. Renaming either index without the
+  // other silently breaks `swarm install` on that host — this is the row that catches it.
+  const codexName = readJson(marketplaceURL).name;
+  equal(codexName, readJson(claudeMarketplaceURL).name, "the Codex and Claude marketplaces must share one name");
+
+  const resolver = readFileSync(fileURLToPath(new URL("statusline/resolver.mjs", pluginRoot)), "utf8");
+  const key = resolver.match(/const PLUGIN_KEY = "([^"]+)"/)?.[1];
+  ok(key, "resolver.mjs no longer declares a PLUGIN_KEY the packaging can be pinned against");
+  equal(key, `swarm@${codexName}`);
+});

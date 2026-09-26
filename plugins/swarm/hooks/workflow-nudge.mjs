@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 // PreToolUse hook on the Workflow tool: block a Workflow call with a "consider swarm
 // instead" reason. Two strengths:
-//   standing mode (swarm.always) -> HARD BLOCK, every call, no budget. The operator has
-//     pre-authorised swarm; Workflow is the wrong tool and a retry must not launder it.
+//   standing mode (swarm.always) -> HARD BLOCK, every call, no budget, while a provider
+//     resolves to allowedRoots. The operator has pre-authorised swarm; Workflow is the
+//     wrong tool and a retry must not launder it.
 //   otherwise                    -> speed bump, NUDGE_CAP firings per session, and only
 //     when swarm's alternative-model path is armed (an enabled provider resolves to
 //     allowedRoots). A retry passes straight through.
-// Silent (exit 0) when: swarm isn't armed, the budget is spent, CORRELATION_ID is set
-// (pipeline child), or swarm.workflowNudge === false. Never throws.
+// Silent (exit 0) when: swarm isn't armed (no allowedRoots at all), the budget is spent,
+// CORRELATION_ID is set (pipeline child), or swarm.workflowNudge === false. Never throws.
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -47,11 +48,11 @@ function allowedRoots(config) {
 export function decideNudge({ config, seen, sessionId, correlationId }) {
   if (correlationId) return false;
   if (config?.swarm?.workflowNudge === false) return false;
-  // Standing mode does not consult arming: with no provider armed swarm still runs the
-  // leaves on Claude tiers, so Workflow is still the tool being reached for by mistake.
+  // Arming is checked before standing mode: with no dispatchable root swarm cannot take the
+  // fan-out either, so a hard block would leave Workflow as the only tool and deny it.
+  if (allowedRoots(config).length === 0) return false;
   if (config?.swarm?.always === true) return 'block';
   if (!sessionId) return false;
-  if (allowedRoots(config).length === 0) return false; // not armed — Workflow is the only game
   return underCap(seen, sessionId) ? 'nudge' : false;
 }
 

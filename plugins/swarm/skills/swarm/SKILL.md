@@ -11,6 +11,8 @@ The arguments are: $ARGUMENTS
 
 **`setup`** → read [references/setup.md](references/setup.md) and follow it — materialise, explain and edit the operator's config. Nothing below applies to a setup call: no offer gate, no manifest, no dispatch.
 
+**Not configured yet** — no `~/.swarm/config.json`, or no `allowedRoots` in it: read [references/setup.md](references/setup.md) and run `/swarm:swarm setup` before anything below, because until the roots are written nothing dispatches and every command here refuses.
+
 Swarm runs work in headless provider sessions on models this session isn't using — one leaf or many. Its widest shape turns one session into a group (independent perspectives, redundant attempts, diverse-lens judging), but a single delegated leaf is a first-class use: the engine is how you spend someone else's context and budget instead of your own. Enabled providers supply capable alternative models (including Ollama `:cloud` and opt-in Codex) alongside Claude tiers, at interactive speed. You author a JSON manifest (the same authoring act as writing a Workflow script); the engine runs the dependency graph in the background and compresses results through a digest so raw output never floods your context.
 
 **Core principle:** the smarts live in the plan and the leaves; the plumbing has none. A manifest you could not defend line by line is a manifest you should not dispatch.
@@ -71,7 +73,7 @@ Dispatch is **deny-by-default, for every provider including Claude**. `allowedRo
 splits into agents (one per lane; merges only on shared surface), and it produces the numbers
 the gate's third question carries. Drafting a leaf-per-item manifest without it is the failure that skill exists to catch. It does not restate the gate and the gate does not restate it. **Invoke `swarm:executing-swarms` in the same breath** — it decides what shape the graph takes and what each task waits for, which is the other half of a manifest you could defend line by line; the two answer different questions and neither summarises the other.
 
-This is not just prose: the dispatch gate denies a `run` unless `swarm:swarm`, `swarm:orchestrating-agents` and `swarm:executing-swarms` were each invoked this session — the swarm skill per dispatch (once per session under `swarm.always`), the other two once per session.
+This is not just prose on a Claude Code host: there the dispatch gate denies a `run` unless `swarm:swarm`, `swarm:orchestrating-agents` and `swarm:executing-swarms` were each invoked this session — the swarm skill per dispatch (once per session under `swarm.always`), the other two once per session. On a Codex host no hook fires at all (`README.md` → Codex — the manifest declares none and `feature.plugin_hooks` is server-controlled off), so those three invocations are this skill's instruction with nothing enforcing them, and the governance roots in `~/.swarm/config.json` are the only containment.
 
 **THE GATE'S ANSWER IS THE ONLY CONSENT TO SPEND. NO ANSWER IS NO.** Violating the letter of this rule is violating its spirit.
 

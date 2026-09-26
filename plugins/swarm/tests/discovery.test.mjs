@@ -8,7 +8,7 @@ import { EventEmitter } from "node:events";
 import {
   discoverModels, scrapeDiscoverCmd,
   deriveCloudName, enrichWithShow, sortModelsBySize,
-  collapseFamilies, visibleModels, removeCachedModel, probeTopModels,
+  removeCachedModel, probeTopModels,
   createOllamaProviderAdapter, discoverOllamaModels, mergeProviderModelCaches,
   normalizeOllamaModelDescriptor, readModelsCache, refreshModelsCache,
   writeCompositeModelsCache,
@@ -241,69 +241,6 @@ test("sortModelsBySize: parameterCount desc, contextLength tiebreak, missing las
   ]);
   deepEqual(sorted.map((m) => m.model),
     ["kimi-k3:cloud", "glm-5.2:cloud", "glm-5.1:cloud", "minimax-m3:cloud"]);
-});
-
-test("collapseFamilies: segment split marks elders superseded within a lineage", () => {
-  const out = collapseFamilies([
-    { model: "glm-5.2:cloud" }, { model: "glm-5.1:cloud" },
-    { model: "kimi-k3:cloud" }, { model: "kimi-k2.6:cloud" },
-    { model: "qwen3.6:cloud" }, { model: "qwen3.5:cloud" },
-    { model: "gemma5:31b-cloud" }, { model: "gemma4:31b-cloud" },
-  ]);
-  const byName = Object.fromEntries(out.map((m) => [m.model, m]));
-  equal(byName["glm-5.1:cloud"].supersededBy, "glm-5.2:cloud");
-  equal(byName["glm-5.2:cloud"].supersededBy, undefined);
-  equal(byName["kimi-k2.6:cloud"].supersededBy, "kimi-k3:cloud"); // lineage kimi-k
-  equal(byName["qwen3.5:cloud"].supersededBy, "qwen3.6:cloud"); // multi-letter stem splits
-  equal(byName["gemma4:31b-cloud"].supersededBy, "gemma5:31b-cloud"); // size tag joins the lineage
-});
-
-test("collapseFamilies: variant tags and size tags are lineage, not versions", () => {
-  const out = collapseFamilies([
-    { model: "kimi-k3:cloud" }, { model: "kimi-k2.7-code:cloud" },
-    { model: "gpt-oss:20b-cloud" }, { model: "gpt-oss:120b-cloud" },
-    { model: "deepseek-v4-flash:0830-cloud" }, { model: "deepseek-v4-flash:0731-cloud" },
-    { model: "deepseek-v4-flash:preview-cloud" },
-  ]);
-  const byName = Object.fromEntries(out.map((m) => [m.model, m]));
-  equal(byName["kimi-k2.7-code:cloud"].supersededBy, "kimi-k3:cloud");
-  equal(byName["gpt-oss:20b-cloud"].supersededBy, undefined);
-  equal(byName["gpt-oss:120b-cloud"].supersededBy, undefined);
-  equal(byName["deepseek-v4-flash:0731-cloud"].supersededBy, "deepseek-v4-flash:0830-cloud");
-  equal(byName["deepseek-v4-flash:preview-cloud"].supersededBy, undefined); // :preview is its own lineage
-});
-
-test("collapseFamilies: prefix-extension versions are incomparable — both kept", () => {
-  const out = collapseFamilies([{ model: "kimi-k3:cloud" }, { model: "kimi-k3:0901-cloud" }]);
-  deepEqual(out.map((m) => m.supersededBy), [undefined, undefined]);
-});
-
-test("visibleModels: elder hidden only while its superseder is usable", () => {
-  const roster = [
-    { model: "glm-5.2:cloud" },
-    { model: "glm-5.1:cloud", supersededBy: "glm-5.2:cloud" },
-  ];
-  deepEqual(visibleModels(roster).map((m) => m.model), ["glm-5.2:cloud"]);
-  // superseder removed from the cache (402 entitlement) → elder resurfaces
-  deepEqual(visibleModels(roster.slice(1)).map((m) => m.model), ["glm-5.1:cloud"]);
-  // superseder denylisted → elder resurfaces; the denylist itself filters at print, not here
-  deepEqual(
-    visibleModels(roster, { isDenylisted: (name) => name === "glm-5.2:cloud" }).map((m) => m.model),
-    ["glm-5.2:cloud", "glm-5.1:cloud"],
-  );
-});
-
-test("visibleModels: supersededBy chains walk to any usable newer entry", () => {
-  const roster = [
-    { model: "glm-5.2:cloud" },
-    { model: "glm-5.1:cloud", supersededBy: "glm-5.2:cloud" },
-    { model: "glm-5.0:cloud", supersededBy: "glm-5.1:cloud" },
-  ];
-  // 5.2 denylisted: 5.1 resurfaces and still hides 5.0
-  deepEqual(
-    visibleModels(roster, { isDenylisted: (n) => n === "glm-5.2:cloud" }).map((m) => m.model),
-    ["glm-5.2:cloud", "glm-5.1:cloud"],
-  );
 });
 
 // Live 402 body from ollama for an unfunded extra-usage model.

@@ -8,6 +8,58 @@ import { band, coins, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_C
 
 const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
 
+// The one supersession reading the Cost screen and the Performance ranking
+// share: the cloud suffix belongs to Ollama's naming, every other provider
+// compares bare, and a superseder the denylist removed leaves its elder alone.
+// Keyed by provider + model so two providers sharing a name never chain.
+function supersededByMap(rows, { providerKey, isDenylisted = () => false, cloudSuffix = ":cloud" } = {}) {
+  const familyNames = new Map();
+  for (const row of rows) {
+    const provider = providerKey(row);
+    const names = familyNames.get(provider) || new Set();
+    names.add(row.model);
+    familyNames.set(provider, names);
+  }
+  const superseded = new Map();
+  for (const [provider, names] of familyNames) {
+    const suffix = provider === "ollama" ? cloudSuffix : "";
+    const families = collapseFamilies([...names].map((model) => ({ model })), suffix);
+    const visible = new Set(visibleModels(families, { isDenylisted }).map((row) => row.model));
+    for (const row of families) {
+      if (!visible.has(row.model) && row.supersededBy) {
+        superseded.set(JSON.stringify([provider, row.model]), row.supersededBy);
+      }
+    }
+  }
+  return superseded;
+}
+
+// The same reading written onto the rows, so a screen can filter or mark them.
+function markSuperseded(rows, options) {
+  const superseded = supersededByMap(rows, options);
+  for (const row of rows) {
+    const by = superseded.get(JSON.stringify([options.providerKey(row), row.model]));
+    if (by) row.supersededBy = by;
+  }
+  return rows;
+}
+
+// The Performance ranking's cells: a ranked row leaves the list while a usable
+// superseder is present, and carries `supersededBy` so the toggle can bring it
+// back. A cell spanning more than one provider has no single naming rule, so it
+// compares bare alongside the unqualified rows.
+export function rankCells(cells, { isDenylisted = () => false, cloudSuffix = ":cloud" } = {}) {
+  const providerOf = (cell) => {
+    const providers = providersOf(cell);
+    return providers.length === 1 ? providers[0] : "unqualified";
+  };
+  const superseded = supersededByMap(cells, { providerKey: providerOf, isDenylisted, cloudSuffix });
+  return cells.map((cell) => {
+    const by = superseded.get(JSON.stringify([providerOf(cell), cell.model]));
+    return by ? { ...cell, supersededBy: by } : cell;
+  });
+}
+
 // One cell per model×aspect, including pairs the model was never graded or
 // scored on at all (n=0) — absence is evidence the grid must still draw.
 // JSON-encoded tuple, not a joined string — a plain delimiter (space, ":") collides
@@ -174,26 +226,7 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
       ...(r.baseModel !== undefined ? { baseModel: r.baseModel } : {}),
     }))
     .sort((a, z) => (a.mult ?? Infinity) - (z.mult ?? Infinity) || compareIdentity(a, z));
-  const familyNames = new Map();
-  for (const row of [...points, ...spread]) {
-    const provider = providerKey(row);
-    const names = familyNames.get(provider) || new Set();
-    names.add(row.model);
-    familyNames.set(provider, names);
-  }
-  for (const [provider, names] of familyNames) {
-    const suffix = provider === "ollama" ? cloudSuffix : "";
-    const families = collapseFamilies([...names].map((model) => ({ model })), suffix);
-    const visible = new Set(visibleModels(families, { isDenylisted }).map((row) => row.model));
-    const supersededBy = new Map(families
-      .filter((row) => !visible.has(row.model) && row.supersededBy)
-      .map((row) => [row.model, row.supersededBy]));
-    for (const row of [...points, ...spread]) {
-      if (providerKey(row) === provider && supersededBy.has(row.model)) {
-        row.supersededBy = supersededBy.get(row.model);
-      }
-    }
-  }
+  markSuperseded([...points, ...spread], { providerKey, isDenylisted, cloudSuffix });
 
   // Verdicts are intentionally local. A single global best/worst would imply
   // that (say) an Ollama meter point and a Codex plan-rate point share a cost

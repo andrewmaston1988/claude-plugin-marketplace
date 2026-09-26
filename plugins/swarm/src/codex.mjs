@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { dirname } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { modelDescriptor, runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
 import { providerConfig } from "./providers.mjs";
@@ -35,6 +36,13 @@ function modelEfforts(row) {
   return [...new Set(efforts)];
 }
 
+// The row names its default effort outright, where Claude's carries it as a badge
+// on one of the options. Both reach `effortFor` under the same field name.
+function modelDefaultEffort(row) {
+  const value = row?.defaultReasoningEffort ?? row?.default_reasoning_effort;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function modelModalities(row) {
   const values = row?.inputModalities ?? row?.modalities;
   if (!Array.isArray(values)) return undefined;
@@ -46,6 +54,7 @@ export function normalizeCodexModel(row) {
   const model = row?.id ?? row?.model ?? row?.modelId;
   if (typeof model !== "string" || !model.trim()) return null;
   const efforts = modelEfforts(row);
+  const defaultEffort = modelDefaultEffort(row);
   const modalities = modelModalities(row);
   return modelDescriptor({
     provider: "codex",
@@ -55,6 +64,7 @@ export function normalizeCodexModel(row) {
       displayName: row.displayName ?? row.display_name,
     }),
     ...(efforts?.length ? { efforts } : {}),
+    ...(defaultEffort ? { defaultEffort } : {}),
     ...(modalities?.length ? { modalities } : {}),
     ...(typeof row?.isDefault === "boolean" ? { isDefault: row.isDefault } : {}),
     ...(row?.availability && typeof row.availability === "object" && !Array.isArray(row.availability)
@@ -139,8 +149,15 @@ export function createCodexAppServerClient({
     stdoutNoise += `${JSON.stringify(message)}\n`;
   }
 
+  // One decoder per stream: a chunk boundary can split a multibyte character, and
+  // decoding each chunk on its own turns the halves into U+FFFD. A chunk that is
+  // already a string was decoded upstream and needs no help.
+  const stdoutDecoder = new StringDecoder("utf8");
+  const stderrDecoder = new StringDecoder("utf8");
+  const decode = (decoder, chunk) => (typeof chunk === "string" ? chunk : decoder.write(chunk));
+
   function handleStdout(chunk) {
-    stdoutBuffer += String(chunk);
+    stdoutBuffer += decode(stdoutDecoder, chunk);
     let index;
     while ((index = stdoutBuffer.indexOf("\n")) >= 0) {
       const line = stdoutBuffer.slice(0, index).trim();
@@ -157,7 +174,7 @@ export function createCodexAppServerClient({
   }
 
   function handleStderr(chunk) {
-    stderr += String(chunk);
+    stderr += decode(stderrDecoder, chunk);
   }
 
   function start() {
@@ -276,7 +293,9 @@ async function makeClient(config, options) {
   return {
     client: createCodexAppServerClient({
       executable: options.executable || cfg.path || "codex",
-      args: options.args || ["app-server", "--stdio"],
+      // Same config key the usage reader spawns with: discovery and usage must
+      // reach the same app-server, or a non-default one works for one and not the other.
+      args: options.args || cfg.appServerArgs,
       timeoutMs: options.timeoutMs ?? cfg.timeoutMs ?? 10_000,
       spawnImpl: options.spawnImpl || options._spawn,
       env: options.env,
@@ -435,6 +454,12 @@ export const defaultCodexRunnerAdapter = createCodexRunnerAdapter();
 
 /** Concrete Codex provider adapter; its capabilities remain opt-in to callers. */
 export function createCodexProviderAdapter(options = {}) {
+  // Spawning the app-server just to read usage is opt-in unless a client is already live.
+  const readUsage = async (context = {}) => {
+    if (!context.client && context.usageOptIn !== true) return null;
+    const { readCodexUsage } = await import("./codex-usage.mjs");
+    return readCodexUsage(context.config || {}, { ...options, ...context });
+  };
   return {
     id: "codex",
     runnerId: "codex",
@@ -452,11 +477,17 @@ export function createCodexProviderAdapter(options = {}) {
         ...options,
         ...context,
       }),
-      // Spawning the app-server just to read usage is opt-in unless a client is already live.
-      readUsage: async (context = {}) => {
-        if (!context.client && context.usageOptIn !== true) return null;
-        const { readCodexUsage } = await import("./codex-usage.mjs");
-        return readCodexUsage(context.config || {}, { ...options, ...context });
+      readUsage,
+      // Codex counterpart to Claude preflight; preserve its fallback exemption.
+      preflight: async (context = {}) => {
+        if (context.config?.quotaPreflight === false) return { ok: true };
+        const usage = await readUsage({ ...context, usageOptIn: true });
+        const blocked = (context.tasks || []).filter((task) => !task.fallbackModel);
+        if (usage?.exhausted && blocked.length) {
+          return { ok: false, error: `Codex usage is exhausted — ${blocked.map((task) => task.id).join(", ")} cannot dispatch. Add fallbackModel or re-run after reset.` };
+        }
+        // Like Claude's: only exhaustion blocks; an unreadable meter dispatches.
+        return { ok: true, usage };
       },
     },
   };

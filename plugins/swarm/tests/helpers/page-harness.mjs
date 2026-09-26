@@ -19,6 +19,7 @@ import vm from "node:vm";
 
 export const PAGE = fileURLToPath(new URL("../../src/serve/page.html", import.meta.url));
 const LIVE_JS = readFileSync(fileURLToPath(new URL("../../src/serve/live.js", import.meta.url)), "utf8");
+const PERF_JS = readFileSync(fileURLToPath(new URL("../../src/serve/perf.js", import.meta.url)), "utf8");
 
 // ── mini-DOM ─────────────────────────────────────────────────────────────
 // Just enough of a DOM for page.html to boot and paint for real: setHtml
@@ -165,9 +166,11 @@ export function loadPage(opts = {}) {
     title: "swarm",
     querySelector: (sel) => (sel.startsWith("#") && !sel.includes(" ") && ids.has(sel.slice(1))) ? ids.get(sel.slice(1)) : (chrome[sel] || makeElement("div", ids)),
     createElement: (tag) => makeElement(tag, ids),
-    // Loading live.js really runs it in this context (the page needs window.swarmLive);
-    // perf.js just resolves — no test drives the perf views.
-    head: { appendChild: (s) => { if (/live\.js(\?|$)/.test(s.src)) vm.runInContext(LIVE_JS, context, { filename: "live.js" }); s.onload && s.onload(); } },
+    // Both lazy scripts really run in this context: the page needs window.swarmLive,
+    // and every Performance route — the overall ranking included — needs window.perfViews.
+    // A test that hands in perfViews owns that contract, so the real script stays out
+    // of its way rather than overwriting the stub.
+    head: { appendChild: (s) => { if (/live\.js(\?|$)/.test(s.src)) vm.runInContext(LIVE_JS, context, { filename: "live.js" }); else if (/perf\.js(\?|$)/.test(s.src) && !opts.perfViews) vm.runInContext(PERF_JS, context, { filename: "perf.js" }); s.onload && s.onload(); } },
   };
   const DOMParser = function () { this.parseFromString = (markup) => ({ documentElement: parseHtml(markup, ids).childNodes[0] }); };
   // readyState/close()/onopen: enough of the real EventSource surface for D6's
@@ -191,7 +194,7 @@ export function loadPage(opts = {}) {
     // depend on wall-clock time to behave.
     setTimeout: (fn, ms) => { timers.push({ fn, ms }); return timers.length; }, clearTimeout: (id) => { if (timers[id - 1]) timers[id - 1].fn = null; },
     queueMicrotask: (f) => Promise.resolve().then(f), console });
-  if (opts.perfViews) window.perfViews = opts.perfViews; // perf.js is never loaded here; stub the contract
+  if (opts.perfViews) window.perfViews = opts.perfViews; // an explicit stub replaces what perf.js installs
   // Absent unless a test hands one in — the page must render without storage.
   if (opts.storage) context.localStorage = opts.storage;
   // Date.now under the test's control, for cadence tests; `new Date()` stays real.

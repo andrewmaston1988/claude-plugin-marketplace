@@ -8,6 +8,7 @@ const root = join(fileURLToPath(import.meta.url), "..", "..", "..", "..");
 const refs = join(root, "plugins", "swarm", "skills", "swarm", "references");
 
 const read = (name) => readFileSync(join(refs, name), "utf8");
+const skill = () => readFileSync(join(root, "plugins", "swarm", "skills", "swarm", "SKILL.md"), "utf8");
 
 test("swarm reference docs do not restate roster token arithmetic", () => {
   const roster = read("reading-the-roster.md");
@@ -22,6 +23,33 @@ test("swarm reference docs do not restate roster token arithmetic", () => {
     !/input\s*\+\s*output\s*\+\s*cacheCreation/.test(roster),
     "reading-the-roster.md must not restate the token bucket arithmetic",
   );
+});
+
+// R8: item 14 ships every provider disabled until setup writes the roots, so an
+// unconfigured install refuses everything. The check has to be the FIRST thing in the
+// skill, before the prose that assumes a configured engine.
+test("SKILL.md opens with the unconfigured check, before anything else", () => {
+  const text = skill();
+  const setupArg = text.split("\n").findIndex((l) => l.trimStart().startsWith("**`setup`**"));
+  ok(setupArg > -1, "SKILL.md must keep its `setup` argument line");
+  // Everything from the argument line to the next section heading is the opening.
+  const after = text.split("\n").slice(setupArg + 1).join("\n").split(/\n## /)[0];
+  const check = after.split(/\n\s*\n/).find((p) => p.trim());
+  ok(check, "SKILL.md must carry a check straight after the `setup` argument line");
+  ok(check.includes("config.json"), `the check must name the missing file; got: ${check}`);
+  ok(check.includes("allowedRoots"), `the check must name the empty-roots case; got: ${check}`);
+  ok(check.includes("references/setup.md"), `the check must route to the setup reference; got: ${check}`);
+});
+
+test("SKILL.md scopes the dispatch-gate promise to the host that enforces it", () => {
+  const text = skill();
+
+  // The gate is a Claude Code PreToolUse hook; the Codex manifest declares none, so
+  // an unscoped "the dispatch gate denies a run" promises Codex enforcement it lacks.
+  const claim = text.split(/\n\s*\n/).find((p) => p.includes("dispatch gate denies"));
+  ok(claim, "SKILL.md must state what the dispatch gate enforces");
+  ok(claim.includes("Claude Code"), `the gate promise must name its host scope; got: ${claim}`);
+  ok(claim.includes("Codex"), `the gate promise must name a Codex host's containment; got: ${claim}`);
 });
 
 test("swarm reference docs keep the guidance no command prints", () => {

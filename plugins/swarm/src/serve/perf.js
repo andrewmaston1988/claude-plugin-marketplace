@@ -136,6 +136,32 @@
     return hero + aspectWidget + covWidget + relWidget;
   }
 
+  // The overall ranking: the page's own rankList under a thin adapter, plus the
+  // superseded rows behind a disclosure. Supersession is read server-side
+  // (`rankCells`), so this view only splits on it — the ranked list and the
+  // toggle can never disagree about which rows are gone.
+  function rankScreen(cells, h) {
+    const { esc, enc, fmtScore, cellSub, rankList, costOf, universals } = h;
+    const short = (a) => a.slice(0, 5);
+    const rows = (list) => list.map((c) => ({
+      key: `m:${c.model}`,
+      href: `#/perf/model/${enc(c.model)}`,
+      label: esc(c.model),
+      val: fmtScore(c.combined),
+      none: c.combined == null,
+      sub: cellSub(c, universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)),
+      frac: (c.combined ?? 0) / 10,
+      prov: c.provisional,
+      badge: costOf.get(c.model) ?? null,
+    }));
+    const listed = cells.filter((c) => !c.supersededBy);
+    const held = cells.filter((c) => c.supersededBy);
+    const ranked = rankList(rows(listed), { podium: true });
+    if (!held.length) return ranked;
+    return ranked + `<details class="foot"><summary>Show more</summary>${rankList(rows(held))}`
+      + `<div class="sub">superseded by a newer model in the roster</div></details>`;
+  }
+
   // The cost read-model as the mockup's Cost screen (prototype.html 922–983): one
   // provider per page from the slide control — multipliers only compare within a
   // provider — then its value hero, then a ranked card per model, or one
@@ -216,7 +242,7 @@
     const LOW = 20, WARN = LOW * 2;
     const week = w !== "session";
     // Named windows (anthropic weekly_all/weekly_scoped, ollama session/weekly) fit by
-    // kind; codex names its windows primary/secondary, so its own span places them —
+    // kind; a window known only by its span (codex's odd lengths) is placed by it —
     // under a day is the session, a day or more the week.
     const SPAN = { m: 1, h: 60, d: 1440 };
     const spanMins = (w) => { const m = /^(\d+)([mhd])$/.exec(w || ""); return m ? +m[1] * SPAN[m[2]] : null; };
@@ -229,6 +255,15 @@
     };
     // Several buckets of one window: the most-consumed is the one that stops work.
     const limitOf = (u) => (u.limits || []).filter(fits).sort((a, b) => b.percent - a.percent)[0] || null;
+    // How long a limit's own window runs, in minutes — the reach a spent one has, so
+    // `reading` can zero its own tab and any shorter one. The named kinds come first
+    // (each provider's own vocabulary), else codex's window string; null is unplaceable.
+    const spanOf = (l) => {
+      const k = l.kind || "";
+      if (k === "session") return 0;
+      if (k === "weekly" || k.startsWith("weekly_")) return 1440;
+      return spanMins(l.window);
+    };
     const tone = (n) => (n <= LOW ? "bad" : n <= WARN ? "warn" : "ok");
     const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const pad = (n) => String(n).padStart(2, "0");
@@ -245,10 +280,17 @@
     for (const [provider, error] of Object.entries(data.errors || {})) if (!seen.has(provider)) { seen.add(provider); rows.push({ provider, error }); }
     rows.sort((a, b) => a.provider.localeCompare(b.provider));
     const reading = (p) => {
-      // Exhausted is dead in every window: 0% left. The note is when it is back — the LAST
-      // spent limit to reset; red 0% already says it ran out.
-      if (p.usage?.state === "exhausted") {
-        const back = (p.usage.limits || []).filter((l) => l.percent >= 100 && l.resetsAt).map((l) => l.resetsAt).sort().pop();
+      // Exhausted is dead in every window it can reach. A spent window zeroes its own tab
+      // and any SHORTER one, never a longer one — a spent 5h session says nothing about the
+      // week, so the Week tab keeps its own figure. A limit we cannot place zeroes both, as
+      // it always did. The note is when it is back — the LAST spent limit to reset; red 0%
+      // already says it ran out.
+      const tabSpan = week ? 1440 : 0;
+      const spent = p.usage?.state === "exhausted"
+        ? (p.usage.limits || []).filter((l) => l.percent >= 100 && (spanOf(l) ?? Infinity) >= tabSpan)
+        : [];
+      if (spent.length) {
+        const back = spent.filter((l) => l.resetsAt).map((l) => l.resetsAt).sort().pop();
         return { left: 0, note: back ? resets(back) : "" };
       }
       const l = p.usage && limitOf(p.usage);
@@ -288,5 +330,5 @@
     return tabs + hero + `<div class="section"><span>providers</span><span class="line"></span></div>` + cards;
   }
 
-  window.perfViews = { coverageGrid, reliabilityBars, leadersList, modelDashboard, costScreen, usageScreen };
+  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelDashboard, costScreen, usageScreen };
 })();

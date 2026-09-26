@@ -185,8 +185,7 @@ export function collapseFamilies(models, suffix = ":cloud") {
 // the cache (402 entitlement) simply isn't found, so its elders resurface.
 // The denylist itself filters at print time in the caller — injected here as
 // a predicate so this module never imports manifest.mjs.
-export function visibleModels(models, { isDenylisted = () => false } = {}) {
-  const byName = new Map(models.map((m) => [m.model, m]));
+export function visibleModels(models, { isDenylisted = () => false } = {}) {  const byName = new Map(models.map((m) => [m.model, m]));
   const usable = (m) => !isDenylisted(m.model);
   return models.filter((m) => {
     const seen = new Set([m.model]);
@@ -196,6 +195,22 @@ export function visibleModels(models, { isDenylisted = () => false } = {}) {
     }
     return true;
   });
+}
+
+// Every provider's roster through the lineage collapse, at this one site: the
+// cloud suffix belongs to Ollama's naming and every other provider compares
+// bare, so a roster that never reached collapseFamilies cannot print a
+// superseded generation beside its replacement. Split per provider first — a
+// name two providers share must not chain into the other's family.
+export function collapseRoster(rows, { cloudSuffix = ":cloud" } = {}) {
+  const groups = new Map();
+  for (const row of rows) {
+    const provider = row?.provider || "ollama";
+    if (!groups.has(provider)) groups.set(provider, []);
+    groups.get(provider).push(row);
+  }
+  return [...groups.entries()].flatMap(([provider, group]) =>
+    collapseFamilies(group, provider === "ollama" ? cloudSuffix : ""));
 }
 
 export async function discoverModels(cfg, fetchImpl = globalThis.fetch, { spawnImpl } = {}) {

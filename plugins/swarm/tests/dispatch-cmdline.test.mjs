@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadManifest } from "./helpers/repo-io.mjs";
-import { buildDispatch, toSpawnable, windowsCommandLineLength } from "../src/dispatch.mjs";
+import { buildDispatch, windowsCommandLineLength } from "../src/dispatch.mjs";
 import { withLeafNotices } from "../src/leaf-notices.mjs";
 
 function tmp() {
@@ -104,7 +104,8 @@ test("win32 command-line check: the engine's notice is measured, so a prompt tha
   try {
     const p = join(dir, "plan.json");
     const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: "C:\\fake\\claude.exe" };
-    const task = { id: "edge", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob" };
+    // cwd is required: Claude is root-gated at dispatch like every other provider.
+    const task = { id: "edge", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob", cwd: dir, originalCwd: dir };
     const len = (text) => windowsCommandLineLength(buildDispatch({ ...task, prompt: text }, text, cfg).argv);
     // The line grows 1:1 with an all-x prompt, so one measurement lands on the cap.
     const n = 30000 + (32000 - len("x".repeat(30000)));
@@ -120,34 +121,22 @@ test("win32 command-line check: the engine's notice is measured, so a prompt tha
   }
 });
 
-test("win32 command-line check: with a .cmd launcher, the measured length includes the cmd /d /s /c wrapper", () => {
+// An opaque .cmd has no measurable command line to count: it cannot be peeled to a node
+// script, so the budget check's own resolution refuses it — naming the launcher, at
+// validate time, before anything spends.
+test("win32 command-line check: an opaque .cmd launcher is refused at validate, naming it", () => {
   const dir = tmp();
   try {
     const cmdPath = join(dir, "claude.cmd");
-    writeFileSync(cmdPath, "@echo off\r\necho hello\r\n"); // opaque shim -> cmd /d /s /c fallback
+    writeFileSync(cmdPath, "@echo off\r\necho hello\r\n");
     const cfg = { provider: { allowedRoots: [] }, providers: { claude: { enabled: true, allowedRoots: [tmpdir()] } }, concurrency: 4, timeoutMs: 50000, resultInlineCap: 4000, claudePath: cmdPath };
-    const baseTask = { id: "shim", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob" };
-    // Find the prompt length where the WRAPPED command line just crosses the
-    // cap but the bare (unwrapped) argv join would not — isolates that the
-    // wrapper itself is what's being counted.
-    let promptLen = 31000;
-    let found = false;
-    for (; promptLen < 32500; promptLen++) {
-      const prompt = "x".repeat(promptLen);
-      const { argv } = buildDispatch(baseTask, prompt, cfg);
-      const bare = windowsCommandLineLength(argv);
-      const { cmd, args } = toSpawnable(argv, { _platform: "win32" });
-      const wrapped = windowsCommandLineLength([cmd, ...args]);
-      if (bare <= 32000 && wrapped > 32000) { found = true; break; }
-    }
-    ok(found, "expected a prompt length where wrapping crosses the cap but the bare join doesn't");
     const p = join(dir, "plan.json");
     writeFileSync(p, JSON.stringify({
-      tasks: [{ ...baseTask, prompt: "x".repeat(promptLen) }],
+      tasks: [{ id: "shim", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001", allowedTools: "Read,Grep,Glob" }],
     }));
     throws(
       () => loadManifest(p, cfg, dir, { io: { platform: "win32" } }),
-      (e) => /task 'shim'/.test(e.message) && /command line/.test(e.message)
+      (e) => e.message.includes(cmdPath) && /not a node shim/.test(e.message)
     );
   } finally {
     rmSync(dir, { recursive: true, force: true });

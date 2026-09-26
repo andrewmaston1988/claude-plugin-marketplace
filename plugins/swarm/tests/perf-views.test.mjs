@@ -1,8 +1,8 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
-import { aggregate, dedupe } from "../src/scores.mjs";
+import { aggregate, dedupe, overall } from "../src/scores.mjs";
 import { OUTCOMES } from "../src/aspects.mjs";
-import { coverage, reliability, leaders, costView } from "../src/serve/perf-views.mjs";
+import { coverage, reliability, leaders, costView, rankCells } from "../src/serve/perf-views.mjs";
 import { DEFAULT_COST_BANDS, costRowsFor as providerCostRows } from "../src/cost.mjs";
 
 // Minimal valid row — mirrors scores.test.mjs's baseline shape so aggregate()
@@ -443,4 +443,31 @@ test("cost: a provider with no cost source renders an unpriced ROW, never an emp
   equal(point.classification, "unpriced", "RED: the point carried no classification, so the page could not say unpriced");
   equal(point.unit, costRows[0].unit, "the point states which unit its weight would be in");
   equal(point.baseModel, "gpt-5.6-luna", "the point names what it is relative to");
+});
+
+// ── the Performance ranking's supersession ──────────────────────────────────
+
+// Operator, 2026-09-26: "Hide, toggle to show" — a superseded model left the
+// ranked list, the same rule `swarm models` and the Cost screen already keep.
+test("rankCells: a superseded model leaves the ranking until the toggle shows it", () => {
+  const rows = [
+    ...Array.from({ length: 5 }, (_, i) => graded({ leaf: `old${i}`, provider: "ollama", model: "deepseek-v4-flash:cloud", grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 } })),
+    ...Array.from({ length: 5 }, (_, i) => graded({ leaf: `new${i}`, provider: "ollama", model: "deepseek-v4.1-flash:cloud", grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 } })),
+  ];
+  const cells = rankCells(overall(rows, { combineProviders: true }).cells);
+  deepEqual(cells.filter((c) => !c.supersededBy).map((c) => c.model), ["deepseek-v4.1-flash:cloud"],
+    "the default ranking is the visible rows only");
+  equal(cells.find((c) => c.model === "deepseek-v4-flash:cloud").supersededBy, "deepseek-v4.1-flash:cloud",
+    "the toggle has a row to bring back, and it names what replaced it");
+});
+
+// The denylist is the same predicate `swarm models` uses: a superseder the
+// account cannot run must not hide its elder from the ranking either.
+test("rankCells: a superseder that is not launchable leaves its elder ranked", () => {
+  const rows = [
+    ...Array.from({ length: 5 }, (_, i) => graded({ leaf: `o${i}`, provider: "ollama", model: "deepseek-v4-flash:cloud", grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 } })),
+    ...Array.from({ length: 5 }, (_, i) => graded({ leaf: `n${i}`, provider: "ollama", model: "deepseek-v4.1-flash:cloud", grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 } })),
+  ];
+  const cells = rankCells(overall(rows, { combineProviders: true }).cells, { isDenylisted: (m) => m === "deepseek-v4.1-flash:cloud" });
+  equal(cells.find((c) => c.model === "deepseek-v4-flash:cloud").supersededBy, undefined);
 });
