@@ -231,7 +231,7 @@ async function main() {
     await client.send("Runtime.enable");
 
     const failures = [];
-    let rows = 0, worst = { v: 0 };
+    let rows = 0, worst = null;
     for (const pass of PASSES) {
       const seen = await measure(client, pass);
       if (seen.length < MODELS.length) failures.push(`${pass.name}: only ${seen.length} rows rendered, expected ${MODELS.length}`);
@@ -243,14 +243,14 @@ async function main() {
         for (const [what, v] of [["grade-rk", r.grade], ["coin-base", r.coin]]) {
           if (v == null) { parts.push(`${what} n/a  `); continue; }
           parts.push(`${what} ${v >= 0 ? "+" : ""}${v.toFixed(2)}`);
-          if (Math.abs(v) > Math.abs(worst.v)) worst = { v, what, pass: pass.name, model: r.model };
+          if (!worst || Math.abs(v) > Math.abs(worst.v)) worst = { v, what, pass: pass.name, model: r.model };
           if (Math.abs(v) > TOL_PX) failures.push(`${pass.name} #${r.i + 1} ${r.model}: ${what} ${v.toFixed(2)}px`);
         }
         console.log(`${pass.name.padEnd(14)} #${String(r.i + 1).padEnd(2)} ${(r.model || "?").padEnd(16)} ${r.trophy ? "trophy" : "disc  "} ${r.kind.padEnd(8)} ${parts.join("  ")}`);
       }
     }
     console.log(`\n${rows} rows measured across ${PASSES.length} passes, tolerance ${TOL_PX}px`);
-    console.log(`worst: ${worst.pass} ${worst.model} ${worst.what} ${worst.v >= 0 ? "+" : ""}${worst.v.toFixed(2)}px`);
+    console.log(`worst: ${worst ? `${worst.pass} ${worst.model} ${worst.what} ${worst.v >= 0 ? "+" : ""}${worst.v.toFixed(2)}px` : "nothing measured"}`);
     if (failures.length) {
       console.log(`\nFAIL — ${failures.length} outside tolerance (or missing):`);
       for (const f of failures) console.log(`  ${f}`);
