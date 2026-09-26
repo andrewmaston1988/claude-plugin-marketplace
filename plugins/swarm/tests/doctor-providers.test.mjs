@@ -5,6 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer, connect } from "node:net";
 import { doctorChecks, doctorExit } from "../src/serve/daemon.mjs";
+import { probeProvider, createDefaultProviderRegistry } from "../src/providers.mjs";
+import { createCodexProviderAdapter } from "../src/codex.mjs";
 import { runCli, SHIMS } from "./helpers/cli.mjs";
 
 // `swarm doctor` reports the probe setup asks its provider question from, so a
@@ -59,6 +61,24 @@ test("doctor: every enabled provider gets a probe row, and an unprobed one is un
 // ── the CLI wiring ───────────────────────────────────────────────────────────
 // The rows above pass with doctor.mjs correct and cmdServe passing nothing, which
 // is exactly the state `probeProvider` was found in: exported, called from nowhere.
+
+// setup.md hands the wizard an unfiltered `probeProvider('<id>', …)` for `codex`, so
+// the gate below is what keeps an install that never enabled Codex from spawning an
+// app-server to answer a question nobody asked.
+test("probe: an unenabled provider is not spawned, and an enabled one really is", async () => {
+  const spawned = [];
+  const registryFor = () => createDefaultProviderRegistry({
+    codexAdapter: createCodexProviderAdapter({ _spawn: (cmd, args) => { spawned.push([cmd, ...args]); throw new Error("no codex here"); } }),
+  });
+  const off = await probeProvider("codex", { config: { codex: { enabled: false } }, registry: registryFor() });
+  assert.deepEqual(off, { id: "codex", ok: true, detail: null, probed: false });
+  assert.deepEqual(spawned, [], "an unenabled provider's preflight must not reach a spawn");
+
+  // Switched on, the same call does probe — the gate is not a constant.
+  const on = await probeProvider("codex", { config: { codex: { enabled: true } }, registry: registryFor() });
+  assert.equal(on.probed, true);
+  assert.equal(spawned.length, 1, "an enabled provider's preflight is the thing that runs");
+});
 
 const tmp = () => mkdtempSync(join(tmpdir(), "swarm-doctor-"));
 const portAnswers = (port) => new Promise((resolve) => {
