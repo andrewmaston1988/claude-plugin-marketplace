@@ -344,7 +344,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     return COST_PROVIDERS.flatMap((provider) => costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps }));
   };
   const rankOf = (cells, model) => {
-    const ranked = cells.filter((c) => c.combined != null);
+    const ranked = rankCells(cells, { isDenylisted, cloudSuffix }).filter((c) => c.combined != null && !c.supersededBy);
     const i = ranked.findIndex((c) => c.model === model);
     return i < 0 ? null : { position: i + 1, of: ranked.length };
   };
@@ -376,7 +376,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       aspects: ASPECTS, universals: UNIVERSAL, domains,
       filters: report.filters,
       overall: rankCells(overall(rows, { model, domain, combineProviders: true }).cells, { isDenylisted, cloudSuffix }),
-      // Drill-in: where this model sits among every model in the same domain filter.
+      // Drill-in: where this model sits among the models the ranking draws, not every graded one.
       ...(model ? { rank: rankOf(overall(rows, { domain, combineProviders: true }).cells, model) } : {}),
       report: report.aspects,
       views: {

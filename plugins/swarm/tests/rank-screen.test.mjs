@@ -59,23 +59,20 @@ test("a ranking with nothing superseded draws no control — never an empty disc
 
 // The page can only hide what the server marks: a cell reaching /api/perf
 // without `supersededBy` renders beside its replacement however good perf.js is.
-async function getPerf() {
+async function getPerf({ models = [["deepseek-v4-flash:cloud", 8], ["deepseek-v4.1-flash:cloud", 9]], query = "" } = {}) {
   const home = mkdtempSync(join(tmpdir(), "swarm-rank-"));
   const row = (leaf, model, s) => JSON.stringify({
     resultsDir: "C:/runs/x-1", leaf, model, provider: "ollama", domain: "godot",
     grades: { adherence: s, handoff: s, truthfulness: s, depth: s },
     outcome: "completed", note: "x", assessedBy: { session: "s" },
   });
-  const rows = [
-    ...Array.from({ length: 5 }, (_, i) => row(`old${i}`, "deepseek-v4-flash:cloud", 8)),
-    ...Array.from({ length: 5 }, (_, i) => row(`new${i}`, "deepseek-v4.1-flash:cloud", 9)),
-  ];
+  const rows = models.flatMap(([model, s], i) => Array.from({ length: 5 }, (_, n) => row(`leaf${i}-${n}`, model, s)));
   writeFileSync(join(home, "model-scores.jsonl"), rows.join("\n") + "\n", "utf8");
   const cfg = { dashboard: { port: 0, bind: "127.0.0.1", token: null }, grading: { enabled: true } };
   const server = createServer({ home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000 });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   try {
-    return await new Promise((resolve, reject) => http.get({ host: "127.0.0.1", port: server.address().port, path: "/api/perf" }, (res) => {
+    return await new Promise((resolve, reject) => http.get({ host: "127.0.0.1", port: server.address().port, path: `/api/perf${query}` }, (res) => {
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (c) => { body += c; });
@@ -95,4 +92,17 @@ test("/api/perf marks the superseded overall cell, and the real renderer hides i
     "RED: the server never read the roster's families, so the page could not hide the row");
   const html = loadPerfViews().rankScreen(body.overall, RANK_H);
   assert.ok(html.split("<details")[0].includes("deepseek-v4.1-flash:cloud"));
+});
+
+// R5: the drill-in rank is a position on the list the ranking SHOWS. A hidden
+// superseded model must not inflate a visible model's position or the "of" count.
+test("/api/perf ranks a model among the visible cells, not the hidden ones", async () => {
+  const model = "deepseek-v4.1-flash:cloud";
+  const models = [["deepseek-v4-flash:cloud", 9], ["glm-5.1:cloud", 7], [model, 5]];
+  const body = await getPerf({ models });
+  assert.equal(body.overall.find((c) => c.model === "deepseek-v4-flash:cloud").supersededBy, model,
+    "the top-scoring elder is marked superseded, so the page holds it out of the ranked list");
+  const mid = await getPerf({ models, query: `?model=${encodeURIComponent(model)}` });
+  assert.deepEqual(mid.rank, { position: 2, of: 2 },
+    "the visible list is glm-5.1 then deepseek-v4.1-flash");
 });
