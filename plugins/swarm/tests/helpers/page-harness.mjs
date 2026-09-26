@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { logosScript } from "../../src/serve/logos.mjs";
 
 // page.html is one IIFE inside a <script> tag with no exports: route(), the
 // renderers, the paint primitives and `api` are all closed over. So this
@@ -20,6 +21,7 @@ import vm from "node:vm";
 export const PAGE = fileURLToPath(new URL("../../src/serve/page.html", import.meta.url));
 const LIVE_JS = readFileSync(fileURLToPath(new URL("../../src/serve/live.js", import.meta.url)), "utf8");
 const PERF_JS = readFileSync(fileURLToPath(new URL("../../src/serve/perf.js", import.meta.url)), "utf8");
+const LOGOS_JS = logosScript();
 
 // ── mini-DOM ─────────────────────────────────────────────────────────────
 // Just enough of a DOM for page.html to boot and paint for real: setHtml
@@ -43,12 +45,15 @@ function makeElement(tag, ids) {
     get: () => el.childNodes.map((n) => n.textContent).join(""),
     set: (v) => { el.childNodes = [makeText(v)]; },
   });
+  el.contains = (n) => { for (let p = n; p; p = p.parentNode) if (p === el) return true; return false; };
   el.hasAttribute = (n) => el.attributes.some((a) => a.name === n);
   el.getAttribute = (n) => { const a = el.attributes.find((x) => x.name === n); return a ? a.value : ""; };
   el.setAttribute = (n, v) => {
     const a = el.attributes.find((x) => x.name === n);
     if (a) a.value = String(v); else el.attributes.push({ name: n, value: String(v) });
     if (n === "id") ids.set(String(v), el);
+    // The delegated click listener reads t.dataset.*, so data-* attributes must land there.
+    if (n.startsWith("data-")) el.dataset[n.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = String(v);
   };
   el.removeAttribute = (n) => { el.attributes = el.attributes.filter((a) => a.name !== n); };
   Object.defineProperty(el, "className", { get: () => el.getAttribute("class"), set: (v) => el.setAttribute("class", v) });
@@ -166,11 +171,15 @@ export function loadPage(opts = {}) {
     title: "swarm",
     querySelector: (sel) => (sel.startsWith("#") && !sel.includes(" ") && ids.has(sel.slice(1))) ? ids.get(sel.slice(1)) : (chrome[sel] || makeElement("div", ids)),
     createElement: (tag) => makeElement(tag, ids),
-    // Both lazy scripts really run in this context: the page needs window.swarmLive,
-    // and every Performance route — the overall ranking included — needs window.perfViews.
-    // A test that hands in perfViews owns that contract, so the real script stays out
-    // of its way rather than overwriting the stub.
-    head: { appendChild: (s) => { if (/live\.js(\?|$)/.test(s.src)) vm.runInContext(LIVE_JS, context, { filename: "live.js" }); else if (/perf\.js(\?|$)/.test(s.src) && !opts.perfViews) vm.runInContext(PERF_JS, context, { filename: "perf.js" }); s.onload && s.onload(); } },
+    // live.js, logos.js and perf.js really run in this context: the page needs
+    // window.swarmLive, window.swarmLogos and window.perfViews. A test that hands in
+    // perfViews owns that contract, so the real perf script stays out of its way.
+    head: { appendChild: (s) => {
+      if (/live.js(?|$)/.test(s.src)) vm.runInContext(LIVE_JS, context, { filename: "live.js" });
+      else if (/logos.js(?|$)/.test(s.src)) vm.runInContext(LOGOS_JS, context, { filename: "logos.js" });
+      else if (/perf.js(?|$)/.test(s.src) && !opts.perfViews) vm.runInContext(PERF_JS, context, { filename: "perf.js" });
+      s.onload && s.onload();
+    } },
   };
   const DOMParser = function () { this.parseFromString = (markup) => ({ documentElement: parseHtml(markup, ids).childNodes[0] }); };
   // readyState/close()/onopen: enough of the real EventSource surface for D6's
@@ -219,6 +228,9 @@ export function loadPage(opts = {}) {
 
   return {
     location, hdr, main, nav, perfTab: chrome["#nav a[href='#/perf']"], flush, scrolls,
+    // A tap on one delegated target: page.html's click listener resolves e.target.closest(),
+    // so the caller names the element the tap lands on rather than the listener walking up.
+    tap: (el) => main.listeners.click.forEach((f) => f({ target: { closest: () => el } })),
     fireHashchange: () => winListeners.hashchange.forEach((f) => f()),
     fireSse: (t, d) => (esListeners[t] || []).forEach((f) => f({ data: d || "{}" })),
     esCount: () => esInstances.length,

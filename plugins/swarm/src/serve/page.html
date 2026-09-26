@@ -188,8 +188,8 @@
   .card.rcard { margin-top:10px; cursor:pointer; } .card.rcard.bad { border-color:var(--bad-bg); } .card.rcard.warn { border-color:var(--warn-bg); }
   .rcard .rh { display:flex; align-items:center; gap:8px; }
   .rcard .rdot { width:7px; height:7px; border-radius:50%; flex:none; } .rcard .rspin { flex:none; display:flex; margin:-4px -2px; } .rcard .rspin svg { width:16px; height:16px; }
-  .rcard .nm { flex:1; min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .rcard .tm { flex:none; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .rcard .nm { flex:0 1 auto; min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rcard .tm { flex:none; margin-left:auto; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; }
   .rcard .rs { margin-top:8px; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .rcard .rs .counts { margin-right:6px; }
   .rcard .rbar .bar { margin-top:12px; height:5px; border-radius:3px; }
@@ -235,9 +235,8 @@
   /* one gold coin, tinted per provider; an unknown provider stays gold */
   /* provider brand colours: the chips wear these; the coins are tinted to match */
   :root { --p-claude:#d97757; --p-codex:#3fb68b; --p-ollama:#c3c8d0; }
-  /* hero chips: one shape, coloured by --pc (provider brand, or the value verdict) */
-  .pchip, .vchip { font-size:11px; padding:3px 9px; border-radius:999px; color:var(--pc, var(--muted)); background:color-mix(in srgb, var(--pc, var(--muted)) 16%, transparent); border:1px solid color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); }
-  .pchip.claude { --pc:var(--p-claude); } .pchip.codex { --pc:var(--p-codex); } .pchip.ollama { --pc:var(--p-ollama); } .plogo { width:1.35em; height:1.35em; vertical-align:-.35em; margin-right:.15em; }
+  /* hero chips: one shape, coloured by --pc (provider brand, or the value verdict). A chip leading with its disc drops its left and vertical padding, so the disc is the pill's full inner height and forms its rounded start; a provider with no logo wears .pinit, a disc holding its initial */ .pchip, .vchip { font-size:11px; padding:3px 9px; border-radius:999px; color:var(--pc, var(--muted)); background:color-mix(in srgb, var(--pc, var(--muted)) 16%, transparent); border:1px solid color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); } .pchip:has(>.pdisc) { padding:0 10px 0 0; display:inline-flex; align-items:center; gap:.15em; } .pchip:has(>.pdisc) .pdisc { width:1.5em; height:1.5em; margin-right:0; vertical-align:0; } .pinit { display:inline-flex; align-items:center; justify-content:center; flex:none; width:1.8em; height:1.8em; font-size:.75em; font-weight:600; border-radius:50%; color:var(--fg); background:color-mix(in srgb, var(--muted) 22%, transparent); border:1px solid color-mix(in srgb, var(--muted) 45%, transparent); }
+  /* the runs-tile chip stack: overlapping discs, largest tokens first, in z order. .pdisc's shadow and pulse are CSS — a <filter> def per chip would repeat ids across every chip in the page */ .pchip.claude { --pc:var(--p-claude); } .pchip.codex { --pc:var(--p-codex); } .pchip.ollama { --pc:var(--p-ollama); } .plogo { width:1.35em; height:1.35em; vertical-align:-.35em; margin-right:.15em; } .pstack { display:inline-flex; align-items:center; flex:none; } .pitem { display:inline-flex; border-radius:50%; } .pitem+.pitem { margin-inline-start:-.5em; } .pitem.dim .pdisc { opacity:.4; } .pitem.pulse .pdisc { animation:chipPulse 3.6s ease-in-out infinite; } .pdisc { transform-box:fill-box; transform-origin:center; filter:drop-shadow(0 1.5px 1.5px rgb(0 0 0/.24)); }
   .vchip.good { --pc:var(--ok); } .vchip.bad { --pc:var(--bad); } .vchip.front { --pc:var(--accent); }
   .coins.claude svg { filter:hue-rotate(-24deg) saturate(.9); }
   .coins.codex svg { filter:hue-rotate(125deg) saturate(.8); }
@@ -318,7 +317,7 @@
   main:has(.actionbar) { padding-bottom:calc(140px + env(safe-area-inset-bottom)); }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
   .flash { animation:pulse .8s ease-in-out 3; }
-  @keyframes dash { to { stroke-dashoffset:-56; } }
+  @keyframes dash { to { stroke-dashoffset:-56; } } @keyframes chipPulse { 0%,18%,100% { transform:scale(1); filter:drop-shadow(0 1.5px 1.5px rgb(0 0 0/.24)); } 7% { transform:scale(1.075); filter:drop-shadow(0 1.5px 2.8px rgb(0 0 0/.38)); } } @media (prefers-reduced-motion: reduce) { .pitem.pulse .pdisc { animation:none; } }
   /* Every running glyph (rail, banner, graph, card): the dot under the spinning ring pulses. */
   circle:has(+ .ring) { animation:pulse 1.6s ease-in-out infinite; }
   .ring { fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:14 42; animation:dash 1.4s linear infinite; }
@@ -559,7 +558,7 @@
   }
   function runRow(r, done, labels = groupLabels) {
     const shortProject = (p) => labels.get(p) || p;
-    const providerMeta = Object.entries(r.providerTokens || {}).filter(([provider]) => provider !== "unknown").map(([provider, tokens]) => `${provider} ${fmtTok(tokens)}`).join(" · ");
+    const stack = (r) => /* one disc per provider, largest first, overlapping: a live run's running providers pulse in front and the idle dim behind, a finished run's are all solid, largest on top; a provider with no logo wears its initial */ { const run = new Set(r.providersRunning || []); const e = Object.entries(r.providerTokens || {}).filter(([p]) => p !== "unknown").sort((a, b) => b[1] - a[1]); const o = done ? e : [...e.filter(([p]) => run.has(p)), ...e.filter(([p]) => !run.has(p))]; return o.length ? `<span class="pstack">${o.map(([p], i) => `<span class="pitem${done ? "" : run.has(p) ? " pulse" : " dim"}" style="z-index:${o.length - i}${!done && run.has(p) ? `;animation-delay:${i * 1.2}s` : ""}">${window.swarmLogos?.providerLogo(p, { chip: true, label: p }) || `<span class="pinit" role="img" aria-label="${esc(p)}">${esc(p[0].toUpperCase())}</span>`}</span>`).join("")}</span>` : ""; };
     // Navigation is a data-href picked up by one delegated listener — never an inline
     // onclick, whose quoted string a run or leaf name could break out of.
     const href = `#/run/${enc(r.project)}/${enc(r.name)}`;
@@ -571,10 +570,10 @@
       // closed it (killed, crashed, machine slept). Say so rather than "done".
       const stale = !r.finishedMs && !r.stopped;
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
-       return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${providerMeta ? ` · ${esc(providerMeta)}` : ""}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
+       return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
     }
-    return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span><span class="tm">${elapsed}</span></div>`
-      + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${providerMeta ? esc(providerMeta) : fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
+    return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span>${stack(r)}<span class="tm">${elapsed}</span></div>`
+      + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
   }
 
   // ── run view: rows + rail ──────────────────────────────────────────────

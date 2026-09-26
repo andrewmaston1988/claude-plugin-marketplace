@@ -38,9 +38,11 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
     cache.set(r.dir, { key, run });
     const group = groupOf(r.project);
     const providerTokens = {};
+    const providersRunning = new Set();
     for (const task of run?.tasks || []) {
       const provider = task.provider || "unknown";
       providerTokens[provider] = (providerTokens[provider] || 0) + tokenTotal(task.tokens);
+      if (task.state === "running") providersRunning.add(provider);
     }
     return {
       project: r.project, name: r.name, active: r.active, aborted: r.aborted, stopped: r.stopped, mtimeMs: r.mtimeMs,
@@ -49,7 +51,7 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
       byState: run?.totals.byState ?? {}, leaves: run?.tasks.length ?? 0, waves: run?.waves.length ?? 0,
       tokens: run ? run.tasks.reduce((n, t) => n + tokenTotal(t.tokens), 0) : 0,
       providers: [...new Set((run?.tasks || []).map((task) => task.provider).filter(Boolean))],
-      providerTokens,
+      providerTokens, providersRunning: [...providersRunning],
       hasDigest: !!(run?.digestPath || run?.reportPath),
     };
   });

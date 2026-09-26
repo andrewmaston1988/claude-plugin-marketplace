@@ -43,14 +43,82 @@ test("a running card carries the spinning ring, not a pulsing dot", async () => 
   assert.equal(P.findByClass("rdot").length, 0);
 });
 
-// Operator 2026-09-24: "does it duplicate the token count" — the per-provider split
-// replaces the total, never sits beside it.
-test("a run's tokens read once: the provider split when there is one, else the total", async () => {
-  const one = await runsWith(listData(listRow({ tokens: 12_000, providerTokens: { ollama: 12_000 } })));
-  assert.equal(one.findByClass("rs")[0].textContent.match(/12k/g).length, 1);
-  assert.match(one.findByClass("rs")[0].textContent, /ollama 12k/);
+// Operator 2026-09-26: "instead of trying to split up the provider and the token cost
+// on the runs tile, just show one number" — the split is gone, not hidden, and the
+// providers become a chip stack instead.
+test("a run's tokens read once, as the run total, with no per-provider figure", async () => {
+  const P = await runsWith(listData(listRow({ tokens: 12_000, providerTokens: { ollama: 9_000, claude: 3_000 } })));
+  const rs = P.findByClass("rs")[0].textContent;
+  assert.match(rs, /12k/);
+  assert.equal(rs.match(/12k/g).length, 1, "the total appears once");
+  assert.doesNotMatch(rs, /ollama|claude/, "no provider figure survives in the meta line");
   const none = await runsWith(listData(listRow({ tokens: 12_000 })));
   assert.match(none.findByClass("rs")[0].textContent, /12k/);
+});
+
+// The stack is one chip per provider, largest tokens first, each chip naming its
+// provider for the screen reader (the provider text itself is gone from the tile).
+const chipsOf = (P, root) => P.findByClass("pitem", root).map((c) => ({
+  cls: c.getAttribute("class"),
+  label: c.children[0].getAttribute("aria-label"),
+  z: Number((/z-index:(-?\d+)/.exec(c.getAttribute("style")) || [])[1]),
+  style: c.getAttribute("style"),
+}));
+
+test("the chip stack follows the swarm name, in token order", async () => {
+  const P = await runsWith(listData(listRow({ tokens: 1_201_000, providerTokens: { ollama: 300_000, claude: 900_000, unknown: 1000 } })));
+  const card = P.findByClass("rcard")[0];
+  const rh = P.findByClass("rh", card)[0];
+  const chips = chipsOf(P, card);
+  assert.equal(chips.length, 2, "one chip per known provider, nothing for the unknown bucket");
+  assert.deepEqual(chips.map((c) => c.label), ["claude", "ollama"], "largest provider first");
+  assert.ok(chips[0].z > chips[1].z, "the leading chip is drawn in front");
+  const name = rh.children.findIndex((n) => n.getAttribute("class") === "nm");
+  assert.equal(rh.children[name + 1].getAttribute("class"), "pstack", "the stack sits directly after the name");
+});
+
+test("a provider with no logo gets an initial chip, so no provider disappears silently", async () => {
+  const P = await runsWith(listData(listRow({ tokens: 100, providerTokens: { mystery: 100 } })));
+  const chips = chipsOf(P, P.findByClass("rcard")[0]);
+  assert.equal(chips.length, 1);
+  assert.equal(chips[0].label, "mystery");
+  assert.equal(P.findByClass("pitem")[0].textContent.trim(), "M");
+});
+
+// Operator 2026-09-26: "you would pulse when active only and only stack when running..
+// the ones not running might stay dim and shuffle to the bottom of the stack whilst
+// active ones become foreground solid and pulse".
+test("a live run's running provider is solid and pulsing in front, the idle one dim behind", async () => {
+  const P = await runsWith(listData(listRow({ tokens: 12_000, providerTokens: { ollama: 300_000, claude: 40_000 }, providersRunning: ["claude"] })));
+  const chips = chipsOf(P, P.findByClass("rcard")[0]);
+  assert.deepEqual(chips.map((c) => c.cls), ["pitem pulse", "pitem dim"], "active pulses, idle dims");
+  assert.deepEqual(chips.map((c) => c.label), ["claude", "ollama"], "the running provider leads, despite the smaller token count");
+  assert.ok(chips[0].z > chips[1].z, "the active chip is in front");
+  assert.match(chips[0].style, /animation-delay:0s/);
+});
+
+// Operator 2026-09-26: "completed they would all just be solid stacked", "the one
+// which did most on top".
+test("a finished run's chips are all solid, in token order, the largest drawn on top", async () => {
+  const done = listRow({ active: false, finishedMs: Date.now(), byState: { ok: 1 }, tokens: 12_000, providerTokens: { ollama: 300_000, claude: 900_000 }, providersRunning: ["ollama"] });
+  const data = { ...listData(done), finishedTotals: { "C--code-listproj": 1 } };
+  const P = await runsWith(data);
+  // A project's finished stack is collapsed until it is opened (page.html's (d)).
+  P.tap(P.findByClass("section").find((e) => e.getAttribute("data-project")));
+  await P.flush();
+  P.respondList(data);
+  await P.flush();
+  const chips = chipsOf(P, P.main);
+  assert.deepEqual(chips.map((c) => c.cls), ["pitem", "pitem"], "no dim and no pulse once the run is done");
+  assert.deepEqual(chips.map((c) => c.label), ["claude", "ollama"]);
+  assert.ok(chips[0].z > chips[1].z, "the largest is drawn on top");
+  assert.doesNotMatch(chips[0].style, /animation-delay/);
+});
+
+test("the chip pulse is off under prefers-reduced-motion", async () => {
+  const { readFileSync } = await import("node:fs");
+  const css = readFileSync(new URL("../src/serve/page.html", import.meta.url), "utf8");
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)\s*\{\s*\.pitem\.pulse \.pdisc\s*\{\s*animation:none/);
 });
 
 // Operator 2026-09-24: "the pulse is only applied on one screen" — the rule keys on the
