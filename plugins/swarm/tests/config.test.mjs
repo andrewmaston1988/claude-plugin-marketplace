@@ -123,6 +123,27 @@ test("a top-level allowedRoots is validated like the per-provider one", () => {
   }
 });
 
+// A relative root resolves against whatever cwd the launcher happened to have, so one
+// config gates a different directory per invocation. Refused at load, not at dispatch.
+test("a relative allowedRoots entry is refused at load, naming the key and the value", () => {
+  const dir = tmp();
+  try {
+    const p = join(dir, "config.json");
+    writeFileSync(p, JSON.stringify({ allowedRoots: ["code"] }));
+    throws(() => loadConfig(p), (e) => e.message.includes("allowedRoots") && e.message.includes("'code'") && e.message.includes("absolute"));
+    // "~" is the spelling a user reaches for first, and resolve() does not expand it —
+    // it lands under the launcher's cwd as a literal "~" directory.
+    writeFileSync(p, JSON.stringify({ providers: { codex: { allowedRoots: ["C:/code", "~/code"] } } }));
+    throws(() => loadConfig(p), (e) => e.message.includes("providers.codex.allowedRoots") && e.message.includes("'~/code'"));
+    // The windows drive spelling counts as absolute off win32 too, so a config authored
+    // on one host still loads on the other.
+    writeFileSync(p, JSON.stringify({ allowedRoots: ["C:/code", "/srv/code"] }));
+    deepEqual(loadConfig(p).allowedRoots, ["C:/code", "/srv/code"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("malformed provider containers are rejected before defaults or migration can hide them", () => {
   const dir = tmp();
   try {

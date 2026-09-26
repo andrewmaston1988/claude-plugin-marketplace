@@ -1,5 +1,5 @@
 import { readFileSync, existsSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, isAbsolute } from "node:path";
 import { homedir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -113,11 +113,22 @@ function legacyConfigWarnings(input) {
   return legacyKeys(input).map((k) => `swarm config key '${k}' is deprecated; move it to '${LEGACY_KEY_TO_CANONICAL[k]}'`);
 }
 
+// A windows drive spelling is absolute even off win32 — configs move between hosts, and
+// path.isAbsolute reads "C:/code" as relative on POSIX.
+const WINDOWS_DRIVE = /^[A-Za-z]:[\\/]/;
+
 // Both levels take the same shape. An empty array is valid and means "deny everything"
 // — a deliberate denial, not the absence of configuration, so `undefined` is left alone.
+// A relative entry is refused: it resolves against whatever cwd the launcher happened to
+// have, so one config would gate a different directory per invocation.
 function validateAllowedRoots(value, label) {
   if (value !== undefined && (!Array.isArray(value) || value.some((root) => typeof root !== "string" || !root))) {
     throw new Error(`${label} must be an array of non-empty path strings`);
+  }
+  for (const root of value || []) {
+    if (!isAbsolute(root) && !WINDOWS_DRIVE.test(root)) {
+      throw new Error(`${label} entries must be absolute paths — e.g. "C:/code" or "/home/you/code" instead of '${root}'`);
+    }
   }
 }
 
