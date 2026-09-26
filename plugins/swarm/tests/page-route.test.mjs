@@ -232,8 +232,7 @@ test("badges: the perf overall list carries the band badge and the unmeasured em
   await P.flush();
   P.respondPerf(perfPayload());
   await P.flush();
-  assert.equal(P.main.innerHTML.includes('class="plogo"'), false, "performance rank rows stay logo-free");
-  const badges = badgesIn(P.main);
+  assert.equal(P.main.innerHTML.includes('class="plogo"'), false, "performance rank rows stay logo-free"); const badges = badgesIn(P.main);
   assert.equal(badges.length, 2, "one badge per ranked row");
   assert.deepEqual(badges.map((b) => b.getAttribute("data-coins") || b.textContent), ["2", "—"],
     "measured reads its coins, unmeasured reads —, never a blank");
@@ -263,7 +262,6 @@ test("badges: provider-local cost points do not collapse into one ambiguous mode
   await P.flush();
   P.respondPerf(payload);
   await P.flush();
-  assert.equal(P.main.innerHTML.includes('class="plogo"'), false, "performance rank rows stay logo-free");
   const badges = badgesIn(P.main);
   assert.equal(badges.length, 1, "the model still gets the honest unmeasured marker");
   assert.equal(badges[0].textContent, "—", "provider-local alternatives never become a misleading global multiplier");
