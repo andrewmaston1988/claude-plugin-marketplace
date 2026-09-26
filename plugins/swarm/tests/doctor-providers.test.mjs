@@ -99,7 +99,7 @@ test("swarm doctor: an enabled provider's probe result reaches the operator", as
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "config.json"), JSON.stringify({
     providers: {
-      claude: { allowedRoots: [dir] },
+      claude: { enabled: true, allowedRoots: [dir] },
       // A Codex-enabled install is probed like Claude: the app-server shim answers
       // the two usage reads, so a pass here means the account really answered.
       codex: { enabled: true, path: process.execPath, appServerArgs: [join(SHIMS, "codex-shim.mjs"), "app-server"] },

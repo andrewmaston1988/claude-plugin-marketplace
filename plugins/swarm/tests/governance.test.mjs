@@ -207,8 +207,8 @@ test("governance: an integrate-only manifest is still bounded by allowedRoots", 
 
 // A provider with NO allowedRoots at all is UNCONFIGURED, not mis-located. Every cwd fails
 // the check, so "dispatch from a repo under <list>" names an empty list and teaches nothing.
-// This is exactly what a fresh install hits: config.default.json ships claude with only
-// { enabled: true }, and dropping the Claude exemption made that deny every task.
+// This is exactly what a fresh install hits: config.default.json ships claude with no
+// allowedRoots, and dropping the Claude exemption made that deny every task.
 // RED while the refusal does not separate the two cases: it offers no setup route.
 test("governance: a provider with no allowedRoots is diagnosed as unconfigured, pointing at setup", () => {
   const repo = tmp();
