@@ -237,7 +237,7 @@
   :root { --p-claude:#d97757; --p-codex:#3fb68b; --p-ollama:#c3c8d0; }
   /* hero chips: one shape, coloured by --pc (provider brand, or the value verdict) */
   .pchip, .vchip { font-size:11px; padding:3px 9px; border-radius:999px; color:var(--pc, var(--muted)); background:color-mix(in srgb, var(--pc, var(--muted)) 16%, transparent); border:1px solid color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); }
-  .pchip.claude { --pc:var(--p-claude); } .pchip.codex { --pc:var(--p-codex); } .pchip.ollama { --pc:var(--p-ollama); }
+  .pchip.claude { --pc:var(--p-claude); } .pchip.codex { --pc:var(--p-codex); } .pchip.ollama { --pc:var(--p-ollama); } .plogo { width:1em; height:1em; vertical-align:-.125em; margin-right:.35em; }
   .vchip.good { --pc:var(--ok); } .vchip.bad { --pc:var(--bad); } .vchip.front { --pc:var(--accent); }
   .coins.claude svg { filter:hue-rotate(-24deg) saturate(.9); }
   .coins.codex svg { filter:hue-rotate(125deg) saturate(.8); }
@@ -346,7 +346,7 @@
 <header id="hdr" class="home"></header>
 <main id="main"></main>
 <nav id="nav" class="bnav"><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>swarm</a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>performance</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>cost</a></nav>
-<script>
+<script src="/logos.js"></script><script>
 (() => {
   const TOKEN = new URLSearchParams(location.search).get("t");
   const q = (p) => TOKEN ? `${p}${p.includes("?") ? "&" : "?"}t=${encodeURIComponent(TOKEN)}` : p;
@@ -624,7 +624,7 @@
   const stateOfGroup = (kids) => window.swarmLive.stateOfGroup(kids);
   // A clone session reads `X[i] local`, the clone's id faint; the full id stays the key.
   const sessionName = (id) => { const tilde = id.lastIndexOf("~"); return tilde > 0 ? `<span class="faint">${esc(id.slice(0, tilde))}</span> ${esc(id.slice(tilde + 1))}` : esc(id); };
-  const identityName = (task) => window.swarmLive?.identityLabel ? window.swarmLive.identityLabel(task) : (task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || ""));
+  const identityName = (task) => window.swarmLive?.identityLabel ? window.swarmLive.identityLabel(task) : (task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || "")); const identityHtml = (task) => window.swarmLive?.identityHtml ? window.swarmLive.identityHtml(task) : esc(identityName(task));
   const stripHtml = (kids, sq) => {
     const max = 40;
     const dots = kids.slice(0, max).map((k) => `<i class="${sq ? "sq " : ""}${cls(k.state)}"></i>`).join("");
@@ -634,9 +634,9 @@
 
   // The rail's running glyph — same geometry and .ring animation as dot() — sized into a banner circle.
   const SPIN = `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="var(--accent)"/><circle class="ring" cx="12" cy="12" r="9"/></svg>`;
-  const tile = (kind, icon, title, sub, href) =>
+  const tile = (kind, icon, title, sub, href, subHtml = false) =>
     `<div class="banner ${kind}${href ? " tap" : ""}"${href ? ` role="link" data-key="banner" data-href="${esc(href)}"` : ""}>`
-    + `<span class="ic${icon === SPIN ? " bare" : ""}">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`
+    + `<span class="ic${icon === SPIN ? " bare" : ""}">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${subHtml ? sub : esc(sub)}</div></div>`
     + (href ? `<span class="go">›</span>` : "") + `</div>`;
 
   // One run → one verdict tile, read off the run's own facts in severity order: the
@@ -725,15 +725,15 @@
         // screen, never flattened inline; its dot strip is the row's own summary.
         const t = r.task;
         const href = `#/run/${enc(run.project)}/${enc(run.name)}/node/${enc(t.id)}`;
-         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(identityName(t))} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
+         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${identityHtml(t)} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       const t = r.task;
       const quietSecs = window.swarmLive.quietSecs(t, now);
       const quiet = quietSecs != null && quietSecs * 1000 > quietWarn;
       const right = window.swarmLive.elapsedText(t, now) ?? t.state;
-       const identity = identityName(t);
-       const sub = quiet ? `quiet ${quietSecs}s · ${esc(identity)}` : t.state === "running" && t.activity ? `${esc(identity)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(identity);
+       const identity = identityName(t) ? identityHtml(t) : "";
+       const sub = quiet ? `quiet ${quietSecs}s · ${identity}` : t.state === "running" && t.activity ? `${identity} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : identity;
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
       html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
@@ -875,7 +875,7 @@
     const tok = `${fmtTok(tokTotal(t.tokens || leaf?.tokens))} tokens`;
     const took = t.durationMs != null ? fmtDur(t.durationMs) : window.swarmLive.elapsedText(t, now) ?? "—";
     const last = t.lastEventMs ? ` · last event ${ago(t.lastEventMs)}` : "";
-    const identity = identityName(t);
+    const identity = identityName(t) ? identityHtml(t) : "";
     switch (t.state) {
       case "ok": return tile("ok", "✓", `Finished clean in ${took}`, tok);
       case "skipped": return tile("ok", "✓", "Skipped", "its condition was false — nothing ran");
@@ -894,19 +894,19 @@
       }
     }
     if (quietSecs != null) return tile("slow", "!", `No output for ${fmtDur(quietSecs * 1000)}`, `${tok} so far`);
-    return tile("", SPIN, `Running for ${took}`, `${identity ? `${identity} · ` : ""}${tok} so far`);
+    return tile("", SPIN, `Running for ${took}`, `${identity ? `${identity} · ` : ""}${esc(tok)} so far`, undefined, true);
   }
 
   function renderLeafHtml(run, leaf, id) {
     const now = Date.now();
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
     const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
-     const identity = identityName(t) || "agentless";
+     const identity = identityName(t) ? identityHtml(t) : "agentless";
      const header = childHeader({ name: "leaf", project: run.project, run: run.name }, esc(id), id);
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
     let html = leafBannerHtml(t, leaf, now, quiet ? quietSecsVal : null);
-    html += `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${esc(identity)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}</div>`;
+    html += `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${identity}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}</div>`;
     // Position in graph: what it waited on, what it unblocks, and the way back to the rail.
     const fchips = (ids, none) => ids.length ? ids.map((x) => `<span class="fchip">${esc(x)}</span>`).join("") : `<span>${none}</span>`;
     const order = run.tasks.filter((x) => x.kind !== "digest").map((x) => x.id);
@@ -1080,7 +1080,7 @@
   function segSwitcher(views, activeIndex) {
     // The indicator is one pill wide and slides by whole pill widths, so --i alone places it.
     const ind = activeIndex >= 0 ? `<span class="seg-ind"></span>` : "";
-    const pills = views.map((v, i) => `<a class="seg-label${i === activeIndex ? " on" : ""}" data-href="${esc(v.href)}">${esc(v.label)}</a>`).join("");
+    const pills = views.map((v, i) => `<a class="seg-label${i === activeIndex ? " on" : ""}" data-href="${esc(v.href)}">${v.icon || ""}${esc(v.label)}</a>`).join("");
     return `<div class="seg"><div class="seg-rail" style="--n:${views.length};--i:${Math.max(0, activeIndex)}">${ind}${pills}</div></div>`;
   }
   // Cost is its own screen off /api/cost, which serves with grading off: a price

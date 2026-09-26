@@ -4,6 +4,7 @@ import { aggregate, dedupe, overall } from "../src/scores.mjs";
 import { OUTCOMES } from "../src/aspects.mjs";
 import { coverage, reliability, leaders, costView, rankCells } from "../src/serve/perf-views.mjs";
 import { DEFAULT_COST_BANDS, costRowsFor as providerCostRows } from "../src/cost.mjs";
+import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
 
 // Minimal valid row — mirrors scores.test.mjs's baseline shape so aggregate()
 // and dedupe() see exactly what the real store would hand them.
@@ -470,4 +471,10 @@ test("rankCells: a superseder that is not launchable leaves its elder ranked", (
   ];
   const cells = rankCells(overall(rows, { combineProviders: true }).cells, { isDenylisted: (m) => m === "deepseek-v4.1-flash:cloud" });
   equal(cells.find((c) => c.model === "deepseek-v4-flash:cloud").supersededBy, undefined);
+});
+
+test("model detail provider chips carry logos, while model names remain provider-derived", () => {
+  const { modelDashboard } = loadPerfViews();
+  const html = modelDashboard({ model: "model-x", overall: { providers: ["ollama"] }, aspects: [], coverage: { aspects: [], models: [], cells: [] }, reliability: [], cost: null }, H);
+  ok(/class="pchip ollama"><svg[^>]*class="plogo"/.test(html), "Claude and Ollama provider chip render the Ollama mark");
 });

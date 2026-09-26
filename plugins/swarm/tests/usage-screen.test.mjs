@@ -27,22 +27,22 @@ const pcards = (html) => html.match(/class="card upc[^"]*"/g) || [];
 // Operator, 2026-09-24: the hero is where the next run goes — the MOST left, not the least.
 test("the hero names the provider with the MOST left this session, as percent left", () => {
   const html = loadPerfViews().usageScreen(READABLE, H, "session");
-  assert.match(html, /MOST LEFT THIS SESSION · ANTHROPIC/);
+  assert.match(html, /MOST LEFT THIS SESSION[\s\S]*?ANTHROPIC/);
   assert.match(html, /class="uhero[^"]*"[\s\S]*?<b>97%<\/b>/, "3% used is 97% left");
 });
 
 test("Week reads anthropic's weekly_* buckets, the most-consumed one winning", () => {
   const html = loadPerfViews().usageScreen(READABLE, H, "week");
-  assert.match(html, /MOST LEFT THIS WEEK · OLLAMA/);
+  assert.match(html, /MOST LEFT THIS WEEK[\s\S]*?OLLAMA/);
   assert.match(html, /<b>72%<\/b>/, "ollama's plain weekly reads");
-  assert.match(html, /class="nm">anthropic<\/span><span class="val bad">12%</, "weekly_all at 88% used beats weekly_scoped at 5%");
+  assert.match(html, /class="nm">[\s\S]*?anthropic<\/span><span class="val bad">12%/, "weekly_all at 88% used beats weekly_scoped at 5%");
 });
 
 // Operator, 2026-09-24: alphabetical — the hero already carries the ranking.
 test("one card per provider in alphabetical order, each with its percent left and a bar", () => {
   const html = loadPerfViews().usageScreen(LIVE, H, "session");
   assert.equal(pcards(html).length, 3);
-  const order = [...html.matchAll(/class="nm">([^<]+)</g)].map((m) => m[1]);
+  const order = [...html.matchAll(/class="nm">([\s\S]*?)<\/span>/g)].map((m) => m[1].replace(/<svg[\s\S]*?<\/svg>\s*/, ""));
   assert.deepEqual(order, ["anthropic", "codex", "ollama"]);
   assert.ok(html.includes("97%"));
 });
@@ -53,8 +53,8 @@ test("an exhausted provider reads 0% left in either window, noting when it reset
   for (const w of ["week", "session"]) {
     const html = loadPerfViews().usageScreen(LIVE, H, w);
     assert.equal((html.match(/class="card upc unread"/g) || []).length, 0, w);
-    assert.match(html, /class="nm">codex<\/span><span class="val bad">0%</);
-    assert.match(html, /class="nm">codex<\/span>[\s\S]*?<div class="sub">resets Sat 09:00<\/div>/);
+    assert.match(html, /class="nm">[\s\S]*?codex<\/span><span class="val bad">0%/);
+    assert.match(html, /class="nm">[\s\S]*?codex<\/span>[\s\S]*?<div class="sub">resets Sat 09:00<\/div>/);
     assert.ok(!html.includes("exhausted"), "0% in red already says it");
   }
 });
@@ -140,4 +140,10 @@ test("a held-over reading keeps its figure and carries a stale chip; a live one 
   const html = loadPerfViews().usageScreen(stale, H, "session");
   assert.match(html, /anthropic<span class="chip warn stale">stale<\/span>[\s\S]*?60%/);
   assert.equal((html.match(/chip warn stale/g) || []).length, 1, "only the held-over provider is chipped");
+});
+
+test("Usage cards and the hero place a provider logo before its name", () => {
+  const html = loadPerfViews().usageScreen(READABLE, H, "session");
+  assert.match(html, /class="uhero[\s\S]*?class="plogo"[\s\S]*?ANTHROPIC/);
+  assert.match(html, /class="nm"><svg[^>]*class="plogo"[\s\S]*?anthropic/);
 });
