@@ -109,7 +109,9 @@
     const verdict = cost?.value === "best" ? ["best value", "good"] : cost?.value === "worst" ? ["worst value", "bad"] : cost?.onFrontier ? ["frontier", "front"] : null;
     // The bottom row is chips: the provider(s) first, in brand colour, then the value verdict.
     const providers = cost?.provider ? [cost.provider] : overall?.providers || [];
-    const chips = providers.map((p) => `<span class="pchip ${esc(p)}">${providerLogo(p)}${esc(p)}</span>`).join("") + (verdict ? `<span class="vchip ${verdict[1]}">${verdict[0]}</span>` : "");
+    // The disc is decorative — the provider name sits right after it in the pill, so
+    // the chip stays aria-hidden rather than announcing the provider twice.
+    const chips = providers.map((p) => `<span class="pchip ${esc(p)}">${providerLogo(p, { chip: true })}${esc(p)}</span>`).join("") + (verdict ? `<span class="vchip ${verdict[1]}">${verdict[0]}</span>` : "");
     // Below the podium the position reads RAG: 4th green, amber midway, last red.
     const rag = (pos, of) => {
       const t = of > 4 ? Math.max(0, Math.min(1, (pos - 4) / (of - 4))) : 0;

@@ -476,5 +476,18 @@ test("rankCells: a superseder that is not launchable leaves its elder ranked", (
 test("model detail provider chips carry logos, while model names remain provider-derived", () => {
   const { modelDashboard } = loadPerfViews();
   const html = modelDashboard({ model: "model-x", overall: { providers: ["ollama"] }, aspects: [], coverage: { aspects: [], models: [], cells: [] }, reliability: [], cost: null }, H);
-  ok(/class="pchip ollama"><svg[^>]*class="plogo"/.test(html), "Claude and Ollama provider chip render the Ollama mark");
+  ok(/class="pchip ollama"><svg[^>]*class="plogo pdisc"[\s\S]*?fill="#fff"[\s\S]*?stroke="#d4d4d4"[\s\S]*?<\/svg>ollama<\/span>/.test(html),
+    "the Ollama chip wears Ollama's own disc, not a generic mark");
+});
+
+// The chip disc leads the pill, butted to its leading edge, with the provider name
+// after it — "(O) ollama". The name text is already there, so the disc is decorative
+// and stays aria-hidden.
+test("a provider chip leads with the chip disc, flush left of the name", () => {
+  const { modelDashboard } = loadPerfViews();
+  const html = modelDashboard({ model: "model-x", overall: { providers: ["claude"] }, aspects: [], coverage: { aspects: [], models: [], cells: [] }, reliability: [], cost: null }, H);
+  ok(/<span class="pchip claude"><svg[^>]*class="plogo pdisc"[^>]*><circle[^>]*>[\s\S]*?<\/svg>claude<\/span>/.test(html),
+    `RED: the chip did not lead with the chip disc — got ${html.slice(html.indexOf("pchip claude"), html.indexOf("pchip claude") + 220)}`);
+  ok(/class="plogo pdisc" aria-hidden="true"/.test(html), "the disc is decorative: the name text follows it");
+  ok(!/class="plogo pdisc"[^>]*aria-label/.test(html), "the disc does not repeat the name for the screen reader");
 });
