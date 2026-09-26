@@ -130,6 +130,26 @@ test("readClaudeUsage: an unreachable endpoint returns a marked snapshot, never 
   }
 });
 
+// checkQuota's "stale" reading carries `asOfMs` — the timestamp of the cache it
+// served. Defaulting to the read clock would date a ten-minute-old reading as
+// fresh, and every staleness display reads `asOf` verbatim.
+test("readClaudeUsage: a stale live reading keeps checkQuota's asOfMs, not the read clock", async () => {
+  const home = tmpHome();
+  try {
+    const asOfMs = NOW - 900_000;
+    const snap = await readClaudeUsage({
+      env: { SWARM_HOME: home },
+      now: () => NOW,
+      usageOptIn: true,
+      quotaCheck: async () => ({ ...structuredClone(HEADROOM), source: "stale", asOfMs }),
+    });
+    equal(snap.provenance, "stale");
+    equal(snap.asOf, new Date(asOfMs).toISOString());
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // usage.mjs's own rule: an expired Claude cache is refilled by the CLI
 // unprompted, so the hook's reading is marked but stays SILENT — a reason here
 // would banner every prompt for a condition that fixes itself.
