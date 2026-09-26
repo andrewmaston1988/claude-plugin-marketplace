@@ -1233,6 +1233,20 @@ test("quota: names the missing Codex reading rather than fetching one", async ()
   }
 });
 
+test("quota: the same spy logs when the app-server IS spawned", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const spawnLog = codexSpawnSpy(dir, home);
+    // `usage` is the command whose job the Codex fetch is. Without this half,
+    // "no log" above would hold just as well for a spy that never logs at all.
+    await runCliAsync(["usage", "--provider", "codex"], { cwd: dir, env: { SWARM_HOME: home } });
+    ok(existsSync(spawnLog), "the spy must log a genuine app-server spawn");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // settingsUrl points `models`' meter fetch at this stub; null = the meter is
 // unconfigured and every /settings hit gets the catch-all "{}" JSON.
 function modelsStubServer(settingsHtml = null) {
