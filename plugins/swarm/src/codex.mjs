@@ -486,10 +486,8 @@ export function createCodexProviderAdapter(options = {}) {
         if (usage?.exhausted && blocked.length) {
           return { ok: false, error: `Codex usage is exhausted — ${blocked.map((task) => task.id).join(", ")} cannot dispatch. Add fallbackModel or re-run after reset.` };
         }
-        const reason = usage?.buckets?.find((bucket) => bucket?.kind === "unavailable")?.reason;
-        return usage?.provenance === "none"
-          ? { ok: false, error: `Codex usage could not be read${reason ? ` (${reason})` : ""}` }
-          : { ok: true, usage };
+        // Like Claude's: only exhaustion blocks; an unreadable meter dispatches.
+        return { ok: true, usage };
       },
     },
   };

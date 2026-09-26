@@ -424,7 +424,7 @@ test("Codex runner parser registry exposes both provider factories", () => {
 // own answer, so it reads usage with no opt-in and spawns the app-server exactly as
 // the Claude preflight reads Anthropic's quota. A reading that never arrived is a
 // refusal, not a pass — nothing else here would notice a logged-out Codex.
-test("Codex preflight reads usage unasked, and refuses a spent or unreadable account", async () => {
+test("Codex preflight reads usage unasked, and refuses only a spent account", async () => {
   const adapter = createCodexProviderAdapter();
   const context = { config: { providers: { codex: { enabled: true } } } };
   const clientFor = (limits) => ({
@@ -453,8 +453,8 @@ test("Codex preflight reads usage unasked, and refuses a spent or unreadable acc
     ...context,
     client: { async initialize() {}, async request() { throw new Error("spawn codex ENOENT"); } },
   });
-  equal(dead.ok, false);
-  match(dead.error, /ENOENT/, "an unreadable account names the cause the app-server gave");
+  // Like Claude's (operator, 2026-09-26): an unreadable meter dispatches.
+  equal(dead.ok, true, dead.error);
 
   // The standing hook stays cache-only: no client and no opt-in is still no spawn.
   equal(await adapter.capabilities.readUsage({ config: {} }), null);
