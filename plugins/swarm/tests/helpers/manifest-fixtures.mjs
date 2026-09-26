@@ -39,3 +39,6 @@ export function errorsOf(fn) {
 }
 
 export const claudeTask = (over = {}) => ({ id: "a", prompt: "do it", provider: "claude", model: "claude-haiku-4-5-20251001", ...over });
+
+// A tree follows from write tools, so every test that wants one asks for them.
+export const writerTask = (over = {}) => claudeTask({ allowedTools: "Read,Edit,Bash", ...over });
