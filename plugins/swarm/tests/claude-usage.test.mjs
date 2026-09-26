@@ -104,6 +104,7 @@ test("readClaudeUsage: cache and live readings carry distinct provenance tokens,
     });
     equal(live.provenance, "live");
     equal(cached.provenance, "cache");
+    equal(cached.asOf, new Date(NOW - 10_000).toISOString(), "the reading is dated by the cache, not the read clock");
     equal(cached.exhausted, false, "the verdict survives the cache round-trip");
     ok(live.provenance !== "cached" && cached.provenance !== "cached",
       "ollama's stale-cookie token is a different state; claude must not reuse it");
@@ -125,6 +126,26 @@ test("readClaudeUsage: an unreachable endpoint returns a marked snapshot, never 
     equal(snap.exhausted, undefined, "a failed read is unknown — neither headroom nor exhaustion");
     ok(typeof snap.reason === "string" && snap.reason.length > 0, JSON.stringify(snap));
     ok(snap.buckets.some((b) => b.kind === "unavailable"), JSON.stringify(snap.buckets));
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// checkQuota's "stale" reading carries `asOfMs` — the timestamp of the cache it
+// served. Defaulting to the read clock would date a ten-minute-old reading as
+// fresh, and every staleness display reads `asOf` verbatim.
+test("readClaudeUsage: a stale live reading keeps checkQuota's asOfMs, not the read clock", async () => {
+  const home = tmpHome();
+  try {
+    const asOfMs = NOW - 900_000;
+    const snap = await readClaudeUsage({
+      env: { SWARM_HOME: home },
+      now: () => NOW,
+      usageOptIn: true,
+      quotaCheck: async () => ({ ...structuredClone(HEADROOM), source: "stale", asOfMs }),
+    });
+    equal(snap.provenance, "stale");
+    equal(snap.asOf, new Date(asOfMs).toISOString());
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
