@@ -146,10 +146,10 @@ function validateDispatchPolicy(task, identity, adapter, cfg) {
   const canonicalBlock = cfg?.providers?.[identity.provider] && typeof cfg.providers[identity.provider] === "object";
   const rootGate = identity.provider === "codex" || canonicalBlock || (Array.isArray(roots) && roots.length > 0);
   const cwd = task.originalCwd || task.cwd;
-  // The `!== "claude"` conjunct is deliberate and is NOT the rule ask.mjs applies — an ask
-  // gates every provider including Claude (ask.mjs:44-46). The two disagree on purpose;
-  // unifying them is a governance decision with its own blast radius, not a refactor.
-  if (rootGate && identity.provider !== "claude" && (!cwd || !Array.isArray(roots) || !roots.some((root) => isUnderRoot(cwd, root)))) {
+  // Every provider is gated here, Claude included — the same rule ask.mjs and
+  // governance.mjs apply. Gating Claude is defence in depth (normalization's
+  // checkGovernance refuses it first), but the layers must not disagree on exemptions.
+  if (rootGate && (!cwd || !Array.isArray(roots) || !roots.some((root) => isUnderRoot(cwd, root)))) {
     throw new Error(
       `governance: provider '${identity.provider}' model '${identity.model}' cannot dispatch from '${cwd}' — ` +
       `cwd is not under any ${deniedBy} entry`
@@ -221,7 +221,10 @@ export function transcriptRunner(task, cfg, providerRegistry) {
 // the pipeline precedent: resolve the command via PATH, and when it lands on a
 // .cmd/.bat that is a thin `node "<script>" %*` wrapper, peel it and invoke
 // node directly with the underlying script (supports %~dp0 self-relative paths).
-// Anything else falls back to `cmd /c` (fine for argv without quotes).
+// Anything else is refused: cmd.exe re-parses the argv it is handed and it is not
+// reliably escapable for arbitrary prompt text, so a silent `cmd /c` would dispatch
+// a mangled leaf. The error names the launcher so the config can point at the real
+// executable instead.
 
 export function resolveExecutable(cmd, { _spawnSync = spawnSync, _env = process.env, _platform = process.platform, _cache } = {}) {
   if (_platform !== "win32") return cmd;
@@ -279,6 +282,9 @@ export function toSpawnable(argv, { _readFileSync = readFileSync, _spawnSync = s
       const script = m[1].replace(/%~dp0/gi, dirname(cmd) + sep);
       return { cmd: process.execPath, args: [script, ...args] };
     }
-  } catch { /* unreadable shim — fall through to cmd /c */ }
-  return { cmd: _env.ComSpec || "cmd.exe", args: ["/d", "/s", "/c", cmd, ...args] };
+  } catch { /* unreadable shim is no more peelable than an opaque one — same refusal below */ }
+  throw new Error(
+    `cannot spawn '${cmd}': it is not a node shim, and routing it through cmd.exe would re-parse the arguments ` +
+    `(a prompt containing quotes comes out mangled); point the config at the real executable this launcher wraps`
+  );
 }
