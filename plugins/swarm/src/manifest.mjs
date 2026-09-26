@@ -14,6 +14,7 @@ import { validateTaskShapes } from "./manifest-task-shape.mjs";
 import { detectCycle, validateTaskRelations, validateWorktreeGroups } from "./manifest-relations.mjs";
 import { validateMustRead, validateMustReadRunners } from "./manifest-must-read.mjs";
 import { PROVIDERS, checkDenylist, checkHeadroom, resolveProvider } from "./manifest-model-gates.mjs";
+import { ValidationError } from "./validation-error.mjs";
 
 // The loader is the public surface: every name this module exported before it was
 // split into the manifest-*.mjs modules is still exported from here, so no call
@@ -26,14 +27,9 @@ export { makeReaches } from "./manifest-relations.mjs";
 export { MUST_READ_MAX_ENTRIES } from "./manifest-must-read.mjs";
 export { matchDenylist } from "./manifest-model-gates.mjs";
 export { FOREACH_ITEM_MAX } from "./manifest-dispatch-budget.mjs";
-
-export class ValidationError extends Error {
-  constructor(errors) {
-    super(`manifest validation failed:\n  - ${errors.join("\n  - ")}`);
-    this.name = "ValidationError";
-    this.errors = errors;
-  }
-}
+// Used locally below as well as re-exported, so it is imported rather than
+// re-exported straight from the leaf module.
+export { ValidationError };
 
 // ── args parameterization ({{args.<key>}}) ────────────────────────────────────
 // Substituted on RAW text before any validation, so the validators — and the

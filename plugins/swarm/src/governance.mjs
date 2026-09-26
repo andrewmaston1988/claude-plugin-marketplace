@@ -1,8 +1,9 @@
 import { allowedRootsFor } from "./providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
-// Cyclic on purpose: ValidationError is manifest.mjs's, and it is only ever
-// referenced inside checkRunRoots' body — never at module-evaluation time.
-import { ValidationError } from "./manifest.mjs";
+// From the leaf, not manifest.mjs: importing it from the loader made governance
+// and the loader mutually dependent, and the loader's split pulled
+// manifest-normalize.mjs into that cycle too.
+import { ValidationError } from "./validation-error.mjs";
 
 // An empty roots list denies every cwd, so a provider that has never been given one is
 // UNCONFIGURED, not mis-located — naming the empty list it failed against teaches nothing.
