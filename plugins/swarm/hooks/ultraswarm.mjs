@@ -25,19 +25,49 @@ function readJSON(p) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
 }
 
-export function standingBlock(mode) {
+// The block is OPERATOR-LOCKED (2026-09-26) in scout's shape — identity line, a nested
+// non-negotiable trigger, The Rule, and a Red Flags table of rationalisations. Do not
+// reflow, reword or "improve" a line of it: tests/ultraswarm.test.mjs transcribes the
+// locked text verbatim, so any edit outside an operator decision fails there first.
+const IDENTITY = 'You have swarm. The operator has decided in advance: swarm is PRE-AUTHORISED.';
+
+function blockLines(mode, identity) {
   return [
     '<EXTREMELY_IMPORTANT>',
-    'Standing mode is ON (swarm.always): the swarm skill is PRE-AUTHORISED. RUN IT.',
-    'Invoke Skill(swarm); read orchestrating-agents and executing-swarms — that reasoning',
-    'is what makes the manifest defensible. Then models, author, validate, dispatch.',
-    'Emit none of it: no grouping block, no gate statement, no caveat paragraph.',
-    'Ask none of it: the offer gate, adversarial review, and every other settled call are',
-    'ANSWERED — presenting one back for approval is the defect.',
-    'Solo only on conversational turns, a single bounded question, or a trivial edit.',
+    identity,
+    'It spreads cost across providers, optimises spend, offloads and compresses carried',
+    'context, and applies committee judgement. The trade-off is settled — not yours to weigh.',
+    '',
+    '<EXTREMELY-IMPORTANT>',
+    'If there is even a 1% chance work can be delegated, fanned out, or judged by',
+    'another model, you ABSOLUTELY MUST swarm it.',
+    'This is not negotiable. You cannot rationalise your way out of it.',
+    '</EXTREMELY-IMPORTANT>',
+    '',
+    '## The Rule',
+    '**Before any delegable work**: invoke Skill(swarm:swarm), read orchestrating-agents',
+    'and executing-swarms, then models -> author -> validate -> dispatch. Emit none of the',
+    'reasoning. Ask none of the settled calls: presenting one back for approval is the defect.',
+    'Solo ONLY for a conversational reply, a single one-read question, or a trivial edit.',
+    '',
+    '## Red Flags',
+    '| Thought | Reality |',
+    '|---|---|',
+    '| "Inline is quicker" | The operator decided in advance. Period. |',
+    '| "It\'s too small to swarm" | Size is not the test. The decision is already made. |',
+    '| "A leaf will do it worse" | You verify every leaf; committee judgement beats one pass. |',
+    '| "I\'ll check with the operator first" | They answered in advance. Asking back is the defect. |',
+    '| "I know the command, I can skip the skill" | The command arrives without the rules that govern it. |',
+    '| "An Agent/Workflow will do" | Swarm is the fan-out tier; Agent only for one run that must be on Anthropic. |',
+    '| "I\'ll peek at the leaf\'s log" | One status check, then hands-off until the notification. |',
+    '',
     `Mode: ${mode}`,
     '</EXTREMELY_IMPORTANT>',
-  ].join('\n');
+  ];
+}
+
+export function standingBlock(mode) {
+  return blockLines(mode, IDENTITY).join('\n');
 }
 
 // Every id that could own roots: the canonical blocks the operator wrote, plus the two ids
