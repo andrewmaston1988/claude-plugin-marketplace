@@ -69,7 +69,7 @@ test("Codex normalization preserves every rate-limit id and separates account us
   equal(u.provider, "codex");
   equal(u.state, "exhausted");
   equal(u.buckets.length, 3, "account usage remains a separate bucket");
-  deepEqual(u.limits.map((l) => l.kind), ["five-hour primary", "weekly primary"]);
+  deepEqual(u.limits.map((l) => l.kind), ["five-hour", "weekly"]);
   equal(u.source, "account/rateLimits/read");
   equal(u.provenance, "live");
   ok(u.asOf, "the normalized account reading carries an as-of timestamp");
@@ -86,9 +86,9 @@ test("normalizeOllama/Anthropic: G4 an unreadable provider is `unknown` with no 
 
 test("usageLines: G5 every provider prints the same shape, provider-named", () => {
   const lines = usageLines([normalizeAnthropic(ANTHROPIC), normalizeOllama(OLLAMA_OK)], { timeZone: LONDON });
-  ok(lines.includes("anthropic session: 42% — resets Sun 6 Sep, 13:00"), lines.join("\n"));
+  ok(lines.includes("claude session: 42% — resets Sun 6 Sep, 13:00"), lines.join("\n"));
   ok(lines.includes("ollama weekly: 83.8% — resets Sat 12 Sep, 09:00"), lines.join("\n"));
-  ok(lines.some((l) => l.startsWith("anthropic weekly (Opus):")), lines.join("\n"));
+  ok(lines.some((l) => l.startsWith("claude weekly (Opus):")), lines.join("\n"));
 });
 
 test("notableLines: G6 a healthy provider says NOTHING", () => {
@@ -240,7 +240,7 @@ test("codex cache: C1 a stored reading reads back as cached, and renders through
     // This process did not fetch it: "live" would suppress the banner that says so.
     equal(cached.provenance, "cached");
     equal(cached.buckets.length, 1);
-    ok(usageLines([normalizeCodex(cached)])[0].startsWith("codex session primary"), usageLines([normalizeCodex(cached)])[0]);
+    ok(usageLines([normalizeCodex(cached)])[0].startsWith("codex session: 20%"), usageLines([normalizeCodex(cached)])[0]);
   });
 });
 
@@ -314,8 +314,8 @@ test("usageLines: a bucket that restates the provider collapses — kind prefix 
     secondary: { usedPercent: 95, resetsAt: "2026-09-20T17:00:00Z" },
   }))], { timeZone: LONDON });
 
-  equal(lines[0], "codex primary: 9% — resets Sun 20 Sep, 17:00");
-  equal(lines[1], "codex secondary: 95% — resets Sun 20 Sep, 18:00");
+  equal(lines[0], "codex: 9% — resets Sun 20 Sep, 17:00");
+  equal(lines[1], "codex: 95% — resets Sun 20 Sep, 18:00");
   ok(!lines.some((l) => l.includes("codex codex")), `the provider id printed twice: ${lines.join(" | ")}`);
   ok(!lines.some((l) => l.includes("(codex)")), `the scope restated the provider: ${lines.join(" | ")}`);
 
@@ -330,31 +330,31 @@ test("usageLines: a bucket that restates the provider collapses — kind prefix 
 
   // Not naming luck: any provider's row collapses the same way.
   const generic = [{ provider: "anthropic", limits: [{ kind: "anthropic weekly_all", percent: 25, resetsAt: "2026-09-20T16:00:00Z", scope: "anthropic" }] }];
-  equal(usageLines(generic, { timeZone: LONDON })[0], "anthropic weekly_all: 25% — resets Sun 20 Sep, 17:00");
+  equal(usageLines(generic, { timeZone: LONDON })[0], "claude weekly_all: 25% — resets Sun 20 Sep, 17:00");
   // A scope that is NOT the provider is real information and stays.
   const scoped = [{ provider: "anthropic", limits: [{ kind: "weekly_scoped", percent: 2, resetsAt: null, scope: "Fable" }] }];
-  equal(usageLines(scoped, { timeZone: LONDON })[0], "anthropic weekly_scoped (Fable): 2%");
+  equal(usageLines(scoped, { timeZone: LONDON })[0], "claude weekly_scoped (Fable): 2%");
 });
 
-// Defect 2 — `primary` / `secondary` say nothing next to `session` /
-// `weekly_all`. Print what the bucket measures, from the payload's own
-// `windowDurationMins`; where the payload does not say, print the raw name and
-// invent nothing.
-test("usageLines: a Codex bucket states the window the payload says it measures", () => {
+// Defect 2 — `primary` / `secondary` are the payload's slot names, not windows.
+// Operator, 2026-09-26: "one five hour window is a session, one week long window
+// is a week, primary/secondary is nonsense". The payload's `windowDurationMins`
+// names the row in Claude's vocabulary; the slot name never prints.
+test("usageLines: a Codex bucket is named session/weekly by its own window length", () => {
   const lines = usageLines([normalizeCodex(codexReading({
     primary: { usedPercent: 9, windowDurationMins: 300, resetsAt: "2026-09-20T16:00:00Z" },
     secondary: { usedPercent: 95, windowDurationMins: 10080, resetsAt: "2026-09-27T16:00:00Z" },
   }))], { timeZone: LONDON });
 
-  equal(lines[0], "codex primary (5h): 9% — resets Sun 20 Sep, 17:00");
-  equal(lines[1], "codex secondary (7d): 95% — resets Sun 27 Sep, 17:00");
+  equal(lines[0], "codex session: 9% — resets Sun 20 Sep, 17:00");
+  equal(lines[1], "codex weekly: 95% — resets Sun 27 Sep, 17:00");
 
-  // No duration in the payload => the raw name plus nothing invented. A wrong
-  // mapping onto session/weekly would be worse than an opaque label.
-  const bare = usageLines([normalizeCodex(codexReading({
-    primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" },
+  // Any other length prints the length itself — still never the slot name.
+  const odd = usageLines([normalizeCodex(codexReading({
+    primary: { usedPercent: 9, windowDurationMins: 180, resetsAt: "2026-09-20T16:00:00Z" },
   }))], { timeZone: LONDON });
-  equal(bare[0], "codex primary: 9% — resets Sun 20 Sep, 17:00");
+  equal(odd[0], "codex (3h): 9% — resets Sun 20 Sep, 17:00");
+  ok(![...lines, ...odd].some((l) => /primary|secondary/.test(l)), [...lines, ...odd].join(" | "));
 });
 
 // Defect 3 — the Codex reset read ~4 months out because `new Date()` took Unix
@@ -398,17 +398,17 @@ test("cmdUsage: --provider selects one provider — the Anthropic row is filtere
 
   const only = await read(["--provider", "codex"]);
   ok(only.lines.every((l) => l.startsWith("codex")), `--provider codex printed another provider: ${only.lines.join(" | ")}`);
-  ok(only.lines.some((l) => l.startsWith("codex ")), only.lines.join(" | "));
+  ok(only.lines.some((l) => l.startsWith("codex: ")), only.lines.join(" | "));
   equal(only.code, 0);
 
   // `claude` is the registry id for the Anthropic reading, so it selects it.
   const claude = await read(["--provider", "claude"]);
-  ok(claude.lines.every((l) => l.startsWith("anthropic")), `--provider claude printed another provider: ${claude.lines.join(" | ")}`);
-  ok(claude.lines.some((l) => l.startsWith("anthropic probe-marker")), claude.lines.join(" | "));
+  ok(claude.lines.every((l) => l.startsWith("claude")), `--provider claude printed another provider: ${claude.lines.join(" | ")}`);
+  ok(claude.lines.some((l) => l.startsWith("claude probe-marker")), claude.lines.join(" | "));
 
   // No flag: every provider that answered is present.
   const all = await read([]);
-  ok(all.lines.some((l) => l.startsWith("anthropic ")) && all.lines.some((l) => l.startsWith("codex ")), all.lines.join(" | "));
+  ok(all.lines.some((l) => l.startsWith("claude ")) && all.lines.some((l) => l.startsWith("codex: ")), all.lines.join(" | "));
 });
 
 test("formatResetTime: R5 a missing or unparseable resetsAt prints no clause, never throws", () => {
@@ -504,16 +504,16 @@ test("cmdUsage: a claude adapter's reading is walked, selected, and gates the ex
   };
 
   const all = await read([]);
-  ok(all.lines.some((l) => l.startsWith("anthropic probe-marker")), `claude's reading must be walked: ${all.lines.join(" | ")}`);
-  ok(all.lines.some((l) => l.startsWith("codex ")), all.lines.join(" | "));
+  ok(all.lines.some((l) => l.startsWith("claude probe-marker")), `claude's reading must be walked: ${all.lines.join(" | ")}`);
+  ok(all.lines.some((l) => l.startsWith("codex: ")), all.lines.join(" | "));
 
   const claude = await read(["--provider", "claude"]);
-  ok(claude.lines.some((l) => l.startsWith("anthropic probe-marker")), claude.lines.join(" | "));
+  ok(claude.lines.some((l) => l.startsWith("claude probe-marker")), claude.lines.join(" | "));
   ok(claude.lines.every((l) => !l.startsWith("codex")), `the flag must filter codex: ${claude.lines.join(" | ")}`);
 
   // `anthropic` selects the same reading by its display name.
   const alias = await read(["--provider", "anthropic"]);
-  ok(alias.lines.some((l) => l.startsWith("anthropic probe-marker")), alias.lines.join(" | "));
+  ok(alias.lines.some((l) => l.startsWith("claude probe-marker")), alias.lines.join(" | "));
 });
 
 // `swarm usage` is the command whose job the Codex fetch is, so it is the one
@@ -538,7 +538,7 @@ test("cmdUsage: a live Codex reading is banked for the cache-only readers", asyn
     const cached = codexUsageFromCache(env);
     ok(cached, "the live read must land in the cache");
     equal(cached.provenance, "cached");
-    ok(usageLines([normalizeCodex(cached)])[0].startsWith("codex primary"), usageLines([normalizeCodex(cached)])[0]);
+    ok(usageLines([normalizeCodex(cached)])[0].startsWith("codex: 9%"), usageLines([normalizeCodex(cached)])[0]);
 
     // A cache-only walk is not a fetch and must leave the banked reading alone.
     rmSync(join(home, "codex-usage.json"));
@@ -561,7 +561,7 @@ test("cmdUsage: the quotaCheck seam reaches the claude adapter and exhaustion ex
     return { lines, code };
   };
   const okRead = await read(async () => ({ ...ANTHROPIC, source: "endpoint" }));
-  ok(okRead.lines.some((l) => l.startsWith("anthropic session")), `the injected reading must print: ${okRead.lines.join(" | ")}`);
+  ok(okRead.lines.some((l) => l.startsWith("claude session")), `the injected reading must print: ${okRead.lines.join(" | ")}`);
   equal(okRead.code, 0);
   const done = await read(async () => ({ ...ANTHROPIC, source: "endpoint", exhausted: true }));
   equal(done.code, 1, "an exhausted Anthropic reading must ground the command");

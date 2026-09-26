@@ -242,7 +242,7 @@
     const LOW = 20, WARN = LOW * 2;
     const week = w !== "session";
     // Named windows (anthropic weekly_all/weekly_scoped, ollama session/weekly) fit by
-    // kind; codex names its windows primary/secondary, so its own span places them —
+    // kind; a window known only by its span (codex's odd lengths) is placed by it —
     // under a day is the session, a day or more the week.
     const SPAN = { m: 1, h: 60, d: 1440 };
     const spanMins = (w) => { const m = /^(\d+)([mhd])$/.exec(w || ""); return m ? +m[1] * SPAN[m[2]] : null; };

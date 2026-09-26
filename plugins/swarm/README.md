@@ -414,12 +414,12 @@ row when Codex is enabled. It does not spawn Codex to refresh that row. Use `swa
 readings from every enabled provider capability:
 
 ```
-anthropic session: 42% — resets Sun 6 Sep, 19:00
-anthropic weekly_all: 71% — resets Sat 12 Sep, 01:00
+claude session: 42% — resets Sun 6 Sep, 19:00
+claude weekly_all: 71% — resets Sat 12 Sep, 01:00
 ollama session: 12% — resets Sun 6 Sep, 13:00
 ollama weekly: 87% — resets Tue 8 Sep, 01:00
-codex primary (5h): 24% — resets Sun 6 Sep, 19:00
-codex secondary (7d): 58% — resets Fri 11 Sep, 09:00
+codex session: 24% — resets Sun 6 Sep, 19:00
+codex weekly: 58% — resets Fri 11 Sep, 09:00
 ```
 
 `quota` fetches Anthropic live and reads the legacy Ollama cloud cache (its cookie needs a

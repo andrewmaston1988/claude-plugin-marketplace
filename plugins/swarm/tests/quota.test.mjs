@@ -155,7 +155,7 @@ test("quota: prints the cached Codex row and never spawns the app-server", async
     writeFileSync(join(home, "codex-usage.json"), JSON.stringify(CODEX_CACHED));
     const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
     equal(r.status, 0, r.stderr + r.stdout);
-    ok(r.stdout.includes("codex session primary (5h) (session): 20%"), r.stdout);
+    ok(r.stdout.includes("codex session: 20%"), r.stdout);
     equal(existsSync(log), false, `quota must not spawn the Codex app-server:\n${r.stdout}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -227,7 +227,7 @@ test("quota: prints per-window utilization from the usage endpoint", async () =>
   }
 });
 
-test("quota: C0b every line is prefixed anthropic, not claude", async () => {
+test("quota: C0b every line is prefixed claude, the provider id", async () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-quota-cli-"));
   const server = createServer((req, res) => {
     res.writeHead(200, { "content-type": "application/json" });
@@ -248,8 +248,8 @@ test("quota: C0b every line is prefixed anthropic, not claude", async () => {
     equal(r.status, 0, r.stderr + r.stdout);
     const lines = r.stdout.trim().split("\n");
     equal(lines.length, 3, r.stdout);
-    for (const l of lines) ok(l.startsWith("anthropic "), l);
-    ok(!/\bclaude\b/i.test(r.stdout), r.stdout);
+    for (const l of lines) ok(l.startsWith("claude "), l);
+    ok(!/\banthropic\b/i.test(r.stdout), r.stdout);
   } finally {
     server.close();
     rmSync(dir, { recursive: true, force: true });

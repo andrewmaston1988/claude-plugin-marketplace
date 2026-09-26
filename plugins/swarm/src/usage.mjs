@@ -95,9 +95,10 @@ function toInstant(value) {
   return new Date(value < 1e11 ? value * 1000 : value).toISOString();
 }
 
-// The payload's own answer to "what does this bucket measure". Printed, never
-// mapped: `primary`/`secondary` are not established to BE session/weekly, and a
-// wrong window name is worse than an opaque one.
+// A window's length is its name: `primary`/`secondary` are payload slots, not
+// windows, and never print. 5h is Claude's session, 7d its weekly.
+const NAMED_WINDOWS = { 300: "session", 10080: "weekly" };
+
 function windowLabel(mins) {
   if (typeof mins !== "number" || !Number.isFinite(mins) || mins <= 0) return null;
   if (mins % 1440 === 0) return `${mins / 1440}d`;
@@ -113,15 +114,17 @@ function codexLimitBuckets(buckets) {
     const entries = ["primary", "secondary"].filter((name) => bucket[name] && typeof bucket[name] === "object")
       .map((name) => [name, bucket[name]]);
     if (!entries.length) entries.push(["", bucket]);
-    for (const [name, value] of entries) {
+    for (const [, value] of entries) {
       const percent = value.usedPercent ?? value.used_percent ?? value.percent;
       if (typeof percent !== "number") continue;
+      const mins = value.windowDurationMins ?? value.window_duration_mins;
+      const named = NAMED_WINDOWS[mins];
       limits.push(limit(
-        name ? `${id} ${name}` : id,
+        named || id,
         percent,
         toInstant(value.resetsAt ?? value.resets_at ?? null),
         id,
-        windowLabel(value.windowDurationMins ?? value.window_duration_mins),
+        named ? null : windowLabel(mins),
       ));
     }
   }
@@ -351,11 +354,12 @@ export function usageLines(usages, { timeZone } = {}) {
   for (const u of usages) {
     for (const l of u.limits) {
       const kind = stripProviderPrefix(u.provider, l.kind);
-      const scope = l.scope && !restatesProvider(u.provider, l.scope) ? l.scope : null;
+      const scope = l.scope && !restatesProvider(u.provider, l.scope) && l.scope !== kind ? l.scope : null;
       const label = [kind, l.window && `(${l.window})`, scope && `(${scope})`].filter(Boolean).join(" ");
       const formatted = formatResetTime(l.resetsAt, { timeZone });
       const resets = formatted ? ` — resets ${formatted}` : "";
-      lines.push(`${u.provider}${label ? ` ${label}` : ""}: ${l.percent}%${resets}`);
+      const name = u.provider === "anthropic" ? "claude" : u.provider;
+      lines.push(`${name}${label ? ` ${label}` : ""}: ${l.percent}%${resets}`);
     }
   }
   return lines;
