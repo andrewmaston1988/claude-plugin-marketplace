@@ -1146,49 +1146,13 @@ async function main() {
       case "usage":
         return await cmdUsage(rest);
       case "quota": {
-        // Anthropic is fetched (its credential renews itself); every cloud
-        // provider is read from cache, because its cookie needs a human and
-        // `quota` must not stall on one. Both print through usageLines, so the
-        // subcommand and the standing-mode hook can never word this differently.
-        const { checkQuota } = await import("../src/quota.mjs");
-        const { normalizeAnthropic, normalizeOllama, normalizeCodex, codexUsageFromCache, usageLines, notableLines } = await import("../src/usage.mjs");
-        const cfg = getConfig();
-        const q = await checkQuota({
-          cfg,
-          fetch: (...a) => globalThis.fetch(...a),
+        const { printQuota } = await import("../src/quota.mjs");
+        return await printQuota({
+          cfg: getConfig(),
+          out,
           cachePath: join(swarmHome(), "quota-cache.json"),
-          ...(process.env.SWARM_CREDENTIALS && { credentialsPath: process.env.SWARM_CREDENTIALS }),
+          credentialsPath: process.env.SWARM_CREDENTIALS,
         });
-        const usages = [];
-        if (q) usages.push(normalizeAnthropic(q));
-        else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
-
-        const { usageFromCache, ollamaCloudConfig } = await import("../src/ollama-usage.mjs");
-        if (ollamaCloudConfig(cfg).enabled === true) {
-          const reading = usageFromCache(cfg);
-          if (reading.state === "unknown") out("ollama: no reading yet — run `swarm ollama-usage --cookie '<value>'`");
-          else usages.push(normalizeOllama(reading));
-        }
-
-        // Codex on the same terms as Ollama, and for a stronger reason: its reading
-        // costs an app-server process, so the figure comes from the cache `swarm
-        // usage` banked — this command never spawns one.
-        if (providerConfig(cfg, "codex").enabled === true) {
-          const cached = codexUsageFromCache();
-          if (cached) usages.push(normalizeCodex(cached));
-          else out("codex: no cached reading yet — run `swarm usage --provider codex`");
-        }
-
-        for (const line of usageLines(usages)) out(line);
-        // Anthropic severity is its own vocabulary and has no cross-provider
-        // equivalent, so it stays an Anthropic-only annotation.
-        for (const l of q?.limits || []) {
-          if (l.severity && l.severity !== "normal") out(`anthropic ${l.kind}: [${l.severity}]`);
-        }
-        for (const line of notableLines(usages)) out(line);
-        // Exit code keeps its documented meaning: Anthropic exhausted. A cloud
-        // provider's state is reported, never conflated with it.
-        return q?.exhausted ? 1 : 0;
       }
       case "ollama-usage": {
         const { saveCookie, loadCookie, getUsage, ollamaCloudConfig } = await import("../src/ollama-usage.mjs");

@@ -138,3 +138,53 @@ export async function checkQuota({
   if (cachePath) writeCache(cachePath, { ts: now(), result: parsed });
   return { ...parsed, source: "endpoint" };
 }
+
+// The `quota` subcommand's whole body, here rather than in the arg dispatcher so
+// the reporting rules sit beside the fetch they report on. Anthropic is fetched
+// (its credential renews itself); every cloud provider is read from cache,
+// because its cookie — or, for Codex, an app-server process — needs a cost this
+// command must not pay. All of them print through `usageLines`, the same path
+// the standing-mode hook uses, so the two can never word a reading differently.
+// Returns the exit code: Anthropic exhausted, and nothing else.
+export async function printQuota({ cfg, out, cachePath, credentialsPath, fetchImpl = globalThis.fetch }) {
+  const { providerConfig } = await import("./providers.mjs");
+  const { normalizeAnthropic, normalizeOllama, normalizeCodex, codexUsageFromCache, usageLines, notableLines } =
+    await import("./usage.mjs");
+
+  const q = await checkQuota({
+    cfg,
+    fetch: (...a) => fetchImpl(...a),
+    cachePath,
+    ...(credentialsPath && { credentialsPath }),
+  });
+  const usages = [];
+  if (q) usages.push(normalizeAnthropic(q));
+  else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
+
+  const { usageFromCache, ollamaCloudConfig } = await import("./ollama-usage.mjs");
+  if (ollamaCloudConfig(cfg).enabled === true) {
+    const reading = usageFromCache(cfg);
+    if (reading.state === "unknown") out("ollama: no reading yet — run `swarm ollama-usage --cookie '<value>'`");
+    else usages.push(normalizeOllama(reading));
+  }
+
+  // Codex on the same terms as Ollama, and for a stronger reason: its reading
+  // costs an app-server process, so the figure comes from the cache `swarm
+  // usage` banked — this command never spawns one.
+  if (providerConfig(cfg, "codex").enabled === true) {
+    const cached = codexUsageFromCache();
+    if (cached) usages.push(normalizeCodex(cached));
+    else out("codex: no cached reading yet — run `swarm usage --provider codex`");
+  }
+
+  for (const line of usageLines(usages)) out(line);
+  // Anthropic severity is its own vocabulary and has no cross-provider
+  // equivalent, so it stays an Anthropic-only annotation.
+  for (const l of q?.limits || []) {
+    if (l.severity && l.severity !== "normal") out(`anthropic ${l.kind}: [${l.severity}]`);
+  }
+  for (const line of notableLines(usages)) out(line);
+  // Exit code keeps its documented meaning: Anthropic exhausted. A cloud
+  // provider's state is reported, never conflated with it.
+  return q?.exhausted ? 1 : 0;
+}

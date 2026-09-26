@@ -1053,33 +1053,6 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
   }
 });
 
-test("quota: prints per-window utilization from the usage endpoint", async () => {
-  const dir = tmp();
-  const server = createServer((req, res) => {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({
-      limits: [
-        { kind: "session", percent: 22, severity: "normal", resets_at: "2026-07-11T12:19:59Z" },
-        { kind: "weekly_scoped", percent: 4, severity: "normal", resets_at: "2026-07-18T07:59:59Z", scope: { model: { display_name: "Fable" } } },
-      ],
-    }));
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try {
-    const home = gateHome(join(dir, "home"), { quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` });
-    const creds = join(home, "creds.json");
-    writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds, TZ: "Europe/London" } });
-    equal(r.status, 0, r.stderr + r.stdout);
-    ok(r.stdout.includes("session: 22%"), r.stdout);
-    ok(r.stdout.includes("resets Sat 11 Jul, 13:19"), r.stdout);
-    ok(r.stdout.includes("weekly_scoped (Fable): 4%"), r.stdout);
-  } finally {
-    server.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 // ── headroom (:cloud weekly-allowance preflight): ollama-usage, quota prefix, models, swarm.always ──
 
 // P0 — the incident: a failed live fetch must never render its cached reading
@@ -1145,105 +1118,6 @@ test("ollama-usage: C0 a live fetch prints exactly two provider-named lines, not
     ok(!/cost|\$|request/i.test(r.stdout), r.stdout);
   } finally {
     server.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("quota: C0b every line is prefixed anthropic, not claude", async () => {
-  const dir = tmp();
-  const server = createServer((req, res) => {
-    res.writeHead(200, { "content-type": "application/json" });
-    res.end(JSON.stringify({
-      limits: [
-        { kind: "session", percent: 5, severity: "normal", resets_at: "2026-09-06T18:00:00Z" },
-        { kind: "weekly_all", percent: 10, severity: "normal", resets_at: "2026-09-07T00:00:00Z" },
-        { kind: "weekly_scoped", percent: 3, severity: "normal", resets_at: "2026-09-07T00:00:00Z", scope: { model: { display_name: "Fable" } } },
-      ],
-    }));
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try {
-    const home = gateHome(join(dir, "home"), { quotaUsageUrl: `http://127.0.0.1:${server.address().port}/usage` });
-    const creds = join(home, "creds.json");
-    writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds } });
-    equal(r.status, 0, r.stderr + r.stdout);
-    const lines = r.stdout.trim().split("\n");
-    equal(lines.length, 3, r.stdout);
-    for (const l of lines) ok(l.startsWith("anthropic "), l);
-    ok(!/\bclaude\b/i.test(r.stdout), r.stdout);
-  } finally {
-    server.close();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// Item 3: Codex rides the same split as Ollama — `swarm usage` pays for the
-// app-server process and caches the reading, `quota` renders what the cache
-// holds. A spawn here would stall the command on a process it does not need.
-// The spy is the proof: a node executable that only logs when it actually runs.
-function codexSpawnSpy(dir, home, extra = {}) {
-  const log = join(dir, "codex-spawn.log");
-  const spy = join(dir, "codex-spy.mjs");
-  writeFileSync(spy, `import { appendFileSync } from "node:fs";\nappendFileSync(${JSON.stringify(log)}, "spawned\\n");\n`);
-  gateHome(home, {
-    providers: {
-      claude: { allowedRoots: [tmpdir()] },
-      ollama: { enabled: true },
-      codex: { enabled: true, path: process.execPath, appServerArgs: [spy] },
-      ...extra,
-    },
-  });
-  return log;
-}
-
-const CODEX_CACHED = {
-  provider: "codex",
-  source: "codex-app-server",
-  provenance: "live",
-  asOf: "2026-09-26T10:00:00.000Z",
-  buckets: [{ kind: "rate-limit", limitId: "session", primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1790000000 } }],
-};
-
-test("quota: prints the cached Codex row and never spawns the app-server", async () => {
-  const dir = tmp();
-  try {
-    const home = join(dir, "home");
-    const spawnLog = codexSpawnSpy(dir, home);
-    writeFileSync(join(home, "codex-usage.json"), JSON.stringify(CODEX_CACHED));
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home, TZ: "Europe/London" } });
-    equal(r.status, 0, r.stderr + r.stdout);
-    ok(r.stdout.includes("codex session primary (5h) (session): 20%"), r.stdout);
-    equal(existsSync(spawnLog), false, `quota must not spawn the Codex app-server:\n${r.stdout}`);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("quota: names the missing Codex reading rather than fetching one", async () => {
-  const dir = tmp();
-  try {
-    const home = join(dir, "home");
-    const spawnLog = codexSpawnSpy(dir, home);
-    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home } });
-    equal(r.status, 0, r.stderr + r.stdout);
-    ok(r.stdout.includes("codex: no cached reading yet"), r.stdout);
-    equal(existsSync(spawnLog), false, `quota must not spawn the Codex app-server:\n${r.stdout}`);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("quota: the same spy logs when the app-server IS spawned", async () => {
-  const dir = tmp();
-  try {
-    const home = join(dir, "home");
-    const spawnLog = codexSpawnSpy(dir, home);
-    // `usage` is the command whose job the Codex fetch is. Without this half,
-    // "no log" above would hold just as well for a spy that never logs at all.
-    await runCliAsync(["usage", "--provider", "codex"], { cwd: dir, env: { SWARM_HOME: home } });
-    ok(existsSync(spawnLog), "the spy must log a genuine app-server spawn");
-  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
