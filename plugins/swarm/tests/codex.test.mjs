@@ -420,6 +420,46 @@ test("Codex runner parser registry exposes both provider factories", () => {
   ok(createRunnerParser("claude", { emit: () => {} }));
 });
 
+// "Every preflight when the provider is enabled": the probe reports the account's
+// own answer, so it reads usage with no opt-in and spawns the app-server exactly as
+// the Claude preflight reads Anthropic's quota. A reading that never arrived is a
+// refusal, not a pass — nothing else here would notice a logged-out Codex.
+test("Codex preflight reads usage unasked, and refuses a spent or unreadable account", async () => {
+  const adapter = createCodexProviderAdapter();
+  const context = { config: { providers: { codex: { enabled: true } } } };
+  const clientFor = (limits) => ({
+    async initialize() {},
+    async request(method) {
+      if (method === "account/rateLimits/read") return limits;
+      if (method === "account/usage/read") return { summary: { inputTokens: 1 } };
+      throw new Error(`unexpected ${method}`);
+    },
+  });
+  const limits = (usedPercent) => ({ rateLimitsByLimitId: { five_hour: { primary: { usedPercent } } } });
+
+  const ok = await adapter.capabilities.preflight({ ...context, client: clientFor(limits(12)) });
+  equal(ok.ok, true);
+  equal(ok.usage.provider, "codex", "the probe reports the reading it made");
+
+  const spent = await adapter.capabilities.preflight({ ...context, tasks: [{ id: "spent" }], client: clientFor(limits(100)) });
+  equal(spent.ok, false);
+  match(spent.error, /usage is exhausted/);
+  match(spent.error, /spent/, "the refusal names the leaves it grounds");
+  // The exemption the usage gate already states: a fallback leaf rides through.
+  const spared = await adapter.capabilities.preflight({ ...context, tasks: [{ id: "c", fallbackModel: "gpt-5-mini" }], client: clientFor(limits(100)) });
+  equal(spared.ok, true);
+
+  const dead = await adapter.capabilities.preflight({
+    ...context,
+    client: { async initialize() {}, async request() { throw new Error("spawn codex ENOENT"); } },
+  });
+  equal(dead.ok, false);
+  match(dead.error, /ENOENT/, "an unreadable account names the cause the app-server gave");
+
+  // The standing hook stays cache-only: no client and no opt-in is still no spawn.
+  equal(await adapter.capabilities.readUsage({ config: {} }), null);
+});
+
 test("Codex provider adapter passes the concrete provider contract", async () => {
   const client = {
     async initialize() {},

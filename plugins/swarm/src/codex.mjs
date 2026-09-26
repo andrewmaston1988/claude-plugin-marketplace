@@ -454,6 +454,12 @@ export const defaultCodexRunnerAdapter = createCodexRunnerAdapter();
 
 /** Concrete Codex provider adapter; its capabilities remain opt-in to callers. */
 export function createCodexProviderAdapter(options = {}) {
+  // Spawning the app-server just to read usage is opt-in unless a client is already live.
+  const readUsage = async (context = {}) => {
+    if (!context.client && context.usageOptIn !== true) return null;
+    const { readCodexUsage } = await import("./codex-usage.mjs");
+    return readCodexUsage(context.config || {}, { ...options, ...context });
+  };
   return {
     id: "codex",
     runnerId: "codex",
@@ -471,11 +477,20 @@ export function createCodexProviderAdapter(options = {}) {
         ...options,
         ...context,
       }),
-      // Spawning the app-server just to read usage is opt-in unless a client is already live.
-      readUsage: async (context = {}) => {
-        if (!context.client && context.usageOptIn !== true) return null;
-        const { readCodexUsage } = await import("./codex-usage.mjs");
-        return readCodexUsage(context.config || {}, { ...options, ...context });
+      readUsage,
+      // The Claude preflight's counterpart: it forces the read rather than trusting a
+      // binary on PATH, and an exhausted account grounds only the leaves carrying no
+      // fallback — the same exemption the usage gate states.
+      preflight: async (context = {}) => {
+        const usage = await readUsage({ ...context, usageOptIn: true });
+        const blocked = (context.tasks || []).filter((task) => !task.fallbackModel);
+        if (usage?.exhausted && blocked.length) {
+          return { ok: false, error: `Codex usage is exhausted — ${blocked.map((task) => task.id).join(", ")} cannot dispatch. Add fallbackModel or re-run after reset.` };
+        }
+        const reason = usage?.buckets?.find((bucket) => bucket?.kind === "unavailable")?.reason;
+        return usage?.provenance === "none"
+          ? { ok: false, error: `Codex usage could not be read${reason ? ` (${reason})` : ""}` }
+          : { ok: true, usage };
       },
     },
   };

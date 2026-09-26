@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer, connect } from "node:net";
 import { doctorChecks, doctorExit } from "../src/serve/daemon.mjs";
-import { runCli } from "./helpers/cli.mjs";
+import { runCli, SHIMS } from "./helpers/cli.mjs";
 
 // `swarm doctor` reports the probe setup asks its provider question from, so a
 // provider that is switched on and cannot dispatch is visible outside setup. The
@@ -80,7 +80,9 @@ test("swarm doctor: an enabled provider's probe result reaches the operator", as
   writeFileSync(join(home, "config.json"), JSON.stringify({
     providers: {
       claude: { allowedRoots: [dir] },
-      codex: { enabled: true },
+      // A Codex-enabled install is probed like Claude: the app-server shim answers
+      // the two usage reads, so a pass here means the account really answered.
+      codex: { enabled: true, path: process.execPath, appServerArgs: [join(SHIMS, "codex-shim.mjs"), "app-server"] },
       ollama: { enabled: true, url: `http://127.0.0.1:${deadPort}` },
     },
   }), "utf8");
@@ -90,6 +92,6 @@ test("swarm doctor: an enabled provider's probe result reaches the operator", as
     const r = runCli(["serve", "doctor"], { cwd: dir, env: { SWARM_HOME: home, APPDATA: dir } });
     assert.match(r.stdout, /provider:claude: /, `no provider rows at all:\n${r.stdout}\n${r.stderr}`);
     assert.match(r.stdout, /✗ provider:ollama: .*(unreachable|did not answer)/, r.stdout);
-    assert.match(r.stdout, /⚠ provider:codex: no preflight to run/, r.stdout);
+    assert.match(r.stdout, /✓ provider:codex: preflight passed/, r.stdout);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

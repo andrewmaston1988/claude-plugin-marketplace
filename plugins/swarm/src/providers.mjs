@@ -152,9 +152,13 @@ async function pingOllamaEndpoint({ config, fetch, timeoutMs = PROBE_TIMEOUT_MS 
 // survive the answer: a throwing preflight is caught, a capability that reports ok:false
 // keeps its own text, and `probed` separates "the preflight passed" from "there is no
 // preflight to run" — setup renders this as the content of its question, and would
-// otherwise tell the operator a provider answered when nothing was ever asked.
+// otherwise tell the operator a provider answered when nothing was ever asked. A
+// provider the config has switched OFF is reported unprobed too: nothing is claiming it
+// works, and its preflight may spawn a process to answer a question nobody asked.
 export async function probeProvider(id, { config = {}, registry, fetch = globalThis.fetch, ...deps } = {}) {
-  const preflight = (registry || createDefaultProviderRegistry()).capability(id, "preflight");
+  const providers = registry || createDefaultProviderRegistry();
+  if (!providers.get(id).enabled(config)) return { id, ok: true, detail: null, probed: false };
+  const preflight = providers.capability(id, "preflight");
   if (!preflight) return { id, ok: true, detail: null, probed: false };
   try {
     const r = await preflight({ config, fetch, ...deps });
