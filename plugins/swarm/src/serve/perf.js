@@ -136,6 +136,32 @@
     return hero + aspectWidget + covWidget + relWidget;
   }
 
+  // The overall ranking: the page's own rankList under a thin adapter, plus the
+  // superseded rows behind a disclosure. Supersession is read server-side
+  // (`rankCells`), so this view only splits on it — the ranked list and the
+  // toggle can never disagree about which rows are gone.
+  function rankScreen(cells, h) {
+    const { esc, enc, fmtScore, cellSub, rankList, costOf, universals } = h;
+    const short = (a) => a.slice(0, 5);
+    const rows = (list) => list.map((c) => ({
+      key: `m:${c.model}`,
+      href: `#/perf/model/${enc(c.model)}`,
+      label: esc(c.model),
+      val: fmtScore(c.combined),
+      none: c.combined == null,
+      sub: cellSub(c, universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)),
+      frac: (c.combined ?? 0) / 10,
+      prov: c.provisional,
+      badge: costOf.get(c.model) ?? null,
+    }));
+    const listed = cells.filter((c) => !c.supersededBy);
+    const held = cells.filter((c) => c.supersededBy);
+    const ranked = rankList(rows(listed), { podium: true });
+    if (!held.length) return ranked;
+    return ranked + `<details class="foot"><summary>Show more</summary>${rankList(rows(held))}`
+      + `<div class="sub">superseded by a newer model in the roster</div></details>`;
+  }
+
   // The cost read-model as the mockup's Cost screen (prototype.html 922–983): one
   // provider per page from the slide control — multipliers only compare within a
   // provider — then its value hero, then a ranked card per model, or one
@@ -288,5 +314,5 @@
     return tabs + hero + `<div class="section"><span>providers</span><span class="line"></span></div>` + cards;
   }
 
-  window.perfViews = { coverageGrid, reliabilityBars, leadersList, modelDashboard, costScreen, usageScreen };
+  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelDashboard, costScreen, usageScreen };
 })();

@@ -14,7 +14,7 @@ import { costRowsFor, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBa
 import { readModelsCache } from "../discovery.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
-import { coverage, reliability, leaders, costView } from "./perf-views.mjs";
+import { coverage, reliability, leaders, costView, rankCells } from "./perf-views.mjs";
 import { projectGrouping } from "./grouping.mjs";
 import { buildSnapshot, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
@@ -348,14 +348,18 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const i = ranked.findIndex((c) => c.model === model);
     return i < 0 ? null : { position: i + 1, of: ranked.length };
   };
+  // Shared by the Cost view and the Performance ranking: supersession has one
+  // rule, so both read the denylist and the cloud suffix from the same place.
+  const isDenylisted = (model) => Boolean(matchDenylist(model, cfg));
+  const cloudSuffix = providerConfig(cfg, "ollama")?.cloudSuffix || ":cloud";
   const costOf = (rows, domain) => {
     const ollama = providerConfig(cfg, "ollama");
     return costView(rows, costRows(), {
       domain,
       bands: resolveBands(ollama?.cloud?.ollama?.costBands),
       valueMargin: ollama?.cloud?.ollama?.valueMargin,
-      isDenylisted: (model) => Boolean(matchDenylist(model, cfg)),
-      cloudSuffix: ollama?.cloudSuffix || ":cloud",
+      isDenylisted,
+      cloudSuffix,
     });
   };
   const perf = (res, url) => {
@@ -371,7 +375,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       grading, path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
       aspects: ASPECTS, universals: UNIVERSAL, domains,
       filters: report.filters,
-      overall: overall(rows, { model, domain, combineProviders: true }).cells,
+      overall: rankCells(overall(rows, { model, domain, combineProviders: true }).cells, { isDenylisted, cloudSuffix }),
       // Drill-in: where this model sits among every model in the same domain filter.
       ...(model ? { rank: rankOf(overall(rows, { domain, combineProviders: true }).cells, model) } : {}),
       report: report.aspects,

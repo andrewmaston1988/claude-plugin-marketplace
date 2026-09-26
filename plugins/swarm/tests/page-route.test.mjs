@@ -350,7 +350,7 @@ const gotoPerf = async (P, hash) => {
 test("switcher: one pill per view, exactly one active, and it matches the route", async () => {
   const cases = [["#/perf", "rank"], ["#/perf/coverage", "coverage"], ["#/perf/reliability", "reliability"], ["#/perf/leaders", "leaders"]];
   for (const [hash, label] of cases) {
-    const P = loadPage({ perfViews: Object.fromEntries(["coverageGrid", "reliabilityBars", "leadersList", "costScreen"].map((k) => [k, () => "<div></div>"])) });
+    const P = loadPage({ perfViews: Object.fromEntries(["coverageGrid", "reliabilityBars", "leadersList", "costScreen", "rankScreen"].map((k) => [k, () => "<div></div>"])) });
     await P.flush();
     P.respondList(listData(listRow()));
     await P.flush();
@@ -363,7 +363,7 @@ test("switcher: one pill per view, exactly one active, and it matches the route"
 
 test("switcher: the indicator sits on the active pill and moves with the route", async () => {
   const vars = async (hash) => {
-    const P = loadPage({ perfViews: Object.fromEntries(["coverageGrid", "reliabilityBars", "leadersList", "costScreen"].map((k) => [k, () => "<div></div>"])) });
+    const P = loadPage({ perfViews: Object.fromEntries(["coverageGrid", "reliabilityBars", "leadersList", "costScreen", "rankScreen"].map((k) => [k, () => "<div></div>"])) });
     await P.flush();
     P.respondList(listData(listRow()));
     await P.flush();
