@@ -35,6 +35,13 @@ function modelEfforts(row) {
   return [...new Set(efforts)];
 }
 
+// The row names its default effort outright, where Claude's carries it as a badge
+// on one of the options. Both reach `effortFor` under the same field name.
+function modelDefaultEffort(row) {
+  const value = row?.defaultReasoningEffort ?? row?.default_reasoning_effort;
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
 function modelModalities(row) {
   const values = row?.inputModalities ?? row?.modalities;
   if (!Array.isArray(values)) return undefined;
@@ -46,6 +53,7 @@ export function normalizeCodexModel(row) {
   const model = row?.id ?? row?.model ?? row?.modelId;
   if (typeof model !== "string" || !model.trim()) return null;
   const efforts = modelEfforts(row);
+  const defaultEffort = modelDefaultEffort(row);
   const modalities = modelModalities(row);
   return modelDescriptor({
     provider: "codex",
@@ -55,6 +63,7 @@ export function normalizeCodexModel(row) {
       displayName: row.displayName ?? row.display_name,
     }),
     ...(efforts?.length ? { efforts } : {}),
+    ...(defaultEffort ? { defaultEffort } : {}),
     ...(modalities?.length ? { modalities } : {}),
     ...(typeof row?.isDefault === "boolean" ? { isDefault: row.isDefault } : {}),
     ...(row?.availability && typeof row.availability === "object" && !Array.isArray(row.availability)

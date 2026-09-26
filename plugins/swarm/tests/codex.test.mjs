@@ -16,6 +16,7 @@ import {
   normalizeCodexModel,
 } from "../src/codex.mjs";
 import { isUnderRoot } from "../src/roots.mjs";
+import { declaredEfforts, effortFor } from "../src/models.mjs";
 import { createCodexStreamParser, createRunnerParser } from "../src/stream.mjs";
 import { addDirsOf } from "./helpers/fake-io.mjs";
 import { assertProviderAdapterContract } from "./helpers/provider-contract.mjs";
@@ -102,6 +103,29 @@ test("Codex model normalization preserves optional capabilities", () => {
     modalities: ["text"],
     isDefault: true,
   });
+});
+
+// The advertised default is the whole point of forwarding `efforts`: without it
+// `effortFor` falls to "medium" and a leaf that named no effort runs at a setting
+// the provider never chose.
+test("Codex model normalization carries the advertised default effort", () => {
+  const descriptor = normalizeCodexModel({
+    id: "gpt-5-codex",
+    supportedReasoningEfforts: ["low", "high"],
+    defaultReasoningEffort: "high",
+  });
+  deepEqual(descriptor, {
+    provider: "codex",
+    model: "gpt-5-codex",
+    runner: "codex",
+    efforts: ["low", "high"],
+    defaultEffort: "high",
+  });
+  equal(effortFor({}, declaredEfforts("gpt-5-codex", "codex", [descriptor])), "high");
+  equal(effortFor({ effort: "low" }, declaredEfforts("gpt-5-codex", "codex", [descriptor])), "low");
+
+  // An undeclared default stays absent rather than becoming a wrong one.
+  equal(normalizeCodexModel({ id: "gpt-5-mini", defaultReasoningEffort: "  " }).defaultEffort, undefined);
 });
 
 test("Codex runner invocation is sandboxed, resumable, and contract-valid", () => {
