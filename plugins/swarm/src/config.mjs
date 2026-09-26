@@ -185,7 +185,9 @@ export function loadConfig(overridePath, env = process.env, { warn = (message) =
   const userPath = overridePath || join(swarmHome(env), "config.json");
   const user = existsSync(userPath) ? parseUser(userPath) : null;
   for (const warning of legacyConfigWarnings(user)) warn(warning);
-  const cfg = user ? deepMerge(defaults, normalizeConfigInput(user)) : defaults;
+  const normalized = user ? normalizeConfigInput(user) : null;
+  const cfg = user ? deepMerge(defaults, normalized) : defaults;
+  if (user && !getPath(normalized, "providers.claude.enabled").found) cfg.providers.claude.enabled = true;
   validateConfig(cfg, userPath);
   return addLegacyProviderView(cfg);
 }
@@ -297,6 +299,7 @@ export function initConfig(overridePath, env = process.env) {
   const added = [];
   for (const key of leafKeys(defaults)) {
     if (getPath(user, key).found) continue;
+    if (!created && key === "providers.claude.enabled") continue;
     setPath(user, key, getPath(defaults, key).value);
     added.push(key);
   }

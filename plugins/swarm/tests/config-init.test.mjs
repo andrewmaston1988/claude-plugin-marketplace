@@ -88,3 +88,20 @@ test("initConfig never flips a provider the operator already enabled", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("sparse existing config keeps Claude enabled; fresh config disables it and init preserves omission", () => {
+  const dir = tmp();
+  try {
+    const absent = join(dir, "absent.json");
+    equal(loadConfig(absent).providers.claude.enabled, false);
+    const sparse = join(dir, "sparse.json");
+    writeFileSync(sparse, JSON.stringify({ providers: { codex: { enabled: false } } }));
+    equal(loadConfig(sparse).providers.claude.enabled, true);
+    initConfig(sparse);
+    const stored = JSON.parse(readFileSync(sparse, "utf8"));
+    equal(stored.providers.claude?.enabled, undefined);
+    deepEqual(stored.providers.codex.enabled, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
