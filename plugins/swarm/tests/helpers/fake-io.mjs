@@ -88,6 +88,11 @@ export function promptOf(call) {
   return args.indexOf("-p") >= 0 ? withoutLeafNotices(sentPrompt(call)) : undefined;
 }
 
+// Every `--add-dir` value in a recorded (or constructed) argv, in emitted order.
+export function addDirsOf(args) {
+  return (args ?? []).reduce((acc, value, i) => (value === "--add-dir" ? [...acc, args[i + 1]] : acc), []);
+}
+
 // A canned claude stream-json transcript for a resumed ask: init on s-2, then the answer.
 export const STREAM = [
   JSON.stringify({ type: "system", subtype: "init", session_id: "s-2" }),

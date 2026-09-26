@@ -7,7 +7,7 @@
 // `permissions.deny` binds Edit/Read but not Write. A PreToolUse hook is the only
 // primitive that confines a WRITE, so this is the one mechanism swarm can inject.
 //
-// It is INJECTED, never installed: src/manifest.mjs merges it into each write-capable
+// It is INJECTED, never installed: src/manifest-normalize.mjs (and src/dispatch.mjs, for the report digest) merges it into each write-capable
 // leaf's own `--settings` on the command line. A settings file inside the worktree
 // would sit where the leaf can rewrite it, which defeats the purpose. That also
 // distinguishes this from the CONFIGURED leaf guard (`projects[].hooks.preToolUse`,

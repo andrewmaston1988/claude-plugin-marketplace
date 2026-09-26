@@ -232,4 +232,63 @@ test("report digest sits in scratch-__digest, not in the repo it reports on", ()
   ok(t.cwd.endsWith("scratch-__digest"), t.cwd);
 });
 
+// ── typed write targets ───────────────────────────────────────────────────────
+
+// The digest builder states the engine's write INTENT, never a provider's wire
+// format. Claude settings here is what made every Codex report digest die at the
+// adapter boundary with `Codex tasks do not accept Claude-only settings`.
+test("report digest carries typed writeRoots: scratch as directory, report path as file", () => {
+  const t = buildDigestTask(reportPlan());
+  deepEqual(t.writeRoots, [
+    { path: scratchPath("C:/work/.swarm/run-1"), kind: "directory" },
+    { path: join("C:/work/.swarm/run-1", "report.md"), kind: "file" },
+  ]);
+});
+
+// Both kinds are asserted, not merely the paths: a bare-string list would satisfy
+// a `paths` check while leaving every adapter to guess file from directory.
+test("writeRoots targets are typed objects, never bare path strings", () => {
+  const roots = buildDigestTask(reportPlan()).writeRoots;
+  ok(Array.isArray(roots));
+  for (const target of roots) {
+    equal(typeof target, "object", `a bare string root reached the digest: ${JSON.stringify(target)}`);
+    equal(typeof target.path, "string");
+    ok(["file", "directory"].includes(target.kind), `untyped target: ${JSON.stringify(target)}`);
+    ok(target.path.length > 0);
+  }
+});
+
+// The generated task is provider-neutral: it names no provider, so it can carry
+// no provider's settings. Provider identity lives on the plan's digest block.
+test("no generated digest carries provider-specific settings, for any provider", () => {
+  for (const provider of ["claude", "codex"]) {
+    const p = plan({ digest: { provider, model: "m", report: true } });
+    const t = buildDigestTask(p);
+    ok(!("settings" in t), `${provider} report digest must not carry settings: ${JSON.stringify(t.settings)}`);
+  }
+});
+
+// The typed policy is worth nothing if the builder still branches per provider —
+// that is the defect this replaces, one level up. Asserted as EQUALITY across
+// providers, so any provider-conditional shape here fails rather than passing as
+// one shape per provider.
+test("a report digest's shape is identical whichever provider will run it", () => {
+  const shape = (provider) => {
+    const t = buildDigestTask(plan({ digest: { provider, model: "m", report: true } }));
+    return { prompt: t.prompt, cwd: t.cwd, allowedTools: t.allowedTools, writeRoots: t.writeRoots, after: t.after };
+  };
+  deepEqual(shape("claude"), shape("codex"));
+});
+
+// Regression pin: only report mode has anything to write, so only report mode
+// gets a policy at all. An empty writeRoots on a read-only digest would make a
+// provider emit an add-dir it never needed.
+test("a read-only digest carries no writeRoots key at all", () => {
+  for (const provider of ["claude", "codex"]) {
+    const t = buildDigestTask(plan({ digest: { provider, model: "m" } }));
+    equal("writeRoots" in t, false);
+    equal(t.allowedTools, "Read");
+  }
+});
+
 

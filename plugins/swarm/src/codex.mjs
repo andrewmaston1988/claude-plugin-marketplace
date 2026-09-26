@@ -1,7 +1,9 @@
 import { spawn as nodeSpawn } from "node:child_process";
+import { dirname } from "node:path";
 import { modelDescriptor, runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
 import { providerConfig } from "./providers.mjs";
+import { normalizeForCompare } from "./roots.mjs";
 
 const DEFAULT_CLIENT_INFO = {
   name: "swarm",
@@ -339,6 +341,21 @@ function writeSandboxArg(args, task, context) {
   args.push("--sandbox", codexSandbox(task, context));
 }
 
+// The engine's typed write targets, as directories. `--add-dir` grants a whole
+// directory and has no file-level equivalent, so a `file` target contributes its
+// containing directory — deliberately broader than the Claude guard's exact-file
+// root, which is the narrower primitive this runner does not have.
+function writeTargetDirs(task) {
+  const targets = Array.isArray(task.writeRoots) ? task.writeRoots : [];
+  return targets
+    .map((target) => {
+      const path = typeof target?.path === "string" ? target.path.trim() : "";
+      if (!path) return null;
+      return target.kind === "file" ? dirname(path) : path;
+    })
+    .filter(Boolean);
+}
+
 /** Build native `codex exec --json` argv. */
 export function buildCodexInvocation(task, prompt, context = {}) {
   const cfg = providerConfig(context.config || context.cfg || {}, "codex");
@@ -349,9 +366,28 @@ export function buildCodexInvocation(task, prompt, context = {}) {
   writeEffortArg(args, task.effort ?? task.reasoningEffort ?? "medium");
   writeSandboxArg(args, task, context);
   const addDirs = task.additionalDirs || context.additionalDirs || cfg.additionalDirs || [];
+  // Existing entries are emitted first, verbatim — the write targets only append.
+  // Everything already writable (the primary cwd, or an entry emitted above) is
+  // skipped, so an ordinary leaf's argv is unchanged and a target cannot produce
+  // a duplicate --add-dir through separator style or win32 casing.
+  const writable = new Set();
+  if (task.cwd) writable.add(normalizeForCompare(task.cwd));
   for (const dir of Array.isArray(addDirs) ? addDirs : [addDirs]) {
-    if (typeof dir === "string" && dir.trim()) args.push("--add-dir", dir);
+    if (typeof dir !== "string" || !dir.trim()) continue;
+    args.push("--add-dir", dir);
+    writable.add(normalizeForCompare(dir));
   }
+  for (const dir of writeTargetDirs(task)) {
+    const key = normalizeForCompare(dir);
+    if (writable.has(key)) continue;
+    writable.add(key);
+    args.push("--add-dir", dir);
+  }
+  // The generated digest launches from engine scratch — a cwd outside every Git
+  // repository, where `codex exec` refuses to start. Scoped to the digest by the
+  // cwd/originalCwd comparison (a pure comparison, not a filesystem probe): an
+  // ordinary Codex leaf keeps the repo-root gate that stops it wandering.
+  if (task.isDigest === true && task.cwd !== task.originalCwd) args.push("--skip-git-repo-check");
   if (sessionId) args.push("resume", sessionId);
   args.push(prompt);
   return { argv: [executable, ...args], env: { ...(cfg.env || {}) } };
