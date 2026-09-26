@@ -24,6 +24,20 @@ test("swarm reference docs do not restate roster token arithmetic", () => {
   );
 });
 
+test("SKILL.md scopes the dispatch-gate promise to the host that enforces it", () => {
+  const skill = readFileSync(
+    join(root, "plugins", "swarm", "skills", "swarm", "SKILL.md"),
+    "utf8",
+  );
+
+  // The gate is a Claude Code PreToolUse hook; the Codex manifest declares none, so
+  // an unscoped "the dispatch gate denies a run" promises Codex enforcement it lacks.
+  const claim = skill.split(/\n\s*\n/).find((p) => p.includes("dispatch gate denies"));
+  ok(claim, "SKILL.md must state what the dispatch gate enforces");
+  ok(claim.includes("Claude Code"), `the gate promise must name its host scope; got: ${claim}`);
+  ok(claim.includes("Codex"), `the gate promise must name a Codex host's containment; got: ${claim}`);
+});
+
 test("swarm reference docs keep the guidance no command prints", () => {
   const roster = read("reading-the-roster.md");
   const modelSelection = read("model-selection.md");
