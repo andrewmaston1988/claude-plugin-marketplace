@@ -32,7 +32,7 @@ function effortConfig(root) {
   };
 }
 
-async function modelLines(descriptors) {
+async function modelLines(descriptors, rest = []) {
   const home = mkdtempSync(join(tmpdir(), "swarm-efforts-"));
   // HOME too, not just SWARM_HOME: the claude adapter's discoverModels reads
   // ~/.claude/cache/model-catalog, so a real one would add rows this roster asserts against.
@@ -40,7 +40,7 @@ async function modelLines(descriptors) {
   const registry = defaultProviderRegistry({ additionalProviders: [effortProvider(descriptors)] });
   const lines = [];
   try {
-    equal(await cmdModels([], { cfg: effortConfig(home), env, registry, fetchImpl: async () => ({ ok: true }), write: (line) => lines.push(line) }), 0);
+    equal(await cmdModels(rest, { cfg: effortConfig(home), env, registry, fetchImpl: async () => ({ ok: true }), write: (line) => lines.push(line) }), 0);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -90,4 +90,27 @@ test("a declared default effort renders beside the list and stands alone", async
   ok(listLine && listLine.includes("low/high (default low)"), lines.join("\n"));
   const onlyLine = lines.find((l) => l.includes("default-only"));
   ok(onlyLine && onlyLine.includes("default medium"), lines.join("\n"));
+});
+
+// Item 16: the Codex and Claude rosters were never collapsed, so a superseded
+// generation printed beside the model that replaced it. `--all` still lists
+// them, marked — the same rule the Ollama roster already followed.
+test("a superseded Codex/Claude row leaves the roster until --all, which marks it", async () => {
+  const descriptors = [
+    "gpt-5.6-luna", "gpt-6-luna", "gpt-5.6-sol", "gpt-6-sol", "gpt-5.6-terra", "gpt-5.5",
+    "claude-opus-4-8", "claude-opus-5",
+  ].map((model) => modelDescriptor({ provider: "fixture", model, runner: "fixture" }));
+
+  const shown = await modelLines(descriptors);
+  const text = shown.join("\n");
+  for (const gone of ["gpt-5.6-luna", "gpt-5.6-sol", "claude-opus-4-8"]) {
+    ok(!text.includes(gone), `${gone} is superseded and must not print by default:\n${text}`);
+  }
+  for (const kept of ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-terra", "gpt-5.5", "claude-opus-5"]) {
+    ok(text.includes(kept), `${kept} has no newer sibling and must stay:\n${text}`);
+  }
+
+  const all = (await modelLines(descriptors, ["--all"])).join("\n");
+  ok(/gpt-5\.6-luna.*\[superseded by gpt-6-luna\]/.test(all), `--all must list it, marked:\n${all}`);
+  ok(/claude-opus-4-8.*\[superseded by claude-opus-5\]/.test(all), `--all must list it, marked:\n${all}`);
 });

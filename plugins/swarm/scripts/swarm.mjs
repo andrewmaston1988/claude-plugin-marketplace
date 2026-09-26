@@ -6,7 +6,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, swarmHome, getConfig } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
-import { readModelsCache as readProviderModelsCache, refreshModelsCache, writeCompositeModelsCache, visibleModels, probeTopModels } from "../src/discovery.mjs";
+import { readModelsCache as readProviderModelsCache, refreshModelsCache, writeCompositeModelsCache, collapseRoster, visibleModels, probeTopModels } from "../src/discovery.mjs";
 import { providerConfig } from "../src/providers.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
@@ -211,10 +211,13 @@ async function cmdModels(rest = [], {
     ...roster.filter((m) => (m.provider || "ollama") !== "ollama"),
     ...cachedOllama,
   ], env);
-  const liveRoster = [
+  // The one collapse site for every provider — without it a Codex or Claude
+  // roster prints a superseded generation beside the model that replaced it,
+  // and `--all` has no `supersededBy` to mark the row with.
+  const liveRoster = collapseRoster([
     ...roster.filter((m) => (m.provider || "ollama") !== "ollama"),
     ...liveOllama,
-  ].filter((m) => providerEnabled(registry, cfg, m) && !isDenylisted(m.model));
+  ].filter((m) => providerEnabled(registry, cfg, m) && !isDenylisted(m.model)), { cloudSuffix: ollama.cloudSuffix });
   const visible = new Set(visibleProviderModels(liveRoster, { isDenylisted }).map(identityKey));
   const shown = showAll ? liveRoster : liveRoster.filter((m) => visible.has(identityKey(m)));
   const { readRows, scoresPath, frontier } = await import("../src/scores.mjs");
@@ -271,7 +274,8 @@ function seatedModels(plan) {
 async function launchableRoster(cfg, { env = process.env, registry = defaultProviderRegistry() } = {}) {
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
   const cached = readProviderModelsCache(env)?.models || [];
-  const enabled = cached.filter((m) => providerEnabled(registry, cfg, m));
+  const enabled = collapseRoster(cached.filter((m) => providerEnabled(registry, cfg, m)),
+    { cloudSuffix: providerConfig(cfg, "ollama")?.cloudSuffix });
   const visible = new Set(visibleProviderModels(enabled, { isDenylisted }).map(identityKey));
   const offered = enabled.filter((m) => !isDenylisted(m.model));
   return offered.filter((m) => visible.has(identityKey(m)));

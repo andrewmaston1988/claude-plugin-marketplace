@@ -8,7 +8,7 @@ import { EventEmitter } from "node:events";
 import {
   discoverModels, scrapeDiscoverCmd,
   deriveCloudName, enrichWithShow, sortModelsBySize,
-  collapseFamilies, visibleModels, removeCachedModel, probeTopModels,
+  collapseFamilies, collapseRoster, visibleModels, removeCachedModel, probeTopModels,
   createOllamaProviderAdapter, discoverOllamaModels, mergeProviderModelCaches,
   normalizeOllamaModelDescriptor, readModelsCache, refreshModelsCache,
   writeCompositeModelsCache,
@@ -551,4 +551,32 @@ test("refreshModelsCache: a first-ever zero-row discover still writes the empty 
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// Item 16: only the Ollama roster was ever collapsed, so `swarm models` printed
+// gpt-5.6-luna beside gpt-6-luna and claude-opus-4-8 beside claude-opus-5. One
+// collapse site for every provider — the cloud suffix belongs to Ollama's naming,
+// every other provider compares bare.
+test("collapseRoster: every provider's roster collapses, bare outside Ollama", () => {
+  const roster = collapseRoster([
+    { provider: "codex", model: "gpt-5.6-luna" },
+    { provider: "codex", model: "gpt-6-luna" },
+    { provider: "codex", model: "gpt-5.6-sol" },
+    { provider: "codex", model: "gpt-6-sol" },
+    { provider: "codex", model: "gpt-5.6-terra" },
+    { provider: "codex", model: "gpt-5.5" },
+    { provider: "claude", model: "claude-opus-4-8" },
+    { provider: "claude", model: "claude-opus-5" },
+    { provider: "ollama", model: "glm-5:cloud" },
+    { provider: "ollama", model: "glm-5.1:cloud" },
+  ]);
+  const by = Object.fromEntries(roster.map((m) => [`${m.provider}/${m.model}`, m]));
+  equal(by["codex/gpt-5.6-luna"].supersededBy, "gpt-6-luna", roster.map((m) => m.model).join(","));
+  equal(by["codex/gpt-5.6-sol"].supersededBy, "gpt-6-sol");
+  equal(by["codex/gpt-5.6-terra"].supersededBy, undefined, "no newer sibling — terra stays");
+  equal(by["codex/gpt-5.5"].supersededBy, undefined, "a bare gpt-5.5 family has no newer member");
+  equal(by["claude/claude-opus-4-8"].supersededBy, "claude-opus-5");
+  equal(by["ollama/glm-5:cloud"].supersededBy, "glm-5.1:cloud", "Ollama keeps its cloud suffix");
+  deepEqual(visibleModels(roster.filter((m) => m.provider === "codex")).map((m) => m.model),
+    ["gpt-6-luna", "gpt-6-sol", "gpt-5.6-terra", "gpt-5.5"]);
 });
