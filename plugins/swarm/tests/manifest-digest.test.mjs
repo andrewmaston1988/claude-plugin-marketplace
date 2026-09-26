@@ -159,8 +159,7 @@ test("generated digest: the dispatch check is not the win32 length check", () =>
 });
 
 // An incompatible generated dispatch must be a VALIDATION error, not a task that
-// dies in the scheduler: the engine's own task has no second reporter, which is
-// how the Codex settings rejection reached the operator as a zero-duration failure.
+// dies in the scheduler: the engine's own task has no second reporter.
 test("generated digest: an incompatible generated dispatch fails validation, naming the digest", () => {
   const dir = tmp();
   try {

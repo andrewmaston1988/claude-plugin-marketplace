@@ -129,13 +129,9 @@ Return the digest as your final response text. ${plan.digest?.report
 export function buildDigestTask(plan) {
   const timeoutMs = Math.max(...plan.tasks.map((t) => t.timeoutMs || 0)) || DEFAULT_TIMEOUT_MS;
   const report = Boolean(plan.digest.report);
-  // The report digest is the one non-leaf node holding Write, and buildDigestTask
-  // bypasses normalizeTasks — so the write policy every other writer gets is attached
-  // here or nowhere. Its targets are the drafting directory and the single file the
-  // prompt permits, both named in reportPhase; they carry the engine's INTENT as
-  // typed targets because no provider-neutral spelling of them exists. Each runner
-  // adapter translates them at invocation time: Claude into the PreToolUse guard,
-  // Codex into native directory arguments.
+  // The one non-leaf writer bypasses normalizeTasks, so its write policy is attached
+  // here or nowhere. Typed targets carry intent; each runner adapter translates them
+  // (Claude: PreToolUse guard; Codex: --add-dir).
   const writeRoots = report
     ? [
         { path: scratchPath(plan.resultsDir), kind: "directory" },

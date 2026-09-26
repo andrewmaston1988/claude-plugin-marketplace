@@ -145,15 +145,8 @@ function codexPlanWith(dir, report) {
   return p;
 }
 
-// The digest's spawn is driven through the REAL codex shim: the argv the engine
-// built runs it (so the shim's own exec-flag placement rule adjudicates it), and
-// the JSONL it prints is what the engine's codex parser consumes. A shim that
-// refuses the argv would otherwise surface as an opaque zero-output digest.
-//
-// The shim is launched in the digest's cwd, so the spawn itself proves that
-// directory exists when Codex starts; and it writes report.md only where the
-// emitted argv actually granted write access, so a wrong --add-dir cannot leave
-// both artifacts behind and pass.
+// Driven through the REAL codex shim, so the shim adjudicates the emitted argv, and
+// it writes report.md only where --add-dir granted access — a wrong grant cannot pass.
 function codexSpawn(dir, { writesReport = true, output = CODEX_DIGEST_TEXT } = {}) {
   const shimRuns = [];
   const reportFile = join(dir, "run", "report.md");

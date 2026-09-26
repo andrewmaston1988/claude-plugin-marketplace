@@ -1,9 +1,8 @@
 // Workspace and branch: how a task names the tree it runs in, how that name is
 // run-scoped, and the ordering and collision rules the shared surface imposes.
 import { test } from "node:test";
-import { equal, ok, deepEqual, match } from "node:assert/strict";
+import { equal, ok, deepEqual } from "node:assert/strict";
 import { rmSync } from "node:fs";
-import { join } from "node:path";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask, writerTask } from "./helpers/manifest-fixtures.mjs";
 

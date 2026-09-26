@@ -1,8 +1,7 @@
 // ── shared normalization ──────────────────────────────────────────────────────
-// Governance gate — deny-by-default for non-Claude models. The employer's
-// data agreement covers Anthropic only; open-model tasks may run only under
-// directories the user has explicitly allow-listed. Checked against the
-// task's ORIGINAL effective cwd (before any scratch redirect).
+// Every task, Claude included, passes the governance gate (governance.mjs): it may
+// run only under the allow-listed roots, checked against its ORIGINAL effective cwd
+// (before any scratch redirect).
 
 import { resolve } from "node:path";
 import { CONTEXT_WINDOW_1M } from "./contracts.mjs";

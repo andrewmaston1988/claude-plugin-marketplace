@@ -53,13 +53,13 @@ export function leafWriteGuardRoots({ worktreeName, resultsDir, outputDir }) {
 }
 
 // True when this task shares its tree with ordered siblings rather than owning it.
+// Sharers run in ONE directory, so they must form a single ordered chain — two
+// unordered members would race and corrupt each other.
 // Only a named workspace shares; a derived tree is the task's alone by construction.
 export function isSharedTree(t) {
   return typeof t.workspace === "string" && !!t.workspace;
 }
 
-// Tasks sharing a worktree run in ONE directory, so they must form a single
-// ordered chain — two unordered members would race and corrupt each other.
 // The kinds that run in the engine and spawn no leaf. `model` carries a display
 // sentinel for a normalized task, but a hand-built plan (tests, runPlan callers)
 // may set only the key — so both are checked, in ONE place. Every site that asks

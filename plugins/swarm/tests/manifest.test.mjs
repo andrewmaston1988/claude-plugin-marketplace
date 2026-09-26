@@ -4,7 +4,7 @@
 //
 // The remaining concerns live beside this file, one suite each: provider policy,
 // digest, headroom, deterministic steps, composition, args, workspace, integrate,
-// helpers, leaf guards, run home and relations.
+// helpers, leaf guards, run home, relations and top-level keys.
 import { test } from "node:test";
 import { equal, ok, deepEqual, throws } from "node:assert/strict";
 import { writeFileSync, rmSync, mkdirSync } from "node:fs";

@@ -2,7 +2,7 @@ import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join, basename, dirname } from "node:path";
 import { createHash } from "node:crypto";
 import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
-import { buildDispatch, createDispatchRegistry, runnerOf } from "./dispatch.mjs";
+import { buildDispatch, createDispatchRegistry } from "./dispatch.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
 import { checkGovernance, checkRunRoots } from "./governance.mjs";
@@ -315,13 +315,9 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   if (digest) {
     const digestTask = buildDigestTask({ tasks, resultsDir, goal: raw.goal || "", digest, cwd });
     checkCommandLineLengths([digestTask], cfg, resolvedIo, errors, () => "digest");
-    // ...and the same dispatch is built once more, because the engine's own task
-    // has no second reporter: the measurement above swallows a dispatch exception
-    // (every ordinary task reports its own problems through normalization), which
-    // is exactly how a provider that cannot accept the digest surfaced only as a
-    // zero-duration runtime failure. Built on EVERY platform with the registries
-    // execution will use; the dispatch contract is platform-independent and only
-    // the length measurement is win32-specific. Pure — nothing is spawned.
+    // ...and built once more, because the measurement above swallows a dispatch
+    // exception and the engine's own task has no other reporter. Every platform,
+    // execution's registries; only the length check is win32-specific. Pure.
     if (digest.provider && !digestGovernanceDenied) {
       const effectiveRunnerRegistry = runnerRegistry || createDispatchRegistry({ providerRegistry }).runnerRegistry;
       try {

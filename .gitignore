@@ -25,4 +25,4 @@ STATE.md
 # .scoutignore template — committed at the repo root — declares what
 # scout should skip while indexing.
 .scout/
-AGENTS.md
+/AGENTS.md

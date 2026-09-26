@@ -4,7 +4,7 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual, notEqual } from "node:assert/strict";
 import { rmSync } from "node:fs";
-import { join, basename } from "node:path";
+import { basename } from "node:path";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask } from "./helpers/manifest-fixtures.mjs";
 

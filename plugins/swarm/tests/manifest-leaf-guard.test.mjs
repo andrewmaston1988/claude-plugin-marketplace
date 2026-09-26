@@ -131,8 +131,8 @@ test("leaf guard: a passing probe prints one line per guarded task and an opt-ou
 });
 
 // ── leaf write guard ──────────────────────────────────────────────────────────
-// A worktree confines a leaf's cwd, not an absolute path: the 2026-08-28 incident
-// was a compacted leaf writing across the operator's live checkout. The guard is
+// A worktree confines a leaf's cwd, not an absolute path, so a leaf could write
+// across the operator's live checkout. The guard is
 // INJECTED into each writer's own `--settings`, so the leaf cannot rewrite it.
 
 test("write guard: attached to a write-capable leaf, rooted at its own worktree", () => {
