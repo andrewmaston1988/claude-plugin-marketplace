@@ -372,6 +372,36 @@ test("Codex parser output is the final agent message, never reasoning or interim
   equal(parser.result().output, '{"ok":true}');
 });
 
+// A chunk boundary lands wherever the OS put it, so a multibyte character can be
+// split across two chunks. Decoded per-chunk it becomes U+FFFD — in a JSONL line
+// that is a silently corrupted payload, not a parse failure anything reports.
+test("Codex app-server decodes a character split across stdout chunks", async () => {
+  const child = {
+    stdin: { write() {} },
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    on() {},
+    kill() {},
+  };
+  const client = createCodexAppServerClient({ spawnImpl: () => child });
+  const id = "gpt-é🙂-codex";
+  const bytes = Buffer.from(`${JSON.stringify({ jsonrpc: "2.0", id: 1, result: { data: [{ id }] } })}\n`, "utf8");
+  // Cut at every UTF-8 continuation byte: each chunk then begins mid-character.
+  const chunks = [];
+  let start = 0;
+  for (let i = 1; i < bytes.length; i++) {
+    if ((bytes[i] & 0xc0) === 0x80) { chunks.push(bytes.subarray(start, i)); start = i; }
+  }
+  chunks.push(bytes.subarray(start));
+  ok(chunks.length > 2, "the fixture must really split characters, or it proves nothing");
+
+  const pending = client.request("model/list");
+  for (const chunk of chunks) child.stdout.emit("data", chunk);
+  const result = await pending;
+  equal(result.data[0].id, id);
+  ok(!result.data[0].id.includes("�"), `split decode corrupted the payload: ${JSON.stringify(result.data[0].id)}`);
+});
+
 test("Codex app-server rejects a request when stdin fails synchronously", async () => {
   const child = {
     stdin: { write() { throw new Error("broken pipe"); } },

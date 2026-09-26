@@ -1,5 +1,6 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { dirname } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { modelDescriptor, runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
 import { providerConfig } from "./providers.mjs";
@@ -148,8 +149,15 @@ export function createCodexAppServerClient({
     stdoutNoise += `${JSON.stringify(message)}\n`;
   }
 
+  // One decoder per stream: a chunk boundary can split a multibyte character, and
+  // decoding each chunk on its own turns the halves into U+FFFD. A chunk that is
+  // already a string was decoded upstream and needs no help.
+  const stdoutDecoder = new StringDecoder("utf8");
+  const stderrDecoder = new StringDecoder("utf8");
+  const decode = (decoder, chunk) => (typeof chunk === "string" ? chunk : decoder.write(chunk));
+
   function handleStdout(chunk) {
-    stdoutBuffer += String(chunk);
+    stdoutBuffer += decode(stdoutDecoder, chunk);
     let index;
     while ((index = stdoutBuffer.indexOf("\n")) >= 0) {
       const line = stdoutBuffer.slice(0, index).trim();
@@ -166,7 +174,7 @@ export function createCodexAppServerClient({
   }
 
   function handleStderr(chunk) {
-    stderr += String(chunk);
+    stderr += decode(stderrDecoder, chunk);
   }
 
   function start() {
