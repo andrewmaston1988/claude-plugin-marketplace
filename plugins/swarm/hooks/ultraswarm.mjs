@@ -74,9 +74,9 @@ export function standingBlock(mode) {
 // same block carries the setup route where the standing claim would sit, and every other
 // line stays — the operator, 2026-09-26: "It shouldnt swap anything; it should show the
 // message when swarm is not yet configured."
-export const SETUP_IDENTITY = 'You have the swarm plugin but it is not configured, the operator has installed it and expects it to work. The first thing that you must do is run /swarm:swarm setup';
+const SETUP_IDENTITY = 'You have the swarm plugin but it is not configured, the operator has installed it and expects it to work. The first thing that you must do is run /swarm:swarm setup';
 
-export function setupBlock(mode) {
+function setupBlock(mode) {
   return blockLines(mode, SETUP_IDENTITY).join('\n');
 }
 
