@@ -398,10 +398,10 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
   marks every still-pending undefended Claude leaf `quota`. Re-running after reset skips
   `ok` work.
 - **Quota preflight**: with Claude leaves present, the engine queries Anthropic's usage
-  endpoint first (free, local OAuth creds, cached `quotaCacheSecs`). Exhausted quota with
-  undefended Claude leaves aborts before dispatch; ≥`quotaWarnPct` (80) warns and proceeds.
-  Best-effort — any endpoint failure and the run proceeds. Disable with
-  `"quotaPreflight": false`.
+  endpoint first (free, local credentials, cached `quotaCacheSecs`). Exhausted quota with
+  undefended leaves aborts before dispatch; ≥`quotaWarnPct` (80) warns and proceeds. Best-effort —
+  any endpoint failure and the run proceeds. `"quotaPreflight": false` skips every provider's
+  usage preflight, including Codex.
 - **Memory pressure parks, it doesn't fail.** Below `minFreeMemMb` (2048) a pending leaf
   waits (`retrying`, unlimited); below `valveFreeMemMb` (1024) with >1 leaf running, the
   engine stops its own newest leaf (classified `memory`, not a failure). Both redrive once

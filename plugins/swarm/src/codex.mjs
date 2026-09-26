@@ -478,10 +478,9 @@ export function createCodexProviderAdapter(options = {}) {
         ...context,
       }),
       readUsage,
-      // The Claude preflight's counterpart: it forces the read rather than trusting a
-      // binary on PATH, and an exhausted account grounds only the leaves carrying no
-      // fallback — the same exemption the usage gate states.
+      // Codex counterpart to Claude preflight; preserve its fallback exemption.
       preflight: async (context = {}) => {
+        if (context.config?.quotaPreflight === false) return { ok: true };
         const usage = await readUsage({ ...context, usageOptIn: true });
         const blocked = (context.tasks || []).filter((task) => !task.fallbackModel);
         if (usage?.exhausted && blocked.length) {

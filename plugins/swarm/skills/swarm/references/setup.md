@@ -331,7 +331,7 @@ from the appendix. If no, close.
 | `worktreeBranchPrefix` | `swarm/` | Branch prefix for worktree-isolated leaves. |
 | `modelDenylist` | `[]` | Case-insensitive substrings; matching models fail `validate` and vanish from `models`. |
 | `notifyCmd` | `null` | Stage 6. |
-| `quotaPreflight` | `true` | Before a run with Claude leaves, read Anthropic's usage with Claude Code's own sign-in; refuse when a window is exhausted. |
+| `quotaPreflight` | `true` | Before dispatch, read usage for every enabled provider with its own credentials; refuse when usage is exhausted. `false` skips every provider's usage preflight, including Codex. |
 | `quotaWarnPct` | `80` | Warn once when the worst window is at or past this percent. |
 | `quotaCacheSecs` | `300` | How long one usage read is reused. |
 | `quotaPatterns` | four strings | Output substrings that classify a failed leaf as quota-hit. |
