@@ -227,11 +227,11 @@
   .ubar { margin-top:11px; height:5px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
   .ubar span { display:block; height:100%; border-radius:3px; background:var(--accent); }
   .ubar span.warn { background:var(--warn); } .ubar span.bad { background:var(--bad); }
-  /* the cost badge rides the rank row's value side, never the name */
+  /* the cost badge rides the rank row's value side, never the name, and never its line: the grade's own line box centres the row, the stack's foot still the baseline */
   .valside { display:flex; align-items:baseline; gap:4px; }
   .cbadge { font-size:11px; flex:none; }
   .cbadge.none { color:var(--faint); }
-  .cbadge.coins { display:inline-flex; align-items:flex-end; }
+  .cbadge.coins { display:inline-flex; align-items:flex-end; } .crow .valside .cbadge.coins { height:0 !important; }
   /* one gold coin, tinted per provider; an unknown provider stays gold */
   /* provider brand colours: the chips wear these; the coins are tinted to match */
   :root { --p-claude:#d97757; --p-codex:#3fb68b; --p-ollama:#c3c8d0; }
