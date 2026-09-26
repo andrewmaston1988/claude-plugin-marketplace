@@ -70,6 +70,16 @@ export function standingBlock(mode) {
   return blockLines(mode, IDENTITY).join('\n');
 }
 
+// A fresh install has no config file at all, so nothing here can be pre-authorised yet: the
+// same block carries the setup route where the standing claim would sit, and every other
+// line stays — the operator, 2026-09-26: "It shouldnt swap anything; it should show the
+// message when swarm is not yet configured."
+export const SETUP_IDENTITY = 'You have the swarm plugin but it is not configured, the operator has installed it and expects it to work. The first thing that you must do is run /swarm:swarm setup';
+
+export function setupBlock(mode) {
+  return blockLines(mode, SETUP_IDENTITY).join('\n');
+}
+
 // Every id that could own roots: the canonical blocks the operator wrote, plus the two ids
 // that are configurable without one (ollama via `provider`, codex via `codex` or a bare
 // file). `claude` is excluded — see modeFor. A config setting ONLY the top-level key has no
@@ -80,19 +90,24 @@ function providerIds(config) {
     .filter((id) => id !== 'claude');
 }
 
+// Roots are resolved per provider rather than read off the block, so a provider that names
+// none inherits the top-level list. The legacy `provider.allowedRoots` concat stays: this
+// hook reads RAW config.json, and addLegacyProviderView never runs on a file off disk.
+// Empty means the install never ran setup — nothing is dispatchable, whatever the mode says.
+function configuredRoots(config) {
+  return [...new Set(providerIds(config)
+    .filter((id) => providerConfig(config, id)?.enabled !== false)
+    .flatMap((id) => allowedRootsFor(config, id).roots || [])
+    .concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
+}
+
 // cwd under any allowed root -> alternative models are launchable here. Lazy import:
 // manifest.mjs is the governance source of truth but heavy for a per-prompt hook.
 //
 // Claude is EXCLUDED here and included by the run-level gate. The two are not the same
 // question: this one is "is the alternative-model path armed?", not "where may swarm run".
-// Roots are resolved per provider rather than read off the block, so a provider that names
-// none inherits the top-level list. The legacy `provider.allowedRoots` concat stays: this
-// hook reads RAW config.json, and addLegacyProviderView never runs on a file off disk.
 export async function modeFor({ cwd, config }) {
-  const roots = [...new Set(providerIds(config)
-    .filter((id) => providerConfig(config, id)?.enabled !== false)
-    .flatMap((id) => allowedRootsFor(config, id).roots || [])
-    .concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
+  const roots = configuredRoots(config);
   if (!roots.length || !cwd) return MODE_ANTHROPIC;
   const { isUnderRoot } = await import('../src/manifest.mjs');
   return roots.some((r) => isUnderRoot(cwd, r)) ? MODE_CLOUD : MODE_ANTHROPIC;
@@ -105,11 +120,16 @@ const KEYWORD_RE = /(^|[^\w./-])ultraswarm(?![\w./-])/i;
 // `usage` is readCachedUsage()'s array; the caller reads it, so this stays pure
 // and an absent argument behaves exactly as before usage existed.
 export async function decide({ event, prompt = '', cwd, config, usage = [] }) {
-  const armed = event === 'SessionStart' ? config?.swarm?.always === true
+  // SessionStart alone may fire without swarm.always: an install with no roots dispatches
+  // nothing, so the session has to learn the way out before it tries. The keyword event is
+  // unchanged — a user asking for the swarm on a prompt still gets the standing block.
+  const unconfigured = event === 'SessionStart' && !configuredRoots(config).length;
+  const armed = event === 'SessionStart' ? config?.swarm?.always === true || unconfigured
     : event === 'UserPromptSubmit' ? KEYWORD_RE.test(prompt)
       : false;
   if (!armed) return null;
-  const block = standingBlock(await modeFor({ cwd, config }));
+  const mode = await modeFor({ cwd, config });
+  const block = unconfigured ? setupBlock(mode) : standingBlock(mode);
   const lines = notableLines(usage);
   return lines.length ? `${block}\n${lines.join('\n')}` : block;
 }
