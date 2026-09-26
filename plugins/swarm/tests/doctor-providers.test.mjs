@@ -79,7 +79,7 @@ test("swarm doctor: an enabled provider's probe result reaches the operator", as
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "config.json"), JSON.stringify({
     providers: {
-      claude: { allowedRoots: [dir] },
+      claude: { enabled: true, allowedRoots: [dir] },
       codex: { enabled: true },
       ollama: { enabled: true, url: `http://127.0.0.1:${deadPort}` },
     },

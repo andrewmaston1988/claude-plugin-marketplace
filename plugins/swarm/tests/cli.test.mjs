@@ -13,8 +13,9 @@ import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 // The one place the provider policy lives. `allowedRoots` gates EVERY provider, claude
 // included, and an empty list denies — so a fixture HOME without it refuses every
 // dispatching row; fixtures live under tmpdir, so that is the root they declare and
-// `extra` keys win. Ollama is on explicitly: the shipped default is opt-in, so a fixture that omits it refuses.
-const gateConfig = (extra = {}) => JSON.stringify({ providers: { claude: { allowedRoots: [tmpdir()] }, ollama: { enabled: true } }, ...extra });
+// `extra` keys win. Ollama and Claude are on explicitly: both shipped defaults are
+// `enabled: false`, so a fixture that omits one refuses every row that dispatches to it.
+const gateConfig = (extra = {}) => JSON.stringify({ providers: { claude: { enabled: true, allowedRoots: [tmpdir()] }, ollama: { enabled: true } }, ...extra });
 
 // Writes that config into `home` and returns it — every fixture HOME a dispatching row
 // reads goes through here, so the block exists in exactly one place.
