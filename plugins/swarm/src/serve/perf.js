@@ -255,6 +255,15 @@
     };
     // Several buckets of one window: the most-consumed is the one that stops work.
     const limitOf = (u) => (u.limits || []).filter(fits).sort((a, b) => b.percent - a.percent)[0] || null;
+    // How long a limit's own window runs, in minutes — the reach a spent one has, so
+    // `reading` can zero its own tab and any shorter one. The named kinds come first
+    // (each provider's own vocabulary), else codex's window string; null is unplaceable.
+    const spanOf = (l) => {
+      const k = l.kind || "";
+      if (k === "session") return 0;
+      if (k === "weekly" || k.startsWith("weekly_")) return 1440;
+      return spanMins(l.window);
+    };
     const tone = (n) => (n <= LOW ? "bad" : n <= WARN ? "warn" : "ok");
     const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
     const pad = (n) => String(n).padStart(2, "0");
@@ -271,10 +280,17 @@
     for (const [provider, error] of Object.entries(data.errors || {})) if (!seen.has(provider)) { seen.add(provider); rows.push({ provider, error }); }
     rows.sort((a, b) => a.provider.localeCompare(b.provider));
     const reading = (p) => {
-      // Exhausted is dead in every window: 0% left. The note is when it is back — the LAST
-      // spent limit to reset; red 0% already says it ran out.
-      if (p.usage?.state === "exhausted") {
-        const back = (p.usage.limits || []).filter((l) => l.percent >= 100 && l.resetsAt).map((l) => l.resetsAt).sort().pop();
+      // Exhausted is dead in every window it can reach. A spent window zeroes its own tab
+      // and any SHORTER one, never a longer one — a spent 5h session says nothing about the
+      // week, so the Week tab keeps its own figure. A limit we cannot place zeroes both, as
+      // it always did. The note is when it is back — the LAST spent limit to reset; red 0%
+      // already says it ran out.
+      const tabSpan = week ? 1440 : 0;
+      const spent = p.usage?.state === "exhausted"
+        ? (p.usage.limits || []).filter((l) => l.percent >= 100 && (spanOf(l) ?? Infinity) >= tabSpan)
+        : [];
+      if (spent.length) {
+        const back = spent.filter((l) => l.resetsAt).map((l) => l.resetsAt).sort().pop();
         return { left: 0, note: back ? resets(back) : "" };
       }
       const l = p.usage && limitOf(p.usage);

@@ -59,6 +59,23 @@ test("an exhausted provider reads 0% left in either window, noting when it reset
   }
 });
 
+// Operator, 2026-09-26: "When the codex session usage expires it takes out the weekly usage
+// too" — "Real weekly left". A spent window zeroes its own tab and any SHORTER one, never a
+// longer one: the spent 5h session says nothing about the week.
+test("a spent session window zeroes Session and leaves Week its own reading", () => {
+  const at = (h) => new Date(Date.now() + h * 3_600_000).toISOString();
+  const codex = { usages: [usage("codex", [
+    lim("codex primary", 100, { window: "5h", resetsAt: at(2) }),
+    lim("codex secondary", 44, { window: "7d", resetsAt: at(72) }),
+  ], { state: "exhausted" })], errors: {} };
+  const { usageScreen } = loadPerfViews();
+  const week = usageScreen(codex, H, "week");
+  assert.match(week, /class="nm">codex<\/span><span class="val ok">56%</, "44% used is 56% left");
+  assert.match(week, /class="nm">codex<\/span>[\s\S]*?<div class="sub">resets \w{3} \d{2}:\d{2}<\/div>/, "the weekly window's own reset, not the session's");
+  const session = usageScreen(codex, H, "session");
+  assert.match(session, /class="nm">codex<\/span><span class="val bad">0%</);
+});
+
 test("a provider that reports neither window, and is not exhausted, stays a dim card naming what it did report", () => {
   const html = loadPerfViews().usageScreen({ usages: [usage("codex", [lim("codex primary", 10, { window: "5h" })])] }, H, "week");
   assert.match(html, /not read — reports codex primary — no weekly window/);
