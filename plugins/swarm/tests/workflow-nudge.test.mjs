@@ -27,13 +27,18 @@ test("silent when not armed (no allowedRoots) — Workflow is the only game", ()
   assert.equal(decideNudge({ config: null, seen: null, sessionId: "s1" }), false);
 });
 
-// Standing mode does not consult arming: with nothing armed swarm still runs the leaves on
-// Claude tiers, so Workflow is still the tool being reached for by mistake.
-test("standing mode hard blocks with no budget and no arming check", () => {
+test("standing mode hard blocks with no budget, and needs no session id to book one", () => {
   const spent = { s1: { n: 99, t: Date.now() } };
   assert.equal(decideNudge({ config: { ...ARMED, swarm: { always: true } }, seen: spent, sessionId: "s1" }), "block");
-  assert.equal(decideNudge({ config: { swarm: { always: true } }, seen: null, sessionId: "s1" }), "block");
-  assert.equal(decideNudge({ config: { swarm: { always: true } }, seen: null, sessionId: "" }), "block");
+  assert.equal(decideNudge({ config: { ...ARMED, swarm: { always: true } }, seen: null, sessionId: "" }), "block");
+});
+
+// Roots are checked before standing mode: a session with nothing armed has nowhere to send
+// the work, so a hard block would trap the fan-out with no tool left to run it.
+test("standing mode is silent when nothing is armed", () => {
+  assert.equal(decideNudge({ config: { swarm: { always: true } }, seen: null, sessionId: "s1" }), false);
+  const claudeOnly = { providers: { claude: { enabled: true, allowedRoots: ["C:/personal"] } }, swarm: { always: true } };
+  assert.equal(decideNudge({ config: claudeOnly, seen: null, sessionId: "s1" }), false);
 });
 
 test("silent for pipeline children and when disabled", () => {
