@@ -104,6 +104,7 @@ test("readClaudeUsage: cache and live readings carry distinct provenance tokens,
     });
     equal(live.provenance, "live");
     equal(cached.provenance, "cache");
+    equal(cached.asOf, new Date(NOW - 10_000).toISOString(), "the reading is dated by the cache, not the read clock");
     equal(cached.exhausted, false, "the verdict survives the cache round-trip");
     ok(live.provenance !== "cached" && cached.provenance !== "cached",
       "ollama's stale-cookie token is a different state; claude must not reuse it");
