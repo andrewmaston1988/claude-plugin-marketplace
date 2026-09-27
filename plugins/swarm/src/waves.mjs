@@ -1,3 +1,14 @@
+import { parseCloneId } from "./leaf-ids.mjs";
+
+// The forEach a live task id belongs to: a clone, or any child spliced under one.
+export function cloneTreeParent(id) {
+  for (let cut = id; ; cut = cut.slice(0, cut.lastIndexOf("~"))) {
+    const clone = parseCloneId(cut);
+    if (clone) return clone.parent;
+    if (cut.lastIndexOf("~") <= 0) return undefined;
+  }
+}
+
 // Shared wave depth calculation for the dashboard and scheduler. The resolvers
 // keep each caller's task representation out of this graph rule.
 export function waveDepths(tasks, { afterOf = (task) => task.after || [], parentOf = () => undefined } = {}) {

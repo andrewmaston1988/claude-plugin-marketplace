@@ -3934,3 +3934,15 @@ test("forEach clone yields a freed seat to an earlier wave leaf", async () => {
     ok(launches.indexOf("f2") < launches.indexOf("fix[0]"), `expected earlier wave f2 before fix clone; got ${launches.join(", ")}`);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("wave seating: a manifest node's root child sits in the node's wave, behind earlier-wave leaves", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ delayMs: 5, output: "ok" }));
+    const node = task("m", { model: "manifest", prompt: "", after: ["x"], childPlan: childPlanOf(task("c1")) });
+    const p = plan(dir, [task("x"), node, task("y"), task("z")], { concurrency: 1 });
+    await runPlan(p, CFG, makeIo(spawn));
+    const launched = spawn.calls.map((call) => promptOf(call).slice(3));
+    deepEqual(launched, ["x", "y", "z", "c1"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});

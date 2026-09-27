@@ -32,7 +32,7 @@ import { extractCitations, verifyCitations, citationErrorLines, annotateCitation
 import { removeCachedModel, ENTITLEMENT_RE } from "./discovery.mjs";
 import { ALIVE_STATES, cloneId, childId, parseCloneId } from "./runlog.mjs";
 import * as defaultWorktree from "./worktree.mjs";
-import { waveDepths } from "./waves.mjs";
+import { waveDepths, cloneTreeParent } from "./waves.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const OK_STATES = new Set(["ok", "skipped"]);
@@ -1048,6 +1048,8 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     const locals = new Set(node.childPlan.tasks.map((c) => c.id));
     const remap = (id) => childId(node.id, id);
     const hasItem = node.manifestItem !== undefined;
+    // the node's upstream stays its wave edge: a root child seats in the node's wave, as the dashboard draws it
+    const upstream = node.waveAfter || [...node.after];
     // {{result:local}} / {{resultPath:local}} references to sibling child tasks are
     // rewritten to the spliced ids — in the prompt AND in each mustRead entry's
     // path/index string, so a verifier's `mustRead: ["{{resultPath:finder}}"]`
@@ -1075,6 +1077,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         // absent from the group maps entirely (never collected, never reset).
         ...(c.worktreeName !== undefined && { worktreeName: remap(c.worktreeName) }),
         after: c.after.map((d) => (locals.has(d) ? remap(d) : d)),
+        ...(c.after.length === 0 && { waveAfter: upstream }),
         ...(c.when && { when: { ...c.when, from: locals.has(c.when.from) ? remap(c.when.from) : c.when.from } }),
         ...(c.forEach && { forEach: { ...c.forEach, from: locals.has(c.forEach.from) ? remap(c.forEach.from) : c.forEach.from } }),
         ...(c.compute !== undefined && {
@@ -1099,6 +1102,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     const sinks = node.childPlan.tasks.filter((c) => !dependedOn.has(c.id)).map((c) => ({ local: c.id, full: remap(c.id) }));
     pinKey(node); node.when = undefined;
     node.childPlan = undefined;
+    node.waveAfter = upstream;
     node.after = spliced.map((c) => c.id);
     node.aggregateManifest = { sinks };
     rebuildGroups();
@@ -1490,15 +1494,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
 
       const depths = waveDepths(tasks, {
         afterOf: (task) => task.waveAfter || task.after,
-        parentOf: (task) => {
-          let id = task.id;
-          while (id.lastIndexOf("~") > 0) {
-            id = id.slice(0, id.lastIndexOf("~"));
-            const clone = parseCloneId(id);
-            if (clone) return clone.parent;
-          }
-          return parseCloneId(id)?.parent;
-        },
+        parentOf: (task) => cloneTreeParent(task.id),
       });
       const index = new Map(tasks.map((task, i) => [task.id, i]));
       readyLeaves.sort((a, b) => depths.get(a.id) - depths.get(b.id) || index.get(a.id) - index.get(b.id));
@@ -1510,7 +1506,9 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         launch(t);
       }
     }
-    if (progressed) continue;    // Stop wins: whatever is parked or waiting gets swept to failed:stopped below.
+    if (progressed) continue;
+
+    // Stop wins: whatever is parked or waiting gets swept to failed:stopped below.
     if (running.size === 0 && (stopRequested || (memoryParked.size === 0 && retryWaiting === 0))) break;
     if (running.size > 0) {
       await Promise.race(running.values());
