@@ -97,9 +97,9 @@
   // row, its reliability bar.
   const providerLogo = (p, options) => window.swarmLogos?.providerLogo(p, options) ?? "";
 
-  function modelDashboard(data, h) {
+  function modelSummary(data, h) {
     const { esc, enc, fmtScore } = h;
-    const { model, overall, rank, aspects, coverage, reliability, domainSelect, domain, cost } = data;
+    const { model, overall, rank, aspects, reliability, domainSelect, domain, cost } = data;
     const place = rank && rank.position <= 3 ? rank.position : 0;
     const rel = reliability[0];
     const total = rel ? rel.total : 0;
@@ -135,9 +135,13 @@
       return `<div class="arow${none ? " none" : ""}" data-href="#/perf/aspect/${enc(a.aspect)}"><span class="alabel">${esc(a.aspect)}</span><div class="bar${c && c.provisional ? " prov" : ""}"><span style="width:${w}%"></span></div><span class="aval">${none ? "—" : fmtScore(c.weighted)}<small>${c ? " n=" + c.n : ""}</small></span></div>`;
     }).join("");
     const aspectWidget = `<div class="section"><span>aspects</span><span class="line"></span>${domainSelect ? `<span class="secsel">${domainSelect}</span>` : ""}</div><div class="aspects">${rows}</div>`;
-    const covWidget = `<div class="section"><span>coverage</span><span class="line"></span></div>${coverageGrid(coverage, h)}`;
-    const relWidget = `<div class="section"><span>reliability</span><span class="line"></span></div>${reliabilityBars(reliability, h)}`;
-    return hero + aspectWidget + covWidget + relWidget;
+    return hero + aspectWidget;
+  }
+
+  function modelDashboard(data, h) {
+    const covWidget = `<div class="section"><span>coverage</span><span class="line"></span></div>${coverageGrid(data.coverage, h)}`;
+    const relWidget = `<div class="section"><span>reliability</span><span class="line"></span></div>${reliabilityBars(data.reliability, h)}`;
+    return modelSummary(data, h) + covWidget + relWidget;
   }
 
   // The overall ranking: the page's own rankList under a thin adapter, plus the
@@ -171,8 +175,9 @@
   // provider — then its value hero, then a ranked card per model, or one
   // fact card when nothing is measured. Draws only: multipliers, bands and verdicts
   // arrive from the server's costView().
+  const name = (s) => s.provider || "unqualified";
   function costScreen(data, h, pick) {
-    const { esc, enc, seg } = h;
+    const { enc, seg } = h;
     const all = data.sections?.length ? data.sections : [{
       provider: null, points: data.points || [], spread: data.spread || [], best: data.best, worst: data.worst,
     }];
@@ -184,14 +189,19 @@
     if (!sections.length) {
       return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
     }
-    const name = (s) => s.provider || "unqualified";
     const section = sections.find((s) => name(s) === pick) || sections[0];
-    // Never "0×" for a missing multiplier — that would read as free.
-    const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
     // One page per provider, switched like Performance's views — multipliers never
     // compare across providers. The card names this provider's best value; without
     // one it says why, never the cheapest instead.
     const switcher = seg(sections.map((s) => ({ label: name(s), href: `#/cost/${enc(name(s))}`, icon: providerLogo(name(s)) })), sections.indexOf(section));
+    return switcher + costSection(section, data, h);
+  }
+
+  // One provider cost page: its value hero, then a ranked card per model, or one fact card.
+  function costSection(section, data, h) {
+    const { esc, enc } = h;
+    // Never "0×" for a missing multiplier — that would read as free.
+    const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
     const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
     // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
     // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
@@ -210,10 +220,9 @@
       return `<div class="card chero" data-href="#/perf/model/${enc(b.model)}">${cl}<div class="fig">${esc(b.model)}</div><div class="claim">${claim}</div>`
         + vbar("score", q, b.wtd == null ? "—" : b.wtd.toFixed(1), "q") + vbar("cost", c, esc(fmtMult(b.multiplier)), "c") + `</div>`;
     })();
-    const tabs = switcher + hero;
     const { points, spread, best } = section;
     const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
-    const head = tabs;
+    const head = hero;
     if (!spread.some((r) => r.mult != null)) {
       return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
     }
@@ -242,6 +251,12 @@
   // provider with the least headroom, then a card per provider. A limit's percent
   // is USED; every figure drawn is what is LEFT.
   function usageScreen(data, h, w) {
+    const { tabs, empty, hero, cards } = usageParts(data, h, w);
+    if (empty) return tabs + empty;
+    return tabs + hero + `<div class="section"><span>providers</span><span class="line"></span></div>` + cards.join("");
+  }
+
+  function usageParts(data, h, w) {
     const { esc } = h;
     const LOW = 20, WARN = LOW * 2;
     const week = w !== "session";
@@ -310,7 +325,7 @@
     };
     const bar = (n) => `<div class="ubar"><span class="${tone(n)}" style="width:${n}%"></span></div>`;
     const tabs = h.seg([{ label: "Week", href: "#/usage/week" }, { label: "Session", href: "#/usage/session" }], week ? 0 : 1);
-    if (!rows.length) return tabs + `<div class="empty">no provider answered — run swarm usage to read them once.</div>`;
+    if (!rows.length) return { tabs, empty: `<div class="empty">no provider answered — run swarm usage to read them once.</div>` };
     // The hero is where the next run goes: the provider with the most left.
     const best = rows.map((p) => ({ p, r: reading(p) })).filter((x) => x.r)
       .reduce((a, b) => (a && a.r.left >= b.r.left ? a : b), null);
@@ -330,9 +345,9 @@
       if (!r) return `<div class="card upc unread"><div class="top">${nm}</div><div class="sub">${esc(`not read — ${whyNot(p)}`)}</div></div>`;
       return `<div class="card upc ${tone(r.left)}"><div class="top">${nm}<span class="val ${tone(r.left)}">${r.left}%</span></div>${bar(r.left)}`
         + (r.note ? `<div class="sub">${esc(r.note)}</div>` : "") + "</div>";
-    }).join("");
-    return tabs + hero + `<div class="section"><span>providers</span><span class="line"></span></div>` + cards;
+    });
+    return { tabs, hero, cards };
   }
 
-  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelDashboard, costScreen, usageScreen };
+  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelSummary, modelDashboard, costScreen, costSection, usageScreen, usageParts };
 })();
