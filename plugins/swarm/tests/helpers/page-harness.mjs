@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { logosScript } from "../../src/serve/logos.mjs";
+import { PAGE, pageHtml } from "../../src/serve/page-assets.mjs";
 
 // page.html is one IIFE inside a <script> tag with no exports: route(), the
 // renderers, the paint primitives and `api` are all closed over. So this
@@ -18,7 +19,7 @@ import { logosScript } from "../../src/serve/logos.mjs";
 // would. Every fetch resolves by hand, because the defect is a race: only a
 // harness that controls resolution order can reproduce it.
 
-export const PAGE = fileURLToPath(new URL("../../src/serve/page.html", import.meta.url));
+export { PAGE };
 const LIVE_JS = readFileSync(fileURLToPath(new URL("../../src/serve/live.js", import.meta.url)), "utf8");
 const PERF_JS = readFileSync(fileURLToPath(new URL("../../src/serve/perf.js", import.meta.url)), "utf8");
 const LOGOS_JS = logosScript();
@@ -133,8 +134,8 @@ function parseHtml(markup, ids) {
 
 // ── the page under test ──────────────────────────────────────────────────
 export function loadPage(opts = {}) {
-  const src = readFileSync(PAGE, "utf8");
-  const script = src.match(/<script>([\s\S]*)<\/script>/)[1];
+  // Every inline <script> of the served page, in order; <script src> tags load through head.appendChild.
+  const scripts = [...pageHtml().matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 
   const ids = new Map();
   const hdr = makeElement("header", ids); hdr.setAttribute("id", "hdr");
@@ -209,7 +210,7 @@ export function loadPage(opts = {}) {
   // Date.now under the test's control, for cadence tests; `new Date()` stays real.
   if (opts.clock) context.Date = class extends Date { static now() { return opts.clock(); } };
   vm.createContext(context);
-  vm.runInContext(script, context, { filename: "page.html" });
+  for (const script of scripts) vm.runInContext(script, context, { filename: "page.html" });
 
   // One macrotask turn drains every microtask chain (loadScript boot, fetch
   // then-chains, the coalescing latch) — exactly one flush per settled step.

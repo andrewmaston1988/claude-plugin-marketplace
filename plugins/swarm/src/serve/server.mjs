@@ -20,9 +20,9 @@ import { buildSnapshot, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
 import { providerConfig } from "../providers.mjs";
 import { logosScript } from "./logos.mjs";
+import { PAGE, pageHtml } from "./page-assets.mjs";
 import { matchDenylist } from "../manifest.mjs";
 
-const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
 const PERF_JS = fileURLToPath(new URL("./perf.js", import.meta.url));
 const LIVE_JS = fileURLToPath(new URL("./live.js", import.meta.url));
 const ESTATE_WORKER = fileURLToPath(new URL("./estate-worker.mjs", import.meta.url));
@@ -395,7 +395,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
 
     if (p === "/") {
       if (!existsSync(PAGE)) return send(res, 500, "page.html missing", "text/plain");
-      return send(res, 200, readFileSync(PAGE, "utf8"), "text/html; charset=utf-8");
+      return send(res, 200, pageHtml(), "text/html; charset=utf-8");
     }
     if (p === "/manifest.webmanifest") return send(res, 200, MANIFEST, "application/manifest+json");
     const icon = /^\/icon-(\d+)\.png$/.exec(p);
