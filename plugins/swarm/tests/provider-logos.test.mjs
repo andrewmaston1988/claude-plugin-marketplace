@@ -91,3 +91,9 @@ test("a chip takes the same label rules as a free-standing logo", () => {
   assert.match(unlabelled, /aria-hidden="true"/);
   assert.doesNotMatch(unlabelled, /role="img"/);
 });
+
+test("dashboard declares a dark-only colour scheme so forced dark mode leaves the chip marks alone", () => {
+  // Brave/Chrome auto-dark repaints the black Ollama mark white on its white disc unless the page opts out.
+  const page = readFileSync(new URL("../src/serve/page.html", import.meta.url), "utf8");
+  assert.ok(page.includes(`<meta name="color-scheme" content="dark">`), "page.html must declare <meta name=\"color-scheme\" content=\"dark\">");
+});
