@@ -7,6 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { spawnSync } from "node:child_process";
 import { parseReadCalls, computeCoverage, coverageErrorLines, coverageRetryBlock, codexWindowedRead } from "../src/coverage.mjs";
 import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
@@ -47,7 +48,7 @@ const readsOf = (text, cwd) => parseReadCalls(text, "codex", { cwd });
 
 // The PowerShell wrapper, as codex really emits it: the exe as a quoted absolute
 // path with doubled separators, then the payload. A payload holding `"` arrives
-// escaped (`\"`) — the real rv-architecture-2 transcript carries exactly that.
+// escaped (`\"`), as codex re-serialises it.
 const PS_EXE = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
 const pwshRun = (payload, ...switches) => `"${dbl(PS_EXE)}"${switches.map((s) => ` ${s}`).join("")} -Command "${payload.replace(/"/g, '\\"')}"`;
 const psRun = (payload, ...switches) => `"${dbl("C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")}"${switches.map((s) => ` ${s}`).join("")} -Command "${payload.replace(/"/g, '\\"')}"`;
@@ -231,12 +232,7 @@ test("parseReadCalls: a trimmed slice of the REAL rv-plan transcript yields only
 });
 
 // ── 7b. windows: the PowerShell windowed read ─────────────────────────────────
-// On win32 the codex sandbox kills every MSYS2 program at startup — Git's sed,
-// bash and grep all die with `CreateFileMapping … Win32 error 5` (reproduced with
-// `codex sandbox -- sed …`, 2026-09-27) — so the one windowed read that runs is
-// PowerShell's array-index form. The `@( )` wrap is load-bearing: Get-Content
-// returns a SCALAR for a one-line file, so an unwrapped `[0..0]` indexes
-// characters (`.git/HEAD` → `r`) and would certify a read that never happened.
+// The codex sandbox kills MSYS2 programs (Win32 error 5), so win32 reads through PowerShell.
 
 test("codex/win32: a pwsh `@(Get-Content -LiteralPath \"p\")[a-1..b-1]` at exit 0 covers exactly a..b", () => {
   const dir = tmp();
@@ -298,12 +294,25 @@ test("codex/win32: what codexWindowedRead renders is what the parser credits —
   try {
     const F = writeLines(dir, "f.mjs", 50);
     const cmd = codexWindowedRead(F, 10, 40, "win32");
-    equal(cmd, `@(Get-Content -LiteralPath "${F}")[9..39]`);
+    equal(cmd, `@(Get-Content -LiteralPath '${F}')[9..39]`);
     const reads = readsOf(transcript(event(pwshRun(cmd), { output: "x\n".repeat(31) })), dir);
     deepEqual(reads, [{ file: F, offset: 10, limit: 31 }]);
     // and the POSIX rendering still round-trips through its own wrapper
     equal(codexWindowedRead(F, 10, 40, "linux"), `sed -n '10,40p' "${F}"`);
     deepEqual(readsOf(transcript(event(bashRun(codexWindowedRead(F, 10, 40, "linux")), { output: "x\n".repeat(31) })), dir), [{ file: F, offset: 10, limit: 31 }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// PowerShell expands `$name` inside double quotes, so a path holding one would read a
+// different file than the parser credits. Run the render for real where pwsh exists.
+const hasPwsh = spawnSync("pwsh", ["-NoProfile", "-Command", "1"], { encoding: "utf8" }).status === 0;
+test("codex/win32: the rendered read opens a path holding `$` literally", { skip: !hasPwsh && "pwsh not installed" }, () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "a$HOME.mjs", 50);
+    const run = spawnSync("pwsh", ["-NoProfile", "-Command", codexWindowedRead(F, 10, 40, "win32")], { encoding: "utf8" });
+    equal(run.status, 0, run.stderr);
+    equal(run.stdout.trim().split("\n").length, 31);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -452,7 +461,8 @@ test("teaching/win32: a range that fits the cap in source bytes is split to fit 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("integration: a codex leaf that missed its mustRead is re-asked for a shell command, not a Read tool call", async () => {  const dir = tmp();
+test("integration: a codex leaf that missed its mustRead is re-asked for a shell command, not a Read tool call", async () => {
+  const dir = tmp();
   try {
     const WANTED = writeLines(dir, "wanted.mjs", 3);
     const OTHER = writeLines(dir, "other.mjs", 3);

@@ -187,15 +187,12 @@ function codexReadSpec(pipeline) {
   return path ? { path, a: 1, b: Infinity } : null;
 }
 
-// The ONE windowed read. Rendered here, recognised by codexWindowedSpec and dictated
-// by the codex retry block, so the three cannot drift. The `@( )` wrap is load-bearing:
-// Get-Content returns a scalar STRING for a one-line file, so an unwrapped
-// `(Get-Content f)[0..0]` indexes characters (`.git/HEAD` → `r`) and would certify a
-// read that never happened. On win32 this is the only windowed form that runs at all —
-// the codex sandbox kills every MSYS2 program (Git's sed, bash, grep) at startup.
+// The ONE windowed read. On win32 the codex sandbox kills every MSYS2 program, so it is
+// PowerShell's; `@( )` stops a one-line file indexing characters instead of lines, and
+// single quotes keep `$` and backticks in a path literal.
 export function codexWindowedRead(path, a, b, platform = process.platform) {
   return platform === "win32"
-    ? `@(Get-Content -LiteralPath "${path}")[${a - 1}..${b - 1}]`
+    ? `@(Get-Content -LiteralPath '${path.replace(/'/g, "''")}')[${a - 1}..${b - 1}]`
     : `sed -n '${a},${b}p' "${path}"`;
 }
 
@@ -203,12 +200,12 @@ export function codexWindowedRead(path, a, b, platform = process.platform) {
 // the path is quoted and may hold spaces. codex re-serialises the command with `\"`,
 // so that is normalised first.
 function codexWindowedSpec(pipeline) {
-  const m = /^@\(\s*Get-Content\s+(?:-LiteralPath\s+)?("([^"]*)"|'([^']*)'|(\S+))\s*\)\s*\[\s*(\d+)\s*\.\.\s*(\d+)\s*\]$/i
+  const m = /^@\(\s*Get-Content\s+(?:-LiteralPath\s+)?("([^"]*)"|'((?:[^']|'')*)'|(\S+))\s*\)\s*\[\s*(\d+)\s*\.\.\s*(\d+)\s*\]$/i
     .exec(pipeline.trim().replace(/\\"/g, '"'));
   if (!m) return null;
   const from = Number(m[5]), to = Number(m[6]);
   if (to < from) return null;
-  return { path: m[2] ?? m[3] ?? m[4], a: from + 1, b: to + 1 };
+  return { path: m[2] ?? m[3]?.replace(/''/g, "'") ?? m[4], a: from + 1, b: to + 1 };
 }
 
 // The parsed command carries doubled separators (`C:\\Users\\…`) and a quoted

@@ -308,7 +308,7 @@ test("page wiring: the runs fetch splices expandQuery inside q()'s argument, and
 // ── coverage: a short mustRead is a warning, never a silent `ok` ──────────
 // The engine records a shortfall and deliberately does NOT fail the leaf, so without
 // this the row and the banner of a leaf that read 3 of 430 required lines read exactly
-// like a clean one's. Operator saw the codex leaf in the long-night review as "complete".
+// like a clean one's.
 
 test("coverageWarn: only a non-complete status warns, and it names the shortfall (C1)", () => {
   const { coverageWarn } = loadLive();

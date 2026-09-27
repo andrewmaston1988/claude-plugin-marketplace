@@ -281,7 +281,8 @@ test("readRun: the coverage status survives topology onto the row the dashboard 
   });
 });
 
-test("listRuns: live rows first, then finished/aborted rows newest-mtime first, active only while run.log is fresh and no summary.json", () => {  const home = mkdtempSync(join(tmpdir(), "swarm-runs-"));
+test("listRuns: live rows first, then finished/aborted rows newest-mtime first, active only while run.log is fresh and no summary.json", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-runs-"));
   try {
     const mk = (proj, run, ageMs, { summary = false, log = true } = {}) => {
       const d = join(home, "runs", proj, run);
