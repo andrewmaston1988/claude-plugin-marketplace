@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { parseReadCalls, computeCoverage, coverageErrorLines, coverageRetryBlock } from "../src/coverage.mjs";
+import { parseReadCalls, computeCoverage, coverageErrorLines, coverageRetryBlock, codexWindowedRead } from "../src/coverage.mjs";
 import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { runPlan } from "../src/scheduler.mjs";
@@ -44,6 +44,13 @@ const transcript = (...events) => [
   ...events.flat(),
 ].join("\n") + "\n";
 const readsOf = (text, cwd) => parseReadCalls(text, "codex", { cwd });
+
+// The PowerShell wrapper, as codex really emits it: the exe as a quoted absolute
+// path with doubled separators, then the payload. A payload holding `"` arrives
+// escaped (`\"`) — the real rv-architecture-2 transcript carries exactly that.
+const PS_EXE = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
+const pwshRun = (payload, ...switches) => `"${dbl(PS_EXE)}"${switches.map((s) => ` ${s}`).join("")} -Command "${payload.replace(/"/g, '\\"')}"`;
+const psRun = (payload, ...switches) => `"${dbl("C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")}"${switches.map((s) => ` ${s}`).join("")} -Command "${payload.replace(/"/g, '\\"')}"`;
 
 // ── 1. whole file ─────────────────────────────────────────────────────────────
 
@@ -223,6 +230,83 @@ test("parseReadCalls: a trimmed slice of the REAL rv-plan transcript yields only
   });
 });
 
+// ── 7b. windows: the PowerShell windowed read ─────────────────────────────────
+// On win32 the codex sandbox kills every MSYS2 program at startup — Git's sed,
+// bash and grep all die with `CreateFileMapping … Win32 error 5` (reproduced with
+// `codex sandbox -- sed …`, 2026-09-27) — so the one windowed read that runs is
+// PowerShell's array-index form. The `@( )` wrap is load-bearing: Get-Content
+// returns a SCALAR for a one-line file, so an unwrapped `[0..0]` indexes
+// characters (`.git/HEAD` → `r`) and would certify a read that never happened.
+
+test("codex/win32: a pwsh `@(Get-Content -LiteralPath \"p\")[a-1..b-1]` at exit 0 covers exactly a..b", () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 50);
+    const reads = readsOf(transcript(event(pwshRun(`@(Get-Content -LiteralPath "${dbl(F)}")[9..39]`), { output: "x\n".repeat(31) })), dir);
+    deepEqual(reads, [{ file: F, offset: 10, limit: 31 }]);
+    equal(computeCoverage([{ path: F, lines: [[10, 40]] }], reads, { cwd: dir }).status, "complete");
+    const cov = computeCoverage([{ path: F, lines: [[1, 50]] }], reads, { cwd: dir });
+    equal(cov.status, "incomplete");
+    deepEqual(cov.gaps, [{ path: F, ranges: [[1, 9], [41, 50]] }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("codex/win32: the windowed form is read through the switches a leaf may put before -Command", () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 20);
+    const want = [{ file: F, offset: 1, limit: 5 }];
+    const payload = `@(Get-Content -LiteralPath '${dbl(F)}')[0..4]`;
+    const out = "x\n".repeat(5);
+    deepEqual(readsOf(transcript(event(pwshRun(payload, "-NoProfile"), { output: out })), dir), want, "pwsh -NoProfile -Command");
+    deepEqual(readsOf(transcript(event(psRun(payload, "-NoProfile", "-NonInteractive"), { output: out })), dir), want, "powershell.exe -NoProfile -NonInteractive -Command");
+    deepEqual(readsOf(transcript(event(psRun(payload, "-ExecutionPolicy", "Bypass"), { output: out })), dir), want, "-ExecutionPolicy takes its own argument");
+    deepEqual(readsOf(transcript(event(pwshRun(payload, "-NoProfile"), { exit: 1, output: out })), dir), [], "a failed command read nothing");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("codex/win32: the `@( )` wrap is required — an unwrapped index read counts nothing (the one-line-file trap)", () => {
+  const dir = tmp();
+  try {
+    const one = join(dir, "one.txt");
+    writeFileSync(one, "only\n");
+    const wrapped = readsOf(transcript(event(pwshRun(`@(Get-Content -LiteralPath "${dbl(one)}")[0..0]`), { output: "only\n" })), dir);
+    deepEqual(wrapped, [{ file: one, offset: 1, limit: 1 }]);
+    equal(computeCoverage([one], wrapped, { cwd: dir }).status, "complete", "the wrapped form reads the LINE");
+    // Unwrapped, `(Get-Content one.txt)[0..0]` is the string "only" indexed at 0 — the
+    // character "o". The parser cannot tell the two apart from the command alone, so it
+    // credits neither: a window it does not recognise is not a read.
+    deepEqual(readsOf(transcript(event(pwshRun(`(Get-Content -LiteralPath "${dbl(one)}")[0..0]`), { output: "o\n" })), dir), []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("codex/win32: the whole-file Get-Content forms still count, and a windowed read is not mistaken for one", () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 4);
+    const whole = readsOf(transcript(event(pwshRun(`Get-Content "${dbl(F)}"`), { output: "x\nx\nx\nx\n" })), dir);
+    deepEqual(whole, [{ file: F, offset: 1, limit: 4 }]);
+    const literal = readsOf(transcript(event(pwshRun(`Get-Content -LiteralPath "${dbl(F)}"`), { output: "x\nx\nx\nx\n" })), dir);
+    deepEqual(literal, [{ file: F, offset: 1, limit: 4 }], "-LiteralPath is a flag, not the path");
+    const total = readsOf(transcript(event(pwshRun(`Get-Content -LiteralPath "${dbl(F)}" -TotalCount 2`), { output: "x\nx\n" })), dir);
+    deepEqual(total, [{ file: F, offset: 1, limit: 2 }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("codex/win32: what codexWindowedRead renders is what the parser credits — the two cannot drift", () => {
+  const dir = tmp();
+  try {
+    const F = writeLines(dir, "f.mjs", 50);
+    const cmd = codexWindowedRead(F, 10, 40, "win32");
+    equal(cmd, `@(Get-Content -LiteralPath "${F}")[9..39]`);
+    const reads = readsOf(transcript(event(pwshRun(cmd), { output: "x\n".repeat(31) })), dir);
+    deepEqual(reads, [{ file: F, offset: 10, limit: 31 }]);
+    // and the POSIX rendering still round-trips through its own wrapper
+    equal(codexWindowedRead(F, 10, 40, "linux"), `sed -n '10,40p' "${F}"`);
+    deepEqual(readsOf(transcript(event(bashRun(codexWindowedRead(F, 10, 40, "linux")), { output: "x\n".repeat(31) })), dir), [{ file: F, offset: 10, limit: 31 }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 // ── 8. unparseable ────────────────────────────────────────────────────────────
 
 test("codex: an empty or torn transcript (no thread.started / turn.started) → null, the fail-closed contract", () => {
@@ -310,14 +394,30 @@ test("teaching: a codex leaf's retry names a shell command — never `Read offse
   ok(claude.every((l) => /Read offset \d+ limit \d+/.test(l)), claude.join("\n"));
   ok(coverageRetryBlock(gaps).includes("with the Read tool"), coverageRetryBlock(gaps));
 
-  const codex = coverageErrorLines(gaps, { runner: "codex" });
+  const codex = coverageErrorLines(gaps, { runner: "codex", platform: "linux" });
   equal(codex.length, 2, codex.join("\n"));
   ok(codex[0].includes(`sed -n '1,9p'`), codex[0]);
   ok(codex[1].includes(`sed -n '41,50p'`), codex[1]);
-  const block = coverageRetryBlock(gaps, { runner: "codex" });
+  const block = coverageRetryBlock(gaps, { runner: "codex", platform: "linux" });
   ok(!block.includes("Read tool"), block);
   ok(!block.includes("Read offset"), block);
   ok(block.includes(`sed -n '41,50p'`), block);
+});
+
+test("teaching: the codex retry is the platform's own form — PowerShell on win32, sed elsewhere", () => {
+  const gaps = [{ path: "C:/a.mjs", ranges: [[1, 9], [41, 50]] }];
+  const win = coverageErrorLines(gaps, { runner: "codex", platform: "win32" });
+  equal(win.length, 2, win.join("\n"));
+  ok(win[0].includes(codexWindowedRead("C:/a.mjs", 1, 9, "win32")), win[0]);
+  ok(win[1].includes(codexWindowedRead("C:/a.mjs", 41, 50, "win32")), win[1]);
+  ok(!win.join("\n").includes("sed -n"), "no MSYS tool the sandbox cannot start");
+  const block = coverageRetryBlock(gaps, { runner: "codex", platform: "win32" });
+  ok(!block.includes("Read tool") && !block.includes("Read offset"), block);
+  ok(block.includes(codexWindowedRead("C:/a.mjs", 41, 50, "win32")), block);
+  // claude is unmoved by the platform: its retry keeps the Read tool on both.
+  for (const platform of ["win32", "linux"]) {
+    ok(coverageRetryBlock(gaps, { platform }).includes("with the Read tool"), `claude/${platform}`);
+  }
 });
 
 test("teaching: codex re-asks split ranges at the model-visible byte cap", () => {
@@ -330,8 +430,29 @@ test("teaching: codex re-asks split ranges at the model-visible byte cap", () =>
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("integration: a codex leaf that missed its mustRead is re-asked for a shell command, not a Read tool call", async () => {
+// A range is sized in the bytes the MODEL sees. PowerShell emits CRLF, so a range that
+// fits exactly in source bytes arrives past the 40 KB cap on win32 and would be truncated
+// to head+tail — the page the retry asks for is then half-unread.
+test("teaching/win32: a range that fits the cap in source bytes is split to fit it in EMITTED bytes", () => {
   const dir = tmp();
+  try {
+    const F = join(dir, "page.html");
+    // 500 lines of 80 source bytes = 40,000 — exactly the cap. Emitted with CRLF it is
+    // 40,500, so win32 must split; linux emits LF and need not.
+    writeFileSync(F, `${"x".repeat(79)}\n`.repeat(500));
+    const lin = coverageErrorLines([{ path: F, ranges: [[1, 500]] }], { runner: "codex", platform: "linux" });
+    equal(lin.length, 1, "one range on linux — 40,000 source bytes is the whole budget");
+    const win = coverageErrorLines([{ path: F, ranges: [[1, 500]] }], { runner: "codex", platform: "win32" });
+    deepEqual(win.map((l) => l.match(/lines (\d+-\d+):/)[1]), ["1-493", "494-500"], "split so no page is truncated");
+    // The property behind the split, not just its arithmetic: every page's emitted
+    // bytes stay inside the cap (80 source + 1 CR, per line).
+    for (const [a, b] of win.map((l) => l.match(/lines (\d+)-(\d+):/).slice(1).map(Number))) {
+      ok((b - a + 1) * 81 <= 40_000, `lines ${a}-${b} emit ${(b - a + 1) * 81} bytes`);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: a codex leaf that missed its mustRead is re-asked for a shell command, not a Read tool call", async () => {  const dir = tmp();
   try {
     const WANTED = writeLines(dir, "wanted.mjs", 3);
     const OTHER = writeLines(dir, "other.mjs", 3);
@@ -351,7 +472,9 @@ test("integration: a codex leaf that missed its mustRead is re-asked for a shell
     await runPlan(p, CODEX_CFG(dir), makeIo(spawn));
     equal(spawn.calls.length, 2, "a coverage miss re-asks once");
     const prompt = spawn.calls[1].args.at(-1);
-    ok(prompt.includes(`sed -n '1,3p'`), prompt);
+    // The engine host is the platform of record, so the retry carries the host's own
+    // form — asserting through the helper keeps this green on both CI and win32.
+    ok(prompt.includes(codexWindowedRead(WANTED, 1, 3)), prompt);
     ok(!prompt.includes("Read tool"), prompt);
     ok(!prompt.includes("Read offset"), prompt);
   } finally { rmSync(dir, { recursive: true, force: true }); }
