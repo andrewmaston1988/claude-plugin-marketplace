@@ -32,6 +32,7 @@ import { extractCitations, verifyCitations, citationErrorLines, annotateCitation
 import { removeCachedModel, ENTITLEMENT_RE } from "./discovery.mjs";
 import { ALIVE_STATES, cloneId, childId, parseCloneId } from "./runlog.mjs";
 import * as defaultWorktree from "./worktree.mjs";
+import { waveDepths } from "./waves.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const OK_STATES = new Set(["ok", "skipped"]);
@@ -1030,6 +1031,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         if (cacheHit(plan.resultsDir, c, prior)) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
       }
     }
+    task.waveAfter = [...task.after];
     pinKey(task); task.when = undefined;
     task.forEach = undefined;
     task.childPlan = undefined; // the clones carry it; the parent is now pure aggregate
@@ -1464,30 +1466,51 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       }
     }
 
-    // Inline settles (when-skip, compute, expansion, aggregation) change state
-    // without occupying a slot — after any of them, re-drive the whole cycle so
-    // tasks earlier in the array unlock in the same pass.
+    // Settle every ready inline node before spending any seat. Re-scan after
+    // inline changes so expansions and aggregates can unlock more work now.
     let progressed = false;
     if (!stopRequested) {
-      for (const t of tasks) {
+      let inlineProgress;
+      let readyLeaves = [];
+      do {
+        inlineProgress = false;
+        readyLeaves = [];
+        for (const t of tasks) {
+          if (state.get(t.id) !== "pending" || !depsSatisfied(t)) continue;
+          if (!passesWhen(t)) { inlineProgress = progressed = true; continue; }
+          if (t.forEach) { expandForEach(t); inlineProgress = progressed = true; continue; }
+          if (t.childPlan) { expandManifest(t); inlineProgress = progressed = true; continue; }
+          if (t.aggregate) { runAggregate(t); inlineProgress = progressed = true; continue; }
+          if (t.aggregateManifest) { runManifestAggregate(t); inlineProgress = progressed = true; continue; }
+          if (t.compute) { runCompute(t); inlineProgress = progressed = true; continue; }
+          if (t.integrate) { runIntegrate(t); inlineProgress = progressed = true; continue; }
+          readyLeaves.push(t);
+        }
+      } while (inlineProgress);
+
+      const depths = waveDepths(tasks, {
+        afterOf: (task) => task.waveAfter || task.after,
+        parentOf: (task) => {
+          let id = task.id;
+          while (id.lastIndexOf("~") > 0) {
+            id = id.slice(0, id.lastIndexOf("~"));
+            const clone = parseCloneId(id);
+            if (clone) return clone.parent;
+          }
+          return parseCloneId(id)?.parent;
+        },
+      });
+      const index = new Map(tasks.map((task, i) => [task.id, i]));
+      readyLeaves.sort((a, b) => depths.get(a.id) - depths.get(b.id) || index.get(a.id) - index.get(b.id));
+      for (const t of readyLeaves) {
         if (running.size >= plan.concurrency) break;
-        if (state.get(t.id) !== "pending" || !depsSatisfied(t)) continue;
-        if (!passesWhen(t)) { progressed = true; continue; }
-        if (t.forEach) { expandForEach(t); progressed = true; continue; }
-        if (t.childPlan) { expandManifest(t); progressed = true; continue; }
-        if (t.aggregate) { runAggregate(t); progressed = true; continue; }
-        if (t.aggregateManifest) { runManifestAggregate(t); progressed = true; continue; }
-        if (t.compute) { runCompute(t); progressed = true; continue; }
-        if (t.integrate) { runIntegrate(t); progressed = true; continue; }
         // Spawn floor (D3): only once something is already running — the very
         // first leaf of a run must never be gated by the machine's headroom.
         if (running.size > 0 && memLow(cfg.minFreeMemMb)) { parkForMemory(t); continue; }
         launch(t);
       }
     }
-    if (progressed) continue;
-
-    // Stop wins: whatever is parked or waiting gets swept to failed:stopped below.
+    if (progressed) continue;    // Stop wins: whatever is parked or waiting gets swept to failed:stopped below.
     if (running.size === 0 && (stopRequested || (memoryParked.size === 0 && retryWaiting === 0))) break;
     if (running.size > 0) {
       await Promise.race(running.values());

@@ -433,13 +433,11 @@ test("M4: the valve kills the newest running leaf under the low-memory floor, an
   }
 });
 
-// M5: a memory park must never consume a retry attempt. A chain of three
-// decoys (d1->d2->d3), each long enough to still be running when the next
-// heartbeat's redrive flips "b" back to pending, gives the valve a partner
-// to fire against three times before "b" ever runs uncontested. With
-// retry.spawnError: 0, any attempt spent on those parks would leave b
-// terminal on the very first kill instead of finishing ok on the fourth.
-test("M5: a valve-killed leaf with a zero retry budget still finishes ok after three parks", async () => {
+// M5: a memory park must never consume a retry attempt. The independent "b"
+// leaf is shallower than the decoy chain, so wave-first seating gives it the
+// first free seat after one valve kill. With retry.spawnError: 0, any attempt
+// spent on that park would leave b terminal instead of finishing cleanly.
+test("M5: a valve-killed leaf with a zero retry budget still finishes after a park", async () => {
   const dir = tmp();
   try {
     let nowN = 0;
@@ -457,12 +455,12 @@ test("M5: a valve-killed leaf with a zero retry budget still finishes ok after t
     const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("runPlan hung waiting on b's parks")), 5000));
     const r = await Promise.race([runPlan(p, cfg, io), timeout]);
 
-    equal(spawn.calls.filter((c) => promptOf(c) === "do b").length, 4, "3 killed attempts + 1 clean finish");
+    equal(spawn.calls.filter((c) => promptOf(c) === "do b").length, 2, "1 killed attempt + 1 clean finish");
     deepEqual(r.summary.tasks.map((t) => t.state), ["ok", "ok", "ok", "ok"]);
 
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     const bParks = logLines.filter((l) => l.id === "b" && l.state === "retrying" && l.note === "memory-park");
-    equal(bParks.length, 3, "b must have been parked for memory exactly three times, never as a retry");
+    equal(bParks.length, 1, "b must have been parked for memory exactly once, never as a retry");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -3904,5 +3902,35 @@ test("wave seating: every ready finder launches before its interleaved verifier"
     const lastFinder = Math.max(...["f1", "f2", "f3", "f4"].map((id) => launched.indexOf(id)));
     const firstVerifier = Math.min(...["v1", "v2", "v3", "v4"].map((id) => launched.indexOf(id)));
     ok(lastFinder < firstVerifier, `expected all finders before any verifier; got ${launched.join(", ")}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+test("inline compute settles before the ready leaves launch", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ delayMs: 40, output: "ok" }));
+    const p = plan(dir, [task("f1"), task("f2"), computeTask("src", "length('x')", [])], { concurrency: 2 });
+    await runPlan(p, CFG, makeIo(spawn));
+    const events = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const computed = events.findIndex((event) => event.id === "src" && event.state === "ok");
+    const firstLaunch = events.findIndex((event) => event.state === "running" && ["f1", "f2"].includes(event.id));
+    ok(computed >= 0 && computed < firstLaunch, `expected inline settlement before leaf launches; event order ${events.map((e) => `${e.id}:${e.event || e.state}`).join(", ")}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("forEach clone yields a freed seat to an earlier wave leaf", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => promptOf(call) === "do src"
+      ? { delayMs: 5, output: '["x"]' }
+      : { delayMs: promptOf(call) === "do f1" ? 50 : 5, output: "ok" });
+    const p = plan(dir, [
+      task("src"),
+      task("fix", { after: ["src"], forEach: { from: "src", path: "", maxItems: 2 } }),
+      task("f1"), task("f2"),
+    ], { concurrency: 2 });
+    await runPlan(p, CFG, makeIo(spawn));
+    const launches = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n")
+      .map((line) => JSON.parse(line)).filter((event) => event.state === "running").map((event) => event.id);
+    ok(launches.indexOf("f2") < launches.indexOf("fix[0]"), `expected earlier wave f2 before fix clone; got ${launches.join(", ")}`);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
