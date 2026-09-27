@@ -1,16 +1,7 @@
 import { seatOrder } from "./waves.mjs";
 
-// Settle every ready inline step the scheduler can take without spending a
-// seat — a when-skip, a forEach or manifest expansion, an aggregation, a
-// compute, an integrate — then return what is left, in wave order.
-//
-// The scan re-drives until a pass settles nothing: an expansion can unlock a
-// later task in the same pass, and the leaves it seats must be weighed against
-// the ones already ready rather than jumped ahead of them.
-//
-// hooks carries the scheduler's own closures: pending, depsSatisfied,
-// passesWhen, expandForEach, expandManifest, runAggregate, runManifestAggregate,
-// runCompute, runIntegrate.
+// Settle every ready inline step before any seat is spent, re-scanning until a pass
+// settles nothing (an expansion can unlock more), then return the ready leaves in wave order.
 export function settleInline(tasks, hooks) {
   let readyLeaves = [];
   let progressed = false;
