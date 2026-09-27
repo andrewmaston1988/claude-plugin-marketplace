@@ -47,7 +47,8 @@
   const identityLabel = (task) => task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || "");
   const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   const identityHtml = (task, { chip, href } = {}) => {
-    const model = escapeHtml(task?.model);
+    // The provider chip already says ollama, so the :cloud tag is noise here.
+    const model = escapeHtml(String(task?.model ?? "").replace(/:cloud$/, ""));
     if (!(task?.provider && task?.model)) return model;
     const disc = chip && window.swarmLogos?.providerLogo(task.provider, { chip: true, label: task.provider });
     if (disc) return `<span class="pchip ${escapeHtml(window.swarmLogos.providerKey(task.provider))}"${href ? ` data-href="${escapeHtml(href)}"` : ""}>${disc}${model}</span>`;
