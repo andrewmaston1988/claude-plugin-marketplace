@@ -9,14 +9,21 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
-import { withLeafNotices, withoutLeafNotices } from "../src/leaf-notices.mjs";
+import { withLeafNotices, withoutLeafNotices, leafNotices } from "../src/leaf-notices.mjs";
 import { fakeSpawnFactory, makeIo, sentPrompt } from "./helpers/fake-io.mjs";
 
 // The notices verbatim: these literals are the spec, so a wording change is a
 // deliberate edit here, never a silent drift in the engine.
 const FINAL = "Only your FINAL message is recorded as your result — put every finding in it; nothing said earlier is kept.";
-const codexLine = (sandbox) =>
+// Two variants, one per platform: the codex sandbox kills every MSYS2 program on
+// Windows (CreateFileMapping … Win32 error 5), so the POSIX line steers a win32 leaf
+// into tools that cannot start. The engine host picks which one it sends.
+const codexLinePosix = (sandbox) =>
   `You have no Read/Grep/Glob/Edit/Write tools here — a shell only. Where this prompt names them, use shell commands (type/cat, rg/findstr, sed -n); your sandbox is ${sandbox}.`;
+const codexLineWin32 = (sandbox) =>
+  `You have no Read/Grep/Glob/Edit/Write tools here — a shell only. Where this prompt names them, use PowerShell (Get-Content, rg, findstr) — Git's bash, sed, cat and grep cannot start in the codex sandbox; your sandbox is ${sandbox}.`;
+const codexLine = (sandbox, platform = process.platform) =>
+  platform === "win32" ? codexLineWin32(sandbox) : codexLinePosix(sandbox);
 
 const CFG = {
   provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },
@@ -139,6 +146,30 @@ for (const [allowedTools, sandbox] of [["Read,Grep,Glob", "read-only"], ["Read,G
     }
   });
 }
+
+// ── the win32 codex line ─────────────────────────────────────────────────────
+// The sandbox that kills MSYS2 is the one on the engine host, so the host picks
+// the variant: a win32 leaf told to use `sed -n` is told to run a command that
+// cannot start.
+
+test("win32: the codex notice names only tools the sandbox can start, and says why", () => {
+  const line = leafNotices({ runner: "codex", sandbox: "read-only", platform: "win32" });
+  equal(line, `${FINAL}\n${codexLineWin32("read-only")}`);
+  ok(!line.includes("sed -n"), "never steers a win32 leaf at an MSYS tool");
+});
+
+test("linux: the codex notice is the line it always was", () => {
+  equal(leafNotices({ runner: "codex", sandbox: "read-only", platform: "linux" }), `${FINAL}\n${codexLinePosix("read-only")}`);
+  equal(leafNotices({ runner: "claude", sandbox: "read-only", platform: "win32" }), FINAL, "no tool line off the codex runner");
+});
+
+test("a codex block written on either platform strips, and is never told twice", () => {
+  for (const platform of ["win32", "linux"]) {
+    const told = `author text\n\n${FINAL}\n${codexLine("read-only", platform)}`;
+    equal(withoutLeafNotices(told), "author text", `${platform}: stripped`);
+    equal(withLeafNotices(told, { allowedTools: "Read,Grep,Glob" }, {}, "codex"), told, `${platform}: not told twice`);
+  }
+});
 
 // A forEach clone carries promptFinal, so it never re-runs the launch-time
 // substitution pass — and must still be told exactly once.
