@@ -240,6 +240,7 @@ export function loadPage(opts = {}) {
     fireEsError: (readyState) => { const es = esInstances[esInstances.length - 1]; if (readyState !== undefined) es.readyState = readyState; es.onerror && es.onerror(); },
     fetchLog,
     pendingCount: () => pendingFetches.length,
+    pendingUrls: () => pendingFetches.map((f) => f.url),
     fireTimers: (ms) => timers.filter((t) => t.fn && t.ms === ms).forEach((t) => { const fn = t.fn; if (!t.every) t.fn = null; fn(); }),
     listFetches: () => fetchLog.filter(isList),
     runFetches: () => fetchLog.filter(isRun),
@@ -272,6 +273,15 @@ export function loadPage(opts = {}) {
     seam: () => window.__swarmPage,
     snapshot: () => window.__swarmPage && window.__swarmPage.snapshot(),
   };
+}
+
+// The mini-DOM's innerHTML getter returns text, so markup snapshots serialise the tree.
+export function serialize(n) {
+  if (n.nodeType === 3) return n.nodeValue;
+  const kids = n.childNodes.map(serialize).join("");
+  if (n.nodeType !== 1) return kids;
+  const tag = n.tagName.toLowerCase();
+  return `<${tag}${n.attributes.map((a) => ` ${a.name}="${a.value}"`).join("")}>${kids}</${tag}>`;
 }
 
 // ── fixtures ─────────────────────────────────────────────────────────────
