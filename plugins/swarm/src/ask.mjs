@@ -7,14 +7,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { readResult } from "./results.mjs";
-import { isUnderRoot } from "./roots.mjs";
+import { cwdAllowed, defaultGovernanceIo } from "./governance.mjs";
 import { allowedRootsFor, providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { runPlan, makeDefaultIo } from "./scheduler.mjs";
 
 const PROVIDERS = defaultProviderRegistry();
 
-export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo(), providerRegistry = PROVIDERS, runnerRegistry }) {
+export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo(), providerRegistry = PROVIDERS, runnerRegistry, _governanceIo = defaultGovernanceIo() }) {
   const prior = readResult(resultsDir, taskId);
   if (!prior) throw new Error(`no result for '${taskId}' under ${resultsDir}`);
   if (!prior.sessionId) {
@@ -48,7 +48,7 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   {
     const govCwd = prior.originalCwd || cwd;
     const { roots, deniedBy } = allowedRootsFor(cfg, identity.provider);
-    if (!(roots || []).some((root) => isUnderRoot(govCwd, root))) {
+    if (!cwdAllowed(govCwd, roots || [], _governanceIo)) {
       throw new Error(
         `governance: provider '${identity.provider}' model '${askModel}' and '${govCwd}' is not under any ${deniedBy} entry`
       );

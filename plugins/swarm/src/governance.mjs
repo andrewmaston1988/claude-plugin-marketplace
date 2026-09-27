@@ -1,5 +1,7 @@
 import { allowedRootsFor } from "./providers.mjs";
 import { isUnderRoot } from "./roots.mjs";
+import { realRepoToplevel } from "./manifest-leaf-guard.mjs";
+import { swarmHome } from "./config.mjs";
 // From the leaf, not manifest.mjs: importing it from the loader made governance
 // and the loader mutually dependent, and the loader's split pulled
 // manifest-normalize.mjs into that cycle too.
@@ -14,6 +16,19 @@ function unconfigured(provider, rootLabel) {
     `configured roots — so every task is refused. Run /swarm:swarm setup to choose the directory roots ` +
     `swarm may work in, or add ${rootLabel} to ~/.swarm/config.json by hand.`;
 }
+// The one root test for all three gates (manifest, dispatch, ask). A swarm-made worktree
+// sits outside every root: judge it by the repo it was cut from, so each provider's roots
+// still bind. repoToplevel spawns git, so ask only inside the home.
+export function cwdAllowed(cwd, roots, io) {
+  const inRoots = (p) => roots.some((root) => isUnderRoot(p, root));
+  if (inRoots(cwd)) return true;
+  if (!isUnderRoot(cwd, io.home)) return false;
+  const repo = io.repoToplevel(cwd);
+  return Boolean(repo) && inRoots(repo);
+}
+
+export const defaultGovernanceIo = () => ({ home: swarmHome(), repoToplevel: realRepoToplevel });
+
 // Every provider, Claude included — operator, 2026-09-21: allowedRoots is the single
 // statement of where swarm may run anything. The old `claude` early return made the roots
 // list a non-Anthropic policy, which left the Claude leaves that do the writing ungated.
@@ -26,16 +41,7 @@ export function checkGovernance(provider, model, effCwd, l, cfg, errors, io) {
     errors.push(`${l}: ${unconfigured(provider, deniedBy)}`);
     return;
   }
-  const inRoots = (p) => roots.some((root) => isUnderRoot(p, root));
-  // A swarm-made worktree sits outside every root: judge it by the repo it was cut from, so
-  // each provider's roots still bind. repoToplevel spawns git, so ask only inside the home.
-  const ok = inRoots(effCwd) || inSwarmTreeOfAllowedRepo();
-  function inSwarmTreeOfAllowedRepo() {
-    if (!isUnderRoot(effCwd, io.home)) return false;
-    const repo = io.repoToplevel(effCwd);
-    return Boolean(repo) && inRoots(repo);
-  }
-  if (!ok) {
+  if (!cwdAllowed(effCwd, roots, io)) {
     errors.push(
       `${l}: provider '${provider}' model '${model}' and its cwd '${effCwd}' is not under any ` +
       `${deniedBy} entry — ${provider === "claude"

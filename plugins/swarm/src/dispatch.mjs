@@ -9,7 +9,7 @@ import { allowedRootsFor, providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createRunnerRegistry } from "./runners.mjs";
 import { defaultCodexRunnerAdapter } from "./codex.mjs";
-import { isUnderRoot } from "./roots.mjs";
+import { cwdAllowed, defaultGovernanceIo } from "./governance.mjs";
 import { applyWriteGuard } from "../hooks/leaf-write-guard.mjs";
 import { runnerParserFactories } from "./stream.mjs";
 
@@ -125,7 +125,7 @@ function dispatchCache(task, cfg, options) {
   return [];
 }
 
-function validateDispatchPolicy(task, identity, adapter, cfg) {
+function validateDispatchPolicy(task, identity, adapter, cfg, governanceIo) {
   const problems = adapter.validateTask({ ...task, ...identity }, { config: cfg, task });
   if (Array.isArray(problems) && problems.length) {
     throw new Error(`provider '${identity.provider}' rejected task: ${problems.join("; ")}`);
@@ -149,7 +149,7 @@ function validateDispatchPolicy(task, identity, adapter, cfg) {
   // Every provider is gated here, Claude included — the same rule ask.mjs and
   // governance.mjs apply. Gating Claude is defence in depth (normalization's
   // checkGovernance refuses it first), but the layers must not disagree on exemptions.
-  if (rootGate && (!cwd || !Array.isArray(roots) || !roots.some((root) => isUnderRoot(cwd, root)))) {
+  if (rootGate && (!cwd || !Array.isArray(roots) || !cwdAllowed(cwd, roots, governanceIo))) {
     throw new Error(
       `governance: provider '${identity.provider}' model '${identity.model}' cannot dispatch from '${cwd}' — ` +
       `cwd is not under any ${deniedBy} entry`
@@ -167,7 +167,7 @@ export function buildDispatch(task, prompt, cfg = {}, options = {}) {
     config: cfg,
   });
   const adapter = providerRegistry.get(identity.provider);
-  validateDispatchPolicy(task, identity, adapter, cfg);
+  validateDispatchPolicy(task, identity, adapter, cfg, options._governanceIo ?? defaultGovernanceIo());
   const provider = { ...identity, runnerId: adapter.runnerId };
   const runner = runnerRegistry.resolve(provider);
   if (typeof runner.buildInvocation !== "function") {
