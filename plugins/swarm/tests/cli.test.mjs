@@ -1717,7 +1717,7 @@ test("serve: dashboard.enabled=false refuses to start (foreground and --daemon),
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "config.json"), gateConfig({ dashboard: { enabled: false, port: 0 } }));
+    writeFileSync(join(home, "config.json"), gateConfig({ dashboard: { enabled: false, port: 0, tray: false } }));
     for (const args of [["serve"], ["serve", "--daemon"]]) {
       const r = runCli(args, { cwd: dir, env: { SWARM_HOME: home } });
       equal(r.status, 0, r.stderr);
