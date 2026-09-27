@@ -56,8 +56,8 @@ test("an explicit provider label makes the logo accessible and escapes its value
   assert.doesNotMatch(logo, /aria-hidden/);
 });
 
-// The chip disc's colours, from the operator's design reference. The stored SVGs are
-// never edited, so the disc, its ring and the mark's colour are all render-time.
+// The chip disc's colours per provider. The stored SVGs are never edited, so the
+// disc, its ring and the mark's colour are all render-time.
 const DISCS = {
   ollama: { disc: "#fff", ring: "#d4d4d4", mark: "#000" },
   codex: { disc: "#10A37F", ring: "#087f64", mark: "#fff" },
@@ -71,7 +71,7 @@ test("a chip draws the provider's disc and ring, and recolours the mark to the c
     assert.match(chip, new RegExp(`<circle[^>]*fill="${c.disc}"[^>]*stroke="${c.ring}"`), `${name}: disc fill and ring`);
     const fills = [...chip.matchAll(/fill="([^"]+)"/g)].map((m) => m[1]);
     assert.deepEqual([...new Set(fills)].sort(), [c.disc, c.mark].sort(), `${name}: only the disc and the mark are filled`);
-    // 48/64 of the disc's diameter: the art's 60% is too small, the operator asked for more.
+    // The mark fills 48/64 (75%) of the disc's diameter.
     assert.match(chip, /translate\(8 8\) scale\(0\.1875\)/, `${name}: the mark sits at 75% of the disc`);
   }
 });

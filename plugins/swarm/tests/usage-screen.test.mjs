@@ -35,7 +35,7 @@ test("Week reads anthropic's weekly_* buckets, the most-consumed one winning", (
   const html = loadPerfViews().usageScreen(READABLE, H, "week");
   assert.match(html, /MOST LEFT THIS WEEK[\s\S]*?OLLAMA/);
   assert.match(html, /<b>72%<\/b>/, "ollama's plain weekly reads");
-  assert.match(html, /class="nm">[\s\S]*?anthropic<\/span><span class="val bad">12%/, "weekly_all at 88% used beats weekly_scoped at 5%");
+  assert.match(html, /class="nm">(?:<svg[\s\S]*?<\/svg>)?anthropic<\/span><span class="val bad">12%/, "weekly_all at 88% used beats weekly_scoped at 5%");
 });
 
 // Operator, 2026-09-24: alphabetical — the hero already carries the ranking.

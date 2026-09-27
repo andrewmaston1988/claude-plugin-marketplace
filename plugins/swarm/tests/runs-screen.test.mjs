@@ -43,9 +43,8 @@ test("a running card carries the spinning ring, not a pulsing dot", async () => 
   assert.equal(P.findByClass("rdot").length, 0);
 });
 
-// Operator 2026-09-26: "instead of trying to split up the provider and the token cost
-// on the runs tile, just show one number" — the split is gone, not hidden, and the
-// providers become a chip stack instead.
+// A run's tokens read once, as its total: the per-provider split is gone, not hidden,
+// and the providers become a chip stack instead.
 test("a run's tokens read once, as the run total, with no per-provider figure", async () => {
   const P = await runsWith(listData(listRow({ tokens: 12_000, providerTokens: { ollama: 9_000, claude: 3_000 } })));
   const rs = P.findByClass("rs")[0].textContent;
@@ -85,9 +84,7 @@ test("a provider with no logo gets an initial chip, so no provider disappears si
   assert.equal(P.findByClass("pitem")[0].textContent.trim(), "M");
 });
 
-// Operator 2026-09-26: "you would pulse when active only and only stack when running..
-// the ones not running might stay dim and shuffle to the bottom of the stack whilst
-// active ones become foreground solid and pulse".
+// A live stack: providers with a running leaf pulse in front; idle ones sit dim behind.
 test("a live run's running provider is solid and pulsing in front, the idle one dim behind", async () => {
   const P = await runsWith(listData(listRow({ tokens: 12_000, providerTokens: { ollama: 300_000, claude: 40_000 }, providersRunning: ["claude"] })));
   const chips = chipsOf(P, P.findByClass("rcard")[0]);
@@ -97,9 +94,9 @@ test("a live run's running provider is solid and pulsing in front, the idle one 
   assert.match(chips[0].style, /animation-delay:0s/);
 });
 
-// Operator 2026-09-26: "completed they would all just be solid stacked", "the one
-// which did most on top".
-test("a finished run's chips are all solid, in token order, the largest drawn on top", async () => {
+// A finished run's discs are at rest (no per-disc dim or pulse; the stack dims as a
+// group in CSS), in token order, the largest on top, and the row reads the run total.
+test("a finished run's chips are at rest, in token order, the largest drawn on top", async () => {
   const done = listRow({ active: false, finishedMs: Date.now(), byState: { ok: 1 }, tokens: 12_000, providerTokens: { ollama: 300_000, claude: 900_000 }, providersRunning: ["ollama"] });
   const data = { ...listData(done), finishedTotals: { "C--code-listproj": 1 } };
   const P = await runsWith(data);
@@ -113,6 +110,7 @@ test("a finished run's chips are all solid, in token order, the largest drawn on
   assert.deepEqual(chips.map((c) => c.label), ["claude", "ollama"]);
   assert.ok(chips[0].z > chips[1].z, "the largest is drawn on top");
   assert.doesNotMatch(chips[0].style, /animation-delay/);
+  assert.match(P.findByClass("meta", P.main).map((e) => e.textContent).join(" "), /12k/, "the finished row reads the run total");
 });
 
 test("the chip pulse is off under prefers-reduced-motion", async () => {

@@ -1,18 +1,19 @@
 (function () {
   const logos = __SWARM_LOGO_SVGS__;
-  // The chip disc, its ring and the mark's colour, per provider — the operator's
-  // design reference. The stored .svg files are never edited: the mark's own fill
-  // is swapped to `mark` here, at render time, disc included.
+  // The chip disc, its ring and the mark's colour, per provider. The stored .svg
+  // files are never edited: the mark's own fill is swapped to `mark` at render time.
   const discs = {
     claude: { disc: "#D97757", ring: "#b75e42", mark: "#fff" },
     codex: { disc: "#10A37F", ring: "#087f64", mark: "#fff" },
     ollama: { disc: "#fff", ring: "#d4d4d4", mark: "#000" },
   };
   const escapeAttr = (value) => String(value).replace(/[&<>\"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  // The provider's logo key, also its chip class: anthropic is claude's legacy id.
+  const providerKey = (provider) => String(provider ?? "").toLowerCase().replace(/^anthropic$/, "claude");
   function providerLogo(provider, { chip, label } = {}) {
-    const name = String(provider ?? "").toLowerCase().replace(/^anthropic$/, "claude");
+    const name = providerKey(provider);
     const source = logos[name];
-    if (!source) return "";
+    if (!source || (chip && !discs[name])) return "";
     const attrs = label === undefined ? 'aria-hidden="true"' : `role="img" aria-label="${escapeAttr(label)}"`;
     const bare = source.trim().replace(/<title>[\s\S]*?<\/title>\s*/i, "");
     if (chip) {
@@ -23,5 +24,5 @@
     }
     return bare.replace(/fill="#000"/g, 'fill="currentColor"').replace(/^<svg\b/, `<svg class="plogo" ${attrs}`);
   }
-  window.swarmLogos = { providerLogo };
+  window.swarmLogos = { providerLogo, providerKey };
 })();

@@ -50,7 +50,7 @@
     const model = escapeHtml(task?.model);
     if (!(task?.provider && task?.model)) return model;
     const disc = chip && window.swarmLogos?.providerLogo(task.provider, { chip: true, label: task.provider });
-    if (disc) return `<span class="pchip ${escapeHtml(String(task.provider).toLowerCase())}"${href ? ` data-href="${escapeHtml(href)}"` : ""}>${disc}${model}</span>`;
+    if (disc) return `<span class="pchip ${escapeHtml(window.swarmLogos.providerKey(task.provider))}"${href ? ` data-href="${escapeHtml(href)}"` : ""}>${disc}${model}</span>`;
     return `${window.swarmLogos?.providerLogo(task.provider, { label: task.provider }) ?? ""}${model}`;
   };
 

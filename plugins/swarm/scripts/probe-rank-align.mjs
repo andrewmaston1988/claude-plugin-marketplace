@@ -1,20 +1,9 @@
 #!/usr/bin/env node
-// Rank-row geometry probe: does every perf rank row put the grade's vertical
-// centre on the rank marker's centre? Rank rows carry no coin badge (coins live
-// on the cost screen); the probe fails if one reappears.
-//
-// Real browser, real layout — the geometry is a fact about a layout engine, so
-// it is measured in one rather than reasoned about. An in-process dashboard over
-// a temp SWARM_HOME, headless Chromium driven over the DevTools protocol, one
-// zero-height inline-block per row to read the grade's baseline. Zero npm deps:
-// node:http + node:child_process + the global WebSocket.
-//
-// Lives outside `npm test` (needs a browser and a few seconds):
-//
-//   node plugins/swarm/scripts/probe-rank-align.mjs [--browser <path>]
-//
-// Exits 1 when any |delta| > TOL_PX. Removes its own temp dirs and kills only
-// the browser PID it spawned.
+// Rank-row geometry probe: each perf rank row's grade must sit centred on its rank
+// marker, and no rank row may carry a coin badge. Measured in a real headless browser
+// over an in-process dashboard (temp SWARM_HOME, DevTools protocol, zero npm deps).
+// Outside `npm test`: node plugins/swarm/scripts/probe-rank-align.mjs [--browser <path>]
+// Exits 1 when any |delta| > TOL_PX; removes its temp dirs, kills only its own browser.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -192,7 +181,7 @@ async function measure(client, pass) {
   await waitFor(client, `document.querySelectorAll(".crow").length > 0`, ".crow rows");
   if (pass.compact) {
     // The compact list is a stored preference, not a width breakpoint: tick the
-    // real checkbox so the rows under test are the ones the operator sees.
+    // real checkbox so the compact rows are the ones measured.
     await evaluate(client, `(() => { const cb = document.querySelector('input[data-compact="rank"]'); if (cb && !cb.checked) cb.click(); return !!cb; })()`);
     await waitFor(client, `document.querySelectorAll(".rlist.compact .crow").length > 0`, "the compact list");
   }
