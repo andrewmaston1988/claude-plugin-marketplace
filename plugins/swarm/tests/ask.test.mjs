@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal, ok, rejects } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { askLeaf } from "../src/ask.mjs";
@@ -266,5 +266,25 @@ test("askLeaf: a top-level list that does not cover originalCwd refuses — Clau
     equal(spawn.calls.length, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Same rule as the manifest and dispatch gates: a leaf approved in a swarm worktree is
+// judged by the repo that tree was cut from.
+test("askLeaf: a leaf approved in a swarm worktree of an allowed repo can be asked; a stranger repo's cannot", async () => {
+  const root = mkdtempSync(join(tmpdir(), "swarm-ask-repo-"));
+  const home = mkdtempSync(join(tmpdir(), "swarm-ask-home-"));
+  const wt = join(home, "runs", "repo", "run1", "wt-a");
+  mkdirSync(wt, { recursive: true });
+  const dir = setup({ cwd: wt, originalCwd: wt });
+  try {
+    const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [root] } } };
+    const gov = (repo) => ({ home, repoToplevel: () => repo });
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", cfg, io: makeIo(spawn), _governanceIo: gov(root) });
+    equal(r.answer, "the follow-up answer");
+    await rejects(() => askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", cfg, io: makeIo(spawn), _governanceIo: gov(null) }), /governance/i);
+  } finally {
+    for (const d of [dir, root, home]) rmSync(d, { recursive: true, force: true });
   }
 });
