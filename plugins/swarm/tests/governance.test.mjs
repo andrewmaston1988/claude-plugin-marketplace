@@ -576,8 +576,8 @@ test("governance G4: per-provider roots still bind inside the swarm home", () =>
   }
 });
 
-// G5 — the widening is the swarm home ONLY. A checkout of an allowed repo parked
-// anywhere else still fails: the operator's ask was swarm's own directory.
+// G5 — the widening is the swarm home ONLY: a checkout of an allowed repo parked
+// anywhere else still fails.
 test("governance G5: a worktree outside the swarm home is not widened", () => {
   const repo = tmp();
   const home = tmp();

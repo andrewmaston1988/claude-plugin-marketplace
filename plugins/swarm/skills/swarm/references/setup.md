@@ -158,7 +158,8 @@ its usage reader is explicit rather than a background preflight.
 ### Stage 2 — where swarm may run at all (`allowedRoots`)
 
 **Every provider is gated, Claude included, and an empty list permits nothing.** Code under a
-listed root may be dispatched; anything else fails validation. For a non-Anthropic provider the
+listed root may be dispatched; anything else fails validation. A swarm-made worktree under `~/.swarm`
+is judged by the repo it was cut from. For a non-Anthropic provider the
 reason is the data agreement, which may cover Anthropic only. For Claude it is containment:
 swarm runs nothing outside its configured roots.
 
