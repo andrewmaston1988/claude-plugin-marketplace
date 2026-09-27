@@ -32,6 +32,7 @@ import { extractCitations, verifyCitations, citationErrorLines, annotateCitation
 import { removeCachedModel, ENTITLEMENT_RE } from "./discovery.mjs";
 import { ALIVE_STATES, cloneId, childId, parseCloneId } from "./runlog.mjs";
 import * as defaultWorktree from "./worktree.mjs";
+import { settleInline } from "./inline-steps.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const OK_STATES = new Set(["ok", "skipped"]);
@@ -1030,6 +1031,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         if (cacheHit(plan.resultsDir, c, prior)) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
       }
     }
+    task.waveAfter ??= [...task.after];
     pinKey(task); task.when = undefined;
     task.forEach = undefined;
     task.childPlan = undefined; // the clones carry it; the parent is now pure aggregate
@@ -1046,6 +1048,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     const locals = new Set(node.childPlan.tasks.map((c) => c.id));
     const remap = (id) => childId(node.id, id);
     const hasItem = node.manifestItem !== undefined;
+    const upstream = node.waveAfter || [...node.after]; // the node's own wave edge, kept for its root children
     // {{result:local}} / {{resultPath:local}} references to sibling child tasks are
     // rewritten to the spliced ids — in the prompt AND in each mustRead entry's
     // path/index string, so a verifier's `mustRead: ["{{resultPath:finder}}"]`
@@ -1073,6 +1076,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         // absent from the group maps entirely (never collected, never reset).
         ...(c.worktreeName !== undefined && { worktreeName: remap(c.worktreeName) }),
         after: c.after.map((d) => (locals.has(d) ? remap(d) : d)),
+        ...(c.after.length === 0 && { waveAfter: upstream }),
         ...(c.when && { when: { ...c.when, from: locals.has(c.when.from) ? remap(c.when.from) : c.when.from } }),
         ...(c.forEach && { forEach: { ...c.forEach, from: locals.has(c.forEach.from) ? remap(c.forEach.from) : c.forEach.from } }),
         ...(c.compute !== undefined && {
@@ -1097,6 +1101,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     const sinks = node.childPlan.tasks.filter((c) => !dependedOn.has(c.id)).map((c) => ({ local: c.id, full: remap(c.id) }));
     pinKey(node); node.when = undefined;
     node.childPlan = undefined;
+    node.waveAfter = upstream;
     node.after = spliced.map((c) => c.id);
     node.aggregateManifest = { sinks };
     rebuildGroups();
@@ -1464,21 +1469,16 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       }
     }
 
-    // Inline settles (when-skip, compute, expansion, aggregation) change state
-    // without occupying a slot — after any of them, re-drive the whole cycle so
-    // tasks earlier in the array unlock in the same pass.
     let progressed = false;
     if (!stopRequested) {
-      for (const t of tasks) {
+      const seats = settleInline(tasks, {
+        pending: (t) => state.get(t.id) === "pending",
+        depsSatisfied, passesWhen, expandForEach, expandManifest,
+        runAggregate, runManifestAggregate, runCompute, runIntegrate,
+      });
+      progressed = seats.progressed;
+      for (const t of seats.ready) {
         if (running.size >= plan.concurrency) break;
-        if (state.get(t.id) !== "pending" || !depsSatisfied(t)) continue;
-        if (!passesWhen(t)) { progressed = true; continue; }
-        if (t.forEach) { expandForEach(t); progressed = true; continue; }
-        if (t.childPlan) { expandManifest(t); progressed = true; continue; }
-        if (t.aggregate) { runAggregate(t); progressed = true; continue; }
-        if (t.aggregateManifest) { runManifestAggregate(t); progressed = true; continue; }
-        if (t.compute) { runCompute(t); progressed = true; continue; }
-        if (t.integrate) { runIntegrate(t); progressed = true; continue; }
         // Spawn floor (D3): only once something is already running — the very
         // first leaf of a run must never be gated by the machine's headroom.
         if (running.size > 0 && memLow(cfg.minFreeMemMb)) { parkForMemory(t); continue; }

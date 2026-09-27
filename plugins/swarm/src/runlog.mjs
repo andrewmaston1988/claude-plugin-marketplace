@@ -8,6 +8,7 @@ import { DIGEST_ID } from "./digest.mjs";
 import { cloneId, childId, parseCloneId } from "./leaf-ids.mjs";
 export { cloneId, childId, parseCloneId };
 import { readHeartbeat, inferStoredIdentity } from "./results.mjs";
+import { waveDepths } from "./waves.mjs";
 
 // Non-terminal, non-doomed: a leaf waiting out a backoff or model fallback. Lives here
 // rather than in the scheduler because it is state vocabulary, and two modules read it.
@@ -241,23 +242,13 @@ export function topology(tasks, manifest) {
   // …every row outside that forEach, clones of a downstream forEach included
   for (const r of rows) if (r.kind !== "digest") r.after = r.after.flatMap((a) => (a !== r.parent && sinks.get(a)) || [a]);
   for (const r of rows) if (r.kind === "digest") r.after = rows.filter((x) => x.id !== DIGEST_ID).map((x) => x.id);
-  const byId = new Map(rows.map((r) => [r.id, r]));
-  const depth = new Map();
-  const visiting = new Set();
-  const depthOf = (id) => {
-    if (depth.has(id)) return depth.get(id);
-    if (visiting.has(id)) return 0; // cycle guard — the back-edge contributes nothing
-    visiting.add(id);
-    const r = byId.get(id);
-    let d = 0;
-    // clones never wait on each other: a forEach's members all sit in its wave
-    if (r && r.parent && defs.get(r.parent)?.forEach && (r.kind === "clone" || r.kind === "child" || r.kind === "container")) d = depthOf(r.parent);
-    else for (const a of r?.after || []) if (byId.has(a)) d = Math.max(d, depthOf(a) + 1);
-    visiting.delete(id);
-    depth.set(id, d);
-    return d;
-  };
-  for (const r of rows) r.depth = depthOf(r.id);
+  const depth = waveDepths(rows, {
+    afterOf: (r) => r.after,
+    parentOf: (r) => r.parent && defs.get(r.parent)?.forEach && (r.kind === "clone" || r.kind === "child" || r.kind === "container")
+      ? r.parent
+      : undefined,
+  });
+  for (const r of rows) r.depth = depth.get(r.id);
   const waves = [];
   for (const r of rows) (waves[r.depth] ||= []).push(r.id);
   return { tasks: rows, waves: waves.map((w) => w || []) };

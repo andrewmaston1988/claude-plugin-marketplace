@@ -11,38 +11,9 @@ import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure
 import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
+import { CFG, tmp, task, plan, computeTask, childPlanOf } from "./helpers/scheduler-fixtures.mjs";
 
 const SHIM = fileURLToPath(new URL("./shims/claude-shim.mjs", import.meta.url));
-
-const CFG = {
-  provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },
-  concurrency: 4,
-  timeoutMs: 600000,
-  resultInlineCap: 4000,
-  worktreeBranchPrefix: "swarm/",
-};
-
-function tmp() {
-  return mkdtempSync(join(tmpdir(), "swarm-sched-"));
-}
-
-function task(id, over = {}) {
-  return {
-    id,
-    prompt: `do ${id}`,
-    provider: "claude", model: "claude-haiku-4-5-20251001",
-    allowedTools: "Read,Grep,Glob",
-    cwd: over.cwd || tmpdir(),
-    originalCwd: over.cwd || tmpdir(),
-    timeoutMs: 5000,
-    after: [],
-    ...over,
-  };
-}
-
-function plan(dir, tasks, over = {}) {
-  return { cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, tasks, goal: "", ...over };
-}
 
 test("fan-out: all tasks run, results + summary + run.log written", async () => {
   const dir = tmp();
@@ -433,13 +404,11 @@ test("M4: the valve kills the newest running leaf under the low-memory floor, an
   }
 });
 
-// M5: a memory park must never consume a retry attempt. A chain of three
-// decoys (d1->d2->d3), each long enough to still be running when the next
-// heartbeat's redrive flips "b" back to pending, gives the valve a partner
-// to fire against three times before "b" ever runs uncontested. With
-// retry.spawnError: 0, any attempt spent on those parks would leave b
-// terminal on the very first kill instead of finishing ok on the fourth.
-test("M5: a valve-killed leaf with a zero retry budget still finishes ok after three parks", async () => {
+// M5: a memory park must never consume a retry attempt. The independent "b"
+// leaf is shallower than the decoy chain, so wave-first seating gives it the
+// first free seat after one valve kill. With retry.spawnError: 0, any attempt
+// spent on that park would leave b terminal instead of finishing cleanly.
+test("M5: a valve-killed leaf with a zero retry budget still finishes after a park", async () => {
   const dir = tmp();
   try {
     let nowN = 0;
@@ -457,12 +426,12 @@ test("M5: a valve-killed leaf with a zero retry budget still finishes ok after t
     const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error("runPlan hung waiting on b's parks")), 5000));
     const r = await Promise.race([runPlan(p, cfg, io), timeout]);
 
-    equal(spawn.calls.filter((c) => promptOf(c) === "do b").length, 4, "3 killed attempts + 1 clean finish");
+    equal(spawn.calls.filter((c) => promptOf(c) === "do b").length, 2, "1 killed attempt + 1 clean finish");
     deepEqual(r.summary.tasks.map((t) => t.state), ["ok", "ok", "ok", "ok"]);
 
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     const bParks = logLines.filter((l) => l.id === "b" && l.state === "retrying" && l.note === "memory-park");
-    equal(bParks.length, 3, "b must have been parked for memory exactly three times, never as a retry");
+    equal(bParks.length, 1, "b must have been parked for memory exactly once, never as a retry");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1474,10 +1443,6 @@ test("per-leaf log streams progressively to results/<id>.log (real shim)", async
 
 // ── deterministic steps: compute / when / forEach ─────────────────────────────
 
-function computeTask(id, expr, after) {
-  return task(id, { compute: expr, model: "compute", prompt: "", allowedTools: "", after });
-}
-
 test("compute: runs inline with zero spawns; result feeds templates and JSON chains", async () => {
   const dir = tmp();
   try {
@@ -2359,8 +2324,6 @@ test("cost warn: subscription costUsd is synthetic — projection stays token-de
 });
 
 // ── child manifests (bounded composition) ─────────────────────────────────────
-
-const childPlanOf = (...tasks) => ({ tasks });
 
 test("manifest node: children run namespaced, sinks aggregate as the node's output, dependents inline it", async () => {
   const dir = tmp();
