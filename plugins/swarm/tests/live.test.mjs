@@ -305,6 +305,22 @@ test("page wiring: the runs fetch splices expandQuery inside q()'s argument, and
   assert.match(page, /openProjects\.delete\(p\)[^\n}]*expandedProjects\.delete\(p\)/, "the collapse branch drops the group's expansion");
 });
 
+// ── coverage: a short mustRead is a warning, never a silent `ok` ──────────
+// The engine records a shortfall and deliberately does NOT fail the leaf, so without
+// this the row and the banner of a leaf that read 3 of 430 required lines read exactly
+// like a clean one's. Operator saw the codex leaf in the long-night review as "complete".
+
+test("coverageWarn: only a non-complete status warns, and it names the shortfall (C1)", () => {
+  const { coverageWarn } = loadLive();
+  assert.equal(coverageWarn({}, {}), null, "no coverage recorded — nothing to warn about");
+  assert.equal(coverageWarn({ coverage: { status: "complete" } }, {}), null, "a complete read is the clean case");
+  const short = coverageWarn({ coverage: { status: "incomplete", required: 430, read: 3 } }, {});
+  assert.match(short, /3 of 430/);
+  const blind = coverageWarn({}, { coverage: { status: "unparseable", required: 12, read: 0 } });
+  assert.match(blind, /12/, "the leaf's own result is a source too — the run row may have no event");
+  assert.notEqual(blind, short, "an unreadable transcript is not the same fact as a partial read");
+});
+
 test("identityHtml shows the provider logo with escaped model text; the run and leaf screens wear the provider chip", () => {
   const { identityHtml, identityLabel } = loadLive();
   const task = { provider: "claude", model: "opus<test>" };

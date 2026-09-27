@@ -483,8 +483,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       try { r = JSON.parse(readFileSync(file, "utf8")); } catch { return notFound(res); }
       // `prompt` is exposed deliberately — the leaf view renders it as a collapsed
       // accordion, and it is the one field that says what the leaf was actually asked.
-      const { id, provider, runner, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd } = r;
-      return send(res, 200, { id, provider, runner, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd });
+      const { id, provider, runner, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd, coverage } = r;
+      return send(res, 200, { id, provider, runner, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd, coverage });
     }
     return notFound(res);
   };

@@ -20,7 +20,9 @@ function seedHome() {
   // find-b carries a prompt but NO result file: the in-flight case, where the prompt is
   // only knowable from this snapshot. `join` is agentless — no prompt, and must stay 404.
   writeFileSync(join(live, "manifest.json"), JSON.stringify({ tasks: [{ id: "find-a", model: "m", prompt: "authored a" }, { id: "find-b", model: "m", prompt: "authored b" }, { id: "fix", model: "m", after: ["find-a"] }, { id: "review", model: "m", after: ["fix"] }, { id: "join", compute: "1" }], digest: { model: "m", instructions: "steer the digest" } }), "utf8");
-  writeFileSync(join(live, "results", "find-a.json"), JSON.stringify({ id: "find-a", model: "m", ok: true, output: "ten bullets", tokens: { input: 1, output: 2 }, numTurns: 7, prompt: "secret prompt" }), "utf8");
+  // find-a's coverage is short. The leaf is still `ok` — a short read is recorded, never
+  // fatal — so this field is the only thing that tells the two apart on screen.
+  writeFileSync(join(live, "results", "find-a.json"), JSON.stringify({ id: "find-a", model: "m", ok: true, output: "ten bullets", tokens: { input: 1, output: 2 }, numTurns: 7, prompt: "secret prompt", coverage: { status: "incomplete", required: 430, read: 3, missed: ["README.md"] } }), "utf8");
   writeFileSync(join(live, "results", "find-a.log"), "raw stream json — never served", "utf8");
   const done = join(home, "runs", "C--code-b", "done-1");
   buildFixture(done);
@@ -123,6 +125,8 @@ test("routes: runs list, run, leaf (no raw log; prompt exposed for the accordion
       // can now read prompts as well as outputs. Pinned so the exposure stays
       // intentional and a future reader sees it was chosen, not leaked.
       assert.equal(leaf.body.prompt, "secret prompt", "the prompt is served for the leaf-view accordion");
+      assert.equal(leaf.body.coverage.status, "incomplete", "the short read reaches the leaf screen");
+      assert.equal(leaf.body.coverage.read, 3);
       assert.equal(leaf.body.log, undefined);
       assert.equal((await get("/api/runs/C--code-a/live-1/leaves/nope")).status, 404);
 
