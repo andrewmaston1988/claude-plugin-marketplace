@@ -313,3 +313,11 @@ test("identityHtml shows the provider logo with escaped model text; the run and 
   assert.match(identityHtml(task, { chip: true, href: "#/x" }), /^<span class="pchip claude" data-href="#\/x"><svg class="plogo pdisc"[\s\S]*<\/svg>opus&lt;test&gt;<\/span>$/, "the leaf page wears the chip");
   assert.equal(identityHtml({ model: "plain<&" }), "plain&lt;&amp;");
 });
+
+test("identityHtml drops a trailing :cloud from the shown model name; the chip already names the provider", () => {
+  const { identityHtml } = loadLive();
+  const task = { provider: "ollama", model: "glm-5.2:cloud" };
+  assert.match(identityHtml(task, { chip: true }), /<\/svg>glm-5\.2<\/span>$/);
+  assert.match(identityHtml(task), /<\/svg>glm-5\.2$/);
+  assert.equal(identityHtml({ model: "cloudy:cloud-x" }), "cloudy:cloud-x", "only a trailing :cloud is trimmed");
+});
