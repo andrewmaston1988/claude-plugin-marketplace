@@ -3888,3 +3888,21 @@ test("a reader spawns in its own cwd and is never given a tree", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("wave seating: every ready finder launches before its interleaved verifier", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => ({ delayMs: promptOf(call).startsWith("do v") ? 20 : 5, output: "ok" }));
+    const p = plan(dir, [
+      task("f1"), task("v1", { after: ["f1"] }),
+      task("f2"), task("v2", { after: ["f2"] }),
+      task("f3"), task("v3", { after: ["f3"] }),
+      task("f4"), task("v4", { after: ["f4"] }),
+    ], { concurrency: 2 });
+    await runPlan(p, CFG, makeIo(spawn));
+    const launched = spawn.calls.map((call) => promptOf(call).slice(3));
+    const lastFinder = Math.max(...["f1", "f2", "f3", "f4"].map((id) => launched.indexOf(id)));
+    const firstVerifier = Math.min(...["v1", "v2", "v3", "v4"].map((id) => launched.indexOf(id)));
+    ok(lastFinder < firstVerifier, `expected all finders before any verifier; got ${launched.join(", ")}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
