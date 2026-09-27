@@ -45,6 +45,14 @@
   }
 
   const identityLabel = (task) => task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || "");
+  const escapeHtml = (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const identityHtml = (task, { chip, href } = {}) => {
+    const model = escapeHtml(task?.model);
+    if (!(task?.provider && task?.model)) return model;
+    const disc = chip && window.swarmLogos?.providerLogo(task.provider, { chip: true, label: task.provider });
+    if (disc) return `<span class="pchip ${escapeHtml(window.swarmLogos.providerKey(task.provider))}"${href ? ` data-href="${escapeHtml(href)}"` : ""}>${disc}${model}</span>`;
+    return `${window.swarmLogos?.providerLogo(task.provider, { label: task.provider }) ?? ""}${model}`;
+  };
 
   // page.html's existing ago() thresholds, verbatim, with `now` injected in place
   // of Date.now() — the boundaries (59s/61s/3601s/86401s) are pinned by test L5.
@@ -314,5 +322,5 @@
     return n;
   };
 
-  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, identityLabel, agoText, projectOrder, runEnded, shouldPoll, finishedSince, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges, stateOfGroup, railPitch, railRows, railLayout };
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, identityLabel, identityHtml, agoText, projectOrder, runEnded, shouldPoll, finishedSince, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges, stateOfGroup, railPitch, railRows, railLayout };
 })();

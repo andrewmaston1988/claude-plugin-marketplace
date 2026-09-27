@@ -55,7 +55,7 @@ test("the server's real /api/cost response renders cost cards, not the empty sta
 const isCost = (u) => u.startsWith("/api/cost");
 
 async function openCost(hash, calls = []) {
-  const P = loadPage({ perfViews: { costScreen: (data, h, pick) => { calls.push(pick); return `<div class="stub">screen:${data.tag}</div>`; } } });
+  const P = loadPage({ perfViews: { costScreen: (data, h, pick) => { calls.push(pick); calls.badge = typeof h.badge; return `<div class="stub">screen:${data.tag}</div>`; } } });
   await P.flush();
   P.respondList(listData(listRow()));
   await P.flush();
@@ -68,8 +68,9 @@ async function openCost(hash, calls = []) {
 }
 
 test("#/cost fetches /api/cost, never /api/perf, and heads the screen the mockup's way", async () => {
-  const P = await openCost("#/cost");
+  const calls = [], P = await openCost("#/cost", calls);
   assert.ok(P.fetchLog.some(isCost) && !P.fetchLog.some(P.isPerf));
+  assert.equal(calls.badge, "function", "the page hands the cost screen its coin badge renderer");
   const text = P.screenText();
   assert.ok(text.includes("screen:flat"), "perf.js's cost screen drew the flat payload");
   assert.ok(text.includes("Relative cost within each provider"));

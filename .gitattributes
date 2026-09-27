@@ -11,3 +11,4 @@
 # same reason.
 *.cmd text eol=crlf
 *.bat text eol=crlf
+plugins/swarm/src/serve/logos/*.svg text eol=lf

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { logosScript } from "../src/serve/logos.mjs";
 
 // live.js is a browser static, never imported as a module — load it in a bare
 // vm context the way the real page does (a `window` global and nothing else),
@@ -13,6 +14,7 @@ const PAGE_HTML = fileURLToPath(new URL("../src/serve/page.html", import.meta.ur
 function loadLive() {
   const context = { window: {} };
   vm.createContext(context);
+  vm.runInContext(logosScript(), context, { filename: "logos.js" });
   vm.runInContext(readFileSync(LIVE_JS, "utf8"), context, { filename: "live.js" });
   return context.window.swarmLive;
 }
@@ -301,4 +303,13 @@ test("page wiring: the runs fetch splices expandQuery inside q()'s argument, and
   assert.doesNotMatch(page, /q\((["'`])\/api\/runs\1\)\s*\+/, "never concatenated after q() — that drops the token");
   assert.doesNotMatch(page, /\+\s*[`"']\??expand=/, "never appended as a raw string anywhere");
   assert.match(page, /openProjects\.delete\(p\)[^\n}]*expandedProjects\.delete\(p\)/, "the collapse branch drops the group's expansion");
+});
+
+test("identityHtml shows the provider logo with escaped model text; the run and leaf screens wear the provider chip", () => {
+  const { identityHtml, identityLabel } = loadLive();
+  const task = { provider: "claude", model: "opus<test>" };
+  assert.equal(identityLabel(task), "claude/opus<test>");
+  assert.match(identityHtml(task), /^<svg class="plogo"[^>]*role="img"[^>]*aria-label="claude"[\s\S]*<\/svg>opus&lt;test&gt;$/);
+  assert.match(identityHtml(task, { chip: true, href: "#/x" }), /^<span class="pchip claude" data-href="#\/x"><svg class="plogo pdisc"[\s\S]*<\/svg>opus&lt;test&gt;<\/span>$/, "the leaf page wears the chip");
+  assert.equal(identityHtml({ model: "plain<&" }), "plain&lt;&amp;");
 });

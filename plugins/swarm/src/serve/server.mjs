@@ -19,6 +19,7 @@ import { projectGrouping } from "./grouping.mjs";
 import { buildSnapshot, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
 import { providerConfig } from "../providers.mjs";
+import { logosScript } from "./logos.mjs";
 import { matchDenylist } from "../manifest.mjs";
 
 const PAGE = fileURLToPath(new URL("./page.html", import.meta.url));
@@ -417,6 +418,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       if (!existsSync(PERF_JS)) return notFound(res);
       return send(res, 200, readFileSync(PERF_JS, "utf8"), "text/javascript; charset=utf-8");
     }
+    if (p === "/logos.js") return send(res, 200, logosScript(), "text/javascript; charset=utf-8");
     if (p === "/live.js") {
       if (!existsSync(LIVE_JS)) return notFound(res);
       return send(res, 200, readFileSync(LIVE_JS, "utf8"), "text/javascript; charset=utf-8");

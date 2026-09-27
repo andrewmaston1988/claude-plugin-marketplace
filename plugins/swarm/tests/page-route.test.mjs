@@ -190,7 +190,7 @@ function stripStringsAndComments(js) {
 
 const allNodes = (el, out = []) => { for (const n of el.childNodes || []) { out.push(n); allNodes(n, out); } return out; };
 const badgesIn = (el) => allNodes(el).filter((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes("cbadge"));
-const chipHref = (el, href) => allNodes(el).find((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).includes("chip") && n.getAttribute("data-href") === href);
+const chipHref = (el, href) => allNodes(el).find((n) => n.nodeType === 1 && (n.getAttribute("class") || "").split(/\s+/).some((c) => ["chip", "vchip", "pchip"].includes(c)) && n.getAttribute("data-href") === href);
 
 // A /api/perf payload with one measured model (two coins within its provider) and one
 // unmeasured tier (band null → the em dash, never a blank that reads as
@@ -222,7 +222,7 @@ const perfPayload = () => ({
   },
 });
 
-test("badges: the perf overall list carries the band badge and the unmeasured em dash", async () => {
+test("badges: the perf overall list carries no coin badge — coins live on the cost screen", async () => {
   const P = loadPage();
   await P.flush();
   P.respondList(listData(listRow()));
@@ -232,15 +232,9 @@ test("badges: the perf overall list carries the band badge and the unmeasured em
   await P.flush();
   P.respondPerf(perfPayload());
   await P.flush();
-  const badges = badgesIn(P.main);
-  assert.equal(badges.length, 2, "one badge per ranked row");
-  assert.deepEqual(badges.map((b) => b.getAttribute("data-coins") || b.textContent), ["2", "—"],
-    "measured reads its coins, unmeasured reads —, never a blank");
-  const coins = allNodes(badges[0]).filter((n) => n.nodeType === 1 && n.tagName?.toLowerCase() === "use");
-  assert.equal(coins.length, 2, "two coins stack two <use>s");
-  const svg = allNodes(badges[0]).find((n) => n.tagName?.toLowerCase() === "svg");
-  assert.equal(badges[0].getAttribute("style"), "height:26px", "the box is a full five-stack tall, so every stack shares its foot");
-  assert.equal(svg.getAttribute("height"), "15", "a two-stack is shorter than its box");
+  assert.equal(P.main.innerHTML.includes('class="plogo"'), false, "performance rank rows stay logo-free");
+  assert.ok(P.main.innerHTML.includes("m-dear"), "the ranked rows rendered");
+  assert.equal(badgesIn(P.main).length, 0, "rank rows carry no coin badge");
 });
 
 test("badges: provider-local cost points do not collapse into one ambiguous model badge", async () => {
@@ -263,8 +257,7 @@ test("badges: provider-local cost points do not collapse into one ambiguous mode
   P.respondPerf(payload);
   await P.flush();
   const badges = badgesIn(P.main);
-  assert.equal(badges.length, 1, "the model still gets the honest unmeasured marker");
-  assert.equal(badges[0].textContent, "—", "provider-local alternatives never become a misleading global multiplier");
+  assert.equal(badges.length, 0, "rank rows carry no coin badge, so no ambiguous multiplier either");
 });
 
 test("badges: run rows and leaf rows carry none — the screen a run is READ on stays clean", async () => {

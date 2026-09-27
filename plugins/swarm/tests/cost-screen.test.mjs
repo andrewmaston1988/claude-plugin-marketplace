@@ -19,7 +19,7 @@ test("one page per provider on the Performance switcher, the picked one active, 
   const { costScreen } = loadPerfViews();
   const data = { sections: [section("claude", [srow("sonnet", 1)]), section("ollama", [srow("glm", 2)])] };
   const first = costScreen(data, H);
-  assert.ok(first.includes('<div class="seg"><a data-href="#/cost/claude" class="on">claude</a><a data-href="#/cost/ollama">ollama</a></div>'));
+  assert.match(first, /<a data-href="#\/cost\/claude" class="on"><svg[^>]*class="plogo"[\s\S]*?claude<\/a><a data-href="#\/cost\/ollama">[\s\S]*?ollama<\/a>/);
   const picked = costScreen(data, H, "ollama");
   assert.ok(picked.includes('<a data-href="#/cost/ollama" class="on">'));
   assert.ok(picked.includes("glm") && !picked.includes("sonnet"), "only the picked provider's models — multipliers only compare within one");
@@ -35,7 +35,7 @@ test("each measured model is a ranked card: rank, name, multiplier, bar, verdict
   assert.match(html, /class="rk">1<[\s\S]*class="rk">2</, "ranked cheapest first");
   assert.ok(html.includes("3×") && html.includes("best value") && html.includes("beaten by a"));
   assert.ok(html.includes('data-href="#/perf/model/a"'), "a card taps through to its model page");
-  assert.ok(!html.includes("<svg"), "no chart canvas");
+  assert.ok(!html.replace(/<svg class="plogo"[\s\S]*?<\/svg>/g, "").includes("<svg"), "no chart SVG");
 });
 
 test("the bar is LOG-scaled over 0.5×–20×, not linear", () => {
@@ -116,4 +116,21 @@ test("when the best value is also the top scorer the hero says so, not a 100%-of
   const pts = [point("opus", 9.3, 2.5, { onFrontier: true }), point("sonnet", 8.2, 1)];
   const hero = heroOf(costScreen({ sections: [section("claude", [srow("opus", 2.5)], { points: pts, best: pts[0] })] }, H));
   assert.ok(hero.includes("the top score here, at the lowest cost that reaches it"));
+});
+
+test("Cost switcher carries provider logos and keeps labels escaped", () => {
+  const { costScreen } = loadPerfViews();
+  const html = costScreen({ sections: [section("claude", [srow("sonnet", 1)]), section('unknown"><script>', [srow("other", 2)])] }, H);
+  assert.match(html, /class="plogo"/);
+  assert.match(html, /unknown&quot;&gt;&lt;script&gt;/);
+  assert.doesNotMatch(html, /<script>/);
+});
+
+test("each measured card carries its coin badge in the bottom-right corner; an unmeasured card carries none", () => {
+  const { costScreen } = loadPerfViews();
+  const badge = (r) => `<span class="cbadge coins" data-coins="${r.coins}"></span>`;
+  const html = costScreen({ sections: [section("ollama", [srow("a", 1, { coins: 1 }), srow("b", 3, { coins: 3 }), srow("c", null)])] }, { ...H, badge });
+  assert.match(html, /<div class="cfoot"><div class="sub">[^<]*<\/div><span class="cbadge coins" data-coins="1"><\/span><\/div><\/div>/);
+  assert.match(html, /<div class="cfoot"><div class="sub">[^<]*<\/div><span class="cbadge coins" data-coins="3"><\/span><\/div><\/div>/);
+  assert.equal((html.match(/class="cbadge/g) || []).length, 2, "the unmeasured card has no badge");
 });

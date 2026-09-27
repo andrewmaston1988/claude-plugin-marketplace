@@ -101,7 +101,7 @@
   .rank .bar span { background:var(--accent); }
   .rank .bar.prov span { background:repeating-linear-gradient(90deg, var(--accent) 0 4px, transparent 4px 7px); }
   .rank .meta .tag { color:var(--faint); }
-  .chip[data-href], .chip[data-domain] { cursor:pointer; }
+  .chip[data-href], .chip[data-domain], .pchip[data-href], .vchip[data-href] { cursor:pointer; } .chips.hero { padding:0 16px; gap:6px; }
   .foot { padding:12px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
   /* view switcher: full width at one fixed height on every screen, pills sharing it
@@ -188,8 +188,8 @@
   .card.rcard { margin-top:10px; cursor:pointer; } .card.rcard.bad { border-color:var(--bad-bg); } .card.rcard.warn { border-color:var(--warn-bg); }
   .rcard .rh { display:flex; align-items:center; gap:8px; }
   .rcard .rdot { width:7px; height:7px; border-radius:50%; flex:none; } .rcard .rspin { flex:none; display:flex; margin:-4px -2px; } .rcard .rspin svg { width:16px; height:16px; }
-  .rcard .nm { flex:1; min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-  .rcard .tm { flex:none; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .rcard .nm { flex:0 1 auto; min-width:0; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .rcard .tm { flex:none; margin-left:auto; font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; }
   .rcard .rs { margin-top:8px; font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .rcard .rs .counts { margin-right:6px; }
   .rcard .rbar .bar { margin-top:12px; height:5px; border-radius:3px; }
@@ -227,18 +227,17 @@
   .ubar { margin-top:11px; height:5px; border-radius:3px; background:var(--surface-2); overflow:hidden; }
   .ubar span { display:block; height:100%; border-radius:3px; background:var(--accent); }
   .ubar span.warn { background:var(--warn); } .ubar span.bad { background:var(--bad); }
-  /* the cost badge rides the rank row's value side, never the name */
+  /* the cost badge rides the rank row's value side, never the name, and never its line: the grade's own line box centres the row, the stack's foot still the baseline */
   .valside { display:flex; align-items:baseline; gap:4px; }
   .cbadge { font-size:11px; flex:none; }
   .cbadge.none { color:var(--faint); }
-  .cbadge.coins { display:inline-flex; align-items:flex-end; }
+  .cbadge.coins { display:inline-flex; align-items:flex-end; } .cfoot { display:flex; justify-content:space-between; align-items:flex-end; gap:10px; }
   /* one gold coin, tinted per provider; an unknown provider stays gold */
   /* provider brand colours: the chips wear these; the coins are tinted to match */
   :root { --p-claude:#d97757; --p-codex:#3fb68b; --p-ollama:#c3c8d0; }
-  /* hero chips: one shape, coloured by --pc (provider brand, or the value verdict) */
-  .pchip, .vchip { font-size:11px; padding:3px 9px; border-radius:999px; color:var(--pc, var(--muted)); background:color-mix(in srgb, var(--pc, var(--muted)) 16%, transparent); border:1px solid color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); }
-  .pchip.claude { --pc:var(--p-claude); } .pchip.codex { --pc:var(--p-codex); } .pchip.ollama { --pc:var(--p-ollama); }
-  .vchip.good { --pc:var(--ok); } .vchip.bad { --pc:var(--bad); } .vchip.front { --pc:var(--accent); }
+  /* hero chips: one shape, coloured by --pc (provider brand, or the value verdict). A chip leading with its disc drops its left and vertical padding, so the disc is the pill's full inner height and forms its rounded start; a provider with no logo wears .pinit, a disc holding its initial */ .pchip, .vchip { font-size:11px; padding:3px 9px; border-radius:999px; color:var(--pc, var(--muted)); background:color-mix(in srgb, var(--pc, var(--muted)) 16%, transparent); border:1px solid color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); } .pchip:has(>.pdisc) { padding:0 10px 0 0; border:0; box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--pc, var(--muted)) 40%, transparent); display:inline-flex; align-items:center; gap:.4em; } .pchip:has(>.pdisc) .pdisc { width:calc(1lh + 8px); height:calc(1lh + 8px); margin:0; vertical-align:0; } .pinit { display:inline-flex; align-items:center; justify-content:center; flex:none; width:1.8em; height:1.8em; font-size:.75em; font-weight:600; border-radius:50%; color:var(--ink); background:color-mix(in srgb, var(--muted) 22%, transparent); border:1px solid color-mix(in srgb, var(--muted) 45%, transparent); }
+  /* the runs-tile chip stack: overlapping discs, largest tokens rightmost and on top. .pdisc's shadow and pulse are CSS — a <filter> def per chip would repeat ids across every chip in the page */ .pchip.claude { --pc:var(--p-claude); } .pchip.codex { --pc:var(--p-codex); } .pchip.ollama { --pc:var(--p-ollama); } .plogo { width:1.35em; height:1.35em; vertical-align:-.35em; margin-right:.15em; } .pstack { isolation:isolate; display:inline-flex; flex-direction:row-reverse; align-items:center; flex:none; } .pstack:not(:has(.pulse)) { opacity:.5; } .pitem { display:inline-flex; border-radius:50%; } .pitem+.pitem { margin-inline-end:-.6em; } .pitem.dim .pdisc { filter:brightness(.5) drop-shadow(0 1.5px 1.5px rgb(0 0 0/.24)); } .pitem.pulse .pdisc { animation:chipPulse 3.6s ease-in-out infinite; animation-delay:inherit; } .pchip .pdisc { filter:none; } .row .meta:has(.pdisc) { padding:1px; margin:-1px; } .pdisc { transform-box:fill-box; transform-origin:center; filter:drop-shadow(0 1.5px 1.5px rgb(0 0 0/.24)); }
+  .vchip.good, .vchip.ok { --pc:var(--ok); } .vchip.bad { --pc:var(--bad); } .vchip.run { --pc:var(--accent); } .vchip.warn { --pc:var(--warn); } .vchip.front { --pc:var(--accent); }
   .coins.claude svg { filter:hue-rotate(-24deg) saturate(.9); }
   .coins.codex svg { filter:hue-rotate(125deg) saturate(.8); }
   .coins.ollama svg { filter:grayscale(1) brightness(1.2); }
@@ -318,7 +317,7 @@
   main:has(.actionbar) { padding-bottom:calc(140px + env(safe-area-inset-bottom)); }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
   .flash { animation:pulse .8s ease-in-out 3; }
-  @keyframes dash { to { stroke-dashoffset:-56; } }
+  @keyframes dash { to { stroke-dashoffset:-56; } } @keyframes chipPulse { 0%,18%,100% { transform:scale(1); filter:drop-shadow(0 1.5px 1.5px rgb(0 0 0/.24)); } 7% { transform:scale(1.075); filter:drop-shadow(0 1.5px 2.8px rgb(0 0 0/.38)); } } @media (prefers-reduced-motion: reduce) { .pitem.pulse .pdisc { animation:none; } }
   /* Every running glyph (rail, banner, graph, card): the dot under the spinning ring pulses. */
   circle:has(+ .ring) { animation:pulse 1.6s ease-in-out infinite; }
   .ring { fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:14 42; animation:dash 1.4s linear infinite; }
@@ -346,7 +345,7 @@
 <header id="hdr" class="home"></header>
 <main id="main"></main>
 <nav id="nav" class="bnav"><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>swarm</a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>performance</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>cost</a></nav>
-<script>
+<script src="/logos.js"></script><script>
 (() => {
   const TOKEN = new URLSearchParams(location.search).get("t");
   const q = (p) => TOKEN ? `${p}${p.includes("?") ? "&" : "?"}t=${encodeURIComponent(TOKEN)}` : p;
@@ -559,7 +558,7 @@
   }
   function runRow(r, done, labels = groupLabels) {
     const shortProject = (p) => labels.get(p) || p;
-    const providerMeta = Object.entries(r.providerTokens || {}).filter(([provider]) => provider !== "unknown").map(([provider, tokens]) => `${provider} ${fmtTok(tokens)}`).join(" · ");
+    const stack = (r) => /* one disc per provider, largest first, overlapping: a live run's running providers pulse in front and the idle dim behind, a finished run's are all solid, largest on top; a provider with no logo wears its initial */ { const run = new Set(r.providersRunning || []); const e = Object.entries(r.providerTokens || {}).filter(([p]) => p !== "unknown").sort((a, b) => b[1] - a[1]); const o = done ? e : [...e.filter(([p]) => run.has(p)), ...e.filter(([p]) => !run.has(p))]; return o.length ? `<span class="pstack">${o.map(([p], i) => `<span class="pitem${done ? "" : run.has(p) ? " pulse" : " dim"}" style="z-index:${o.length - i}${!done && run.has(p) ? `;animation-delay:${i * 1.2}s` : ""}">${window.swarmLogos?.providerLogo(p, { chip: true, label: p }) || `<span class="pinit" role="img" aria-label="${esc(p)}">${esc(p[0].toUpperCase())}</span>`}</span>`).join("")}</span>` : ""; };
     // Navigation is a data-href picked up by one delegated listener — never an inline
     // onclick, whose quoted string a run or leaf name could break out of.
     const href = `#/run/${enc(r.project)}/${enc(r.name)}`;
@@ -571,10 +570,10 @@
       // closed it (killed, crashed, machine slept). Say so rather than "done".
       const stale = !r.finishedMs && !r.stopped;
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
-       return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)}${providerMeta ? ` · ${esc(providerMeta)}` : ""}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
+       return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)} · ${fmtTok(r.tokens)}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
     }
-    return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span><span class="tm">${elapsed}</span></div>`
-      + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${providerMeta ? esc(providerMeta) : fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
+    return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span>${stack(r)}<span class="tm">${elapsed}</span></div>`
+      + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
   }
 
   // ── run view: rows + rail ──────────────────────────────────────────────
@@ -624,7 +623,7 @@
   const stateOfGroup = (kids) => window.swarmLive.stateOfGroup(kids);
   // A clone session reads `X[i] local`, the clone's id faint; the full id stays the key.
   const sessionName = (id) => { const tilde = id.lastIndexOf("~"); return tilde > 0 ? `<span class="faint">${esc(id.slice(0, tilde))}</span> ${esc(id.slice(tilde + 1))}` : esc(id); };
-  const identityName = (task) => window.swarmLive?.identityLabel ? window.swarmLive.identityLabel(task) : (task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || ""));
+  const identityName = (task) => window.swarmLive?.identityLabel ? window.swarmLive.identityLabel(task) : (task?.provider && task?.model ? `${task.provider}/${task.model}` : (task?.model || "")); const identityHtml = (task, o) => window.swarmLive?.identityHtml ? window.swarmLive.identityHtml(task, o) : esc(identityName(task));
   const stripHtml = (kids, sq) => {
     const max = 40;
     const dots = kids.slice(0, max).map((k) => `<i class="${sq ? "sq " : ""}${cls(k.state)}"></i>`).join("");
@@ -634,9 +633,9 @@
 
   // The rail's running glyph — same geometry and .ring animation as dot() — sized into a banner circle.
   const SPIN = `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="5" fill="var(--accent)"/><circle class="ring" cx="12" cy="12" r="9"/></svg>`;
-  const tile = (kind, icon, title, sub, href) =>
+  const tile = (kind, icon, title, sub, href, subHtml = false) =>
     `<div class="banner ${kind}${href ? " tap" : ""}"${href ? ` role="link" data-key="banner" data-href="${esc(href)}"` : ""}>`
-    + `<span class="ic${icon === SPIN ? " bare" : ""}">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${esc(sub)}</div></div>`
+    + `<span class="ic${icon === SPIN ? " bare" : ""}">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${subHtml ? sub : esc(sub)}</div></div>`
     + (href ? `<span class="go">›</span>` : "") + `</div>`;
 
   // One run → one verdict tile, read off the run's own facts in severity order: the
@@ -725,15 +724,15 @@
         // screen, never flattened inline; its dot strip is the row's own summary.
         const t = r.task;
         const href = `#/run/${enc(run.project)}/${enc(run.name)}/node/${enc(t.id)}`;
-         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${esc(identityName(t))} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
+         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${identityHtml(t, { chip: true })} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       const t = r.task;
       const quietSecs = window.swarmLive.quietSecs(t, now);
       const quiet = quietSecs != null && quietSecs * 1000 > quietWarn;
       const right = window.swarmLive.elapsedText(t, now) ?? t.state;
-       const identity = identityName(t);
-       const sub = quiet ? `quiet ${quietSecs}s · ${esc(identity)}` : t.state === "running" && t.activity ? `${esc(identity)} · ${esc(t.activity)}` : t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : esc(identity);
+       const identity = identityName(t) ? identityHtml(t, { chip: true }) : "";
+       const sub = t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : identity;
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
       html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
@@ -875,7 +874,7 @@
     const tok = `${fmtTok(tokTotal(t.tokens || leaf?.tokens))} tokens`;
     const took = t.durationMs != null ? fmtDur(t.durationMs) : window.swarmLive.elapsedText(t, now) ?? "—";
     const last = t.lastEventMs ? ` · last event ${ago(t.lastEventMs)}` : "";
-    const identity = identityName(t);
+    const identity = identityName(t) ? identityHtml(t) : "";
     switch (t.state) {
       case "ok": return tile("ok", "✓", `Finished clean in ${took}`, tok);
       case "skipped": return tile("ok", "✓", "Skipped", "its condition was false — nothing ran");
@@ -894,19 +893,19 @@
       }
     }
     if (quietSecs != null) return tile("slow", "!", `No output for ${fmtDur(quietSecs * 1000)}`, `${tok} so far`);
-    return tile("", SPIN, `Running for ${took}`, `${identity ? `${identity} · ` : ""}${tok} so far`);
+    return tile("", SPIN, `Running for ${took}`, `${identity ? `${identity} · ` : ""}${esc(tok)} so far`, undefined, true);
   }
 
   function renderLeafHtml(run, leaf, id) {
     const now = Date.now();
     const t = run.tasks.find((x) => x.id === id) || { id, state: "pending", after: [] };
     const feeds = run.tasks.filter((x) => (x.after || []).includes(id)).map((x) => x.id);
-     const identity = identityName(t) || "agentless";
+     const identity = identityName(t) ? identityHtml(t) : "agentless"; const modelHref = `#/perf/model/${enc(t.model)}`, idChip = identityHtml(t, { chip: true, href: modelHref });
      const header = childHeader({ name: "leaf", project: run.project, run: run.name }, esc(id), id);
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
     let html = leafBannerHtml(t, leaf, now, quiet ? quietSecsVal : null);
-    html += `<div class="chips"><span class="chip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? `<span class="chip" data-href="#/perf/model/${enc(t.model)}">${esc(identity)}</span>` : ""}${t.kind && t.kind !== "leaf" ? `<span class="chip">${esc(t.kind)}</span>` : ""}</div>`;
+    html += `<div class="chips hero"><span class="vchip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? (idChip.startsWith("<span class=\"pchip") ? idChip : `<span class="vchip" data-href="${modelHref}">${identity}</span>`) : ""}${t.kind && t.kind !== "leaf" ? `<span class="vchip">${esc(t.kind)}</span>` : ""}</div>`;
     // Position in graph: what it waited on, what it unblocks, and the way back to the rail.
     const fchips = (ids, none) => ids.length ? ids.map((x) => `<span class="fchip">${esc(x)}</span>`).join("") : `<span>${none}</span>`;
     const order = run.tasks.filter((x) => x.kind !== "digest").map((x) => x.id);
@@ -1080,7 +1079,7 @@
   function segSwitcher(views, activeIndex) {
     // The indicator is one pill wide and slides by whole pill widths, so --i alone places it.
     const ind = activeIndex >= 0 ? `<span class="seg-ind"></span>` : "";
-    const pills = views.map((v, i) => `<a class="seg-label${i === activeIndex ? " on" : ""}" data-href="${esc(v.href)}">${esc(v.label)}</a>`).join("");
+    const pills = views.map((v, i) => `<a class="seg-label${i === activeIndex ? " on" : ""}" data-href="${esc(v.href)}">${v.icon || ""}${esc(v.label)}</a>`).join("");
     return `<div class="seg"><div class="seg-rail" style="--n:${views.length};--i:${Math.max(0, activeIndex)}">${ind}${pills}</div></div>`;
   }
   // Cost is its own screen off /api/cost, which serves with grading off: a price
@@ -1090,7 +1089,7 @@
     await loadPerfJs();
     return {
       header: headerHtml(TAB_TITLE.cost, "Relative cost within each provider"),
-      html: window.perfViews.costScreen(data, { esc, enc, seg: segSwitcher }, v.which),
+      html: window.perfViews.costScreen(data, { esc, enc, seg: segSwitcher, badge: modelBadge }, v.which),
     };
   }
   // Usage, Cost and Performance read slow endpoints and change gradually. Each is held
@@ -1251,14 +1250,14 @@
       const a = p.report.find((x) => x.aspect === aspect);
       if (!a || !a.cells.length) html += `<div class="empty">n=0 — nothing graded on ${esc(aspect)} yet. Absence is evidence.</div>`;
       else {
-        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional, badge: costOf.get(c.model) ?? null })), { podium: true });
+        html += rankList(a.cells.map((c) => ({ key: `m:${c.model}`, href: `#/perf/model/${enc(c.model)}`, label: esc(c.model), val: fmtScore(c.weighted), none: c.weighted == null, sub: cellSub(c, c.mean != null ? [`mean ${fmtScore(c.mean)}`] : []), frac: (c.weighted ?? 0) / 10, prov: c.provisional })), { podium: true });
         if (a.prior != null) html += `<div class="foot">ranked on the weighted score: the raw mean shrunk toward the prior ${a.prior.toFixed(2)} (mean of per-model means; k=${p.priorWeight}) — a thin cell is pulled most.${a.universal ? "" : " Capability aspect: graded only where a leaf stressed it."}</div>`;
       }
     } else {
       if (!p.overall.length) html += `<div class="empty">no graded leaves under ${esc(p.path)} yet.</div>`;
       else {
         await loadPerfJs();
-        html += window.perfViews.rankScreen(p.overall, { esc, enc, fmtScore, cellSub, rankList, costOf, universals: p.universals });
+        html += window.perfViews.rankScreen(p.overall, { esc, enc, fmtScore, cellSub, rankList, universals: p.universals });
       }
     }
     return { header, html };

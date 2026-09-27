@@ -6,12 +6,14 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
+import { logosScript } from "../../src/serve/logos.mjs";
 
 const PERF_JS = readFileSync(fileURLToPath(new URL("../../src/serve/perf.js", import.meta.url)), "utf8");
 
 export function loadPerfViews() {
   const sandbox = { window: {}, Math, JSON, Object, Array, Number, String, Map, Set, console };
   sandbox.globalThis = sandbox;
+  vm.runInNewContext(logosScript(), sandbox, { filename: "logos.js" });
   vm.runInNewContext(PERF_JS, sandbox, { filename: "perf.js" });
   return sandbox.window.perfViews;
 }
@@ -22,5 +24,5 @@ export const H = {
   fmtScore: (v) => (v == null ? "—" : v.toFixed(2)),
   chip: (label) => `<span class="chip">${label}</span>`,
   // The page's segSwitcher, reduced to what a view test reads: labels, hrefs, the active one.
-  seg: (views, active) => `<div class="seg">${views.map((v, i) => `<a data-href="${v.href}"${i === active ? ' class="on"' : ""}>${v.label}</a>`).join("")}</div>`,
+  seg: (views, active) => `<div class="seg">${views.map((v, i) => `<a data-href="${v.href}"${i === active ? ' class="on"' : ""}>${v.icon || ""}${String(v.label ?? "").replace(/[&<>\"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[c]))}</a>`).join("")}</div>`,
 };

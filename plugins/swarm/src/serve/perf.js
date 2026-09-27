@@ -95,6 +95,8 @@
   // One model's page as a dashboard: a hero card (graded, completed, overall, its cost coins, trophy or #n), compressed
   // aspect bars (with the domain picker in the widget header), its coverage
   // row, its reliability bar.
+  const providerLogo = (p, options) => window.swarmLogos?.providerLogo(p, options) ?? "";
+
   function modelDashboard(data, h) {
     const { esc, enc, fmtScore } = h;
     const { model, overall, rank, aspects, coverage, reliability, domainSelect, domain, cost } = data;
@@ -107,7 +109,9 @@
     const verdict = cost?.value === "best" ? ["best value", "good"] : cost?.value === "worst" ? ["worst value", "bad"] : cost?.onFrontier ? ["frontier", "front"] : null;
     // The bottom row is chips: the provider(s) first, in brand colour, then the value verdict.
     const providers = cost?.provider ? [cost.provider] : overall?.providers || [];
-    const chips = providers.map((p) => `<span class="pchip ${esc(p)}">${esc(p)}</span>`).join("") + (verdict ? `<span class="vchip ${verdict[1]}">${verdict[0]}</span>` : "");
+    // The disc is decorative — the provider name sits right after it in the pill, so
+    // the chip stays aria-hidden rather than announcing the provider twice.
+    const chips = providers.map((p) => `<span class="pchip ${esc(window.swarmLogos?.providerKey(p) ?? p)}">${providerLogo(p, { chip: true })}${esc(p)}</span>`).join("") + (verdict ? `<span class="vchip ${verdict[1]}">${verdict[0]}</span>` : "");
     // Below the podium the position reads RAG: 4th green, amber midway, last red.
     const rag = (pos, of) => {
       const t = of > 4 ? Math.max(0, Math.min(1, (pos - 4) / (of - 4))) : 0;
@@ -141,7 +145,7 @@
   // (`rankCells`), so this view only splits on it — the ranked list and the
   // toggle can never disagree about which rows are gone.
   function rankScreen(cells, h) {
-    const { esc, enc, fmtScore, cellSub, rankList, costOf, universals } = h;
+    const { esc, enc, fmtScore, cellSub, rankList, universals } = h;
     const short = (a) => a.slice(0, 5);
     const rows = (list) => list.map((c) => ({
       key: `m:${c.model}`,
@@ -152,7 +156,6 @@
       sub: cellSub(c, universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)),
       frac: (c.combined ?? 0) / 10,
       prov: c.provisional,
-      badge: costOf.get(c.model) ?? null,
     }));
     const listed = cells.filter((c) => !c.supersededBy);
     const held = cells.filter((c) => c.supersededBy);
@@ -187,7 +190,7 @@
     // One page per provider, switched like Performance's views — multipliers never
     // compare across providers. The card names this provider's best value; without
     // one it says why, never the cheapest instead.
-    const switcher = seg(sections.map((s) => ({ label: name(s), href: `#/cost/${enc(name(s))}` })), sections.indexOf(section));
+    const switcher = seg(sections.map((s) => ({ label: name(s), href: `#/cost/${enc(name(s))}`, icon: providerLogo(name(s)) })), sections.indexOf(section));
     const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
     // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
     // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
@@ -229,7 +232,7 @@
       const evidence = [verdict(r), r.thin ? "thin evidence" : null, isMeter(r) && r.measuredRequests != null ? `${r.measuredRequests} measured requests` : null].filter(Boolean).join(" · ");
       return `<div class="card crow" ${href}>${top(++rank, esc(fmtMult(r.mult)))}`
         + `<div class="cbar${r.thin ? " thin" : ""}"><span style="width:${pct(r.mult).toFixed(1)}%"></span></div>`
-        + `<div class="sub">${evidence}</div></div>`;
+        + `<div class="cfoot"><div class="sub">${evidence}</div>${h.badge ? h.badge(r) : ""}</div></div>`;
     }).join("");
     return head + cards;
   }
@@ -316,13 +319,13 @@
       : n <= WARN ? "Enough for a medium run, not a full swarm."
         : unread.length ? `Room for a full swarm — ${unread.join(", ")} not read.` : "Room for a full swarm.");
     const hero = best
-      ? `<div class="uhero ${tone(best.r.left)}"><div class="lbl">MOST LEFT THIS ${week ? "WEEK" : "SESSION"} · ${esc(best.p.provider.toUpperCase())}</div>`
+      ? `<div class="uhero ${tone(best.r.left)}"><div class="lbl">MOST LEFT THIS ${week ? "WEEK" : "SESSION"} · ${providerLogo(best.p.provider)}${esc(best.p.provider.toUpperCase())}</div>`
         + `<div class="fig"><b>${best.r.left}%</b><span>left</span></div>${bar(best.r.left)}<div class="sub">${esc(heroNote(best.r.left))}</div></div>`
       : "";
     const cards = rows.map((p) => {
       const r = reading(p);
       // A held-over reading (the endpoint refused a fresh one) keeps its figures, tagged.
-      const nm = `<span class="nm">${esc(p.provider)}${p.usage?.provenance === "stale" ? '<span class="chip warn stale">stale</span>' : ""}</span>`;
+      const nm = `<span class="nm">${providerLogo(p.provider)}${esc(p.provider)}${p.usage?.provenance === "stale" ? '<span class="chip warn stale">stale</span>' : ""}</span>`;
       if (!r) return `<div class="card upc unread"><div class="top">${nm}</div><div class="sub">${esc(`not read — ${whyNot(p)}`)}</div></div>`;
       return `<div class="card upc ${tone(r.left)}"><div class="top">${nm}<span class="val ${tone(r.left)}">${r.left}%</span></div>${bar(r.left)}`
         + (r.note ? `<div class="sub">${esc(r.note)}</div>` : "") + "</div>";

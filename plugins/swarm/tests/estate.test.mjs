@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, utimesSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -14,7 +14,7 @@ const QUIET_WARN_MS = 60_000;
 const GOLDEN = JSON.parse(readFileSync(fileURLToPath(new URL("./fixtures/estate-golden.json", import.meta.url)), "utf8"));
 
 function withoutProviderProjection(rows) {
-  return rows.map(({ providers, providerTokens, ...row }) => row);
+  return rows.map(({ providers, providerTokens, providersRunning, ...row }) => row);
 }
 
 function seedFinished(home, project, name, ageHours) {
@@ -94,5 +94,29 @@ test("E3: filterRuns over the snapshot matches the pre-change handler's captured
     const expanded = filterRuns(snapshot.rows, { finishedPerProject: 3, expanded: new Set(["C--code-alpha"]) });
     assert.deepEqual(withoutProviderProjection(expanded.rows), GOLDEN.expanded.runs, "expand=C--code-alpha matches the captured handler output");
     assert.deepEqual(expanded.finishedTotals, GOLDEN.expanded.finishedTotals);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
+// The run tiles' chip stack needs to know which providers are ACTIVE — a provider
+// with a leaf in state `running`. Read off run.log, so it is the run's own truth,
+// not the estate's guess from mtime.
+test("E4: providersRunning names exactly the providers with a leaf in state running", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-estate-e4-"));
+  try {
+    const live = join(home, "runs", "C--code-alpha", "live-1");
+    mkdirSync(live, { recursive: true });
+    writeFileSync(join(live, "run.log"), [
+      '{"ts":"2026-09-05T01:00:00Z","event":"run-start","tasks":[{"id":"a","model":"glm-5.3:cloud"},{"id":"b","model":"sonnet"}]}',
+      '{"ts":"2026-09-05T01:00:01Z","id":"a","state":"running"}',
+      '{"ts":"2026-09-05T01:00:02Z","id":"b","state":"ok","tokens":{"input":10,"output":5}}',
+    ].join("\n"), "utf8");
+    const t = (NOW - 5000) / 1000;
+    utimesSync(join(live, "run.log"), t, t);
+    touchHeartbeat(live, new Date(NOW - 5000).toISOString(), process.pid);
+    utimesSync(heartbeatPath(live), t, t);
+
+    const s = buildSnapshot(home, new Map(), { now: NOW, heartbeatMs: HEARTBEAT_MS, quietWarnMs: QUIET_WARN_MS });
+    assert.deepEqual(s.rows[0].providers, ["ollama", "claude"], "both providers ran");
+    assert.deepEqual(s.rows[0].providersRunning, ["ollama"], "only the provider with a running leaf is active");
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
