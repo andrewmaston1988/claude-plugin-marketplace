@@ -80,3 +80,16 @@ export function runCliAsync(args, { cwd, env = {}, quotaPreflight = false } = {}
     });
   });
 }
+
+// The dispatch gate refuses `run` on a manifest whose exact bytes were never
+// validated, so every run-path row validates first — same ref, same --args. A
+// refusal here is a broken fixture, not the row's subject: throw rather than let
+// the row assert against the gate's own message.
+export function runValidated(args, opts = {}) {
+  const ref = args[1];
+  if (!ref || ref.startsWith("--")) return opts.async ? runCliAsync(args, opts) : runCli(args, opts);
+  const i = args.indexOf("--args");
+  const v = runCli(["validate", ref, ...(i < 0 ? [] : ["--args", args[i + 1]])], opts);
+  if (v.status !== 0) throw new Error(`runValidated: validate refused ${ref} (${v.status}):\n${v.stdout}${v.stderr}`);
+  return opts.async ? runCliAsync(args, opts) : runCli(args, opts);
+}
