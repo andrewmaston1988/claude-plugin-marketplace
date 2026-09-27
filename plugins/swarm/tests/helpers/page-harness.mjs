@@ -231,7 +231,12 @@ export function loadPage(opts = {}) {
     location, hdr, main, nav, perfTab: chrome["#nav a[href='#/perf']"], flush, scrolls,
     // A tap on one delegated target: page.html's click listener resolves e.target.closest(),
     // so the caller names the element the tap lands on rather than the listener walking up.
-    tap: (el) => main.listeners.click.forEach((f) => f({ target: { closest: () => el } })),
+    // closest() honours the page's own `[data-x], …` selector, so a target it does not list is not tapped.
+    tap: (el) => main.listeners.click.forEach((f) => f({ target: { closest: (sel) => {
+      const attrs = [...sel.matchAll(/\[([\w-]+)\]/g)].map((m) => m[1]);
+      for (let n = el; n && n.nodeType === 1; n = n.parentNode) if (attrs.some((a) => n.hasAttribute(a))) return n;
+      return null;
+    } } })),
     fireHashchange: () => winListeners.hashchange.forEach((f) => f()),
     fireSse: (t, d) => (esListeners[t] || []).forEach((f) => f({ data: d || "{}" })),
     esCount: () => esInstances.length,
