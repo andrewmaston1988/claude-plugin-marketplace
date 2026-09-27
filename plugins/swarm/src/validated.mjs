@@ -6,11 +6,11 @@ import { join } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { canonicalize } from "./manifest.mjs";
 
-export function validatedDir(env = process.env) {
+function validatedDir(env = process.env) {
   return join(swarmHome(env), "validated");
 }
 
-export function markerPath(key, env = process.env) {
+function validationMarkerPath(key, env = process.env) {
   return join(validatedDir(env), key);
 }
 
@@ -32,7 +32,7 @@ export function validationKey(files, args = null) {
 }
 
 export function isValidated(key, env = process.env) {
-  return existsSync(markerPath(key, env));
+  return existsSync(validationMarkerPath(key, env));
 }
 
 // `validate`'s success path. Returns 0 so the verb can `return markValidated(...)`
@@ -40,7 +40,7 @@ export function isValidated(key, env = process.env) {
 export function markValidated(plan, args) {
   const key = validationKey(plan.manifestFiles, args);
   mkdirSync(validatedDir(), { recursive: true });
-  writeFileSync(markerPath(key), JSON.stringify({ validatedAt: new Date().toISOString() }) + "\n");
+  writeFileSync(validationMarkerPath(key), JSON.stringify({ validatedAt: new Date().toISOString() }) + "\n");
   return 0;
 }
 
@@ -49,6 +49,7 @@ export function markValidated(plan, args) {
 // here must name the exact command — args included — that would have covered it.
 export function unvalidatedRefusal(plan, args, ref) {
   if (isValidated(validationKey(plan.manifestFiles, args))) return null;
-  const shown = args ? `${ref} --args '${JSON.stringify(args)}'` : ref;
-  return `swarm: ${shown} has not been validated as written — run \`swarm validate ${shown}\` and read its seats block, then run again.`;
+  // POSIX single-quote escaping, so an apostrophe in an args value survives the paste.
+  const shown = args ? `${ref} --args '${JSON.stringify(args).replace(/'/g, "'\\''")}'` : ref;
+  return `swarm: ${shown} has not been validated as written — run \`swarm validate ${shown}\` and read what it prints (the seats block, when grading is on), then run again.`;
 }

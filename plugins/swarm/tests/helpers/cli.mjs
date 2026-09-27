@@ -53,7 +53,8 @@ export function runCli(args, { cwd, env = {}, quotaPreflight = false } = {}) {
 
 // Async variant for tests that host a stub HTTP server in THIS process:
 // spawnSync would block the event loop and the server could never respond.
-export function runCliAsync(args, { cwd, env = {}, quotaPreflight = false } = {}) {  const { configDir, childEnv } = configOverlay(env, quotaPreflight);
+export function runCliAsync(args, { cwd, env = {}, quotaPreflight = false } = {}) {
+  const { configDir, childEnv } = configOverlay(env, quotaPreflight);
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd,

@@ -118,7 +118,7 @@ unguarded, and the governance roots in `~/.swarm/config.json` are the only conta
 swarm models              # discover launchable rows from enabled providers — run first
 swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/manifests)
 swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, forEach/when/compute shapes + expressions
-swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background
+swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background. Refuses unless `validate` passed on the same bytes + args (markers in ~/.swarm/validated/)
 swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
 swarm quota                # Anthropic plus cached cloud-provider utilization
 swarm usage [--provider X] # live usage from enabled provider capabilities

@@ -184,6 +184,17 @@ test("validated: --args with a changed value refuses", () => {
 
 // A registry name is a lookup, so validating by name must cover running by name
 // — the name is never a second key.
+test("refusal: an args value holding an apostrophe still prints a pasteable command", () => {
+  const w = world({ tasks: [{ id: "a", prompt: "{{args.a}}", provider: "claude", model: MODEL }] });
+  try {
+    const r = run(w, ["--args", `{"a":"it's"}`]);
+    equal(r.status, 1, r.stdout + r.stderr);
+    ok(r.stderr.includes(`--args '{"a":"it'\\''s"}'`), r.stderr);
+  } finally {
+    cleanup(w);
+  }
+});
+
 test("validated: a manifest validated by registry name runs by that name", () => {
   const w = world();
   try {
