@@ -114,10 +114,9 @@ async function costBands(cfg = getConfig()) {
   return resolveBands(providerConfig(cfg, "ollama")?.cloud?.ollama?.costBands);
 }
 
-// Read usage through registered provider capabilities. `live` means the adapter
-// may fetch at all — the 5-minute cache still governs whether it does; `force`
-// is the operator's own refresh, and only `swarm usage --provider` asks for it.
-// Hooks and validation leave both off and read the cache alone.
+// Read usage through registered provider capabilities. `live` lets an adapter
+// fetch at all — the cache still governs whether it does; `force` is the
+// operator's refresh, which only `swarm usage --provider` asks for.
 export async function readProviderUsage(cfg, { registry = defaultProviderRegistry(), live = false, force = false, provider, env = process.env, fetchImpl = globalThis.fetch, quotaCheck } = {}) {
   const { getUsage } = await import("../src/ollama-usage.mjs");
   const { normalizeProviderUsage } = await import("../src/usage.mjs");
@@ -964,8 +963,7 @@ async function cmdUsage(rest = [], {
   // `anthropic`, so either name selects it.
   const selected = getFlag("provider", rest);
   const provider = selected === "anthropic" ? "claude" : selected;
-  // The documented refresh command: `--provider` ignores the cache's age, so a
-  // reader who asks for a figure gets the provider's own answer, not a banked one.
+  // The refresh command: `--provider` ignores the cache's age.
   const providerReading = await readProviderUsage(cfg, { registry, env, fetchImpl, live: true, force: true, quotaCheck, ...(provider ? { provider } : {}) });
   const usages = providerReading.usages;
   for (const [provider, message] of Object.entries(providerReading.errors)) write(`${provider}: unavailable (${message})`);

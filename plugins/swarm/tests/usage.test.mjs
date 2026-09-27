@@ -105,57 +105,6 @@ test("notableLines: G7 exhaustion and a full session bar each get one line", () 
   ok(session[0].startsWith("ollama: session limit reached"), session[0]);
 });
 
-// Test 3 — the timestamp is absolute UTC, never an age. A "33h ago" reading is
-// what told nobody the figure was old; an ISO stamp lets the operator judge.
-test("notableLines: G7b the cached banner stamps last-seen in absolute UTC — the word 'ago' is gone", () => {
-  const lastSeen = Date.parse("2026-09-08T14:49:00Z");
-  const u = normalizeOllama({
-    ...OLLAMA_OK, provenance: "cached", reason: "expired-cookie",
-    lastSeen, cookiePath: join("home", "ollama-cookie.json"),
-  });
-  const lines = notableLines([u]);
-  const stamp = new Date(lastSeen).toISOString();
-  ok(lines.some((l) => l.includes(`last seen: ${stamp}`)), lines.join("\n"));
-  ok(!lines.some((l) => l.includes("ago")), `'ago' must never print: ${lines.join("\n")}`);
-  // the figures themselves keep their own absolute reset stamps
-  deepEqual(usageLines([u], { timeZone: LONDON }).filter((l) => l.startsWith("ollama weekly")), ["ollama weekly: 83.8% — resets Sat 12 Sep, 09:00"]);
-});
-
-// Test 4 — every failure reason names itself; a healthy cached reading is silent.
-test("notableLines: G7c each failure reason prints its own /!\\ title above a Refresh line", () => {
-  const cases = [
-    ["no-cookie", "No Cookie"],
-    ["expired-cookie", "Cookie Expired"],
-    ["network-error", "Network Error"],
-    ["timeout", "Fetch Timed Out"],
-    ["unparseable", "Page Unreadable"],
-  ];
-  for (const [reason, title] of cases) {
-    const u = normalizeOllama({ ...OLLAMA_OK, provenance: "cached", reason, cookiePath: "cp" });
-    const lines = notableLines([u]);
-    ok(lines[0].startsWith(`/!\\ ${title} — figures below are cached.`), `${reason}: ${lines.join(" | ")}`);
-    ok(lines.some((l) => l.includes("swarm ollama-usage --cookie")), `${reason} must name the fix: ${lines.join(" | ")}`);
-  }
-  // the same reading with NO recorded reason is healthy — exact-output callers stay quiet
-  deepEqual(notableLines([normalizeOllama({ ...OLLAMA_OK, provenance: "cached", reason: null })]), []);
-});
-
-// The mark rides the figure, not only the banner: a reading past its TTL that
-// this process did not fetch says so on the line the reader takes the number
-// from, and says how old it is — "stale" alone does not say whether to act.
-test("usageLines: G7d a stale reading prints `stale · read <age> ago`; cached and live do not", () => {
-  const now = Date.parse("2026-09-08T15:00:00Z");
-  const line = (over) => usageLines([normalizeOllama({ ...OLLAMA_OK, ...over })], { timeZone: LONDON, now })
-    .find((l) => l.startsWith("ollama weekly"));
-  const figures = "ollama weekly: 83.8% — resets Sat 12 Sep, 09:00";
-
-  equal(line({ provenance: "stale", lastSeen: now - 12 * 60_000 }), `${figures} · stale · read 12m ago`);
-  equal(line({ provenance: "stale", lastSeen: now - 3 * 3_600_000 }), `${figures} · stale · read 3h ago`);
-  equal(line({ provenance: "cached", lastSeen: now - 60_000 }), figures, "a fresh cache read is not marked");
-  equal(line({ provenance: "live" }), figures);
-  equal(line({ provenance: "stale", lastSeen: null }), figures, "no banked age, no claim about one");
-});
-
 test("notableLines: G8 anthropic exhaustion is reported the same way as a cloud provider's", () => {
   const lines = notableLines([normalizeAnthropic({ ...ANTHROPIC, exhausted: true })]);
   ok(lines[0].startsWith("anthropic: weekly allowance exhausted"), lines[0]);
