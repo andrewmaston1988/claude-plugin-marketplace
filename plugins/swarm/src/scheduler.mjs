@@ -32,7 +32,7 @@ import { extractCitations, verifyCitations, citationErrorLines, annotateCitation
 import { removeCachedModel, ENTITLEMENT_RE } from "./discovery.mjs";
 import { ALIVE_STATES, cloneId, childId, parseCloneId } from "./runlog.mjs";
 import * as defaultWorktree from "./worktree.mjs";
-import { waveDepths, cloneTreeParent } from "./waves.mjs";
+import { settleInline } from "./inline-steps.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 const OK_STATES = new Set(["ok", "skipped"]);
@@ -1048,8 +1048,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     const locals = new Set(node.childPlan.tasks.map((c) => c.id));
     const remap = (id) => childId(node.id, id);
     const hasItem = node.manifestItem !== undefined;
-    // the node's upstream stays its wave edge: a root child seats in the node's wave, as the dashboard draws it
-    const upstream = node.waveAfter || [...node.after];
+    const upstream = node.waveAfter || [...node.after]; // the node's own wave edge, kept for its root children
     // {{result:local}} / {{resultPath:local}} references to sibling child tasks are
     // rewritten to the spliced ids — in the prompt AND in each mustRead entry's
     // path/index string, so a verifier's `mustRead: ["{{resultPath:finder}}"]`
@@ -1470,35 +1469,15 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       }
     }
 
-    // Settle every ready inline node before spending any seat. Re-scan after
-    // inline changes so expansions and aggregates can unlock more work now.
     let progressed = false;
     if (!stopRequested) {
-      let inlineProgress;
-      let readyLeaves = [];
-      do {
-        inlineProgress = false;
-        readyLeaves = [];
-        for (const t of tasks) {
-          if (state.get(t.id) !== "pending" || !depsSatisfied(t)) continue;
-          if (!passesWhen(t)) { inlineProgress = progressed = true; continue; }
-          if (t.forEach) { expandForEach(t); inlineProgress = progressed = true; continue; }
-          if (t.childPlan) { expandManifest(t); inlineProgress = progressed = true; continue; }
-          if (t.aggregate) { runAggregate(t); inlineProgress = progressed = true; continue; }
-          if (t.aggregateManifest) { runManifestAggregate(t); inlineProgress = progressed = true; continue; }
-          if (t.compute) { runCompute(t); inlineProgress = progressed = true; continue; }
-          if (t.integrate) { runIntegrate(t); inlineProgress = progressed = true; continue; }
-          readyLeaves.push(t);
-        }
-      } while (inlineProgress);
-
-      const depths = waveDepths(tasks, {
-        afterOf: (task) => task.waveAfter || task.after,
-        parentOf: (task) => cloneTreeParent(task.id),
+      const seats = settleInline(tasks, {
+        pending: (t) => state.get(t.id) === "pending",
+        depsSatisfied, passesWhen, expandForEach, expandManifest,
+        runAggregate, runManifestAggregate, runCompute, runIntegrate,
       });
-      const index = new Map(tasks.map((task, i) => [task.id, i]));
-      readyLeaves.sort((a, b) => depths.get(a.id) - depths.get(b.id) || index.get(a.id) - index.get(b.id));
-      for (const t of readyLeaves) {
+      progressed = seats.progressed;
+      for (const t of seats.ready) {
         if (running.size >= plan.concurrency) break;
         // Spawn floor (D3): only once something is already running — the very
         // first leaf of a run must never be gated by the machine's headroom.

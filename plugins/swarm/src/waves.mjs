@@ -33,3 +33,17 @@ export function waveDepths(tasks, { afterOf = (task) => task.after || [], parent
   for (const task of tasks) depthOf(task.id);
   return depth;
 }
+
+// The launch order of a ready set: shallower waves first, ties keeping the
+// plan's own order. A task's wave edge is `waveAfter` where its `after` has been
+// rewritten to point at its own children — a manifest node splices its children
+// in and a forEach parent re-points at its clones, and in both cases the upstream
+// the task was seated on stays the edge that seats it.
+export function seatOrder(readyLeaves, tasks) {
+  const depths = waveDepths(tasks, {
+    afterOf: (task) => task.waveAfter || task.after,
+    parentOf: (task) => cloneTreeParent(task.id),
+  });
+  const index = new Map(tasks.map((task, i) => [task.id, i]));
+  return readyLeaves.sort((a, b) => depths.get(a.id) - depths.get(b.id) || index.get(a.id) - index.get(b.id));
+}
