@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { equal, ok, rejects } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { askLeaf } from "../src/ask.mjs";
@@ -266,5 +267,31 @@ test("askLeaf: a top-level list that does not cover originalCwd refuses — Clau
     equal(spawn.calls.length, 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Same rule as the manifest and dispatch gates: a leaf approved in a swarm worktree is
+// judged by the repo that tree was cut from. Real git, so ask and the dispatch it drives
+// both resolve the same tree.
+test("askLeaf: a leaf approved in a swarm worktree of an allowed repo can be asked; a stranger repo's cannot", async () => {
+  const root = mkdtempSync(join(tmpdir(), "swarm-ask-repo-"));
+  const home = mkdtempSync(join(tmpdir(), "swarm-ask-home-"));
+  const wt = join(home, "runs", "repo", "run1", "wt-a");
+  const git = (...a) => execFileSync("git", ["-C", root, ...a], { stdio: "ignore" });
+  git("init", "-q"); git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init");
+  git("worktree", "add", "-q", "--detach", wt);
+  const dir = setup({ cwd: wt, originalCwd: wt });
+  const prevHome = process.env.SWARM_HOME;
+  process.env.SWARM_HOME = home;
+  try {
+    const cfg = { ...CFG, providers: { claude: { enabled: true, allowedRoots: [root] } } };
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", cfg, io: makeIo(spawn) });
+    equal(r.answer, "the follow-up answer");
+    const stranger = { home, repoToplevel: () => null };
+    await rejects(() => askLeaf({ resultsDir: dir, taskId: "leaf", question: "?", cfg, io: makeIo(spawn), _governanceIo: stranger }), /governance/i);
+  } finally {
+    if (prevHome === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prevHome;
+    for (const d of [dir, root, home]) rmSync(d, { recursive: true, force: true });
   }
 });

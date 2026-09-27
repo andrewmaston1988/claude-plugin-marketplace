@@ -290,7 +290,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
       }, cfg, cache, "digest", errors, providerRegistry);
       if (digestIdentity) {
         const before = errors.length;
-        checkGovernance(digestIdentity.provider, raw.digest.model, cwd, "digest", cfg, errors);
+        checkGovernance(digestIdentity.provider, raw.digest.model, cwd, "digest", cfg, errors, resolvedIo);
         digestGovernanceDenied = errors.length > before;
         checkHeadroom(digestIdentity.provider, raw.digest.model, "digest", headroom, errors, warnings);
       }

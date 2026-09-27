@@ -461,3 +461,22 @@ test("a leaf with no allowedTools still gets MCP, with no leading comma", () => 
   const d = buildDispatch({ provider: "claude", model: "claude-sonnet-5", allowedTools: "" }, "p", CFG, { _mcpTools: fake });
   equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "mcp__scout");
 });
+
+// A task whose cwd is a swarm-made worktree must pass dispatch exactly when it passes the
+// manifest gate — judged by the repo the tree was cut from, never by the literal path.
+test("dispatch: a swarm worktree of an allowed repo dispatches; one of a stranger repo is refused", () => {
+  const root = mkdtempSync(join(tmpdir(), "swarm-dispatch-repo-"));
+  const home = mkdtempSync(join(tmpdir(), "swarm-dispatch-home-"));
+  try {
+    const cfg = { allowedRoots: [root], providers: { claude: { enabled: true } } };
+    const wt = join(home, "runs", "repo", "run1", "wt-a");
+    const base = task({ cwd: wt, originalCwd: wt });
+    const gov = (repo) => ({ _mcpTools: NO_MCP, _governanceIo: { home, repoToplevel: () => repo } });
+    equal(buildDispatch(base, "p", cfg, gov(root)).argv[0], "claude");
+    throws(() => buildDispatch(base, "p", cfg, gov(resolve(root, "..", "swarm-stranger-repo"))), /governance/i);
+    throws(() => buildDispatch(base, "p", cfg, gov(null)), /governance/i);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});

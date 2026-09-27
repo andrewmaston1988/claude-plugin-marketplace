@@ -4,6 +4,7 @@ import { writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { basename, join } from "node:path";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask } from "./helpers/manifest-fixtures.mjs";
+import { isUnderRoot } from "../src/roots.mjs";
 
 // ── governance gate ───────────────────────────────────────────────────────────
 
@@ -471,6 +472,142 @@ test("governance: a legacy config with only per-provider keys dispatches unchang
   } finally {
     rmSync(repo, { recursive: true, force: true });
     rmSync(elsewhere, { recursive: true, force: true });
+  }
+});
+
+// ── G: a swarm-made worktree is judged by the repo it was cut from ────────────
+// A leaf worktree lives under ~/.swarm/runs/<repo>/<run>/wt-*, outside every allowedRoots
+// entry, so the literal-cwd test refused swarm's own trees for every provider. These cases
+// stub io.repoToplevel and io.home, so no real git runs.
+
+// The governance io seam: the swarm home the gate may widen inside, and the repo every
+// tree under it resolves to. A path outside home answers itself, which is how the run's
+// own manifest cwd stays an allowed repo in every case.
+const govIo = (home, repoOfTree) => ({
+  home,
+  repoToplevel: (p) => (isUnderRoot(p, home) ? repoOfTree : p),
+});
+
+// G1 — the literal path is still the first test: a cwd already under a root must not
+// cost a git probe. The task cwd is a SUBDIR so it is distinguishable from the manifest
+// cwd, which manifest.mjs legitimately probes for the run's own toplevel.
+test("governance G1: a cwd already under a root passes without probing git for its repo", () => {
+  const repo = tmp();
+  const inside = join(repo, "sub");
+  mkdirSync(inside, { recursive: true });
+  try {
+    const probed = [];
+    const cfg = { ...CFG, providers: { ollama: { enabled: true, allowedRoots: [repo] } } };
+    const p = writeManifest(repo, { tasks: [ollamaTask({ cwd: inside })] });
+    const plan = loadManifest(p, cfg, repo, {
+      io: { home: join(repo, "no-such-home"), repoToplevel: (x) => { probed.push(x); return repo; } },
+    });
+    equal(plan.tasks[0].cwd, inside);
+    ok(!probed.includes(inside), `governance probed git for an in-root cwd: ${probed.join("|")}`);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// G2 — the widening: a tree under swarm's own home passes when the repo it belongs to is
+// under the provider's roots. RED against the literal-cwd-only predicate.
+test("governance G2: a swarm worktree of an allowed repo passes", () => {
+  const repo = tmp();
+  const home = tmp();
+  const wt = join(home, "runs", "repo", "run1", "wt-a");
+  mkdirSync(wt, { recursive: true });
+  try {
+    const cfg = { ...CFG, providers: { ollama: { enabled: true, allowedRoots: [repo] } } };
+    const p = writeManifest(repo, { tasks: [ollamaTask({ cwd: wt })] });
+    equal(loadManifest(p, cfg, repo, { io: govIo(home, repo) }).tasks[0].cwd, wt);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// G3 — the tree's repo is what binds, so a repo outside the roots keeps the refusal and
+// the message still names the literal cwd the operator has to go and look at.
+test("governance G3: a swarm worktree whose repo is outside the roots is refused, naming the cwd", () => {
+  const repo = tmp();
+  const stranger = tmp();
+  const home = tmp();
+  const wt = join(home, "runs", "stranger", "run1", "wt-a");
+  mkdirSync(wt, { recursive: true });
+  try {
+    const cfg = { ...CFG, providers: { ollama: { enabled: true, allowedRoots: [repo] } } };
+    const p = writeManifest(repo, { tasks: [ollamaTask({ cwd: wt })] });
+    const errs = errorsOf(() => loadManifest(p, cfg, repo, { io: govIo(home, stranger) }));
+    ok(errs.some((e) => e.includes("data governance") && e.includes(wt)), errs.join("|"));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(stranger, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// G4 — the widening resolves the repo, it does not blanket-allow ~/.swarm: per-provider
+// roots still bind, so a codex task narrowed to rootA may not run in a rootB tree.
+test("governance G4: per-provider roots still bind inside the swarm home", () => {
+  const rootA = tmp();
+  const rootB = tmp();
+  const home = tmp();
+  const wt = join(home, "runs", "b", "run1", "wt-a");
+  mkdirSync(wt, { recursive: true });
+  try {
+    const cfg = {
+      ...CFG,
+      allowedRoots: [rootA, rootB],
+      providers: { claude: { enabled: true }, codex: { enabled: true, allowedRoots: [rootA] } },
+    };
+    const io = govIo(home, rootB);
+    // claude has no entry of its own, so it inherits both roots and the tree passes.
+    const pc = writeManifest(rootA, { tasks: [claudeTask({ cwd: wt })] });
+    equal(loadManifest(pc, cfg, rootA, { io }).tasks[0].cwd, wt);
+    // codex narrows to rootA, so the same tree is refused for codex.
+    const px = writeManifest(rootA,
+      { tasks: [{ id: "x", prompt: "p", provider: "codex", model: "gpt-5-codex", cwd: wt }] }, "codex.json");
+    const errs = errorsOf(() => loadManifest(px, cfg, rootA, { io }));
+    ok(errs.some((e) => e.includes("providers.codex.allowedRoots") && e.includes(wt)), errs.join("|"));
+  } finally {
+    rmSync(rootA, { recursive: true, force: true });
+    rmSync(rootB, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// G5 — the widening is the swarm home ONLY: a checkout of an allowed repo parked
+// anywhere else still fails.
+test("governance G5: a worktree outside the swarm home is not widened", () => {
+  const repo = tmp();
+  const home = tmp();
+  const stray = tmp();
+  try {
+    const cfg = { ...CFG, providers: { ollama: { enabled: true, allowedRoots: [repo] } } };
+    const p = writeManifest(repo, { tasks: [ollamaTask({ cwd: stray })] });
+    const errs = errorsOf(() => loadManifest(p, cfg, repo, { io: govIo(home, repo) }));
+    ok(errs.some((e) => e.includes("data governance") && e.includes(stray)), errs.join("|"));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+    rmSync(stray, { recursive: true, force: true });
+  }
+});
+
+// G6 — an orphaned tree has no repo to vouch for it, so it stays refused.
+test("governance G6: a swarm tree with no resolvable repo is refused", () => {
+  const repo = tmp();
+  const home = tmp();
+  const wt = join(home, "runs", "gone", "run1", "wt-a");
+  mkdirSync(wt, { recursive: true });
+  try {
+    const cfg = { ...CFG, providers: { ollama: { enabled: true, allowedRoots: [repo] } } };
+    const p = writeManifest(repo, { tasks: [ollamaTask({ cwd: wt })] });
+    const errs = errorsOf(() => loadManifest(p, cfg, repo, { io: govIo(home, null) }));
+    ok(errs.some((e) => e.includes("data governance") && e.includes(wt)), errs.join("|"));
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
   }
 });
 
