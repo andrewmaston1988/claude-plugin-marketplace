@@ -1,0 +1,4 @@
+/* The desktop layout, whole. Every rule lives inside the one breakpoint below and
+   nothing outside this file names a width — `--layout: desktop` is the single source
+   the JS reads, so the phone and the desktop can never disagree about where the line
+   is. Inlined by pageHtml() into page.html. */
