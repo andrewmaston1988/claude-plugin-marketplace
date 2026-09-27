@@ -25,6 +25,7 @@ export function usageTmpPath(cachePath, pid = process.pid) {
 }
 
 const pathOf = (provider, opts) => opts.cachePath ?? usageCachePath(provider, opts.env);
+const ttlOf = (opts) => opts.ttlMs ?? USAGE_TTL_MS;
 
 // Anything that is not a whole envelope reads as no cache at all, so an older
 // on-disk shape costs one live read rather than a wrong number.
@@ -52,7 +53,8 @@ function writeEnvelope(envelope, { cachePath, pid }) {
 }
 
 // The reader's shape: whatever `result` held, plus how to read it — provenance
-// and the moment it was fetched.
+// and the moment it was fetched. The failure note rides along when one is
+// banked: it is why the reading is not this process's own fetch.
 function flatten(envelope, fallbackProvider, provenance) {
   return {
     ...envelope.result,
@@ -60,6 +62,8 @@ function flatten(envelope, fallbackProvider, provenance) {
     provenance,
     fetchedAt: envelope.fetchedAt,
     asOf: new Date(envelope.fetchedAt).toISOString(),
+    ...(envelope.lastError != null
+      && { lastError: envelope.lastError, lastErrorAt: envelope.lastErrorAt ?? null }),
   };
 }
 
@@ -87,7 +91,7 @@ export function cachedUsageReading(provider, opts = {}) {
   const cached = readUsageEnvelope(provider, { cachePath });
   if (!cached) return null;
   const now = opts.now ? opts.now() : Date.now();
-  return flatten(cached, provider, now - cached.fetchedAt < USAGE_TTL_MS ? "cache" : "stale");
+  return flatten(cached, provider, now - cached.fetchedAt < ttlOf(opts) ? "cached" : "stale");
 }
 
 export async function usageReading(provider, opts = {}) {
@@ -95,7 +99,7 @@ export async function usageReading(provider, opts = {}) {
   const cachePath = pathOf(provider, opts);
   const now = opts.now ? opts.now() : Date.now();
   const cached = readUsageEnvelope(provider, { cachePath });
-  const fresh = cached != null && now - cached.fetchedAt < USAGE_TTL_MS;
+  const fresh = cached != null && now - cached.fetchedAt < ttlOf(opts);
 
   if (fetchLive && (force || !fresh)) {
     let result = null;
@@ -112,5 +116,5 @@ export async function usageReading(provider, opts = {}) {
     }
   }
   if (!cached) return null;
-  return flatten(cached, provider, fresh ? "cache" : "stale");
+  return flatten(cached, provider, fresh ? "cached" : "stale");
 }

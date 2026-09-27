@@ -1092,11 +1092,20 @@
     const src = dataSource(view), e = src && heldEntry(src.path);
     if (e && Date.now() - Math.max(e.at, tried.get(src.path) || 0) >= cadenceOf(src.tab)) revalidate(src);
   }
+  // The held copy paints before the fresh one lands, so its figures would read as
+  // current however old they are. Past the same 5 minutes the server's own cache
+  // uses, the held reading says so — the chip is the only mark the reader gets
+  // until the response arrives. Only Usage carries provenance on its figures.
+  const HELD_STALE_MS = 5 * 60_000;
+  function markHeldStale(tab, data, at) {
+    if (tab !== "usage" || !data?.usages || Date.now() - at < HELD_STALE_MS) return data;
+    return { ...data, usages: data.usages.map((u) => ({ ...u, provenance: "stale", lastSeen: at })) };
+  }
   async function viaCache(v) {
     const src = dataSource(v), e = heldEntry(src.path);
     if (!e) { const data = await api(src.path); hold(src.path, data); return data; }
     if (!sameView(v, view) || Date.now() - e.at >= cadenceOf(src.tab)) revalidate(src);
-    return e.data;
+    return markHeldStale(src.tab, e.data, e.at);
   }
   async function buildUsage(v) {
     const usageData = await viaCache(v);

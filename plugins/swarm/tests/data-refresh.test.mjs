@@ -15,18 +15,21 @@ function memStorage(seed = {}) {
 async function boot(opts = {}) {
   let now = opts.start ?? 1_000_000_000;
   const renders = { cost: 0, usage: 0 };
+  // The payloads as the screen received them — a held reading's provenance is
+  // only visible there, not in the stub's markup.
+  const usagePayloads = [];
   const P = loadPage({
     storage: opts.storage,
     clock: () => now,
     perfViews: {
       costScreen: (d) => { renders.cost++; return `<div class="stub">${d.tag}</div>`; },
-      usageScreen: (d) => { renders.usage++; return `<div class="stub">${d.tag}</div>`; },
+      usageScreen: (d) => { renders.usage++; usagePayloads.push(d); return `<div class="stub">${d.tag}</div>`; },
     },
   });
   await P.flush();
   P.respondList({ ...listData(listRow()), ...opts.list });
   await P.flush();
-  return { P, renders, advance: (ms) => { now += ms; }, now: () => now };
+  return { P, renders, usagePayloads, advance: (ms) => { now += ms; }, now: () => now };
 }
 async function go(P, hash) { P.location.hash = hash; P.fireHashchange(); await P.flush(); }
 
@@ -133,6 +136,28 @@ test("a tab opened straight on Cost takes its cadence from the estate scan's pay
   const n = P.costFetches().length;
   advance(60_000); P.fireTimers(1000); await P.flush();
   assert.equal(P.costFetches().length, n + 1);
+});
+
+// A held Usage reading paints before the fresh one lands, so its figures read
+// as current however old the held copy is. Past the same 5 minutes the server's
+// own cache uses, the held copy is marked stale — the chip is the only mark the
+// reader gets until the response arrives.
+const USAGE_HELD = { usages: [{ provider: "anthropic", state: "ok", provenance: "live", limits: [] }], errors: {} };
+const heldAt = (start, ageMs) => memStorage({ "swarm.cache:/api/usage": JSON.stringify({ data: USAGE_HELD, at: start - ageMs }) });
+
+test("a held Usage reading over 5 minutes old paints marked stale, at its own age", async () => {
+  const START = 1_000_000_000;
+  const { P, usagePayloads } = await boot({ storage: heldAt(START, 6 * 60_000), start: START });
+  await go(P, "#/usage");
+  assert.equal(usagePayloads[0].usages[0].provenance, "stale");
+  assert.equal(usagePayloads[0].usages[0].lastSeen, START - 6 * 60_000, "the held copy's own age, not the repaint's");
+});
+
+test("a held Usage reading inside 5 minutes keeps the provenance it was banked with", async () => {
+  const START = 1_000_000_000;
+  const { P, usagePayloads } = await boot({ storage: heldAt(START, 60_000), start: START });
+  await go(P, "#/usage");
+  assert.equal(usagePayloads[0].usages[0].provenance, "live");
 });
 
 test("the retired swarm.usage entry is swept on load", async () => {

@@ -56,8 +56,12 @@ export async function readClaudeUsage(context = {}) {
   const cachePath = context.cachePath || join(swarmHome(env), "quota-cache.json");
 
   if (context.usageOptIn !== true) {
-    const fresh = readAnthropicCacheResult(cfg, nowMs, cachePath);
-    if (!fresh || !fresh.parsed?.limits?.length) return marked(null, new Date(nowMs).toISOString());
+    // Expiry reads here as "nothing", not as a stale banner: the CLI refills this
+    // file unprompted, so a warning would be noise its reader cannot act on.
+    const fresh = readAnthropicCacheResult(cfg, nowMs, cachePath, env);
+    if (!fresh) return marked(null, new Date(nowMs).toISOString());
+    // `cache`, never ollama's `cached`: that token means "cookie may be dead" and
+    // the banner it feeds is one this provider's self-healing TTL never earns.
     return claudeSnapshot(fresh.parsed, "cache", new Date(fresh.asOf).toISOString());
   }
 

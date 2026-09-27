@@ -95,7 +95,7 @@ test("readClaudeUsage: cache and live readings carry distinct provenance tokens,
     });
     // Fresh cache on disk, `now` in the walk's NUMBER form, and a fetch that
     // must never fire: hook mode reads the file the CLI refills, nothing else.
-    writeFileSync(join(home, "quota-cache.json"), JSON.stringify({ ts: NOW - 10_000, result: structuredClone(HEADROOM) }));
+    writeFileSync(join(home, "quota-cache.json"), JSON.stringify({ fetchedAt: NOW - 10_000, result: structuredClone(HEADROOM) }));
     const cached = await readClaudeUsage({
       env: { SWARM_HOME: home },
       now: NOW,

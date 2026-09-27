@@ -458,7 +458,21 @@ export function createCodexProviderAdapter(options = {}) {
   const readUsage = async (context = {}) => {
     if (!context.client && context.usageOptIn !== true) return null;
     const { readCodexUsage } = await import("./codex-usage.mjs");
-    return readCodexUsage(context.config || {}, { ...options, ...context });
+    const fetchLive = () => readCodexUsage(context.config || {}, { ...options, ...context });
+    // A caller holding a live client already paid for the app-server, so asking
+    // it is free and its answer is authoritative — never answered from the TTL
+    // file, which exists to spare the SPAWN, not the question.
+    if (context.client) return fetchLive();
+    const { usageReading } = await import("./usage-cache.mjs");
+    const raw = context.now;
+    const now = typeof raw === "function" ? raw() : (typeof raw === "number" ? raw : Date.now());
+    return usageReading("codex", {
+      env: context.env,
+      cachePath: context.cachePath,
+      now: () => now,
+      force: context.force === true,
+      fetchLive,
+    });
   };
   return {
     id: "codex",

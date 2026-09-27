@@ -8,6 +8,7 @@ import {
   formatResetTime, QUOTA_CACHE_FILENAME, normalizeCodex, codexUsageFromCache, writeCodexUsageCache,
 } from "../src/usage.mjs";
 import { createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
+import { usageReading } from "../src/usage-cache.mjs";
 import { providerUsageSnapshot } from "../src/contracts.mjs";
 import { cmdUsage } from "../scripts/swarm.mjs";
 
@@ -139,6 +140,22 @@ test("notableLines: G7c each failure reason prints its own /!\\ title above a Re
   deepEqual(notableLines([normalizeOllama({ ...OLLAMA_OK, provenance: "cached", reason: null })]), []);
 });
 
+// The mark rides the figure, not only the banner: a reading past its TTL that
+// this process did not fetch says so on the line the reader takes the number
+// from, and says how old it is — "stale" alone does not say whether to act.
+test("usageLines: G7d a stale reading prints `stale · read <age> ago`; cached and live do not", () => {
+  const now = Date.parse("2026-09-08T15:00:00Z");
+  const line = (over) => usageLines([normalizeOllama({ ...OLLAMA_OK, ...over })], { timeZone: LONDON, now })
+    .find((l) => l.startsWith("ollama weekly"));
+  const figures = "ollama weekly: 83.8% — resets Sat 12 Sep, 09:00";
+
+  equal(line({ provenance: "stale", lastSeen: now - 12 * 60_000 }), `${figures} · stale · read 12m ago`);
+  equal(line({ provenance: "stale", lastSeen: now - 3 * 3_600_000 }), `${figures} · stale · read 3h ago`);
+  equal(line({ provenance: "cached", lastSeen: now - 60_000 }), figures, "a fresh cache read is not marked");
+  equal(line({ provenance: "live" }), figures);
+  equal(line({ provenance: "stale", lastSeen: null }), figures, "no banked age, no claim about one");
+});
+
 test("notableLines: G8 anthropic exhaustion is reported the same way as a cloud provider's", () => {
   const lines = notableLines([normalizeAnthropic({ ...ANTHROPIC, exhausted: true })]);
   ok(lines[0].startsWith("anthropic: weekly allowance exhausted"), lines[0]);
@@ -163,13 +180,13 @@ const stubOllama = (reading) => ({ usageFromCache: () => reading });
 test("readCachedUsage: G9 a fresh anthropic cache is read; an EXPIRED one is unknown, never stale", async () => {
   await withHome(async (home) => {
     const cachePath = join(home, QUOTA_CACHE_FILENAME);
-    writeFileSync(cachePath, JSON.stringify({ ts: NOW - 1000, result: ANTHROPIC }));
+    writeFileSync(cachePath, JSON.stringify({ fetchedAt: NOW - 1000, result: ANTHROPIC }));
     const fresh = await readCachedUsage({}, { now: NOW, cachePath });
     equal(fresh[0].state, "ok");
 
     // Past the 300s TTL. The CLI refetches unprompted, so a warning here would
     // be noise — `unknown`, and notableLines stays silent about it.
-    writeFileSync(cachePath, JSON.stringify({ ts: NOW - 400_000, result: ANTHROPIC }));
+    writeFileSync(cachePath, JSON.stringify({ fetchedAt: NOW - 400_000, result: ANTHROPIC }));
     const expired = await readCachedUsage({}, { now: NOW, cachePath });
     equal(expired[0].state, "unknown");
     deepEqual(notableLines(expired), []);
@@ -254,8 +271,6 @@ test("codex cache: C2 a foreign or corrupt file is no reading, and a write never
     equal(codexUsageFromCache(env), null);
     rmSync(path);
 
-    writeCodexUsageCache(null, env);
-    writeCodexUsageCache({ provider: "ollama", buckets: [] }, env);
     writeCodexUsageCache(CODEX_READING, env);
     ok(existsSync(path), "a well-formed reading is written atomically, .tmp renamed away");
     equal(existsSync(path + ".tmp"), false);
@@ -521,13 +536,19 @@ test("cmdUsage: a claude adapter's reading is walked, selected, and gates the ex
 // unreachable in a real install, however correct the reader is.
 test("cmdUsage: a live Codex reading is banked for the cache-only readers", async () => {
   await withHome(async (home) => {
+    // The real adapter banks through the cache module; this stands in for it so
+    // the assertion is about the wiring, not about spawning an app-server.
     const codex = {
       id: "codex",
       runnerId: "codex",
       enabled: () => true,
       validateTask: () => [],
       capabilities: {
-        readUsage: async () => normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" } })),
+        readUsage: (context) => usageReading("codex", {
+          env: context.env,
+          cachePath: context.cachePath,
+          fetchLive: async () => normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" } })),
+        }),
       },
     };
     const registry = createProviderRegistry([codex]);

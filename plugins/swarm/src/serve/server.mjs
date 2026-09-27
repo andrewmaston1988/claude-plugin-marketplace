@@ -429,6 +429,9 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     // A live read of every provider: swarm.mjs injects it, since importing swarm.mjs here deadlocks on its top-level await.
     if (p === "/api/usage") {
       if (!_readProviderUsage) throw new Error("no _readProviderUsage seam wired");
+      // `live` says the adapters MAY fetch; it is no longer a demand that they
+      // do. The reading comes through the same 5-minute cache every other
+      // reader uses, so a repaint costs a provider process only when it is due.
       return send(res, 200, await _readProviderUsage(cfg, { live: true }));
     }
     if (routes[p]) return await routes[p](res, url);

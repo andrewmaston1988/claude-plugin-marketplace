@@ -32,7 +32,7 @@ test("U1 a reading under 5 minutes old is served from cache and fetchLive is not
       fetchLive: async () => { calls++; return snapshot("live"); },
     });
     equal(calls, 0, "RED: a 1-minute-old reading must not cost a live read");
-    equal(r.provenance, "cache");
+    equal(r.provenance, "cached");
     equal(r.tag, "banked");
     equal(r.fetchedAt, AGE(60_000), "the reading keeps the moment it was read");
   } finally {
@@ -142,7 +142,7 @@ test("U7 a cache-only caller never fetches, and gets the expired reading marked 
     try {
       const freshPath = join(fresh, "codex-usage.json");
       writeUsageReading("codex", { fetchedAt: AGE(1000), result: snapshot("banked") }, { cachePath: freshPath });
-      equal(cachedUsageReading("codex", { cachePath: freshPath, now: () => T0 }).provenance, "cache");
+      equal(cachedUsageReading("codex", { cachePath: freshPath, now: () => T0 }).provenance, "cached");
       equal(cachedUsageReading("codex", { cachePath: path, now: () => T0 }).provenance, "stale");
     } finally {
       rmSync(fresh, { recursive: true, force: true });

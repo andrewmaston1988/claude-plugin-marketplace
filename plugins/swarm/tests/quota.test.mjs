@@ -8,6 +8,7 @@ import {
   matchQuota, parseQuotaReset, parseUsageLimits, checkQuota, DEFAULT_QUOTA_PATTERNS,
 } from "../src/quota.mjs";
 import { runCliAsync } from "./helpers/cli.mjs";
+import { createCodexProviderAdapter } from "../src/codex.mjs";
 
 // Trimmed from a live probe of the OAuth usage endpoint (2026-07-11).
 const USAGE_FIXTURE = {
@@ -140,12 +141,16 @@ function codexSpawnSpy(dir) {
   return { home, log };
 }
 
+// The envelope the usage cache writes: the reading, and when it was read.
 const CODEX_CACHED = {
-  provider: "codex",
-  source: "codex-app-server",
-  provenance: "live",
-  asOf: "2026-09-26T10:00:00.000Z",
-  buckets: [{ kind: "rate-limit", limitId: "session", primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1790000000 } }],
+  fetchedAt: Date.now() - 60_000,
+  result: {
+    provider: "codex",
+    source: "codex-app-server",
+    provenance: "live",
+    asOf: "2026-09-26T10:00:00.000Z",
+    buckets: [{ kind: "rate-limit", limitId: "session", primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1790000000 } }],
+  },
 };
 
 test("quota: prints the cached Codex row and never spawns the app-server", async () => {
@@ -252,6 +257,65 @@ test("quota: C0b every line is prefixed claude, the provider id", async () => {
     ok(!/\banthropic\b/i.test(r.stdout), r.stdout);
   } finally {
     server.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// `usage --provider` is the operator's own refresh: a cache inside its TTL must
+// not spare the spawn they asked for. A second reading of the envelope is the
+// other half — a live read is banked, not just printed.
+test("quota: usage --provider codex fetches live even with a cache under 5 min old", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-quota-cli-"));
+  try {
+    const { home, log } = codexSpawnSpy(dir);
+    const cache = join(home, "codex-usage.json");
+    writeFileSync(cache, JSON.stringify(CODEX_CACHED));
+    const before = JSON.parse(readFileSync(cache, "utf8")).fetchedAt;
+
+    const r = await runCliAsync(["usage", "--provider", "codex"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr + r.stdout);
+    ok(existsSync(log), `--provider must spawn despite a fresh cache:\n${r.stdout}`);
+    ok(JSON.parse(readFileSync(cache, "utf8")).fetchedAt > before, "the live read is banked");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The preflight is a reader that CAN fetch — so its answer is banked, and the
+// cache-only `quota` a moment later shows the preflight's figure rather than the
+// one it replaced. The client factory stands in for the app-server process.
+function codexStubClient(usedPercent) {
+  return {
+    initialize: async () => {},
+    close: async () => {},
+    request: async (method) => (method === "account/rateLimits/read"
+      ? { rateLimits: [{ limitId: "session", primary: { usedPercent, windowDurationMins: 300, resetsAt: 1790000000 } }] }
+      : {}),
+  };
+}
+
+test("quota: a codex preflight read banks, and quota straight afterwards shows its figure", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-quota-cli-"));
+  try {
+    const { home } = codexSpawnSpy(dir);
+    writeFileSync(join(home, "codex-usage.json"), JSON.stringify({
+      fetchedAt: Date.now() - 33 * 3_600_000,
+      result: { ...CODEX_CACHED.result, buckets: [{ ...CODEX_CACHED.result.buckets[0], primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1790000000 } }] },
+    }));
+
+    const cfg = JSON.parse(readFileSync(join(home, "config.json"), "utf8"));
+    const adapter = createCodexProviderAdapter();
+    await adapter.capabilities.preflight({
+      config: cfg,
+      env: { SWARM_HOME: home },
+      clientFactory: async () => codexStubClient(55),
+    });
+
+    const r = await runCliAsync(["quota"], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr + r.stdout);
+    ok(r.stdout.includes("codex session: 55%"), r.stdout);
+    ok(!r.stdout.includes("codex session: 20%"), `the preflight's figure replaces the older one:\n${r.stdout}`);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

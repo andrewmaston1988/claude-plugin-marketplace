@@ -3,9 +3,10 @@
 // usage endpoint with Claude Code's local credentials — free, predictive,
 // strictly best-effort (any failure returns null; mid-run classification is
 // the backstop).
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { homedir } from "node:os";
+import { usageReading, patchUsageEnvelope } from "./usage-cache.mjs";
 
 export const DEFAULT_QUOTA_PATTERNS = [
   "usage limit reached",
@@ -15,6 +16,10 @@ export const DEFAULT_QUOTA_PATTERNS = [
 ];
 
 export const DEFAULT_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
+
+// One home for the Anthropic TTL, because two readers compare against it: the
+// live path and the cache-only adapter branch. They must expire together.
+export const quotaTtlMs = (cfg = {}) => (cfg.quotaCacheSecs ?? 300) * 1000;
 
 // "…reached your <weekly|session> usage limit, add extra usage: ollama.com/settings" —
 // keyed on the suffix so a later meter needs no edit. Deliberately NOT in `quotaPatterns`:
@@ -94,49 +99,51 @@ export async function fetchUsageLimits({ fetch, url = DEFAULT_USAGE_URL, credent
 
 // The last good reading, re-read at `nowMs`: a bucket whose reset has passed has
 // refilled, so it reads 0% rather than its stale fill (which could ground dispatch).
-function staleReading(cached, nowMs) {
-  const limits = cached.result.limits.map((l) => ({
+function staleReading(reading, nowMs) {
+  const limits = reading.limits.map((l) => ({
     kind: l.kind, severity: l.severity, resets_at: l.resetsAt,
     percent: l.resetsAt && Date.parse(l.resetsAt) <= nowMs ? 0 : l.percent,
     scope: l.scope ? { model: { display_name: l.scope } } : null,
   }));
-  return { ...parseUsageLimits({ limits }), source: "stale", asOfMs: cached.ts };
+  return { ...parseUsageLimits({ limits }), source: "stale", asOfMs: reading.fetchedAt };
 }
 
-function writeCache(cachePath, entry) {
-  try {
-    mkdirSync(dirname(cachePath), { recursive: true });
-    writeFileSync(cachePath, JSON.stringify(entry));
-  } catch { /* cache is garnish */ }
-}
-
-// Cached best-effort quota check. Cache lives under the swarm home so repeated
-// runs (and the `quota` subcommand) within TTL don't re-query. A refused fetch
-// serves the last good reading (source "stale"), and a Retry-After is honoured —
-// asking again sooner only extends the endpoint's rate limit.
+// Cached best-effort quota check. The 5-minute TTL file lives under the swarm
+// home so repeated runs (and the `quota` subcommand) within it don't re-query.
+// A refused fetch serves the last good reading (source "stale"), and a
+// Retry-After is honoured — asking again sooner only extends the rate limit,
+// which is why the hold lives in this closure rather than in the cache module.
 export async function checkQuota({
   cfg = {},
   fetch,
   credentialsPath = join(homedir(), ".claude", ".credentials.json"),
   cachePath,
   now = () => Date.now(),
+  force = false,
 }) {
-  const ttlMs = (cfg.quotaCacheSecs ?? 300) * 1000;
-  let cached = null;
-  if (cachePath && existsSync(cachePath)) {
-    try { cached = JSON.parse(readFileSync(cachePath, "utf8")); } catch { /* corrupt cache — refetch */ }
-  }
-  if (cached?.result && now() - cached.ts < ttlMs) return { ...cached.result, source: "cache" };
-  const stale = () => (cached?.result?.limits?.length ? staleReading(cached, now()) : null);
-  if (cached?.retryAfter > now()) return stale();
-  let retryMs = 0;
-  const parsed = await fetchUsageLimits({ fetch, url: cfg.quotaUsageUrl || DEFAULT_USAGE_URL, credentialsPath, onRetryAfter: (ms) => { retryMs = ms; } });
-  if (!parsed) {
-    if (retryMs && cachePath) writeCache(cachePath, { ...cached, retryAfter: now() + retryMs });
-    return stale();
-  }
-  if (cachePath) writeCache(cachePath, { ts: now(), result: parsed });
-  return { ...parsed, source: "endpoint" };
+  const reading = await usageReading("claude", {
+    cachePath,
+    now,
+    force,
+    ttlMs: quotaTtlMs(cfg),
+    fetchLive: async ({ cached }) => {
+      if (cached?.retryAfter > now()) return null;
+      let retryMs = 0;
+      const parsed = await fetchUsageLimits({
+        fetch,
+        url: cfg.quotaUsageUrl || DEFAULT_USAGE_URL,
+        credentialsPath,
+        onRetryAfter: (ms) => { retryMs = ms; },
+      });
+      if (!parsed && retryMs) patchUsageEnvelope("claude", { retryAfter: now() + retryMs }, { cachePath });
+      return parsed;
+    },
+  });
+  if (!reading) return null;
+  // A reading with no windows says nothing the caller can render, so it reads as
+  // no reading at all rather than as an empty one.
+  if (reading.provenance === "stale") return reading.limits?.length ? staleReading(reading, now()) : null;
+  return { ...reading, source: reading.provenance === "live" ? "endpoint" : "cache" };
 }
 
 // The `quota` subcommand's whole body, here rather than in the arg dispatcher so
