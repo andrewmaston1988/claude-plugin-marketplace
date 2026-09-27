@@ -55,8 +55,7 @@ export function defaultManifestIo() {
     stdout: (line) => console.log(line),
     repoToplevel: realRepoToplevel,
     checkoutToplevel,
-    // The swarm home, for the governance gate's worktree widening: governance is handed
-    // this io, and the home has to travel with it for tests to point it at a temp dir.
+    // Governance judges a tree under the swarm home by its repo; tests point this at a temp dir.
     home: swarmHome(),
     platform: process.platform,
   };

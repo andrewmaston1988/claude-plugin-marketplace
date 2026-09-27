@@ -27,12 +27,8 @@ export function checkGovernance(provider, model, effCwd, l, cfg, errors, io) {
     return;
   }
   const inRoots = (p) => roots.some((root) => isUnderRoot(p, root));
-  // A swarm-made leaf worktree sits under the swarm home, outside every allowedRoots entry,
-  // so the literal path refuses the very trees swarm created. What must be cleared is the
-  // repo the tree was cut from — resolving it, rather than blanket-allowing ~/.swarm, keeps
-  // each provider's own roots binding. repoToplevel spawns git, so it is asked only when the
-  // cwd is inside the home; an orphaned tree (null, or a repo git can no longer resolve)
-  // has nobody to vouch for it and stays refused.
+  // A swarm-made worktree sits outside every root: judge it by the repo it was cut from, so
+  // each provider's roots still bind. repoToplevel spawns git, so ask only inside the home.
   const ok = inRoots(effCwd) || inSwarmTreeOfAllowedRepo();
   function inSwarmTreeOfAllowedRepo() {
     if (!isUnderRoot(effCwd, io.home)) return false;
