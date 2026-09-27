@@ -47,7 +47,7 @@ const cell = (model, combined, n) => ({ model, combined, n, provisional: n < 20,
   wtds: { adherence: combined, handoff: combined, truthfulness: combined, depth: combined } });
 const perf = (rank) => ({ grading: true, path: "x", lines: 2, rows: 2, priorWeight: 4, aspects: ["code"],
   universals: ["adherence", "handoff", "truthfulness", "depth"], domains: ["node"], filters: { aspect: null, model: null, domain: null },
-  overall: [cell("m-dear", 7.9, 26), cell("glm-5.2:cloud", 7.4, 12), cell("claude-sonnet-5", 7.2, 2)],
+  overall: [cell("m-dear", 7.9, 26), { ...cell("glm-5.1:cloud", 7.6, 30), supersededBy: "glm-5.2:cloud" }, cell("glm-5.2:cloud", 7.4, 12), cell("claude-sonnet-5", 7.2, 2)],
   report: [{ aspect: "code", universal: false, cells: [{ model: "m-dear", weighted: 8.1, mean: 8.3, n: 26, provisional: false },
     { model: "glm-5.2:cloud", weighted: 7.6, mean: 7.9, n: 3, provisional: true }] }], ...(rank ? { rank } : {}),
   views: {
@@ -84,11 +84,12 @@ async function settle(P) {
   assert.fail(`fetches never settled: ${P.pendingUrls().join(", ")}`);
 }
 
-async function screen(hash, before) {
+async function screen(hash, before, after) {
   const P = loadPage({ clock: () => T });
   await settle(P);
   if (before) { before(P); await settle(P); }
   if (hash) { P.location.hash = hash; P.fireHashchange(); await settle(P); }
+  if (after) { after(P); await settle(P); }
   return `${serialize(P.hdr)}\n${serialize(P.main)}`;
 }
 
@@ -102,6 +103,7 @@ const SCREENS = {
   cost: () => screen("#/cost"),
   "cost claude": () => screen("#/cost/claude"),
   "perf rank": () => screen("#/perf"),
+  "perf rank superseded": () => screen("#/perf", null, (P) => P.tap(P.findByClass("more")[0])),
   "perf leaders": () => screen("#/perf/leaders"),
   "perf coverage": () => screen("#/perf/coverage"),
   "perf reliability": () => screen("#/perf/reliability"),

@@ -104,7 +104,9 @@
   .rank .meta .tag { color:var(--faint); }
   .chip[data-href], .chip[data-domain], .pchip[data-href], .vchip[data-href] { cursor:pointer; } .chips.hero { padding:0 16px; gap:6px; }
   .foot { padding:12px 16px 16px; font-size:12px; color:var(--faint); line-height:1.5; }
-  details.more > summary { list-style:none; padding-left:16px; } details.more > summary::-webkit-details-marker { display:none; } details.more[open] > summary { display:none; }
+  .row.more { padding-left:16px; }
+  /* a superseded model shown back in the ranking: unranked, outlined dashed */
+  .card.crow.sup { border-style:dashed; }
   .chips { display:flex; gap:8px; flex-wrap:wrap; padding:12px 16px 0; }
   /* view switcher: full width at one fixed height on every screen, pills sharing it
      equally — scaling an SVG to the width made a two-pill switcher twice as tall as a
@@ -450,7 +452,7 @@
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
   // Per screen: Rank opens as cards, Leaders as the compact list.
   const compactPref = (screen, dflt) => { try { const v = localStorage.getItem(`swarm.perfCompact.${screen}`); return v == null ? dflt : v === "1"; } catch { return dflt; } };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, compact: { rank: compactPref("rank", false), leaders: compactPref("leaders", true) } };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, showSuperseded: false, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, compact: { rank: compactPref("rank", false), leaders: compactPref("leaders", true) } };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -978,11 +980,12 @@
   // (n<5) draws its bar dashed and says so, a cell with no grades shows only its
   // outcomes. Numbers are the server's (scores.mjs), never recomputed here.
   $("#trophy-art").innerHTML = `<defs><linearGradient id="tr-black"><stop stop-color="#353535"/><stop offset=".2" stop-color="#080808"/><stop offset=".72" stop-color="#222"/><stop offset="1" stop-color="#050505"/></linearGradient>  <filter id="tr-blur"><feGaussianBlur stdDeviation="5"/></filter>${Object.entries(TROPHY_METALS).map(([m, c]) => trophyDefs(m, c)).join("")}</defs>`;
-  const rankRow = ({ key, href, label, val, sub, frac, prov, none, place, pos, badge }) => `<div class="card crow${place ? ` p${place}` : ""}" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}>`
+  const rankRow = ({ key, href, label, val, sub, frac, prov, none, place, pos, badge, sup }) => `<div class="card crow${place ? ` p${place}` : ""}${sup ? " sup" : ""}" data-key="${esc(key)}"${href ? ` data-href="${esc(href)}"` : ""}>`
     + `<div class="top"><span class="who">${rankBadge(pos, place)}<span class="nm">${label}</span></span><span class="valside">${badge === undefined ? "" : modelBadge(badge)}<span class="val${none ? " none" : ""}">${val}</span></span></div>`
     + `<div class="cbar${prov ? " thin" : ""}"><span style="width:${Math.max(0, Math.min(100, (frac ?? 0) * 100))}%"></span></div><div class="sub">${sub}</div></div>`;
   // podium: the first three cards wear the medals (rank and per-aspect lists; never a model's own page)
-  const rankList = (rows, { podium = false } = {}) => `<div class="rlist${ui.compact.rank ? " compact" : ""}">${rows.map((r, i) => rankRow({ ...r, pos: i + 1, place: podium && i < 3 ? i + 1 : 0 })).join("")}</div>`;
+  // A superseded row keeps its place but takes no number or medal, so the ranking reads the same either way.
+  const rankList = (rows, { podium = false } = {}) => { let n = 0; return `<div class="rlist${ui.compact.rank ? " compact" : ""}">${rows.map((r) => { const pos = r.sup ? "·" : ++n; return rankRow({ ...r, pos, place: podium && !r.sup && n <= 3 ? n : 0 }); }).join("")}</div>`; };
   // Failed / timeout / session-died are not about the model — they live on its page. Wrong is,
   // as a share of the graded attempts; it is already inside the score, so never a raw count.
   const cellSub = (c, extra) => {
@@ -1185,7 +1188,7 @@
       if (!p.overall.length) html += `<div class="empty">no graded leaves under ${esc(p.path)} yet.</div>`;
       else {
         await loadPerfJs();
-        html += window.perfViews.rankScreen(p.overall, { esc, enc, fmtScore, cellSub, rankList, showAll, universals: p.universals });
+        html += window.perfViews.rankScreen(p.overall, { esc, enc, fmtScore, cellSub, rankList, showAll, showSuperseded: ui.showSuperseded, universals: p.universals });
       }
     }
     return { header, html };
@@ -1356,10 +1359,11 @@
     setTimeout(() => { ui.focusId = null; rerender(); }, 2400);
   }
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand]");
+    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-superseded]");
     if (!t || !main.contains(t)) return;
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
+    if (t.dataset.superseded != null) { ui.showSuperseded = !ui.showSuperseded; requestRoute(route); return; }
     if (t.dataset.pretty) { ui.pretty = !ui.pretty; requestRoute(route); return; }
     if (t.dataset.domain != null) { ui.perfDomain = t.dataset.domain || null; requestRoute(route); return; }
     // Show all: record the group — the next /api/runs fetch carries it as expand=

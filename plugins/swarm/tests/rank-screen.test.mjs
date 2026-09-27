@@ -1,6 +1,7 @@
 // The Performance overall ranking's renderer, run for real through perf.js (see
 // the harness) — and the server payload it draws. The operator deleted the old
-// footer text; the runs screen's own "Show all" row reveals the superseded rows.
+// footer text; the runs screen's Show all row, as a Show/Hide superseded toggle, puts the
+// superseded rows back in the ranking in place.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
@@ -23,40 +24,42 @@ const RANK_H = {
   costOf: new Map(),
   cellSub: (c, extra) => [`n=${c.n}`, ...(extra || [])].join(" · "),
   showAll: (label) => `<b class="showall">${label}</b>`,
-  rankList: (rows, { podium } = {}) => `<div class="rlist">${rows.map((r, i) => `<div class="card crow" data-key="${r.key}">${podium && i < 3 ? i + 1 : ""}${r.label}</div>`).join("")}</div>`,
+  rankList: (rows, { podium } = {}) => `<div class="rlist">${rows.map((r, i) => `<div class="card crow${r.sup ? " sup" : ""}" data-key="${r.key}">${podium && i < 3 ? i + 1 : ""}${r.label}</div>`).join("")}</div>`,
 };
 const cell = (model, combined, over = {}) => ({
   model, combined, n: 6, provisional: false, wtds: {}, outcomes: {}, providers: ["ollama"], ...over,
 });
 
-test("the overall ranking's footer is the runs screen's Show all row, and the crusty text is gone from the page", () => {
-  const html = loadPerfViews().rankScreen([
-    cell("deepseek-v4.1-flash:cloud", 9),
-    cell("deepseek-v4-flash:cloud", 8, { supersededBy: "deepseek-v4.1-flash:cloud" }),
-  ], RANK_H);
-  assert.ok(!html.includes("overall = mean of"), html);
-  assert.ok(!html.includes("Show more"), html);
-  assert.match(html, /<summary class="row tap"><b class="showall">Show all 2<\/b><\/summary>/, "the trigger is the shared Show all row, counting the whole list");
-  assert.ok(!/class="foot"[^>]*>(?:(?!<\/details>)[\s\S])*class="rlist"/.test(html), "the held rows sit in a plain rank list, not inside the padded footer");
+const PAIR = [
+  cell("deepseek-v4.1-flash:cloud", 9),
+  cell("glm-5.1:cloud", 8.5),
+  cell("deepseek-v4-flash:cloud", 8, { supersededBy: "deepseek-v4.1-flash:cloud" }),
+];
+
+test("the ranking's control is the shared Show all row reading Show superseded, with no footer text", () => {
+  const html = loadPerfViews().rankScreen(PAIR, RANK_H);
+  assert.ok(html.endsWith(`<div class="row tap more" data-superseded="1"><b class="showall">Show superseded</b></div>`), html);
+  assert.ok(!html.includes("superseded by a newer model"), "the footer said nothing the control does not");
+  assert.ok(!html.includes("<details"), "a toggle, not a disclosure below the list");
   assert.ok(!readFileSync(PAGE, "utf8").includes("overall = mean of"),
     "page.html must not still print the deleted footer — deleting it in perf.js alone leaves the page's own line on screen");
 });
 
-test("superseded cells are held out of the ranked list and revealed by the control", () => {
-  const html = loadPerfViews().rankScreen([
-    cell("deepseek-v4.1-flash:cloud", 9),
-    cell("deepseek-v4-flash:cloud", 8, { supersededBy: "deepseek-v4.1-flash:cloud" }),
-  ], RANK_H);
-  const [ranked, held] = html.split("<details");
-  assert.ok(ranked.includes("deepseek-v4.1-flash:cloud"));
-  assert.ok(!ranked.includes("deepseek-v4-flash:cloud"), "the superseded row is not in the list itself");
-  assert.ok(held.includes("deepseek-v4-flash:cloud"), "…it sits inside the disclosure");
+test("superseded cells are held out of the ranking until shown, then rejoin it in place, marked", () => {
+  const V = loadPerfViews();
+  const hidden = V.rankScreen(PAIR, RANK_H);
+  assert.ok(hidden.includes("deepseek-v4.1-flash:cloud") && !hidden.includes("deepseek-v4-flash:cloud"));
+  const shown = V.rankScreen(PAIR, { ...RANK_H, showSuperseded: true });
+  const order = [...shown.matchAll(/data-key="m:([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(order, ["deepseek-v4.1-flash:cloud", "glm-5.1:cloud", "deepseek-v4-flash:cloud"], "in the ranking's own order, not a list below it");
+  assert.match(shown, /class="card crow sup" data-key="m:deepseek-v4-flash:cloud"/, "the superseded row is marked");
+  assert.ok(shown.includes(">Hide superseded<"));
 });
 
-test("a ranking with nothing superseded draws no control — never an empty disclosure", () => {
+test("a ranking with nothing superseded draws no control", () => {
   const html = loadPerfViews().rankScreen([cell("glm-5.1:cloud", 9), cell("kimi-k3:cloud", 8)], RANK_H);
-  assert.ok(!html.includes("details"), html);
-  assert.ok(!html.includes("Show all"), html);
+  assert.ok(!html.includes("data-superseded"), html);
+  assert.ok(!html.includes("superseded"), html);
 });
 
 // The page can only hide what the server marks: a cell reaching /api/perf
@@ -93,7 +96,7 @@ test("/api/perf marks the superseded overall cell, and the real renderer hides i
   assert.equal(old.supersededBy, "deepseek-v4.1-flash:cloud",
     "RED: the server never read the roster's families, so the page could not hide the row");
   const html = loadPerfViews().rankScreen(body.overall, RANK_H);
-  assert.ok(html.split("<details")[0].includes("deepseek-v4.1-flash:cloud"));
+  assert.ok(html.includes('data-key="m:deepseek-v4.1-flash:cloud"') && !html.includes('data-key="m:deepseek-v4-flash:cloud"'));
 });
 
 // R5: the drill-in rank is a position on the list the ranking SHOWS. A hidden
