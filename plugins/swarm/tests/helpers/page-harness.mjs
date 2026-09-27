@@ -8,6 +8,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 import { logosScript } from "../../src/serve/logos.mjs";
+import { PAGE, pageHtml } from "../../src/serve/page-assets.mjs";
 
 // page.html is one IIFE inside a <script> tag with no exports: route(), the
 // renderers, the paint primitives and `api` are all closed over. So this
@@ -18,7 +19,7 @@ import { logosScript } from "../../src/serve/logos.mjs";
 // would. Every fetch resolves by hand, because the defect is a race: only a
 // harness that controls resolution order can reproduce it.
 
-export const PAGE = fileURLToPath(new URL("../../src/serve/page.html", import.meta.url));
+export { PAGE };
 const LIVE_JS = readFileSync(fileURLToPath(new URL("../../src/serve/live.js", import.meta.url)), "utf8");
 const PERF_JS = readFileSync(fileURLToPath(new URL("../../src/serve/perf.js", import.meta.url)), "utf8");
 const LOGOS_JS = logosScript();
@@ -67,8 +68,11 @@ function makeElement(tag, ids) {
   };
   el.getBoundingClientRect = () => ({ top: 0, left: 0, width: 0, height: 0 });
   el.addEventListener = (t, f) => { (el.listeners[t] ||= []).push(f); };
-  el.appendChild = (c) => { c.parentNode = el; el.childNodes.push(c); return c; };
+  // Like the DOM, inserting an attached node MOVES it — morph() relies on that to reorder children.
+  const detach = (n) => { const p = n.parentNode; if (p) { const j = p.childNodes.indexOf(n); if (j >= 0) p.childNodes.splice(j, 1); } };
+  el.appendChild = (c) => { detach(c); c.parentNode = el; el.childNodes.push(c); return c; };
   el.insertBefore = (n, ref) => {
+    detach(n);
     n.parentNode = el;
     const i = ref ? el.childNodes.indexOf(ref) : -1;
     if (i < 0) el.childNodes.push(n); else el.childNodes.splice(i, 0, n);
@@ -133,8 +137,8 @@ function parseHtml(markup, ids) {
 
 // ── the page under test ──────────────────────────────────────────────────
 export function loadPage(opts = {}) {
-  const src = readFileSync(PAGE, "utf8");
-  const script = src.match(/<script>([\s\S]*)<\/script>/)[1];
+  // Every inline <script> of the served page, in order; <script src> tags load through head.appendChild.
+  const scripts = [...pageHtml().matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 
   const ids = new Map();
   const hdr = makeElement("header", ids); hdr.setAttribute("id", "hdr");
@@ -209,7 +213,7 @@ export function loadPage(opts = {}) {
   // Date.now under the test's control, for cadence tests; `new Date()` stays real.
   if (opts.clock) context.Date = class extends Date { static now() { return opts.clock(); } };
   vm.createContext(context);
-  vm.runInContext(script, context, { filename: "page.html" });
+  for (const script of scripts) vm.runInContext(script, context, { filename: "page.html" });
 
   // One macrotask turn drains every microtask chain (loadScript boot, fetch
   // then-chains, the coalescing latch) — exactly one flush per settled step.
@@ -230,7 +234,12 @@ export function loadPage(opts = {}) {
     location, hdr, main, nav, perfTab: chrome["#nav a[href='#/perf']"], flush, scrolls,
     // A tap on one delegated target: page.html's click listener resolves e.target.closest(),
     // so the caller names the element the tap lands on rather than the listener walking up.
-    tap: (el) => main.listeners.click.forEach((f) => f({ target: { closest: () => el } })),
+    // closest() honours the page's own `[data-x], …` selector, so a target it does not list is not tapped.
+    tap: (el) => main.listeners.click.forEach((f) => f({ target: { closest: (sel) => {
+      const attrs = [...sel.matchAll(/\[([\w-]+)\]/g)].map((m) => m[1]);
+      for (let n = el; n && n.nodeType === 1; n = n.parentNode) if (attrs.some((a) => n.hasAttribute(a))) return n;
+      return null;
+    } } })),
     fireHashchange: () => winListeners.hashchange.forEach((f) => f()),
     fireSse: (t, d) => (esListeners[t] || []).forEach((f) => f({ data: d || "{}" })),
     esCount: () => esInstances.length,
@@ -240,6 +249,7 @@ export function loadPage(opts = {}) {
     fireEsError: (readyState) => { const es = esInstances[esInstances.length - 1]; if (readyState !== undefined) es.readyState = readyState; es.onerror && es.onerror(); },
     fetchLog,
     pendingCount: () => pendingFetches.length,
+    pendingUrls: () => pendingFetches.map((f) => f.url),
     fireTimers: (ms) => timers.filter((t) => t.fn && t.ms === ms).forEach((t) => { const fn = t.fn; if (!t.every) t.fn = null; fn(); }),
     listFetches: () => fetchLog.filter(isList),
     runFetches: () => fetchLog.filter(isRun),
@@ -272,6 +282,15 @@ export function loadPage(opts = {}) {
     seam: () => window.__swarmPage,
     snapshot: () => window.__swarmPage && window.__swarmPage.snapshot(),
   };
+}
+
+// The mini-DOM's innerHTML getter returns text, so markup snapshots serialise the tree.
+export function serialize(n) {
+  if (n.nodeType === 3) return n.nodeValue;
+  const kids = n.childNodes.map(serialize).join("");
+  if (n.nodeType !== 1) return kids;
+  const tag = n.tagName.toLowerCase();
+  return `<${tag}${n.attributes.map((a) => ` ${a.name}="${a.value}"`).join("")}>${kids}</${tag}>`;
 }
 
 // ── fixtures ─────────────────────────────────────────────────────────────
