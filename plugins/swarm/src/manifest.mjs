@@ -62,7 +62,9 @@ function applyArgsToRawTasks(rawTasks, args, used, errors, label) {
 
 // Key-order-independent fingerprint so `run <name> --args …` keys its own
 // default results dir: same args resume, different args never cross-resume.
-function canonicalize(v) {
+// Exported so the dispatch gate keys on the same canonical form rather than a
+// second, subtly different rule.
+export function canonicalize(v) {
   if (Array.isArray(v)) return v.map(canonicalize);
   if (v !== null && typeof v === "object") {
     return Object.fromEntries(Object.keys(v).sort().map((k) => [k, canonicalize(v[k])]));
@@ -154,7 +156,9 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   });
   checkCommandLineLengths(tasks, cfg, io, errors, label);
   validateMustReadRunners(tasks, cfg, io, errors, label, providerRegistry);
-  return { tasks };
+  // `path` is the file that was actually read — the gate keys on its bytes, and
+  // only loadChild knows where resolution landed.
+  return { tasks, path: childPath };
 }
 
 // Load + validate a manifest into a normalized plan. Throws ValidationError
@@ -253,10 +257,17 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   checkRunRoots(gateIds, cfg, toplevel, errors);
 
   const childPlans = new Map();
+  // Every file this load read, root first, then each child in load order — what
+  // the dispatch gate hashes. A child that failed to load throws below, so the
+  // list never has to describe a partial read.
+  const manifestFiles = [manifestPath];
   for (const t of raw.tasks) {
     if (t && typeof t === "object" && typeof t.manifest === "string" && t.manifest) {
       const child = loadChild(t, manifestPath, cwd, cfg, resultsDir, errors, { args, usedArgs, fromRegistry, cache, io: resolvedIo, probedGuards, providerRegistry });
-      if (child) childPlans.set(t.id, child);
+      if (child) {
+        childPlans.set(t.id, { tasks: child.tasks });
+        manifestFiles.push(child.path);
+      }
     }
   }
 
@@ -334,6 +345,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
 
   return {
     path: manifestPath,
+    manifestFiles,
     cwd,
     resultsDir,
     concurrency,

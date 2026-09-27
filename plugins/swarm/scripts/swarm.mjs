@@ -18,6 +18,7 @@ import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, repoOfWorktree, reposOfTrees } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim, out, err } from "../src/ui.mjs";
+import { validationKey, markValidated, isValidated } from "../src/validated.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { modelLine, effortsCell } from "../src/model-row.mjs";
 
@@ -367,6 +368,7 @@ async function cmdValidate(rest) {
     out("resolved manifest:");
     out(JSON.stringify(effectivePlanDoc(plan), null, 2));
   }
+  markValidated(validationKey(plan.manifestFiles, args));
   return 0;
 }
 
@@ -397,6 +399,14 @@ async function cmdRun(rest) {
   const { createNotifier } = await import("../src/notify.mjs");
   const notify = createNotifier({ notifyCmd: cfg.notifyCmd });
   if (refuseLiveEngine(plan.resultsDir, cfg, "re-running")) return 1;
+  // The dispatch gate: validate's seats block is the seating evidence, and it is
+  // engine-side so it holds on hosts the hook gates never reach. After the
+  // live-engine refusal, which owns its own message.
+  if (!isValidated(validationKey(plan.manifestFiles, args))) {
+    const shown = args ? `${rest[0]} --args '${JSON.stringify(args)}'` : rest[0];
+    err(`swarm: ${shown} has not been validated as written — run \`swarm validate ${shown}\` and read its seats block, then run again.`);
+    return 1;
+  }
 
   plan.estimate = estimateRun(plan.tasks, plan.digest, loadCorpus(join(swarmHome(), "runs")));
 
