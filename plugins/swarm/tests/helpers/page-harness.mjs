@@ -68,8 +68,11 @@ function makeElement(tag, ids) {
   };
   el.getBoundingClientRect = () => ({ top: 0, left: 0, width: 0, height: 0 });
   el.addEventListener = (t, f) => { (el.listeners[t] ||= []).push(f); };
-  el.appendChild = (c) => { c.parentNode = el; el.childNodes.push(c); return c; };
+  // Like the DOM, inserting an attached node MOVES it — morph() relies on that to reorder children.
+  const detach = (n) => { const p = n.parentNode; if (p) { const j = p.childNodes.indexOf(n); if (j >= 0) p.childNodes.splice(j, 1); } };
+  el.appendChild = (c) => { detach(c); c.parentNode = el; el.childNodes.push(c); return c; };
   el.insertBefore = (n, ref) => {
+    detach(n);
     n.parentNode = el;
     const i = ref ? el.childNodes.indexOf(ref) : -1;
     if (i < 0) el.childNodes.push(n); else el.childNodes.splice(i, 0, n);

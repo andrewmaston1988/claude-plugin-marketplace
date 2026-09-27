@@ -28,15 +28,11 @@
     + `<span class="ic${icon === SPIN ? " bare" : ""}">${icon}</span><div class="txt"><div class="t">${esc(title)}</div><div class="s">${subHtml ? sub : esc(sub)}</div></div>`
     + (href ? `<span class="go">›</span>` : "") + `</div>`;
 
-  // The cost badge — 💲 by band, — unmeasured — belongs where models are
-  // COMPARED: the perf rank lists and the model's dashboard. Never on leaf or
-  // run rows: a run is being read, not compared, and badges there are clutter
-  // (operator's correction, 2026-09-09). An unmeasured tier shows —, never a
-  // blank that would read as dominated; absence is not evidence.
-  // Cost is a stack of 1–5 coins, scaled within the provider (server-side `coins`) (the symbol in the page's hidden defs), each
-  // coin 21 units above the last with a little hand-stacked jitter.
+  // The cost badge belongs where models are COMPARED (rank lists, a model's page), never on
+  // leaf or run rows. An unmeasured tier shows —, never a blank that would read as dominated.
+  // It is a stack of 1–5 coins scaled within the provider, each 21 units above the last with a little jitter.
   const COIN_JITTER = [[88, -1], [84, 1.4], [93, -1.7], [86, 1], [94, -1.2]];
-  // The podium trophy: one figure, a palette per metal (operator-supplied), drawn
+  // The podium trophy: one figure, a palette per metal, drawn
   // once into #trophy-art and <use>d per card.
   const TROPHY_METALS = { gold: {"metal":["#8a4300","#ffd12a","#fff170","#d68100","#ffe04a","#7a3500"],"face":["#fff8b0","#ffd52a","#b65f00"],"line":"#713500","rim":"#ffcf27","top":"#ffe45a","visorLine":"#854100","visor":"#ffdd4d","glass":"#fff29a","eye":"#683000","medLine":"#c97600","screen":"#8b4300","screenLit":"#ffd94a","pupil":"#653000","shine":"#ffe66a","numeral":"#542600"}, silver: {"metal":["#555d63","#d9e0e5","#ffffff","#8e989f","#e8edf0","#4a5055"],"face":["#ffffff","#dfe5e9","#737d84"],"line":"#4e565b","rim":"#cbd2d8","top":"#eef3f6","visorLine":"#626b71","visor":"#dce3e7","glass":"#f8fbfc","eye":"#444b50","medLine":"#7d878e","screen":"#5b646a","screenLit":"#e7ecef","pupil":"#41484d","shine":"#ffffff","numeral":"#4f585e"}, bronze: {"metal":["#5f2d16","#d98a4a","#f4bd82","#8e421f","#d98243","#4b2111"],"face":["#ffd2a0","#c9793e","#713218"],"line":"#572813","rim":"#a85d28","top":"#e2a05f","visorLine":"#6d3219","visor":"#c77a42","glass":"#efbd8c","eye":"#4c2212","medLine":"#8f4825","screen":"#6c3219","screenLit":"#d28a50","pupil":"#4e2413","shine":"#f3c08a","numeral":"#542600"} };
   const trophyDefs = (m, c) => `<linearGradient id="tr-${m}-metal" x1="0" x2="1">${c.metal.map((col, i) => `<stop offset="${[0, .18, .35, .58, .78, 1][i]}" stop-color="${col}"/>`).join("")}</linearGradient>
