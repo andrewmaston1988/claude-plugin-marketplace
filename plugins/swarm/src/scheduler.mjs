@@ -1031,7 +1031,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         if (cacheHit(plan.resultsDir, c, prior)) record(c, "skipped", prior.durationMs ?? null, prior.tokens);
       }
     }
-    task.waveAfter = [...task.after];
+    task.waveAfter ??= [...task.after];
     pinKey(task); task.when = undefined;
     task.forEach = undefined;
     task.childPlan = undefined; // the clones carry it; the parent is now pure aggregate

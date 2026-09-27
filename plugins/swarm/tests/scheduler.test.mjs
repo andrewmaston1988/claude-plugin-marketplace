@@ -3946,3 +3946,36 @@ test("wave seating: a manifest node's root child sits in the node's wave, behind
     deepEqual(launched, ["x", "y", "z", "c1"]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test("wave seating: a manifest node's forEach child keeps the node's wave when it expands", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => ({ delayMs: 5, output: promptOf(call) === "do src" ? '["a","b"]' : "ok" }));
+    const child = task("c1", { after: [], forEach: { from: "src", path: "", maxItems: 2 } });
+    const node = task("m", { model: "manifest", prompt: "", after: ["x", "src"], childPlan: childPlanOf(child) });
+    const p = plan(dir, [task("x"), task("src"), node, task("y"), task("z")], { concurrency: 1 });
+    await runPlan(p, CFG, makeIo(spawn));
+    const launched = spawn.calls.map((call) => promptOf(call).slice(3));
+    deepEqual(launched, ["x", "src", "y", "z", "c1", "c1"]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("wave seating: a forEach behind a full wave still expands in the same pass", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory((call) => promptOf(call) === "do src"
+      ? { delayMs: 5, output: '["a"]' }
+      : { delayMs: ["do hold", "do w"].includes(promptOf(call)) ? 60 : 5, output: "ok" });
+    const p = plan(dir, [
+      task("src"), task("hold"), task("w"),
+      task("fix", { after: ["src"], forEach: { from: "src", path: "", maxItems: 1 } }),
+    ], { concurrency: 2 });
+    await runPlan(p, CFG, makeIo(spawn));
+    const events = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    const expanded = events.findIndex((event) => event.event === "expand" && event.id === "fix");
+    const srcDone = events.findIndex((event) => event.id === "src" && event.state === "ok");
+    const firstHeldDone = events.findIndex((event) => ["hold", "w"].includes(event.id) && event.state === "ok");
+    ok(srcDone >= 0 && expanded > srcDone && expanded < firstHeldDone,
+      `expected fix to expand while hold and w held every seat; event order ${events.map((e) => `${e.id}:${e.event || e.state}`).join(", ")}`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
