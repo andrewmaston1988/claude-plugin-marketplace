@@ -17,7 +17,7 @@ function unconfigured(provider, rootLabel) {
 // Every provider, Claude included — operator, 2026-09-21: allowedRoots is the single
 // statement of where swarm may run anything. The old `claude` early return made the roots
 // list a non-Anthropic policy, which left the Claude leaves that do the writing ungated.
-export function checkGovernance(provider, model, effCwd, l, cfg, errors) {
+export function checkGovernance(provider, model, effCwd, l, cfg, errors, io) {
   // The top-level list is the default; a provider entry narrows it and can never widen it.
   // `roots === undefined` is a provider nobody ever configured — a different refusal from
   // the explicit [] that denies on purpose, and the label names whichever key binds.
@@ -26,7 +26,20 @@ export function checkGovernance(provider, model, effCwd, l, cfg, errors) {
     errors.push(`${l}: ${unconfigured(provider, deniedBy)}`);
     return;
   }
-  if (!roots.some((root) => isUnderRoot(effCwd, root))) {
+  const inRoots = (p) => roots.some((root) => isUnderRoot(p, root));
+  // A swarm-made leaf worktree sits under the swarm home, outside every allowedRoots entry,
+  // so the literal path refuses the very trees swarm created. What must be cleared is the
+  // repo the tree was cut from — resolving it, rather than blanket-allowing ~/.swarm, keeps
+  // each provider's own roots binding. repoToplevel spawns git, so it is asked only when the
+  // cwd is inside the home; an orphaned tree (null, or a repo git can no longer resolve)
+  // has nobody to vouch for it and stays refused.
+  const ok = inRoots(effCwd) || inSwarmTreeOfAllowedRepo();
+  function inSwarmTreeOfAllowedRepo() {
+    if (!isUnderRoot(effCwd, io.home)) return false;
+    const repo = io.repoToplevel(effCwd);
+    return Boolean(repo) && inRoots(repo);
+  }
+  if (!ok) {
     errors.push(
       `${l}: provider '${provider}' model '${model}' and its cwd '${effCwd}' is not under any ` +
       `${deniedBy} entry — ${provider === "claude"

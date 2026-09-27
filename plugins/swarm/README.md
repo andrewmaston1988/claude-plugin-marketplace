@@ -36,6 +36,8 @@ compatibility and does not change the public manifest identity.
 other model providers, so non-Claude dispatch is **deny-by-default** — a task whose
 effective `cwd` isn't under a listed root fails validation. With no list configured, nothing
 dispatches until `swarm setup` writes one; list only roots cleared to leave for your provider.
+Swarm's own leaf worktrees live under `~/.swarm/runs/`, outside every root — a task there is
+judged by the repo its tree was cut from, so each provider's roots still bind.
 
 Every other key (`providers.<name>.*`, `concurrency`, `timeoutMs`,
 `worktreeBranchPrefix`, `modelDenylist`, `providers.ollama.cloud.ollama.*`, `notifyCmd`,

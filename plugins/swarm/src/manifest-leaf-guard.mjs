@@ -5,6 +5,7 @@
 import { spawnSync as nodeSpawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { checkoutToplevel } from "./worktree.mjs";
+import { swarmHome } from "./config.mjs";
 
 function namesEqual(a, b) {
   return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -54,6 +55,9 @@ export function defaultManifestIo() {
     stdout: (line) => console.log(line),
     repoToplevel: realRepoToplevel,
     checkoutToplevel,
+    // The swarm home, for the governance gate's worktree widening: governance is handed
+    // this io, and the home has to travel with it for tests to point it at a temp dir.
+    home: swarmHome(),
     platform: process.platform,
   };
 }

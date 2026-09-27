@@ -47,7 +47,7 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       if (t.contextWindow !== undefined && provider === "codex") {
         errors.push(`${l}: Codex tasks do not support contextWindow; "1m" is a Claude CLI model-name suffix`);
       }
-      if (provider) checkGovernance(provider, t.model, originalCwd, l, cfg, errors);
+      if (provider) checkGovernance(provider, t.model, originalCwd, l, cfg, errors, io);
       checkDenylist(t.model, l, cfg, errors);
       if (provider) checkHeadroom(provider, t.model, l, headroom, errors, warnings);
       if (t.fallbackModel !== undefined) {
@@ -68,7 +68,7 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
                 validateEffort(t.fallbackModel, fallbackProvider, resolvedEffort,
                   declaredEfforts(t.fallbackModel, fallbackProvider, cache), `${l} fallback`, errors);
               }
-              checkGovernance(fallbackProvider, t.fallbackModel, originalCwd, `${l} fallback`, cfg, errors);
+              checkGovernance(fallbackProvider, t.fallbackModel, originalCwd, `${l} fallback`, cfg, errors, io);
               checkHeadroom(fallbackProvider, t.fallbackModel, `${l} fallback`, headroom, errors, warnings);
             }
           }
