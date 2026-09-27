@@ -327,6 +327,7 @@
   circle:has(+ .ring) { animation:pulse 1.6s ease-in-out infinite; }
   .ring { fill:none; stroke:var(--accent); stroke-width:2; stroke-dasharray:14 42; animation:dash 1.4s linear infinite; }
 </style>
+<style>/*@inline desktop.css*/</style>
 </head>
 <body>
 <svg id="trophy-art" width="0" height="0" style="position:absolute" aria-hidden="true"></svg>
@@ -349,13 +350,16 @@
 </defs></svg>
 <header id="hdr" class="home"></header>
 <main id="main"></main>
-<nav id="nav" class="bnav"><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>swarm</a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>performance</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>cost</a></nav>
+<nav id="nav" class="bnav"><a href="#/overview" data-tab="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>overview</a><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>swarm<span class="navcount" id="nav-count"></span></a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>performance</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>cost</a></nav>
 <script>/*@inline components.js*/</script><script src="/logos.js"></script><script>
 (() => {
   const TOKEN = new URLSearchParams(location.search).get("t");
   const q = (p) => TOKEN ? `${p}${p.includes("?") ? "&" : "?"}t=${encodeURIComponent(TOKEN)}` : p;
   const $ = (s) => document.querySelector(s);
   const hdr = $("#hdr"), main = $("#main");
+  // desktop.js is loaded by boot and owns the breakpoint; absent — a failed load — reads
+  // as the phone, which is the layout that always works.
+  const isDesktop = () => !!(window.swarmDesktop && window.swarmDesktop.isDesktop());
   const { esc, COLOR, fmtTok, fmtDur, countsHtml, barHtml, dot, SPIN, tile, TROPHY_METALS, trophyDefs, TROPHY_OF, trophy, rankBadge, COIN_SCALE, stackTop, coinStack, MAX_COINS, modelBadge, fmtScore } = window.swarmUI;
   const enc = encodeURIComponent;
   // Same glyphs as the CLI roster (src/results.mjs GLYPHS); colours map the CLI's
@@ -463,10 +467,20 @@
   const tickCfg = { clockMs: 1000, uiPollMs: 5000, usagePollMs: 60000, statsPollMs: 300000 };
 
   function setHeader(html, home) { hdr.className = home ? "home" : ""; setHtml(hdr, html); }
+  // The sidebar's Runs link wears the same figure the Runs header does — live.js's
+  // headerRunCount over the disk total, never runs.length — so the two cannot disagree.
+  // Hidden below the breakpoint (desktop.css), which is what keeps the phone's bar four
+  // targets: the element is always there, it just has nowhere to show.
+  function setNavCount(list) {
+    const el = $("#nav-count");
+    if (!el || !list || !window.swarmLive) return;
+    const active = (list.runs || []).filter((r) => r.active);
+    el.textContent = String(window.swarmLive.headerRunCount(list.finishedTotals || {}, active));
+  }
   // One header on every screen: a title over one small line — the summary on a tab
   // screen, the tappable trail on a child — so the bar never changes shape.
   const headerHtml = (title, sub, extra = "") => `<div class="title"><b>${title}</b><small>${sub || "&nbsp;"}</small></div>${extra}`;
-  const TAB_TITLE = { runs: "swarm", usage: "usage", perf: "performance", cost: "cost" };
+  const TAB_TITLE = { overview: "overview", runs: "swarm", usage: "usage", perf: "performance", cost: "cost" };
   function trailOf(v) {
     if (v.name === "run") return [[TAB_TITLE.runs, "#/"]];
     if (["leaf", "node", "digest", "report"].includes(v.name)) return [[TAB_TITLE.runs, "#/"], [v.run, `#/run/${enc(v.project)}/${enc(v.run)}`]];
@@ -490,6 +504,19 @@
     const { header, home, html, labels } = renderRunsHtml(data);
     return { header, home, html, state: { lastList: data, tickCfg: cadencesOf(data), groupLabels: labels, grading: data.grading } };
   }
+  // Overview is a desktop-only route — below the breakpoint the hash is rewritten
+  // away before this is reached, so it never paints on a phone. Its contents are the
+  // next chunk's; what this one owes is the plumbing: it reads the same /api/runs
+  // payload the Runs screen does, so the SSE `runs` event and the poll refresh it,
+  // and it commits the same state, so the sidebar count is live on it too.
+  async function buildOverview() {
+    const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
+    return {
+      header: headerHtml(TAB_TITLE.overview, ""),
+      html: window.swarmDesktop ? window.swarmDesktop.overviewScreen() : "",
+      state: { lastList: data, tickCfg: cadencesOf(data), grading: data.grading },
+    };
+  }
   function renderRunsHtml(data) {
     // Labels merge into a fresh map — a value the commit swaps in, never a write to
     // the committed one. A local shortProject shadows the module arrow so this
@@ -497,6 +524,8 @@
     const labels = new Map(groupLabels);
     const shortProject = (p) => labels.get(p) || p;
     const runs = data.runs;
+    // One switch for the whole screen: desktop reads a table, the phone reads a row.
+    const table = isDesktop();
     const active = runs.filter((r) => r.active);
     // Every project gets a section — the estate view — projects with a live run first,
     // ranked by that run's newest startedMs (see live.js projectOrder — stable across
@@ -536,8 +565,10 @@
       const total = (data.finishedTotals || {})[p] ?? rest.length;
       html += `<div class="section dim tap" data-key="ps:${esc(p)}" data-project="${esc(p)}"><span>${esc(shortProject(p))}</span><span class="line"></span><small>${rest.length}${total > rest.length ? ` of ${total}` : ""} finished</small>${chev(open)}</div>`;
       if (open) {
-        html += `<ul data-key="pl:${esc(p)}">`;
-        for (const r of rest) html += runRow(r, true, labels);
+        html += `<ul${table ? ' class="rtable"' : ""} data-key="pl:${esc(p)}">`;
+        // A desktop row is cut into columns, so the group needs a header naming them.
+        if (table) html += `<li class="row rhead" data-key="rh:${esc(p)}"><span class="rail"></span><span class="name">run</span><span class="meta">${RUN_COLS.map((c) => `<span class="col">${c}</span>`).join("")}</span></li>`;
+        for (const r of rest) html += runRow(r, true, labels, table);
         // The row is the stack's last item, and only when the cap hid something
         // (predicate in live.js). Tapping it records the group; the next fetch
         // returns that group uncapped.
@@ -549,7 +580,11 @@
     if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
     return { header, home: true, html, labels };
   }
-  function runRow(r, done, labels = groupLabels) {
+  // The finished table's columns, named once here and used for the header row. The
+  // cells themselves come out of the meta line below — the same four fields, in the
+  // same order, that the phone joins with " · ".
+  const RUN_COLS = ["project", "when", "state", "tokens"];
+  function runRow(r, done, labels = groupLabels, columns = false) {
     const shortProject = (p) => labels.get(p) || p;
     const stack = (r) => /* one disc per provider, largest first, overlapping: a live run's running providers pulse in front and the idle dim behind, a finished run's are all solid, largest on top; a provider with no logo wears its initial */ { const run = new Set(r.providersRunning || []); const e = Object.entries(r.providerTokens || {}).filter(([p]) => p !== "unknown").sort((a, b) => b[1] - a[1]); const o = done ? e : [...e.filter(([p]) => run.has(p)), ...e.filter(([p]) => !run.has(p))]; return o.length ? `<span class="pstack">${o.map(([p], i) => `<span class="pitem${done ? "" : run.has(p) ? " pulse" : " dim"}" style="z-index:${o.length - i}${!done && run.has(p) ? `;animation-delay:${i * 1.2}s` : ""}">${window.swarmLogos?.providerLogo(p, { chip: true, label: p }) || `<span class="pinit" role="img" aria-label="${esc(p)}">${esc(p[0].toUpperCase())}</span>`}</span>`).join("")}</span>` : ""; };
     // Navigation is a data-href picked up by one delegated listener — never an inline
@@ -563,7 +598,8 @@
       // closed it (killed, crashed, machine slept). Say so rather than "done".
       const stale = !r.finishedMs && !r.stopped;
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
-       return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${esc(shortProject(r.project))} · ${when} · ${countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState)} · ${fmtTok(r.tokens)}${r.hasDigest ? " · digest" : ""}</span></div>${chevRight}</div></li>`;
+      const fields = [esc(shortProject(r.project)), when, countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState), `${fmtTok(r.tokens)}${r.hasDigest ? " · digest" : ""}`];
+      return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${columns ? fields.map((f) => `<span class="col">${f}</span>`).join("") : fields.join(" · ")}</span></div>${chevRight}</div></li>`;
     }
     return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span>${stack(r)}<span class="tm">${elapsed}</span></div>`
       + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
@@ -1029,9 +1065,12 @@
   async function buildCost(v) {
     const data = await viaCache(v);
     await loadPerfJs();
+    const h = { esc, enc, seg: segSwitcher, badge: modelBadge };
     return {
       header: headerHtml(TAB_TITLE.cost, "Relative cost within each provider"),
-      html: window.perfViews.costScreen(data, { esc, enc, seg: segSwitcher, badge: modelBadge }, v.which),
+      // A desktop window holds every provider at once; the phone's switcher can only
+      // show one, so it keeps the picked page.
+      html: isDesktop() ? window.perfViews.costAll(data, h) : window.perfViews.costScreen(data, h, v.which),
     };
   }
   // Usage, Cost and Performance read slow endpoints and change gradually. Each is held
@@ -1258,11 +1297,13 @@
   // The view the newest in-flight route is building. SSE and the poll consult it, so
   // a refresh is never dropped just because its target screen has not committed yet.
   let pendingView = null;
-  // Every run-family screen lights Runs.
-  const TAB = { usage: "usage", perf: "performance", cost: "cost" };
+  // Every run-family screen lights Runs. The value must be the nav's own `data-tab`:
+  // "performance" matched no anchor, so that tab never lit on a phone either.
+  const TAB = { overview: "overview", usage: "usage", perf: "perf", cost: "cost" };
   const viewOf = (hash) => {
     const h = hash.replace(/^#/, "") || "/";
     const seg = h.split("/").filter(Boolean).map(decodeURIComponent);
+    if (seg[0] === "overview") return { name: "overview", project: null, run: null, leaf: null, node: null };
     // #/perf/cost is where Cost lived under Performance: old bookmarks still land.
     if (seg[0] === "cost" || (seg[0] === "perf" && seg[1] === "cost")) return { name: "cost", project: null, run: null, leaf: null, node: null, which: seg[0] === "cost" ? seg[1] || null : null };
     // The window is a lens on one payload, not a view: sameView ignores it, so the switch never re-reads providers live.
@@ -1281,7 +1322,7 @@
     const tab = next.view ? TAB[view.name] || "runs" : next.tab;
     if (tab) $("#nav").setAttribute("data-on", tab);
     const s = next.state || {};
-    if ("lastList" in s) lastList = s.lastList;
+    if ("lastList" in s) { lastList = s.lastList; setNavCount(lastList); }
     if ("currentRun" in s) currentRun = s.currentRun;
     if ("currentLeaf" in s) currentLeaf = s.currentLeaf;
     if ("groupLabels" in s) groupLabels = s.groupLabels;
@@ -1295,6 +1336,7 @@
     if (s.lastList) announceFinished(s.lastList.runs);
   }
   async function buildFor(v) {
+    if (v.name === "overview") return buildOverview();
     if (v.name === "perf") return buildPerf(v);
     if (v.name === "cost") return buildCost(v);
     if (v.name === "usage") return buildUsage(v);
@@ -1320,7 +1362,17 @@
       html: `<div class="skeleton">${blocks}</div>`,
     };
   }
+  // Decision 3, in one place for both callers: a hash this layout has no screen for is
+  // rewritten before anything is built, so the skeleton and the commit agree — and
+  // `replace`, not an assignment, because an assignment would fire a second route.
+  function redirect() {
+    const want = window.swarmDesktop ? window.swarmDesktop.resolveHash(location.hash, isDesktop()) : location.hash;
+    if (want === location.hash) return false;
+    location.replace(`#${want.replace(/^#/, "")}`);
+    return true;
+  }
   async function route() {
+    redirect();
     const seq = ++routeSeq;
     const v = viewOf(location.hash);
     pendingView = v;
@@ -1409,7 +1461,8 @@
       const v = pendingView || view;
       if (v.project === d.project && v.run === d.name) requestRoute(route);
     });
-    es.addEventListener("runs", () => { if ((pendingView || view).name === "runs") requestRoute(route); });
+    // The estate snapshot changed: the Runs list and the Overview both read it.
+    es.addEventListener("runs", () => { const n = (pendingView || view).name; if (n === "runs" || n === "overview") requestRoute(route); });
     // D6: reconnect only once the browser has given up (readyState CLOSED) —
     // the CONNECTING case is its own retry already in flight. `esAttempt` resets
     // on a successful open; on() fetches a catch-up route so events missed
@@ -1421,7 +1474,12 @@
       setTimeout(connect, window.swarmLive.reconnectDelay(esAttempt++));
     };
   }
-  window.addEventListener("resize", () => { if (view.name === "run" && currentRun) rerender(); });
+  window.addEventListener("resize", () => {
+    // The breakpoint can move under the reader: narrowing past it strands #/overview,
+    // which has no phone screen, so the route is re-resolved rather than left dead.
+    if (redirect()) requestRoute(route);
+    if (view.name === "run" && currentRun) rerender();
+  });
 
   // One cached promise per path — script tags are loaded once and reused. This is
   // its own copy of live.js's loadScript, not a call through window.swarmLive: the
@@ -1471,7 +1529,9 @@
 
   // live.js is a hard dependency of buildRows/renderRunHtml — unlike perf.js, a
   // failed load must not route into a TypeError; it renders the empty panel instead.
-  loadScript("/live.js").then(() => {
+  // desktop.js loads first and swallows its own failure: without it the layout stays
+  // the phone's, which is a readable page, so it must never sink boot.
+  loadScript(q("/desktop.js")).catch(() => {}).then(() => loadScript("/live.js")).then(() => {
     requestRoute = window.swarmLive.singleFlight(route);
     route(); connect(); startTimers();
   }).catch((e) => {

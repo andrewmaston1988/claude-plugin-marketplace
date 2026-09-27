@@ -14,6 +14,12 @@ async function runsOn(layout) {
   const P = loadPage(layout ? { layout } : {});
   await P.flush();
   if (layout) {
+    // Boot lands on #/overview (Decision 3) and reads the estate. Drain that read
+    // before navigating: the harness answers fetches by URL in order, and a
+    // superseded build's answer is discarded, so the Runs fetch must be the one left
+    // pending when the test answers it.
+    P.respondList(DATA);
+    await P.flush();
     P.location.hash = "#/";
     P.fireHashchange();
     await P.flush();

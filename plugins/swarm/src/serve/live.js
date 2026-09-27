@@ -90,7 +90,8 @@
   // The runs list has no single run to end, so it always polls; a run/leaf view
   // polls only while its run is still open, and never for a run not yet fetched.
   function shouldPoll(view, run, now) {
-    if (view && view.name === "runs") return true;
+    // Overview is the estate at desktop widths, so it polls like the estate.
+    if (view && (view.name === "runs" || view.name === "overview")) return true;
     // The caller's run outlives the run screens; only a view that names a run polls it.
     if (!run || !view || !view.run) return false;
     return !runEnded(run);

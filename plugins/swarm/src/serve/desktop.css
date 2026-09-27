@@ -1,4 +1,67 @@
-/* The desktop layout, whole. Every rule lives inside the one breakpoint below and
-   nothing outside this file names a width — `--layout: desktop` is the single source
-   the JS reads, so the phone and the desktop can never disagree about where the line
-   is. Inlined by pageHtml() into page.html. */
+/* The desktop layout, whole. Every rule below the breakpoint is the phone's, and the
+   breakpoint itself exists in exactly one place — `--layout: desktop` is what the JS
+   reads, so the two can never disagree about where the line is.
+   Inlined into page.html by pageHtml(). */
+
+/* Below the breakpoint the phone keeps its four-tab bar: Overview and the run count
+   are hidden, not removed, because the sidebar and the bar are one element (D7). */
+.bnav a[data-tab="overview"], .bnav .navcount { display:none; }
+
+@media (min-width: 68.75em) {
+  /* The single source: isDesktop() reads this string and no JS file names a width. */
+  :root {
+    --layout: desktop;
+    /* One row of the finished-runs table, shared by every row and its header (D2:
+       fr, minmax(<n>ch, 1fr) — never a raw percentage, which tracks the container
+       rather than the content and stops lining the columns up). */
+    --runs-cols: var(--rail) minmax(16ch, 2fr) minmax(11ch, 1fr) minmax(11ch, 1fr) minmax(13ch, 1fr) minmax(8ch, .8fr) 24px;
+  }
+
+  /* The shell: a fixed sidebar, a header across the main column, and main as the one
+     scroll area — body never scrolls, so nothing can scroll sideways behind it. */
+  body { display:grid; grid-template-columns:clamp(180px, 14vw, 240px) minmax(0, 1fr); grid-template-rows:auto minmax(0, 1fr); height:100vh; overflow:hidden; padding-bottom:0; }
+  #hdr { grid-column:2; grid-row:1; }
+  main { grid-column:2; grid-row:2; min-height:0; overflow-y:auto; overflow-x:hidden; padding-bottom:32px; }
+
+  .bnav { position:static; grid-column:1; grid-row:1 / -1; display:flex; flex-direction:column; gap:2px; padding:20px 12px; overflow-y:auto; border-top:0; border-right:1px solid var(--rule); }
+  .bnav a { height:40px; flex-direction:row; justify-content:flex-start; gap:10px; padding:0 12px; border-radius:10px; font-size:13px; }
+  .bnav a[data-tab="overview"] { display:flex; }
+  .bnav .navcount { display:inline; margin-left:auto; color:var(--faint); font-variant-numeric:tabular-nums; }
+  .bnav[data-on=overview] [data-tab=overview] { color:var(--accent); }
+  .bnav[data-on=overview] [data-tab=overview] svg { color:var(--accent); }
+  .bnav[data-on=runs] [data-tab=runs], .bnav[data-on=usage] [data-tab=usage],
+  .bnav[data-on=perf] [data-tab=perf], .bnav[data-on=cost] [data-tab=cost] { background:var(--surface-2); }
+
+  /* A desktop window is wide: a run's rows must not stretch into an unreadable line. */
+  main > .graph, main > .banner, main > .card, main > .skeleton { max-width:1100px; margin-left:auto; margin-right:auto; }
+
+  /* Runs: live runs are cards, so they go side by side above the finished stacks —
+     everything that is not a card spans the full width. */
+  main:has(> .rcard) { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); column-gap:12px; align-content:start; align-items:start; padding:0 16px; }
+  main:has(> .rcard) > .section, main:has(> .rcard) > ul, main:has(> .rcard) > .empty { grid-column:1 / -1; }
+  main:has(> .rcard) > .section { padding-left:0; padding-right:0; }
+  main:has(> .rcard) > .rcard { margin-left:0; margin-right:0; }
+
+  /* The finished stack as a table: the phone's row, cut into its columns, under a
+     header row naming them. `display:contents` lifts the row's two wrapper boxes out
+     of the way so the rail, the name, the meta and the chevron are the grid's items,
+     and the meta's cells ride the parent's tracks with subgrid. */
+  .rtable > .row { display:grid; grid-template-columns:var(--runs-cols); align-items:center; border-bottom:1px solid var(--rule); }
+  .rtable > .row > .body, .rtable > .row > .body > div { display:contents !important; }
+  .rtable > .row > .body > div > span:first-child { grid-column:2; }
+  .rtable .meta { grid-column:3 / 7; display:grid; grid-template-columns:subgrid; align-items:center; }
+  .rtable .chev { grid-column:7; }
+  .rtable .rhead { min-height:34px; color:var(--faint); font-size:11px; letter-spacing:.08em; text-transform:uppercase; border-bottom:1px solid var(--rule); }
+  .rtable .rhead .rail { height:34px; }
+
+  /* Usage: the hero spans the screen, the provider cards sit beside each other. */
+  main:has(> .uhero) { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:0 16px; align-content:start; align-items:start; padding:0 16px; }
+  main:has(> .uhero) > .seg, main:has(> .uhero) > .uhero, main:has(> .uhero) > .section, main:has(> .uhero) > .empty { grid-column:1 / -1; }
+  main:has(> .uhero) > .section { padding-left:0; padding-right:0; }
+  main:has(> .uhero) > .uhero, main:has(> .uhero) > .card { margin-left:0; margin-right:0; }
+
+  /* Cost: every provider at once, so the switcher — which exists to show one at a
+     time — has nothing left to do. Hidden, not removed (D7). */
+  main:has(> .costgrid) > .seg { display:none; }
+  .costgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:0 20px; align-items:start; padding:0 16px; }
+}

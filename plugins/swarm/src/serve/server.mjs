@@ -24,6 +24,7 @@ import { PAGE, pageHtml } from "./page-assets.mjs";
 import { matchDenylist } from "../manifest.mjs";
 
 const PERF_JS = fileURLToPath(new URL("./perf.js", import.meta.url));
+const DESKTOP_JS = fileURLToPath(new URL("./desktop.js", import.meta.url));
 const LIVE_JS = fileURLToPath(new URL("./live.js", import.meta.url));
 const ESTATE_WORKER = fileURLToPath(new URL("./estate-worker.mjs", import.meta.url));
 const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
@@ -417,6 +418,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (p === "/perf.js") {
       if (!existsSync(PERF_JS)) return notFound(res);
       return send(res, 200, readFileSync(PERF_JS, "utf8"), "text/javascript; charset=utf-8");
+    }
+    if (p === "/desktop.js") {
+      if (!existsSync(DESKTOP_JS)) return notFound(res);
+      return send(res, 200, readFileSync(DESKTOP_JS, "utf8"), "text/javascript; charset=utf-8");
     }
     if (p === "/logos.js") return send(res, 200, logosScript(), "text/javascript; charset=utf-8");
     if (p === "/live.js") {
