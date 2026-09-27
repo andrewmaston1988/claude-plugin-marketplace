@@ -378,6 +378,19 @@ test("token: when configured, every route needs ?t=; 401 without, 200 with", asy
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
+// The page's own components ride inside it: a static <script src> would carry no ?t= and 401.
+test("token: the page arrives with components.js inlined, no marker left", async () => {
+  const { home } = seedHome();
+  try {
+    await withServer({ home, cfg: cfg({ token: "s3cret" }) }, async ({ get }) => {
+      const page = await get("/?t=s3cret", { raw: true });
+      assert.equal(page.status, 200);
+      assert.match(page.body, /window\.swarmUI = \{/);
+      assert.doesNotMatch(page.body, /\/\*@inline /);
+    });
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("events: SSE emits one debounced run event per burst, names the run, and heartbeats", async () => {
   const { home, live } = seedHome();
   try {
