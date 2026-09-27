@@ -157,6 +157,9 @@ export function normalizeCodex(reading, options = {}) {
     provider: "codex",
     state: codexExhausted(source.buckets) ? "exhausted" : limits.length ? "ok" : "unknown",
     limits,
+    // The banner's age reads this or `lastSeen`; a cache-read codex snapshot has
+    // no other stamp, and dropping it here would silence the age it exists for.
+    ...(typeof source.fetchedAt === "number" && { fetchedAt: source.fetchedAt }),
   };
 }
 
@@ -340,13 +343,23 @@ function ageText(ms) {
   return `${Math.round(s / 86400)}d`;
 }
 
+// One wording for the age of a reading this process did not fetch, so the banner
+// and the figures beneath it can never drift. `lastSeen` is what the ollama
+// reader banks; a reading straight out of the shared cache carries `fetchedAt`
+// instead. Both are numbers — an absent one makes no claim about age.
+function staleAgeMark(usage, now) {
+  const at = usage?.lastSeen ?? usage?.fetchedAt;
+  if (usage?.provenance !== "stale" || typeof at !== "number") return "";
+  return `stale · read ${ageText(now - at)} ago`;
+}
+
 // The mark travels with the number the reader acts on rather than on a banner
 // they may scroll past: a reading past its TTL that this process did not fetch
 // says so on every figure drawn from it. Live and freshly-cached readings add
 // nothing — freshness is the quiet case.
 function staleSuffix(usage, now = Date.now()) {
-  if (usage?.provenance !== "stale" || typeof usage.lastSeen !== "number") return "";
-  return ` · stale · read ${ageText(now - usage.lastSeen)} ago`;
+  const mark = staleAgeMark(usage, now);
+  return mark ? ` · ${mark}` : "";
 }
 
 export function usageLines(usages, { timeZone, now = Date.now() } = {}) {
@@ -374,7 +387,9 @@ export function usageLines(usages, { timeZone, now = Date.now() } = {}) {
 // all (Anthropic never gains one — its TTL cache self-heals — so its
 // rendering is untouched), and for a `cached` reading with no recorded
 // failure reason (the hook's plain cache read; the figure may be fresh from
-// a successful fetch).
+// a successful fetch). `stale` is the exception: the shared cache marks a
+// reading that way without recording WHY the refresh went unanswered, and a
+// reading the reader must not trust is the last one that may print nothing.
 const REASON_TITLES = {
   "no-cookie": "No Cookie",
   "expired-cookie": "Cookie Expired",
@@ -384,8 +399,9 @@ const REASON_TITLES = {
   "stale-rate-card": "Stale Rate Card",
 };
 
-export function provenanceBanner(usage) {
-  if (!usage?.provenance || usage.provenance === "live" || !usage.reason) return [];
+export function provenanceBanner(usage, { now = Date.now() } = {}) {
+  if (!usage?.provenance || usage.provenance === "live") return [];
+  if (!usage.reason && usage.provenance !== "stale") return [];
   const title = REASON_TITLES[usage.reason] ?? "Usage Unread";
   // Legacy headroom callers pass the raw Ollama reading before normalization.
   const provider = usage.provider || "ollama";
@@ -407,8 +423,10 @@ export function provenanceBanner(usage) {
   // figures are the last ones banked. Distinct from `cached`, which is a
   // reading that may be perfectly fresh.
   if (usage.provenance === "stale") {
-    const lastSeen = usage.lastSeen ? `  last seen: ${new Date(usage.lastSeen).toISOString()}` : "";
-    return [`/!\\ ${title} — figures below are the last reading; the refresh did not answer.${lastSeen}`, refresh];
+    // An age, never an ISO stamp: "read 3h ago" is what tells the reader whether
+    // to act, and it is the same wording the figures below already carry.
+    const age = staleAgeMark(usage, now);
+    return [`/!\\ ${title} — figures below are the last reading; the refresh did not answer.${age ? `  ${age}` : ""}`, refresh];
   }
   // A partial read DID fetch this process — saying "no cached reading available"
   // over figures that just arrived live would be a lie the reader acts on.
@@ -423,10 +441,10 @@ export function provenanceBanner(usage) {
 // healthy — or live-fetched — provider adds nothing beyond its figures; the
 // standing block is instruction, and unprompted noise beside it trains the
 // reader to skip the whole thing.
-export function notableLines(usages, { timeZone } = {}) {
+export function notableLines(usages, { timeZone, now = Date.now() } = {}) {
   const lines = [];
   for (const u of usages) {
-    lines.push(...provenanceBanner(u));
+    lines.push(...provenanceBanner(u, { now }));
     if (u.state === "exhausted") {
       const weekly = u.limits.find((l) => l.kind === "weekly");
       const formatted = formatResetTime(weekly?.resetsAt, { timeZone });
