@@ -145,7 +145,7 @@
   // (`rankCells`), so this view only splits on it — the ranked list and the
   // toggle can never disagree about which rows are gone.
   function rankScreen(cells, h) {
-    const { esc, enc, fmtScore, cellSub, rankList, universals } = h;
+    const { esc, enc, fmtScore, cellSub, rankList, showAll, universals } = h;
     const short = (a) => a.slice(0, 5);
     const rows = (list) => list.map((c) => ({
       key: `m:${c.model}`,
@@ -161,8 +161,9 @@
     const held = cells.filter((c) => c.supersededBy);
     const ranked = rankList(rows(listed), { podium: true });
     if (!held.length) return ranked;
-    return ranked + `<details class="foot"><summary>Show more</summary>${rankList(rows(held))}`
-      + `<div class="sub">superseded by a newer model in the roster</div></details>`;
+    // The runs screen's own Show all row; opening it hides the row, as there.
+    return ranked + `<details class="more"><summary class="row tap">${showAll(`Show all ${cells.length}`)}</summary>${rankList(rows(held))}`
+      + `<div class="foot">superseded by a newer model in the roster</div></details>`;
   }
 
   // The cost read-model as the mockup's Cost screen (prototype.html 922–983): one

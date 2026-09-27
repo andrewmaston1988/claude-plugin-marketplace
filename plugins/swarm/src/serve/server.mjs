@@ -345,12 +345,12 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     return COST_PROVIDERS.flatMap((provider) => costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps }));
   };
   const rankOf = (cells, model) => {
-    const ranked = rankCells(cells, { isDenylisted, cloudSuffix }).filter((c) => c.combined != null && !c.supersededBy);
+    const ranked = rankCells(cells, { cloudSuffix }).filter((c) => c.combined != null && !c.supersededBy);
     const i = ranked.findIndex((c) => c.model === model);
     return i < 0 ? null : { position: i + 1, of: ranked.length };
   };
-  // Shared by the Cost view and the Performance ranking: supersession has one
-  // rule, so both read the denylist and the cloud suffix from the same place.
+  // The cloud suffix is shared by the Cost view and the Performance ranking; only
+  // Cost reads the denylist — the ranking supersedes regardless.
   const isDenylisted = (model) => Boolean(matchDenylist(model, cfg));
   const cloudSuffix = providerConfig(cfg, "ollama")?.cloudSuffix || ":cloud";
   const costOf = (rows, domain) => {
@@ -376,7 +376,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       grading, path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
       aspects: ASPECTS, universals: UNIVERSAL, domains,
       filters: report.filters,
-      overall: rankCells(overall(rows, { model, domain, combineProviders: true }).cells, { isDenylisted, cloudSuffix }),
+      overall: rankCells(overall(rows, { model, domain, combineProviders: true }).cells, { cloudSuffix }),
       // Drill-in: where this model sits among the models the ranking draws, not every graded one.
       ...(model ? { rank: rankOf(overall(rows, { domain, combineProviders: true }).cells, model) } : {}),
       report: report.aspects,

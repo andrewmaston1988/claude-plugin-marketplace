@@ -462,15 +462,15 @@ test("rankCells: a superseded model leaves the ranking until the toggle shows it
     "the toggle has a row to bring back, and it names what replaced it");
 });
 
-// The denylist is the same predicate `swarm models` uses: a superseder the
-// account cannot run must not hide its elder from the ranking either.
-test("rankCells: a superseder that is not launchable leaves its elder ranked", () => {
+// The ranking is a grade record, not a dispatch roster (operator, 2026-09-27:
+// "Supersede regardless"): a denylisted superseder still retires its elder.
+test("rankCells: a denylisted superseder still supersedes its elder", () => {
   const rows = [
     ...Array.from({ length: 5 }, (_, i) => graded({ leaf: `o${i}`, provider: "ollama", model: "deepseek-v4-flash:cloud", grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 } })),
     ...Array.from({ length: 5 }, (_, i) => graded({ leaf: `n${i}`, provider: "ollama", model: "deepseek-v4.1-flash:cloud", grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 } })),
   ];
   const cells = rankCells(overall(rows, { combineProviders: true }).cells, { isDenylisted: (m) => m === "deepseek-v4.1-flash:cloud" });
-  equal(cells.find((c) => c.model === "deepseek-v4-flash:cloud").supersededBy, undefined);
+  equal(cells.find((c) => c.model === "deepseek-v4-flash:cloud").supersededBy, "deepseek-v4.1-flash:cloud");
 });
 
 test("model detail provider chips carry logos, while model names remain provider-derived", () => {

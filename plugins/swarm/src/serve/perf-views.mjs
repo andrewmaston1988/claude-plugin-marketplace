@@ -44,16 +44,17 @@ function markSuperseded(rows, options) {
   return rows;
 }
 
-// The Performance ranking's cells: a ranked row leaves the list while a usable
-// superseder is present, and carries `supersededBy` so the toggle can bring it
-// back. A cell spanning more than one provider has no single naming rule, so it
+// The Performance ranking's cells: a ranked row leaves the list while a newer
+// sibling is present, and carries `supersededBy` so the toggle can bring it
+// back. The denylist is not consulted: the ranking is a grade record, not a
+// dispatch roster. A cell spanning more than one provider has no single naming rule, so it
 // compares bare alongside the unqualified rows.
-export function rankCells(cells, { isDenylisted = () => false, cloudSuffix = ":cloud" } = {}) {
+export function rankCells(cells, { cloudSuffix = ":cloud" } = {}) {
   const providerOf = (cell) => {
     const providers = providersOf(cell);
     return providers.length === 1 ? providers[0] : "unqualified";
   };
-  const superseded = supersededByMap(cells, { providerKey: providerOf, isDenylisted, cloudSuffix });
+  const superseded = supersededByMap(cells, { providerKey: providerOf, cloudSuffix });
   return cells.map((cell) => {
     const by = superseded.get(JSON.stringify([providerOf(cell), cell.model]));
     return by ? { ...cell, supersededBy: by } : cell;

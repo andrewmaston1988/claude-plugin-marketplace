@@ -1,6 +1,6 @@
 // The Performance overall ranking's renderer, run for real through perf.js (see
 // the harness) — and the server payload it draws. The operator deleted the old
-// footer text; a "Show more" disclosure holds the superseded rows in its place.
+// footer text; the runs screen's own "Show all" row reveals the superseded rows.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from "node:fs";
@@ -22,20 +22,22 @@ const RANK_H = {
   universals: ["adherence", "handoff", "truthfulness", "depth"],
   costOf: new Map(),
   cellSub: (c, extra) => [`n=${c.n}`, ...(extra || [])].join(" · "),
+  showAll: (label) => `<b class="showall">${label}</b>`,
   rankList: (rows, { podium } = {}) => `<div class="rlist">${rows.map((r, i) => `<div class="card crow" data-key="${r.key}">${podium && i < 3 ? i + 1 : ""}${r.label}</div>`).join("")}</div>`,
 };
 const cell = (model, combined, over = {}) => ({
   model, combined, n: 6, provisional: false, wtds: {}, outcomes: {}, providers: ["ollama"], ...over,
 });
 
-test("the overall ranking's footer is the Show more control, and the crusty text is gone from the page", () => {
+test("the overall ranking's footer is the runs screen's Show all row, and the crusty text is gone from the page", () => {
   const html = loadPerfViews().rankScreen([
     cell("deepseek-v4.1-flash:cloud", 9),
     cell("deepseek-v4-flash:cloud", 8, { supersededBy: "deepseek-v4.1-flash:cloud" }),
   ], RANK_H);
   assert.ok(!html.includes("overall = mean of"), html);
-  assert.equal((html.match(/Show more/g) || []).length, 1, html);
-  assert.match(html, /<summary>Show more<\/summary>/);
+  assert.ok(!html.includes("Show more"), html);
+  assert.match(html, /<summary class="row tap"><b class="showall">Show all 2<\/b><\/summary>/, "the trigger is the shared Show all row, counting the whole list");
+  assert.ok(!/class="foot"[^>]*>(?:(?!<\/details>)[\s\S])*class="rlist"/.test(html), "the held rows sit in a plain rank list, not inside the padded footer");
   assert.ok(!readFileSync(PAGE, "utf8").includes("overall = mean of"),
     "page.html must not still print the deleted footer — deleting it in perf.js alone leaves the page's own line on screen");
 });
@@ -54,7 +56,7 @@ test("superseded cells are held out of the ranked list and revealed by the contr
 test("a ranking with nothing superseded draws no control — never an empty disclosure", () => {
   const html = loadPerfViews().rankScreen([cell("glm-5.1:cloud", 9), cell("kimi-k3:cloud", 8)], RANK_H);
   assert.ok(!html.includes("details"), html);
-  assert.ok(!html.includes("Show more"), html);
+  assert.ok(!html.includes("Show all"), html);
 });
 
 // The page can only hide what the server marks: a cell reaching /api/perf
