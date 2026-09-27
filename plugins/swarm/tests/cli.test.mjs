@@ -5,50 +5,15 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSy
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
-import { runCli, runCliAsync, CLI } from "./helpers/cli.mjs";
+import { runCli, runCliAsync, runValidated, CLI } from "./helpers/cli.mjs";
+import { commitAll, gateConfig, gateHome, gitOut, tmp } from "./helpers/cli-fixture.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
 import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 
-// The one place the provider policy lives. `allowedRoots` gates EVERY provider, claude
-// included, and an empty list denies — so a fixture HOME without it refuses every
-// dispatching row; fixtures live under tmpdir, so that is the root they declare and
-// `extra` keys win. Ollama and Claude are on explicitly: both shipped defaults are
-// `enabled: false`, so a fixture that omits one refuses every row that dispatches to it.
-const gateConfig = (extra = {}) => JSON.stringify({ providers: { claude: { enabled: true, allowedRoots: [tmpdir()] }, ollama: { enabled: true } }, ...extra });
-
-// Writes that config into `home` and returns it — every fixture HOME a dispatching row
-// reads goes through here, so the block exists in exactly one place.
-function gateHome(home, extra = {}) {
-  mkdirSync(home, { recursive: true });
-  writeFileSync(join(home, "config.json"), gateConfig(extra));
-  return home;
-}
-
-// A git repo with one commit: runs are filed under the dispatching repo. It also carries
-// the fixture HOME every row points at, pre-gated, so a row only writes its own config
-// keys when it has a reason to.
-function tmp() {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-cli-"));
-  spawnSync("git", ["init", "-q"], { cwd: dir, windowsHide: true });
-  writeFileSync(join(dir, "seed.txt"), "seed\n");
-  commitAll(dir, "init");
-  gateHome(join(dir, "home"));
-  return dir;
-}
-
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A real tiny repo + a real worktree, used to exercise prune end-to-end.
-function gitOut(args, cwd) {
-  return (spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true }).stdout || "").trim();
-}
-
-function commitAll(cwd, msg) {
-  spawnSync("git", ["add", "."], { cwd, windowsHide: true });
-  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", msg], { cwd, windowsHide: true });
-}
-
 function initPruneRepo() {
   const repo = mkdtempSync(join(tmpdir(), "swarm-cli-repo-"));
   spawnSync("git", ["init", "-q", "-b", "master"], { cwd: repo, windowsHide: true });
@@ -282,7 +247,7 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
       ],
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "focus on X" },
     }));
-    const r = runCli(["run", manifest], {
+    const r = runValidated(["run", manifest], {
       cwd: dir,
       quotaPreflight: false,
       env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "leaf-output-text" },
@@ -349,7 +314,7 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
       ],
     }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_EXIT: "1", SWARM_SHIM_OUTPUT: "boom" };
-    const r1 = runCli(["run", manifest], { cwd: dir, env, quotaPreflight: false });
+    const r1 = runValidated(["run", manifest], { cwd: dir, env, quotaPreflight: false });
     equal(r1.status, 1);
     ok(/✗ {2}a\s+claude-haiku-4-5-20251001.*\[failed\]/.test(r1.stdout), r1.stdout);
     ok(/⊘ {2}b\s+claude-haiku-4-5-20251001.*\[blocked\]/.test(r1.stdout), r1.stdout);
@@ -360,13 +325,13 @@ test("run: failing leaf -> exit 1, FAILED report + resume offer; resume skips ok
 
     // resume: shim healthy now — both re-execute (nothing was ok), run passes
     const shimLog = join(dir, "shim2.log");
-    const r2 = runCli(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    const r2 = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
     equal(r2.status, 0, r2.stdout + r2.stderr);
     equal(readFileSync(shimLog, "utf8").trim().split("\n").length, 2);
 
     // third run: everything ok already — all skipped, no dispatches
     const shimLog3 = join(dir, "shim3.log");
-    const r3 = runCli(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog3 } });
+    const r3 = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog3 } });
     equal(r3.status, 0);
     ok(!existsSync(shimLog3), "no shim calls expected on fully-resumed run");
     ok(r3.stdout.includes("[skipped]"), r3.stdout);
@@ -389,7 +354,7 @@ test("run: quota-blocked leaf -> re-run-after names the reset in the reader's ow
       SWARM_SHIM_OUTPUT: "usage limit reached|1789200000",
       TZ: "Europe/London",
     };
-    const r = runCli(["run", manifest], { cwd: dir, env, quotaPreflight: false });
+    const r = runValidated(["run", manifest], { cwd: dir, env, quotaPreflight: false });
     equal(r.status, 1);
     ok(r.stdout.includes("quota: 1 leaf(s) blocked by Anthropic usage limits"), r.stdout);
     ok(r.stdout.includes("re-run after Sat 12 Sep, 09:00"), r.stdout);
@@ -407,7 +372,7 @@ test("stop: refuses on a finished run, naming the state", () => {
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "done" };
-    const r1 = runCli(["run", manifest], { cwd: dir, quotaPreflight: false, env });
+    const r1 = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env });
     equal(r1.status, 0, r1.stderr);
     const resultsDir = join(dir, "out");
 
@@ -436,7 +401,7 @@ test("run: refuses a results dir whose engine is alive (fresh heartbeat, no summ
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
 
     const shimLog = join(dir, "shim.log");
-    const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    const r = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes(resultsDir), r.stderr);
     ok(r.stderr.includes("4321"), r.stderr);
@@ -463,7 +428,7 @@ test("run --force: also refuses a live engine — force is not a bypass", () => 
     writeFileSync(join(resultsDir, "heartbeat"), `${new Date().toISOString()} 4321\n`);
 
     const shimLog = join(dir, "shim.log");
-    const r = runCli(["run", manifest, "--force"], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
+    const r = runValidated(["run", manifest, "--force"], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog } });
     equal(r.status, 1, r.stdout + r.stderr);
     ok(r.stderr.includes("swarm stop"), r.stderr);
     ok(!existsSync(shimLog), "claude shim must never be invoked against a live engine, even with --force");
@@ -490,7 +455,7 @@ test("run: a stale heartbeat (dead engine) is not mistaken for live — resume p
     utimesSync(hbPath, anHourAgo, anHourAgo);
 
     const shimLog = join(dir, "shim.log");
-    const r = runCli(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
+    const r = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(existsSync(shimLog), "a dead engine's results dir must still resume and dispatch");
   } finally {
@@ -507,7 +472,7 @@ test("run: a fresh results dir (no heartbeat ever written) is not mistaken for l
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const shimLog = join(dir, "shim.log");
-    const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
+    const r = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_LOG: shimLog, SWARM_SHIM_OUTPUT: "done" } });
     equal(r.status, 0, r.stdout + r.stderr);
     ok(existsSync(shimLog), "a never-run results dir must dispatch normally");
   } finally {
@@ -555,7 +520,7 @@ test("C2: run refuses to start while an ask is live", async () => {
     }));
     const resultsDir = join(dir, "out");
 
-    const r0 = runCli(["run", manifest], {
+    const r0 = runValidated(["run", manifest], {
       cwd: dir,
       env: { SWARM_HOME: home, SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first answer" },
     });
@@ -573,7 +538,7 @@ test("C2: run refuses to start while an ask is live", async () => {
     ok(statSync(hbPath).mtimeMs > baseline, "the ask must touch the heartbeat before a concurrent run can be refused");
 
     const shimLog2 = join(dir, "shim2.log");
-    const r1 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog2 } });
+    const r1 = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog2 } });
     equal(r1.status, 1, r1.stdout + r1.stderr);
     ok(!existsSync(shimLog2), "run must refuse before dispatching anything while the ask is live");
 
@@ -628,7 +593,7 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
     const resultsDir = join(dir, "out");
     const shimLog = join(dir, "stop-shim.log");
 
-    runPromise = runCliAsync(["run", manifest], {
+    runPromise = runValidated(["run", manifest], { async: true,
       cwd: dir,
       env: { SWARM_HOME: home, SWARM_SHIM_SLEEP_MS: "2000", SWARM_SHIM_LOG: shimLog },
     });
@@ -652,7 +617,7 @@ test("stop: live engine via the claude shim writes the stop file, run exits 1, r
 
     // resume: the stopped leaf is non-terminal, so it re-dispatches (never skipped)
     const shimLog2 = join(dir, "shim2.log");
-    const r2 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog2, SWARM_SHIM_OUTPUT: "done" } });
+    const r2 = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog2, SWARM_SHIM_OUTPUT: "done" } });
     equal(r2.status, 0, r2.stdout + r2.stderr);
     equal(readFileSync(shimLog2, "utf8").trim().split("\n").length, 1);
   } finally {
@@ -903,7 +868,7 @@ test("run: prints the absolute resultsDir and the watch command at dispatch", ()
       resultsDir: "out",
       tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
-    const r = runCli(["run", manifest], {
+    const r = runValidated(["run", manifest], {
       cwd: dir,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "done" },
     });
@@ -930,12 +895,12 @@ test("run: an all-skipped replay still exits 0 but says NOTHING RE-EXECUTED", ()
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001" },
     }));
     const env = { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: "first-pass" };
-    const r1 = runCli(["run", manifest], { cwd: dir, env });
+    const r1 = runValidated(["run", manifest], { cwd: dir, env });
     equal(r1.status, 0, r1.stderr);
     ok(!r1.stdout.includes("NOTHING RE-EXECUTED"), "a real run must not claim to be a replay");
 
     // second run: everything is ok on disk already
-    const r2 = runCli(["run", manifest], { cwd: dir, env });
+    const r2 = runValidated(["run", manifest], { cwd: dir, env });
     equal(r2.status, 0, "a cache replay is a SUCCESS — results are valid and resume depends on it");
     ok(r2.stdout.includes("NOTHING RE-EXECUTED"), r2.stdout);
     ok(/previous run|PREVIOUS/i.test(r2.stdout), `the digest must be marked as the previous run's: ${r2.stdout}`);
@@ -947,7 +912,7 @@ test("run: an all-skipped replay still exits 0 but says NOTHING RE-EXECUTED", ()
     ok(r2.stdout.includes("[skipped]"), r2.stdout);
 
     // --force re-executes and says nothing of the kind
-    const r3 = runCli(["run", manifest, "--force"], { cwd: dir, env });
+    const r3 = runValidated(["run", manifest, "--force"], { cwd: dir, env });
     equal(r3.status, 0);
     ok(!r3.stdout.includes("NOTHING RE-EXECUTED"), r3.stdout);
   } finally {
@@ -1205,7 +1170,7 @@ test("run: C3/C4 swarm.always changes nothing — no ceremony, no new flag, bare
       resultsDir: "out",
       tasks: [{ id: "one", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
-    const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
+    const r = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
     equal(r.status, 0, r.stderr + r.stdout);
     // Exclude path-bearing lines (resultsDir:/watch:/summary:) before matching — an
     // absolute path can contain "gate" (e.g. a worktree named gate-*) without that
@@ -1231,7 +1196,7 @@ test("unknown command and missing args exit 1 with usage", () => {
     const r = runCli(["frobnicate"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 1);
     ok(r.stderr.includes("usage:"));
-    const r2 = runCli(["run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r2 = runValidated(["run"], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r2.status, 1);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -1280,7 +1245,7 @@ test("run: stream-json shim -> tokens flow to roster, closing block, and summary
         { id: "t2", prompt: "y", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const r = runCli(["run", manifest], {
+    const r = runValidated(["run", manifest], {
       cwd: dir,
       quotaPreflight: false,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "answer text" },
@@ -1323,7 +1288,7 @@ test("C3: ask stdout is exactly the answer and the tokens line, no roster frames
   try {
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
-    const r0 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
+    const r0 = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
     equal(r0.status, 0, r0.stdout + r0.stderr);
 
     const a = runCli(["ask", join(dir, "out"), "t1", "why?"], {
@@ -1347,7 +1312,7 @@ test("C3: a failed ask exits non-zero, leaves the leaf ok, records the failure",
   try {
     const manifest = join(dir, "plan.json");
     writeFileSync(manifest, JSON.stringify({ resultsDir: "out", tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
-    const r0 = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
+    const r0 = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "first" } });
     equal(r0.status, 0, r0.stdout + r0.stderr);
 
     const a = runCli(["ask", join(dir, "out"), "t1", "why?"], {
@@ -1383,7 +1348,7 @@ test("run: forEach expands end-to-end via the shim; validate previews worst-case
     ok(v.stdout.includes("worst case: up to 2 leaves"), v.stdout);
     ok(v.stdout.includes("fix ≤ 1"), v.stdout);
 
-    const r = runCli(["run", manifest], {
+    const r = runValidated(["run", manifest], {
       cwd: dir,
       env: { SWARM_HOME: join(dir, "home"), SWARM_SHIM_OUTPUT: '{"sites":[{"f":"a"},{"f":"b"}]}' },
     });
@@ -1420,7 +1385,7 @@ test("run: default resultsDir lands under <home>/runs/<encoded-repo-toplevel>/<s
   try {
     const manifest = join(dir, "myplan.json");
     writeFileSync(manifest, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }] }));
-    const r = runCli(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
+    const r = runValidated(["run", manifest], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(r.status, 0, r.stderr);
     const rd = join(dir, "home", "runs", gitOut(["rev-parse", "--show-toplevel"], dir).replace(/[\\/:]/g, "-"), "myplan-1");
     ok(existsSync(join(rd, "summary.json")), readdirSync(dir).join(","));
@@ -1534,7 +1499,7 @@ test("run: closing tokens line compares actual vs estimate; projection warn reac
         { id: "y", prompt: "b", provider: "claude", model: "claude-haiku-4-5-20251001" },
       ],
     }));
-    const r = runCli(["run", p], {
+    const r = runValidated(["run", p], {
       cwd: dir,
       env: { SWARM_HOME: home, SWARM_CONFIG: cfgPath, SWARM_SHIM_STREAM: "1" },
     });
@@ -1666,7 +1631,7 @@ test("run: named manifest end-to-end — args substituted into the dispatched le
       tasks: [{ id: "a", prompt: "say {{args.word}}", provider: "claude", model: "claude-haiku-4-5-20251001" }],
     }));
     const shimLog = join(dir, "w1-shim.log");
-    const r = runCli(["run", "w1-run", "--args", '{"word":"hello"}'], {
+    const r = runValidated(["run", "w1-run", "--args", '{"word":"hello"}'], {
       cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_LOG: shimLog },
     });
     equal(r.status, 0, `stderr: ${r.stderr}\nstdout: ${r.stdout}`);
@@ -1771,7 +1736,7 @@ test("run: the closing block asks for grading only when grading.enabled is true"
         goal: "grading gate",
         tasks: [{ id: "one", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }],
       }));
-      const r = runCli(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
+      const r = runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
       equal(r.status, 0, r.stderr);
       equal(/awaiting grading/.test(r.stdout), enabled, `enabled=${enabled}\n${r.stdout}`);
     } finally {
@@ -1795,7 +1760,7 @@ test("run: digest.md carries exactly one grade footer while the run is ungraded,
       tasks: [{ id: "one", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }, { id: "two", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" }],
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "" },
     }));
-    const run = () => runCli(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
+    const run = () => runValidated(["run", manifest], { cwd: dir, quotaPreflight: false, env: { SWARM_HOME: home, SWARM_SHIM_OUTPUT: "x" } });
     return { dir, home, run };
   };
   const on = setup(true);

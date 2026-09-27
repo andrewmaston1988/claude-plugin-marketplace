@@ -44,6 +44,28 @@ export function reposOfTrees(fs, dir, spawnSync) {
     .map((e) => repoOfWorktree(spawnSync, join(dir, e.name)));
 }
 
+// A git runner behind an injected spawnSync — the closure production code and
+// tests both build over the raw module.
+export function makeGit(spawnSync) {
+  return (args, cwd) => {
+    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 60000 });
+    return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+  };
+}
+
+// Every cwd the manifest named, not just the top-level one — a manifest may place
+// tasks in different repos, and once every kept worktree is gone manifest.json's
+// cwd (the invoking process's cwd at dispatch) is the only surviving record of them.
+export function reposFromManifest(fs, dir) {
+  try {
+    const m = JSON.parse(fs.readFileSync(join(dir, "manifest.json"), "utf8"));
+    const cwds = [m.cwd, ...(Array.isArray(m.tasks) ? m.tasks.map((t) => t?.cwd) : [])];
+    return cwds.filter((c) => typeof c === "string" && c);
+  } catch {
+    return [];
+  }
+}
+
 // `git worktree list --porcelain` parsed with the injected git, mirroring
 // worktree.mjs's prepareIsolation-side registry read — duplicated rather than
 // imported because that one is bound to the real spawnSync git and this seam

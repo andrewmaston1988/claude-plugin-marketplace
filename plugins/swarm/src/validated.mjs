@@ -31,11 +31,24 @@ export function validationKey(files, args = null) {
   return h.digest("hex");
 }
 
-export function markValidated(key, env = process.env) {
-  mkdirSync(validatedDir(env), { recursive: true });
-  writeFileSync(markerPath(key, env), JSON.stringify({ validatedAt: new Date().toISOString() }) + "\n");
-}
-
 export function isValidated(key, env = process.env) {
   return existsSync(markerPath(key, env));
+}
+
+// `validate`'s success path. Returns 0 so the verb can `return markValidated(...)`
+// and the write cannot be dropped from a later edit to cmdValidate's tail.
+export function markValidated(plan, args) {
+  const key = validationKey(plan.manifestFiles, args);
+  mkdirSync(validatedDir(), { recursive: true });
+  writeFileSync(markerPath(key), JSON.stringify({ validatedAt: new Date().toISOString() }) + "\n");
+  return 0;
+}
+
+// The refusal `run` prints when the marker is missing, or null when it is there.
+// The key that decides and the line that teaches live together: a run refused
+// here must name the exact command — args included — that would have covered it.
+export function unvalidatedRefusal(plan, args, ref) {
+  if (isValidated(validationKey(plan.manifestFiles, args))) return null;
+  const shown = args ? `${ref} --args '${JSON.stringify(args)}'` : ref;
+  return `swarm: ${shown} has not been validated as written — run \`swarm validate ${shown}\` and read its seats block, then run again.`;
 }

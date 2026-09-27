@@ -15,10 +15,10 @@ import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
-import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, repoOfWorktree, reposOfTrees } from "../src/prune.mjs";
+import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, repoOfWorktree, reposOfTrees, makeGit, reposFromManifest } from "../src/prune.mjs";
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim, out, err } from "../src/ui.mjs";
-import { validationKey, markValidated, isValidated } from "../src/validated.mjs";
+import { markValidated, unvalidatedRefusal } from "../src/validated.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { modelLine, effortsCell } from "../src/model-row.mjs";
 
@@ -368,8 +368,7 @@ async function cmdValidate(rest) {
     out("resolved manifest:");
     out(JSON.stringify(effectivePlanDoc(plan), null, 2));
   }
-  markValidated(validationKey(plan.manifestFiles, args));
-  return 0;
+  return markValidated(plan, args);
 }
 
 // A second engine on the same resultsDir resumes each leaf's recorded session
@@ -399,12 +398,11 @@ async function cmdRun(rest) {
   const { createNotifier } = await import("../src/notify.mjs");
   const notify = createNotifier({ notifyCmd: cfg.notifyCmd });
   if (refuseLiveEngine(plan.resultsDir, cfg, "re-running")) return 1;
-  // The dispatch gate: validate's seats block is the seating evidence, and it is
-  // engine-side so it holds on hosts the hook gates never reach. After the
-  // live-engine refusal, which owns its own message.
-  if (!isValidated(validationKey(plan.manifestFiles, args))) {
-    const shown = args ? `${rest[0]} --args '${JSON.stringify(args)}'` : rest[0];
-    err(`swarm: ${shown} has not been validated as written — run \`swarm validate ${shown}\` and read its seats block, then run again.`);
+  // Engine-side, so it holds on hosts the hook gates never reach; after
+  // refuseLiveEngine, which owns its own message.
+  const refusal = unvalidatedRefusal(plan, args, rest[0]);
+  if (refusal) {
+    err(refusal);
     return 1;
   }
 
@@ -493,30 +491,6 @@ async function cmdRun(rest) {
   // the session falls back to summary.json + selective raw reads.
   if (r.summary.stopped) return 1;
   return 0;
-}
-
-// A worktree-registry read behind an injected git — the closure production
-// code and tests both build over the raw spawnSync.
-function makeGit(spawnSync) {
-  return (args, cwd) => {
-    const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true, timeout: 60000 });
-    return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
-  };
-}
-
-// Once every kept worktree is gone there is nothing left to ask for the repo —
-// manifest.json's cwd (the invoking process's cwd at dispatch) is the only
-// surviving record of it.
-// Every cwd the manifest named, not just the top-level one — a manifest may place
-// tasks in different repos, and a killed run's only record of the second is here.
-function reposFromManifest(fs, dir) {
-  try {
-    const m = JSON.parse(fs.readFileSync(join(dir, "manifest.json"), "utf8"));
-    const cwds = [m.cwd, ...(Array.isArray(m.tasks) ? m.tasks.map((t) => t?.cwd) : [])];
-    return cwds.filter((c) => typeof c === "string" && c);
-  } catch {
-    return [];
-  }
 }
 
 // Dead engine: no live process to signal, so nothing is killed. The run-stop
