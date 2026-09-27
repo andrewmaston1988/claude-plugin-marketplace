@@ -2,7 +2,7 @@
 // the screen and carries a live pill; finished stacks stay compact rows.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadPage, listData, listRow } from "./helpers/page-harness.mjs";
+import { loadPage, listData, listRow, RUN_URL, targetRun } from "./helpers/page-harness.mjs";
 
 async function runsWith(data) {
   const P = loadPage();
@@ -11,6 +11,70 @@ async function runsWith(data) {
   await P.flush();
   return P;
 }
+
+// ── coverage: a short mustRead is a warning on both screens ──────────────────
+// The engine records a shortfall and never fails the leaf (`scheduler.mjs` finish), so
+// the state alone cannot tell a leaf that read what it was asked from one that did not.
+// A codex leaf reporting "3 of 430 required lines" reached the operator as "complete".
+
+const SHORT = { status: "incomplete", required: 430, read: 3, missed: ["README.md"] };
+const leafTask = (coverage, over = {}) => ({ ...targetRun().tasks[0], ...(coverage ? { coverage } : {}), ...over });
+const runWith = (coverage) => ({ ...targetRun(), tasks: [leafTask(coverage)] });
+
+async function openRun(run) {
+  const P = loadPage();
+  await P.flush();
+  P.location.hash = RUN_URL;
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun(run);
+  await P.flush();
+  return P;
+}
+
+async function openLeaf(leaf) {
+  const P = loadPage();
+  await P.flush();
+  P.location.hash = `${RUN_URL}/leaf/leaf-a`;
+  P.fireHashchange();
+  await P.flush();
+  P.respondRun(runWith(null));
+  P.respondLeaf({ id: "leaf-a", prompt: "do it", output: "done", ...leaf });
+  await P.flush();
+  return P;
+}
+
+test("run screen: a leaf whose read was short is marked on its row, and a clean one is not", async () => {
+  const warned = await openRun(runWith(SHORT));
+  const marks = warned.findByClass("covwarn");
+  assert.equal(marks.length, 1, "the row carries the warning");
+  assert.match(marks[0].textContent, /3 of 430/, "and names the shortfall, not just that something is off");
+  const clean = await openRun(runWith({ status: "complete", required: 430, read: 430 }));
+  assert.equal(clean.findByClass("covwarn").length, 0, "a complete read is the clean case");
+});
+
+test("leaf screen: a short read banners amber instead of the clean green, naming the shortfall", async () => {
+  const P = await openLeaf({ coverage: SHORT });
+  const b = P.findByClass("banner");
+  assert.equal(b.length, 1);
+  assert.match(b[0].getAttribute("class"), /\bslow\b/, "the ok/clean green is exactly what the operator was shown");
+  assert.doesNotMatch(b[0].getAttribute("class"), /\bok\b/);
+  assert.match(P.screenText(), /3 of 430/);
+});
+
+test("leaf screen: an unparseable transcript warns as its own fact, not as a partial read", async () => {
+  const P = await openLeaf({ coverage: { status: "unparseable", required: 12, read: 0, missed: [] } });
+  const text = P.screenText();
+  assert.match(P.findByClass("banner")[0].getAttribute("class"), /\bslow\b/);
+  assert.match(text, /could not be read/, "the cause is named — 0 of 12 reads the same either way");
+});
+
+test("leaf screen: a leaf with no coverage recorded keeps the clean banner", async () => {
+  const P = await openLeaf({});
+  const b = P.findByClass("banner")[0];
+  assert.match(b.getAttribute("class"), /\bok\b/);
+  assert.equal(P.findByClass("covwarn").length, 0);
+});
 
 test("a live run is a card carrying its name, elapsed time and progress bar", async () => {
   const P = await runsWith(listData(listRow()));

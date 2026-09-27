@@ -49,6 +49,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
   const lastEvent = new Map();
   const clones = new Map();   // parent -> count
   const children = new Map(); // node -> [ids]
+  const coverage = new Map(); // id -> mustRead coverage, when the leaf had one
   const rosterTask = (task) => {
     const row = typeof task === "string" ? { id: task, model: "?" } : { ...task };
     const inferred = inferStoredIdentity(row.model);
@@ -75,7 +76,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       startedMs = Date.parse(entry.ts) || now;
       enginePid = Number.isInteger(entry.pid) ? entry.pid : null;
       state.clear(); tokens.clear(); durations.clear(); runningSince.clear();
-      activity.clear(); lastEvent.clear(); clones.clear(); children.clear();
+      activity.clear(); lastEvent.clear(); clones.clear(); children.clear(); coverage.clear();
       continue;
     }
     if (entry.event === "expand") {
@@ -116,6 +117,13 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       tokens.set(entry.id, entry.tokens);
     } else if (entry.event === "activity") {
       activity.set(entry.id, entry.activity);
+    } else if (entry.event === "coverage") {
+      // A short read never fails the leaf, so this event is the only record of it —
+      // kept whole so the row can say what was missed, not just that something was.
+      coverage.set(entry.id, {
+        status: entry.status, required: entry.required, read: entry.read,
+        missed: entry.missed, retried: entry.retried,
+      });
     } else if (entry.state) {
       state.set(entry.id, entry.state);
       if (entry.state === "running") runningSince.set(entry.id, Date.parse(entry.ts) || now);
@@ -136,6 +144,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       startedMs: runningSince.get(id),
       tokens: tokens.get(id),
       activity: activity.get(id),
+      coverage: coverage.get(id),
       lastEventMs: last,
       quietMs: st === "running" && last != null ? now - last : null,
     };

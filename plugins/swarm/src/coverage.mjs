@@ -109,12 +109,19 @@ function parseCodexReadCalls(text, cwd) {
   return sawStart ? reads : null;
 }
 
+// Switches a caller may place BEFORE the command switch: `pwsh -NoProfile -Command …`,
+// `powershell.exe -ExecutionPolicy Bypass -Command …`. A wrapper that is not unwrapped
+// makes its whole payload invisible, so the read it performed counts as nothing.
+const PRE_SWITCHES = String.raw`(?:\s+-(?:noprofile|noninteractive|nologo)|\s+-executionpolicy\s+\S+)*`;
+const SHELL_CALL_RE = new RegExp(
+  String.raw`^\s*(?:"([^"]*)"|'([^']*)'|(\S+))${PRE_SWITCHES}\s+(\/c|-c|-lc|-command)\s+([\s\S]*)$`, "i");
+
 // `"C:\WINDOWS\system32\cmd.exe" /c "<payload>"` → `<payload>`; null when the
 // command is not a shell wrapper. Matched on the exe BASENAME after stripping its
 // quotes: a literal `cmd.exe /c` substring occurs in 0 of the 49 commands in the
 // real transcript, and the wrapper path arrives with doubled separators.
 function codexShellPayload(command) {
-  const m = /^\s*(?:"([^"]*)"|'([^']*)'|(\S+))\s+(\/c|-c|-lc|-command)\s+([\s\S]*)$/i.exec(command);
+  const m = SHELL_CALL_RE.exec(command);
   if (!m) return null;
   const exe = (m[1] ?? m[2] ?? m[3] ?? "").replace(/\.(exe|cmd|bat|com)$/i, "").split(/[\\/]/).pop().toLowerCase();
   if (!CODEX_SHELLS.has(exe)) return null;
@@ -138,12 +145,17 @@ function codexPipelines(payload) {
 }
 
 const codexTokens = (pipeline) => pipeline.match(/"[^"]*"|'[^']*'|\S+/g) || [];
-const unquote = (s) => String(s ?? "").replace(/["']/g, "");
+// A quote arrives bare (`type "C:\a.mjs"`) or escaped (`\"C:\\a.mjs\"` — codex
+// re-serialises the command). The escaped form's backslash goes with the quote: left
+// behind it becomes a trailing separator and the path no longer compares equal.
+const unquote = (s) => String(s ?? "").replace(/\\?["']/g, "");
 
 // The read allowlist; everything else — findstr, rg, grep, dir, pytest — is not a
 // read, exactly as Grep is not a Read for claude. Fails closed: an unrecognised
 // shape is an honest `incomplete` with teaching, never a false `complete`.
 function codexReadSpec(pipeline) {
+  const windowed = codexWindowedSpec(pipeline);
+  if (windowed) return windowed;
   const toks = codexTokens(pipeline);
   if (toks.length < 2) return null;
   const cmd = unquote(toks[0]).split(/[\\/]/).pop().toLowerCase();
@@ -173,6 +185,27 @@ function codexReadSpec(pipeline) {
   } else if (cmd !== "type" && cmd !== "cat") return null;
   const path = firstPath();
   return path ? { path, a: 1, b: Infinity } : null;
+}
+
+// The ONE windowed read. On win32 the codex sandbox kills every MSYS2 program, so it is
+// PowerShell's; `@( )` stops a one-line file indexing characters instead of lines, and
+// single quotes keep `$` and backticks in a path literal.
+export function codexWindowedRead(path, a, b, platform = process.platform) {
+  return platform === "win32"
+    ? `@(Get-Content -LiteralPath '${path.replace(/'/g, "''")}')[${a - 1}..${b - 1}]`
+    : `sed -n '${a},${b}p' "${path}"`;
+}
+
+// The same shape, recognised. Matched off the whole pipeline rather than its tokens:
+// the path is quoted and may hold spaces. codex re-serialises the command with `\"`,
+// so that is normalised first.
+function codexWindowedSpec(pipeline) {
+  const m = /^@\(\s*Get-Content\s+(?:-LiteralPath\s+)?("([^"]*)"|'((?:[^']|'')*)'|(\S+))\s*\)\s*\[\s*(\d+)\s*\.\.\s*(\d+)\s*\]$/i
+    .exec(pipeline.trim().replace(/\\"/g, '"'));
+  if (!m) return null;
+  const from = Number(m[5]), to = Number(m[6]);
+  if (to < from) return null;
+  return { path: m[2] ?? m[3]?.replace(/''/g, "'") ?? m[4], a: from + 1, b: to + 1 };
 }
 
 // The parsed command carries doubled separators (`C:\\Users\\…`) and a quoted
@@ -330,7 +363,12 @@ export function computeCoverage(entries, reads, opts) {
   };
 }
 
-function codexRanges(path, start, end) {
+// A range must fit the model-visible output budget. On win32 the read is PowerShell's,
+// which emits CRLF, so a range sized in SOURCE bytes can arrive PAST the cap and be
+// truncated to head+tail (page.html 1-416 = 40,000 source bytes, 40,416 emitted) — the
+// budget there counts the extra byte per line the emitted text will carry.
+function codexRanges(path, start, end, platform = process.platform) {
+  const eol = platform === "win32" ? 1 : 0;
   let sizes;
   try {
     sizes = (readFileSync(path, "utf8").match(/[^\n]*\n|[^\n]+$/g) || [])
@@ -341,7 +379,7 @@ function codexRanges(path, start, end) {
   const ranges = [];
   let first = start, bytes = 0;
   for (let line = start; line <= end; line++) {
-    const size = sizes[line - 1] ?? 0;
+    const size = (sizes[line - 1] ?? 0) + eol;
     if (bytes && bytes + size > CODEX_MODEL_OUTPUT_BYTES) {
       ranges.push([first, line - 1]);
       first = line;
@@ -356,13 +394,13 @@ function codexRanges(path, start, end) {
 // Retry teaching: one "- <path> lines a-b: Read offset a limit n" per uncovered
 // range, a range over 2000 lines split into consecutive 2000-line reads, plus any
 // resolve/index errors. Capped like citations.
-export function coverageErrorLines(gaps, { indexErrors = [], runner = "claude" } = {}) {
+export function coverageErrorLines(gaps, { indexErrors = [], runner = "claude", platform = process.platform } = {}) {
   const lines = [];
   for (const { path, ranges } of gaps) {
     for (const [a, b] of ranges) {
       if (runner === "codex") {
-        for (const [start, end] of codexRanges(path, a, b)) {
-          lines.push(`${path} lines ${start}-${end}: sed -n '${start},${end}p' "${path}"`);
+        for (const [start, end] of codexRanges(path, a, b, platform)) {
+          lines.push(`${path} lines ${start}-${end}: ${codexWindowedRead(path, start, end, platform)}`);
         }
         continue;
       }
@@ -379,12 +417,12 @@ export function coverageErrorLines(gaps, { indexErrors = [], runner = "claude" }
 
 // The whole re-ask paragraph in one place. The sentence has to name the leaf's
 // OWN reader: a codex leaf has no Read tool.
-export function coverageRetryBlock(gaps, { indexErrors = [], runner = "claude" } = {}) {
+export function coverageRetryBlock(gaps, { indexErrors = [], runner = "claude", platform = process.platform } = {}) {
   const how = runner === "codex"
     ? "Run the command shown for each of the following, exactly as stated"
     : "Read each of the following with the Read tool, exactly as stated";
   return `You did not read everything this task requires. ${how}, then give your corrected answer:` +
-    `\n  - ${coverageErrorLines(gaps, { indexErrors, runner }).join("\n  - ")}`;
+    `\n  - ${coverageErrorLines(gaps, { indexErrors, runner, platform }).join("\n  - ")}`;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────

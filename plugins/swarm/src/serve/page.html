@@ -51,6 +51,7 @@
   .row .sub { display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:13px; }
   .counts { display:inline-flex; align-items:center; gap:8px; vertical-align:middle; }
   .c-ok { color:var(--ok); } .c-run { color:var(--accent); } .c-warn { color:var(--warn); } .c-bad { color:var(--bad); } .c-pend { color:var(--faint); }
+  .covwarn { color:var(--warn); }
   .bar { display:flex; height:3px; overflow:hidden; background:var(--surface-2); }
   .bar span { display:block; }
   .tap { -webkit-tap-highlight-color:transparent; cursor:pointer; }
@@ -719,8 +720,11 @@
       const right = window.swarmLive.elapsedText(t, now) ?? t.state;
        const identity = identityName(t) ? identityHtml(t, { chip: true }) : "";
        const sub = t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : identity;
+      // A short read never fails the leaf, so the state glyph cannot carry it — the row
+      // says it in words instead.
+      const short = window.swarmLive.coverageWarn(t);
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
-      html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
+      html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}${short ? ` · <span class="covwarn">⚠ ${esc(short)}</span>` : ""}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
     }
     html += `</ul></div>`;
     return { html, rows };
@@ -862,7 +866,14 @@
     const last = t.lastEventMs ? ` · last event ${ago(t.lastEventMs)}` : "";
     const identity = identityName(t) ? identityHtml(t) : "";
     switch (t.state) {
-      case "ok": return tile("ok", "✓", `Finished clean in ${took}`, tok);
+      // A short mustRead is recorded, not failed — so the clean green is a claim this
+      // leaf cannot support. Same verdict, one fact louder.
+      case "ok": {
+        const short = window.swarmLive.coverageWarn(t, leaf);
+        return short
+          ? tile("slow", "!", "Finished — but it did not read everything", `${short} · ${tok}`)
+          : tile("ok", "✓", `Finished clean in ${took}`, tok);
+      }
       case "skipped": return tile("ok", "✓", "Skipped", "its condition was false — nothing ran");
       case "failed:timeout": return tile("bad", "✗", `Timed out after ${took}`, tok + last);
       case "failed:stopped": return tile("bad", "✗", "Stopped by hand", tok + last);
