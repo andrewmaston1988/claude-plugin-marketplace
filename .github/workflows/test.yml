@@ -72,8 +72,10 @@ jobs:
         run: |
           git config --global user.email "ci@example.com"
           git config --global user.name "CI"
+      # npm test preloads isolate-home.mjs; a bare `node --test` reads the real ~/.swarm
       - name: Run tests
-        run: node --test plugins/swarm/tests/*.test.mjs
+        run: npm test
+        working-directory: plugins/swarm
 
   pipeline:
     name: pipeline
