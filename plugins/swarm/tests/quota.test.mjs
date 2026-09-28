@@ -275,7 +275,11 @@ test("quota: usage --provider codex fetches live even with a cache under 5 min o
     const r = await runCliAsync(["usage", "--provider", "codex"], { cwd: dir, env: { SWARM_HOME: home } });
     equal(r.status, 0, r.stderr + r.stdout);
     ok(existsSync(log), `--provider must spawn despite a fresh cache:\n${r.stdout}`);
-    ok(JSON.parse(readFileSync(cache, "utf8")).fetchedAt > before, "the live read is banked");
+    // The spy exits at once, so this live read fails outright: it must leave the cached
+    // reading standing and say why, never bank the failure over it.
+    const after = JSON.parse(readFileSync(cache, "utf8"));
+    equal(after.fetchedAt, before, "a failed live read never replaces the reading");
+    ok(after.lastError, "and records why it failed");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

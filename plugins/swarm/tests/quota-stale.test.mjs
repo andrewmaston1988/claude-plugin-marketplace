@@ -2,7 +2,7 @@
 // and the endpoint's Retry-After is honoured so the dashboard stops extending the 429.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { checkQuota } from "../src/quota.mjs";
@@ -70,4 +70,22 @@ test("the Claude adapter reports a held-over reading as provenance stale, dated 
     quotaCheck: async () => ({ limits: [{ kind: "session", percent: 40 }], source: "stale", asOfMs: T0 }) });
   equal(snap.provenance, "stale");
   equal(snap.asOf, new Date(T0).toISOString());
+});
+
+// A refusal nobody writes down leaves "stale" with no cause: a 1h hold on a 1h28m-old
+// reading could not be explained (operator 2026-09-28). Every failed read says why.
+test("a failed read records why beside the reading it kept", async () => {
+  const s = setup();
+  try {
+    await checkQuota(s.opts(T0));
+    s.setReply({ ok: false, status: 503, headers: { get: () => null } });
+    await checkQuota(s.opts(T0 + 10 * 60_000));
+    const env = JSON.parse(readFileSync(join(s.home, "q.json"), "utf8"));
+    equal(env.lastError, "HTTP 503", "the refusal is recorded");
+    equal(env.lastErrorAt, T0 + 10 * 60_000);
+    equal(env.fetchedAt, T0, "the reading keeps the moment it was really read");
+    s.setReply(tooMany(3600));
+    await checkQuota(s.opts(T0 + 20 * 60_000));
+    equal(JSON.parse(readFileSync(join(s.home, "q.json"), "utf8")).lastError, "HTTP 429", "a rate limit says so");
+  } finally { rmSync(s.home, { recursive: true, force: true }); }
 });
