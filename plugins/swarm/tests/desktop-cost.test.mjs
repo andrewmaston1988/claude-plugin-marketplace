@@ -26,6 +26,10 @@ test("the desktop Cost screen shows both providers at once, each its own section
   const grid = P.findByClass("costgrid");
   assert.equal(grid.length, 1, "the sections share one grid");
   assert.equal(P.findByClass("chero", grid[0]).length, 2, "one value hero per provider");
+  // Each provider is one grid item: loose cards would flow into a mosaic that mixes providers.
+  const cols = P.findByClass("costcol", grid[0]);
+  assert.equal(cols.length, 2, "one column per provider");
+  for (const col of cols) assert.equal(P.findByClass("chero", col).length, 1, "each column holds its own provider's hero");
 });
 
 test("the phone Cost screen still shows one provider, behind its switcher", async () => {

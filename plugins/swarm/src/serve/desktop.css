@@ -69,5 +69,7 @@
   /* Cost: every provider at once, so the switcher — which exists to show one at a
      time — has nothing left to do. Hidden, not removed (D7). */
   main:has(> .costgrid) > .seg { display:none; }
+  /* One column per provider: its cards stack inside it, never mixed with another provider's. */
   .costgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:0 20px; align-items:start; padding:0 16px; }
+  .costcol > .card { margin-left:0; margin-right:0; }
 }

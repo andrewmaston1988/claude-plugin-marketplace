@@ -209,7 +209,7 @@
     const sections = costSections(data);
     if (!sections.length) return noCost();
     const switcher = seg(sections.map((s) => ({ label: name(s), href: `#/cost/${enc(name(s))}`, icon: providerLogo(name(s)) })), 0);
-    return switcher + `<div class="costgrid">${sections.map((s) => costSection(s, data, h)).join("")}</div>`;
+    return switcher + `<div class="costgrid">${sections.map((s) => `<div class="costcol">${costSection(s, data, h)}</div>`).join("")}</div>`;
   }
 
   // One provider cost page: its value hero, then a ranked card per model, or one fact card.
