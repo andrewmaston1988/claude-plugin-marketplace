@@ -94,5 +94,18 @@
 
   /* ── Model screen (chunk 2b) ─────────────────────────────────────────────── */
 
+  .model-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; align-items:start; padding:12px 16px 20px; }
+  .model-hero { grid-column:1 / -1; min-width:0; }
+  .model-hero > .mhero { max-width:none; margin:0; }
+  .model-box { min-width:0; align-self:start; border:1px solid var(--rule); border-radius:12px; padding:12px; background:var(--surface); }
+  .model-box > .section { padding:2px 0 8px; color:var(--muted); letter-spacing:.12em; }
+  .model-aspects .aspects { padding:4px 0 0; }
+  .model-reliability .chips { gap:5px; }
+  .model-reliability .rank { margin:0; }
+  .model-cost-value { color:var(--accent); font-size:24px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .model-cost-evidence, .model-cost-verdict { margin-top:6px; color:var(--muted); font-size:12px; }
+  .model-coverage { grid-column:1 / -1; overflow-x:auto; }
+  .model-coverage .covtable { padding:0; }
+
   /* end model */
 }
