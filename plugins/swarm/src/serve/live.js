@@ -326,8 +326,10 @@
 
   // A short mustRead is RECORDED, never fatal (the engine's `finish`), so a leaf's state
   // alone cannot say whether it read what it was asked — a codex leaf reporting 3 of 430
-  // required entries reached the operator as "complete". One sentence, both screens: the
-  // run row carries the run.log event, the leaf view the result's own field.
+  // required entries reached the operator as "complete". The sentence is the leaf screen's
+  // and the table's hover title; the run row takes coverageBadge, which fits its one line.
+  // Both read the same record — the run row from the run.log event, the leaf view from the
+  // result's own field.
   const coverageWarn = (row, leaf) => {
     const c = row?.coverage || leaf?.coverage;
     if (!c || c.status === "complete") return null;

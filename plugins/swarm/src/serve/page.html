@@ -772,7 +772,7 @@
       const quietSecs = window.swarmLive.quietSecs(t, now);
       const quiet = quietSecs != null && quietSecs * 1000 > quietWarn;
       // A short read never fails the leaf, so the state glyph cannot carry it — the row
-      // says it in words instead.
+      // marks it instead: the badge on the phone, the sentence on the table's hover title.
       const identity = identityName(t) ? identityHtml(t, { chip: true }) : "", sub = t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : identity, nm = r.block ? sessionName(t.id) : esc(t.id), tk = fmtTok(tokTotal(t.tokens)), tm = window.swarmLive.elapsedText(t, now), short = window.swarmLive.coverageWarn(t);
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
       // One row, one set of values, two cuts: the phone stacks them, the table's cells are them.
