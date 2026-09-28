@@ -39,6 +39,9 @@ test("Overview's flyout holds Usage and Cost, and nothing from Performance", asy
   assert.equal(P.findByClass("rlist").length, 0, "no top-models list");
   assert.ok(panel[0].contains(P.findByClass("uhero")[0]), "the hero is the flyout's, not the feed's");
   assert.match(P.findByClass("uhero")[0].textContent, /MOST LEFT THIS WEEK/);
+  // Each section heads with the way through to its full screen, as the wireframe's box does.
+  const links = P.findByClass("phead").map((hd) => hd.childNodes.find((n) => n.tagName === "A")?.getAttribute("href"));
+  assert.deepEqual(links, ["#/usage", "#/cost"], "usage links to Usage, best value to Cost");
 });
 
 // Grading off is a Performance note, and the hub dropped the column that carried it: the

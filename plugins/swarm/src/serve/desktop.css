@@ -197,7 +197,7 @@
   /* The hub fills main: the feed takes the width the flyout does not, and the flyout
      rides a clamp()'d track of its own. Nothing here is capped — the 1100px column is a
      run's reading width, and the hub is a landing, not a document. */
-  main:has(> .ovfeed) { display:grid; grid-template-columns:minmax(0, 1fr) clamp(240px, 24ch, 340px); align-items:start; align-content:start; gap:0 18px; padding-left:16px; padding-right:16px; }
+  main:has(> .ovfeed) { display:grid; grid-template-columns:minmax(0, 1fr) clamp(300px, 25vw, 360px); align-items:start; align-content:start; gap:0 18px; padding-left:16px; padding-right:16px; }
   main:has(> .ovfeed.shut) { grid-template-columns:minmax(0, 1fr); }
   .ovfeed { min-width:0; display:grid; grid-template-columns:var(--feed-cols); column-gap:12px; align-content:start; align-items:start; }
   /* Everything that is not a card spans the feed's tracks: the two section rules, the
@@ -208,10 +208,32 @@
   .ovtoggle { font:inherit; font-size:12px; letter-spacing:.04em; color:var(--muted); background:var(--surface); border:1px solid var(--rule); border-radius:999px; padding:4px 12px; cursor:pointer; }
   .ovtoggle.on { color:var(--accent); border-color:var(--accent); }
   /* The panel is the whole right track and stays put while a long feed scrolls past it. */
-  .ovpanel { min-width:0; position:sticky; top:0; }
-  .ovpanel > .card, .ovpanel > .uhero, .ovpanel > .empty { margin-left:0; margin-right:0; }
-  .ovpanel > .section { padding:0 0 6px; }
-  .ovpanel > .section + .card, .ovpanel > .section + .uhero, .ovpanel > .section + .empty { margin-top:0; }
+  /* It is one box, as the wireframe draws it: the Usage and Cost screens' own parts
+     with their card chrome taken off, so each reads as a thin row under its head. */
+  .ovpanel { min-width:0; position:sticky; top:0; background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; }
+  .ovpanel .phead { display:flex; justify-content:space-between; align-items:baseline; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding-bottom:4px; }
+  .ovpanel .phead a { font-size:12px; letter-spacing:0; text-transform:none; color:var(--accent); text-decoration:none; }
+  .ovpanel > * + .phead { margin-top:14px; padding-top:14px; border-top:1px solid var(--rule); }
+  aside.ovpanel > .card, aside.ovpanel > .uhero, aside.ovpanel > .empty { margin:0; padding:8px 0; background:none; border:0; border-radius:0; }
+  aside.ovpanel > .uhero { padding-top:6px; }
+  .ovpanel .uhero .fig { margin-top:6px; }
+  .ovpanel .uhero .fig b { font-size:36px; }
+  .ovpanel .uhero .ubar { margin-top:10px; }
+  .ovpanel .upc .sub, .ovpanel .uhero .sub { margin-top:4px; }
+  .ovpanel .upc .ubar { margin-top:6px; }
+  /* Best value: provider · model, then its score and cost — the claim and the bars stay
+     on the Cost screen, one link away. */
+  aside.ovpanel > .chero { display:grid; grid-template-columns:auto minmax(0, 1fr) auto auto; column-gap:10px; align-items:baseline; padding:8px 0; }
+  .ovpanel .chero .cl { display:contents; }
+  .ovpanel .chero .cl span:first-child { display:none; }
+  .ovpanel .chero .cl span:last-child { font-size:12px; letter-spacing:0; text-transform:none; color:var(--muted); }
+  .ovpanel .chero .fig { margin:0; font-size:14px; font-weight:600; letter-spacing:0; }
+  .ovpanel .chero .claim { display:none; }
+  .ovpanel .chero.none .claim { display:block; margin:0; grid-column:2 / -1; }
+  .ovpanel .chero .vbar { margin:0; gap:5px; }
+  .ovpanel .chero .vbar .bar { display:none; }
+  .ovpanel .chero .vbar .k { display:none; }
+  .ovpanel .chero .vbar b { width:auto; font-size:13px; }
   /* The hub draws no graph above the feed's rows: the lane line goes, the state disc
      (x 7–17, inside this svg) stays. A narrower svg would squash the disc, so the rail
      keeps its width and the space right of the disc, less an 8px gap, is pulled back. */

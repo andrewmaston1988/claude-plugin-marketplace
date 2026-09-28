@@ -54,14 +54,16 @@
     // tab is one tap away for the other window. A provider with nothing measured is not
     // on the Cost screen either (costSections), so the panel shows the same providers it
     // does — and when that is none of them, the Cost screen's own empty state.
+    // Each panel section heads with the way through to its full screen.
+    const head = (label, href, go) => `<div class="phead"><span>${esc(label)}</span><a href="${href}">${esc(go)}</a></div>`;
     let side = "";
     if (usage) {
       const u = V.usageParts(usage, h, "week");
-      side += sec("usage") + (u.empty || u.hero + u.cards.join(""));
+      side += head("usage", "#/usage", "view all →") + (u.empty || u.hero + u.cards.join(""));
     }
     if (cost) {
       const sections = V.costSections(cost);
-      side += sec("cost") + (sections.length ? sections.map((s) => V.costHero(s, h)).join("") : V.noCost());
+      side += head("best value", "#/cost", "cost →") + (sections.length ? sections.map((s) => V.costHero(s, h)).join("") : V.noCost());
     }
     return feed + `<aside class="ovpanel">${side}</aside>`;
   }
