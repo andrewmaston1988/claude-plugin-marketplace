@@ -1,11 +1,9 @@
 #!/usr/bin/env node
-// Desktop-layout geometry probe: the sidebar stays inside its clamp, the main column
-// never overlaps it, nothing scrolls sideways, the Runs table's cells line up per
-// column and its fr tracks keep their declared ratio — measured in a real headless
-// browser over an in-process dashboard (temp SWARM_HOME, DevTools protocol, zero npm
-// deps), because "it looks right" is not a measurement.
-// Outside `npm test`: node plugins/swarm/scripts/probe-desktop-layout.mjs [--browser <path>]
-// Exits 1 when any check is outside tolerance; removes its temp dirs, kills only its own browser.
+// Desktop-layout geometry probe: sidebar inside its clamp, no overlap, no sideways
+// scroll, table cells aligned per column and their fr ratio — measured in a real
+// headless browser over an in-process dashboard (zero npm deps), because "it looks
+// right" is not a measurement.
+// Outside `npm test`: node plugins/swarm/scripts/probe-desktop-layout.mjs [--browser <path>]; exits 1 outside tolerance.
 
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -65,7 +63,7 @@ const MEASURE = `(() => {
     mainOverflow: main.scrollWidth - main.clientWidth,
     tables: document.querySelectorAll(".rtable").length,
     cols, cellRows,
-    vw: window.innerWidth,
+    vw: window.innerWidth, vh: window.innerHeight,
   };
 })()`;
 
@@ -165,12 +163,17 @@ async function measure(client, pass) {
   // measurement then reads a screen that was never opened.
   await client.send("Page.navigate", { url: `${ORIGIN}/?probe=${pass.name}#/` });
   await waitFor(client, `location.search === "?probe=${pass.name}" && document.querySelectorAll(".rcard").length > 0`, "the live run card");
+  // A project's finished stack is collapsed until it is opened (page.html's (d)) —
+  // the tap is the same gesture on both layouts, so the probe makes it on both.
+  await evaluate(client, `(() => { const s = document.querySelector(".section[data-project]"); if (s) s.click(); return !!s; })()`);
   if (pass.desktop) {
-    // A project's finished stack is collapsed until it is opened (page.html's (d)) —
-    // the tap is the same gesture on both layouts, so the probe makes it.
-    await evaluate(client, `(() => { const s = document.querySelector(".section[data-project]"); if (s) s.click(); return !!s; })()`);
     const table = await waitFor(client, `document.querySelectorAll(".rtable > .row .col").length > 0`, "the finished-runs table", true);
     if (!table) missing = "the finished-runs table never rendered";
+  } else {
+    // The phone must open its stack too: ".rtable is absent" then measures a rendered
+    // section, not one that was never exercised.
+    const opened = await waitFor(client, `document.querySelector('ul[data-key^="pl:"]') != null`, "the opened finished stack on the phone", true);
+    if (!opened) missing = "the finished stack never opened on the phone";
   }
   await sleep(150); // settle the re-render before reading boxes
   const m = await evaluate(client, MEASURE);
@@ -196,21 +199,24 @@ function check(pass, m, failures) {
     // Column alignment: every row's nth cell shares an x with the header's nth.
     const head = m.cellRows[0] || [];
     for (const row of m.cellRows.slice(1)) {
+      if (!row.length) { failures.push(`${tag}: a row rendered without cells`); continue; }
       for (let i = 0; i < head.length; i++) {
         if (Math.abs(row[i] - head[i]) > TOL_PX) failures.push(`${tag}: column ${i} drifts ${r2(row[i] - head[i])}px from the header`);
       }
     }
     // The fr tracks, as the ratio of the widths the four cells actually got.
-    const base = m.cols[0];
-    m.cols.forEach((w, i) => {
-      if (!base) return;
-      const got = w / base, want = FR_RATIO[i];
+    if (!m.cols.length) failures.push(`${tag}: the header cells were not measured (.rhead missing)`);
+    else m.cols.forEach((w, i) => {
+      const got = w / m.cols[0], want = FR_RATIO[i];
       if (Math.abs(got - want) / want > TOL_FR) failures.push(`${tag}: track ${i} is ${r2(got)}fr of ${want}fr (width ${w}px)`);
     });
   } else {
     if (m.layout === "desktop") failures.push(`${tag}: --layout says desktop below the breakpoint`);
     if (m.overviewHidden !== true) failures.push(`${tag}: the Overview link is not hidden on the phone`);
-    if (m.navBottom < m.vw - TOL_PX) failures.push(`${tag}: the bar's foot ${m.navBottom} is not the viewport's`);
+    if (Math.abs(m.navBottom - m.vh) > TOL_PX) failures.push(`${tag}: the bar's foot ${m.navBottom} is not the viewport's ${m.vh}`);
+    if (m.missing) failures.push(`${tag}: ${m.missing}`);
+    // The stack is open (missing above covers a failed open), so a table here would
+    // be the desktop one leaking below the breakpoint.
     if (m.tables !== 0) failures.push(`${tag}: ${m.tables} table(s) rendered on the phone`);
   }
   if (m.rootOverflow > TOL_PX) failures.push(`${tag}: the document scrolls sideways by ${m.rootOverflow}px`);
