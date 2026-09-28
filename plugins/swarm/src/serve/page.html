@@ -526,16 +526,29 @@
   // cached payloads its tabs already fetch (D5) — no new endpoint and no new figure.
   async function buildOverview() {
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
-    const [usage, perf, cost] = await Promise.all([viaCache({ name: "usage" }, false), viaCache({ name: "perf" }, false), viaCache({ name: "cost" }, false), loadPerfJs()]);
-    const h = { esc, enc, seg: segSwitcher, rankBadge, fmtScore, compact: ui.compact.leaders, runRow, labels: runLabels(data.runs) };
+    const [usage, perf, cost] = await Promise.all([
+      viaCache({ name: "usage" }, false), viaCache({ name: "perf" }, false), viaCache({ name: "cost" }, false), loadPerfJs(),
+    ]);
+    const h = {
+      esc, enc, seg: segSwitcher, rankBadge, fmtScore, compact: ui.compact.leaders,
+      runRow, labels: runLabels(data.runs),
+    };
     return {
       header: headerHtml(TAB_TITLE.overview, ""),
       html: window.swarmDesktop.overviewScreen(data.runs, usage, perf, cost, h),
       state: { lastList: data, tickCfg: cadencesOf(data), grading: data.grading },
     };
   }
-  // The labels a run payload names, as a fresh map — a value the commit swaps in, never a write to the committed one.
-  const runLabels = (runs) => { const labels = new Map(groupLabels); for (const r of runs) { labels.set(r.project, r.groupLabel || r.project); if (r.group) labels.set(r.group, r.groupLabel || r.group); } return labels; };
+  // The labels a run payload names, as a fresh map — a value the commit swaps in,
+  // never a write to the committed one.
+  function runLabels(runs) {
+    const labels = new Map(groupLabels);
+    for (const r of runs) {
+      labels.set(r.project, r.groupLabel || r.project);
+      if (r.group) labels.set(r.group, r.groupLabel || r.group);
+    }
+    return labels;
+  }
   function renderRunsHtml(data) {
     // A local shortProject shadows the module arrow so this build's markup reads this
     // build's labels, not the last committed set.
@@ -1155,7 +1168,8 @@
     if (tab !== "usage" || !data?.usages || Date.now() - at < HELD_STALE_MS) return data;
     return { ...data, usages: data.usages.map((u) => ({ ...u, provenance: "stale", lastSeen: at })) };
   }
-  // `fresh:false` = a screen reading several sources at once (the Overview) is not switching to any of them, so only an aged-out reading revalidates.
+  // `fresh:false`: a screen reading several sources at once (the Overview) is not
+  // switching to any of them, so only an aged-out reading revalidates.
   async function viaCache(v, fresh = true) {
     const src = dataSource(v), e = heldEntry(src.path);
     if (!e) { const data = await api(src.path); hold(src.path, data); return data; }
