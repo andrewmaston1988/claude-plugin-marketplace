@@ -153,3 +153,40 @@ test("the leaf screen and the hub's leaf fill main, uncapped", () => {
   assert.ok(leaf.length > 0);
   assert.deepEqual(leaf.filter((l) => /max-width\s*:\s*1100px/.test(l)), [], "no leaf rule caps it at the reading width");
 });
+
+// The hub holds the opened leaf's payload, not its markup: a disclosure toggled inside it
+// re-renders from ui state like the leaf screen does, rather than repainting a stale copy.
+test("the hub's leaf opens and closes its output like the leaf screen", async () => {
+  const P = await hub({ run: runPayload("DONE_2") });
+  P.tap(rowNamed(P, "DONE_2"));
+  await settle(P, replies({ run: runPayload("DONE_2") }));
+  P.tap(P.findByClass("row").find((e) => e.getAttribute("data-href").endsWith("/leaf/leaf-a")));
+  await settle(P, replies({ run: runPayload("DONE_2") }), [/\/leaves\//]);
+  const disc = () => P.findByClass("disc").find((e) => e.hasAttribute("data-output"));
+  assert.equal(P.findByClass("dbody").length, 0);
+  P.tap(disc());
+  await settle(P);
+  assert.equal(P.findByClass("dbody").length, 1, "the output opens in the hub's leaf");
+  P.tap(disc());
+  await settle(P);
+  assert.equal(P.findByClass("dbody").length, 0, "and closes again");
+});
+
+// The feed spans both of main's rows; row 1 must stay the tab's own height, or a run
+// opened in the feed shares its height into it and pushes the panel down the page.
+test("the flyout's tab row does not grow with the feed", () => {
+  const css = readFileSync(new URL("../src/serve/desktop.css", import.meta.url), "utf8");
+  assert.match(css, /main:has\(> \.ovfeed\) \{ grid-template-rows:auto 1fr; \}/);
+});
+
+test("a wave label in the hub's opened run folds its wave", async () => {
+  const P = await hub({ run: runPayload("DONE_2") });
+  P.tap(rowNamed(P, "DONE_2"));
+  await settle(P, replies({ run: runPayload("DONE_2") }));
+  const wave = () => P.findByClass("wave-label")[0];
+  const before = P.findByClass("ovrun")[0].textContent;
+  P.tap(wave());
+  await settle(P, replies({ run: runPayload("DONE_2") }));
+  assert.notEqual(P.findByClass("ovrun")[0].textContent, before, "the tap folds the wave in place");
+  assert.equal(P.location.hash, "#/overview");
+});

@@ -528,11 +528,13 @@
   }
   // The run a hub row opened in place, held while it stays open: the hub's poll and its
   // SSE refresh both rebuild the feed, and re-reading the same run each time would be a
-  // fetch per tick. Opening another row drops it — one row is open at a time.
+  // fetch per tick. Opening another row drops it — one row is open at a time. What is
+  // held is the payload, never the markup: a wave, prompt or output toggle re-renders it.
   let hubRun = null;
+  const drawn = (h) => ({ ...h, ...h.render() });
   async function expandedRun() {
     const key = ui.hubRun, leafId = ui.hubLeaf;
-    if (hubRun && hubRun.key === key && hubRun.leaf === leafId) return hubRun;
+    if (hubRun && hubRun.key === key && hubRun.leaf === leafId) return drawn(hubRun);
     hubRun = null;
     if (!key) return null;
     // The row's own key is `project/name`; either part may itself contain a slash, so the
@@ -544,13 +546,15 @@
       // screen's own markup, so the hub never navigates away from its sidebar.
       if (leafId) {
         const [run, leaf] = await Promise.all([api(base), api(`${base}/leaves/${enc(leafId)}`).catch(() => null)]);
-        hubRun = { key, leaf: leafId, html: renderLeafHtml(run, leaf, leafId).html };
-        return hubRun;
+        hubRun = { key, leaf: leafId, render: () => ({ html: renderLeafHtml(run, leaf, leafId).html }) };
+        return drawn(hubRun);
       }
       const run = endRun(await api(base));
-      const { html, rows } = runScreen(run, isDesktop());
-      hubRun = { key, leaf: null, html, draw: () => drawRail(run.tasks, rows) };
-      return hubRun;
+      hubRun = { key, leaf: null, render: () => {
+        const { html, rows } = runScreen(run, isDesktop());
+        return { html, draw: () => drawRail(run.tasks, rows) };
+      } };
+      return drawn(hubRun);
     } catch (e) {
       // A run that cannot be read closes the row rather than leaving an empty shelf.
       console.error("overview: opened run not read", e);
@@ -1568,7 +1572,9 @@
       const w = Number(t.dataset.wave);
       const isOpen = t.classList.contains("wave-label");
       if (isOpen) ui.closedWaves.add(w); else ui.closedWaves.delete(w);
-      rerender(); return;
+      // The hub's opened run is drawn by the hub's own build, which rerender has no cut for.
+      if (view.name === "overview") requestRoute(route); else rerender();
+      return;
     }
   });
   window.addEventListener("hashchange", route);
