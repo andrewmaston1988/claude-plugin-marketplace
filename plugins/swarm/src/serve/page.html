@@ -384,6 +384,8 @@
   // ago()/elapsed/quiet rules live once, in live.js, behind window.swarmLive — pinned
   // by tests/live.test.mjs so the page and the test share the same copy.
   const ago = (ms) => window.swarmLive.agoText(ms, Date.now());
+  // A run's elapsed time, shared by the runs table's `when` cell and the run screen's box.
+  const runElapsed = (r) => r.finishedMs ? fmtDur(r.finishedMs - r.startedMs) : r.startedMs ? window.swarmLive.elapsedText({ state: "running", startedMs: r.startedMs }, Date.now()) : "—";
   // Mirrors stream.mjs tokenTotal (processed total, cache reads included) — the browser cannot import it; serve.test.mjs pins the two together.
   const tokTotal = (t) => t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) + (t.cacheRead || 0) : 0;
   // The server groups runs (grouping.mjs) and labels every row; the page only draws.
@@ -596,10 +598,9 @@
     if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
     return { header, home: true, html, labels };
   }
-  // The finished table's columns, named once here and used for the header row. The
-  // cells themselves come out of the meta line below — the same four fields, in the
-  // same order, that the phone joins with " · ".
-  const RUN_COLS = ["project", "when", "state", "tokens"];
+  // Each table's columns, named once here and used for its own header row. The cells come out
+  // of the row renderers below: the same fields, in the same order, the phone joins or stacks.
+  const RUN_COLS = ["project", "when", "state", "tokens"]; const TASK_COLS = ["leaf", "model", "state", "time", "tokens", "latest tool"];
   function runRow(r, done, labels = groupLabels, columns = false) {
     const shortProject = (p) => labels.get(p) || p;
     const stack = (r) => /* one disc per provider, largest first, overlapping: a live run's running providers pulse in front and the idle dim behind, a finished run's are all solid, largest on top; a provider with no logo wears its initial */ { const run = new Set(r.providersRunning || []); const e = Object.entries(r.providerTokens || {}).filter(([p]) => p !== "unknown").sort((a, b) => b[1] - a[1]); const o = done ? e : [...e.filter(([p]) => run.has(p)), ...e.filter(([p]) => !run.has(p))]; return o.length ? `<span class="pstack">${o.map(([p], i) => `<span class="pitem${done ? "" : run.has(p) ? " pulse" : " dim"}" style="z-index:${o.length - i}${!done && run.has(p) ? `;animation-delay:${i * 1.2}s` : ""}">${window.swarmLogos?.providerLogo(p, { chip: true, label: p }) || `<span class="pinit" role="img" aria-label="${esc(p)}">${esc(p[0].toUpperCase())}</span>`}</span>`).join("")}</span>` : ""; };
@@ -607,7 +608,7 @@
     // onclick, whose quoted string a run or leaf name could break out of.
     const href = `#/run/${enc(r.project)}/${enc(r.name)}`;
     const key = esc(`${r.project}/${r.name}`);
-    const elapsed = r.finishedMs ? fmtDur(r.finishedMs - r.startedMs) : r.startedMs ? window.swarmLive.elapsedText({ state: "running", startedMs: r.startedMs }, Date.now()) : "—";
+    const elapsed = runElapsed(r);
     const st = runState(r);
     if (done) {
       // No summary.json and gone quiet past the recency window: the engine never
@@ -714,6 +715,7 @@
   // (finishedMs/digestPath mixed with a subset of tasks) is a lie, not a summary.
   function runChromeHtml(run, tasks) {
     let html = bannerHtml(run, tasks, Date.now(), run.quietWarnMs || 60000);
+    if (isDesktop()) html += `<div class="stat"><span>${runElapsed(run)}</span></div>`;
     // report.html only — the digest is already one tap away from the banner.
     if (run.reportHtmlPath)
       html += `<div class="actionbar"><a class="primary" href="#/run/${enc(run.project)}/${enc(run.name)}/report">Open report</a></div>`;
@@ -722,7 +724,7 @@
 
   // The graph, and only the graph. `run` is read for project/name alone (row hrefs) —
   // no verdict, no action bar, so a subgraph renders identically to a whole run.
-  function renderRunHtml(run, tasks, waves) {
+  function renderRunHtml(run, tasks, waves, columns = false) {
     const now = Date.now();
     const focus = ui.focusId;
     const inFocus = (x) => focus === x || (focus || "").startsWith(x + "~");
@@ -733,7 +735,7 @@
     const totalsByState = byStateOf(tasks);
     const total = tasks.reduce((n, t) => n + tokTotal(t.tokens), 0);
     html += `<div class="totals">${countsHtml(totalsByState)}<span class="meta">${fmtTok(total)}</span>${barHtml(totalsByState, tasks.length)}</div>`;
-    html += `<div class="graph"><svg class="overlay" id="rail" data-keep></svg><ul id="rows">`;
+    html += `<div class="graph">${columns ? `<div class="rthead"><span class="rail"></span>${TASK_COLS.map((c) => `<span>${c}</span>`).join("")}</div>` : ""}<svg class="overlay" id="rail" data-keep></svg><ul id="rows">`;
     for (const r of rows) {
       if (r.type === "wave") {
         const live = r.tasks.some((t) => t.state === "running" || t.state === "retrying");
@@ -769,14 +771,12 @@
       const t = r.task;
       const quietSecs = window.swarmLive.quietSecs(t, now);
       const quiet = quietSecs != null && quietSecs * 1000 > quietWarn;
-      const right = window.swarmLive.elapsedText(t, now) ?? t.state;
-       const identity = identityName(t) ? identityHtml(t, { chip: true }) : "";
-       const sub = t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : identity;
       // A short read never fails the leaf, so the state glyph cannot carry it — the row
       // says it in words instead.
-      const short = window.swarmLive.coverageWarn(t);
+      const identity = identityName(t) ? identityHtml(t, { chip: true }) : "", sub = t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : identity, nm = r.block ? sessionName(t.id) : esc(t.id), tk = fmtTok(tokTotal(t.tokens)), tm = window.swarmLive.elapsedText(t, now), short = window.swarmLive.coverageWarn(t);
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
-      html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${r.block ? sessionName(t.id) : esc(t.id)}</span><span class="meta">${sub}${short ? ` · <span class="covwarn">⚠ ${esc(short)}</span>` : ""}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(right)}</span><span>${fmtTok(tokTotal(t.tokens))}</span></div></div></li>`;
+      // One row, one set of values, two cuts: the phone stacks them, the table's cells are them.
+      html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body">${columns ? `<span class="col nm${t.state === "pending" ? " dim" : ""}">${nm}</span><span class="col mdl">${identity}</span><span class="col c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span><span class="col tm">${tm ?? "—"}</span><span class="col tk">${tk}</span><span class="col act">${t.activity ? esc(t.activity) : ""}</span>` : `<div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${nm}</span><span class="meta">${sub}${short ? ` · <span class="covwarn">⚠ ${esc(short)}</span>` : ""}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(tm ?? t.state)}</span><span>${tk}</span></div>`}</div></li>`;
     }
     html += `</ul></div>`;
     return { html, rows };
@@ -841,7 +841,7 @@
   let currentRun = null;
   async function buildRun(project, name) {
     const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
-    const { html, rows } = renderRunHtml(run, run.tasks, run.waves);
+    const { html, rows } = renderRunHtml(run, run.tasks, run.waves, isDesktop());
     return { header: runHeaderHtml(run, Date.now()), html: runChromeHtml(run, run.tasks) + html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
   }
 
@@ -885,7 +885,7 @@
     }
     if (view.name === "run" && currentRun) {
       setHeader(runHeaderHtml(currentRun, now));
-      const { html, rows } = renderRunHtml(currentRun, currentRun.tasks, currentRun.waves);
+      const { html, rows } = renderRunHtml(currentRun, currentRun.tasks, currentRun.waves, isDesktop());
       setHtml(main, runChromeHtml(currentRun, currentRun.tasks) + html);
       drawRail(currentRun.tasks, rows);
       return;

@@ -88,6 +88,81 @@
 
   /* ── Run and leaf screens (chunk 2b) ─────────────────────────────────────── */
 
+  /* The run screen's verdict, elapsed time and token total as three boxes across the
+     top; its leaves as a table cut into columns. Nothing here is a figure the screen
+     did not already render (D5) — only where each one sits changes. */
+  :root {
+    /* One row of the run screen's leaf table. The rail leads the list because the
+       overlay paints its lanes into that first track, from the same --rail the rows
+       use — so the table and the graph stay on the same columns. */
+    --task-cols: var(--rail) minmax(12ch, 1.4fr) minmax(11ch, 1.2fr) minmax(10ch, 1fr) minmax(6ch, .8fr) minmax(6ch, .8fr) minmax(14ch, 1.6fr);
+    /* The column-header row's height, which is also where the absolute rail starts. */
+    --rthead: 34px;
+  }
+
+  /* Both `:has` are the screen's identity: the node screen shares this renderer but has
+     no verdict, and no other screen has both a banner and a graph under main. */
+  main:has(> .banner):has(> .graph) { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px; align-items:stretch; align-content:start; max-width:1100px; margin:0 auto; padding:16px; }
+  main:has(> .banner):has(> .graph) > .banner { grid-area:1/1/2/2; margin:0; flex-wrap:wrap; row-gap:2px; }
+  main:has(> .banner):has(> .graph) > .stat { grid-area:1/2/2/3; }
+  main:has(> .banner):has(> .graph) > .totals { grid-area:1/3/2/4; }
+  main:has(> .banner):has(> .graph) > .actionbar, main:has(> .banner):has(> .graph) > .graph { grid-column:1 / -1; }
+
+  /* A box wears a name above its figure. The name is the stylesheet's, not the markup's:
+     one box markup, three fills (D4), and the phone is shown none of it. */
+  main:has(> .banner):has(> .graph) > .stat, main:has(> .banner):has(> .graph) > .totals {
+    display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin:0; padding:14px;
+    border:1px solid var(--rule); border-radius:14px; background:var(--surface); }
+  main:has(> .banner):has(> .graph) > .banner::before,
+  main:has(> .banner):has(> .graph) > .stat::before,
+  main:has(> .banner):has(> .graph) > .totals::before {
+    font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
+  main:has(> .banner):has(> .graph) > .banner::before { content:"status"; flex:0 0 100%; }
+  main:has(> .banner):has(> .graph) > .stat::before { content:"elapsed"; }
+  main:has(> .banner):has(> .graph) > .totals::before { content:"tokens"; }
+  main:has(> .banner):has(> .graph) > .stat > span,
+  main:has(> .banner):has(> .graph) > .totals > .meta { font-size:24px; letter-spacing:-.02em; color:var(--ink); font-variant-numeric:tabular-nums; }
+  main:has(> .banner):has(> .graph) > .totals .bar { width:100%; }
+
+  /* The phone's action bar is fixed above the tab bar; on this layout it is a row of the
+     grid, so the button sizes to itself instead of stretching across the window. */
+  main:has(> .banner):has(> .graph) > .actionbar { position:static; margin:0; padding:0; border:0; background:none; }
+  main:has(> .banner):has(> .graph) > .actionbar .primary { flex:0 0 auto; height:38px; padding:0 18px; }
+
+  /* The leaves as a table: the phone's row, cut into its columns. `:has(> .body > .col)`
+     is what tells a leaf row from the wave labels and manifest rows sharing the list —
+     only the leaf row carries columns, so the phone's own renderer is untouched (D4). */
+  main:has(> .banner):has(> .graph) .row.leaf:has(> .body > .col) { display:grid; grid-template-columns:var(--task-cols); align-items:center; column-gap:12px; border-bottom:1px solid var(--rule); }
+  /* Its two wrapper boxes lifted out of the way, so the rail and the cells are the grid's
+     own items and the cells ride the row's tracks — the Runs table's trick, same reason. */
+  main:has(> .banner):has(> .graph) .row.leaf:has(> .body > .col) > .body { display:contents; }
+  main:has(> .banner):has(> .graph) .row.leaf .col { min-width:0; padding:10px 0; font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  main:has(> .banner):has(> .graph) .row.leaf .col.nm { font-size:14px; font-weight:650; color:var(--ink); }
+  main:has(> .banner):has(> .graph) .row.leaf .col.nm.dim { color:var(--faint); }
+  /* The colour stays on the leaf's own `c-*` class — a bare `color` here would win on
+     specificity and paint every state grey. */
+  main:has(> .banner):has(> .graph) .row.leaf .col.mdl,
+  main:has(> .banner):has(> .graph) .row.leaf .col.tm,
+  main:has(> .banner):has(> .graph) .row.leaf .col.tk { color:var(--muted); font-variant-numeric:tabular-nums; }
+  main:has(> .banner):has(> .graph) .row.leaf .col.act { color:var(--faint); }
+
+  /* The header row sits between the graph's top edge and the list, so the overlay —
+     absolutely placed in the graph — starts below it, not at zero. */
+  main:has(> .banner):has(> .graph) .graph > .rthead { display:grid; grid-template-columns:var(--task-cols); align-items:center; column-gap:12px; height:var(--rthead); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); border-bottom:1px solid var(--rule); }
+  main:has(> .banner):has(> .graph) .graph:has(> .rthead) svg.overlay { top:var(--rthead); }
+
+  /* The leaf screen: the verdict and the chips across the top, the prompt and output
+     down the left, the figures beside them. The chips wear the grid's width, which is
+     the cards' width — measured 2026-09-28, they ran the full main width over cards
+     capped at 1100px. */
+  main:has(> .chips.hero) { display:grid; grid-template-columns:minmax(0, 2fr) minmax(280px, 1fr); gap:14px; align-items:start; align-content:start; max-width:1100px; margin:0 auto; padding:16px; }
+  main:has(> .chips.hero) > .banner { grid-area:1/1/2/3; margin:0; }
+  main:has(> .chips.hero) > .chips.hero { grid-area:2/1/3/3; padding:0; }
+  main:has(> .chips.hero) > .card.flush { grid-area:3/1/4/2; margin:0; }
+  /* The figure cards have no row of their own: both take column 2, so they stack beside
+     the prose rather than under it. */
+  main:has(> .chips.hero) > .card:not(.flush) { grid-column:2; margin:0; }
+
   /* end run and leaf */
 
 
