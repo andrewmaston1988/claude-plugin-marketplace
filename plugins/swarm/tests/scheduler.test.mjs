@@ -10,7 +10,7 @@ import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
-import { fakeSpawnFactory, makeIo, promptOf } from "./helpers/fake-io.mjs";
+import { fakeSpawnFactory, makeIo, promptOf, usageEnv, codexReading } from "./helpers/fake-io.mjs";
 import { CFG, tmp, task, plan, computeTask, childPlanOf } from "./helpers/scheduler-fixtures.mjs";
 
 const SHIM = fileURLToPath(new URL("./shims/claude-shim.mjs", import.meta.url));
@@ -1867,7 +1867,7 @@ test("Codex canonical completion persists provider, runner, session, and usage",
       model: "gpt-5-codex", provider: "codex", cwd, originalCwd: cwd, allowedTools: "Read",
     })], { concurrency: 1 });
     const spawn = fakeSpawnFactory(() => ({ output: stream }));
-    const r = await runPlan(p, cfg, makeIo(spawn));
+    const r = await runPlan(p, cfg, makeIo(spawn, { env: usageEnv({ codex: codexReading() }) }));
     const result = readResult(p.resultsDir, "codex");
     equal(r.summary.tasks[0].state, "ok");
     equal(result.provider, "codex");
@@ -1975,7 +1975,7 @@ test("a mixed Claude/Ollama/Codex DAG runs on two runners and persists each iden
       task("o", { model: "glm-5.2:cloud", provider: "ollama", cwd, originalCwd: cwd }),
       task("x", { model: "gpt-5-codex", provider: "codex", cwd, originalCwd: cwd, after: ["c", "o"] }),
     ]);
-    const r = await runPlan(p, MIXED_CFG(cwd), makeIo(spawn));
+    const r = await runPlan(p, MIXED_CFG(cwd), makeIo(spawn, { env: usageEnv({ codex: codexReading() }) }));
     deepEqual(r.summary.tasks.map((t) => t.state), ["ok", "ok", "ok"]);
     const identity = (id) => { const res = readResult(p.resultsDir, id); return [res.provider, res.runner]; };
     deepEqual(identity("c"), ["claude", "claude"]);
@@ -2002,7 +2002,7 @@ test("a schema correction turn resumes the same Codex thread and logs its identi
       model: "gpt-5-codex", provider: "codex", cwd, originalCwd: cwd,
       returns: { type: "object", required: ["ok"] }, verifyCitations: false,
     })]);
-    const r = await runPlan(p, MIXED_CFG(cwd), makeIo(spawn));
+    const r = await runPlan(p, MIXED_CFG(cwd), makeIo(spawn, { env: usageEnv({ codex: codexReading() }) }));
     equal(r.summary.tasks[0].state, "ok");
     equal(spawn.calls.length, 2);
     ok(spawn.calls[1].args.includes("resume") && spawn.calls[1].args.includes("thread-fix"));

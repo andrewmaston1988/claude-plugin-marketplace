@@ -10,7 +10,7 @@ import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
 import { withLeafNotices, withoutLeafNotices, leafNotices } from "../src/leaf-notices.mjs";
-import { fakeSpawnFactory, makeIo, sentPrompt } from "./helpers/fake-io.mjs";
+import { fakeSpawnFactory, makeIo, sentPrompt, usageEnv, codexReading } from "./helpers/fake-io.mjs";
 
 // The notices verbatim: these literals are the spec, so a wording change is a
 // deliberate edit here, never a silent drift in the engine.
@@ -124,6 +124,9 @@ for (const [allowedTools, sandbox] of [["Read,Grep,Glob", "read-only"], ["Read,G
     const dir = tmp();
     // Only a write-capable leaf is given a worktree, so only that case needs a repo.
     const cwd = allowedTools.includes("Bash") ? initRepo() : tmp();
+    // Codex preflight reads the meter before it dispatches, so the home it reads
+    // must already hold a reading — otherwise the run spawns the real codex.
+    const env = usageEnv({ codex: codexReading() });
     try {
       const cfg = {
         providers: {
@@ -137,7 +140,7 @@ for (const [allowedTools, sandbox] of [["Read,Grep,Glob", "read-only"], ["Read,G
       const p = plan(dir, [task("cx", {
         model: "gpt-5-codex", provider: "codex", cwd, originalCwd: cwd, allowedTools, prompt: "author text",
       })]);
-      const r = await runPlan(p, cfg, makeIo(spawn));
+      const r = await runPlan(p, cfg, makeIo(spawn, { env }));
       equal(r.summary.tasks[0].state, "ok", "the codex leaf must still complete");
       equal(sentPrompt(spawn.calls[0]), `author text\n\n${FINAL}\n${codexLine(sandbox)}`);
     } finally {

@@ -1,9 +1,10 @@
 // Test doubles for scheduler io — no network, no real claude.
 import { EventEmitter } from "node:events";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { withoutLeafNotices } from "../../src/leaf-notices.mjs";
+import { writeUsageReading } from "../../src/usage-cache.mjs";
 
 // handler(call, index) -> { exit=0, output="", delayMs=1, outputAtMs? } | undefined
 // outputAtMs emits output early (before close at delayMs) so tests can observe
@@ -70,6 +71,36 @@ export function makeIo(spawn, over = {}) {
     snapshots,
     ...over,
   };
+}
+
+// The reading a live codex read would have banked. `exhausted` is the field the
+// preflight refuses on, so the healthy default is stated, never left absent.
+export const codexReading = (over = {}) => ({
+  provider: "codex",
+  buckets: [{
+    kind: "rate-limit",
+    limitId: "codex",
+    primary: { usedPercent: 3, windowDurationMins: 300, resetsAt: 4102444800 },
+  }],
+  source: "codex-app-server",
+  provenance: "live",
+  exhausted: false,
+  ...over,
+});
+
+// An io.env whose SWARM_HOME already holds the readings. A provider preflight
+// asks the cache before it spawns anything, so a seeded home keeps the test off
+// the operator's real meter. Written through usage-cache.mjs so the envelope is
+// the one the engine reads. Self-cleaning: the dir goes when the process does.
+export function usageEnv(readings, { fetchedAt = Date.now() } = {}) {
+  const home = mkdtempSync(join(tmpdir(), "swarm-usage-home-"));
+  process.on("exit", () => {
+    try { rmSync(home, { recursive: true, force: true }); } catch { /* best effort */ }
+  });
+  for (const [provider, result] of Object.entries(readings)) {
+    writeUsageReading(provider, { fetchedAt, result }, { env: { SWARM_HOME: home } });
+  }
+  return { PATH: process.env.PATH, SWARM_HOME: home };
 }
 
 // The prompt a recorded call actually carried: claude rides `-p`, codex takes it
