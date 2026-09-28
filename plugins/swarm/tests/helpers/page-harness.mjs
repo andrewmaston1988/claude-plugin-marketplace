@@ -205,6 +205,10 @@ export function loadPage(opts = {}) {
     // window.swarmLive, window.swarmLogos and window.perfViews. A test that hands in
     // perfViews owns that contract, so the real perf script stays out of its way.
     head: { appendChild: (s) => {
+      // A /perf.js that never arrives is a load page.html is built to survive (loadPerfJs
+      // swallows the rejection), so a test needs a way to produce one: a script tag that
+      // errors, which leaves window.perfViews undefined.
+      if (opts.failPerfJs && /perf\.js(\?|$)/.test(s.src)) { s.onerror && s.onerror(); return; }
       if (/live\.js(\?|$)/.test(s.src)) vm.runInContext(LIVE_JS, context, { filename: "live.js" });
       else if (/logos\.js(\?|$)/.test(s.src)) vm.runInContext(LOGOS_JS, context, { filename: "logos.js" });
       else if (/perf\.js(\?|$)/.test(s.src) && !opts.perfViews) vm.runInContext(PERF_JS, context, { filename: "perf.js" });
