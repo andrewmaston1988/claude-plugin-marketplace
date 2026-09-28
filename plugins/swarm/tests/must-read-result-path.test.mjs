@@ -139,22 +139,40 @@ test("a code-review --mode swarm shape still validates — verifiers and the gat
 // Docs are the teaching surface, so a documented manifest must survive `validate`
 // as written — an example the rule rejects teaches the wrong shape.
 const SKILL = fileURLToPath(new URL("../skills/executing-swarms/SKILL.md", import.meta.url));
+const README = fileURLToPath(new URL("../README.md", import.meta.url));
 
-function docExample(heading) {
-  const md = readFileSync(SKILL, "utf8");
-  const after = md.slice(md.indexOf(heading));
+function docExample(heading, file = SKILL) {
+  const md = readFileSync(file, "utf8");
+  const at = md.indexOf(heading);
+  ok(at >= 0, `no heading ${heading} in ${file}`);
+  const after = md.slice(at);
   const block = after.match(/```json\n([\s\S]*?)\n```/);
   ok(block, `no json block under ${heading}`);
   return block[1];
 }
 
-test("the judge-panel example in executing-swarms validates as written", () => {
+// The examples seat ollama beside Claude, so both providers must be configured for the
+// load to reach the rule at all.
+for (const [name, heading, file] of [
+  ["the judge-panel example in executing-swarms", "### Judge panel", SKILL],
+  ["the mixed-topology example in executing-swarms", "### Mixed topology", SKILL],
+  ["the README example", "## Example manifest", README],
+]) {
+  test(`${name} validates as written`, () => {
+    const dir = tmp();
+    try {
+      const cfg = { ...CFG, providers: { ...CFG.providers, ollama: { enabled: true, allowedRoots: [tmpdir()] } } };
+      const errs = loadErrs(dir, JSON.parse(docExample(heading, file)).tasks, cfg);
+      equal(errs.length, 0, errs.join("\n"));
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
+test("an undeclared id gets no mustRead advice — the dependency check already refuses it", () => {
   const dir = tmp();
   try {
-    // The example seats ollama judges beside a Claude one, so both providers must be
-    // configured for the load to reach the rule at all.
-    const cfg = { ...CFG, providers: { ...CFG.providers, ollama: { enabled: true, allowedRoots: [tmpdir()] } } };
-    const errs = loadErrs(dir, JSON.parse(docExample("### Judge panel")).tasks, cfg);
-    equal(errs.length, 0, errs.join("\n"));
+    const errs = loadErrs(dir, [find(), verify("check {{resultPath:ghost}}")]);
+    ok(errs.length > 0, "the undeclared id is still refused");
+    equal(ruleErrors(errs).length, 0, errs.join("\n"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -127,8 +127,10 @@ export function validateResultPathReads(tasks, cfg, errors, label, providerRegis
       for (const m of s.matchAll(TEMPLATE_RE)) if (m[1] === "resultPath") covered.add(m[2]);
     }
     const l = label(t);
+    const deps = new Set(t.after || []);
+    // An undeclared id is already refused; advising a mustRead entry for it would too.
     for (const id of handed) {
-      if (covered.has(id)) continue;
+      if (covered.has(id) || !deps.has(id)) continue;
       errors.push(
         `${l}: the prompt hands this leaf {{resultPath:${id}}} but mustRead never names it — ` +
         `nothing proves the leaf opened it. Add it: "mustRead": ["{{resultPath:${id}}}"]`);
