@@ -22,6 +22,13 @@ const PASSES = [
   { name: "desktop-1280", width: 1280, height: 900, mobile: false, desktop: true },
   { name: "desktop-1440", width: 1440, height: 900, mobile: false, desktop: true },
   { name: "desktop-1920", width: 1920, height: 1080, mobile: false, desktop: true },
+  // The Overview hub, at each desktop width, paired with the Runs pass above it: the
+  // feed's width is checked against that pass's own measured section width, so "as wide
+  // as the Runs screen" is an equality between two boxes rather than a second opinion
+  // about the stylesheet. Each hub pass runs after its Runs pass, in this order.
+  { name: "desktop-1280-hub", width: 1280, height: 900, mobile: false, desktop: true, hub: true },
+  { name: "desktop-1440-hub", width: 1440, height: 900, mobile: false, desktop: true, hub: true },
+  { name: "desktop-1920-hub", width: 1920, height: 1080, mobile: false, desktop: true, hub: true },
 ];
 // The fr columns, in track order: three 1fr and the 0.8fr that closes the row.
 const FR_RATIO = [1, 1, 1, 0.8];
@@ -54,7 +61,11 @@ const MEASURE = `(() => {
   const cellRows = [head, ...document.querySelectorAll(".rtable > .row")].filter(Boolean)
     .map((row) => [...row.querySelectorAll(".col")].map((c) => r1(c.getBoundingClientRect().left)));
   const cols = head ? [...head.querySelectorAll(".col")].map((c) => r1(c.getBoundingClientRect().width)) : [];
+  // The full-width section above the stacks: the hub's feed is checked against this box,
+  // so the two widths are compared as measured rather than as both being "main's content".
+  const sec = document.querySelector("main > .section");
   return {
+    secW: sec ? r1(sec.getBoundingClientRect().width) : null,
     layout: getComputedStyle(document.documentElement).getPropertyValue("--layout").trim(),
     navW: r1(nb.width), navRight: r1(nb.right), navBottom: r1(nb.bottom), navLeft: r1(nb.left),
     mainLeft: r1(mb.left), mainW: r1(mb.width), hdrLeft: r1(hb.left),
@@ -64,6 +75,25 @@ const MEASURE = `(() => {
     tables: document.querySelectorAll(".rtable").length,
     cols, cellRows,
     vw: window.innerWidth, vh: window.innerHeight,
+  };
+})()`;
+
+// The hub's own quantities: where the feed's edges land, and where the flyout's right edge
+// lands once it is open. Read as a function so the same expression serves the closed, open
+// and re-closed reads — the three are compared to each other, so they must be one query.
+const HUB_MEASURE = `(() => {
+  const r1 = (n) => Math.round(n * 10) / 10;
+  const main = document.querySelector("#main");
+  const feed = document.querySelector(".ovfeed"), panel = document.querySelector(".ovpanel");
+  return {
+    layout: getComputedStyle(document.documentElement).getPropertyValue("--layout").trim(),
+    shut: feed ? feed.classList.contains("shut") : null,
+    feedW: feed ? r1(feed.getBoundingClientRect().width) : null,
+    panelRight: panel ? r1(panel.getBoundingClientRect().right) : null,
+    hasPanel: !!panel,
+    rootOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    mainOverflow: main.scrollWidth - main.clientWidth,
+    vw: window.innerWidth,
   };
 })()`;
 
@@ -181,6 +211,32 @@ async function measure(client, pass) {
   return m;
 }
 
+// The hub's pass: one navigation, three reads. The toggle's own state outlives a
+// navigation (localStorage), so the closed read forces the state rather than assuming the
+// default — otherwise a pass would silently measure whatever the previous pass left.
+async function measureHub(client, pass) {
+  await client.send("Emulation.setDeviceMetricsOverride", {
+    width: pass.width, height: pass.height, deviceScaleFactor: 1, mobile: pass.mobile,
+  });
+  await client.send("Page.navigate", { url: `${ORIGIN}/?probe=${pass.name}#/overview` });
+  const up = await waitFor(client, `location.search === "?probe=${pass.name}" && document.querySelector(".ovfeed") != null`, "the hub's run feed", true);
+  const m = { missing: up ? null : "the hub's run feed never rendered" };
+  if (!up) return m;
+  const click = `(() => { const b = document.querySelector(".ovtoggle"); if (b) b.click(); return !!b; })()`;
+  m.hasToggle = await evaluate(client, `document.querySelector(".ovtoggle") != null`);
+  if (!m.hasToggle) return m;
+  await evaluate(client, `(() => { const f = document.querySelector(".ovfeed"); if (!f.classList.contains("shut")) document.querySelector(".ovtoggle").click(); return true; })()`);
+  await sleep(200);
+  m.closed = await evaluate(client, HUB_MEASURE);
+  await evaluate(client, click);
+  await sleep(200);
+  m.open = await evaluate(client, HUB_MEASURE);
+  await evaluate(client, click);
+  await sleep(200);
+  m.reclosed = await evaluate(client, HUB_MEASURE);
+  return m;
+}
+
 // ── checks ──────────────────────────────────────────────────────────────────
 const r2 = (n) => Math.round(n * 100) / 100;
 // The clamp the CSS declares: clamp(180px, 14vw, 240px).
@@ -223,6 +279,35 @@ function check(pass, m, failures) {
   if (m.mainOverflow > TOL_PX) failures.push(`${tag}: the main column scrolls sideways by ${m.mainOverflow}px`);
 }
 
+// The hub at desktop width: the feed holds the Runs screen's own width while the flyout is
+// shut, the flyout takes a track of its own and stays inside the window when open, and the
+// feed gets its width back when it shuts again. `runsSecW` is the section width measured on
+// the Runs pass at this same width — null means that pass failed to measure one, which it
+// reports itself, so this check stays quiet rather than doubling the failure.
+function checkHub(pass, m, failures, runsSecW) {
+  const tag = pass.name;
+  if (!m.closed) { if (m.missing) failures.push(`${tag}: ${m.missing}`); return; }
+  if (m.closed.layout !== "desktop") failures.push(`${tag}: --layout is ${JSON.stringify(m.closed.layout)}, not desktop`);
+  for (const [when, r] of [["shut", m.closed], ["open", m.open], ["re-shut", m.reclosed]]) {
+    if (!r) { failures.push(`${tag}: no ${when} measurement`); continue; }
+    if (r.rootOverflow > TOL_PX) failures.push(`${tag}: ${when} — the document scrolls sideways by ${r.rootOverflow}px`);
+    if (r.mainOverflow > TOL_PX) failures.push(`${tag}: ${when} — the main column scrolls sideways by ${r.mainOverflow}px`);
+  }
+  if (!m.hasToggle) { failures.push(`${tag}: the hub drew no flyout toggle`); return; }
+  if (runsSecW != null && m.closed.feedW != null && Math.abs(m.closed.feedW - runsSecW) > TOL_PX) {
+    failures.push(`${tag}: the shut hub's feed is ${m.closed.feedW}px, the Runs screen's sections are ${runsSecW}px`);
+  }
+  if (!m.open.hasPanel) {
+    failures.push(`${tag}: the open hub drew no flyout panel`);
+  } else {
+    if (m.open.panelRight > m.open.vw + TOL_PX) failures.push(`${tag}: the flyout's right edge ${m.open.panelRight} is past the viewport's ${m.open.vw}`);
+    if (m.open.feedW >= m.closed.feedW) failures.push(`${tag}: opening the flyout did not take a track (feed ${m.open.feedW}px, was ${m.closed.feedW}px)`);
+  }
+  if (m.reclosed && Math.abs(m.reclosed.feedW - m.closed.feedW) > TOL_PX) {
+    failures.push(`${tag}: re-shutting the flyout left the feed at ${m.reclosed.feedW}px, not ${m.closed.feedW}px`);
+  }
+}
+
 // ── run ─────────────────────────────────────────────────────────────────────
 let ORIGIN = "";
 let home = null, profile = null, browser = null, browserWs = null;
@@ -255,12 +340,23 @@ async function main() {
     await client.send("Runtime.enable");
 
     const failures = [];
+    // The section width each Runs pass measured, by viewport width: the hub pass at that
+    // width is checked against it, so the two screens are compared at the same size.
+    const runsSecW = new Map();
     for (const pass of PASSES) {
-      const m = await measure(client, pass);
-      check(pass, m, failures);
+      const m = pass.hub ? await measureHub(client, pass) : await measure(client, pass);
       // The printed row is the record: the numbers, not a verdict.
-      const cols = m.cols.length ? `  tracks ${m.cols.join(" / ")}` : "";
-      console.log(`${pass.name.padEnd(14)} ${String(m.vw).padStart(4)}px  sidebar ${String(m.navW).padStart(6)}  main ${String(m.mainW).padStart(6)}  gap ${String(r2(m.mainLeft - m.navRight)).padStart(5)}  overflow ${m.rootOverflow}/${m.mainOverflow}${cols}`);
+      if (pass.hub) {
+        checkHub(pass, m, failures, runsSecW.get(pass.width));
+        const shut = m.closed ? `${m.closed.feedW}px` : "—";
+        const open = m.open ? `${m.open.feedW}px flyout -> ${m.open.panelRight} of ${m.open.vw}` : "—";
+        console.log(`${pass.name.padEnd(18)} ${String(m.closed ? m.closed.vw : pass.width).padStart(4)}px  feed shut ${shut.padStart(7)}  open ${open}  overflow ${m.closed ? `${m.closed.rootOverflow}/${m.open ? m.open.rootOverflow : "-"}` : "-"}`);
+      } else {
+        check(pass, m, failures);
+        if (m.secW != null) runsSecW.set(pass.width, m.secW);
+        const cols = m.cols.length ? `  tracks ${m.cols.join(" / ")}` : "";
+        console.log(`${pass.name.padEnd(18)} ${String(m.vw).padStart(4)}px  sidebar ${String(m.navW).padStart(6)}  main ${String(m.mainW).padStart(6)}  gap ${String(r2(m.mainLeft - m.navRight)).padStart(5)}  section ${String(m.secW).padStart(6)}  overflow ${m.rootOverflow}/${m.mainOverflow}${cols}`);
+      }
     }
     console.log(`\n${PASSES.length} passes, tolerance ${TOL_PX}px and ${TOL_FR * 100}% on the fr ratio`);
     if (failures.length) {
@@ -268,7 +364,7 @@ async function main() {
       for (const f of failures) console.log(`  ${f}`);
       process.exitCode = 1;
     } else {
-      console.log("PASS — the sidebar holds its clamp, nothing overlaps, nothing scrolls sideways, the columns align and the fr ratio holds");
+      console.log("PASS — the sidebar holds its clamp, nothing overlaps, nothing scrolls sideways, the columns align, the fr ratio holds, and the hub's feed and flyout stay inside the window");
     }
     client.close();
   } finally {
