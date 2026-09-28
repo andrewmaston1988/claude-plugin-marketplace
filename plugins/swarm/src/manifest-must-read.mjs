@@ -104,11 +104,8 @@ export function validateMustReadRunners(tasks, cfg, io, errors, label, providerR
   validateResultPathReads(tasks, cfg, errors, label, providerRegistry);
 }
 
-// A prompt carrying {{resultPath:<dep>}} hands the leaf an absolute path, and
-// nothing else proves the leaf ever opened it — a verifier that never read the
-// finder's result verifies nothing, and the run reports its verdicts like any
-// other. Sits beside the runner check because the exemption needs the task's
-// runner, which only a normalized task carries.
+// A prompt handed {{resultPath:<dep>}} must mustRead it — nothing else proves the
+// leaf opened it. Lives here because the exemption needs the task's runner.
 export function validateResultPathReads(tasks, cfg, errors, label, providerRegistry) {
   for (const t of tasks) {
     if (typeof t.prompt !== "string" || !t.prompt) continue;
