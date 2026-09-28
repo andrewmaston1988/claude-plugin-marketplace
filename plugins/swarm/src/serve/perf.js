@@ -243,30 +243,38 @@
     return switcher + `<div class="costgrid">${sections.map((s) => `<div class="costcol">${costSection(s, data, h)}</div>`).join("")}</div>`;
   }
 
-  // One provider cost page: its value hero, then a ranked card per model, or one fact card.
-  function costSection(section, data, h) {
+  // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
+  // cheap model a stub and hides the 1×-vs-2× difference that decides a seat. One
+  // scale, module-wide, because the hero and the cards under it draw on the same one.
+  const COST_LO = Math.log10(0.5), COST_HI = Math.log10(20);
+  const costPct = (m) => Math.max(2, Math.min(100, ((Math.log10(m) - COST_LO) / (COST_HI - COST_LO)) * 100));
+
+  // One provider's value hero: its best-value model, or the reason it has none. Split out
+  // of costSection so a screen can draw the hero alone — the Overview's best-value line
+  // per provider — without the ranked cards that belong to the Cost screen.
+  function costHero(section, data, h) {
     const { esc, enc } = h;
     const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
-    // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
-    // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
-    const LO = Math.log10(0.5), HI = Math.log10(20);
-    const pct = (m) => Math.max(2, Math.min(100, ((Math.log10(m) - LO) / (HI - LO)) * 100));
     // The value case against this provider's top scorer: how close to its score, at what
     // share of its cost. The cost bar shares the cards' log scale below.
     const b = section.best, cl = `<div class="cl"><span>best value</span><span>${esc(name(section))}</span></div>`;
-    const hero = !b ? `<div class="card chero none">${cl}<div class="claim">${whyNone(section)}</div></div>` : (() => {
-      const lead = section.points.reduce((m, p) => (p.wtd ?? -1) > (m.wtd ?? -1) ? p : m, b);
-      const q = lead.wtd > 0 && b.wtd != null ? Math.round((b.wtd / lead.wtd) * 100) : null;
-      const c = b.multiplier > 0 ? Math.round(pct(b.multiplier)) : null;
-      const vbar = (label, w, val, cls) => `<div class="vbar"><span class="k">${label}</span><div class="bar ${cls}"><span style="width:${w ?? 0}%"></span></div><b>${val}</b></div>`;
-      const claim = lead === b || lead.model === b.model ? "the top score here, at the lowest cost that reaches it"
-        : lead.multiplier > 0 && q != null ? `${q}% of ${esc(lead.model)}'s score at ${Math.round((b.multiplier / lead.multiplier) * 100)}% of its cost` : "on the value frontier";
-      return `<div class="card chero" data-href="#/perf/model/${enc(b.model)}">${cl}<div class="fig">${esc(b.model)}</div><div class="claim">${claim}</div>`
-        + vbar("score", q, b.wtd == null ? "—" : b.wtd.toFixed(1), "q") + vbar("cost", c, esc(fmtMult(b.multiplier)), "c") + `</div>`;
-    })();
+    if (!b) return `<div class="card chero none">${cl}<div class="claim">${whyNone(section)}</div></div>`;
+    const lead = section.points.reduce((m, p) => (p.wtd ?? -1) > (m.wtd ?? -1) ? p : m, b);
+    const q = lead.wtd > 0 && b.wtd != null ? Math.round((b.wtd / lead.wtd) * 100) : null;
+    const c = b.multiplier > 0 ? Math.round(costPct(b.multiplier)) : null;
+    const vbar = (label, w, val, cls) => `<div class="vbar"><span class="k">${label}</span><div class="bar ${cls}"><span style="width:${w ?? 0}%"></span></div><b>${val}</b></div>`;
+    const claim = lead === b || lead.model === b.model ? "the top score here, at the lowest cost that reaches it"
+      : lead.multiplier > 0 && q != null ? `${q}% of ${esc(lead.model)}'s score at ${Math.round((b.multiplier / lead.multiplier) * 100)}% of its cost` : "on the value frontier";
+    return `<div class="card chero" data-href="#/perf/model/${enc(b.model)}">${cl}<div class="fig">${esc(b.model)}</div><div class="claim">${claim}</div>`
+      + vbar("score", q, b.wtd == null ? "—" : b.wtd.toFixed(1), "q") + vbar("cost", c, esc(fmtMult(b.multiplier)), "c") + `</div>`;
+  }
+
+  // One provider cost page: its value hero, then a ranked card per model, or one fact card.
+  function costSection(section, data, h) {
+    const { esc, enc } = h;
     const { points, spread, best } = section;
     const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
-    const head = hero;
+    const head = costHero(section, data, h);
     if (!spread.some((r) => r.mult != null)) {
       return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
     }
@@ -285,7 +293,7 @@
       if (r.mult == null) return `<div class="card crow unm" ${href}>${top("·", "—")}<div class="sub">unmeasured — no price or banked history</div></div>`;
       const evidence = [verdict(r), r.thin ? "thin evidence" : null, isMeter(r) && r.measuredRequests != null ? `${r.measuredRequests} measured requests` : null].filter(Boolean).join(" · ");
       return `<div class="card crow" ${href}>${top(++rank, esc(fmtMult(r.mult)))}`
-        + `<div class="cbar${r.thin ? " thin" : ""}"><span style="width:${pct(r.mult).toFixed(1)}%"></span></div>`
+        + `<div class="cbar${r.thin ? " thin" : ""}"><span style="width:${costPct(r.mult).toFixed(1)}%"></span></div>`
         + `<div class="cfoot"><div class="sub">${evidence}</div>${h.badge ? h.badge(r) : ""}</div></div>`;
     }).join("");
     return head + cards;
@@ -393,5 +401,5 @@
     return { tabs, hero, cards };
   }
 
-  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelSummary, modelDashboard, costScreen, costAll, costSection, usageScreen, usageParts };
+  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelSummary, modelDashboard, costScreen, costAll, costSection, costHero, costSections, usageScreen, usageParts };
 })();
