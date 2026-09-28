@@ -328,9 +328,9 @@ test("coverageWarn: only a non-complete status warns, and it names the shortfall
 test("coverageBadge: the compact form of the same record, for the run row (C2)", () => {
   const { coverageBadge } = loadLive();
   assert.equal(coverageBadge({ coverage: { status: "incomplete", read: 6, required: 7 } }), "6/7 read");
-  assert.equal(coverageBadge({}, { coverage: { status: "unparseable", read: 0, required: 12 } }), "unreadable");
+  assert.equal(coverageBadge({ coverage: { status: "unparseable", read: 0, required: 12 } }), "unreadable");
   assert.equal(coverageBadge({ coverage: { status: "complete", read: 7, required: 7 } }), null);
-  assert.equal(coverageBadge({}, {}), null);
+  assert.equal(coverageBadge({}), null);
 });
 
 test("identityHtml shows the provider logo with escaped model text; the run and leaf screens wear the provider chip", () => {

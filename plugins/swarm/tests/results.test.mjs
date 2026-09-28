@@ -378,7 +378,7 @@ test("formatClosing renders a loud coverage-gap line, kept-not-failed", () => {
     coverageGaps: [{ id: "rv-arch", status: "incomplete", required: 5, read: 2, missed: ["a.mjs:1-40", "b.mjs:1-90", "c.mjs", "d.mjs"] }],
   });
   ok(out.includes("rv-arch"), out);
-  ok(out.includes("read 2 of 5 required entries"), out); // test-plan row 78 literal
+  ok(out.includes("read 2 of 5 required entries"), out);
   ok(out.includes("incomplete"), out);
   ok(/a\.mjs:1-40/.test(out) && /\+1 more/.test(out), "first 3 missed + overflow count: " + out);
   ok(!/failed|deleted/i.test(out), "a shortfall never reads as a failed leaf: " + out);

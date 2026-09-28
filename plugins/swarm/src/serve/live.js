@@ -340,8 +340,8 @@
   // The same record, short enough for the run row: the sentence wraps the phone row's
   // meta line at 390px. An unreadable transcript says so rather than `0/N`, which would
   // read as a skim when the leaf may have read everything.
-  const coverageBadge = (row, leaf) => {
-    const c = row?.coverage || leaf?.coverage;
+  const coverageBadge = (row) => {
+    const c = row?.coverage;
     if (!c || c.status === "complete") return null;
     return c.status === "unparseable" ? "unreadable" : `${c.read ?? 0}/${c.required ?? 0} read`;
   };
