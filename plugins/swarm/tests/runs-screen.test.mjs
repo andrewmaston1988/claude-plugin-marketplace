@@ -15,7 +15,7 @@ async function runsWith(data) {
 // ── coverage: a short mustRead is a warning on both screens ──────────────────
 // The engine records a shortfall and never fails the leaf (`scheduler.mjs` finish), so
 // the state alone cannot tell a leaf that read what it was asked from one that did not.
-// A codex leaf reporting "3 of 430 required lines" reached the operator as "complete".
+// A codex leaf reporting "3 of 430 required entries" reached the operator as "complete".
 
 const SHORT = { status: "incomplete", required: 430, read: 3, missed: ["README.md"] };
 const leafTask = (coverage, over = {}) => ({ ...targetRun().tasks[0], ...(coverage ? { coverage } : {}), ...over });
@@ -48,7 +48,7 @@ test("run screen: a leaf whose read was short is marked on its row, and a clean 
   const warned = await openRun(runWith(SHORT));
   const marks = warned.findByClass("covwarn");
   assert.equal(marks.length, 1, "the row carries the warning");
-  assert.match(marks[0].textContent, /3 of 430/, "and names the shortfall, not just that something is off");
+  assert.match(marks[0].textContent, /3\/430 read/, "the row carries the compact badge — the sentence wraps it at 390px");
   const clean = await openRun(runWith({ status: "complete", required: 430, read: 430 }));
   assert.equal(clean.findByClass("covwarn").length, 0, "a complete read is the clean case");
 });
