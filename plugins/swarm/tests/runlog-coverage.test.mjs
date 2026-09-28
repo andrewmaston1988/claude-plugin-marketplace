@@ -8,7 +8,7 @@ import { withFixture } from "./helpers/runlog-fixture.mjs";
 
 // A coverage shortfall never fails the leaf — `finish` records it and the runner's
 // closing block is the only other place it exists. So a reader that drops the event
-// leaves a leaf that read 3 of 430 required lines looking exactly like a clean one.
+// leaves a leaf that read 3 of 430 required entries looking exactly like a clean one.
 test("readRunLog: a leaf's coverage status reaches its row, and a resume clears it", () => {
   const log = [
     '{"event":"run-start","tasks":["a","b"]}',

@@ -309,7 +309,7 @@ test("page wiring: the runs fetch splices expandQuery inside q()'s argument, and
 
 // ── coverage: a short mustRead is a warning, never a silent `ok` ──────────
 // The engine records a shortfall and deliberately does NOT fail the leaf, so without
-// this the row and the banner of a leaf that read 3 of 430 required lines read exactly
+// this the row and the banner of a leaf that read 3 of 430 required entries read exactly
 // like a clean one's.
 
 test("coverageWarn: only a non-complete status warns, and it names the shortfall (C1)", () => {
@@ -317,10 +317,20 @@ test("coverageWarn: only a non-complete status warns, and it names the shortfall
   assert.equal(coverageWarn({}, {}), null, "no coverage recorded — nothing to warn about");
   assert.equal(coverageWarn({ coverage: { status: "complete" } }, {}), null, "a complete read is the clean case");
   const short = coverageWarn({ coverage: { status: "incomplete", required: 430, read: 3 } }, {});
-  assert.match(short, /3 of 430/);
+  assert.equal(short, "read 3 of 430 required entries", "`required` counts mustRead ENTRIES, not lines");
   const blind = coverageWarn({}, { coverage: { status: "unparseable", required: 12, read: 0 } });
   assert.match(blind, /12/, "the leaf's own result is a source too — the run row may have no event");
   assert.notEqual(blind, short, "an unreadable transcript is not the same fact as a partial read");
+});
+
+// The run row is the one surface too narrow for the sentence: at 390px it wraps the
+// row's meta line. Same record, same lookup, a string short enough to stay on one line.
+test("coverageBadge: the compact form of the same record, for the run row (C2)", () => {
+  const { coverageBadge } = loadLive();
+  assert.equal(coverageBadge({ coverage: { status: "incomplete", read: 6, required: 7 } }), "6/7 read");
+  assert.equal(coverageBadge({ coverage: { status: "unparseable", read: 0, required: 12 } }), "unreadable");
+  assert.equal(coverageBadge({ coverage: { status: "complete", read: 7, required: 7 } }), null);
+  assert.equal(coverageBadge({}), null);
 });
 
 test("identityHtml shows the provider logo with escaped model text; the run and leaf screens wear the provider chip", () => {

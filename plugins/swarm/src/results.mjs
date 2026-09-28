@@ -514,7 +514,7 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
     const shown = missed.slice(0, 3).join(", ");
     const more = missed.length > 3 ? `, +${missed.length - 3} more` : "";
     const tail = missed.length ? `; missed: ${shown}${more}` : "";
-    lines.push(`${yellow("⚠")} ${bold(cg.id)}: read ${cg.read} of ${cg.required} required items — coverage ${cg.status}${tail}`);
+    lines.push(`${yellow("⚠")} ${bold(cg.id)}: read ${cg.read} of ${cg.required} required entries — coverage ${cg.status}${tail}`);
   }
   if (digestPath) lines.push(`${bold("digest:")} ${green(digestPath)}`);
   else if (digestFailed) lines.push(`${bold("digest:")} ${red("FAILED")} — read summary + per-task results instead`);

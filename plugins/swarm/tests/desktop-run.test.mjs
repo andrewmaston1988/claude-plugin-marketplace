@@ -123,7 +123,7 @@ test("a short read keeps its warning in the table — a mark on the name, the wo
   const desk = await runOn("desktop");
   const warn = desk.findByClass("covwarn", rowOf(desk, "impl"));
   assert.equal(warn.length, 1, "the desktop row carries the warning");
-  assert.equal(warn[0].getAttribute("title"), "read 3 of 9 required lines");
+  assert.equal(warn[0].getAttribute("title"), "read 3 of 9 required entries");
   assert.equal(desk.findByClass("covwarn", rowOf(desk, "survey")).length, 0, "a complete read carries none");
   const phone = await runOn();
   assert.equal(phone.findByClass("covwarn", rowOf(phone, "impl")).length, 1, "the phone row still says it");
