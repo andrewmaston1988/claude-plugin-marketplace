@@ -60,11 +60,11 @@
   .rtable .rhead { min-height:34px; color:var(--faint); font-size:11px; letter-spacing:.08em; text-transform:uppercase; border-bottom:1px solid var(--rule); }
   .rtable .rhead .rail { height:34px; }
 
-  /* Usage: the hero spans the screen, the provider cards sit beside each other. */
-  main:has(> .uhero) { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:0 16px; align-content:start; align-items:start; padding-left:16px; padding-right:16px; }
-  main:has(> .uhero) > .seg, main:has(> .uhero) > .uhero, main:has(> .uhero) > .section, main:has(> .uhero) > .empty { grid-column:1 / -1; }
-  main:has(> .uhero) > .section { padding-left:0; padding-right:0; }
-  main:has(> .uhero) > .uhero, main:has(> .uhero) > .card { margin-left:0; margin-right:0; }
+  /* Usage: one full-width column — switcher, hero and the provider cards stacked beneath it,
+     all on the same edges. */
+  main:has(> .uhero) { padding-left:16px; padding-right:16px; }
+  main:has(> .uhero) > .seg, main:has(> .uhero) > .section { padding-left:0; padding-right:0; }
+  main:has(> .uhero) > .uhero, main:has(> .uhero) > .card { margin-left:0; margin-right:0; max-width:none; }
 
   /* Cost: every provider at once, so the switcher — which exists to show one at a
      time — has nothing left to do. Hidden, not removed (D7). */
