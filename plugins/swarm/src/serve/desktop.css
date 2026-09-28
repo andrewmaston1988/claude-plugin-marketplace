@@ -201,7 +201,7 @@
   /* The parts keep the phone's own margins — that is what makes them the same parts. Only
      the horizontal ones go: the column already sets the edge, and the section rule above
      a part sets the gap, so a part's own top margin there would double it. */
-  .ovcol .card, .ovcol .uhero { margin-left:0; margin-right:0; }
+  .ovcol .card, .ovcol .uhero, .ovcol .note { margin-left:0; margin-right:0; }
   .ovcol > .section { padding:0 0 6px; }
   .ovcol > .section + .card, .ovcol > .section + .uhero, .ovcol > .section + .rlist > .crow:first-child { margin-top:0; }
   /* The live runs as a card row, the Runs screen's own cards. */

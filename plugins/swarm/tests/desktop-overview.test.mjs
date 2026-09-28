@@ -102,6 +102,14 @@ test("Overview fetches Performance and draws the top-models list", async () => {
     "Overview requests the unfiltered Performance payload");
 });
 
+test("Overview keeps the unfiltered ranking after a domain is picked on the Performance tab", async () => {
+  const P = await overview();
+  const chip = { nodeType: 1, parentNode: P.main, dataset: { domain: "node" }, hasAttribute: (a) => a === "data-domain" };
+  P.tap(chip);
+  await settle(P, [[(u) => /^\/api\/runs(\?|$)/.test(u), RUNS], [(u) => u.startsWith("/api/perf"), PERF]]);
+  assert.deepEqual(P.fetchLog.filter((u) => u.includes("domain=")), [], "the hub never asks for a domain slice");
+});
+
 test("Overview fetches Cost and draws one best-value hero per provider, without model cards", async () => {
   const P = await overview();
   assert.equal(P.findByClass("chero").length, 2, "one costSection hero per provider");
@@ -203,11 +211,7 @@ test("Overview draws Cost's own empty state when nothing is banked", async () =>
 });
 
 // ── the no-new-figures gate ──────────────────────────────────────────────
-// Every figure Overview draws must be a named field of the payload its source tab reads,
-// and must equal it; a figure with no mapping fails. Each entry names the field, locates
-// the figure in the hub, and the census then requires the hub's own digits to be exactly
-// what the entries account for — column by column, so an invented number fails even when
-// it collides with a figure another column already draws.
+// Every digit the hub draws is a named payload field, counted column by column.
 
 // A figure is a run of digits; the glyphs around it are not this test's business (the
 // markup-equality test above owns those).

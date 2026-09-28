@@ -528,12 +528,12 @@
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
     // Settled per source, never all at once: the run feed needs none of the other three,
     // so a read that fails costs its own column rather than the whole landing screen.
+    // perf.js carries the column helpers; without it the hub draws the run feed alone.
+    const perfJs = loadPerfJs();
     const [usage, perf, cost] = await Promise.all([
-      viaCache({ name: "usage" }, false).catch(() => null),
-      viaCache({ name: "perf" }, false).catch(() => null),
-      viaCache({ name: "cost" }, false).catch(() => null),
-      loadPerfJs(),
-    ]);
+      { name: "usage" }, { name: "perf", allDomains: true }, { name: "cost" },
+    ].map((v) => viaCache(v, false).catch((e) => { console.error(`overview: /api/${v.name} not read`, e); return null; })));
+    await perfJs;
     const h = {
       esc, enc, seg: segSwitcher, rankBadge, fmtScore, compact: ui.compact.leaders,
       runRow, labels: runLabels(data.runs), gradingOff: GRADING_OFF,
@@ -1116,7 +1116,7 @@
     if (v.name === "cost") return { tab: "cost", path: "/api/cost" };
     if (v.name !== "perf") return null;
     const qs = new URLSearchParams();
-    if (ui.perfDomain) qs.set("domain", ui.perfDomain);
+    if (ui.perfDomain && !v.allDomains) qs.set("domain", ui.perfDomain);
     if (v.kind === "model") qs.set("model", v.which);
     return { tab: "perf", path: `/api/perf${qs.toString() ? "?" + qs : ""}` };
   }

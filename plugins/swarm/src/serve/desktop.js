@@ -16,12 +16,8 @@
   // tab is the place a long history is read.
   const HUB_FINISHED = 5;
 
-  // The Overview: the parts Runs, Usage, Performance and Cost already draw, arranged. Not
-  // one of them is re-rendered here (D4/D5) — they are called, so a figure that changes on
-  // its own screen changes on the hub in the same commit. `h` carries page.html's
-  // closure-bound helpers (runRow, esc, enc, seg, labels, rankBadge, fmtScore) and the
-  // grading-off note, the perfViews helper-bag pattern, for the same reason: this file
-  // cannot see page state.
+  // The parts Runs, Usage, Performance and Cost already draw, called rather than re-rendered
+  // (D4/D5), so a figure that changes on its own screen changes here in the same commit.
   function overviewScreen(runs, usage, perf, cost, h) {
     const V = window.perfViews;
     const { esc, runRow, labels } = h;
