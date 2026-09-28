@@ -3,24 +3,51 @@
 import { OUTCOMES } from "../aspects.mjs";
 import { overall } from "../scores.mjs";
 import { identityOf } from "../contracts.mjs";
-import { supersededByMap, supersessionKey } from "../discovery.mjs";
+import { supersessionReading, supersessionKey } from "../discovery.mjs";
 import { band, coins, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
 
 const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
+
+// Grades it takes for a successor to take over a family. Below it a grade is a
+// coin toss, and the ranking already calls such a cell provisional.
+const READY_N = 5;
 
 // The supersession reading, written onto the rows so a screen can filter or mark
 // them. The reading itself lives beside `collapseFamilies` — the CLI's cost table
 // needs the same one and must not import from `serve/`.
 function markSuperseded(rows, { providerKey = () => "unqualified", ...options } = {}) {
-  const superseded = supersededByMap(rows, { providerKey, ...options });
+  const { superseded, pending } = supersessionReading(rows, { providerKey, ...options });
   for (const row of rows) {
     // A card's base model IS its section's unit: the screen labels every multiplier
     // against it, so a newer sibling must never hide it.
     if (row.baseModel !== undefined && row.model === row.baseModel) continue;
-    const by = superseded.get(supersessionKey(providerKey(row), row.model));
+    const key = supersessionKey(providerKey(row), row.model);
+    const by = superseded.get(key);
+    const next = pending.get(key);
     if (by) row.supersededBy = by;
+    else if (next) row.pendingSuccessor = next;
   }
   return rows;
+}
+
+// Readiness from a set of graded cells: the n a model has actually earned, keyed
+// by provider + model like the supersession reading itself. Never `provisional` —
+// an outcome-only cell reads n=0 and provisional=false, which would pass.
+function readyFrom(cells, providerOf) {
+  const graded = new Map(cells.map((cell) => [supersessionKey(providerOf(cell), cell.model), cell.n || 0]));
+  return (provider, model) => (graded.get(supersessionKey(provider, model)) ?? 0) >= READY_N;
+}
+
+// The chip a young successor wears, in the one place its wording lives — the
+// dashboard and `swarm perf` render the same sentence. Rank and verdicts are the
+// elder's own; with neither there is nothing to claim but the generation.
+export function successorPitch({ elder, rank, verdicts = [], n } = {}) {
+  if (!elder) return `needs grades, n=${n ?? 0}`;
+  const claims = verdicts.filter(Boolean);
+  // Rank qualifies a verdict; alone it is a position on a list, not a reason.
+  if (!claims.length) return `needs grades — newer generation of ${elder}`;
+  if (rank != null) claims.unshift(`#${rank} overall`);
+  return `needs grades — newer generation of ${elder} (${claims.join(", ")})`;
 }
 
 // The Performance ranking's cells: a ranked row leaves the list while a newer
@@ -33,10 +60,15 @@ export function rankCells(cells, { cloudSuffix = ":cloud" } = {}) {
     const providers = providersOf(cell);
     return providers.length === 1 ? providers[0] : "unqualified";
   };
-  const superseded = supersededByMap(cells, { providerKey: providerOf, cloudSuffix });
+  const { superseded, pending } = supersessionReading(cells, {
+    providerKey: providerOf, cloudSuffix, ready: readyFrom(cells, providerOf),
+  });
   return cells.map((cell) => {
-    const by = superseded.get(supersessionKey(providerOf(cell), cell.model));
-    return by ? { ...cell, supersededBy: by } : cell;
+    const key = supersessionKey(providerOf(cell), cell.model);
+    const by = superseded.get(key);
+    const next = pending.get(key);
+    if (by) return { ...cell, supersededBy: by };
+    return next ? { ...cell, pendingSuccessor: next } : cell;
   });
 }
 
@@ -209,7 +241,10 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
       ...(r.baseModel !== undefined ? { baseModel: r.baseModel } : {}),
     }))
     .sort((a, z) => (a.mult ?? Infinity) - (z.mult ?? Infinity) || compareIdentity(a, z));
-  markSuperseded([...points, ...spread], { providerKey, cloudSuffix });
+  // Readiness is the successor's own graded n, per identity: a model two
+  // providers share has one reading each, and the merged cost cell has neither.
+  const ready = readyFrom(overall(rows, { domain }).cells, (cell) => identityOf(cell).provider || "unqualified");
+  markSuperseded([...points, ...spread], { providerKey, cloudSuffix, ready });
 
   // Verdicts are intentionally local. A single global best/worst would imply
   // that (say) an Ollama meter point and a Codex plan-rate point share a cost
@@ -223,7 +258,9 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
     const topWtd = candidates.reduce((m, p) => (p.wtd > m ? p.wtd : m), -Infinity);
     const best = candidates.filter((p) => p.wtd >= topWtd - margin)
       .sort((a, z) => a.multiplier - z.multiplier || z.wtd - a.wtd || compareIdentity(a, z))[0] ?? null;
-    const worst = sectionPoints.filter((p) => !p.supersededBy && p.dominatedBy != null)
+    // A pending elder is still the generation on trial, not this provider's
+    // worst buy — it does not collect that verdict on its way out.
+    const worst = sectionPoints.filter((p) => !p.supersededBy && !p.pendingSuccessor && p.dominatedBy != null)
       .sort((a, z) => z.multiplier - a.multiplier || a.wtd - z.wtd || compareIdentity(a, z))[0] ?? null;
     return { best, worst };
   };

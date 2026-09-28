@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
-import { seatReport, resolveSeatModel } from "../src/seats.mjs";
+import { seatReport, resolveSeatModel, gapCandidates } from "../src/seats.mjs";
 import { overall, aggregate, frontier } from "../src/scores.mjs";
 
 // The same baseline store row scores.test.mjs builds — one field mutated per
@@ -147,6 +147,87 @@ test("seatReport: launchable-but-unseated models list with their n; a seated mod
   ok(tail.includes("outsider:cloud n=7"), tail);
   ok(tail.includes("unproven:cloud never graded"), tail);
   ok(!tail.includes("seated:cloud"), `the seated model is listed twice: ${tail}`);
+  // seated:cloud is itself under canon and seated, so the exploration seat is
+  // already taken — the gap line would name a model nobody is being asked for.
+  ok(!out.includes("gap seat available"), out);
+});
+
+// ── the gap seat: what makes an ungraded model get seated ───────────────────
+// An ungraded model is absent from the ranking the author reads to seat, so
+// nothing in the output asks for it. Validate names one available seat, with
+// the reason to take it, in the block every dispatch already passes through.
+const many = (model, g, n) => Array.from({ length: n }, (_, i) => graded({
+  resultsDir: `C:/runs/${model}-${i}`,
+  model,
+  grades: { adherence: g, handoff: g, truthfulness: g, depth: g, impl: g, code: g },
+}));
+const priced = (model, mult) => ({
+  model, mult, requests: 300, measuredRequests: 300, weeks: 1, measuredWeeks: 1,
+  unit: "usd", costDomain: "ollama:usd:meter",
+});
+
+test("seatReport: a gap seat is named when nothing seated is under canon", () => {
+  const rows = many("kimi-k2.6:cloud", 8, 24);
+  const seated = { model: "kimi-k2.6:cloud", leaves: ["impl-lane"] };
+  const roster = [seated, { model: "fresh:cloud" }];
+  const out = seatReport({ models: [seated], rows, costRows: [], roster }).join("\n");
+  const gap = out.split("\n").find((l) => l.startsWith("  gap seat available:"));
+  ok(gap.includes("fresh:cloud (never graded)"), out);
+  ok(gap.includes("needs grades, n=0"), gap);
+  ok(gap.includes("seat it on one bounded leaf this run"), `the line carries its own instruction, so no skill has to: ${gap}`);
+
+  // A run that already seats the gap model is not nudged twice.
+  const seatedGap = seatReport({ models: [{ model: "fresh:cloud", leaves: ["probe"] }], rows, costRows: [], roster }).join("\n");
+  ok(!seatedGap.includes("gap seat available"), seatedGap);
+  // Nothing launchable outside the seats: nothing to name.
+  const noneLeft = seatReport({ models: [seated], rows, costRows: [], roster: [seated] }).join("\n");
+  ok(!noneLeft.includes("gap seat available"), noneLeft);
+});
+
+// The strongest case first: a successor of a best-value elder, then of a
+// frontier one, then whatever is left. The elder's own row is the source —
+// its rank and its verdict, never a guess about the model that has no grades.
+test("gapCandidates: sells the successor of the best-value elder first, and the gap line carries it", () => {
+  const rows = [...many("kimi-k2.6:cloud", 8.6, 24), ...many("glm-5.2:cloud", 9, 24)];
+  const costRows = [priced("kimi-k2.6:cloud", 1), priced("glm-5.2:cloud", 3)];
+  const seated = { model: "kimi-k2.6:cloud", leaves: ["impl-lane"] };
+  const roster = [
+    seated,
+    { model: "kimi-k2.7-code:cloud" },
+    { model: "glm-5.2:cloud" },
+    { model: "glm-5.3:cloud" },
+    { model: "fresh:cloud" },
+  ];
+  const candidates = gapCandidates({ roster, rows, costRows });
+
+  deepEqual(candidates.map((c) => c.model), ["kimi-k2.7-code:cloud", "glm-5.3:cloud", "fresh:cloud"]);
+  deepEqual(candidates.map((c) => c.elder), ["kimi-k2.6:cloud", "glm-5.2:cloud", null]);
+  deepEqual(candidates[0].verdicts, ["best value"]);
+  deepEqual(candidates[1].verdicts, ["frontier"]);
+  equal(candidates[0].rank, 2);
+  equal(candidates[1].rank, 1, "the elder's rank rides along, even when it sorts after a better pitch");
+  equal(candidates[2].n, 0);
+
+  const out = seatReport({ models: [seated], rows, costRows, roster }).join("\n");
+  const gap = out.split("\n").find((l) => l.startsWith("  gap seat available:"));
+  ok(gap.includes("gap seat available: kimi-k2.7-code:cloud (never graded)"), gap);
+  ok(gap.includes("newer generation of kimi-k2.6:cloud (#2 overall, best value)"), gap);
+  // the line replaces that model's unseated entry, and only that one's
+  const tail = out.split("\n").find((l) => l.startsWith("  launchable, not seated:"));
+  ok(!tail.includes("kimi-k2.7-code:cloud"), `the gap seat is named twice: ${tail}`);
+  ok(tail.includes("glm-5.3:cloud never graded"), tail);
+  ok(tail.includes("glm-5.2:cloud n=24"), tail);
+});
+
+test("gapCandidates: a roster model with no rows is never graded, and only under-canon models are candidates", () => {
+  const rows = many("kimi-k2.6:cloud", 8, 24);
+  const roster = [{ model: "kimi-k2.6:cloud" }, { model: "fresh:cloud" }];
+  const candidates = gapCandidates({ roster, rows });
+
+  deepEqual(candidates.map((c) => c.model), ["fresh:cloud"]);
+  equal(candidates[0].n, 0);
+  equal(candidates[0].elder, null);
+  deepEqual(gapCandidates({ roster: [{ model: "kimi-k2.6:cloud" }], rows }), [], "at n=24 the model is not a gap");
 });
 
 // The observed incident: kimi seated on an implementation lane at n=24 while
@@ -256,7 +337,9 @@ test("seatReport: the unseated roster resolves aliases too", () => {
     models: [{ model: "glm-5.3:cloud", leaves: ["a"] }],
     rows: [...rows, graded({ model: "glm-5.3:cloud" })],
     costRows: [],
-    roster: [{ model: "haiku" }],
+    // glm-5.3 is seated at n=1, so the exploration seat is taken and the gap
+    // line stays quiet — this row is about the unseated list's own resolution.
+    roster: [{ model: "glm-5.3:cloud" }, { model: "haiku" }],
   }).join("\n");
   ok(/haiku n=12 n<20/.test(out), `the unseated list must carry the alias's real n, got: ${out}`);
 });

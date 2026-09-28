@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
-import { costView } from "../src/serve/perf-views.mjs";
+import { costView, rankCells, successorPitch } from "../src/serve/perf-views.mjs";
+import { overall } from "../src/scores.mjs";
 import { costSections } from "../src/cost.mjs";
 import { dropSuperseded } from "../src/discovery.mjs";
 import { rateCards } from "../src/rate-card.mjs";
@@ -139,6 +140,121 @@ test("costView never supersedes the card's own base model", () => {
     "RED: the 1x row left the spread table");
   // Supersession still runs for every family but that one.
   equal(point("claude-opus-5").supersededBy, "claude-opus-5-5");
+});
+
+// ── the handover waits for the successor's grades ───────────────────────────
+// An ungraded successor erased its elder: Sonnet 5's point and best-value
+// verdict vanished when Sonnet 5.5 appeared with nothing to plot. On a graded
+// view the elder now leaves only once the successor has the evidence to take
+// over — the same n>=5 the ranking already calls provisional.
+const handoverRows = (elder, successor, n) => ({
+  rows: [...grades(elder, 10), ...grades(successor, 6).slice(0, n)],
+  costs: [cost(elder, 1), cost(successor, 4)],
+});
+
+test("four grades hand nothing over: the elder stays, pending, and still leads", () => {
+  const old = "claude-opus-5", next = "claude-opus-5-5";
+  const { rows, costs } = handoverRows(old, next, 4);
+  const view = costView(rows, costs);
+  const point = (model) => view.points.find((row) => row.model === model);
+  const spread = (model) => view.spread.find((row) => row.model === model);
+
+  equal(point(old).supersededBy, undefined, "the elder is not superseded while the successor is ungraded enough to be a coin toss");
+  equal(point(old).pendingSuccessor, next);
+  equal(spread(old).pendingSuccessor, next);
+  equal(point(next).pendingSuccessor, undefined, "only the row under a successor carries the flag");
+  equal(view.best.model, old, "the pending elder is still eligible for best value");
+});
+
+test("five grades hand over: the elder is superseded and leaves the verdict", () => {
+  const old = "claude-opus-5", next = "claude-opus-5-5";
+  const { rows, costs } = handoverRows(old, next, 5);
+  const view = costView(rows, costs);
+
+  equal(view.points.find((row) => row.model === old).supersededBy, next);
+  equal(view.points.find((row) => row.model === old).pendingSuccessor, undefined);
+  equal(view.best.model, next);
+});
+
+test("an outcome-only successor has earned no handover, whatever provisional says", () => {
+  // n=0 with provisional=false is the shape that would pass a provisional test:
+  // failed rows create the cell, count an outcome, and grade nothing.
+  const old = "claude-opus-5", next = "claude-opus-5-5";
+  const rows = [
+    ...grades(old, 8),
+    ...Array.from({ length: 3 }, (_, i) => ({
+      resultsDir: "C:/runs/cost-supersession",
+      leaf: `${next}-dead-${i}`,
+      provider: "claude",
+      model: next,
+      domain: "godot",
+      grades: null,
+      outcome: "failed",
+      note: "",
+    })),
+  ];
+  const view = costView(rows, [cost(old, 2), cost(next, 1)]);
+
+  equal(view.points.find((row) => row.model === next), undefined, "no grade, no point");
+  equal(view.points.find((row) => row.model === old).supersededBy, undefined);
+  equal(view.points.find((row) => row.model === old).pendingSuccessor, next);
+  equal(view.best.model, old);
+});
+
+test("readiness is per provider: one provider's grades never retire a same-named model under another", () => {
+  const under = (provider, model, n) => Array.from({ length: n }, (_, i) => ({
+    resultsDir: `C:/runs/${provider}-${model}-${i}`,
+    leaf: `${model}-${i}`,
+    provider,
+    model,
+    domain: "godot",
+    grades: { adherence: 9, handoff: 9, truthfulness: 9, depth: 9 },
+    outcome: "completed",
+    note: "",
+  }));
+  const price = (provider, model, mult) => ({ ...cost(model, mult), provider });
+  const rows = [
+    ...under("alpha", "m-1", 6), ...under("alpha", "m-2", 2),
+    ...under("beta", "m-1", 6), ...under("beta", "m-2", 7),
+  ];
+  const view = costView(rows, [price("alpha", "m-1", 2), price("beta", "m-1", 2), price("alpha", "m-2", 1), price("beta", "m-2", 1)]);
+  const point = (provider, model) => view.points.find((row) => row.provider === provider && row.model === model);
+
+  equal(point("alpha", "m-1").supersededBy, undefined);
+  equal(point("alpha", "m-1").pendingSuccessor, "m-2", "alpha's successor has two grades and retires nothing");
+  equal(point("beta", "m-1").supersededBy, "m-2", "beta's successor has seven and takes the handover");
+});
+
+test("rankCells keeps an elder whose successor is under five grades", () => {
+  const old = "claude-opus-5", next = "claude-opus-5-5";
+  const cellsFor = (n) => rankCells(overall(handoverRows(old, next, n).rows, { combineProviders: true }).cells);
+  const cell = (cells, model) => cells.find((c) => c.model === model);
+
+  equal(cell(cellsFor(4), old).supersededBy, undefined);
+  equal(cell(cellsFor(4), old).pendingSuccessor, next);
+  equal(cell(cellsFor(5), old).supersededBy, next);
+  equal(cell(cellsFor(5), old).pendingSuccessor, undefined);
+});
+
+test("a pending elder is never named worst, and is still pending", () => {
+  const elder = "claude-opus-5", successor = "claude-opus-5-5", other = "claude-sonnet-5";
+  const rows = [...grades(elder, 3), ...grades(successor, 9).slice(0, 2), ...grades(other, 4)];
+  const view = costView(rows, [cost(elder, 9), cost(successor, 1), cost(other, 5)]);
+
+  // The elder is the dearest dominated row, so it would win `worst` on sort
+  // order alone the moment it stopped being superseded.
+  equal(view.points.find((row) => row.model === elder).pendingSuccessor, successor);
+  equal(view.worst?.model, other);
+});
+
+test("successorPitch names the elder, its rank and its verdicts — or says there is none", () => {
+  equal(successorPitch({ elder: "claude-sonnet-5", rank: 2, verdicts: ["best value"] }),
+    "needs grades — newer generation of claude-sonnet-5 (#2 overall, best value)");
+  equal(successorPitch({ elder: "claude-sonnet-5", rank: 7 }), "needs grades — newer generation of claude-sonnet-5",
+    "no verdict is no claim, and a middling rank is not one either");
+  equal(successorPitch({ elder: "claude-sonnet-5", verdicts: ["frontier"] }),
+    "needs grades — newer generation of claude-sonnet-5 (frontier)");
+  equal(successorPitch({ n: 3 }), "needs grades, n=3", "no predecessor, so the only fact is its own n");
 });
 
 test("costScreen hides superseded cards and never names one as the hero leader", () => {

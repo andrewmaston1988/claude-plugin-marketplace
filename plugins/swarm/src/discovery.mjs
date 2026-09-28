@@ -216,10 +216,13 @@ export function collapseRoster(rows, { cloudSuffix = ":cloud" } = {}) {
 // family, and every caller of the map below has to agree on the tuple shape.
 export const supersessionKey = (provider, model) => JSON.stringify([provider, model]);
 
-// Which rows a collapse hides, as provider+model -> the model that supersedes it.
-// `collapseFamilies` marks chains; `visibleModels` decides which of a chain are
-// actually shown, and only the hidden members land here.
-export function supersededByMap(rows, { providerKey = () => "unqualified", isDenylisted = () => false, cloudSuffix = ":cloud" } = {}) {
+// Which rows a collapse hides, as provider+model -> the model that supersedes it,
+// beside the elders it would have hidden but for `ready`. `collapseFamilies` marks
+// chains; `visibleModels` decides which of a chain are actually shown, and only the
+// hidden members land in `superseded`. A graded view passes a `ready(provider,
+// model)` predicate — an elder whose successor has not earned a grade yet is not
+// hidden by it, it is *pending* it, and says so.
+export function supersessionReading(rows, { providerKey = () => "unqualified", isDenylisted = () => false, cloudSuffix = ":cloud", ready = () => true } = {}) {
   const familyNames = new Map();
   for (const row of rows) {
     const provider = providerKey(row);
@@ -228,17 +231,26 @@ export function supersededByMap(rows, { providerKey = () => "unqualified", isDen
     familyNames.set(provider, names);
   }
   const superseded = new Map();
+  const pending = new Map();
   for (const [provider, names] of familyNames) {
     const suffix = provider === "ollama" ? cloudSuffix : "";
     const families = collapseFamilies([...names].map((model) => ({ model })), suffix);
     const visible = new Set(visibleModels(families, { isDenylisted }).map((row) => row.model));
     for (const row of families) {
-      if (!visible.has(row.model) && row.supersededBy) {
-        superseded.set(supersessionKey(provider, row.model), row.supersededBy);
-      }
+      if (!row.supersededBy || visible.has(row.model)) continue;
+      const key = supersessionKey(provider, row.model);
+      // `ready` is asked per provider+model so another provider's grades for a
+      // shared name cannot retire this family's elder.
+      if (ready(provider, row.supersededBy)) superseded.set(key, row.supersededBy);
+      else pending.set(key, row.supersededBy);
     }
   }
-  return superseded;
+  return { superseded, pending };
+}
+
+// The hidden rows alone, for the callers that only drop them.
+export function supersededByMap(rows, options) {
+  return supersessionReading(rows, options).superseded;
 }
 
 // The same reading applied to a table: superseded rows leave, unless `keep` says
