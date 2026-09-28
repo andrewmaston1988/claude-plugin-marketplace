@@ -2239,12 +2239,12 @@ test("resume: the corrected result counts the re-asks' spend only, never the fir
     const spawn = fakeSpawnFactory((call) => {
       // A slow, expensive first run — the spend a resume must never re-add.
       if (pass === 1) {
-        return { output: streamOut("still prose", "s-leaf", { input_tokens: 1000, output_tokens: 100 }), delayMs: 60 };
+        return { output: streamOut("still prose", "s-leaf", { input_tokens: 1000, output_tokens: 100 }, 0.5), delayMs: 60 };
       }
       // Anything but the correction comes back as prose again: only a leaf resumed
       // on its own correction can land ok here.
       return sentPrompt(call).includes("did not match the task's returns schema")
-        ? { output: streamOut(JSON.stringify({ sites: ["a.mjs"] }), "s-leaf-2", { input_tokens: 7, output_tokens: 3 }) }
+        ? { output: streamOut(JSON.stringify({ sites: ["a.mjs"] }), "s-leaf-2", { input_tokens: 7, output_tokens: 3 }, 0.01) }
         : { output: streamOut("still prose", "s-leaf-2", { input_tokens: 1000, output_tokens: 100 }), delayMs: 60 };
     });
     const io = makeIo(spawn);
@@ -2258,6 +2258,8 @@ test("resume: the corrected result counts the re-asks' spend only, never the fir
     const res = JSON.parse(readFileSync(resultPath(p.resultsDir, "a"), "utf8"));
     equal(res.ok, true);
     deepEqual(res.tokens, { input: 7, output: 3, cacheCreation: 0, cacheRead: 0 });
+    equal(res.costUsd, 0.01, "the first run's cost must not ride into the corrected row");
+    equal(res.schemaErrors, undefined, "a recovered leaf must not keep the failure's errors");
     // One re-ask's worth of wall-clock, not a fresh dispatch's: the synthetic
     // first result carries zero duration, so only the correction is timed.
     ok(res.durationMs < 30,

@@ -1244,10 +1244,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         && prior.key === taskKey(task) && resumeId);
       let r;
       if (corrective) {
-        // The synthetic first result carries the prior output and session only: the
-        // re-asks below count their own spend, never the first run's.
+        // Built field by field, never spread from prior: the failure's errors, cost
+        // and turns must not ride into a recovered row.
         r = await enforceLeafContract(task, {
-          ...prior, ok: true, output: prior.rawOutput, sessionId: resumeId,
+          ok: true, exit: prior.exit, output: prior.rawOutput, sessionId: resumeId,
+          provider: prior.provider, runner: prior.runner,
+          ...(prior.modelAlias && { realModel: prior.model }),
           tokens: emptyTokens(), durationMs: 0,
         }, taskCwd, plan.resultsDir, cfg, io, streamHooks(task), runtime);
       } else {
