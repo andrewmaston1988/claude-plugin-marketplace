@@ -12,13 +12,8 @@
 // the disk lives in `readCachedUsage` and the Codex cache pair below. The former
 // is called from a UserPromptSubmit hook, so it must never fetch, never block and
 // never throw; a provider it cannot read is `unknown` and says nothing at all.
-import { readFileSync, writeFileSync, renameSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { swarmHome } from "./config.mjs";
 import { providerUsageSnapshot } from "./contracts.mjs";
-
-export const QUOTA_CACHE_FILENAME = "quota-cache.json";
-export const CODEX_USAGE_CACHE_FILENAME = "codex-usage.json";
+import { cachedUsageReading, writeUsageReading, quotaTtlMs } from "./usage-cache.mjs";
 
 // A limit window, uniform across providers. `scope` is Anthropic's per-model
 // bucket; cloud providers have no equivalent and leave it null. `window` is the
@@ -158,6 +153,9 @@ export function normalizeCodex(reading, options = {}) {
     provider: "codex",
     state: codexExhausted(source.buckets) ? "exhausted" : limits.length ? "ok" : "unknown",
     limits,
+    // The banner's age reads this or `lastSeen`; a cache-read codex snapshot has
+    // no other stamp, and dropping it here would silence the age it exists for.
+    ...(typeof source.fetchedAt === "number" && { fetchedAt: source.fetchedAt }),
   };
 }
 
@@ -166,28 +164,16 @@ export function normalizeCodex(reading, options = {}) {
 // that wants to SHOW Codex figures — `quota`, and anything later — reads this
 // file, which is why it can never stall on a process it does not need.
 export function codexUsageFromCache(env = process.env) {
-  let cached;
-  try {
-    cached = JSON.parse(readFileSync(join(swarmHome(env), CODEX_USAGE_CACHE_FILENAME), "utf8"));
-  } catch {
-    return null;
-  }
-  if (cached?.provider !== "codex" || !Array.isArray(cached.buckets)) return null;
-  // THIS process did not fetch it, and saying `live` would suppress the banner
-  // that exists to mark exactly that. A failed half keeps its own provenance.
-  return { ...cached, provenance: cached.provenance === "live" ? "cached" : cached.provenance };
+  const reading = cachedUsageReading("codex", { env });
+  if (reading?.provider !== "codex" || !Array.isArray(reading.buckets)) return null;
+  // THIS process did not fetch it, which the module already says: it never
+  // returns `live` from disk. A failed half keeps its own reason.
+  return reading;
 }
 
 export function writeCodexUsageCache(reading, env = process.env) {
-  if (reading?.provider !== "codex" || !Array.isArray(reading.buckets)) return;
-  const path = join(swarmHome(env), CODEX_USAGE_CACHE_FILENAME);
-  try {
-    mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(`${path}.tmp`, JSON.stringify(reading));
-    renameSync(`${path}.tmp`, path);
-  } catch {
-    // Best-effort: a cache nothing can read is a missing figure, never a failure.
-  }
+  if (reading?.provider !== "codex" || !Array.isArray(reading.buckets)) return null;
+  return writeUsageReading("codex", { fetchedAt: Date.now(), result: reading }, { env });
 }
 
 // Providers whose reading needs its own shape read. Anything absent here takes the
@@ -237,26 +223,20 @@ export function normalizeProviderUsage(provider, reading) {
 // why only ollama's readings carry provenance and the /!\ banner. That
 // asymmetry is real; flattening it would either spam a warning Anthropic fixes
 // silently, or bury one only the operator can fix.
-// Single home for the quota-cache TTL read — the legacy snapshot path and the
-// claude adapter's cache-only branch read the same file the same way. Returns
-// `{ parsed, asOf }` for a fresh cache, null when absent, corrupt or stale.
-export function readAnthropicCacheResult(cfg = {}, now = Date.now(), cachePath) {
-  let cached;
-  try {
-    cached = JSON.parse(readFileSync(cachePath || join(swarmHome(), QUOTA_CACHE_FILENAME), "utf8"));
-  } catch {
-    return null;
-  }
-  if (typeof cached?.ts !== "number") return null;
-  if (now - cached.ts >= (cfg.quotaCacheSecs ?? 300) * 1000) return null;
-  return { parsed: cached.result, asOf: cached.ts };
+// Single home for the quota-cache read — the legacy snapshot path, `quota` and
+// the claude adapter's cache-only branch all come here. Returns `{ parsed, asOf }`
+// for a fresh cache, null when absent, unreadable or past its TTL.
+export function readAnthropicCacheResult(cfg = {}, now = Date.now(), cachePath, env) {
+  const reading = cachedUsageReading("claude", { cachePath, env, now: () => now, ttlMs: quotaTtlMs(cfg) });
+  if (!reading?.limits?.length || reading.provenance === "stale") return null;
+  return { parsed: reading, asOf: reading.fetchedAt };
 }
 
-function readAnthropicCache(cfg, now, cachePath) {
-  const fresh = readAnthropicCacheResult(cfg, now, cachePath);
-  return fresh
-    ? normalizeAnthropic(fresh.parsed, { source: "anthropic-oauth-cache", provenance: "cache", asOf: fresh.asOf })
-    : none("anthropic");
+function readAnthropicCache(cfg, now, cachePath, env) {
+  const fresh = readAnthropicCacheResult(cfg, now, cachePath, env);
+  if (!fresh) return none("anthropic");
+  const reading = fresh.parsed;
+  return normalizeAnthropic(reading, { source: "anthropic-oauth-cache", provenance: "cache", asOf: reading.fetchedAt });
 }
 
 // Every provider, in one array, cache-only. With a registry, Claude reads through
@@ -282,7 +262,7 @@ export async function readCachedUsage(cfg = {}, { env = process.env, now = Date.
     }
     return out;
   }
-  const out = [readAnthropicCache(cfg, now, cachePath)];
+  const out = [readAnthropicCache(cfg, now, cachePath, env)];
   const ollamaEnabled = cfg?.providers?.ollama?.cloud?.ollama?.enabled === true || cfg?.provider?.cloud?.ollama?.enabled === true;
   if (ollamaEnabled) {
     const { usageFromCache } = _ollama || (await import("./ollama-usage.mjs"));
@@ -349,9 +329,43 @@ function stripProviderPrefix(provider, kind) {
   return kind.toLowerCase().startsWith(prefix.toLowerCase()) ? kind.slice(prefix.length) : kind;
 }
 
-export function usageLines(usages, { timeZone } = {}) {
+// Compact and coarse on purpose: the reader needs "minutes or days", not the
+// seconds. One character of unit, because this rides inside a figure line.
+function ageText(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.round(s / 60)}m`;
+  if (s < 86400) return `${Math.round(s / 3600)}h`;
+  return `${Math.round(s / 86400)}d`;
+}
+
+// One wording for the age of a reading this process did not fetch, so the banner
+// and the figures beneath it can never drift. `lastSeen` is what the ollama
+// reader banks; a reading straight out of the shared cache carries `fetchedAt`
+// instead. Both are numbers — an absent one makes no claim about age.
+function staleAge(usage, now) {
+  const at = usage?.lastSeen ?? usage?.fetchedAt;
+  return usage?.provenance === "stale" && typeof at === "number" ? ageText(now - at) : "";
+}
+
+function staleAgeMark(usage, now) {
+  const age = staleAge(usage, now);
+  return age ? `stale · read ${age} ago` : "";
+}
+
+// The mark travels with the number the reader acts on rather than on a banner
+// they may scroll past: a reading past its TTL that this process did not fetch
+// says so on every figure drawn from it. Live and freshly-cached readings add
+// nothing — freshness is the quiet case.
+function staleSuffix(usage, now = Date.now()) {
+  const mark = staleAgeMark(usage, now);
+  return mark ? ` · ${mark}` : "";
+}
+
+export function usageLines(usages, { timeZone, now = Date.now() } = {}) {
   const lines = [];
   for (const u of usages) {
+    const stale = staleSuffix(u, now);
     for (const l of u.limits) {
       const kind = stripProviderPrefix(u.provider, l.kind);
       const scope = l.scope && !restatesProvider(u.provider, l.scope) && l.scope !== kind ? l.scope : null;
@@ -359,7 +373,7 @@ export function usageLines(usages, { timeZone } = {}) {
       const formatted = formatResetTime(l.resetsAt, { timeZone });
       const resets = formatted ? ` — resets ${formatted}` : "";
       const name = u.provider === "anthropic" ? "claude" : u.provider;
-      lines.push(`${name}${label ? ` ${label}` : ""}: ${l.percent}%${resets}`);
+      lines.push(`${name}${label ? ` ${label}` : ""}: ${l.percent}%${resets}${stale}`);
     }
   }
   return lines;
@@ -373,7 +387,9 @@ export function usageLines(usages, { timeZone } = {}) {
 // all (Anthropic never gains one — its TTL cache self-heals — so its
 // rendering is untouched), and for a `cached` reading with no recorded
 // failure reason (the hook's plain cache read; the figure may be fresh from
-// a successful fetch).
+// a successful fetch). `stale` is the exception: the shared cache marks a
+// reading that way without recording WHY the refresh went unanswered, and a
+// reading the reader must not trust is the last one that may print nothing.
 const REASON_TITLES = {
   "no-cookie": "No Cookie",
   "expired-cookie": "Cookie Expired",
@@ -383,8 +399,9 @@ const REASON_TITLES = {
   "stale-rate-card": "Stale Rate Card",
 };
 
-export function provenanceBanner(usage) {
-  if (!usage?.provenance || usage.provenance === "live" || !usage.reason) return [];
+export function provenanceBanner(usage, { now = Date.now() } = {}) {
+  if (!usage?.provenance || usage.provenance === "live") return [];
+  if (!usage.reason && usage.provenance !== "stale") return [];
   const title = REASON_TITLES[usage.reason] ?? "Usage Unread";
   // Legacy headroom callers pass the raw Ollama reading before normalization.
   const provider = usage.provider || "ollama";
@@ -402,6 +419,19 @@ export function provenanceBanner(usage) {
     const lastSeen = usage.lastSeen ? `  last seen: ${new Date(usage.lastSeen).toISOString()}` : "";
     return [`/!\\ ${title} — figures below are cached.${lastSeen}`, refresh];
   }
+  // Stale: the figures are the last ones banked. A banked failure means a
+  // refresh was asked for and the provider did not answer; without one, nothing
+  // tried, and claiming a failed refresh would be a lie the reader acts on.
+  // Distinct from `cached`, which is a reading that may be perfectly fresh.
+  if (usage.provenance === "stale") {
+    // An age, never an ISO stamp: "read 3h ago" is what tells the reader whether
+    // to act, and it is the same wording the figures below already carry.
+    const mark = staleAgeMark(usage, now);
+    const claim = usage.reason
+      ? `the refresh did not answer.${mark ? `  ${mark}` : ""}`
+      : `not refreshed${mark ? ` for ${staleAge(usage, now)}` : ""}.`;
+    return [`/!\\ ${title} — figures below are the last reading; ${claim}`, refresh];
+  }
   // A partial read DID fetch this process — saying "no cached reading available"
   // over figures that just arrived live would be a lie the reader acts on.
   if (usage.provenance === "partial") {
@@ -415,10 +445,10 @@ export function provenanceBanner(usage) {
 // healthy — or live-fetched — provider adds nothing beyond its figures; the
 // standing block is instruction, and unprompted noise beside it trains the
 // reader to skip the whole thing.
-export function notableLines(usages, { timeZone } = {}) {
+export function notableLines(usages, { timeZone, now = Date.now() } = {}) {
   const lines = [];
   for (const u of usages) {
-    lines.push(...provenanceBanner(u));
+    lines.push(...provenanceBanner(u, { now }));
     if (u.state === "exhausted") {
       const weekly = u.limits.find((l) => l.kind === "weekly");
       const formatted = formatResetTime(weekly?.resetsAt, { timeZone });

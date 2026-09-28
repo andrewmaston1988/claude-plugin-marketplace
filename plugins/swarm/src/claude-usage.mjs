@@ -56,8 +56,12 @@ export async function readClaudeUsage(context = {}) {
   const cachePath = context.cachePath || join(swarmHome(env), "quota-cache.json");
 
   if (context.usageOptIn !== true) {
-    const fresh = readAnthropicCacheResult(cfg, nowMs, cachePath);
-    if (!fresh || !fresh.parsed?.limits?.length) return marked(null, new Date(nowMs).toISOString());
+    // Expiry reads here as "nothing", not as a stale banner: the CLI refills this
+    // file unprompted, so a warning would be noise its reader cannot act on.
+    const fresh = readAnthropicCacheResult(cfg, nowMs, cachePath, env);
+    if (!fresh) return marked(null, new Date(nowMs).toISOString());
+    // `cache`, never ollama's `cached`: that token means "cookie may be dead" and
+    // the banner it feeds is one this provider's self-healing TTL never earns.
     return claudeSnapshot(fresh.parsed, "cache", new Date(fresh.asOf).toISOString());
   }
 
@@ -67,6 +71,9 @@ export async function readClaudeUsage(context = {}) {
     credentialsPath: env?.SWARM_CREDENTIALS,
     cachePath,
     now: () => nowMs,
+    // `swarm usage --provider claude` is the documented refresh, so forced reads
+    // must bypass a cache written seconds ago.
+    force: context.force === true,
   });
   if (!q || !q.limits?.length) {
     return marked("anthropic usage endpoint unreachable, or no Claude Code credentials", new Date(nowMs).toISOString());

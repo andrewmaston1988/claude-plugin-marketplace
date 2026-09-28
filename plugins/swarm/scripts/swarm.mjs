@@ -74,8 +74,8 @@ function resolveManifestRef(ref) {
   return r;
 }
 
-// The single ollama usage entry point for the CLI — getUsage memoises per
-// process, so validate/run/models share one fetch however many seats.
+// The single ollama usage entry point for the CLI — the usage file's 5-minute
+// TTL is what lets validate/run/models share one fetch however many seats.
 async function usageHeadroom(cfg, { env = process.env, fetchImpl = globalThis.fetch } = {}) {
   return (await import("../src/ollama-usage.mjs")).getUsage(cfg, { env, _fetch: fetchImpl });
 }
@@ -114,11 +114,12 @@ async function costBands(cfg = getConfig()) {
   return resolveBands(providerConfig(cfg, "ollama")?.cloud?.ollama?.costBands);
 }
 
-// Read usage through registered provider capabilities. `live` is reserved for
-// the explicit operator command; hooks and validation use the cache-only path.
-export async function readProviderUsage(cfg, { registry = defaultProviderRegistry(), live = false, provider, env = process.env, fetchImpl = globalThis.fetch, quotaCheck } = {}) {
+// Read usage through registered provider capabilities. `live` lets an adapter
+// fetch at all — the cache still governs whether it does; `force` is the
+// operator's refresh, which only `swarm usage --provider` asks for.
+export async function readProviderUsage(cfg, { registry = defaultProviderRegistry(), live = false, force = false, provider, env = process.env, fetchImpl = globalThis.fetch, quotaCheck } = {}) {
   const { getUsage } = await import("../src/ollama-usage.mjs");
-  const { normalizeProviderUsage, writeCodexUsageCache } = await import("../src/usage.mjs");
+  const { normalizeProviderUsage } = await import("../src/usage.mjs");
   const usages = [];
   const errors = {};
   for (const adapter of registry.list()) {
@@ -127,11 +128,8 @@ export async function readProviderUsage(cfg, { registry = defaultProviderRegistr
     if (!readUsage) continue;
     try {
       const reading = live && adapter.id === "ollama"
-        ? await getUsage(cfg, { gate: false, env, _fetch: fetchImpl })
-        : await readUsage({ config: cfg, env, fetch: fetchImpl, usageOptIn: live, ...(quotaCheck && { quotaCheck }) });
-      // Only the live read pays for Codex's app-server process; the reading is
-      // banked here so `quota` can show Codex without spawning one of its own.
-      if (live && adapter.id === "codex") writeCodexUsageCache(reading, env);
+        ? await getUsage(cfg, { gate: false, env, _fetch: fetchImpl, force })
+        : await readUsage({ config: cfg, env, fetch: fetchImpl, usageOptIn: live, force, ...(quotaCheck && { quotaCheck }) });
       if (reading == null) continue;
       usages.push(normalizeProviderUsage(adapter.id, reading));
     } catch (error) {
@@ -965,7 +963,8 @@ async function cmdUsage(rest = [], {
   // `anthropic`, so either name selects it.
   const selected = getFlag("provider", rest);
   const provider = selected === "anthropic" ? "claude" : selected;
-  const providerReading = await readProviderUsage(cfg, { registry, env, fetchImpl, live: true, quotaCheck, ...(provider ? { provider } : {}) });
+  // The refresh command: `--provider` ignores the cache's age.
+  const providerReading = await readProviderUsage(cfg, { registry, env, fetchImpl, live: true, force: true, quotaCheck, ...(provider ? { provider } : {}) });
   const usages = providerReading.usages;
   for (const [provider, message] of Object.entries(providerReading.errors)) write(`${provider}: unavailable (${message})`);
   for (const line of usageLines(usages)) write(line);

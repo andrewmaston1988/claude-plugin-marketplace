@@ -12,7 +12,7 @@ import { runPlan } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir, appendRunLog } from "../src/results.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
 import { createCodexStreamParser } from "../src/stream.mjs";
-import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
+import { fakeSpawnFactory, makeIo, usageEnv, codexReading } from "./helpers/fake-io.mjs";
 
 const CFG = {
   provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "ollama", allowedRoots: [] },
@@ -344,7 +344,9 @@ test("Z-codex: a codex leaf that failed at zero turns dispatches with no resume"
     prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CODEX_CFG, p.resultsDir);
 
     const spawn = fakeSpawnFactory(writesInTree);
-    await runPlan(p, CODEX_CFG, makeIo(spawn));
+    // The codex preflight reads the meter first, so the home must already hold a
+    // reading — otherwise the run spawns the operator's real codex account.
+    await runPlan(p, CODEX_CFG, makeIo(spawn, { env: usageEnv({ codex: codexReading() }) }));
 
     equal(spawn.calls.length, 1, "the leaf must be dispatched");
     equal(codexResumeOf(spawn.calls[0]), null,

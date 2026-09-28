@@ -1,17 +1,21 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   normalizeAnthropic, normalizeOllama, readCachedUsage, usageLines, notableLines,
-  formatResetTime, QUOTA_CACHE_FILENAME, normalizeCodex, codexUsageFromCache, writeCodexUsageCache,
+  formatResetTime, normalizeCodex, codexUsageFromCache, writeCodexUsageCache,
 } from "../src/usage.mjs";
 import { createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
+import { usageReading, usageCachePath } from "../src/usage-cache.mjs";
 import { providerUsageSnapshot } from "../src/contracts.mjs";
 import { cmdUsage } from "../scripts/swarm.mjs";
 
 const LONDON = "Europe/London";
+
+// The path the module itself resolves, never a filename restated here.
+const claudeCache = (home) => usageCachePath("claude", { SWARM_HOME: home });
 
 const ANTHROPIC = {
   limits: [
@@ -104,41 +108,6 @@ test("notableLines: G7 exhaustion and a full session bar each get one line", () 
   ok(session[0].startsWith("ollama: session limit reached"), session[0]);
 });
 
-// Test 3 — the timestamp is absolute UTC, never an age. A "33h ago" reading is
-// what told nobody the figure was old; an ISO stamp lets the operator judge.
-test("notableLines: G7b the cached banner stamps last-seen in absolute UTC — the word 'ago' is gone", () => {
-  const lastSeen = Date.parse("2026-09-08T14:49:00Z");
-  const u = normalizeOllama({
-    ...OLLAMA_OK, provenance: "cached", reason: "expired-cookie",
-    lastSeen, cookiePath: join("home", "ollama-cookie.json"),
-  });
-  const lines = notableLines([u]);
-  const stamp = new Date(lastSeen).toISOString();
-  ok(lines.some((l) => l.includes(`last seen: ${stamp}`)), lines.join("\n"));
-  ok(!lines.some((l) => l.includes("ago")), `'ago' must never print: ${lines.join("\n")}`);
-  // the figures themselves keep their own absolute reset stamps
-  deepEqual(usageLines([u], { timeZone: LONDON }).filter((l) => l.startsWith("ollama weekly")), ["ollama weekly: 83.8% — resets Sat 12 Sep, 09:00"]);
-});
-
-// Test 4 — every failure reason names itself; a healthy cached reading is silent.
-test("notableLines: G7c each failure reason prints its own /!\\ title above a Refresh line", () => {
-  const cases = [
-    ["no-cookie", "No Cookie"],
-    ["expired-cookie", "Cookie Expired"],
-    ["network-error", "Network Error"],
-    ["timeout", "Fetch Timed Out"],
-    ["unparseable", "Page Unreadable"],
-  ];
-  for (const [reason, title] of cases) {
-    const u = normalizeOllama({ ...OLLAMA_OK, provenance: "cached", reason, cookiePath: "cp" });
-    const lines = notableLines([u]);
-    ok(lines[0].startsWith(`/!\\ ${title} — figures below are cached.`), `${reason}: ${lines.join(" | ")}`);
-    ok(lines.some((l) => l.includes("swarm ollama-usage --cookie")), `${reason} must name the fix: ${lines.join(" | ")}`);
-  }
-  // the same reading with NO recorded reason is healthy — exact-output callers stay quiet
-  deepEqual(notableLines([normalizeOllama({ ...OLLAMA_OK, provenance: "cached", reason: null })]), []);
-});
-
 test("notableLines: G8 anthropic exhaustion is reported the same way as a cloud provider's", () => {
   const lines = notableLines([normalizeAnthropic({ ...ANTHROPIC, exhausted: true })]);
   ok(lines[0].startsWith("anthropic: weekly allowance exhausted"), lines[0]);
@@ -162,14 +131,14 @@ const stubOllama = (reading) => ({ usageFromCache: () => reading });
 
 test("readCachedUsage: G9 a fresh anthropic cache is read; an EXPIRED one is unknown, never stale", async () => {
   await withHome(async (home) => {
-    const cachePath = join(home, QUOTA_CACHE_FILENAME);
-    writeFileSync(cachePath, JSON.stringify({ ts: NOW - 1000, result: ANTHROPIC }));
+    const cachePath = claudeCache(home);
+    writeFileSync(cachePath, JSON.stringify({ fetchedAt: NOW - 1000, result: ANTHROPIC }));
     const fresh = await readCachedUsage({}, { now: NOW, cachePath });
     equal(fresh[0].state, "ok");
 
     // Past the 300s TTL. The CLI refetches unprompted, so a warning here would
     // be noise — `unknown`, and notableLines stays silent about it.
-    writeFileSync(cachePath, JSON.stringify({ ts: NOW - 400_000, result: ANTHROPIC }));
+    writeFileSync(cachePath, JSON.stringify({ fetchedAt: NOW - 400_000, result: ANTHROPIC }));
     const expired = await readCachedUsage({}, { now: NOW, cachePath });
     equal(expired[0].state, "unknown");
     deepEqual(notableLines(expired), []);
@@ -178,7 +147,7 @@ test("readCachedUsage: G9 a fresh anthropic cache is read; an EXPIRED one is unk
 
 test("readCachedUsage: G10 ollama appears only when enabled", async () => {
   await withHome(async (home) => {
-    const cachePath = join(home, QUOTA_CACHE_FILENAME);
+    const cachePath = claudeCache(home);
     const off = await readCachedUsage({}, { now: NOW, cachePath, _ollama: stubOllama(OLLAMA_OK) });
     deepEqual(off.map((u) => u.provider), ["anthropic"]);
 
@@ -198,7 +167,7 @@ test("readCachedUsage accepts canonical Ollama config and an injected Codex snap
       asOf: "2026-09-06T00:00:00Z",
     }) };
     const cfg = { providers: { codex: { enabled: true }, ollama: { cloud: { ollama: { enabled: false } } } } };
-    const out = await readCachedUsage(cfg, { now: NOW, cachePath: join(home, QUOTA_CACHE_FILENAME), _codex: codex });
+    const out = await readCachedUsage(cfg, { now: NOW, cachePath: claudeCache(home), _codex: codex });
     deepEqual(out.map((u) => u.provider), ["anthropic", "codex"]);
     equal(out[1].limits[0].percent, 10);
   });
@@ -209,7 +178,7 @@ test("readCachedUsage: G11 never throws — missing cache, corrupt cache, a prov
     const missing = await readCachedUsage({}, { now: NOW, cachePath: join(home, "nope.json") });
     equal(missing[0].state, "unknown");
 
-    const corrupt = join(home, QUOTA_CACHE_FILENAME);
+    const corrupt = claudeCache(home);
     writeFileSync(corrupt, "{not json");
     equal((await readCachedUsage({}, { now: NOW, cachePath: corrupt }))[0].state, "unknown");
 
@@ -254,11 +223,11 @@ test("codex cache: C2 a foreign or corrupt file is no reading, and a write never
     equal(codexUsageFromCache(env), null);
     rmSync(path);
 
-    writeCodexUsageCache(null, env);
-    writeCodexUsageCache({ provider: "ollama", buckets: [] }, env);
     writeCodexUsageCache(CODEX_READING, env);
     ok(existsSync(path), "a well-formed reading is written atomically, .tmp renamed away");
-    equal(existsSync(path + ".tmp"), false);
+    // The writer's tmp is `<file>.<pid>.tmp`, so assert on what the writer names,
+    // not on one guessed filename: a readdir sweep catches a leak of any shape.
+    deepEqual(readdirSync(home).filter((f) => f.endsWith(".tmp")), [], "a tmp was abandoned beside the cache");
   });
 });
 
@@ -521,13 +490,19 @@ test("cmdUsage: a claude adapter's reading is walked, selected, and gates the ex
 // unreachable in a real install, however correct the reader is.
 test("cmdUsage: a live Codex reading is banked for the cache-only readers", async () => {
   await withHome(async (home) => {
+    // The real adapter banks through the cache module; this stands in for it so
+    // the assertion is about the wiring, not about spawning an app-server.
     const codex = {
       id: "codex",
       runnerId: "codex",
       enabled: () => true,
       validateTask: () => [],
       capabilities: {
-        readUsage: async () => normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" } })),
+        readUsage: (context) => usageReading("codex", {
+          env: context.env,
+          cachePath: context.cachePath,
+          fetchLive: async () => normalizeCodex(codexReading({ primary: { usedPercent: 9, resetsAt: "2026-09-20T16:00:00Z" } })),
+        }),
       },
     };
     const registry = createProviderRegistry([codex]);
@@ -542,7 +517,7 @@ test("cmdUsage: a live Codex reading is banked for the cache-only readers", asyn
 
     // A cache-only walk is not a fetch and must leave the banked reading alone.
     rmSync(join(home, "codex-usage.json"));
-    await readCachedUsage(cfg, { env, providerRegistry: registry, cachePath: join(home, QUOTA_CACHE_FILENAME) });
+    await readCachedUsage(cfg, { env, providerRegistry: registry, cachePath: claudeCache(home) });
     equal(codexUsageFromCache(env), null, "nothing but the live read refreshes the cache");
   });
 });

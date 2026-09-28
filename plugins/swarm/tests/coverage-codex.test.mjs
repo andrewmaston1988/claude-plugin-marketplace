@@ -13,7 +13,7 @@ import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
-import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
+import { fakeSpawnFactory, makeIo, usageEnv, codexReading } from "./helpers/fake-io.mjs";
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/coverage/", import.meta.url));
 const fixture = (f) => readFileSync(join(FIXTURES, f), "utf8");
@@ -357,7 +357,9 @@ test("integration: a codex-seated mustRead task is checked from its exec transcr
         cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [], mustRead: [F],
       }],
     };
-    await runPlan(p, CODEX_CFG(dir), makeIo(spawn));
+    // The codex preflight reads the meter before it dispatches, so the home it reads
+    // must already hold a reading — otherwise the run spawns the operator's real codex.
+    await runPlan(p, CODEX_CFG(dir), makeIo(spawn, { env: usageEnv({ codex: codexReading() }) }));
     equal(spawn.calls.length, 1, "the transcript parses on the first pass — no re-ask");
     const res = readResult(p.resultsDir, "a");
     equal(res.runner, "codex");
@@ -479,7 +481,7 @@ test("integration: a codex leaf that missed its mustRead is re-asked for a shell
         cwd: dir, originalCwd: dir, timeoutMs: 5000, after: [], mustRead: [WANTED],
       }],
     };
-    await runPlan(p, CODEX_CFG(dir), makeIo(spawn));
+    await runPlan(p, CODEX_CFG(dir), makeIo(spawn, { env: usageEnv({ codex: codexReading() }) }));
     equal(spawn.calls.length, 2, "a coverage miss re-asks once");
     const prompt = spawn.calls[1].args.at(-1);
     // The engine host is the platform of record, so the retry carries the host's own

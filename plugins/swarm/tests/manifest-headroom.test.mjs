@@ -6,7 +6,7 @@ import { writeFileSync, readFileSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask } from "./helpers/manifest-fixtures.mjs";
-import { getUsage, resetUsageMemo, saveCookie } from "../src/ollama-usage.mjs";
+import { getUsage, saveCookie } from "../src/ollama-usage.mjs";
 
 // ── headroom (:cloud weekly-allowance preflight) ──────────────────────────────
 
@@ -18,9 +18,8 @@ function withHeadroom(dir, { weeklyPctUsed, ageMs = 0, extra = {} } = {}, fn) {
   const home = join(dir, "home");
   mkdirSync(home, { recursive: true });
   writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
-    weeklyPctUsed,
-    weeklyResetsAt: "2026-09-07T00:00:00Z",
     fetchedAt: Date.now() - ageMs,
+    result: { state: "ok", weeklyPctUsed, resetsAt: "2026-09-07T00:00:00Z" },
     ...extra,
   }));
   const prevHome = process.env.SWARM_HOME;
@@ -101,21 +100,39 @@ test("headroom: M4 no configured cookie (unknown) does not fail a manifest", () 
   }
 });
 
-// The default headroom (cache-only usageFromCache) carries provenance cached +
-// the cache's recorded lastError — the warning carries the banner text, which
-// is where `/!\ Cookie Expired` reaches validate output.
-test("headroom: M5 a cached figure warns with its banner (last-seen stamp, the refresh command), does not fail", () => {
+// The default headroom (cache-only usageFromCache) of a reading past its TTL
+// carries provenance stale + the cache's recorded lastError — the warning
+// carries the banner text, which is where `/!\ Cookie Expired` reaches validate.
+test("headroom: M5 a stale figure with a banked failure warns with its banner (age, the refresh command), does not fail", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
-    withHeadroom(dir, { weeklyPctUsed: 42, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 86_400_000 } }, () => {
+    withHeadroom(dir, { weeklyPctUsed: 42, ageMs: 12 * 60_000, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 60_000 } }, () => {
       const plan = loadManifest(p, cfg, dir);
       equal(plan.tasks[0].model, "glm-5.3:cloud");
       const w = plan.warnings?.find((w) => w.includes("find-diag"));
       ok(w, JSON.stringify(plan.warnings));
       ok(w.includes("/!\\ Cookie Expired"), w);
-      ok(/last seen: \d{4}-\d{2}-\d{2}T/.test(w), "absolute UTC stamp, not an age");
+      ok(/read 12m ago/.test(w), w);
+      ok(w.includes("swarm ollama-usage"), w);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A reading inside its TTL was not affected by an older failure: still not live, so it
+// warns, but it never wears the failure's banner.
+test("headroom: M5b a fresh cached figure never wears a banked failure's banner", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
+    const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 42, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 86_400_000 } }, () => {
+      const w = loadManifest(p, cfg, dir).warnings?.find((w) => w.includes("find-diag"));
+      ok(w, "a non-live figure still warns");
+      ok(!w.includes("Cookie Expired"), w);
       ok(w.includes("swarm ollama-usage"), w);
     });
   } finally {
@@ -155,18 +172,18 @@ test("headroom: T5 a live 100% fails; a cached 100% succeeds with the banner in 
     }));
     ok(liveErrs.some((e) => e.includes("weekly allowance is exhausted")), liveErrs.join("|"));
 
-    // Build the cached-100% reading the way production does: getUsage over a
-    // redirecting fetch (expired cookie) and a 100% cache file.
-    resetUsageMemo();
+    // Build the aged-100% reading the way production does: getUsage over a
+    // redirecting fetch (expired cookie) and a 100% cache file older than the TTL.
     const home = join(dir, "home2");
     mkdirSync(home, { recursive: true });
     writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
-      weeklyPctUsed: 100, weeklyResetsAt: "2026-09-07T00:00:00Z", fetchedAt: Date.now() - 33 * 3_600_000,
+      fetchedAt: Date.now() - 33 * 3_600_000,
+      result: { state: "exhausted", weeklyPctUsed: 100, resetsAt: "2026-09-07T00:00:00Z" },
     }));
     saveCookie(join(home, "ollama-cookie.json"), "expired");
     const redirect = async () => ({ status: 303, headers: { get: () => "https://ollama.com/signin" }, text: async () => "" });
     const headroom = await getUsage(cfg, { env: { SWARM_HOME: home }, _fetch: redirect });
-    equal(headroom.provenance, "cached");
+    equal(headroom.provenance, "stale");
     equal(headroom.state, "exhausted");
 
     const plan = loadManifest(p, cfg, dir, { headroom });
@@ -176,10 +193,10 @@ test("headroom: T5 a live 100% fails; a cached 100% succeeds with the banner in 
   }
 });
 
-// Test 6 — one fetch per process across seats and stages: five :cloud seats
+// Test 6 — one fetch per TTL window across seats and stages: five :cloud seats
 // read the meter once, and the second stage (a run re-reading after validate)
-// reuses the memo rather than refetching.
-test("headroom: T6 five :cloud seats fetch the meter exactly once — the memo carries validate into run", async () => {
+// is served from the file rather than refetching.
+test("headroom: T6 five :cloud seats fetch the meter exactly once — the cache carries validate into run", async () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, {
@@ -188,14 +205,13 @@ test("headroom: T6 five :cloud seats fetch the meter exactly once — the memo c
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
     let fetches = 0;
     const counting = async () => { fetches++; return { status: 200, headers: { get: () => null }, text: async () => readFileSync(join(import.meta.dirname, "fixtures", "ollama-settings.html"), "utf8") }; };
-    resetUsageMemo();
     saveCookie(join(dir, "ollama-cookie.json"), "tok");
     const headroom = await getUsage(cfg, { env: { SWARM_HOME: dir }, _fetch: counting });
     const validated = loadManifest(p, cfg, dir, { headroom });
     equal(validated.tasks.length, 5);
     const rerun = loadManifest(p, cfg, dir, { headroom: await getUsage(cfg, { env: { SWARM_HOME: dir }, _fetch: counting }) });
     equal(rerun.tasks.length, 5);
-    equal(fetches, 1, "two stages, five seats, ONE fetch — the memo is the seam");
+    equal(fetches, 1, "two stages, five seats, ONE fetch — the 5-minute cache is the seam");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

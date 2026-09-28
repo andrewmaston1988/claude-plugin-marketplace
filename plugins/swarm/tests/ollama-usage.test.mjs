@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, chmodSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, mkdirSync, chmodSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  SETTINGS_URL, fetchUsage, parseUsage, readUsage, usageFromCache, usageCachePath,
-  saveCookie, loadCookie, getUsage, resetUsageMemo, recordUsageError,
+  SETTINGS_URL, fetchUsage, parseUsage, readUsage, usageFromCache,
+  saveCookie, loadCookie, getUsage,
 } from "../src/ollama-usage.mjs";
+import { usageCachePath } from "../src/usage-cache.mjs";
 import { parseHtml } from "../src/minidom.mjs";
 import { usageHistoryPath, readSnapshots } from "../src/cost.mjs";
 import { initConfig } from "../src/config.mjs";
@@ -16,6 +17,11 @@ const FIXTURE = readFileSync(join(import.meta.dirname, "fixtures", "ollama-setti
 function tempHome() {
   return mkdtempSync(join(tmpdir(), "swarm-ollama-usage-"));
 }
+
+const cfgEnabled = (extra = {}) => ({ provider: { cloud: { ollama: { enabled: true, ...extra } } } });
+// Far past every real clock, so a reading written at FIFTY is unambiguous.
+const FIFTY = 2_000_000_000_000;
+const SIX_MIN = 6 * 60_000; // one minute past the 5-minute TTL
 
 // ---- H1-H6: readUsage / usageFromCache classification --------------------
 
@@ -62,7 +68,7 @@ test("usageFromCache: H6 never throws — missing path, or the path is a directo
     const cfg = { provider: { cloud: { ollama: { enabled: true } } } };
     deepEqual(usageFromCache(cfg, { SWARM_HOME: home }), { state: "unknown" });
 
-    const cachePath = usageCachePath({ SWARM_HOME: home });
+    const cachePath = usageCachePath("ollama", { SWARM_HOME: home });
     mkdirSync(cachePath, { recursive: true });
     deepEqual(usageFromCache(cfg, { SWARM_HOME: home }), { state: "unknown" });
     rmSync(cachePath, { recursive: true, force: true });
@@ -91,7 +97,7 @@ test("usageFromCache: H7 — provider.cloud absent / ollama absent / enabled fal
   try {
     // A valid, fresh cache on disk proves the gate short-circuits BEFORE
     // reading it — not that the file happens to be missing.
-    writeFileSync(usageCachePath({ SWARM_HOME: home }), JSON.stringify({ weeklyPctUsed: 42, weeklyResetsAt: "R", fetchedAt: Date.now() }));
+    writeFileSync(usageCachePath("ollama", { SWARM_HOME: home }), JSON.stringify({ weeklyPctUsed: 42, weeklyResetsAt: "R", fetchedAt: Date.now() }));
 
     deepEqual(usageFromCache({}, { SWARM_HOME: home }), { state: "unknown" });
     deepEqual(usageFromCache({ provider: {} }, { SWARM_HOME: home }), { state: "unknown" });
@@ -241,7 +247,6 @@ test("parseUsage: 8a — a bar whose widths don't sum to 100 yields [] segments;
 });
 
 test("getUsage: 8a — a bad-sum bar banks no history line, and headroom still reads live", async () => {
-  resetUsageMemo();
   const home = tempHome();
   try {
     saveCookie(join(home, "ollama-cookie.json"), "tok");
@@ -261,7 +266,6 @@ test("getUsage: 8a — a bad-sum bar banks no history line, and headroom still r
 // `swarm cost`. Only LIVE readings bank: a cached fallback would re-stamp the
 // same week's shape and double-count it in the request-weighted mean.
 test("getUsage: 8b — a successful live fetch banks exactly one history line, shaped for `swarm cost`", async () => {
-  resetUsageMemo();
   const home = tempHome();
   try {
     saveCookie(join(home, "ollama-cookie.json"), "tok");
@@ -286,11 +290,11 @@ test("getUsage: 8b — a successful live fetch banks exactly one history line, s
       ],
     });
 
-    resetUsageMemo();
+    // Past the TTL, so the read really is attempted and really does fail.
     const redirectFetch = async () => ({ status: 303, headers: { get: () => "https://ollama.com/signin" }, text: async () => "" });
-    const cached = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: redirectFetch, _now: () => FIFTY });
-    equal(cached.provenance, "cached");
-    equal(readSnapshots(usageHistoryPath({ SWARM_HOME: home })).length, 1, "a cached fallback never banks");
+    const cached = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: redirectFetch, _now: () => FIFTY + SIX_MIN });
+    equal(cached.provenance, "stale");
+    equal(readSnapshots(usageHistoryPath({ SWARM_HOME: home })).length, 1, "a stale fallback never banks");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -298,45 +302,35 @@ test("getUsage: 8b — a successful live fetch banks exactly one history line, s
 
 // ---- P5-P7: fetch, cookie, config ------------------------------------------
 
-test("fetchUsage: happy path parses a live-shaped response and writes the cache", async () => {
+// The fetch writes nothing: it RETURNS the reading for usage-cache to bank, so
+// a failure leaves the existing snapshot at its own age instead of re-stamping it.
+test("fetchUsage: happy path parses a live-shaped response and writes no file", async () => {
   const home = tempHome();
   try {
-    const cachePath = join(home, "ollama-usage.json");
     const okFetch = async () => ({ status: 200, headers: { get: () => null }, text: async () => FIXTURE });
-    const r = await fetchUsage({ cookie: "session=abc", cachePath, _fetch: okFetch, _now: () => 555 });
+    const r = await fetchUsage({ cookie: "session=abc", _fetch: okFetch, _now: () => 555 });
     equal(r.ok, true);
     equal(r.weeklyPctUsed, 83.8);
     equal(r.fetchedAt, 555);
-    deepEqual(JSON.parse(readFileSync(cachePath, "utf8")), {
-      sessionPctUsed: 12,
-      sessionResetsAt: "2026-09-06T04:10:00.377393+00:00",
-      weeklyPctUsed: 83.8,
-      weeklyResetsAt: "2026-09-12T08:00:00.377418+00:00",
-      fetchedAt: 555,
-    });
+    deepEqual(readdirSync(home), [], "the reading is banked by the caller, never here");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("fetchUsage: P5 — an expired cookie is reported explicitly and the cache is never touched", async () => {
+test("fetchUsage: P5 — an expired cookie is reported explicitly and nothing is written", async () => {
   const home = tempHome();
   try {
-    const cachePath = join(home, "ollama-usage.json");
-    writeFileSync(cachePath, JSON.stringify({ weeklyPctUsed: 10, fetchedAt: 111 }));
-    const before = readFileSync(cachePath, "utf8");
-
     const redirectFetch = async () => ({
       status: 303,
       headers: { get: (h) => (h === "location" ? "https://ollama.com/signin" : null) },
       text: async () => "",
     });
-    deepEqual(await fetchUsage({ cookie: "stale", cachePath, _fetch: redirectFetch }), { ok: false, reason: "expired-cookie" });
-    equal(readFileSync(cachePath, "utf8"), before);
+    deepEqual(await fetchUsage({ cookie: "stale", _fetch: redirectFetch }), { ok: false, reason: "expired-cookie" });
 
     const noMarkerFetch = async () => ({ status: 200, headers: { get: () => null }, text: async () => "<html>signed out</html>" });
-    deepEqual(await fetchUsage({ cookie: "stale", cachePath, _fetch: noMarkerFetch }), { ok: false, reason: "expired-cookie" });
-    equal(readFileSync(cachePath, "utf8"), before);
+    deepEqual(await fetchUsage({ cookie: "stale", _fetch: noMarkerFetch }), { ok: false, reason: "expired-cookie" });
+    deepEqual(readdirSync(home), []);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -398,191 +392,4 @@ test("readUsage: H8 carries session alongside weekly, in every state", () => {
   const full = readUsage(JSON.stringify({ ...base, weeklyPctUsed: 100, fetchedAt: now - 1000 }), { now });
   equal(full.state, "exhausted");
   equal(full.sessionPctUsed, 100, "session survives the exhausted branch too");
-});
-
-// ---- H9-H15: getUsage — provenance, memo, timeout, error recording ---------
-
-const cfgEnabled = (extra = {}) => ({ provider: { cloud: { ollama: { enabled: true, ...extra } } } });
-const FIFTY = 2_000_000_000_000;
-
-function cacheFixture(home, reading, extra = {}) {
-  const p = usageCachePath({ SWARM_HOME: home });
-  writeFileSync(p, JSON.stringify({ ...reading, ...extra }));
-  return p;
-}
-
-test("getUsage: H9 a successful fetch is provenance live, classified through the same readUsage", async () => {
-  resetUsageMemo();
-  const home = tempHome();
-  try {
-    saveCookie(join(home, "ollama-cookie.json"), "tok");
-    const okFetch = async () => ({ status: 200, headers: { get: () => null }, text: async () => FIXTURE });
-    const r = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: okFetch, _now: () => FIFTY });
-    equal(r.provenance, "live");
-    equal(r.state, "ok");
-    equal(r.weeklyPctUsed, 83.8);
-    // the cache was written and carries the reading back out
-    deepEqual(JSON.parse(readFileSync(usageCachePath({ SWARM_HOME: home }), "utf8")).fetchedAt, FIFTY);
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("getUsage: H10 a failed fetch returns the cache as provenance cached, naming reason, lastSeen, cookiePath", async () => {
-  resetUsageMemo();
-  const home = tempHome();
-  try {
-    cacheFixture(home, {
-      sessionPctUsed: 3, sessionResetsAt: "S",
-      weeklyPctUsed: 8.1, weeklyResetsAt: "2026-09-12T08:00:00Z",
-      fetchedAt: FIFTY - 33 * 3_600_000,
-    });
-    saveCookie(join(home, "ollama-cookie.json"), "expired");
-    const redirectFetch = async () => ({ status: 303, headers: { get: () => "https://ollama.com/signin" }, text: async () => "" });
-    const r = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: redirectFetch, _now: () => FIFTY });
-    equal(r.provenance, "cached");
-    equal(r.reason, "expired-cookie");
-    equal(r.lastSeen, FIFTY - 33 * 3_600_000, "lastSeen is the cache's own fetchedAt");
-    equal(r.cookiePath, join(home, "ollama-cookie.json"));
-    equal(r.weeklyPctUsed, 8.1, "the figure survives as last-known context");
-    equal(r.state, "ok");
-    // the failure note rides beside the reading, without re-stamping it
-    const cached = JSON.parse(readFileSync(usageCachePath({ SWARM_HOME: home }), "utf8"));
-    equal(cached.lastError, "expired-cookie");
-    equal(cached.fetchedAt, FIFTY - 33 * 3_600_000, "fetchedAt is never re-stamped by a failure");
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("getUsage: H11 no cache either is provenance none, with the reason and the fix's cookiePath", async () => {
-  resetUsageMemo();
-  const home = tempHome();
-  try {
-    saveCookie(join(home, "ollama-cookie.json"), "tok");
-    const r = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: async () => { throw new Error("down"); }, _now: () => FIFTY });
-    equal(r.state, "unknown");
-    equal(r.provenance, "none");
-    equal(r.reason, "network-error");
-    equal(r.cookiePath, join(home, "ollama-cookie.json"));
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("getUsage: H12 the enabled gate — off means bare unknown and NO fetch, gate:false overrides", async () => {
-  resetUsageMemo();
-  const home = tempHome();
-  saveCookie(join(home, "ollama-cookie.json"), "tok");
-  let fetches = 0;
-  const counting = async () => { fetches++; return { status: 200, headers: { get: () => null }, text: async () => FIXTURE }; };
-  const off = { provider: { cloud: { ollama: { enabled: false } } } };
-  deepEqual(await getUsage(off, { env: { SWARM_HOME: home }, _fetch: null }), { state: "unknown" });
-  deepEqual(await getUsage({}, { env: { SWARM_HOME: home }, _fetch: null }), { state: "unknown" });
-  equal(fetches, 0, "a disabled provider never reaches for the network");
-
-  resetUsageMemo();
-  const r = await getUsage(off, { env: { SWARM_HOME: home }, _fetch: okFetch, _now: () => FIFTY, gate: false });
-  equal(r.provenance, "live", "the ollama-usage subcommand fetches even before ollama is enabled");
-  equal(fetches, 1);
-
-  function okFetch() { fetches++; return { status: 200, headers: { get: () => null }, text: async () => FIXTURE }; }
-  resetUsageMemo();
-  await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: okFetch, _now: () => FIFTY });
-  equal(fetches, 2, "enabled with gate:true fetches");
-});
-
-test("getUsage: H13 no-cookie over a populated cache is provenance cached with its own reason", async () => {
-  resetUsageMemo();
-  const home = tempHome();
-  try {
-    // deliberately NO cookie file — that is the condition under test
-    cacheFixture(home, { weeklyPctUsed: 40, weeklyResetsAt: "R", fetchedAt: FIFTY - 1000 });
-    const r = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: async () => { throw new Error("no request should fire"); }, _now: () => FIFTY });
-    equal(r.provenance, "cached");
-    equal(r.reason, "no-cookie");
-    equal(r.weeklyPctUsed, 40);
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("getUsage: H14 timeout — a fetch that never settles is bounded and reports its own reason", async () => {
-  resetUsageMemo();
-  const home = tempHome();
-  try {
-    saveCookie(join(home, "ollama-cookie.json"), "tok");
-    const neverFetch = () => new Promise(() => {});
-    const started = Date.now();
-    const r = await getUsage(
-      { provider: { cloud: { ollama: { enabled: true } }, usageTimeoutMs: 50 } },
-      { env: { SWARM_HOME: home }, _fetch: neverFetch, _now: () => Date.now() }
-    );
-    ok(Date.now() - started < 5000, "the timeout fired well under the suite's own ceiling");
-    equal(r.provenance, "none");
-    equal(r.reason, "timeout");
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("getUsage: H15 one fetch per process — the memo returns the SAME reading; a reset or fresh import re-fetches", async () => {
-  resetUsageMemo();
-  const home = tempHome();
-  try {
-    saveCookie(join(home, "ollama-cookie.json"), "tok");
-    let fetches = 0;
-    const countingFetch = async () => { fetches++; return { status: 200, headers: { get: () => null }, text: async () => FIXTURE }; };
-    const a = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: countingFetch, _now: () => FIFTY });
-    const b = await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: countingFetch, _now: () => FIFTY });
-    equal(fetches, 1, "two calls, one fetch");
-    equal(a, b, "the memoised reading is the same object");
-
-    resetUsageMemo();
-    await getUsage(cfgEnabled(), { env: { SWARM_HOME: home }, _fetch: countingFetch, _now: () => FIFTY });
-    equal(fetches, 2, "resetUsageMemo re-fetches — the memo must be resettable for tests");
-
-    const fresh = await import(`../src/ollama-usage.mjs?fresh-${Date.now()}`);
-    let freshFetches = 0;
-    await fresh.getUsage(cfgEnabled(), {
-      env: { SWARM_HOME: home },
-      _fetch: async () => { freshFetches++; return { status: 200, headers: { get: () => null }, text: async () => FIXTURE }; },
-      _now: () => FIFTY,
-    });
-    equal(freshFetches, 1, "a fresh module import re-fetches — the memo dies with the process");
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("fetchUsage: H16 honors an overridden url (settingsUrl seam) and passes an AbortSignal", async () => {
-  let seen = null;
-  const okFetch = async (url, opts) => { seen = { url, signal: opts.signal }; return { status: 200, headers: { get: () => null }, text: async () => FIXTURE }; };
-  const r = await fetchUsage({ cookie: "c", url: "http://127.0.0.1:9/settings", _fetch: okFetch, _now: () => 1 });
-  equal(r.ok, true);
-  equal(seen.url, "http://127.0.0.1:9/settings");
-  ok(seen.signal instanceof AbortSignal, "the timeout signal is passed to the fetch");
-});
-
-test("recordUsageError: H17 merges beside the reading; absent or corrupt cache is left alone", () => {
-  const home = tempHome();
-  try {
-    const p = usageCachePath({ SWARM_HOME: home });
-    recordUsageError(p, "expired-cookie", 5);
-    ok(!existsSync(p), "no cache, no note — the error only matters beside a reading");
-
-    writeFileSync(p, JSON.stringify({ weeklyPctUsed: 40, fetchedAt: 111 }));
-    recordUsageError(p, "expired-cookie", 222);
-    const merged = JSON.parse(readFileSync(p, "utf8"));
-    equal(merged.weeklyPctUsed, 40, "reading fields untouched");
-    equal(merged.fetchedAt, 111, "fetchedAt untouched");
-    equal(merged.lastError, "expired-cookie");
-    equal(merged.lastErrorAt, 222);
-
-    writeFileSync(p, "{not json");
-    recordUsageError(p, "network-error", 333);
-    equal(readFileSync(p, "utf8"), "{not json", "a corrupt cache is never overwritten");
-  } finally {
-    rmSync(home, { recursive: true, force: true });
-  }
 });

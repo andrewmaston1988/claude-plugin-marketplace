@@ -1038,9 +1038,8 @@ test("ollama-usage: P0 an expired cookie prints /!\\ Cookie Expired above the fi
     });
     writeFileSync(join(home, "ollama-cookie.json"), "expired-cookie\n");
     writeFileSync(join(home, "ollama-usage.json"), JSON.stringify({
-      sessionPctUsed: 3, sessionResetsAt: "2026-09-07T14:49:00Z",
-      weeklyPctUsed: 8.1, weeklyResetsAt: "2026-09-12T08:00:00Z",
       fetchedAt: Date.now() - 33 * 3_600_000,
+      result: { sessionPctUsed: 3, sessionResetsAt: "2026-09-07T14:49:00Z", weeklyPctUsed: 8.1, weeklyResetsAt: "2026-09-12T08:00:00Z" },
     }));
     const r = await runCliAsync(["ollama-usage"], { cwd: dir, env: { SWARM_HOME: home } });
     const out = r.stdout;

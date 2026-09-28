@@ -4,15 +4,16 @@
 // `<claude-base>/skills/ollama-usage` tooling or its files in any way — same
 // upstream page, independent fetch, independent cache, for a different question
 // (can I dispatch right now, not what did each model cost across weeks).
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { parseHtml } from "./minidom.mjs";
 import { appendSnapshot, usageHistoryPath } from "./cost.mjs";
+import { usageCachePath, usageReading, cachedUsageReading, recordUsageError as recordCacheError } from "./usage-cache.mjs";
 
 export const SETTINGS_URL = "https://ollama.com/settings"; // like quota.mjs's DEFAULT_USAGE_URL
 
-const USAGE_CACHE_FILENAME = "ollama-usage.json";
+const PROVIDER = "ollama";
 const DEFAULT_TIMEOUT_MS = 5000;
 const METER_POINTS_UNIT = "meter-points";
 
@@ -24,10 +25,6 @@ export function ollamaCloudConfig(cfg = {}) {
 
 function ollamaProviderConfig(cfg = {}) {
   return cfg?.providers?.ollama || cfg?.provider || {};
-}
-
-export function usageCachePath(env = process.env) {
-  return join(swarmHome(env), USAGE_CACHE_FILENAME);
 }
 
 // The browser-cookie credential lives in its own file, never in config.json —
@@ -145,13 +142,12 @@ export function parseUsage(html) {
 }
 
 // Fetch with the configured cookie. Returns the parsed reading, or an outcome
-// describing why there isn't one. `cachePath` is optional and is written ONLY
-// on success — a failed fetch (the ordinary case: an expired cookie) must age
-// the existing snapshot rather than re-stamp it, so the failure branches below
-// touch the filesystem only through recordUsageError's lastError note.
+// describing why there isn't one. It writes nothing: the reading it RETURNS is
+// what usage-cache banks, so a failure (the ordinary case: an expired cookie)
+// leaves the existing snapshot at its own age instead of re-stamping it.
 // `timeoutMs` bounds the fetch with an AbortSignal so a hung ollama.com cannot
 // wedge a caller; a signal-blind injected _fetch is still bounded by the race.
-export async function fetchUsage({ cookie, cachePath, url = SETTINGS_URL, _fetch = fetch, _now = Date.now, timeoutMs } = {}) {
+export async function fetchUsage({ cookie, url = SETTINGS_URL, _fetch = fetch, _now = Date.now, timeoutMs } = {}) {
   if (!cookie) return { ok: false, reason: "no-cookie" };
 
   const controller = new AbortController();
@@ -185,15 +181,9 @@ export async function fetchUsage({ cookie, cachePath, url = SETTINGS_URL, _fetch
   const parsed = parseUsage(body);
   if (parsed.state === "unknown") return { ok: false, reason: "unparseable" };
 
-  const reading = { ...parsed, fetchedAt: _now() };
-  if (cachePath) {
-    mkdirSync(dirname(cachePath), { recursive: true });
-    // The cache stays headroom-shaped: per-model segments are stripped, so the
-    // provenance path is byte-identical to before the fields existed.
-    const { sessionModels, weeklyModels, ...headroom } = reading;
-    writeFileSync(cachePath, JSON.stringify(headroom));
-  }
-  return { ok: true, ...reading };
+  // The return carries the per-model segments `swarm cost` banks; the CALLER
+  // strips them before the reading is cached, which stays headroom-shaped.
+  return { ok: true, ...parsed, fetchedAt: _now() };
 }
 
 // Pure over the cache object. No filesystem, no age. A cached 100% still reads
@@ -208,8 +198,14 @@ export function readUsage(cacheText, { now = Date.now() } = {}) {
   } catch {
     return { state: "unknown" };
   }
+  return classify(cached) ?? { state: "unknown" };
+}
+
+// The classifier itself, over an already-parsed reading — the cache module hands
+// one in, and `readUsage` above is its JSON-parsing wrapper.
+function classify(cached) {
   if (!cached || typeof cached.weeklyPctUsed !== "number" || !cached.fetchedAt) {
-    return { state: "unknown" };
+    return null;
   }
 
   const resetsAt = cached.weeklyResetsAt ?? null;
@@ -226,113 +222,73 @@ export function readUsage(cacheText, { now = Date.now() } = {}) {
   return { state: "ok", weeklyPctUsed: cached.weeklyPctUsed, resetsAt, ...session };
 }
 
-// Record a failed fetch beside the reading, WITHOUT touching the reading's own
-// fields — `fetchedAt` keeps its value, so a cached figure never looks fresher
-// than it is. Only an existing cache file gains the note: the consumers of
-// `lastError` (the hook, `quota`) read it back WITH a figure to mark; where no
-// reading exists there is nothing to mark. Best-effort, never throws.
-export function recordUsageError(cachePath, reason, at = Date.now()) {
-  try {
-    if (!existsSync(cachePath)) return;
-    let cached = {};
-    try { cached = JSON.parse(readFileSync(cachePath, "utf8")) || {}; } catch { return; }
-    if (typeof cached !== "object" || Array.isArray(cached)) return;
-    writeFileSync(cachePath, JSON.stringify({ ...cached, lastError: reason, lastErrorAt: at }));
-  } catch { /* best effort */ }
+// The cache file's own note, kept as a path-taking wrapper so the call sites
+// that hold a path need not know the provider id. The envelope rule — a note
+// lands beside an existing reading, never over a corrupt one — lives in
+// usage-cache, which owns the file.
+export function recordOllamaUsageError(cachePath, reason, at = Date.now()) {
+  return recordCacheError(PROVIDER, reason, { cachePath, at });
 }
 
-// One reading per process, memoised across callers — checkHeadroom runs per
-// `:cloud` seat, so a five-seat manifest must issue one request, failed or
-// not. The memo dies with the process: never a TTL, never a file, or it
-// becomes a second cache with no provenance. Tests reset it via
-// resetUsageMemo(); a fresh module import re-fetches by construction.
-let memo = null;
-export function resetUsageMemo() {
-  memo = null;
-}
-
-// The single entry point callers that CAN afford a fetch use. Attempts the
-// live fetch; on success returns the cache-read-back reading with
-// `provenance: "live"`; on failure returns the cached reading as
-// `{ provenance: "cached", reason, lastSeen, cookiePath }`, or
-// `{ provenance: "none", reason }` when there is no cache either. `gate`
-// mirrors usageFromCache's enabled-check; the `ollama-usage` subcommand passes
-// `gate: false` because fetching is that subcommand's job even before ollama
-// is enabled. Absent config => `{ state: "unknown" }`: a user who has never
-// heard of ollama must meet nothing, not an error.
-export async function getUsage(cfg, { env = process.env, _fetch = fetch, _now = Date.now, gate = true } = {}) {
-  if (memo) return memo;
-  memo = await computeUsage(cfg, { env, _fetch, _now, gate });
-  return memo;
-}
-
-async function computeUsage(cfg, { env, _fetch, _now, gate }) {
+// The single entry point callers that CAN afford a fetch use. No in-process
+// memo: the file's 5-minute TTL is what de-duplicates a five-seat manifest.
+// Provenance: `live`, `cached` (inside the TTL), `stale` (refresh failed), `none`.
+export async function getUsage(cfg, { env = process.env, _fetch = fetch, _now = Date.now, gate = true, force = false } = {}) {
   const cloud = ollamaCloudConfig(cfg);
   const provider = ollamaProviderConfig(cfg);
   if (gate && cloud.enabled !== true) return { state: "unknown" };
 
   const cookiePath = cloud.cookiePath || join(swarmHome(env), "ollama-cookie.json");
-  const cachePath = usageCachePath(env);
-  const fetched = await fetchUsage({
-    cookie: loadCookie(cookiePath),
-    cachePath,
-    url: cloud.settingsUrl || SETTINGS_URL,
-    _fetch,
-    _now,
-    timeoutMs: provider.usageTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+  const cachePath = usageCachePath(PROVIDER, env);
+  let failure = null;
+
+  const reading = await usageReading(PROVIDER, {
+    env, cachePath, now: _now, force,
+    fetchLive: async () => {
+      const fetched = await fetchUsage({
+        cookie: loadCookie(cookiePath),
+        url: cloud.settingsUrl || SETTINGS_URL,
+        _fetch,
+        _now,
+        timeoutMs: provider.usageTimeoutMs ?? DEFAULT_TIMEOUT_MS,
+      });
+      if (!fetched.ok) {
+        failure = fetched.reason;
+        recordCacheError(PROVIDER, fetched.reason, { cachePath, at: _now() });
+        return null;
+      }
+      bankWeeklySnapshot(fetched, env);
+      // classify drops the per-model segments banked above — the cached reading
+      // stays headroom-shaped — and computes `state` once, here, so a fresh
+      // 100% and a cached 100% can never disagree about being exhausted.
+      return classify(fetched);
+    },
   });
 
-  // One classifier for both provenances: the just-written cache is read back
-  // through the same readUsage a cached reading goes through, so a fresh 100%
-  // and a cached 100% can never disagree about being exhausted.
-  if (fetched.ok) {
-    // Bank the week's snapshot for `swarm cost`. Deliberately from the fetch's
-    // RETURN (which carries the segments) — the cache on disk strips them.
-    // Best-effort: a failed history write must not fail a dispatch that has a
-    // perfectly good headroom reading.
-    try {
-      if (fetched.weeklyModels?.length) {
-        appendSnapshot({
-          provider: "ollama",
-          runner: "claude",
-          unit: METER_POINTS_UNIT,
-          source: "ollama-settings",
-          classification: "unpriced",
-          asOf: new Date(fetched.fetchedAt).toISOString(),
-          fetchedAt: fetched.fetchedAt,
-          weeklyPctUsed: fetched.weeklyPctUsed,
-          weeklyResetsAt: fetched.weeklyResetsAt,
-          weeklyModels: fetched.weeklyModels,
-        }, usageHistoryPath(env));
-      }
-    } catch { /* headroom still valid */ }
-    let text;
-    try {
-      text = readFileSync(cachePath, "utf8");
-    } catch {
-      return { state: "unknown", provenance: "live" };
-    }
-    return { ...readUsage(text), provenance: "live" };
-  }
+  if (!reading) return { state: "unknown", provenance: "none", reason: failure, cookiePath };
+  return { ...reading, reason: failure, lastSeen: reading.fetchedAt, cookiePath };
+}
 
-  recordUsageError(cachePath, fetched.reason, _now());
-  let text = null;
-  let cached = null;
+// The week's snapshot for `swarm cost`, deliberately from the fetch's RETURN
+// (which carries the segments) — the cache on disk strips them. Best-effort: a
+// failed history write must not fail a dispatch that has a perfectly good
+// headroom reading.
+function bankWeeklySnapshot(fetched, env) {
   try {
-    text = readFileSync(cachePath, "utf8");
-    cached = JSON.parse(text);
-  } catch { /* no cache, or not JSON: provenance none */ }
-  const reading = cached ? readUsage(text) : { state: "unknown" };
-  if (reading.state === "unknown") {
-    return { state: "unknown", provenance: "none", reason: fetched.reason, cookiePath };
-  }
-  return {
-    ...reading,
-    provenance: "cached",
-    reason: fetched.reason,
-    lastSeen: cached.fetchedAt ?? null,
-    cookiePath,
-  };
+    if (!fetched.weeklyModels?.length) return;
+    appendSnapshot({
+      provider: "ollama",
+      runner: "claude",
+      unit: METER_POINTS_UNIT,
+      source: "ollama-settings",
+      classification: "unpriced",
+      asOf: new Date(fetched.fetchedAt).toISOString(),
+      fetchedAt: fetched.fetchedAt,
+      weeklyPctUsed: fetched.weeklyPctUsed,
+      weeklyResetsAt: fetched.weeklyResetsAt,
+      weeklyModels: fetched.weeklyModels,
+    }, usageHistoryPath(env));
+  } catch { /* headroom still valid */ }
 }
 
 // The cache-only reader (hook, `quota`): same provenance vocabulary as
@@ -343,25 +299,15 @@ export function usageFromCache(cfg, env = process.env) {
   const cloud = ollamaCloudConfig(cfg);
   if (cloud.enabled !== true) return { state: "unknown" };
 
-  let text;
-  try {
-    text = readFileSync(usageCachePath(env), "utf8");
-  } catch {
-    return { state: "unknown" };
-  }
-  let cached;
-  try {
-    cached = JSON.parse(text);
-  } catch {
-    return { state: "unknown" };
-  }
-  const reading = readUsage(text);
-  if (reading.state === "unknown") return reading;
+  const reading = cachedUsageReading(PROVIDER, { env });
+  if (!reading) return { state: "unknown" };
+  // The banked failure explains why an AGED figure is old; a reading inside its
+  // TTL was not affected by it, so only a stale one may carry the banner.
+  const reason = reading.provenance === "stale" ? (reading.lastError ?? null) : null;
   return {
     ...reading,
-    provenance: "cached",
-    reason: cached.lastError ?? null,
-    lastSeen: cached.fetchedAt ?? null,
+    reason,
+    lastSeen: reading.fetchedAt,
     cookiePath: cloud.cookiePath || join(swarmHome(env), "ollama-cookie.json"),
   };
 }
