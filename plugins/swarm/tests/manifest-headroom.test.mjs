@@ -100,21 +100,39 @@ test("headroom: M4 no configured cookie (unknown) does not fail a manifest", () 
   }
 });
 
-// The default headroom (cache-only usageFromCache) carries provenance cached +
-// the cache's recorded lastError — the warning carries the banner text, which
-// is where `/!\ Cookie Expired` reaches validate output.
-test("headroom: M5 a cached figure warns with its banner (last-seen stamp, the refresh command), does not fail", () => {
+// The default headroom (cache-only usageFromCache) of a reading past its TTL
+// carries provenance stale + the cache's recorded lastError — the warning
+// carries the banner text, which is where `/!\ Cookie Expired` reaches validate.
+test("headroom: M5 a stale figure with a banked failure warns with its banner (age, the refresh command), does not fail", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
     const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
-    withHeadroom(dir, { weeklyPctUsed: 42, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 86_400_000 } }, () => {
+    withHeadroom(dir, { weeklyPctUsed: 42, ageMs: 12 * 60_000, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 60_000 } }, () => {
       const plan = loadManifest(p, cfg, dir);
       equal(plan.tasks[0].model, "glm-5.3:cloud");
       const w = plan.warnings?.find((w) => w.includes("find-diag"));
       ok(w, JSON.stringify(plan.warnings));
       ok(w.includes("/!\\ Cookie Expired"), w);
-      ok(/last seen: \d{4}-\d{2}-\d{2}T/.test(w), "absolute UTC stamp, not an age");
+      ok(/read 12m ago/.test(w), w);
+      ok(w.includes("swarm ollama-usage"), w);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A reading inside its TTL was not affected by an older failure: still not live, so it
+// warns, but it never wears the failure's banner.
+test("headroom: M5b a fresh cached figure never wears a banked failure's banner", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [{ id: "find-diag", prompt: "p", provider: "ollama", model: "glm-5.3:cloud" }] });
+    const cfg = { ...CFG, provider: { allowedRoots: [dir], cloud: { ollama: { enabled: true } } } };
+    withHeadroom(dir, { weeklyPctUsed: 42, extra: { lastError: "expired-cookie", lastErrorAt: Date.now() - 86_400_000 } }, () => {
+      const w = loadManifest(p, cfg, dir).warnings?.find((w) => w.includes("find-diag"));
+      ok(w, "a non-live figure still warns");
+      ok(!w.includes("Cookie Expired"), w);
       ok(w.includes("swarm ollama-usage"), w);
     });
   } finally {
