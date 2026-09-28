@@ -56,9 +56,8 @@ three legs are not on the page (§2a), the decision was not made.
 **How aggressively to batch is the operator's call, not yours.** You present the numbers and a
 recommendation; the operator picks the width. The floor — everything inline, zero
 agents — is always one of the options. Under `swarm.always` (swarm skill → *Standing consent*)
-the recommendation is taken: the arithmetic is computed and recorded in the manifest's shape,
-not stated — this Iron Law keeps its force on the interactive path and stops applying where
-nobody is reading the text.
+the recommendation is taken without asking, and the arithmetic is still written in visible text
+before the manifest — standing mode removes the question, never this Iron Law.
 
 ## 2. Decompose before you group — divide and conquer is an instruction, not a hope
 
@@ -246,8 +245,8 @@ surface; narrower is the operator's override, and a bigger window is a wall-cloc
 
 The two axes the question trades are **capability vs. risk** and **wall-clock vs. coherence**.
 Name both, and always lead with a recommendation rather than a bare menu. Under `swarm.always`
-the recommendation is taken: the three legs and the chosen point are computed and recorded in
-the manifest's shape, not stated — the question is gone, not skipped.
+the recommendation is taken without asking: the three legs and the chosen point are still
+written out before the manifest — the question is gone, the arithmetic is not.
 
 ## 10. Where this fires
 

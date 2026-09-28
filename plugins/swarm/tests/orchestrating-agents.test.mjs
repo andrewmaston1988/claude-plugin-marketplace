@@ -181,13 +181,14 @@ test("T11 — tier partition defers to swarm's own tier guide with both asymmetr
 
 // ---- T15: under swarm.always the gate is GONE, not restated more quietly ----
 
-test("T15 — the gate section branches to dispatch under swarm.always, emitting and asking nothing", () => {
+test("T15 — the gate section branches to dispatch under swarm.always, printing the derivation and asking nothing", () => {
   const gate = sectionSlice(read(SWARM_SKILL), "## MANDATORY first step — the offer gate");
   ok(/^### Standing consent/m.test(gate), "'### Standing consent' subsection present in the gate");
   ok(gate.includes("swarm.always"), "names the config key");
   // The branch must come BEFORE the gate's own text, or a reader meets the gate first.
   ok(gate.indexOf("`swarm.always` is set") < gate.indexOf("THE GATE'S ANSWER"), "branch precedes the gate");
-  match(gate, /Emit nothing/);
+  // The derivation is not the recital: standing mode still prints it (swarm-standing-topology).
+  match(gate, /Print the derivation/);
   match(gate, /Ask nothing/);
   // The recital this replaced. Its return is the regression T15 exists to catch:
   // a "statement in place of the question" is still a wall of text before every run.

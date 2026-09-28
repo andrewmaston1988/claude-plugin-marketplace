@@ -186,7 +186,8 @@ nothing until they name one; that is a real answer, not a stage left unfinished.
 Every fan-out normally stops at an offer gate: a question showing the manifest, the model
 mix and the cost before anything spends. `true` is standing consent to skip that question —
 reading orchestrating-agents and executing-swarms, running `models` and `validate` all stay
-mandatory, but nothing is printed or narrated before dispatch: the session runs it. Ask
+mandatory, and the session still prints its derivation (file partition, the three legs, the
+graph) before the manifest — only the question and the wait go. Ask
 whether they want to keep answering the question or trust the ceremony. Mention
 `swarm.workflowNudge` only if they ask about Workflow: it is the one-time "consider swarm"
 reminder on an armed machine.
