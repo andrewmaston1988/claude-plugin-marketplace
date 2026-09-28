@@ -2,7 +2,7 @@ import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { decide, modeFor, standingBlock, MODE_ARMED, MODE_UNARMED } from "../hooks/ultraswarm.mjs";
+import { decide, modeFor, standingBlock, KEYWORD_LINE, MODE_ARMED, MODE_UNARMED } from "../hooks/ultraswarm.mjs";
 import { normalizeOllama, normalizeAnthropic } from "../src/usage.mjs";
 
 const armed = { swarm: { always: true }, provider: { allowedRoots: ["C:/code"] } };
@@ -10,7 +10,10 @@ const armed = { swarm: { always: true }, provider: { allowedRoots: ["C:/code"] }
 test("decide: SessionStart arms only on swarm.always; UserPromptSubmit only on the keyword", async () => {
   equal(await decide({ event: "SessionStart", cwd: "C:/code/x", config: armed }), standingBlock(MODE_ARMED));
   equal(await decide({ event: "SessionStart", cwd: "C:/code/x", config: { provider: armed.provider } }), null);
-  equal(await decide({ event: "UserPromptSubmit", prompt: "please ULTRASWARM this", cwd: "C:/code/x", config: {} }), standingBlock(MODE_UNARMED));
+  // the keyword path names its trigger, outside the locked block; SessionStart (above) does not
+  equal(await decide({ event: "UserPromptSubmit", prompt: "please ULTRASWARM this", cwd: "C:/code/x", config: {} }), `${KEYWORD_LINE}
+${standingBlock(MODE_UNARMED)}`);
+  match(KEYWORD_LINE ?? "", /`ultraswarm`/);
   equal(await decide({ event: "UserPromptSubmit", prompt: "ordinary prompt", cwd: "C:/code/x", config: armed }), null);
   // the keyword is a standalone word — a filename or path token never arms it
   for (const p of ["edit hooks/ultraswarm.mjs", "tests/ultraswarm.test.mjs failed", "see ultraswarm-notes"]) {
