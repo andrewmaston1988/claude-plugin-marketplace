@@ -429,7 +429,7 @@ export function provenanceBanner(usage, { now = Date.now() } = {}) {
     const mark = staleAgeMark(usage, now);
     const claim = usage.reason
       ? `the refresh did not answer.${mark ? `  ${mark}` : ""}`
-      : `not refreshed${mark ? ` since ${staleAge(usage, now)} ago` : ""}.`;
+      : `not refreshed${mark ? ` for ${staleAge(usage, now)}` : ""}.`;
     return [`/!\\ ${title} — figures below are the last reading; ${claim}`, refresh];
   }
   // A partial read DID fetch this process — saying "no cached reading available"

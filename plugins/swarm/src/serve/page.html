@@ -1096,7 +1096,7 @@
   // current however old they are. Past the same 5 minutes the server's own cache
   // uses, the held reading says so — the chip is the only mark the reader gets
   // until the response arrives. Only Usage carries provenance on its figures.
-  const HELD_STALE_MS = 5 * 60_000;
+  const HELD_STALE_MS = 5 * 60_000; // usage-cache.mjs USAGE_TTL_MS — the browser cannot import it
   function markHeldStale(tab, data, at) {
     if (tab !== "usage" || !data?.usages || Date.now() - at < HELD_STALE_MS) return data;
     return { ...data, usages: data.usages.map((u) => ({ ...u, provenance: "stale", lastSeen: at })) };

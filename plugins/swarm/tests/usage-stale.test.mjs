@@ -78,7 +78,7 @@ test("notableLines: G7f a stale reading with no recorded reason banners as unref
   });
   const lines = notableLines([u], { now });
   ok(lines.length, "a stale reading must never print nothing");
-  ok(lines[0].startsWith("/!\\ Usage Unread — figures below are the last reading; not refreshed since 12m ago."), lines.join("\n"));
+  ok(lines[0].startsWith("/!\\ Usage Unread — figures below are the last reading; not refreshed for 12m."), lines.join("\n"));
   ok(!lines[0].includes("did not answer"), `nothing tried to refresh, so the banner must not claim one failed: ${lines[0]}`);
   ok(!/\d{4}-\d{2}-\d{2}T/.test(lines[0]), `an age, not an ISO stamp: ${lines[0]}`);
   // the age rides the figure too, not only the banner above it

@@ -74,8 +74,8 @@ function resolveManifestRef(ref) {
   return r;
 }
 
-// The single ollama usage entry point for the CLI — getUsage memoises per
-// process, so validate/run/models share one fetch however many seats.
+// The single ollama usage entry point for the CLI — the usage file's 5-minute
+// TTL is what lets validate/run/models share one fetch however many seats.
 async function usageHeadroom(cfg, { env = process.env, fetchImpl = globalThis.fetch } = {}) {
   return (await import("../src/ollama-usage.mjs")).getUsage(cfg, { env, _fetch: fetchImpl });
 }
