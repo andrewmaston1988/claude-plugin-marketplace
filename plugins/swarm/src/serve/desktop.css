@@ -207,11 +207,9 @@
   /* The live runs as a card row, the Runs screen's own cards. */
   .ovcards { display:grid; grid-template-columns:repeat(auto-fill, minmax(260px, 1fr)); gap:12px; }
   .ovcards .rcard { margin-top:0; }
-  /* A finished run's rail is a graph's lane on the Runs screen; the hub draws no graph, so
-     the lane line goes and only the state disc stays. The disc would go with a zero width —
-     dot() draws it inside this svg — and a narrower rail squashes it, because the svg is one
-     56px box with `preserveAspectRatio="none"` and the disc at x=7–17 (viewBox cx=12, r=5).
-     So the rail keeps its width and the leftover right of the disc is pulled back instead. */
-  .ovruns .row .rail { margin-right:-39px; }
+  /* The hub draws no graph: the lane line goes, the state disc (x 7–17, inside this svg)
+     stays. A narrower svg would squash the disc, so the rail keeps its width and the space
+     right of the disc, less an 8px gap, is pulled back. */
+  .ovruns .row .rail { margin-right:calc(25px - var(--rail)); }
   .ovruns .row .rail path { display:none; }
 }
