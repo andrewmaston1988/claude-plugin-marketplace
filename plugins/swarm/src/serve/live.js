@@ -326,14 +326,23 @@
 
   // A short mustRead is RECORDED, never fatal (the engine's `finish`), so a leaf's state
   // alone cannot say whether it read what it was asked — a codex leaf reporting 3 of 430
-  // required lines reached the operator as "complete". One sentence, both screens: the
+  // required entries reached the operator as "complete". One sentence, both screens: the
   // run row carries the run.log event, the leaf view the result's own field.
   const coverageWarn = (row, leaf) => {
     const c = row?.coverage || leaf?.coverage;
     if (!c || c.status === "complete") return null;
-    const short = `${c.read ?? 0} of ${c.required ?? 0} required lines`;
+    const short = `${c.read ?? 0} of ${c.required ?? 0} required entries`;
     return c.status === "unparseable" ? `the transcript could not be read — ${short}` : `read ${short}`;
   };
 
-  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, identityLabel, identityHtml, agoText, projectOrder, runEnded, shouldPoll, finishedSince, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges, stateOfGroup, railPitch, railRows, railLayout, coverageWarn };
+  // The same record, short enough for the run row: the sentence wraps the phone row's
+  // meta line at 390px. An unreadable transcript says so rather than `0/N`, which would
+  // read as a skim when the leaf may have read everything.
+  const coverageBadge = (row, leaf) => {
+    const c = row?.coverage || leaf?.coverage;
+    if (!c || c.status === "complete") return null;
+    return c.status === "unparseable" ? "unreadable" : `${c.read ?? 0}/${c.required ?? 0} read`;
+  };
+
+  window.swarmLive = { waveOpen, projectOpen, showAllRow, expandQuery, elapsedText, quietSecs, identityLabel, identityHtml, agoText, projectOrder, runEnded, shouldPoll, finishedSince, routeGuard, singleFlight, loadScript, headerRunCount, reconnectDelay, reduceEdges, stateOfGroup, railPitch, railRows, railLayout, coverageWarn, coverageBadge };
 })();
