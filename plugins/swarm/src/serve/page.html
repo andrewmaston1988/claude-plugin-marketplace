@@ -459,7 +459,11 @@
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
   // Per screen: Rank opens as cards, Leaders as the compact list.
   const compactPref = (screen, dflt) => { try { const v = localStorage.getItem(`swarm.perfCompact.${screen}`); return v == null ? dflt : v === "1"; } catch { return dflt; } };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, showSuperseded: false, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, compact: { rank: compactPref("rank", false), leaders: compactPref("leaders", true) } };
+  // The hub's usage-and-cost flyout, open unless a reader closed it: the hub is a
+  // landing, and the two readings are why it is one.
+  const FLYOUT_KEY = "swarm.ovFlyout";
+  const flyoutPref = () => { try { return localStorage.getItem(FLYOUT_KEY) !== "0"; } catch { return true; } };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, showSuperseded: false, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, flyout: flyoutPref(), hubRun: null, compact: { rank: compactPref("rank", false), leaders: compactPref("leaders", true) } };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -522,26 +526,52 @@
     const { header, home, html, labels } = renderRunsHtml(data);
     return { header, home, html, state: { lastList: data, tickCfg: cadencesOf(data), groupLabels: labels, grading: data.grading } };
   }
-  // Overview is a desktop-only hub: the run feed the Runs screen reads, plus the three
+  // The run a hub row opened in place, held while it stays open: the hub's poll and its
+  // SSE refresh both rebuild the feed, and re-reading the same run each time would be a
+  // fetch per tick. Opening another row drops it — one row is open at a time.
+  let hubRun = null;
+  async function expandedRun() {
+    const key = ui.hubRun;
+    if (hubRun && hubRun.key === key) return hubRun;
+    hubRun = null;
+    if (!key) return null;
+    // The row's own key is `project/name`; either part may itself contain a slash, so the
+    // split is on the FIRST one — the same rule the row built it with.
+    const i = key.indexOf("/");
+    try {
+      const run = endRun(await api(`/api/runs/${enc(key.slice(0, i))}/${enc(key.slice(i + 1))}`));
+      const { html, rows } = runScreen(run, isDesktop());
+      hubRun = { key, html, draw: () => drawRail(run.tasks, rows) };
+      return hubRun;
+    } catch (e) {
+      // A run that cannot be read closes the row rather than leaving an empty shelf.
+      console.error("overview: opened run not read", e);
+      ui.hubRun = null;
+      return null;
+    }
+  }
+  // Overview is a desktop-only hub: the run feed the Runs screen reads, plus the two
   // cached payloads its tabs already fetch (D5) — no new endpoint and no new figure.
   async function buildOverview() {
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
-    // Settled per source, never all at once: the run feed needs none of the other three,
-    // so a read that fails costs its own column rather than the whole landing screen.
-    // perf.js carries the column helpers; without it the hub draws the run feed alone.
+    // Settled per source, never all at once: the run feed needs none of the other two,
+    // so a read that fails costs its own widget rather than the whole landing screen.
+    // perf.js carries every widget in the flyout; without it the hub draws the feed alone.
     const perfJs = loadPerfJs();
-    const [usage, perf, cost] = await Promise.all([
-      { name: "usage" }, { name: "perf", allDomains: true }, { name: "cost" },
+    const [usage, cost] = await Promise.all([
+      { name: "usage" }, { name: "cost" },
     ].map((v) => viaCache(v, false).catch((e) => { console.error(`overview: /api/${v.name} not read`, e); return null; })));
     await perfJs;
+    const expanded = await expandedRun();
     const h = {
-      esc, enc, seg: segSwitcher, rankBadge, fmtScore, compact: ui.compact.leaders,
-      runRow, labels: runLabels(data.runs), gradingOff: GRADING_OFF,
+      esc, enc, seg: segSwitcher, runRow,
+      labels: runLabels(data.runs), expanded, flyout: ui.flyout,
     };
     return {
       header: headerHtml(TAB_TITLE.overview, ""),
-      html: window.swarmDesktop.overviewScreen(data.runs, usage, perf, cost, h),
+      html: window.swarmDesktop.overviewScreen(data.runs, usage, cost, h),
       state: { lastList: data, tickCfg: cadencesOf(data), grading: data.grading },
+      draw: expanded?.draw,
     };
   }
   // The labels a run payload names, as a fresh map — a value the commit swaps in,
@@ -618,7 +648,9 @@
   // Each table's columns, named once here and used for its own header row. The cells come out
   // of the row renderers below: the same fields, in the same order, the phone joins or stacks.
   const RUN_COLS = ["project", "when", "state", "tokens"]; const TASK_COLS = ["leaf", "model", "state", "time", "tokens", "latest tool"];
-  function runRow(r, done, labels = groupLabels, columns = false) {
+  // `hub`: the row opens its run beneath itself instead of navigating — the same row, one
+  // different attribute, so the hub cannot drift into a second row renderer.
+  function runRow(r, done, labels = groupLabels, columns = false, hub = false) {
     const shortProject = (p) => labels.get(p) || p;
     const stack = (r) => /* one disc per provider, largest first, overlapping: a live run's running providers pulse in front and the idle dim behind, a finished run's are all solid, largest on top; a provider with no logo wears its initial */ { const run = new Set(r.providersRunning || []); const e = Object.entries(r.providerTokens || {}).filter(([p]) => p !== "unknown").sort((a, b) => b[1] - a[1]); const o = done ? e : [...e.filter(([p]) => run.has(p)), ...e.filter(([p]) => !run.has(p))]; return o.length ? `<span class="pstack">${o.map(([p], i) => `<span class="pitem${done ? "" : run.has(p) ? " pulse" : " dim"}" style="z-index:${o.length - i}${!done && run.has(p) ? `;animation-delay:${i * 1.2}s` : ""}">${window.swarmLogos?.providerLogo(p, { chip: true, label: p }) || `<span class="pinit" role="img" aria-label="${esc(p)}">${esc(p[0].toUpperCase())}</span>`}</span>`).join("")}</span>` : ""; };
     // Navigation is a data-href picked up by one delegated listener — never an inline
@@ -633,7 +665,7 @@
       const stale = !r.finishedMs && !r.stopped;
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
       const fields = [esc(shortProject(r.project)), when, countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState), `${fmtTok(r.tokens)}${r.hasDigest ? " · digest" : ""}`];
-      return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${columns ? fields.map((f) => `<span class="col">${f}</span>`).join("") : fields.join(" · ")}</span></div>${chevRight}</div></li>`;
+      return `<li class="row tap" data-key="${key}" ${hub ? `data-hub="${key}"` : `data-href="${esc(href)}"`}>${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${columns ? fields.map((f) => `<span class="col">${f}</span>`).join("") : fields.join(" · ")}</span></div>${chevRight}</div></li>`;
     }
     return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span>${stack(r)}<span class="tm">${elapsed}</span></div>`
       + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
@@ -856,10 +888,16 @@
   }
 
   let currentRun = null;
+  // One run's body — its chrome, then its graph — from one call, so the run screen and
+  // the hub's in-place expansion draw the same markup rather than two that agree today.
+  function runScreen(run, columns) {
+    const { html, rows } = renderRunHtml(run, run.tasks, run.waves, columns);
+    return { html: runChromeHtml(run, run.tasks) + html, rows };
+  }
   async function buildRun(project, name) {
     const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
-    const { html, rows } = renderRunHtml(run, run.tasks, run.waves, isDesktop());
-    return { header: runHeaderHtml(run, Date.now()), html: runChromeHtml(run, run.tasks) + html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
+    const { html, rows } = runScreen(run, isDesktop());
+    return { header: runHeaderHtml(run, Date.now()), html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
   }
 
   // A manifest node's own screen: the same graph renderer, fed the task's own
@@ -902,8 +940,8 @@
     }
     if (view.name === "run" && currentRun) {
       setHeader(runHeaderHtml(currentRun, now));
-      const { html, rows } = renderRunHtml(currentRun, currentRun.tasks, currentRun.waves, isDesktop());
-      setHtml(main, runChromeHtml(currentRun, currentRun.tasks) + html);
+      const { html, rows } = runScreen(currentRun, isDesktop());
+      setHtml(main, html);
       drawRail(currentRun.tasks, rows);
       return;
     }
@@ -1479,8 +1517,18 @@
     setTimeout(() => { ui.focusId = null; rerender(); }, 2400);
   }
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-superseded]");
+    const t = e.target.closest("[data-href], [data-hub], [data-flyout], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-superseded]");
     if (!t || !main.contains(t)) return;
+    // The hub's flyout: one preference, written where the phone's compaction prefs live.
+    if (t.dataset.flyout != null) {
+      ui.flyout = !ui.flyout;
+      try { localStorage.setItem(FLYOUT_KEY, ui.flyout ? "1" : "0"); } catch { /* no storage */ }
+      requestRoute(route);
+      return;
+    }
+    // A finished row on the hub: the run opens beneath the row, and the same row clicked
+    // again closes it. The hash never moves — this is not a navigation.
+    if (t.dataset.hub != null) { ui.hubRun = ui.hubRun === t.dataset.hub ? null : t.dataset.hub; requestRoute(route); return; }
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
     if (t.dataset.superseded != null) { ui.showSuperseded = !ui.showSuperseded; requestRoute(route); return; }

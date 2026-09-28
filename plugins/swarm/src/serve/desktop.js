@@ -16,49 +16,53 @@
   // tab is the place a long history is read.
   const HUB_FINISHED = 5;
 
-  // The parts Runs, Usage, Performance and Cost already draw, called rather than re-rendered
-  // (D4/D5), so a figure that changes on its own screen changes here in the same commit.
-  function overviewScreen(runs, usage, perf, cost, h) {
+  // The hub: the Runs screen's own run feed at the width main gives it, and — when a
+  // reader wants them — Usage and Cost in a flyout beside it. The parts are the other
+  // screens' own markup, called rather than re-rendered (D4/D5), so a figure that
+  // changes on its own screen changes here in the same commit. The hub draws no
+  // ranking: leadersList belonged to a column this redesign dropped.
+  function overviewScreen(runs, usage, cost, h) {
     const V = window.perfViews;
-    const { esc, runRow, labels } = h;
+    const { esc, runRow, labels, expanded, flyout } = h;
     // Live first, most recently dispatched on top; then the newest finished. `filter`
     // copies, so neither sort touches the payload the commit is holding.
     const live = runs.filter((r) => r.active).sort((a, b) => b.startedMs - a.startedMs);
     const done = runs.filter((r) => !r.active).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, HUB_FINISHED);
     const sec = (label) => `<div class="section"><span>${esc(label)}</span><span class="line"></span></div>`;
-    const cols = [];
-    if (live.length || done.length) {
-      cols.push(`<div class="ovcol ovruns">`
-        + (live.length ? sec("live") + `<div class="ovcards">${live.map((r) => runRow(r)).join("")}</div>` : "")
-        + (done.length ? sec("finished") + `<ul>${done.map((r) => runRow(r, true, labels)).join("")}</ul>` : "")
-        + `</div>`);
-    }
-    // Every widget below is perf.js's, so a /perf.js that never arrived (loadPerfJs
-    // swallows its onerror) leaves the run feed above as the whole hub — which is why the
-    // feed needs nothing from it. A source that failed is null: its column goes, the rest
+    const keyOf = (r) => esc(`${r.project}/${r.name}`);
+    // Every widget in the panel is perf.js's, so a /perf.js that never arrived
+    // (loadPerfJs swallows its onerror) leaves the run feed as the whole hub — which is
+    // why the feed needs nothing from it, and why a toggle for a panel that cannot open
+    // is worse than no toggle. A source that failed is null: its section goes, the rest
     // stay, and the run feed is never held hostage to a read it does not use.
-    if (!V) return `<div class="ovgrid">${cols.join("")}</div>`;
-    // Usage pins its week reading: the hub has no room for the switcher, and the Usage tab
-    // is one tap away for the other window.
+    const panel = V && (usage || cost);
+    const open = panel && flyout;
+    let feed = "";
+    if (live.length) feed += sec("live") + live.map((r) => runRow(r)).join("");
+    if (done.length) {
+      // The open run is injected straight after its own row, in the same list, so it
+      // re-renders with the feed the poll rebuilds — never as a second screen.
+      feed += sec("finished") + `<ul>${done.map((r) => runRow(r, true, labels, false, true)
+        + (expanded && expanded.key === keyOf(r) ? `<li class="ovrun" data-key="ov:${keyOf(r)}">${expanded.html}</li>` : "")).join("")}</ul>`;
+    }
+    feed = `<div class="ovfeed${open ? "" : " shut"}">`
+      + (panel ? `<div class="ovbar"><button type="button" class="ovtoggle${open ? " on" : ""}" data-flyout="1" aria-expanded="${open ? "true" : "false"}">usage and cost</button></div>` : "")
+      + feed + `</div>`;
+    if (!open) return feed;
+    // Usage pins its week reading — the hub has no room for the switcher, and the Usage
+    // tab is one tap away for the other window. A provider with nothing measured is not
+    // on the Cost screen either (costSections), so the panel shows the same providers it
+    // does — and when that is none of them, the Cost screen's own empty state.
+    let side = "";
     if (usage) {
       const u = V.usageParts(usage, h, "week");
-      cols.push(`<div class="ovcol ovusage">${sec("usage")}${u.empty || u.hero + u.cards.join("")}</div>`);
+      side += sec("usage") + (u.empty || u.hero + u.cards.join(""));
     }
-    // Grading off is not an empty ranking: the Performance tab says so in words, and so
-    // does this column, from the same string.
-    if (perf) {
-      cols.push(`<div class="ovcol ovmodels">${sec("top models")}`
-        + (perf.grading === false ? h.gradingOff : V.leadersList(perf.views?.leaders ?? [], h)) + `</div>`);
-    }
-    // A provider with nothing measured is not on the Cost screen either (costSections),
-    // so the hub shows the same providers it does — and when that is none of them, the
-    // Cost screen's own empty state rather than a hole in the grid.
     if (cost) {
       const sections = V.costSections(cost);
-      cols.push(`<div class="ovcol ovcost">${sec("cost")}`
-        + (sections.length ? sections.map((s) => V.costHero(s, h)).join("") : V.noCost()) + `</div>`);
+      side += sec("cost") + (sections.length ? sections.map((s) => V.costHero(s, h)).join("") : V.noCost());
     }
-    return `<div class="ovgrid">${cols.join("")}</div>`;
+    return feed + `<aside class="ovpanel">${side}</aside>`;
   }
 
   window.swarmDesktop = { isDesktop, overviewScreen };

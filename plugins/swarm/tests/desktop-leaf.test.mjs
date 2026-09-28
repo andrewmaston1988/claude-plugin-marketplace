@@ -84,11 +84,14 @@ test("the chips wear the grid's width, which is the cards' width", () => {
 });
 
 // The two screens share one renderer, so the layout they ask for is the boundary: the run
-// screen's two paint sites pass `isDesktop()`, the node screen's two do not.
+// screen's body is runScreen() and both its paint sites pass `isDesktop()`; the node screen
+// renders its subgraph through renderRunHtml directly, so nothing there can ask for the cut.
 test("only the run screen asks for the table columns, never the node screen", () => {
-  const calls = [...readFileSync(PAGE, "utf8").matchAll(/renderRunHtml\((.*?)\);/g)].map((m) => m[1]);
-  assert.equal(calls.length, 4, "two paint sites per screen");
-  assert.equal(calls.filter((c) => c.includes("isDesktop()")).length, 2, "the run screen's");
-  for (const bare of calls.filter((c) => !c.includes("isDesktop()")))
-    assert.match(bare, /^(run|currentRun), tasks, waves$/, "the node screen's subgraph, uncut");
+  const page = readFileSync(PAGE, "utf8");
+  const cut = [...page.matchAll(/runScreen\(([^\n]*)\);/g)].map((m) => m[1]);
+  assert.equal(cut.length, 3, "the run screen's two paint sites, and the hub's expansion");
+  for (const c of cut) assert.match(c, /, isDesktop\(\)$/, "every one of them the run's own cut");
+  const bare = [...page.matchAll(/renderRunHtml\((.*?)\);/g)].map((m) => m[1]);
+  for (const b of bare.filter((c) => c !== "run, run.tasks, run.waves, columns"))
+    assert.match(b, /^(run|currentRun), tasks, waves$/, "the node screen's subgraph, uncut");
 });
