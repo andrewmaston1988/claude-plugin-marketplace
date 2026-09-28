@@ -5,10 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  assertPlausible, defaultRateCardStaleAfter, diffPrices, isRateCardStale,
-  overlayRateCard, readRateCardStore, refreshRateCards,
+  assertPlausible, diffPrices, isRateCardStale, overlayRateCard, readRateCardStore,
+  refreshRateCards, resolveRatePrice,
   CODEX_RATE_CARD_SEED, CLAUDE_RATE_CARD_SEED, RATE_CARD_SOURCES,
 } from "../src/rate-card.mjs";
+import { refreshStaleRateCards } from "../src/rate-card-cli.mjs";
 
 const fixture = (name) =>
   readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
@@ -21,6 +22,12 @@ const servePages = () => async (url) => ({
   ok: true,
   text: async () => fixture(url.includes("openai") ? "openai-pricing.md" : "anthropic-pricing.md"),
 });
+
+// The published page with the card's base model's row cut out — the shape a
+// vendor-side table reshuffle leaves behind.
+const baseLess = (url) => url.includes("openai")
+  ? fixture("openai-pricing.md")
+  : fixture("anthropic-pricing.md").split("\n").filter((line) => !/^\|\s*Claude Sonnet 5\s*\|/.test(line)).join("\n");
 
 test("refresh: both tables are fetched, parsed and banked", async () => {
   const path = storePath();
@@ -37,20 +44,30 @@ test("refresh: both tables are fetched, parsed and banked", async () => {
   equal(store.claude.url, RATE_CARD_SOURCES.find((s) => s.provider === "claude").url);
 });
 
-test("refresh: the banked card supersedes the seed, and restarts the stale window", async () => {
+test("refresh: the banked card supersedes the seed and keeps the full read timestamp", async () => {
   const path = storePath();
   await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-01T12:00:00Z") });
   const card = overlayRateCard(CLAUDE_RATE_CARD_SEED, readRateCardStore(path).claude);
 
-  equal(card.asOf, "2026-10-01");
-  equal(card.staleAfter, defaultRateCardStaleAfter("2026-10-01"), "RED: a fresh read kept the old shelf life");
-  equal(isRateCardStale(card, Date.parse("2026-11-01")), false);
-  equal(isRateCardStale(card, Date.parse("2027-11-01")), true);
+  // Full resolution, not a sliced date: 11 hours old and 23 hours old are the
+  // same day and only one of them is inside the window.
+  equal(card.asOf, "2026-10-01T12:00:00.000Z");
+  equal(isRateCardStale(card, { now: Date.parse("2026-10-01T22:00:00Z") }), false, "RED: 10h old must still be fresh");
+  equal(isRateCardStale(card, { now: Date.parse("2026-10-02T01:00:00Z") }), true, "RED: 13h old must be stale");
   // Identity fields are the seed's: the published page names no base model.
   equal(card.baseModel, CLAUDE_RATE_CARD_SEED.baseModel);
   equal(card.unit, CLAUDE_RATE_CARD_SEED.unit);
   // And the whole published table is now priced, not just the seeded subset.
   ok(Object.keys(card.prices).length > Object.keys(CLAUDE_RATE_CARD_SEED.prices).length);
+});
+
+test("overlay: a fresh read does not inherit the seed's hand-noted expiry", () => {
+  // The Codex seed's `staleAfter` marks the end of a promo window on the SEED's
+  // hand-read. Riding onto a later read would mark every read after it stale for
+  // ever, and an always-stale card re-fetches on every cost query.
+  const card = overlayRateCard(CODEX_RATE_CARD_SEED, { asOf: "2026-10-01T12:00:00Z", prices: { "gpt-6-luna": { input: 1, output: 2 } } });
+  equal(card.staleAfter, undefined, "RED: the seed's promo floor rode onto a freshly read card");
+  equal(CODEX_RATE_CARD_SEED.staleAfter, "2026-11-21", "the seed itself still carries it");
 });
 
 test("overlay: a card the vendor has dropped goes unpriced rather than lingering", () => {
@@ -71,6 +88,52 @@ test("a corrupt store never takes the cards down", () => {
   deepEqual(readRateCardStore(path), {});
 });
 
+test("staleness: 11h is fresh, 13h is stale, and an asOf that will not parse is stale", () => {
+  const now = Date.parse("2026-10-02T12:00:00Z");
+  const at = (asOf) => ({ asOf });
+  equal(isRateCardStale(at("2026-10-02T01:00:00.000Z"), { now }), false, "RED: an 11h-old card must still be fresh");
+  equal(isRateCardStale(at("2026-10-01T23:00:00.000Z"), { now }), true, "RED: a 13h-old card must be stale");
+  equal(isRateCardStale(at("not a date"), { now }), true, "RED: a card whose read time cannot be read is not fresh");
+  // A seed's date-only asOf parses as midnight UTC, so a fresh install is stale
+  // on first use and re-reads rather than ranking on a hand-read for 12 hours.
+  equal(isRateCardStale(at("2026-10-02"), { now }), true);
+});
+
+test("staleness: an explicit expiry expires a card inside the window, and only then", () => {
+  const now = Date.parse("2026-10-02T12:00:00Z");
+  const asOf = "2026-10-02T11:00:00.000Z";
+  equal(isRateCardStale({ asOf, staleAfter: "2026-10-01" }, { now }), true,
+    "RED: a passed expiry must expire a card that is only an hour old");
+  equal(isRateCardStale({ asOf, staleAfter: "2026-11-01" }, { now }), false,
+    "RED: an expiry still in the future must not add staleness");
+});
+
+test("staleness: a roster id the card has not seen re-prices it, an id leaving does not", () => {
+  const now = Date.parse("2026-10-02T12:00:00Z");
+  const card = { asOf: "2026-10-02T11:00:00.000Z", rosterIds: ["a", "b"] };
+  equal(isRateCardStale(card, { now, rosterIds: ["a", "b"] }), false);
+  equal(isRateCardStale(card, { now, rosterIds: ["a", "c"] }), true,
+    "RED: a model the card has never priced must re-price it");
+  equal(isRateCardStale(card, { now, rosterIds: ["a"] }), false,
+    "RED: a model leaving the roster needs no new prices");
+  equal(isRateCardStale({ asOf: "2026-10-02T11:00:00.000Z" }, { now, rosterIds: ["a"] }), true,
+    "RED: a card banked before rosters were recorded has seen nothing");
+});
+
+test("refresh: the roster the card was priced for is banked with it", async () => {
+  const path = storePath();
+  const now = new Date("2026-10-01T12:00:00Z");
+  const rosterIds = { claude: ["claude-sonnet-5", "claude-opus-5-5"] };
+  await refreshRateCards({ path, _fetch: servePages(), now, rosterIds });
+
+  const card = overlayRateCard(CLAUDE_RATE_CARD_SEED, readRateCardStore(path).claude);
+  deepEqual(card.rosterIds, rosterIds.claude);
+  const later = now.getTime() + 3600e3;
+  equal(isRateCardStale(card, { now: later, rosterIds: rosterIds.claude }), false);
+  equal(isRateCardStale(card, { now: later, rosterIds: [...rosterIds.claude, "claude-sonnet-5-5"] }), true,
+    "RED: a model that arrives in the roster between refreshes must re-price the card");
+});
+
 test("a parse that comes back broken is refused, not banked", async () => {
   // Every one of these would otherwise overwrite a working card and render the
   // whole provider `unpriced` — the failure mode with no symptom but bad ranking.
@@ -81,19 +144,90 @@ test("a parse that comes back broken is refused, not banked", async () => {
   throws(() => assertPlausible("codex", five({ input: 10, output: 2 })), /columns are transposed/);
 
   const path = storePath();
-  await refreshRateCards({ path, _fetch: servePages() });
+  const now = new Date("2026-10-02T12:00:00Z");
+  await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-01T12:00:00Z") });
   const good = readRateCardStore(path);
 
   // A page that still returns 200 but no longer holds the table swallows the
   // parse silently; the refresh must leave the last good bank exactly as it was.
   await rejects(
-    refreshRateCards({ path, _fetch: async () => ({ ok: true, text: async () => "# Pricing\n\nSee our plans page.\n" }) }),
+    refreshRateCards({ path, _fetch: async () => ({ ok: true, text: async () => "# Pricing\n\nSee our plans page.\n" }), now }),
     /the page shape moved/,
   );
-  deepEqual(readRateCardStore(path), good, "RED: a failed refresh clobbered the banked card");
+  const afterShape = readRateCardStore(path);
+  deepEqual(afterShape.claude.prices, good.claude.prices, "RED: a failed refresh clobbered the banked prices");
+  equal(afterShape.claude.asOf, good.claude.asOf);
+  equal(afterShape.codex.lastFailedAt, now.toISOString(), "RED: a failed attempt must be banked, or the next read re-fetches blindly");
 
-  await rejects(refreshRateCards({ path, _fetch: async () => ({ ok: false, status: 503 }) }), /503/);
-  deepEqual(readRateCardStore(path), good, "RED: a failed fetch clobbered the banked card");
+  await rejects(refreshRateCards({ path, _fetch: async () => ({ ok: false, status: 503 }), now }), /503/);
+  const afterFetch = readRateCardStore(path);
+  deepEqual(afterFetch.claude.prices, good.claude.prices, "RED: a failed fetch clobbered the banked prices");
+  equal(afterFetch.codex.lastFailedAt, now.toISOString());
+});
+
+test("a parse that has lost the seed's base model is refused, not banked", async () => {
+  const five = (p) => ({ a: p, b: p, c: p, d: p, e: p });
+  const seed = { provider: "claude", baseModel: "claude-sonnet-5" };
+  // Without the base every multiplier in the section is null while the label
+  // still names it, and an automatic 12h refresh would bank that in silence.
+  throws(() => assertPlausible("claude", five({ input: 1, output: 2 }), seed), /does not price claude-sonnet-5/);
+  assertPlausible("claude", { ...five({ input: 1, output: 2 }), "claude-sonnet-5": { input: 2, output: 10 } }, seed);
+
+  const path = storePath();
+  await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-01T12:00:00Z") });
+  const good = readRateCardStore(path);
+  await rejects(refreshRateCards({ path, _fetch: async (url) => ({ ok: true, text: async () => baseLess(url) }) }), /does not price claude-sonnet-5/);
+  deepEqual(readRateCardStore(path).claude.prices, good.claude.prices, "RED: a base-less parse was banked");
+});
+
+test("refreshStaleRateCards: a failed attempt backs every surface off for an hour", async () => {
+  const path = storePath();
+  await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-01T12:00:00Z") });
+  const banked = readRateCardStore(path);
+
+  const failedAt = Date.parse("2026-10-02T12:00:00Z");
+  let calls = 0;
+  const offline = async () => { calls += 1; throw new Error("getaddrinfo ENOTFOUND"); };
+  const errs = [];
+  const io = { out: () => {}, err: (line) => errs.push(line) };
+
+  const first = await refreshStaleRateCards({ ...io, path, _fetch: offline, now: failedAt });
+  deepEqual(first.failed, ["codex"], "RED: a failed provider must be named");
+  equal(first.skipped, false);
+  equal(readRateCardStore(path).codex.lastFailedAt, new Date(failedAt).toISOString(), "RED: a failed attempt must be banked");
+  ok(errs.some((line) => /could not be refreshed/.test(line)), "RED: a failed refresh must say so");
+
+  // 59 minutes later the card is still stale, but the failure is not retried.
+  const second = await refreshStaleRateCards({ ...io, path, _fetch: offline, now: failedAt + 59 * 60e3 });
+  deepEqual(second, { refreshed: [], failed: [], skipped: true },
+    "RED: an offline machine must not re-fetch on every cost query");
+  equal(calls, 1);
+
+  // Past the hour it tries again — the card is still stale and still unpriced.
+  const third = await refreshStaleRateCards({ ...io, path, _fetch: offline, now: failedAt + 61 * 60e3 });
+  equal(calls, 2);
+  deepEqual(third.failed, ["codex"]);
+
+  // A card that is not stale is never fetched at all.
+  await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-02T18:00:00Z") });
+  const quiet = await refreshStaleRateCards({ ...io, path, _fetch: offline, now: Date.parse("2026-10-02T19:00:00Z") });
+  deepEqual(quiet, { refreshed: [], failed: [], skipped: true });
+  equal(calls, 2);
+});
+
+test("refreshStaleRateCards: a refresh banks the card and reports what moved", async () => {
+  const path = storePath();
+  await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-02T18:00:00Z") });
+  const result = await refreshStaleRateCards({
+    out: () => {}, err: () => {}, path, _fetch: servePages(),
+    now: Date.parse("2026-10-03T09:00:00Z"),
+    rosterIds: { claude: ["claude-sonnet-4-6"] },
+  });
+
+  deepEqual(result, { refreshed: ["codex", "claude"], failed: [], skipped: false });
+  const card = readRateCardStore(path).claude;
+  equal(card.asOf, "2026-10-03T09:00:00.000Z", "RED: a stale card was reported refreshed without re-reading it");
+  deepEqual(card.rosterIds, ["claude-sonnet-4-6"], "RED: the roster the card was priced for was not banked");
 });
 
 test("diffPrices: says what moved, which is the point of running a refresh", () => {
@@ -101,6 +235,15 @@ test("diffPrices: says what moved, which is the point of running a refresh", () 
   const after = { keep: { input: 1, output: 2 }, up: { input: 9, output: 6 }, fresh: { input: 7, output: 8 } };
   const byModel = Object.fromEntries(diffPrices(before, after).map((c) => [c.model, c.kind]));
   deepEqual(byModel, { gone: "dropped", up: "repriced", fresh: "added" }, "RED: an unchanged row was reported, or a changed one was not");
+});
+
+test("diffPrices: a published sibling reads as added, not as no change", () => {
+  // The elder's key must not claim the new id, or a table that gained a model
+  // reports an empty diff and the refresh looks like a no-op.
+  const before = { "claude-sonnet-5": { input: 2, output: 10 } };
+  const after = { "claude-sonnet-5": { input: 2, output: 10 }, "claude-sonnet-5-5": { input: 2, output: 10 } };
+  deepEqual(diffPrices(before, after), [{ model: "claude-sonnet-5-5", kind: "added", to: { input: 2, output: 10 } }],
+    "RED: a newly published model was swallowed by its elder's prefix");
 });
 
 test("diffPrices: a moved cache rate counts as a reprice", () => {
@@ -115,4 +258,17 @@ test("diffPrices: a dated id the table publishes undated is unchanged, not dropp
   // `Claude Haiku 4.5`. Reported as dropped-and-added, a refresh reads as churn.
   const changes = diffPrices({ "claude-haiku-4-5-20251001": { input: 1, output: 5 } }, { "claude-haiku-4-5": { input: 1, output: 5 } });
   deepEqual(changes.filter((c) => c.model === "claude-haiku-4-5-20251001"), [], "RED: a still-priced model was reported dropped");
+});
+
+test("resolveRatePrice: only a trailing DATE is stripped, never a version segment", () => {
+  const dated = { "claude-haiku-4-5": { input: 1, output: 5 }, "gpt-5": { input: 1, output: 2 } };
+  equal(resolveRatePrice(dated, "claude-haiku-4-5").key, "claude-haiku-4-5");
+  equal(resolveRatePrice(dated, "claude-haiku-4-5-20251001").key, "claude-haiku-4-5");
+  equal(resolveRatePrice(dated, "gpt-5-2025-08-07").key, "gpt-5", "RED: the dashed date form must resolve too");
+  // A version segment is a different model, not a dated spelling of the same one.
+  // Borrowing the elder's price ranks it on a guess; `unpriced` is honest.
+  equal(resolveRatePrice({ "claude-sonnet-5": { input: 2, output: 10 } }, "claude-sonnet-5-5"), null,
+    "RED: an unpublished model borrowed a sibling's price");
+  equal(resolveRatePrice({ "gpt-5": { input: 1, output: 2 } }, "gpt-5-codex"), null);
+  equal(resolveRatePrice(dated, "claude-sonnet-5-5"), null);
 });

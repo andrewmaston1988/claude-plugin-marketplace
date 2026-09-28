@@ -4,8 +4,8 @@
 // growing; `out` and `err` are passed in so the CLI keeps one writer.
 
 import {
-  RATE_CARD_SOURCES, diffPrices, isRateCardStale, loadRateCards,
-  rateCardStorePath, refreshRateCards,
+  RATE_CARD_FAILED_BACKOFF_HOURS, RATE_CARD_SOURCES, diffPrices, isRateCardStale,
+  loadRateCards, rateCardStorePath, rateCards, readRateCardStore, refreshRateCards,
 } from "./rate-card.mjs";
 
 const money = (p) => (p == null ? "—" : `$${p.input}/$${p.output}`);
@@ -50,14 +50,36 @@ export async function refreshPrices({ out, err, dryRun = false, path = rateCardS
  * No flag gates this: a stale card ranks models on prices the vendor has already
  * changed, and that is never what anyone wants. Best-effort — offline, the cached
  * card stands and its own stale banner already says so.
+ *
+ * The back-off is global and lives in the store, not in a caller's memory: one
+ * failed read holds every surface for an hour, so an offline machine pays for the
+ * attempt once rather than on every `swarm cost` and every Cost page load.
+ * `rosterIds` is per provider — the ids the roster offers, to be banked with the
+ * read so a model arriving later re-prices the card.
  */
-export async function refreshStaleRateCards({ out, err, path = rateCardStorePath(), _fetch = fetch } = {}) {
-  if (!Object.values(loadRateCards(path)).some((card) => isRateCardStale(card))) return;
+export async function refreshStaleRateCards({ out, err, path = rateCardStorePath(), _fetch = fetch, now = Date.now(), rosterIds } = {}) {
+  const at = typeof now === "number" ? new Date(now) : now;
+  const store = readRateCardStore(path);
+  const backingOff = RATE_CARD_SOURCES.filter(({ provider }) => {
+    const failedAt = Date.parse(store[provider]?.lastFailedAt ?? "");
+    return Number.isFinite(failedAt) && at.getTime() - failedAt < RATE_CARD_FAILED_BACKOFF_HOURS * 3600e3;
+  });
+  if (backingOff.length) {
+    out(`rate cards: ${backingOff.map((s) => s.provider).join(", ")} could not be read less than an hour ago — not asking again yet`);
+    return { refreshed: [], failed: [], skipped: true };
+  }
+
+  const cards = rateCards(path);
+  const stale = RATE_CARD_SOURCES.some(({ provider }) =>
+    isRateCardStale(cards[provider], { now: at.getTime(), rosterIds: rosterIds?.[provider] }));
+  if (!stale) return { refreshed: [], failed: [], skipped: true };
+
   try {
-    for (const summary of await refreshRateCards({ path, _fetch })) {
-      if (summary.changes.length) reportCardChanges(out, summary);
-    }
+    const summaries = await refreshRateCards({ path, _fetch, now: at, rosterIds });
+    for (const summary of summaries) if (summary.changes.length) reportCardChanges(out, summary);
+    return { refreshed: summaries.map((s) => s.provider), failed: [], skipped: false };
   } catch (e) {
     err(`rate cards are stale and could not be refreshed (${e.message}) — ranking on the cached table`);
+    return { refreshed: [], failed: [e.provider].filter(Boolean), skipped: false };
   }
 }

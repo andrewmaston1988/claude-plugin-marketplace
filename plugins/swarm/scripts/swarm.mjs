@@ -850,14 +850,24 @@ async function cmdPerf(rest) {
 // static rate cards (see cost.mjs), and a model absent from one is an `unpriced`
 // row rather than a blank.
 async function cmdCost() {
-  await (await import("../src/rate-card-cli.mjs")).refreshStaleRateCards({ out, err });
+  const cfg = getConfig();
+  const roster = readProviderModelsCache()?.models || [];
+  // The roster is what the cards are priced for: a model that arrives between
+  // refreshes is one the banked card has never seen, and it re-prices rather than
+  // ranking `unpriced` for half a day.
+  await (await import("../src/rate-card-cli.mjs")).refreshStaleRateCards({
+    out, err, rosterIds: modelsByProvider(roster),
+  });
   const {
     costSections, readSnapshots, usageHistoryPath, THIN_REQUESTS,
     METER_PROVIDER, METER_POINTS_UNIT, UNPRICED_CLASSIFICATION, API_EQUIVALENT_CLASSIFICATION,
   } = await import("../src/cost.mjs");
   const path = usageHistoryPath();
   const snaps = readSnapshots(path);
-  const sections = costSections({ models: modelsByProvider(readProviderModelsCache()?.models || []), snaps });
+  const sections = costSections({
+    models: modelsByProvider(roster), snaps,
+    cloudSuffix: providerConfig(cfg, "ollama")?.cloudSuffix,
+  });
   out("cost — one list per provider, cheapest to dearest within each. The units are not comparable across sections.");
   out("");
   const pad = (s, n) => String(s).padEnd(n);
@@ -899,6 +909,7 @@ async function cmdCost() {
         (notes.length ? "  " + notes.join(", ") : "")
       );
     }
+    if (section.hidden) out(dim(`${section.hidden} superseded hidden — the newest of each family is the one priced here`));
     out("");
   }
   out("Read beside `swarm perf` — that owns quality, this owns cost. Each section ranks within itself; no section is ever ranked against another.");

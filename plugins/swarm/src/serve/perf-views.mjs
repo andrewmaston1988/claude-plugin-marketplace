@@ -3,42 +3,18 @@
 import { OUTCOMES } from "../aspects.mjs";
 import { overall } from "../scores.mjs";
 import { identityOf } from "../contracts.mjs";
-import { collapseFamilies, visibleModels } from "../discovery.mjs";
+import { supersededByMap, supersessionKey } from "../discovery.mjs";
 import { band, coins, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_COST_BANDS } from "../cost.mjs";
 
 const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
 
-// The one supersession reading the Cost screen and the Performance ranking
-// share: the cloud suffix belongs to Ollama's naming, every other provider
-// compares bare, and a superseder the denylist removed leaves its elder alone.
-// Keyed by provider + model so two providers sharing a name never chain.
-function supersededByMap(rows, { providerKey, isDenylisted = () => false, cloudSuffix = ":cloud" } = {}) {
-  const familyNames = new Map();
+// The supersession reading, written onto the rows so a screen can filter or mark
+// them. The reading itself lives beside `collapseFamilies` — the CLI's cost table
+// needs the same one and must not import from `serve/`.
+function markSuperseded(rows, { providerKey = () => "unqualified", ...options } = {}) {
+  const superseded = supersededByMap(rows, { providerKey, ...options });
   for (const row of rows) {
-    const provider = providerKey(row);
-    const names = familyNames.get(provider) || new Set();
-    names.add(row.model);
-    familyNames.set(provider, names);
-  }
-  const superseded = new Map();
-  for (const [provider, names] of familyNames) {
-    const suffix = provider === "ollama" ? cloudSuffix : "";
-    const families = collapseFamilies([...names].map((model) => ({ model })), suffix);
-    const visible = new Set(visibleModels(families, { isDenylisted }).map((row) => row.model));
-    for (const row of families) {
-      if (!visible.has(row.model) && row.supersededBy) {
-        superseded.set(JSON.stringify([provider, row.model]), row.supersededBy);
-      }
-    }
-  }
-  return superseded;
-}
-
-// The same reading written onto the rows, so a screen can filter or mark them.
-function markSuperseded(rows, options) {
-  const superseded = supersededByMap(rows, options);
-  for (const row of rows) {
-    const by = superseded.get(JSON.stringify([options.providerKey(row), row.model]));
+    const by = superseded.get(supersessionKey(providerKey(row), row.model));
     if (by) row.supersededBy = by;
   }
   return rows;
@@ -56,7 +32,7 @@ export function rankCells(cells, { cloudSuffix = ":cloud" } = {}) {
   };
   const superseded = supersededByMap(cells, { providerKey: providerOf, cloudSuffix });
   return cells.map((cell) => {
-    const by = superseded.get(JSON.stringify([providerOf(cell), cell.model]));
+    const by = superseded.get(supersessionKey(providerOf(cell), cell.model));
     return by ? { ...cell, supersededBy: by } : cell;
   });
 }
@@ -158,7 +134,10 @@ export function leaders(report, k = 3) {
 // remains attached to its provider and compatible cost domain. A model with
 // no multiplier is UNMEASURED, not free: it stays in `points` with
 // `multiplier: null` so the page can draw it as a void, never a 0×.
-export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_COST_BANDS, valueMargin, isDenylisted = () => false, cloudSuffix = ":cloud" } = {}) {
+//
+// It reads no denylist: Cost is a price reference, not a dispatch roster, so a
+// family's newest member supersedes its elders whether or not it is dispatchable.
+export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_COST_BANDS, valueMargin, cloudSuffix = ":cloud" } = {}) {
   bands = resolveBands(bands, DEFAULT_COST_BANDS);
   const margin = resolveValueMargin(valueMargin);
   const costs = costRows.filter((row) => costDomain === undefined || row.costDomain === costDomain);
@@ -227,7 +206,7 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
       ...(r.baseModel !== undefined ? { baseModel: r.baseModel } : {}),
     }))
     .sort((a, z) => (a.mult ?? Infinity) - (z.mult ?? Infinity) || compareIdentity(a, z));
-  markSuperseded([...points, ...spread], { providerKey, isDenylisted, cloudSuffix });
+  markSuperseded([...points, ...spread], { providerKey, cloudSuffix });
 
   // Verdicts are intentionally local. A single global best/worst would imply
   // that (say) an Ollama meter point and a Codex plan-rate point share a cost

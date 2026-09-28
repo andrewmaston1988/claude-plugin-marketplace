@@ -213,6 +213,44 @@ export function collapseRoster(rows, { cloudSuffix = ":cloud" } = {}) {
     collapseFamilies(group, provider === "ollama" ? cloudSuffix : ""));
 }
 
+// The key a supersession reading is looked up by. Provider-qualified at this one
+// site: two providers that share a model name must never chain into each other's
+// family, and every caller of the map below has to agree on the tuple shape.
+export const supersessionKey = (provider, model) => JSON.stringify([provider, model]);
+
+// Which rows a collapse hides, as provider+model -> the model that supersedes it.
+// `collapseFamilies` marks chains; `visibleModels` decides which of a chain are
+// actually shown, and only the hidden members land here.
+export function supersededByMap(rows, { providerKey = () => "unqualified", isDenylisted = () => false, cloudSuffix = ":cloud" } = {}) {
+  const familyNames = new Map();
+  for (const row of rows) {
+    const provider = providerKey(row);
+    const names = familyNames.get(provider) || new Set();
+    names.add(row.model);
+    familyNames.set(provider, names);
+  }
+  const superseded = new Map();
+  for (const [provider, names] of familyNames) {
+    const suffix = provider === "ollama" ? cloudSuffix : "";
+    const families = collapseFamilies([...names].map((model) => ({ model })), suffix);
+    const visible = new Set(visibleModels(families, { isDenylisted }).map((row) => row.model));
+    for (const row of families) {
+      if (!visible.has(row.model) && row.supersededBy) {
+        superseded.set(supersessionKey(provider, row.model), row.supersededBy);
+      }
+    }
+  }
+  return superseded;
+}
+
+// The same reading applied to a table: superseded rows leave, unless `keep` says
+// otherwise — a card's base model is the unit every other row is a multiple of,
+// so it is never the row that goes.
+export function dropSuperseded(rows, { providerKey = () => "unqualified", keep = () => false, cloudSuffix = ":cloud" } = {}) {
+  const superseded = supersededByMap(rows, { providerKey, cloudSuffix });
+  return rows.filter((row) => keep(row) || !superseded.has(supersessionKey(providerKey(row), row.model)));
+}
+
 export async function discoverModels(cfg, fetchImpl = globalThis.fetch, { spawnImpl } = {}) {
   const suffix = cfg.provider.cloudSuffix || ":cloud";
   const base = String(cfg.provider.url).replace(/\/+$/, "");
