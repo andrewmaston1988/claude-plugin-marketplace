@@ -609,9 +609,9 @@ Make offering swarm a standing habit by adding one line to your CLAUDE.md:
 skill runs its full ceremony (orchestrating-agents, executing-swarms, `models`, `validate`)
 then prints its derivation (partition, block, graph) and dispatches without an
 `AskUserQuestion`. A `SessionStart` hook announces it each session, mode-bracketed
-(`[:cloud tier preferred]` under an `allowedRoots` cwd, `[Anthropic orchestration only]`
-otherwise). The keyword **`ultraswarm`** in a prompt injects the same block for that
-session without the config flag.
+(`[swarm leaves launchable here]` when any enabled provider's `allowedRoots` covers the cwd,
+`[cwd outside every allowedRoots — no swarm leaves]` otherwise). The keyword
+**`ultraswarm`** in a prompt injects the same block for that session without the config flag.
 
 ## Dispatch nudges
 
