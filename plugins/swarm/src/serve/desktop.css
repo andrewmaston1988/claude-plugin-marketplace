@@ -172,6 +172,9 @@
   /* The figure cards have no row of their own: both take column 2, so they stack beside
      the prose rather than under it. */
   :is(main:has(> .chips.hero), .ovleaf) > .card:not(.flush) { grid-column:2; margin:0; }
+  /* The way back to the waves heads the leaf, not the foot of its position card. */
+  :is(main:has(> .chips.hero), .ovleaf) .vchip.back { display:inline-block; margin-left:auto; --pc:var(--accent); }
+  :is(main:has(> .chips.hero), .ovleaf) .card .cf .show { display:none; }
 
   /* A stalled leaf's tint: the phone paints it on .body, which the table lifts out of the box tree. */
   :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf.quiet:has(> .body > .col) { background:var(--warn-bg); }

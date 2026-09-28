@@ -303,6 +303,8 @@
   .card .fchip { padding:4px 8px; border-radius:8px; background:var(--surface-2); color:var(--ink); font-size:12.5px; }
   .card .cf { display:flex; justify-content:space-between; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--rule); font-size:11.5px; color:var(--faint); }
   .card .show { color:var(--accent); cursor:pointer; }
+  /* The way back to the tree, at the top of the leaf — a desktop move; the phone keeps its link in the card. */
+  .vchip.back { display:none; }
   .segbar { display:flex; gap:2px; height:5px; margin-top:12px; border-radius:3px; overflow:hidden; background:var(--surface-2); }
   .legend { display:flex; flex-wrap:wrap; gap:16px; margin-top:12px; font-size:11.5px; color:var(--muted); }
   .legend i { display:inline-block; width:8px; height:8px; margin-right:6px; border-radius:2px; }
@@ -1028,7 +1030,7 @@
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
     let html = leafBannerHtml(t, leaf, now, quiet ? quietSecsVal : null);
-    html += `<div class="chips hero"><span class="vchip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? (idChip.startsWith("<span class=\"pchip") ? idChip : `<span class="vchip" data-href="${modelHref}">${identity}</span>`) : ""}${t.kind && t.kind !== "leaf" ? `<span class="vchip">${esc(t.kind)}</span>` : ""}</div>`;
+    html += `<div class="chips hero"><span class="vchip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? (idChip.startsWith("<span class=\"pchip") ? idChip : `<span class="vchip" data-href="${modelHref}">${identity}</span>`) : ""}${t.kind && t.kind !== "leaf" ? `<span class="vchip">${esc(t.kind)}</span>` : ""}<span class="vchip back" data-focus="${esc(id)}" data-href="#/run/${enc(run.project)}/${enc(run.name)}">‹ waves</span></div>`;
     // Position in graph: what it waited on, what it unblocks, and the way back to the rail.
     const fchips = (ids, none) => ids.length ? ids.map((x) => `<span class="fchip">${esc(x)}</span>`).join("") : `<span>${none}</span>`;
     const order = run.tasks.filter((x) => x.kind !== "digest").map((x) => x.id);

@@ -190,3 +190,22 @@ test("a wave label in the hub's opened run folds its wave", async () => {
   assert.notEqual(P.findByClass("ovrun")[0].textContent, before, "the tap folds the wave in place");
   assert.equal(P.location.hash, "#/overview");
 });
+
+// Operator 2026-09-28: "'show in tree' already does that, it likely just needs to be
+// reworded or moved for desktop". The way back heads the leaf as a chip; the card's link is the phone's.
+test("the leaf's way back to the waves is a chip at its head on desktop", async () => {
+  const P = await hub({ run: runPayload("DONE_2") });
+  P.tap(rowNamed(P, "DONE_2"));
+  await settle(P, replies({ run: runPayload("DONE_2") }));
+  P.tap(P.findByClass("row").find((e) => e.getAttribute("data-href").endsWith("/leaf/leaf-a")));
+  await settle(P, replies({ run: runPayload("DONE_2") }), [/\/leaves\//]);
+  const back = P.findByClass("back")[0];
+  assert.ok(back && back.parentNode.classList.contains("hero"), "the chip sits in the leaf's hero chips");
+  assert.match(back.textContent, /waves/);
+  P.tap(back);
+  await settle(P, replies({ run: runPayload("DONE_2") }));
+  assert.equal(P.findByClass("ovrun").length, 1, "it returns to the run's waves");
+  const css = readFileSync(new URL("../src/serve/desktop.css", import.meta.url), "utf8");
+  assert.match(css, /\.vchip\.back \{ display:inline-block;/, "desktop shows the chip");
+  assert.match(css, /\.card \.cf \.show \{ display:none; \}/, "and drops the card's link it replaces");
+});

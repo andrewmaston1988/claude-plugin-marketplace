@@ -142,6 +142,18 @@ test("a held-over reading keeps its figure and carries a stale chip; a live one 
   assert.equal((html.match(/chip warn stale/g) || []).length, 1, "only the held-over provider is chipped");
 });
 
+// Operator 2026-09-28, on the chip: "if we do need it, make sure it's accurate and allow all providers to show it".
+test("the stale chip says how old the reading is, for any provider", () => {
+  const ago = (min) => new Date(Date.now() - min * 60_000).toISOString();
+  const data = { usages: [
+    usage("anthropic", [lim("session", 40)], { provenance: "stale", asOf: ago(86) }),
+    usage("ollama", [lim("session", 10)], { provenance: "stale", asOf: ago(12) }),
+  ], errors: {} };
+  const html = loadPerfViews().usageScreen(data, H, "session");
+  assert.match(html, /anthropic<span class="chip warn stale">stale · 1h 26m<\/span>/);
+  assert.match(html, /ollama<span class="chip warn stale">stale · 12m<\/span>/);
+});
+
 test("Usage cards and the hero place a provider logo before its name", () => {
   const html = loadPerfViews().usageScreen(READABLE, H, "session");
   assert.match(html, /class="uhero[\s\S]*?class="plogo"[\s\S]*?ANTHROPIC/);

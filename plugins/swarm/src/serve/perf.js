@@ -375,6 +375,13 @@
       const kinds = [...new Set((p.usage.limits || []).map((l) => l.kind).filter(Boolean))];
       return p.usage.reason || (kinds.length ? `reports ${kinds.join(", ")} — no ${week ? "weekly" : "session"} window` : "no reading");
     };
+    // A held-over reading says how old it is: "stale" alone reads the same at six minutes
+    // as at six hours, and only the age says whether its figure is still worth trusting.
+    const staleFor = (iso) => {
+      const m = Math.round((Date.now() - Date.parse(iso)) / 60_000);
+      if (!Number.isFinite(m) || m < 0) return "stale";
+      return `stale · ${m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`}`;
+    };
     const bar = (n) => `<div class="ubar"><span class="${tone(n)}" style="width:${n}%"></span></div>`;
     const tabs = h.seg([{ label: "Week", href: "#/usage/week" }, { label: "Session", href: "#/usage/session" }], week ? 0 : 1);
     if (!rows.length) return { tabs, empty: `<div class="empty">no provider answered — run swarm usage to read them once.</div>` };
@@ -393,7 +400,7 @@
     const cards = rows.map((p) => {
       const r = reading(p);
       // A held-over reading (the endpoint refused a fresh one) keeps its figures, tagged.
-      const nm = `<span class="nm">${providerLogo(p.provider)}${esc(p.provider)}${p.usage?.provenance === "stale" ? '<span class="chip warn stale">stale</span>' : ""}</span>`;
+      const nm = `<span class="nm">${providerLogo(p.provider)}${esc(p.provider)}${p.usage?.provenance === "stale" ? `<span class="chip warn stale">${esc(staleFor(p.usage.asOf))}</span>` : ""}</span>`;
       if (!r) return `<div class="card upc unread"><div class="top">${nm}</div><div class="sub">${esc(`not read — ${whyNot(p)}`)}</div></div>`;
       return `<div class="card upc ${tone(r.left)}"><div class="top">${nm}<span class="val ${tone(r.left)}">${r.left}%</span></div>${bar(r.left)}`
         + (r.note ? `<div class="sub">${esc(r.note)}</div>` : "") + "</div>";
