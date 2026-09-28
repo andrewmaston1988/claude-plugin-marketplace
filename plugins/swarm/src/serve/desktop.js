@@ -19,8 +19,9 @@
   // The Overview: the parts Runs, Usage, Performance and Cost already draw, arranged. Not
   // one of them is re-rendered here (D4/D5) — they are called, so a figure that changes on
   // its own screen changes on the hub in the same commit. `h` carries page.html's
-  // closure-bound helpers (runRow, esc, enc, seg, labels, rankBadge, fmtScore), the
-  // perfViews helper-bag pattern, for the same reason: this file cannot see page state.
+  // closure-bound helpers (runRow, esc, enc, seg, labels, rankBadge, fmtScore) and the
+  // grading-off note, the perfViews helper-bag pattern, for the same reason: this file
+  // cannot see page state.
   function overviewScreen(runs, usage, perf, cost, h) {
     const V = window.perfViews;
     const { esc, runRow, labels } = h;
@@ -36,15 +37,31 @@
         + (done.length ? sec("finished") + `<ul>${done.map((r) => runRow(r, true, labels)).join("")}</ul>` : "")
         + `</div>`);
     }
+    // Every widget below is perf.js's, so a /perf.js that never arrived (loadPerfJs
+    // swallows its onerror) leaves the run feed above as the whole hub — which is why the
+    // feed needs nothing from it. A source that failed is null: its column goes, the rest
+    // stay, and the run feed is never held hostage to a read it does not use.
+    if (!V) return `<div class="ovgrid">${cols.join("")}</div>`;
     // Usage pins its week reading: the hub has no room for the switcher, and the Usage tab
     // is one tap away for the other window.
-    const u = V.usageParts(usage, h, "week");
-    cols.push(`<div class="ovcol ovusage">${sec("usage")}${u.empty || u.hero + u.cards.join("")}</div>`);
-    cols.push(`<div class="ovcol ovmodels">${sec("top models")}${V.leadersList(perf.views?.leaders ?? [], h)}</div>`);
+    if (usage) {
+      const u = V.usageParts(usage, h, "week");
+      cols.push(`<div class="ovcol ovusage">${sec("usage")}${u.empty || u.hero + u.cards.join("")}</div>`);
+    }
+    // Grading off is not an empty ranking: the Performance tab says so in words, and so
+    // does this column, from the same string.
+    if (perf) {
+      cols.push(`<div class="ovcol ovmodels">${sec("top models")}`
+        + (perf.grading === false ? h.gradingOff : V.leadersList(perf.views?.leaders ?? [], h)) + `</div>`);
+    }
     // A provider with nothing measured is not on the Cost screen either (costSections),
-    // so the hub shows the same providers it does.
-    const sections = V.costSections(cost);
-    if (sections.length) cols.push(`<div class="ovcol ovcost">${sec("cost")}${sections.map((s) => V.costHero(s, cost, h)).join("")}</div>`);
+    // so the hub shows the same providers it does — and when that is none of them, the
+    // Cost screen's own empty state rather than a hole in the grid.
+    if (cost) {
+      const sections = V.costSections(cost);
+      cols.push(`<div class="ovcol ovcost">${sec("cost")}`
+        + (sections.length ? sections.map((s) => V.costHero(s, h)).join("") : V.noCost()) + `</div>`);
+    }
     return `<div class="ovgrid">${cols.join("")}</div>`;
   }
 

@@ -252,7 +252,7 @@
   // One provider's value hero: its best-value model, or the reason it has none. Split out
   // of costSection so a screen can draw the hero alone — the Overview's best-value line
   // per provider — without the ranked cards that belong to the Cost screen.
-  function costHero(section, data, h) {
+  function costHero(section, h) {
     const { esc, enc } = h;
     const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
     // The value case against this provider's top scorer: how close to its score, at what
@@ -274,7 +274,7 @@
     const { esc, enc } = h;
     const { points, spread, best } = section;
     const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
-    const head = costHero(section, data, h);
+    const head = costHero(section, h);
     if (!spread.some((r) => r.mult != null)) {
       return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
     }
@@ -401,5 +401,5 @@
     return { tabs, hero, cards };
   }
 
-  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelSummary, modelDashboard, costScreen, costAll, costSection, costHero, costSections, usageScreen, usageParts };
+  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelSummary, modelDashboard, costScreen, costAll, costSection, costHero, costSections, noCost, usageScreen, usageParts };
 })();

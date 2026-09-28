@@ -526,12 +526,17 @@
   // cached payloads its tabs already fetch (D5) — no new endpoint and no new figure.
   async function buildOverview() {
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
+    // Settled per source, never all at once: the run feed needs none of the other three,
+    // so a read that fails costs its own column rather than the whole landing screen.
     const [usage, perf, cost] = await Promise.all([
-      viaCache({ name: "usage" }, false), viaCache({ name: "perf" }, false), viaCache({ name: "cost" }, false), loadPerfJs(),
+      viaCache({ name: "usage" }, false).catch(() => null),
+      viaCache({ name: "perf" }, false).catch(() => null),
+      viaCache({ name: "cost" }, false).catch(() => null),
+      loadPerfJs(),
     ]);
     const h = {
       esc, enc, seg: segSwitcher, rankBadge, fmtScore, compact: ui.compact.leaders,
-      runRow, labels: runLabels(data.runs),
+      runRow, labels: runLabels(data.runs), gradingOff: GRADING_OFF,
     };
     return {
       header: headerHtml(TAB_TITLE.overview, ""),
@@ -1185,6 +1190,9 @@
       html: window.perfViews.usageScreen(usageData, { esc, seg: segSwitcher }, v.window),
     };
   }
+  // The grading-off note, drawn by the Performance tab and by the Overview's top-models
+  // column: one string, so the two can never disagree about why nothing is ranked.
+  const GRADING_OFF = `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`;
   async function buildPerf(v) {
     const { kind, which } = v;
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
@@ -1192,10 +1200,7 @@
     const p = await viaCache(v);
     const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind : TAB_TITLE.perf;
     if (!p.grading) {
-      return {
-        header: headerHtml(TAB_TITLE.perf, "grading off"),
-        html: `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`,
-      };
+      return { header: headerHtml(TAB_TITLE.perf, "grading off"), html: GRADING_OFF };
     }
     const summary = `${p.rows} graded leaves · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}`;
     const header = kind ? headerHtml(title, crumbs({ name: "perf", kind }, model || aspect || title)) : headerHtml(title, summary);

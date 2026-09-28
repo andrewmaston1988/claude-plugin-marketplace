@@ -129,6 +129,23 @@ test("Overview's figures are the same markup as their phone source parts", async
   assert.deepEqual(overviewCosts, [ollama, markup(phone, "chero")[0]], "value cards keep Cost's figures");
 });
 
+// ── the rail ─────────────────────────────────────────────────────────────
+// The hub draws no graph, so a finished run's rail carries no lane — but the disc that
+// says how the run ended is drawn inside that same svg, and is the only at-a-glance state
+// the row has. The stylesheet can collapse the lane; it may not take the disc with it.
+
+test("Overview's finished rows keep the state disc their rail carries", async () => {
+  const P = await overview();
+  const rails = [];
+  (function walk(n) {
+    if (n.nodeType !== 1) return;
+    if (n.tagName.toLowerCase() === "svg" && n.getAttribute("class").split(/\s+/).includes("rail")) rails.push(n);
+    for (const c of n.childNodes) walk(c);
+  })(P.findByClass("ovruns")[0]);
+  assert.equal(rails.length, 5, "one rail per finished run");
+  for (const r of rails) assert.ok(r.childNodes.some((n) => n.tagName.toLowerCase() === "circle"), "the rail still carries its state disc");
+});
+
 // ── one source down ──────────────────────────────────────────────────────
 // The hub reads four sources and its run feed needs none of the other three: a read
 // that fails costs its own column, never the screen.
