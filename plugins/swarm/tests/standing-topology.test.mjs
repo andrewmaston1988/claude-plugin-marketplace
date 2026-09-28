@@ -7,7 +7,7 @@ import { ok } from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { standingBlock, MODE_CLOUD, MODE_ANTHROPIC } from "../hooks/ultraswarm.mjs";
+import { standingBlock, MODE_ARMED, MODE_UNARMED } from "../hooks/ultraswarm.mjs";
 
 const SKILLS = join(dirname(fileURLToPath(import.meta.url)), "..", "skills");
 const CARVE_OUTS = [
@@ -29,7 +29,7 @@ function markdownUnder(dir) {
 
 // The hook's block is an array of lines, so a phrase can straddle two literals —
 // only the rendered text is checked, never the source file.
-const rendered = () => [standingBlock(MODE_CLOUD), standingBlock(MODE_ANTHROPIC)].map((t) => t.replace(/\s+/g, " "));
+const rendered = () => [standingBlock(MODE_ARMED), standingBlock(MODE_UNARMED)].map((t) => t.replace(/\s+/g, " "));
 
 test("no swarm skill tells a standing-mode session to keep the derivation off the page", () => {
   const hits = [];

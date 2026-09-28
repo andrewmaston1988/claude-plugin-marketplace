@@ -11,13 +11,13 @@ import { allowedRootsFor, providerConfig } from '../src/providers.mjs';
 
 const CONFIG = path.join(os.homedir(), '.swarm', 'config.json');
 
-// Kept as a named export for hook consumers; the label is now provider-neutral.
-export const MODE_CLOUD = '[configured provider models preferred]';
-export const MODE_ANTHROPIC = '[Anthropic orchestration only]';
+// Host-neutral on purpose: a Codex host has no "non-Claude" providers and no Agent tool.
+export const MODE_ARMED = '[swarm leaves launchable here]';
+export const MODE_UNARMED = '[cwd outside every allowedRoots — no swarm leaves]';
 
-// Headroom lines print OUTSIDE the standing block: the mode bracket says which
-// tier is preferred and nothing else. Meter state is availability, not
-// preference — an exhausted or stale meter never makes Anthropic the preference.
+// Headroom lines print OUTSIDE the standing block: the mode bracket says whether any
+// provider's roots cover this cwd and nothing else. Meter state is availability, not
+// governance — an exhausted or stale meter never unarms the mode.
 // Wording and provider coverage belong to src/usage.mjs, so the hook and `quota`
 // cannot drift.
 
@@ -83,12 +83,11 @@ function setupBlock(mode) {
 
 // Every id that could own roots: the canonical blocks the operator wrote, plus the two ids
 // that are configurable without one (ollama via `provider`, codex via `codex` or a bare
-// file). `claude` is excluded — see modeFor. A config setting ONLY the top-level key has no
-// `providers` object at all, so the two-id floor is what keeps inherited roots visible;
-// enumerating `providers` alone would call that config unarmed while the gate calls it armed.
+// file), and claude. A config setting ONLY the top-level key has no `providers` object at
+// all, so the id floor is what keeps inherited roots visible; enumerating `providers` alone
+// would call that config unarmed while the gate calls it armed.
 function providerIds(config) {
-  return [...new Set([...Object.keys(config?.providers || {}), "ollama", "codex"])]
-    .filter((id) => id !== 'claude');
+  return [...new Set([...Object.keys(config?.providers || {}), "ollama", "codex", "claude"])];
 }
 
 // Roots are resolved per provider rather than read off the block, so a provider that names
@@ -102,16 +101,14 @@ function configuredRoots(config) {
     .concat(Array.isArray(config?.provider?.allowedRoots) ? config.provider.allowedRoots : []))];
 }
 
-// cwd under any allowed root -> alternative models are launchable here. Lazy import:
+// cwd under any enabled provider's roots -> swarm leaves are launchable here. Claude is
+// gated by the same roots as every other provider, so it counts the same. Lazy import:
 // manifest.mjs is the governance source of truth but heavy for a per-prompt hook.
-//
-// Claude is EXCLUDED here and included by the run-level gate. The two are not the same
-// question: this one is "is the alternative-model path armed?", not "where may swarm run".
 export async function modeFor({ cwd, config }) {
   const roots = configuredRoots(config);
-  if (!roots.length || !cwd) return MODE_ANTHROPIC;
+  if (!roots.length || !cwd) return MODE_UNARMED;
   const { isUnderRoot } = await import('../src/manifest.mjs');
-  return roots.some((r) => isUnderRoot(cwd, r)) ? MODE_CLOUD : MODE_ANTHROPIC;
+  return roots.some((r) => isUnderRoot(cwd, r)) ? MODE_ARMED : MODE_UNARMED;
 }
 
 // The keyword as a standalone word — `ultraswarm.mjs` in a prompt about this file is not an opt-in.
