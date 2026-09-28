@@ -104,6 +104,11 @@ test("the footer names the connection and the last estate read, and fetches noth
   await P.flush();
   P.respondList(listData(listRow()));
   await P.flush();
+  // The hub reads three cached payloads behind the estate feed (Chunk 3), and its commit
+  // waits on all four. Drain them so the estate read can land; what they hold is the
+  // Overview's own tests' business, not this one's.
+  for (const url of P.pendingUrls()) P.respond((u) => u === url, {});
+  await P.flush();
   const reads = P.fetchLog.length;
   assert.equal(textIn(P, "nf-conn"), "connecting", "the EventSource the page opened, before it opens");
   assert.match(textIn(P, "nf-seen"), /ago$/, "when the estate list landed");
@@ -169,6 +174,6 @@ test("a failed desktop.js cannot strand #/overview: the rewrite is not the shell
   assert.doesNotMatch(read("desktop.js"), /resolveHash/, "the rule cannot live in the asset whose absence is the failure");
   assert.match(html, /const resolveHash = \(hash, desktop\)/, "page.html owns it, and page.html always loads");
   const overview = html.match(/async function buildOverview\(\)[^]*?\n  \}/)[0];
-  assert.match(overview, /window\.swarmDesktop\.overviewScreen\(\)/, "the Overview screen has one renderer");
+  assert.match(overview, /window\.swarmDesktop\.overviewScreen\(/, "the Overview screen has one renderer");
   assert.doesNotMatch(overview, /\?[^\n]*:\s*""/, "and no blank fallback main");
 });

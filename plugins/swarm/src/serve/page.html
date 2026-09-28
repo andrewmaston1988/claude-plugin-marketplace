@@ -522,33 +522,32 @@
     const { header, home, html, labels } = renderRunsHtml(data);
     return { header, home, html, state: { lastList: data, tickCfg: cadencesOf(data), groupLabels: labels, grading: data.grading } };
   }
-  // Overview is a desktop-only route — below the breakpoint the hash is rewritten
-  // away before this is reached, so it never paints on a phone. Its contents are the
-  // next chunk's; what this one owes is the plumbing: it reads the same /api/runs
-  // payload the Runs screen does, so the SSE `runs` event and the poll refresh it,
-  // and it commits the same state, so the sidebar count is live on it too.
+  // Overview is a desktop-only hub: the run feed the Runs screen reads, plus the three
+  // cached payloads its tabs already fetch (D5) — no new endpoint and no new figure.
   async function buildOverview() {
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
+    const [usage, perf, cost] = await Promise.all([viaCache({ name: "usage" }, false), viaCache({ name: "perf" }, false), viaCache({ name: "cost" }, false), loadPerfJs()]);
+    const h = { esc, enc, seg: segSwitcher, rankBadge, fmtScore, compact: ui.compact.leaders, runRow, labels: runLabels(data.runs) };
     return {
       header: headerHtml(TAB_TITLE.overview, ""),
-      html: window.swarmDesktop.overviewScreen(),
+      html: window.swarmDesktop.overviewScreen(data.runs, usage, perf, cost, h),
       state: { lastList: data, tickCfg: cadencesOf(data), grading: data.grading },
     };
   }
+  // The labels a run payload names, as a fresh map — a value the commit swaps in, never a write to the committed one.
+  const runLabels = (runs) => { const labels = new Map(groupLabels); for (const r of runs) { labels.set(r.project, r.groupLabel || r.project); if (r.group) labels.set(r.group, r.groupLabel || r.group); } return labels; };
   function renderRunsHtml(data) {
-    // Labels merge into a fresh map — a value the commit swaps in, never a write to
-    // the committed one. A local shortProject shadows the module arrow so this
-    // build's markup reads this build's labels, not the last committed set.
-    const labels = new Map(groupLabels);
-    const shortProject = (p) => labels.get(p) || p;
+    // A local shortProject shadows the module arrow so this build's markup reads this
+    // build's labels, not the last committed set.
     const runs = data.runs;
+    const labels = runLabels(runs);
+    const shortProject = (p) => labels.get(p) || p;
     // One switch for the whole screen: desktop reads a table, the phone reads a row.
     const table = isDesktop();
     const active = runs.filter((r) => r.active);
     // Every project gets a section — the estate view — projects with a live run first,
     // ranked by that run's newest startedMs (see live.js projectOrder — stable across
     // polls, unlike mtimeMs); inside a section live rows lead, finished follow.
-    for (const r of runs) { labels.set(r.project, r.groupLabel || r.project); if (r.group) labels.set(r.group, r.groupLabel || r.group); }
     const byProject = new Map();
     for (const r of runs) { const g = r.group || r.project; if (!byProject.has(g)) byProject.set(g, []); byProject.get(g).push(r); }
     // Live rows sort by startedMs (most recently dispatched on top, staying there);
@@ -1156,10 +1155,11 @@
     if (tab !== "usage" || !data?.usages || Date.now() - at < HELD_STALE_MS) return data;
     return { ...data, usages: data.usages.map((u) => ({ ...u, provenance: "stale", lastSeen: at })) };
   }
-  async function viaCache(v) {
+  // `fresh:false` = a screen reading several sources at once (the Overview) is not switching to any of them, so only an aged-out reading revalidates.
+  async function viaCache(v, fresh = true) {
     const src = dataSource(v), e = heldEntry(src.path);
     if (!e) { const data = await api(src.path); hold(src.path, data); return data; }
-    if (!sameView(v, view) || Date.now() - e.at >= cadenceOf(src.tab)) revalidate(src);
+    if ((fresh && !sameView(v, view)) || Date.now() - e.at >= cadenceOf(src.tab)) revalidate(src);
     return markHeldStale(src.tab, e.data, e.at);
   }
   async function buildUsage(v) {
