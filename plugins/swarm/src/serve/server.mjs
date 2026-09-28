@@ -10,7 +10,9 @@ import { readRun, projectKeys, resultSuperseded, resolveTaskId } from "../runlog
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
-import { costRowsFor, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
+import { costRowsFor, rateCardRows, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
+import { rateCardStorePath, rateCards } from "../rate-card.mjs";
+import { refreshStaleRateCards } from "../rate-card-cli.mjs";
 import { readModelsCache } from "../discovery.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
@@ -21,7 +23,6 @@ import { createLogger } from "./log.mjs";
 import { providerConfig } from "../providers.mjs";
 import { logosScript } from "./logos.mjs";
 import { PAGE, pageHtml } from "./page-assets.mjs";
-import { matchDenylist } from "../manifest.mjs";
 
 // The three boot scripts served as-is; /logos.js is generated, so it stays a route.
 const JS_ASSETS = {
@@ -142,7 +143,7 @@ const MANIFEST = {
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage }) {
+export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage, _refreshPrices = refreshStaleRateCards }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
@@ -312,6 +313,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   // The cost half, cached the same way: snapshots re-read when the history's
   // mtime moves, the derivation (pure, cheap) on every request.
   const costFile = usageHistoryPath({ ...process.env, SWARM_HOME: home });
+  const rateCardPath = rateCardStorePath({ ...process.env, SWARM_HOME: home });
+  let priceRefreshInFlight = false;
   let costCache = { mtimeMs: -1, snaps: [] };
   // The roster each provider is asked to price, so a scored model the table does
   // not list still draws an `unpriced` ROW rather than a blank one. Cached by
@@ -346,16 +349,23 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     // mapping discovery uses, never a second rule), and the rate cards price
     // theirs. `costView` sections the result by provider.
     const roster = costRoster();
-    return COST_PROVIDERS.flatMap((provider) => costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps }));
+    if (!priceRefreshInFlight) {
+      priceRefreshInFlight = true;
+      Promise.resolve().then(() => _refreshPrices({ path: rateCardPath, rosterIds: roster, out: log, err: log }))
+        .catch(() => {})
+        .finally(() => { priceRefreshInFlight = false; });
+    }
+    const cards = rateCards(rateCardPath);
+    return COST_PROVIDERS.flatMap((provider) => cards[provider]
+      ? rateCardRows(cards[provider], roster[provider] || [])
+      : costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps }));
   };
   const rankOf = (cells, model) => {
     const ranked = rankCells(cells, { cloudSuffix }).filter((c) => c.combined != null && !c.supersededBy);
     const i = ranked.findIndex((c) => c.model === model);
     return i < 0 ? null : { position: i + 1, of: ranked.length };
   };
-  // The cloud suffix is shared by the Cost view and the Performance ranking; only
-  // Cost reads the denylist — the ranking supersedes regardless.
-  const isDenylisted = (model) => Boolean(matchDenylist(model, cfg));
+  // The cloud suffix is shared by Cost and Performance.
   const cloudSuffix = providerConfig(cfg, "ollama")?.cloudSuffix || ":cloud";
   const costOf = (rows, domain) => {
     const ollama = providerConfig(cfg, "ollama");
@@ -363,7 +373,6 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       domain,
       bands: resolveBands(ollama?.cloud?.ollama?.costBands),
       valueMargin: ollama?.cloud?.ollama?.valueMargin,
-      isDenylisted,
       cloudSuffix,
     });
   };
