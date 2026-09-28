@@ -261,7 +261,7 @@ Ask whether they want a ping and, if so, through what.
 After a run, the session can grade each leaf's model on adherence, handoff, truthfulness,
 depth and any capability it stressed; grades accumulate in `~/.swarm/model-scores.jsonl`,
 `swarm perf` ranks them, and the dashboard's Performance page draws them. It costs a grading
-pass per run. Off (the shipped default): no run asks, the tier guide routes models, the
+pass per run. Off (the shipped default): no run asks; with no graded record, seat from the `swarm models` descriptions, and the
 Performance page is disabled. Worth turning on once the operator runs alternative models
 often enough for the numbers to mean something. Ask.
 
