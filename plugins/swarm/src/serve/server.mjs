@@ -23,9 +23,12 @@ import { logosScript } from "./logos.mjs";
 import { PAGE, pageHtml } from "./page-assets.mjs";
 import { matchDenylist } from "../manifest.mjs";
 
-const PERF_JS = fileURLToPath(new URL("./perf.js", import.meta.url));
-const DESKTOP_JS = fileURLToPath(new URL("./desktop.js", import.meta.url));
-const LIVE_JS = fileURLToPath(new URL("./live.js", import.meta.url));
+// The three boot scripts served as-is; /logos.js is generated, so it stays a route.
+const JS_ASSETS = {
+  "/perf.js": fileURLToPath(new URL("./perf.js", import.meta.url)),
+  "/desktop.js": fileURLToPath(new URL("./desktop.js", import.meta.url)),
+  "/live.js": fileURLToPath(new URL("./live.js", import.meta.url)),
+};
 const ESTATE_WORKER = fileURLToPath(new URL("./estate-worker.mjs", import.meta.url));
 const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
 // The estate view: every live run, plus the newest few finished PER DISPLAY GROUP — a
@@ -415,19 +418,12 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       res.on("error", () => drop(res));
       return;
     }
-    if (p === "/perf.js") {
-      if (!existsSync(PERF_JS)) return notFound(res);
-      return send(res, 200, readFileSync(PERF_JS, "utf8"), "text/javascript; charset=utf-8");
-    }
-    if (p === "/desktop.js") {
-      if (!existsSync(DESKTOP_JS)) return notFound(res);
-      return send(res, 200, readFileSync(DESKTOP_JS, "utf8"), "text/javascript; charset=utf-8");
+    const jsAsset = JS_ASSETS[p];
+    if (jsAsset) {
+      if (!existsSync(jsAsset)) return notFound(res);
+      return send(res, 200, readFileSync(jsAsset, "utf8"), "text/javascript; charset=utf-8");
     }
     if (p === "/logos.js") return send(res, 200, logosScript(), "text/javascript; charset=utf-8");
-    if (p === "/live.js") {
-      if (!existsSync(LIVE_JS)) return notFound(res);
-      return send(res, 200, readFileSync(LIVE_JS, "utf8"), "text/javascript; charset=utf-8");
-    }
     if (p === "/api/perf") return perf(res, url);
     // Grading-independent: prices exist without grades, so only the value verdicts need the store.
     if (p === "/api/cost") return send(res, 200, costOf(grading ? scoreRows() : []));
