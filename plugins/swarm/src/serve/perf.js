@@ -37,7 +37,9 @@
     const caption = (a) => a.slice(0, 5);
     const ROW = LBL + TILE;
     const w = aspects.length * CW, hgt = HEAD + models.length * ROW;
-    let svg = `<svg viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="xMinYMin meet" class="covgrid">${HATCH_DEFS}`;
+    // Capped at 1.5x its design width: the labels live inside the SVG, so a desktop-wide
+    // main would otherwise scale 9-10px text several times over. A phone is narrower than the cap.
+    let svg = `<svg viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="xMinYMin meet" class="covgrid" style="max-width:${w * 1.5}px">${HATCH_DEFS}`;
     aspects.forEach((a, i) => {
       const x = i * CW + CW / 2;
       svg += `<text x="${x}" y="${HEAD - 5}" text-anchor="middle" font-size="9" fill="var(--muted)" data-href="#/perf/aspect/${enc(a)}" style="cursor:pointer"><title>${esc(a)}</title>${esc(caption(a))}</text>`;
