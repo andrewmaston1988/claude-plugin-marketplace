@@ -226,7 +226,8 @@ again.
       "provider": "claude", "model": "claude-sonnet-5",
       "effort": "high",
       "after": ["auth", "session"],
-      "prompt": "Read {{resultPath:auth}} and {{resultPath:session}}. Do the expiry and eviction paths agree? Return a verdict with file:line evidence."
+      "prompt": "Read {{resultPath:auth}} and {{resultPath:session}}. Do the expiry and eviction paths agree? Return a verdict with file:line evidence.",
+      "mustRead": ["{{resultPath:auth}}", "{{resultPath:session}}"]
     }
   ],
   "digest": {

@@ -206,9 +206,12 @@ Same subject, diverse lenses, JSON verdicts; the digest presents agreement and d
 
 ```json
 { "tasks": [
-    { "id": "security",    "provider": "ollama", "model": "glm-5.2:cloud",    "prompt": "Review the diff at {{resultPath:…}} as a security reviewer. Return JSON {verdict, findings:[{severity, path, line, note}]}." },
-    { "id": "performance", "provider": "ollama", "model": "minimax-m3:cloud", "effort": "high", "prompt": "…performance lens, same JSON shape…" },
-    { "id": "api-design",  "provider": "claude", "model": "claude-sonnet-5",           "prompt": "…API-design lens, same JSON shape…" }
+    { "id": "diff",        "provider": "claude", "model": "claude-haiku-4-5-20251001", "prompt": "…produce the diff under review as one result…" },
+    { "id": "security",    "provider": "ollama", "model": "glm-5.2:cloud",    "after": ["diff"],
+      "prompt": "Review the diff at {{resultPath:diff}} as a security reviewer. Return JSON {verdict, findings:[{severity, path, line, note}]}.",
+      "mustRead": ["{{resultPath:diff}}"] },
+    { "id": "performance", "provider": "ollama", "model": "minimax-m3:cloud", "effort": "high", "after": ["diff"], "prompt": "…performance lens, same JSON shape…" },
+    { "id": "api-design",  "provider": "claude", "model": "claude-sonnet-5",           "after": ["diff"], "prompt": "…API-design lens, same JSON shape…" }
   ],
   "digest": { "provider": "ollama", "model": "glm-5.2:cloud", "instructions": "Where judges disagree, present both sides — do not average verdicts." } }
 ```
@@ -224,17 +227,20 @@ A run may narrow to one task and widen again:
 
     { "id": "helper", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["survey-a", "survey-b"],
       "workspace": "feat", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "Read {{resultPath:survey-a}} and {{resultPath:survey-b}}. Write the helper. Commit before you finish." },
+      "prompt": "Read {{resultPath:survey-a}} and {{resultPath:survey-b}}. Write the helper. Commit before you finish.",
+      "mustRead": ["{{resultPath:survey-a}}", "{{resultPath:survey-b}}"] },
 
     { "id": "seed-x", "after": ["helper"], "integrate": { "into": "migrate-x", "from": ["helper"] } },
     { "id": "seed-y", "after": ["helper"], "integrate": { "into": "migrate-y", "from": ["helper"] } },
 
     { "id": "migrate-x", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-x", "survey-a"],
       "workspace": "migrate-x", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "…migrate every site in {{resultPath:survey-a}}. Commit before you finish." },
+      "prompt": "…migrate every site in {{resultPath:survey-a}}. Commit before you finish.",
+      "mustRead": ["{{resultPath:survey-a}}"] },
     { "id": "migrate-y", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-y", "survey-b"],
       "workspace": "migrate-y", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish." },
+      "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish.",
+      "mustRead": ["{{resultPath:survey-b}}"] },
 
     { "id": "join", "after": ["migrate-x", "migrate-y"],
       "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
@@ -261,7 +267,7 @@ seeds a tree and folds sibling trees back. Read it before writing any of them.
 
 ### Sweep-then-synthesize
 
-Fan-out plus an explicit synthesis leaf — sweeps with no `after`, then one task `after: [all sweeps]` reading `{{resultPath:…}}` for each. Use when synthesis needs richer instructions than the digest, or a Claude tier. (The *Mixed topology* example above shows the shape.)
+Fan-out plus an explicit synthesis leaf — sweeps with no `after`, then one task `after: [all sweeps]` reading `{{resultPath:…}}` for each and naming each in `mustRead` (the token and the proof travel together, or `validate` refuses it). Use when synthesis needs richer instructions than the digest, or a Claude tier. (The *Mixed topology* example above shows the shape.)
 
 ### Deterministic steps — find → dedupe → fan out → gate
 

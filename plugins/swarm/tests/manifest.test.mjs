@@ -21,7 +21,7 @@ test("fully valid manifest normalizes with defaults", () => {
       tasks: [
         { id: "scan-a", prompt: "look", provider: "claude", model: "claude-haiku-4-5-20251001" },
         { id: "scan-b", prompt: "look more", provider: "claude", model: "claude-sonnet-5", effort: "max" },
-        { id: "join", prompt: "combine {{result:scan-a}} and {{resultPath:scan-b}}", provider: "claude", model: "claude-opus-5", after: ["scan-a", "scan-b"] },
+        { id: "join", prompt: "combine {{result:scan-a}} and {{resultPath:scan-b}}", provider: "claude", model: "claude-opus-5", after: ["scan-a", "scan-b"], mustRead: ["{{resultPath:scan-b}}"] },
       ],
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "focus on X" },
     });
