@@ -85,4 +85,14 @@
   .cvcell { border-radius:4px; padding:2px 4px; text-align:center; font-variant-numeric:tabular-nums; background:color-mix(in oklch, var(--accent) calc(15% + var(--cv, 0) * 55%), transparent); }
   .cvcell.none { background:var(--surface-2); color:var(--faint); }
   .cvcell.prov { background:var(--warn-bg); }
+
+  /* ── Run and leaf screens (chunk 2b) ─────────────────────────────────────── */
+
+  /* end run and leaf */
+
+
+
+  /* ── Model screen (chunk 2b) ─────────────────────────────────────────────── */
+
+  /* end model */
 }
