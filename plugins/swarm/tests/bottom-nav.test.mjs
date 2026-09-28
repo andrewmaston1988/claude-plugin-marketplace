@@ -1,5 +1,6 @@
 // The bottom nav replaces the hamburger menu: four always-visible targets, the
-// active one lit from the route, Perf greyed while grading is off.
+// active one lit from the route, Perf greyed while grading is off. Overview rides
+// the same element for the desktop sidebar and is hidden below the breakpoint.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -7,10 +8,10 @@ import { PAGE, loadPage, listData, listRow } from "./helpers/page-harness.mjs";
 
 const src = readFileSync(PAGE, "utf8");
 
-test("the nav carries Runs, Usage, Perf and Cost, in that order", () => {
+test("the nav carries Overview, Runs, Usage, Perf and Cost, in that order", () => {
   const nav = src.match(/<nav id="nav"[^]*?<\/nav>/);
   assert.ok(nav, "a #nav element exists in the shell");
-  assert.deepEqual([...nav[0].matchAll(/href="([^"]+)"/g)].map((m) => m[1]), ["#/", "#/usage", "#/perf", "#/cost"]);
+  assert.deepEqual([...nav[0].matchAll(/href="([^"]+)"/g)].map((m) => m[1]), ["#/overview", "#/", "#/usage", "#/perf", "#/cost"]);
 });
 
 test("the hamburger menu and its disclaimer are gone", () => {

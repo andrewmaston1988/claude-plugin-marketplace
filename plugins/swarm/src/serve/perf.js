@@ -25,6 +25,7 @@
     const { esc, enc } = h;
     const { aspects, models, cells } = data;
     if (!models.length) return `<div class="empty">no graded leaves yet — nothing to cover.</div>`;
+    if (h.desktop) return coverageTable(data, h);
     // One responsive SVG scaled to the phone by its viewBox. Each model gets a
     // small label line ABOVE its tile row, so the tiles take the full width and
     // the name never truncates. Tap a label → the model's page; tap an aspect
@@ -56,6 +57,24 @@
     });
     svg += `</svg>`;
     return `<div class="cov">${svg}</div>`;
+  }
+
+  // The desktop coverage (the wireframe's): a 180px model column and one fr column per
+  // aspect, each cell its count on a tint — neutral at 0, amber while provisional, then
+  // deepening with the count up to 120. HTML, so its text is the page's size at any width.
+  function coverageTable(data, h) {
+    const { esc, enc } = h;
+    const { aspects, models, cells } = data;
+    const byKey = new Map(cells.map((c) => [JSON.stringify([c.model, c.aspect]), c]));
+    const cols = `grid-template-columns:180px repeat(${aspects.length},minmax(0,1fr))`;
+    const head = `<div class="cvhead" style="${cols}"><span>model</span>${aspects.map((a) => `<span data-href="#/perf/aspect/${enc(a)}" title="${esc(a)}">${esc(a.slice(0, 5))}</span>`).join("")}</div>`;
+    const rows = models.map((m) => `<div class="cvrow" data-href="#/perf/model/${enc(m)}" style="${cols}"><span class="cvname">${esc(m)}</span>${aspects.map((a) => {
+      const c = byKey.get(JSON.stringify([m, a])) || { n: 0 };
+      const kind = c.n === 0 ? " none" : c.provisional ? " prov" : "";
+      const depth = kind ? "" : ` style="--cv:${(Math.min(c.n, 120) / 120).toFixed(2)}"`;
+      return `<span class="cvcell${kind}"${depth} title="${esc(m)} · ${esc(a)} · n=${c.n}">${c.n}</span>`;
+    }).join("")}</div>`).join("");
+    return `<div class="covtable">${head}${rows}</div>`;
   }
 
   // A legend row always accompanies >=2 series (six outcome buckets here) —
@@ -175,25 +194,41 @@
   // fact card when nothing is measured. Draws only: multipliers, bands and verdicts
   // arrive from the server's costView().
   const name = (s) => s.provider || "unqualified";
-  function costScreen(data, h, pick) {
-    const { enc, seg } = h;
+  const noCost = () => `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
+  // The providers with something to draw, superseded rows dropped. Split out because
+  // both cost screens need it and a second copy would be a second answer to "which
+  // providers are on this screen".
+  function costSections(data) {
     const all = data.sections?.length ? data.sections : [{
       provider: null, points: data.points || [], spread: data.spread || [], best: data.best, worst: data.worst,
     }];
-    const sections = all.map((s) => ({
+    return all.map((s) => ({
       ...s,
       points: s.points.filter((p) => !p.supersededBy),
       spread: s.spread.filter((r) => !r.supersededBy),
     })).filter((s) => s.points.length || s.spread.length);
-    if (!sections.length) {
-      return `<div class="empty">no cost history yet — the derivation starts when a live usage fetch banks weekly segments.</div>`;
-    }
+  }
+  function costScreen(data, h, pick) {
+    const { enc, seg } = h;
+    const sections = costSections(data);
+    if (!sections.length) return noCost();
     const section = sections.find((s) => name(s) === pick) || sections[0];
     // One page per provider, switched like Performance's views — multipliers never
     // compare across providers. The card names this provider's best value; without
     // one it says why, never the cheapest instead.
     const switcher = seg(sections.map((s) => ({ label: name(s), href: `#/cost/${enc(name(s))}`, icon: providerLogo(name(s)) })), sections.indexOf(section));
     return switcher + costSection(section, data, h);
+  }
+
+  // Every provider at once, for a window wide enough to hold them side by side — the
+  // phone's switcher can only show one. The switcher still renders (desktop.css hides
+  // it) so both screens share this markup and its tests.
+  function costAll(data, h) {
+    const { enc, seg } = h;
+    const sections = costSections(data);
+    if (!sections.length) return noCost();
+    const switcher = seg(sections.map((s) => ({ label: name(s), href: `#/cost/${enc(name(s))}`, icon: providerLogo(name(s)) })), 0);
+    return switcher + `<div class="costgrid">${sections.map((s) => `<div class="costcol">${costSection(s, data, h)}</div>`).join("")}</div>`;
   }
 
   // One provider cost page: its value hero, then a ranked card per model, or one fact card.
@@ -348,5 +383,5 @@
     return { tabs, hero, cards };
   }
 
-  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelSummary, modelDashboard, costScreen, costSection, usageScreen, usageParts };
+  window.perfViews = { coverageGrid, reliabilityBars, leadersList, rankScreen, modelSummary, modelDashboard, costScreen, costAll, costSection, usageScreen, usageParts };
 })();

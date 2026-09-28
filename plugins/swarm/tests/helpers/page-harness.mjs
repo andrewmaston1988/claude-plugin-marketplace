@@ -22,6 +22,7 @@ import { PAGE, pageHtml } from "../../src/serve/page-assets.mjs";
 export { PAGE };
 const LIVE_JS = readFileSync(fileURLToPath(new URL("../../src/serve/live.js", import.meta.url)), "utf8");
 const PERF_JS = readFileSync(fileURLToPath(new URL("../../src/serve/perf.js", import.meta.url)), "utf8");
+const DESKTOP_JS = readFileSync(fileURLToPath(new URL("../../src/serve/desktop.js", import.meta.url)), "utf8");
 const LOGOS_JS = logosScript();
 
 // ── mini-DOM ─────────────────────────────────────────────────────────────
@@ -137,20 +138,44 @@ function parseHtml(markup, ids) {
 
 // ── the page under test ──────────────────────────────────────────────────
 export function loadPage(opts = {}) {
+  const html = pageHtml();
   // Every inline <script> of the served page, in order; <script src> tags load through head.appendChild.
-  const scripts = [...pageHtml().matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
 
   const ids = new Map();
   const hdr = makeElement("header", ids); hdr.setAttribute("id", "hdr");
   const main = makeElement("main", ids); main.setAttribute("id", "main");
-  const nav = makeElement("nav", ids); nav.setAttribute("id", "nav");
+  // The nav is booted from the served markup, not stubbed: the desktop sidebar re-styles
+  // this element and the Overview link and the run count live inside it, so an empty
+  // element would let a desktop test assert nothing.
+  const navMarkup = html.match(/<nav id="nav"[^]*?<\/nav>/);
+  const nav = navMarkup ? parseHtml(navMarkup[0], ids).childNodes.find((n) => n.nodeType === 1) : makeElement("nav", ids);
+  const navLink = (href) => {
+    let found = null;
+    (function walk(n) {
+      if (found || n.nodeType !== 1) return;
+      if (n.tagName === "A" && n.getAttribute("href") === href) { found = n; return; }
+      for (const c of n.childNodes) walk(c);
+    })(nav);
+    return found;
+  };
   // The compound nav selector: a pre-resolved stub, since querySelector here only resolves ids.
-  const chrome = { "#nav a[href='#/perf']": makeElement("a", ids) };
+  const chrome = { "#nav a[href='#/perf']": navLink("#/perf") || makeElement("a", ids) };
 
-  const location = { hash: "", search: "", origin: "http://localhost" };
+  const location = {
+    hash: "", search: "", origin: "http://localhost",
+    // Decision 3's redirects replace the entry; only the fragment matters here.
+    replace(u) { const s = String(u), i = s.indexOf("#"); location.hash = i < 0 ? "" : s.slice(i); },
+  };
   const winListeners = {};
   const scrolls = [];
-  const window = { addEventListener: (t, f) => { (winListeners[t] ||= []).push(f); }, scrollTo: (x, y) => scrolls.push([x, y]) };
+  // Decision 1's single source: --layout is what desktop.css sets and isDesktop() reads,
+  // so the stub answers exactly that property and nothing else. A function lets a test
+  // narrow the window mid-session and drive the resize listener.
+  const layoutNow = typeof opts.layout === "function" ? opts.layout : () => opts.layout;
+  const getComputedStyle = () => ({ getPropertyValue: (name) => (name === "--layout" && layoutNow() === "desktop" ? " desktop" : "") });
+  const documentElement = makeElement("html", ids);
+  const window = { addEventListener: (t, f) => { (winListeners[t] ||= []).push(f); }, scrollTo: (x, y) => scrolls.push([x, y]), getComputedStyle };
   let esListeners = {};
   const esInstances = [];
   const fetchLog = [];
@@ -173,6 +198,7 @@ export function loadPage(opts = {}) {
   const context = {}; // closed over by the document stub below
   const document = {
     title: "swarm",
+    documentElement,
     querySelector: (sel) => (sel.startsWith("#") && !sel.includes(" ") && ids.has(sel.slice(1))) ? ids.get(sel.slice(1)) : (chrome[sel] || makeElement("div", ids)),
     createElement: (tag) => makeElement(tag, ids),
     // live.js, logos.js and perf.js really run in this context: the page needs
@@ -182,6 +208,7 @@ export function loadPage(opts = {}) {
       if (/live\.js(\?|$)/.test(s.src)) vm.runInContext(LIVE_JS, context, { filename: "live.js" });
       else if (/logos\.js(\?|$)/.test(s.src)) vm.runInContext(LOGOS_JS, context, { filename: "logos.js" });
       else if (/perf\.js(\?|$)/.test(s.src) && !opts.perfViews) vm.runInContext(PERF_JS, context, { filename: "perf.js" });
+      else if (/desktop\.js(\?|$)/.test(s.src)) vm.runInContext(DESKTOP_JS, context, { filename: "desktop.js" });
       s.onload && s.onload();
     } },
   };
@@ -196,7 +223,7 @@ export function loadPage(opts = {}) {
   };
   EventSource.CONNECTING = 0; EventSource.OPEN = 1; EventSource.CLOSED = 2;
 
-  Object.assign(context, { window, document, location, fetch, DOMParser, EventSource,
+  Object.assign(context, { window, document, location, fetch, DOMParser, EventSource, getComputedStyle,
     navigator: { vibrate: (p) => { vibrateCalls.push(p); return true; } },
     URLSearchParams, AbortController,
     // Intervals are captured like the timeouts — the page must not depend on
@@ -241,6 +268,8 @@ export function loadPage(opts = {}) {
       return null;
     } } })),
     fireHashchange: () => winListeners.hashchange.forEach((f) => f()),
+    // Decision 3's other half: the redirect fires on resize too, not only on route.
+    fireResize: () => (winListeners.resize || []).forEach((f) => f()),
     fireSse: (t, d) => (esListeners[t] || []).forEach((f) => f({ data: d || "{}" })),
     esCount: () => esInstances.length,
     // Drives the CURRENT (latest) EventSource — the one page.html's connect() just

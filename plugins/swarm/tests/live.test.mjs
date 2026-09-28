@@ -81,6 +81,8 @@ test("runEnded/shouldPoll: each terminal field on its own, a run not yet fetched
   }
   assert.equal(shouldPoll({ name: "run" }, null, 0), false, "no run fetched yet");
   assert.equal(shouldPoll({ name: "runs" }, null, 0), true, "the estate view has no single run to end");
+  // Overview is the estate at desktop widths: same list, same poll.
+  assert.equal(shouldPoll({ name: "overview" }, null, 0), true, "Overview polls the estate too");
 });
 
 test("projectOrder: live projects rank by newest live startedMs, not mtime; finished-only projects trail, by mtime (L8)", () => {
