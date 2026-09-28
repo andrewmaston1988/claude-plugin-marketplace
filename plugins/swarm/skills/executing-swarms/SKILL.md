@@ -342,7 +342,7 @@ The shape is now fixed. The three steps that follow it live in `swarm:swarm` and
 restated here, because a second copy of a consent rule is a copy that rots:
 
 - **Models** — `swarm models` for the launchable names, `swarm quota` whenever the mix
-  includes Claude leaves. [Tier and effort guidance](../swarm/references/model-selection.md).
+  includes Claude leaves. Seat from `swarm perf --overall` and `swarm cost`.
 - **Validate** — `swarm validate <manifest.json>`. Fix what it names and re-validate; its
   errors name the field, the fix, and an example. Never carry an unvalidated manifest to the gate.
 - **The offer gate** — `swarm:swarm` → *MANDATORY first step*. Its answer — or, under

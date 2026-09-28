@@ -165,10 +165,11 @@ test("T10 — resume carve-out is in swarm gate, three branches, and absent from
 
 // ---- T11: tier partition present, defers tier judgement, no model names in prose ----
 
-test("T11 — tier partition defers to swarm's own tier guide with both asymmetry directions", () => {
+test("T11 — tier partition defers to swarm's graded tools with both asymmetry directions", () => {
   const content = read(NEW_SKILL);
-  // arm (a) — the guide lives in this plugin; a cross-plugin pointer breaks standalone installs
-  ok(content.includes("../swarm/references/model-selection.md"), "defers tier judgement to swarm's references/model-selection.md");
+  // arm (a) — tier judgement uses swarm's graded tools, not a cross-plugin pointer
+  ok(content.includes("swarm perf --overall") && content.includes("swarm cost"), "defers tier judgement to swarm's graded tools");
+  ok(!content.includes("model-selection.md"), "does not link the retired model-selection reference");
   ok(!content.includes("pipeline:model-selection"), "no pointer into the pipeline plugin");
   match(content, /one pin|single model|one model pin/i);
   match(content, /upward/i);

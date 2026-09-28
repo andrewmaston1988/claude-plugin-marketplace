@@ -780,7 +780,7 @@ async function cmdPerf(rest) {
     }
     return new Map([...grouped].map(([name, list]) => [name, list.length === 1 ? list[0] : { providerLocal: true }]));
   };
-  const LEGEND = "    cost $/$$/$$$ = meter weight band vs the cheapest measured model (swarm cost) · * on the quality/cost frontier · dom <model> = a better AND cheaper model exists · provider-local = multiple providers for this model · — not yet measured";
+  const LEGEND = "    cost $/$$/$$$ = meter weight band vs the cheapest measured model (swarm cost) · * on the quality/cost frontier · dom <model> = a better AND cheaper model exists · provider-local = multiple providers for this model · — unmeasured, not free · seat from the frontier, never by quality÷cost";
   const filters = Object.entries(report.filters).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" · ");
   // Lines and rows differ after a re-grade: the store is append-only and the
   // newest row per (resultsDir, leaf) wins, so say both rather than let the raw

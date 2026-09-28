@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { ok } from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -54,7 +54,6 @@ test("SKILL.md scopes the dispatch-gate promise to the host that enforces it", (
 
 test("swarm reference docs keep the guidance no command prints", () => {
   const roster = read("reading-the-roster.md");
-  const modelSelection = read("model-selection.md");
 
   const required = [
     ["reading-the-roster.md", roster, "⚠ quiet"],
@@ -76,14 +75,68 @@ test("swarm reference docs keep the guidance no command prints", () => {
     ["reading-the-roster.md", roster, "`costUsd`"],
     ["reading-the-roster.md", roster, "The activity cell"],
     ["reading-the-roster.md", roster, "One leaf far slower than its siblings"],
-    ["model-selection.md", modelSelection, "The seating rule is the method, not a list:"],
-    ["model-selection.md", modelSelection, "manifest preview in the offer gate"],
-    ["model-selection.md", modelSelection, "~+45% cost"],
-    ["model-selection.md", modelSelection, "Anti-patterns to refuse"],
-    ["model-selection.md", modelSelection, "cost lives on the Anthropic subscription"],
   ];
 
   for (const [file, content, needle] of required) {
     ok(content.includes(needle), `${file} must keep: ${needle}`);
   }
 });
+
+const swarmRoot = join(root, "plugins", "swarm");
+const skillsRoot = join(swarmRoot, "skills");
+const source = (name) => readFileSync(join(swarmRoot, name), "utf8");
+
+function skillFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    return entry.isDirectory() ? skillFiles(path) : [path];
+  });
+}
+
+test("retired model-selection reference is absent", () => {
+  ok(!existsSync(join(refs, "model-selection.md")), "model-selection.md must be deleted");
+});
+
+test("no swarm skill links the retired model-selection reference", () => {
+  const links = skillFiles(skillsRoot).filter((path) => /\.(md|mjs)$/.test(path) && readFileSync(path, "utf8").includes("model-selection.md"));
+  ok(links.length === 0, `skills still link model-selection.md: ${links.join(", ")}`);
+});
+
+test("perf legend seats from the frontier, never by quality divided by cost", () => {
+  const legend = source("scripts/swarm.mjs").match(/const LEGEND = "([^"]+)";/)?.[1] || "";
+  ok(legend.includes("seat from the frontier, never by quality÷cost"), `legend lacks the seating rule: ${legend}`);
+});
+
+test("perf legend calls an em dash unmeasured, not free", () => {
+  const legend = source("scripts/swarm.mjs").match(/const LEGEND = "([^"]+)";/)?.[1] || "";
+  ok(legend.includes("— unmeasured, not free"), `legend mislabels unmeasured cost: ${legend}`);
+});
+
+test("setup routes an empty graded record to model descriptions", () => {
+  const setup = read("setup.md");
+  ok(setup.includes("swarm models") && setup.includes("descriptions"), "setup must route to swarm models descriptions");
+  ok(!setup.includes("the tier guide routes models"), "setup must retire the tier-guide fallback");
+});
+
+test("swarm procedure preserves the Claude capability exception", () => {
+  const step = skill().split("\n").find((line) => line.startsWith("1. **Discover models**")) || "";
+  ok(step.includes("Claude tier") && step.includes("capability"), `step 1 lacks the Claude-tier capability exception: ${step}`);
+});
+
+test("swarm procedure falls back to descriptions without grades", () => {
+  const step = skill().split("\n").find((line) => line.startsWith("1. **Discover models**")) || "";
+  ok(step.includes("no graded record") && step.includes("swarm models") && step.includes("descriptions"), `step 1 lacks the no-graded-record fallback: ${step}`);
+});
+
+for (const [level, description] of [
+  ["low", "quick mechanical work"],
+  ["medium", "balanced reasoning"],
+  ["high", "cross-file invariants"],
+  ["xhigh", "hard cases between high and max"],
+  ["max", "depth-bound reasoning"],
+]) {
+  test(`manifest effort describes ${level}`, () => {
+    const fields = source("skills/swarm/manifest-fields.md");
+    ok(fields.includes(`**${level}** — ${description}`), `Effort must describe ${level} as ${description}`);
+  });
+}

@@ -144,8 +144,8 @@ dependency graph is sparse and the tier column is not, the **pin cut usually set
 count**.
 
 **Which tier an item deserves is not this skill's question —
-[the swarm tier guide](../swarm/references/model-selection.md) owns that judgement.** This section owns only what a pin *boundary* does to the agent count. Do not
-restate the tier guide here.
+the graded record in `swarm perf --overall` and `swarm cost` owns that judgement.** This section owns only what a pin *boundary* does to the agent count. Do not
+restate the graded record here.
 
 Merging across a tier boundary is not free, and the two directions are not symmetrical:
 
