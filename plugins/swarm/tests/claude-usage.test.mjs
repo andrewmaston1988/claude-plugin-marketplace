@@ -151,13 +151,54 @@ test("readClaudeUsage: a stale live reading keeps checkQuota's asOfMs, not the r
   }
 });
 
+// `swarm usage --provider claude` is the documented refresh, so the cache's own
+// age must not stop it: the caller asked for the endpoint's answer, not a banked one.
+test("readClaudeUsage: force reads live through a fresh quota cache", async () => {
+  const home = tmpHome();
+  try {
+    writeFileSync(join(home, "quota-cache.json"),
+      JSON.stringify({ fetchedAt: NOW - 10_000, result: structuredClone(HEADROOM) }));
+    const creds = join(home, "creds.json");
+    writeFileSync(creds, JSON.stringify({ claudeAiOauth: { accessToken: "tok" } }));
+
+    let fetches = 0;
+    const ctx = {
+      env: { SWARM_HOME: home, SWARM_CREDENTIALS: creds },
+      now: () => NOW,
+      usageOptIn: true,
+      fetch: async () => {
+        fetches++;
+        return { ok: true, json: async () => ({ limits: [{ kind: "session", percent: 42, resets_at: "2026-09-21T16:00:00Z" }] }) };
+      },
+    };
+
+    const banked = await readClaudeUsage(ctx);
+    equal(banked.provenance, "cache", "without force the fresh cache answers, and nothing is fetched");
+    equal(fetches, 0);
+
+    const forced = await readClaudeUsage({ ...ctx, force: true });
+    equal(fetches, 1, "RED: force never reached checkQuota, so the fresh cache answered the refresh");
+    equal(forced.provenance, "live");
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 // usage.mjs's own rule: an expired Claude cache is refilled by the CLI
 // unprompted, so the hook's reading is marked but stays SILENT — a reason here
 // would banner every prompt for a condition that fixes itself.
 test("readClaudeUsage: a stale cache in hook mode is marked none but carries no reason", async () => {
   const home = tmpHome();
   try {
-    writeFileSync(join(home, "quota-cache.json"), JSON.stringify({ ts: NOW - 400_000, result: structuredClone(HEADROOM) }));
+    const withFetchedAt = (fetchedAt) => writeFileSync(join(home, "quota-cache.json"),
+      JSON.stringify({ fetchedAt, result: structuredClone(HEADROOM) }));
+
+    // Fresh first: the envelope provably parses, so the reading below can only
+    // fall to the TTL branch — never to a fixture written under the legacy key.
+    withFetchedAt(NOW - 10_000);
+    equal((await readClaudeUsage({ env: { SWARM_HOME: home }, now: NOW, usageOptIn: false })).provenance, "cache");
+
+    withFetchedAt(NOW - 400_000); // past the 5-minute Anthropic TTL
     const snap = await readClaudeUsage({ env: { SWARM_HOME: home }, now: NOW, usageOptIn: false });
     equal(snap.provenance, "none");
     equal(snap.reason, undefined, "the TTL refills silently; a reason would banner the hook");

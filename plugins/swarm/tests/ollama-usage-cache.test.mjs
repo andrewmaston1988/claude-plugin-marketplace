@@ -6,7 +6,8 @@ import { equal, deepEqual, ok } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { SETTINGS_URL, fetchUsage, getUsage, saveCookie, usageCachePath, usageFromCache, recordUsageError } from "../src/ollama-usage.mjs";
+import { SETTINGS_URL, fetchUsage, getUsage, saveCookie, usageFromCache, recordOllamaUsageError } from "../src/ollama-usage.mjs";
+import { usageCachePath } from "../src/usage-cache.mjs";
 
 const FIXTURE = readFileSync(join(import.meta.dirname, "fixtures", "ollama-settings.html"), "utf8");
 
@@ -23,7 +24,7 @@ const SIX_MIN = 6 * 60_000; // one minute past the 5-minute TTL
 // The reading the cache holds, wrapped in the envelope usage-cache owns: the
 // classified result, and when it was fetched.
 function cacheFixture(home, reading, { fetchedAt, ...extra } = {}) {
-  const p = usageCachePath({ SWARM_HOME: home });
+  const p = usageCachePath("ollama", { SWARM_HOME: home });
   writeFileSync(p, JSON.stringify({ fetchedAt, result: reading, ...extra }));
   return p;
 }
@@ -38,7 +39,7 @@ test("getUsage: H9 a successful fetch is provenance live, classified through the
     equal(r.state, "ok");
     equal(r.weeklyPctUsed, 83.8);
     // the cache was written and carries the reading back out
-    deepEqual(JSON.parse(readFileSync(usageCachePath({ SWARM_HOME: home }), "utf8")).fetchedAt, FIFTY);
+    deepEqual(JSON.parse(readFileSync(usageCachePath("ollama", { SWARM_HOME: home }), "utf8")).fetchedAt, FIFTY);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -62,7 +63,7 @@ test("getUsage: H10 an expired cache whose refresh fails is provenance stale, na
     equal(r.weeklyPctUsed, 8.1, "the figure survives as last-known context");
     equal(r.state, "ok");
     // the failure note rides beside the reading, without re-stamping it
-    const cached = JSON.parse(readFileSync(usageCachePath({ SWARM_HOME: home }), "utf8"));
+    const cached = JSON.parse(readFileSync(usageCachePath("ollama", { SWARM_HOME: home }), "utf8"));
     equal(cached.lastError, "expired-cookie");
     equal(cached.fetchedAt, age, "fetchedAt is never re-stamped by a failure");
   } finally {
@@ -185,15 +186,15 @@ test("fetchUsage: H16 honors an overridden url (settingsUrl seam) and passes an 
   ok(seen.signal instanceof AbortSignal, "the timeout signal is passed to the fetch");
 });
 
-test("recordUsageError: H17 merges beside the reading; absent or corrupt cache is left alone", () => {
+test("recordOllamaUsageError: H17 merges beside the reading; absent or corrupt cache is left alone", () => {
   const home = tempHome();
   try {
-    const p = usageCachePath({ SWARM_HOME: home });
-    recordUsageError(p, "expired-cookie", 5);
+    const p = usageCachePath("ollama", { SWARM_HOME: home });
+    recordOllamaUsageError(p, "expired-cookie", 5);
     ok(!existsSync(p), "no cache, no note — the error only matters beside a reading");
 
     writeFileSync(p, JSON.stringify({ fetchedAt: 111, result: { state: "ok", weeklyPctUsed: 40 } }));
-    recordUsageError(p, "expired-cookie", 222);
+    recordOllamaUsageError(p, "expired-cookie", 222);
     const merged = JSON.parse(readFileSync(p, "utf8"));
     deepEqual(merged.result, { state: "ok", weeklyPctUsed: 40 }, "the reading is untouched");
     equal(merged.fetchedAt, 111, "fetchedAt untouched");
@@ -201,7 +202,7 @@ test("recordUsageError: H17 merges beside the reading; absent or corrupt cache i
     equal(merged.lastErrorAt, 222);
 
     writeFileSync(p, "{not json");
-    recordUsageError(p, "network-error", 333);
+    recordOllamaUsageError(p, "network-error", 333);
     equal(readFileSync(p, "utf8"), "{not json", "a corrupt cache is never overwritten");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -226,6 +227,23 @@ test("usageFromCache: H18 a fresh reading is `cached`, an aged one `stale`, both
     equal(stale.provenance, "stale");
     equal(stale.reason, "expired-cookie", "the banked failure is the reason the hook cannot fetch for");
     equal(stale.lastSeen, aged);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+// A banked failure explains why an AGED figure is old. A reading inside its TTL
+// was not affected by that failure, so the banner it feeds must stay off it.
+test("usageFromCache: H19 a fresh reading carries no banked failure as its reason", () => {
+  const home = tempHome();
+  try {
+    const cfg = { provider: { cloud: { ollama: { enabled: true } } } };
+    cacheFixture(home, { state: "ok", weeklyPctUsed: 40, resetsAt: "R" },
+      { fetchedAt: Date.now() - 60_000, lastError: "expired-cookie", lastErrorAt: 7 });
+    const fresh = usageFromCache(cfg, { SWARM_HOME: home });
+    equal(fresh.provenance, "cached");
+    equal(fresh.reason, null, "RED: a banked failure bannered a reading it never affected");
+    equal(fresh.weeklyPctUsed, 40);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

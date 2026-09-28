@@ -9,11 +9,11 @@ import { dirname, join } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { parseHtml } from "./minidom.mjs";
 import { appendSnapshot, usageHistoryPath } from "./cost.mjs";
-import { usageReading, cachedUsageReading, recordUsageError as recordCacheError } from "./usage-cache.mjs";
+import { usageCachePath, usageReading, cachedUsageReading, recordUsageError as recordCacheError } from "./usage-cache.mjs";
 
 export const SETTINGS_URL = "https://ollama.com/settings"; // like quota.mjs's DEFAULT_USAGE_URL
 
-const USAGE_CACHE_FILENAME = "ollama-usage.json";
+const PROVIDER = "ollama";
 const DEFAULT_TIMEOUT_MS = 5000;
 const METER_POINTS_UNIT = "meter-points";
 
@@ -25,10 +25,6 @@ export function ollamaCloudConfig(cfg = {}) {
 
 function ollamaProviderConfig(cfg = {}) {
   return cfg?.providers?.ollama || cfg?.provider || {};
-}
-
-export function usageCachePath(env = process.env) {
-  return join(swarmHome(env), USAGE_CACHE_FILENAME);
 }
 
 // The browser-cookie credential lives in its own file, never in config.json —
@@ -230,29 +226,23 @@ function classify(cached) {
 // that hold a path need not know the provider id. The envelope rule — a note
 // lands beside an existing reading, never over a corrupt one — lives in
 // usage-cache, which owns the file.
-export function recordUsageError(cachePath, reason, at = Date.now()) {
-  return recordCacheError("ollama", reason, { cachePath, at });
+export function recordOllamaUsageError(cachePath, reason, at = Date.now()) {
+  return recordCacheError(PROVIDER, reason, { cachePath, at });
 }
 
-// The single entry point callers that CAN afford a fetch use. The file's own
-// 5-minute TTL is what de-duplicates a five-seat manifest now: every seat's
-// read lands inside one window and the same reading answers them, so there is
-// no in-process memo. On success the reading is `live`; a fetch that fails
-// leaves the last reading marked `stale`; `none` when there is no reading at
-// all. `gate` mirrors usageFromCache's enabled-check; the `ollama-usage`
-// subcommand passes `gate: false` because fetching is that subcommand's job
-// even before ollama is enabled. Absent config => `{ state: "unknown" }`: a
-// user who has never heard of ollama must meet nothing, not an error.
+// The single entry point callers that CAN afford a fetch use. No in-process
+// memo: the file's 5-minute TTL is what de-duplicates a five-seat manifest.
+// Provenance: `live`, `cached` (inside the TTL), `stale` (refresh failed), `none`.
 export async function getUsage(cfg, { env = process.env, _fetch = fetch, _now = Date.now, gate = true, force = false } = {}) {
   const cloud = ollamaCloudConfig(cfg);
   const provider = ollamaProviderConfig(cfg);
   if (gate && cloud.enabled !== true) return { state: "unknown" };
 
   const cookiePath = cloud.cookiePath || join(swarmHome(env), "ollama-cookie.json");
-  const cachePath = usageCachePath(env);
+  const cachePath = usageCachePath(PROVIDER, env);
   let failure = null;
 
-  const reading = await usageReading("ollama", {
+  const reading = await usageReading(PROVIDER, {
     env, cachePath, now: _now, force,
     fetchLive: async () => {
       const fetched = await fetchUsage({
@@ -264,7 +254,7 @@ export async function getUsage(cfg, { env = process.env, _fetch = fetch, _now = 
       });
       if (!fetched.ok) {
         failure = fetched.reason;
-        recordCacheError("ollama", fetched.reason, { cachePath, at: _now() });
+        recordCacheError(PROVIDER, fetched.reason, { cachePath, at: _now() });
         return null;
       }
       bankWeeklySnapshot(fetched, env);
@@ -309,11 +299,14 @@ export function usageFromCache(cfg, env = process.env) {
   const cloud = ollamaCloudConfig(cfg);
   if (cloud.enabled !== true) return { state: "unknown" };
 
-  const reading = cachedUsageReading("ollama", { env });
+  const reading = cachedUsageReading(PROVIDER, { env });
   if (!reading) return { state: "unknown" };
+  // The banked failure explains why an AGED figure is old; a reading inside its
+  // TTL was not affected by it, so only a stale one may carry the banner.
+  const reason = reading.provenance === "stale" ? (reading.lastError ?? null) : null;
   return {
     ...reading,
-    reason: reading.lastError ?? null,
+    reason,
     lastSeen: reading.fetchedAt,
     cookiePath: cloud.cookiePath || join(swarmHome(env), "ollama-cookie.json"),
   };

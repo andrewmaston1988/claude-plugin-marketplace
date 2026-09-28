@@ -71,6 +71,9 @@ export async function readClaudeUsage(context = {}) {
     credentialsPath: env?.SWARM_CREDENTIALS,
     cachePath,
     now: () => nowMs,
+    // `swarm usage --provider claude` is the documented refresh, so forced reads
+    // must bypass a cache written seconds ago.
+    force: context.force === true,
   });
   if (!q || !q.limits?.length) {
     return marked("anthropic usage endpoint unreachable, or no Claude Code credentials", new Date(nowMs).toISOString());

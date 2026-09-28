@@ -4,9 +4,10 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, mkdirSyn
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  SETTINGS_URL, fetchUsage, parseUsage, readUsage, usageFromCache, usageCachePath,
+  SETTINGS_URL, fetchUsage, parseUsage, readUsage, usageFromCache,
   saveCookie, loadCookie, getUsage,
 } from "../src/ollama-usage.mjs";
+import { usageCachePath } from "../src/usage-cache.mjs";
 import { parseHtml } from "../src/minidom.mjs";
 import { usageHistoryPath, readSnapshots } from "../src/cost.mjs";
 import { initConfig } from "../src/config.mjs";
@@ -67,7 +68,7 @@ test("usageFromCache: H6 never throws — missing path, or the path is a directo
     const cfg = { provider: { cloud: { ollama: { enabled: true } } } };
     deepEqual(usageFromCache(cfg, { SWARM_HOME: home }), { state: "unknown" });
 
-    const cachePath = usageCachePath({ SWARM_HOME: home });
+    const cachePath = usageCachePath("ollama", { SWARM_HOME: home });
     mkdirSync(cachePath, { recursive: true });
     deepEqual(usageFromCache(cfg, { SWARM_HOME: home }), { state: "unknown" });
     rmSync(cachePath, { recursive: true, force: true });
@@ -96,7 +97,7 @@ test("usageFromCache: H7 — provider.cloud absent / ollama absent / enabled fal
   try {
     // A valid, fresh cache on disk proves the gate short-circuits BEFORE
     // reading it — not that the file happens to be missing.
-    writeFileSync(usageCachePath({ SWARM_HOME: home }), JSON.stringify({ weeklyPctUsed: 42, weeklyResetsAt: "R", fetchedAt: Date.now() }));
+    writeFileSync(usageCachePath("ollama", { SWARM_HOME: home }), JSON.stringify({ weeklyPctUsed: 42, weeklyResetsAt: "R", fetchedAt: Date.now() }));
 
     deepEqual(usageFromCache({}, { SWARM_HOME: home }), { state: "unknown" });
     deepEqual(usageFromCache({ provider: {} }, { SWARM_HOME: home }), { state: "unknown" });
