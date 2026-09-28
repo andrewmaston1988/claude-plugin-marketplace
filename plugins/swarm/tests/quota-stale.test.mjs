@@ -72,14 +72,20 @@ test("the Claude adapter reports a held-over reading as provenance stale, dated 
   equal(snap.asOf, new Date(T0).toISOString());
 });
 
-// A refusal nobody writes down leaves "stale" with no cause: a 1h hold on a 1h28m-old
-// reading could not be explained (operator 2026-09-28). Every failed read says why.
+test("the Claude adapter carries a stale reading's failure reason onto its snapshot", async () => {
+  const { readClaudeUsage } = await import("../src/claude-usage.mjs");
+  const snap = await readClaudeUsage({ usageOptIn: true, now: T0 + 60 * 60_000,
+    quotaCheck: async () => ({ limits: [{ kind: "session", percent: 40 }], source: "stale", asOfMs: T0, reason: "HTTP 429" }) });
+  equal(snap.reason, "HTTP 429", "RED: the cause must reach the banner");
+});
+
 test("a failed read records why beside the reading it kept", async () => {
   const s = setup();
   try {
     await checkQuota(s.opts(T0));
     s.setReply({ ok: false, status: 503, headers: { get: () => null } });
-    await checkQuota(s.opts(T0 + 10 * 60_000));
+    const q = await checkQuota(s.opts(T0 + 10 * 60_000));
+    equal(q.reason, "HTTP 503", "RED: the reading served after a failed read names why");
     const env = JSON.parse(readFileSync(join(s.home, "q.json"), "utf8"));
     equal(env.lastError, "HTTP 503", "the refusal is recorded");
     equal(env.lastErrorAt, T0 + 10 * 60_000);

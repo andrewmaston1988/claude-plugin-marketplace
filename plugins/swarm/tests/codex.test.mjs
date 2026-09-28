@@ -426,8 +426,7 @@ test("Codex runner parser registry exposes both provider factories", () => {
 // refusal, not a pass — nothing else here would notice a logged-out Codex.
 test("Codex preflight reads usage unasked, and refuses only a spent account", async (t) => {
   const adapter = createCodexProviderAdapter();
-  // Every read here is forced live and banked, so it banks into a home of its own —
-  // never the operator's, where a stub's figures would pass for real ones.
+  // Forced live reads bank; keep them out of the real swarm home.
   const home = mkdtempSync(join(tmpdir(), "swarm-codex-preflight-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   const context = { config: { providers: { codex: { enabled: true } } }, cachePath: join(home, "codex-usage.json") };

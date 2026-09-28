@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createCodexProviderAdapter } from "../src/codex.mjs";
 import { readUsageEnvelope, writeUsageReading } from "../src/usage-cache.mjs";
+import { normalizeProviderUsage, provenanceBanner } from "../src/usage.mjs";
 
 const T0 = 1_700_000_000_000;
 const CONFIG = { providers: { codex: { enabled: true } } };
@@ -94,6 +95,23 @@ test("B4 with nothing banked, a failed read still names its reason and writes no
     equal(reading.provenance, "none");
     equal(reading.buckets[0].reason, "spawn codex ENOENT", "the cause reaches the caller");
     equal(readUsageEnvelope("codex", { cachePath }), null, "RED: a failure is never banked as a reading");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("B5 a stale reading served after a failed read carries the failure as its reason", async () => {
+  const dir = tmpDir();
+  try {
+    const cachePath = join(dir, "codex-usage.json");
+    writeUsageReading("codex", { fetchedAt: T0 - 60 * 60_000, result: { provider: "codex", buckets: [] } }, { cachePath });
+    const reading = await createCodexProviderAdapter().capabilities.readUsage({
+      config: CONFIG, client: deadClient, cachePath, now: () => T0,
+    });
+    equal(reading.provenance, "stale");
+    equal(reading.reason, "spawn codex ENOENT", "RED: the served reading names why the refresh failed");
+    const banner = provenanceBanner(normalizeProviderUsage("codex", reading), { now: T0 }).join("\n");
+    ok(banner.includes("did not answer"), banner);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

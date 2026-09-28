@@ -103,7 +103,8 @@ function staleReading(reading, nowMs) {
     percent: l.resetsAt && Date.parse(l.resetsAt) <= nowMs ? 0 : l.percent,
     scope: l.scope ? { model: { display_name: l.scope } } : null,
   }));
-  return { ...parseUsageLimits({ limits }), source: "stale", asOfMs: reading.fetchedAt };
+  return { ...parseUsageLimits({ limits }), source: "stale", asOfMs: reading.fetchedAt,
+    ...(reading.reason && { reason: reading.reason }) };
 }
 
 // Cached best-effort quota check. The 5-minute TTL file lives under the swarm
