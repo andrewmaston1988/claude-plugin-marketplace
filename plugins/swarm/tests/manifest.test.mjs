@@ -134,6 +134,33 @@ test("mustRead without Read is refused, with the fix inline", () => {
   }
 });
 
+// Only a Claude leaf is confined to its built-ins: a codex leaf proves reads from its
+// shell, and an empty allowedTools resolves to the read-only default, which has Read.
+test("mustRead is not refused for a codex leaf, nor for an empty allowedTools", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "cx", provider: "codex", model: "gpt-6-luna", allowedTools: "Bash", mustRead: ["src/a.mjs"] }),
+      claudeTask({ id: "empty", allowedTools: "", mustRead: ["src/a.mjs"] }),
+    ] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir)).filter((e) => /mustRead needs/.test(e));
+    deepEqual(errs, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("allowedTools: the unknown-name refusal speaks for this engine, not the CLI", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ allowedTools: "Read,WebSurf" })] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir)).join("\n");
+    ok(/not a built-in this engine accepts/.test(errs), errs);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("mustRead beside a declared Read passes", () => {
   const dir = tmp();
   try {

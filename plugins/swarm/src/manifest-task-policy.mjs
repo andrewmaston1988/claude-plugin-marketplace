@@ -7,29 +7,26 @@ import { resolve, join } from "node:path";
 // Default leaf toolset is read-only; write capability must be asked for.
 export const DEFAULT_TOOLS = "Read,Grep,Glob";
 
-// Lowercase manifest spelling → the CLI's OWN spelling, for the built-ins a manifest
-// may name. One table, because `--tools` matches names EXACTLY: `--tools "read,grep"`
-// grants nothing at all, silently. Dispatch's `--tools` and the write-tool classifier
-// below must never disagree about a name.
+// Lowercase manifest spelling → the CLI's OWN spelling and whether the tool can write,
+// for the built-ins a manifest may name. One table, because `--tools` matches names
+// EXACTLY (`--tools "read,grep"` grants nothing, silently), and dispatch's `--tools`
+// and the write classifier that picks a leaf's tree must never disagree about a name.
+// PowerShell runs arbitrary commands exactly as Bash does, so it writes.
 export const BUILTIN_TOOLS = {
-  read: "Read",
-  grep: "Grep",
-  glob: "Glob",
-  edit: "Edit",
-  write: "Write",
-  bash: "Bash",
-  powershell: "PowerShell",
-  notebookedit: "NotebookEdit",
-  webfetch: "WebFetch",
-  websearch: "WebSearch",
-  lsp: "LSP",
-  skill: "Skill",
-  toolsearch: "ToolSearch",
+  read: { name: "Read", write: false },
+  grep: { name: "Grep", write: false },
+  glob: { name: "Glob", write: false },
+  edit: { name: "Edit", write: true },
+  write: { name: "Write", write: true },
+  bash: { name: "Bash", write: true },
+  powershell: { name: "PowerShell", write: true },
+  notebookedit: { name: "NotebookEdit", write: true },
+  webfetch: { name: "WebFetch", write: false },
+  websearch: { name: "WebSearch", write: false },
+  lsp: { name: "LSP", write: false },
+  skill: { name: "Skill", write: false },
+  toolsearch: { name: "ToolSearch", write: false },
 };
-
-// PowerShell runs arbitrary commands exactly as Bash does, so it is a write tool:
-// a `Read,PowerShell` leaf sharing the read-only snapshot could write into it.
-const WRITE_TOOLS = new Set(["edit", "write", "bash", "powershell", "notebookedit"]);
 
 // "Bash(git:*)" names the Bash tool; the pattern is a pre-approval, never a narrowing.
 const toolName = (t) => t.toLowerCase().replace(/\(.*\)$/, "");
@@ -47,7 +44,7 @@ export function builtinToolNames(allowedTools) {
     const bare = toolName(t);
     if (Object.hasOwn(BUILTIN_TOOLS, bare)) keys.add(bare);
   }
-  return [...keys].map((k) => BUILTIN_TOOLS[k]);
+  return [...keys].map((k) => BUILTIN_TOOLS[k].name);
 }
 
 // Names the CLI would silently match to nothing: not a built-in, not an MCP server.
@@ -67,7 +64,7 @@ export function declaresDefaultTool(allowedTools) {
 }
 
 export function hasWriteTools(allowedTools) {
-  return toolNames(allowedTools).some((t) => WRITE_TOOLS.has(toolName(t)));
+  return toolNames(allowedTools).some((t) => BUILTIN_TOOLS[toolName(t)]?.write === true);
 }
 
 // THE rule for which tree a task lives in, and the only one: a leaf that can write

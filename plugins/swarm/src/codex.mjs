@@ -5,6 +5,7 @@ import { modelDescriptor, runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
 import { providerConfig } from "./providers.mjs";
 import { normalizeForCompare } from "./roots.mjs";
+import { hasWriteTools } from "./manifest-task-policy.mjs";
 
 const DEFAULT_CLIENT_INFO = {
   name: "swarm",
@@ -348,7 +349,7 @@ function writeEffortArg(args, effort) {
 export function codexSandbox(task, context) {
   const cfg = providerConfig(context?.config || context?.cfg || {}, "codex");
   const writeCapable = task.write === true || task.writeCapable === true || task.worktreeName ||
-    /(?:^|,)(?:Write|Edit|Bash)(?:,|$)/.test(String(task.allowedTools || ""));
+    hasWriteTools(task.allowedTools);
   const sandbox = task.sandbox || (writeCapable ? (cfg.sandbox || "workspace-write") : "read-only");
   if (!["read-only", "workspace-write"].includes(sandbox)) {
     throw new Error(`Codex sandbox must be read-only or workspace-write, got '${sandbox}'`);

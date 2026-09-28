@@ -37,8 +37,9 @@ export function validateMustRead(rawTasks, errors, label) {
     }
     // allowedTools decides which built-ins the leaf HAS, so a leaf without Read can
     // never read what it must prove — the proof would fail every entry. Only a
-    // DECLARED set can fail this: silence defaults to Read,Grep,Glob, which has it.
-    if (t.allowedTools !== undefined && !builtinToolNames(t.allowedTools).includes("Read")) {
+    // DECLARED, non-empty set on a Claude leaf can fail this: silence and "" default to
+    // Read,Grep,Glob, and a codex leaf proves its reads from its shell.
+    if (t.provider !== "codex" && t.allowedTools && !builtinToolNames(t.allowedTools).includes("Read")) {
       errors.push(
         `${l}: mustRead needs the Read tool, which this task's allowedTools does not declare — ` +
         `the leaf could never read what it must prove.\n` +

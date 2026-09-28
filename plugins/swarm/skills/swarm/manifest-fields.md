@@ -6,13 +6,13 @@ these fields; the decision of *whether* to use them lives in SKILL.md.
 ### Where a leaf runs — the write tools decide
 
 **A leaf that can write gets its own tree; a leaf that cannot reads the live repo.** Claude
-`allowedTools` sets built-ins; unknown CLI names fail `validate`; `mustRead` needs `Read`.
+`allowedTools` sets built-ins; names this engine does not accept fail `validate`; `mustRead` needs `Read`.
 Codex uses it only to pick a sandbox.
 
 | The leaf holds | It runs in | Its branch |
 |---|---|---|
 | `Read,Grep,Glob` (the default) | the live repo, at the `cwd` it was given | none — it commits nothing |
-| `Edit`, `Write` or `Bash` | a private worktree on repo HEAD | `swarm/<run>/<id>`, scoped to this run |
+| `Edit`, `Write`, `NotebookEdit`, `Bash` or `PowerShell` | a private worktree on repo HEAD | `swarm/<run>/<id>`, scoped to this run |
 
 So granting `Bash` to a leaf moves it out of the live repo into a tree of its own. That is
 intended, and worth knowing when you add the tool.

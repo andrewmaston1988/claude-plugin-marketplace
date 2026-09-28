@@ -5,7 +5,7 @@ import { CONTEXT_WINDOWS } from "./contracts.mjs";
 import { BUILTIN_TOOLS, declaresDefaultTool, hasWriteTools, isAgentless, unknownToolNames } from "./manifest-task-policy.mjs";
 
 // Named in the unknown-tool error so a model-authored manifest can pick a real one.
-const BUILTIN_LIST = Object.values(BUILTIN_TOOLS).join(", ");
+const BUILTIN_LIST = Object.values(BUILTIN_TOOLS).map((t) => t.name).join(", ");
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const CLONE_ID_RE = /\[\d+\]$/;
@@ -139,9 +139,9 @@ export function validateTaskShapes(rawTasks, errors, label) {
       const unknown = unknownToolNames(t.allowedTools);
       if (unknown.length) {
         errors.push(
-          `${l}: allowedTools names ${unknown.map((n) => `'${n}'`).join(", ")}, which ${unknown.length === 1 ? "is not a built-in tool" : "are not built-in tools"} — ` +
-          `the CLI matches names exactly, so an unknown one silently grants nothing.\n` +
-          `    Built-ins are ${BUILTIN_LIST}, plus mcp__<server> names — e.g. "allowedTools": "Read,Grep,Glob"`
+          `${l}: allowedTools names ${unknown.map((n) => `'${n}'`).join(", ")}, which ${unknown.length === 1 ? "is not a built-in this engine accepts" : "are not built-ins this engine accepts"} — ` +
+          `a misspelt name would silently grant nothing, so it is refused here.\n` +
+          `    Accepted: ${BUILTIN_LIST}, plus mcp__<server> names — e.g. "allowedTools": "Read,Grep,Glob"`
         );
       }
     }

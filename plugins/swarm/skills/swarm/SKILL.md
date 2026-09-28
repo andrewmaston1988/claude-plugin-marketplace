@@ -267,7 +267,7 @@ a second manifest is almost never needed. Invoke it before drafting, alongside
 | Generation | `outputDir`; nothing to declare |
 | Implementation | write tools — results are branches to review; unchanged worktrees are removed, changed ones kept and listed in the summary. Its prompt carries the two required lines below |
 
-**The write tools decide where a leaf runs, and nothing else does.** A leaf holding `Edit`, `Write` or `Bash` gets a private worktree on HEAD, on a run-scoped branch `swarm/<run>/<id>`; a read-only leaf reads the live repo at the `cwd` it was given. Only a writer needs its `cwd` inside a git repo — a reader reads logs or a data dump outside any repo just as well.
+**The write tools decide where a leaf runs, and nothing else does.** A leaf holding `Edit`, `Write`, `NotebookEdit`, `Bash` or `PowerShell` gets a private worktree on HEAD, on a run-scoped branch `swarm/<run>/<id>`; a read-only leaf reads the live repo at the `cwd` it was given. Only a writer needs its `cwd` inside a git repo — a reader reads logs or a data dump outside any repo just as well.
 
 Name a `workspace` only when leaves must SHARE one tree, and a `branch` only when the branch name must be stable. Both are writer-only, both are omitted by the common case, and `swarm validate` names either if it is wrong.
 

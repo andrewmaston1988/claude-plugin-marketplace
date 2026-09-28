@@ -337,7 +337,7 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
                               # still has every session id on disk for resume to fall back to
 ```
 
-**A leaf's tree follows from its tools.** `Edit`/`Write`/`Bash` ⇒ a private worktree on repo
+**A leaf's tree follows from its tools.** `Edit`/`Write`/`NotebookEdit`/`Bash`/`PowerShell` ⇒ a private worktree on repo
 HEAD, on the run-scoped branch `swarm/<run>/<id>`; read-only ⇒ the live repo at the leaf's own
 `cwd`. Two optional keys refine it, both writer-only:
 
