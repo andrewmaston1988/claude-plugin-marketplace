@@ -123,8 +123,8 @@ export function resolveTarget(project, feature, projectDir, explicit, opts = {})
   const override = queryRow(project, feature, "target_branch");
   if (override) return { branch: override, tier: "row" };
 
-  // A plan naming the branch it works ON must not become the branch it merges INTO —
-  // the same guard a row value gets (merge.mjs ignores both, queue.mjs rewrites them).
+  // A plan naming the branch it works ON must not become the branch it merges INTO — the
+  // guard merge.mjs applies to a row value and queue.mjs applies before storing one.
   const planBranch = planTargetOf(project, feature, opts.plansDir);
   const source = opts.sourceBranch ?? `autonomous/${feature}`;
   if (planBranch && !planBranch.startsWith("autonomous/") && planBranch !== source) {
@@ -136,6 +136,7 @@ export function resolveTarget(project, feature, projectDir, explicit, opts = {})
   return { branch: git(["config", "init.defaultBranch"], projectDir) || "main", tier: "default" };
 }
 
+// The branch alone, for callers with no use for the tier.
 export function resolveTargetBranch(project, feature, projectDir, explicit, opts) {
   return resolveTarget(project, feature, projectDir, explicit, opts).branch;
 }
