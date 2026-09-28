@@ -1432,7 +1432,7 @@ test("validate: returns schemas join the approval preview; malformed ones exit 1
     const v = runCli(["validate", p], { cwd: dir, env: { SWARM_HOME: join(dir, "home") } });
     equal(v.status, 0, v.stderr);
     ok(v.stdout.includes("returns validated: scan"), v.stdout);
-    ok(v.stdout.includes("one corrective re-ask"), v.stdout);
+    ok(v.stdout.includes("up to 3 corrective re-asks"), v.stdout);
 
     const bad = join(dir, "bad-ret.json");
     writeFileSync(bad, JSON.stringify({

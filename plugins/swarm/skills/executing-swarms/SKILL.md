@@ -310,7 +310,7 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
 Three features have field-by-field semantics too long to carry here. Read
 [manifest-fields.md](../swarm/manifest-fields.md) when you are writing one of them:
 
-- **`returns`** — JSON-Schema validation of a leaf's output, the one corrective re-ask, and
+- **`returns`** — JSON-Schema validation of a leaf's output, up to three corrective re-asks, and
   the mechanical citation check. Read it before schema'ing any finder that cites code.
 - **`manifest`** — running a saved child manifest as one node, `forEach` over it, and what
   the node may and may not carry.

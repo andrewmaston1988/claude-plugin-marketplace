@@ -11,7 +11,9 @@ import { listLeavesFrom } from "./leaf-list.mjs";
 //   manifest.json       effective plan at dispatch (P1 — runs record their own intent):
 //                       { goal?, ref?, args?, argsFingerprint?, resultsDir, tasks, digest? }
 //                       (forEach/child expansion is runtime — reconstruct from run.log + per-leaf prompt)
-//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks?, checkoutToplevel?, key? }
+//   results/<id>.json   { id, provider?, runner?, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, prompt?, output, outputJson?, rawOutput?, schemaRetried?, schemaErrors?, citations?, citationRefuted?, coverage?, worktree?, asks?, checkoutToplevel?, key? }
+//                       (rawOutput = the leaf's own output on a schema failure — `output` then holds
+//                        the validator's text; a re-run re-asks from it instead of redoing the work)
 //                       (coverage = { status: "complete"|"incomplete"|"unparseable", required, read, missed[] }
 //                        when the task declared mustRead — a shortfall is recorded, never fails the leaf)
 //                       (asks = [{question, answer, ok, provider?, runner?, model, tokens?, sessionId?}] — `swarm ask` follow-ups;
@@ -34,7 +36,7 @@ import { listLeavesFrom } from "./leaf-list.mjs";
 //                         { ts, event: "expand-manifest", id, children: [{id, provider?, runner?, model}] }    child-manifest splice
 //                       (child-manifest task ids are namespaced "<node>~<childId>")
 //                         { ts, event: "truncate-prompt", id, depId, kept, total }   {{result:}} cut to the inline cap
-//                         { ts, event: "leaf-contract-retry", id }   the single corrective re-ask (schema/citation/coverage) fired
+//                         { ts, event: "leaf-contract-retry", id, attempt }   a corrective re-ask fired — schema/citation/coverage, or the 2nd/3rd schema-only turn
 //                         { ts, event: "citations", id, checked, drifted, refuted }   N3 mechanical verification
 //                         { ts, event: "coverage", id, status, required, read, missed, retried }   mustRead read-coverage check
 //                         { ts, event: "cost-warn", unit, projected, threshold }   single-shot projection warn

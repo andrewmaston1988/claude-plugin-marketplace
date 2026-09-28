@@ -10,7 +10,7 @@ import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
-import { fakeSpawnFactory, makeIo, promptOf, usageEnv, codexReading } from "./helpers/fake-io.mjs";
+import { fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading } from "./helpers/fake-io.mjs";
 import { CFG, tmp, task, plan, computeTask, childPlanOf } from "./helpers/scheduler-fixtures.mjs";
 
 const SHIM = fileURLToPath(new URL("./shims/claude-shim.mjs", import.meta.url));
@@ -2144,20 +2144,181 @@ test("returns: invalid output gets one teaching re-ask via session resume, then 
   }
 });
 
-test("returns: still-invalid after the re-ask fails with the validator's message", async () => {
+test("returns: still-invalid after three re-asks fails with the validator's message", async () => {
   const dir = tmp();
   try {
     const spawn = fakeSpawnFactory(() => ({ output: streamOut("still prose", "s-1") }));
     const io = makeIo(spawn);
     const p = plan(dir, [task("a", { returns: SITES_SCHEMA })]);
     await runPlan(p, CFG, io);
-    equal(spawn.calls.length, 2);
+    equal(spawn.calls.length, 4, "one dispatch plus three re-asks");
+    const attempts = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n")
+      .map((l) => JSON.parse(l))
+      .filter((e) => e.event === "leaf-contract-retry" && e.id === "a")
+      .map((e) => e.attempt);
+    deepEqual(attempts, [1, 2, 3], `every re-ask must log its attempt, got ${JSON.stringify(attempts)}`);
     const res = readResult(p.resultsDir, "a");
     equal(res.ok, false);
     ok(Array.isArray(res.schemaErrors) && res.schemaErrors.length > 0, JSON.stringify(res));
     ok(res.output.includes("returns validation failed"), res.output);
+    // The leaf's own output survives the validator's text, so a re-run can re-ask
+    // off it — read back from the file, not from the in-memory result.
+    equal(JSON.parse(readFileSync(resultPath(p.resultsDir, "a"), "utf8")).rawOutput, "still prose");
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("returns: a schema miss gets up to three re-asks — the third can still land ok", async () => {
+  const dir = tmp();
+  try {
+    // Prose, then the wrong shape twice, right on the last: the third re-ask is
+    // the one that saves the leaf.
+    const spawn = fakeSpawnFactory((call, i) => (i < 3
+      ? { output: streamOut(i === 0 ? "still prose" : JSON.stringify(["a.mjs"]), `s-${i}`) }
+      : { output: streamOut(JSON.stringify({ sites: ["a.mjs"] }), `s-${i}`) }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { returns: SITES_SCHEMA })]);
+    await runPlan(p, CFG, io);
+
+    equal(spawn.calls.length, 4, "one dispatch plus three re-asks");
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true);
+    deepEqual(res.outputJson, { sites: ["a.mjs"] });
+    equal(res.schemaRetried, true);
+    equal(res.sessionId, "s-3", "next ask continues the corrected thread");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── re-run: a contract-failed leaf resumes on its correction ──────────────────
+// A leaf that finished its work and only fumbled its JSON must not redo that work
+// when the manifest is re-run: it is resumed on the correction, not the prompt.
+
+test("resume: a contract-failed leaf is re-asked on its correction, not re-run on its prompt", async () => {
+  const dir = tmp();
+  try {
+    let pass = 1;
+    const spawn = fakeSpawnFactory(() => (pass === 1
+      ? { output: streamOut("still prose", "s-leaf") }
+      : { output: streamOut(JSON.stringify({ sites: ["a.mjs"] }), "s-leaf-2") }));
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { returns: SITES_SCHEMA }), task("b")]);
+
+    await runPlan(p, CFG, io);
+    const firstRun = spawn.calls.length;
+    equal(readResult(p.resultsDir, "a").ok, false, "the first run must fail the leaf");
+    equal(readResult(p.resultsDir, "b").ok, true);
+
+    pass = 2;
+    const r = await runPlan(p, CFG, io);
+    const second = spawn.calls.slice(firstRun);
+    const stateOf = Object.fromEntries(r.summary.tasks.map((t) => [t.id, t.state]));
+    equal(stateOf.b, "skipped", "an ok sibling is never re-dispatched");
+    equal(second.length, 1, "the failed leaf goes straight to its correction — no full re-run");
+    const argv = second[0].args;
+    equal(argv[argv.indexOf("--resume") + 1], "s-leaf", "the re-ask continues the leaf's own session");
+    const sent = sentPrompt(second[0]);
+    ok(sent.includes("did not match the task's returns schema"), sent);
+    ok(!sent.includes("do a"), `the original prompt must not be re-sent: ${sent}`);
+
+    const res = readResult(p.resultsDir, "a");
+    equal(res.ok, true);
+    equal(res.schemaRetried, true);
+    equal(res.sessionId, "s-leaf-2");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resume: the corrected result counts the re-asks' spend only, never the first run's", async () => {
+  const dir = tmp();
+  try {
+    let pass = 1;
+    const spawn = fakeSpawnFactory((call) => {
+      // A slow, expensive first run — the spend a resume must never re-add.
+      if (pass === 1) {
+        return { output: streamOut("still prose", "s-leaf", { input_tokens: 1000, output_tokens: 100 }), delayMs: 60 };
+      }
+      // Anything but the correction comes back as prose again: only a leaf resumed
+      // on its own correction can land ok here.
+      return sentPrompt(call).includes("did not match the task's returns schema")
+        ? { output: streamOut(JSON.stringify({ sites: ["a.mjs"] }), "s-leaf-2", { input_tokens: 7, output_tokens: 3 }) }
+        : { output: streamOut("still prose", "s-leaf-2", { input_tokens: 1000, output_tokens: 100 }), delayMs: 60 };
+    });
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("a", { returns: SITES_SCHEMA })]);
+    await runPlan(p, CFG, io);
+    const prior = JSON.parse(readFileSync(resultPath(p.resultsDir, "a"), "utf8"));
+    ok(prior.durationMs >= 40, `the first run must be the expensive one: ${prior.durationMs}ms`);
+
+    pass = 2;
+    await runPlan(p, CFG, io);
+    const res = JSON.parse(readFileSync(resultPath(p.resultsDir, "a"), "utf8"));
+    equal(res.ok, true);
+    deepEqual(res.tokens, { input: 7, output: 3, cacheCreation: 0, cacheRead: 0 });
+    // One re-ask's worth of wall-clock, not a fresh dispatch's: the synthetic
+    // first result carries zero duration, so only the correction is timed.
+    ok(res.durationMs < 30,
+      `the resumed result times the re-asks alone: ${res.durationMs}ms vs ${prior.durationMs}ms`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resume: a contract-failed leaf whose task definition changed re-runs on its full prompt", async () => {
+  const dir = tmp();
+  try {
+    const cwd = tmpdir();
+    const spawn = fakeSpawnFactory(() => ({ output: streamOut("still prose", "s-leaf") }));
+    const io = makeIo(spawn);
+    const mk = (prompt) => plan(dir, [task("a", { prompt, cwd, originalCwd: cwd, returns: SITES_SCHEMA })]);
+    const p = mk("do a");
+    await runPlan(p, CFG, io);
+    equal(readResult(p.resultsDir, "a").ok, false);
+
+    const before = spawn.calls.length;
+    await runPlan(mk("do a differently"), CFG, io);
+    const second = spawn.calls.slice(before);
+    equal(promptOf(second[0]), "do a differently",
+      "an edited definition is new spend: the leaf re-runs its own prompt");
+    ok(!sentPrompt(second[0]).includes("did not match the task's returns schema"),
+      "a changed definition must not be corrected against the old output");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("resume: a failed row with no rawOutput, or no key, falls back to the full prompt", async () => {
+  const spawn = fakeSpawnFactory(() => ({ output: streamOut("still prose", "s-leaf") }));
+  const io = makeIo(spawn);
+  const dirs = [];
+  try {
+    // Each variant strips a REAL failed result: everything else — key included,
+    // or everything but it — is the engine's own, so the only difference from the
+    // correcting case is the missing field.
+    for (const strip of ["rawOutput", "key"]) {
+      const dir = tmp();
+      dirs.push(dir);
+      const cwd = tmpdir();
+      const mk = () => plan(dir, [task("a", { cwd, originalCwd: cwd, returns: SITES_SCHEMA })]);
+      await runPlan(mk(), CFG, io);
+      const path = resultPath(join(dir, "run"), "a");
+      const onDisk = JSON.parse(readFileSync(path, "utf8"));
+      equal(onDisk.ok, false, "the seeded run must fail the leaf");
+      equal(onDisk.rawOutput, "still prose", "a schema failure keeps the leaf's own output");
+      ok(onDisk.key, "the engine writes a key");
+      delete onDisk[strip];
+      writeFileSync(path, JSON.stringify(onDisk, null, 2) + "\n");
+
+      const before = spawn.calls.length;
+      await runPlan(mk(), CFG, io);
+      const second = spawn.calls.slice(before);
+      equal(promptOf(second[0]), "do a", `${strip}: the full prompt, not a correction`);
+    }
+  } finally {
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
   }
 });
 
