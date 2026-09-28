@@ -4,6 +4,7 @@ import { dirname, sep, isAbsolute, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { CONTEXT_WINDOW_1M } from "./contracts.mjs";
 import { isClaudeModel } from "./models.mjs";
+import { builtinToolNames } from "./manifest-task-policy.mjs";
 import { deepMerge } from "./config.mjs";
 import { allowedRootsFor, providerConfig } from "./providers.mjs";
 import { defaultProviderRegistry } from "./default-providers.mjs";
@@ -15,7 +16,7 @@ import { runnerParserFactories } from "./stream.mjs";
 
 // Build the argv + env for one task dispatch. Pure — no process interaction.
 //
-// Claude-family models: plain `claude -p … --model <m> [--effort <e>] --allowedTools <t>`.
+// Claude-family models: plain `claude -p … --model <m> [--effort <e>] --tools <t> --allowedTools <t>`.
 // Non-Claude models, mode "env" (default): the SAME argv plus the pipeline-proven
 // env trio pointing Claude Code at the provider's Anthropic-format endpoint.
 // Non-Claude models, mode "launch": argv built from cfg.provider.launchCmd template.
@@ -60,6 +61,11 @@ function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpToo
     "-p", prompt,
     "--model", cliModel,
     "--effort", task.effort ?? "medium",
+    // --allowedTools pre-approves; it removes nothing. --tools is what makes the declared
+    // set the ONLY built-ins the leaf has — without it a Read,Grep,Glob leaf still runs
+    // Bash and Edit. An empty list is passed as "" (which keeps the MCP roster) rather
+    // than omitted, since omitting it hands the leaf every built-in there is.
+    "--tools", builtinToolNames(task.allowedTools).join(","),
     // MCP goes to every leaf: the roster is the operator's own, and a leaf that loses
     // scout falls back to grepping the tree.
     "--allowedTools", [task.allowedTools, ..._mcpTools()].filter(Boolean).join(","),

@@ -2,7 +2,10 @@
 // the per-node shape rules that apply before any relation between tasks is read.
 
 import { CONTEXT_WINDOWS } from "./contracts.mjs";
-import { hasWriteTools, isAgentless } from "./manifest-task-policy.mjs";
+import { BUILTIN_TOOLS, declaresDefaultTool, hasWriteTools, isAgentless, unknownToolNames } from "./manifest-task-policy.mjs";
+
+// Named in the unknown-tool error so a model-authored manifest can pick a real one.
+const BUILTIN_LIST = Object.values(BUILTIN_TOOLS).map((t) => t.name).join(", ");
 
 const ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 const CLONE_ID_RE = /\[\d+\]$/;
@@ -119,6 +122,28 @@ export function validateTaskShapes(rawTasks, errors, label) {
         `    Delete it. Only name a workspace if leaves must SHARE one tree:\n` +
         `        "workspace": "feat"\n` +
         `    To read a path in place, just point cwd at it — readers run in the live repo.`);
+    }
+    // The declared set is also the set the CLI is HANDED (`--tools`), and it matches
+    // names exactly: an unmatched name grants nothing, silently. A name the engine
+    // cannot spell is refused here, not discovered later as a leaf that cannot work.
+    // Agentless and manifest nodes are exempt — their own messages already say the
+    // whole key must go.
+    if (t.allowedTools !== undefined && !isAgentless(t) && t.manifest === undefined) {
+      if (declaresDefaultTool(t.allowedTools)) {
+        errors.push(
+          `${l}: allowedTools may not be "default" — the CLI reads it as EVERY built-in tool, ` +
+          `the opposite of confining the leaf.\n` +
+          `    List the tools it needs — e.g. "allowedTools": "Read,Grep,Glob"`
+        );
+      }
+      const unknown = unknownToolNames(t.allowedTools);
+      if (unknown.length) {
+        errors.push(
+          `${l}: allowedTools names ${unknown.map((n) => `'${n}'`).join(", ")}, which ${unknown.length === 1 ? "is not a built-in this engine accepts" : "are not built-ins this engine accepts"} — ` +
+          `a misspelt name would silently grant nothing, so it is refused here.\n` +
+          `    Accepted: ${BUILTIN_LIST}, plus mcp__<server> names — e.g. "allowedTools": "Read,Grep,Glob"`
+        );
+      }
     }
     if (t.workspace !== undefined) {
       if (typeof t.workspace !== "string" || !t.workspace) {

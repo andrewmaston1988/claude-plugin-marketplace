@@ -5,6 +5,8 @@ import { equal, deepEqual } from "node:assert/strict";
 import { join, sep, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { isUnderRoot, hasWriteTools, guardFor } from "../src/manifest.mjs";
+import { builtinToolNames, BUILTIN_TOOLS } from "../src/manifest-task-policy.mjs";
+import { codexSandbox } from "../src/codex.mjs";
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -60,4 +62,37 @@ test("hasWriteTools detects each write tool, case-insensitive", () => {
   equal(hasWriteTools("Bash"), true);
   equal(hasWriteTools("NotebookEdit"), true);
   equal(hasWriteTools(undefined), false);
+});
+
+// PowerShell runs arbitrary commands exactly as Bash does, so it is a write tool:
+// a Read,PowerShell leaf that shared the read-only snapshot could write into it.
+test("PowerShell is a write tool", () => {
+  equal(hasWriteTools("Read,PowerShell"), true);
+});
+
+// The CLI matches --tools names EXACTLY, so a lowercase name silently removes the
+// tool. One table canonicalises every name the manifest may use.
+test("builtinToolNames returns the CLI's own spelling, dropping what it cannot name", () => {
+  deepEqual(builtinToolNames("write"), ["Write"]);
+  deepEqual(builtinToolNames("read,Bash(git:*),mcp__scout__search"), ["Read", "Bash"]);
+  deepEqual(builtinToolNames("PowerShell,LSP,NotebookEdit,WebFetch"), ["PowerShell", "LSP", "NotebookEdit", "WebFetch"]);
+  deepEqual(builtinToolNames("mcp__scout__search"), []);
+  deepEqual(builtinToolNames(undefined), []);
+});
+
+// One table decides both what a leaf HAS (--tools) and whether it writes (its tree):
+// every built-in carries its write flag there, and the classifier reads nothing else.
+test("hasWriteTools reads the built-in table's own write flag, for every entry", () => {
+  for (const [key, entry] of Object.entries(BUILTIN_TOOLS)) {
+    equal(typeof entry.write, "boolean", `${key} carries its write flag`);
+    equal(hasWriteTools(entry.name), entry.write, `${entry.name}: classifier and table agree`);
+  }
+});
+
+// A hand-built codex plan never passes normalize, so the sandbox reads allowedTools
+// itself — through the same classifier, case and PowerShell included.
+test("codexSandbox classifies allowedTools with hasWriteTools", () => {
+  equal(codexSandbox({ allowedTools: "Read,PowerShell" }, {}), "workspace-write");
+  equal(codexSandbox({ allowedTools: "read,write" }, {}), "workspace-write");
+  equal(codexSandbox({ allowedTools: "Read,Grep,Glob" }, {}), "read-only");
 });

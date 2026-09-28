@@ -6,14 +6,65 @@ import { resolve, join } from "node:path";
 
 // Default leaf toolset is read-only; write capability must be asked for.
 export const DEFAULT_TOOLS = "Read,Grep,Glob";
-const WRITE_TOOLS = new Set(["edit", "write", "bash", "notebookedit"]);
+
+// Lowercase manifest spelling → the CLI's OWN spelling and whether the tool can write,
+// for the built-ins a manifest may name. One table, because `--tools` matches names
+// EXACTLY (`--tools "read,grep"` grants nothing, silently), and dispatch's `--tools`
+// and the write classifier that picks a leaf's tree must never disagree about a name.
+// PowerShell runs arbitrary commands exactly as Bash does, so it writes.
+export const BUILTIN_TOOLS = {
+  read: { name: "Read", write: false },
+  grep: { name: "Grep", write: false },
+  glob: { name: "Glob", write: false },
+  edit: { name: "Edit", write: true },
+  write: { name: "Write", write: true },
+  bash: { name: "Bash", write: true },
+  powershell: { name: "PowerShell", write: true },
+  notebookedit: { name: "NotebookEdit", write: true },
+  webfetch: { name: "WebFetch", write: false },
+  websearch: { name: "WebSearch", write: false },
+  lsp: { name: "LSP", write: false },
+  skill: { name: "Skill", write: false },
+  toolsearch: { name: "ToolSearch", write: false },
+};
+
+// "Bash(git:*)" names the Bash tool; the pattern is a pre-approval, never a narrowing.
+const toolName = (t) => t.toLowerCase().replace(/\(.*\)$/, "");
+
+function toolNames(allowedTools) {
+  return String(allowedTools || "").split(",").map((t) => t.trim()).filter(Boolean);
+}
+
+// The canonical built-in names a manifest's allowedTools declares, in declaration
+// order. MCP servers and permission patterns are not built-ins and drop out here —
+// the CLI's `--tools` roster and its MCP roster are separate.
+export function builtinToolNames(allowedTools) {
+  const keys = new Set();
+  for (const t of toolNames(allowedTools)) {
+    const bare = toolName(t);
+    if (Object.hasOwn(BUILTIN_TOOLS, bare)) keys.add(bare);
+  }
+  return [...keys].map((k) => BUILTIN_TOOLS[k].name);
+}
+
+// Names the CLI would silently match to nothing: not a built-in, not an MCP server.
+// `default` is excluded — it is a real CLI value meaning "every tool", and the
+// validator refuses it by name (declaresDefaultTool).
+export function unknownToolNames(allowedTools) {
+  return toolNames(allowedTools).filter((t) => {
+    const bare = toolName(t);
+    return bare !== "default" && !Object.hasOwn(BUILTIN_TOOLS, bare) && !bare.startsWith("mcp__");
+  });
+}
+
+// The CLI's `default` means EVERY built-in there is — never what a manifest means by
+// a list of tools, and not something to pass through as if it were one.
+export function declaresDefaultTool(allowedTools) {
+  return toolNames(allowedTools).some((t) => toolName(t) === "default");
+}
 
 export function hasWriteTools(allowedTools) {
-  return String(allowedTools || "")
-    .split(",")
-    .map((t) => t.trim().toLowerCase().replace(/\(.*\)$/, ""))
-    .filter(Boolean)
-    .some((t) => WRITE_TOOLS.has(t));
+  return toolNames(allowedTools).some((t) => BUILTIN_TOOLS[toolName(t)]?.write === true);
 }
 
 // THE rule for which tree a task lives in, and the only one: a leaf that can write

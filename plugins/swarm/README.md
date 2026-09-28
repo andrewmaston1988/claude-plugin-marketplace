@@ -54,9 +54,9 @@ warns instead, since the window may have since reset.
 
 ### Per-repo leaf guard (`projects`)
 
-A leaf is a full headless Claude Code session, and `allowedTools` scopes tool *names*, not
-what a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every
-leaf that runs under that repo:
+A Claude leaf gets only the built-ins in `allowedTools` (`--tools`). Patterns like `Bash(git:*)`
+pre-approve all of Bash; they never narrow it. The **repo-owned PreToolUse hook** decides
+what those tools may do:
 
 ```json
 { "projects": [{ "name": "myrepo", "hooks": { "preToolUse": "python scripts/leaf_guard.py" } }] }
@@ -337,7 +337,7 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
                               # still has every session id on disk for resume to fall back to
 ```
 
-**A leaf's tree follows from its tools.** `Edit`/`Write`/`Bash` ⇒ a private worktree on repo
+**A leaf's tree follows from its tools.** `Edit`/`Write`/`NotebookEdit`/`Bash`/`PowerShell` ⇒ a private worktree on repo
 HEAD, on the run-scoped branch `swarm/<run>/<id>`; read-only ⇒ the live repo at the leaf's own
 `cwd`. Two optional keys refine it, both writer-only:
 

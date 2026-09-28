@@ -61,7 +61,8 @@ export function checkCommandLineLengths(tasks, cfg, io, errors, label) {
     if (len > WIN_CMDLINE_MAX) {
       errors.push(
         `${label(t)}: win32 command line would be ${len} characters, over the ${WIN_CMDLINE_MAX}-character ` +
-        `limit — point the leaf at a file holding its instructions instead of inlining it in the prompt`
+        `limit — point the leaf at a file holding its instructions instead of inlining it in the prompt, ` +
+        `or trim "allowedTools" (it is passed twice: as --tools and as --allowedTools)`
       );
     }
   }

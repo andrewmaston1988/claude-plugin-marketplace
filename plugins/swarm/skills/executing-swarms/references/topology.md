@@ -120,5 +120,5 @@ through files:
   successor needs.
 - **Giving a reviewer write tools breaks the contract silently.** It will fix things instead of
   reporting them, and `{{result:}}` then describes work the next link cannot see the reasoning
-  for. Nothing in the engine prevents this — `allowedTools` is tool-name-only and a leaf holding
-  `Write` can write anywhere — so the tool list is the whole mechanism.
+  for. Claude `allowedTools` confines built-ins; a leaf with `Write` can still write
+  anywhere unless the repo hook denies it.

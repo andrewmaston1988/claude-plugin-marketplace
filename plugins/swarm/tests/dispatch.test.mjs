@@ -1,9 +1,14 @@
+// Build the argv + env for one task dispatch: the Claude runner's flags, the
+// engine's writeRoots translation, the Codex adapter's boundary and the MCP roster.
+// The Windows half — spawn resolution and command-line measurement — lives beside
+// this file in dispatch-win32.test.mjs.
 import { test } from "node:test";
 import { equal, deepEqual, ok, throws, match } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { buildDispatch, toSpawnable, resolveExecutable, windowsCommandLineLength, mcpTools } from "../src/dispatch.mjs";
+import { buildDispatch, mcpTools } from "../src/dispatch.mjs";
+import { buildDigestTask } from "../src/digest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 
 // The MCP roster is the operator's own machine; pin it out of argv assertions.
@@ -28,18 +33,18 @@ const STREAM_FLAGS = ["--output-format", "stream-json", "--verbose"];
 
 test("claude model: exact argv, no env overrides", () => {
   const d = buildDispatch(task({ provider: "claude", model: "claude-haiku-4-5-20251001", effort: "high" }), "the prompt", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "the prompt", "--model", "claude-haiku-4-5-20251001", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "the prompt", "--model", "claude-haiku-4-5-20251001", "--effort", "high", "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {});
 });
 
 test("claude model with the normalized default carries --effort", () => {
   const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
 });
 
 test("open model env mode: same argv plus exact env trio, model verbatim", () => {
   const d = buildDispatch(task({ provider: "ollama", model: "minimax-m3:cloud" }), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "minimax-m3:cloud", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "minimax-m3:cloud", "--effort", "medium", "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {
     ANTHROPIC_BASE_URL: "http://localhost:11434",
     ANTHROPIC_API_KEY: "ollama",
@@ -49,7 +54,7 @@ test("open model env mode: same argv plus exact env trio, model verbatim", () =>
 
 test("contextWindow 1m suffixes only the CLI model name, keeping the provider model bare", () => {
   const d = buildDispatch(task({ provider: "ollama", model: "glm-5.3:cloud", contextWindow: "1m" }), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "glm-5.3:cloud[1m]", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "glm-5.3:cloud[1m]", "--effort", "medium", "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   deepEqual(d.env, {
     ANTHROPIC_BASE_URL: "http://localhost:11434",
     ANTHROPIC_API_KEY: "ollama",
@@ -88,7 +93,7 @@ test("launch mode: template split with {model} substitution and {args} splice", 
   const d = buildDispatch(task({ provider: "ollama", model: "qwen3-coder:cloud", effort: "high" }), "the prompt", cfg, { _mcpTools: NO_MCP });
   deepEqual(d.argv, [
     "ollama", "launch", "claude", "--model", "qwen3-coder:cloud", "--",
-    "-p", "the prompt", "--model", "qwen3-coder:cloud", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS,
+    "-p", "the prompt", "--model", "qwen3-coder:cloud", "--effort", "high", "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS,
   ]);
   deepEqual(d.env, {});
 });
@@ -116,7 +121,7 @@ test("task.settings adds --settings <json> right after --allowedTools", () => {
 
 test("no settings key: exact argv, no --settings", () => {
   const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   ok(!d.argv.includes("--settings"));
 });
 
@@ -132,7 +137,7 @@ test("disable1mContext: false + Claude model injects --settings with the 1M env 
 test("disable1mContext: true + no task settings → no --settings (byte-identical to the shipped-default argv)", () => {
   const cfg = { ...CFG, disable1mContext: true };
   const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5" }), "p", cfg, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-sonnet-5", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-sonnet-5", "--effort", "medium", "--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
   ok(!d.argv.includes("--settings"));
 });
 
@@ -370,74 +375,7 @@ test("dispatch: a Claude task from outside allowedRoots is refused, like every o
   }
 });
 
-// ── windows spawn resolution ──────────────────────────────────────────────────
-
-test("toSpawnable peels a node .cmd shim, expanding %~dp0", { skip: process.platform !== "win32" }, () => {
-  const dir = mkdtempSync(join(tmpdir(), "swarm-shim-"));
-  try {
-    const cmdPath = join(dir, "claude.cmd");
-    writeFileSync(cmdPath, `@echo off\r\nnode "%~dp0claude-shim.mjs" %*\r\n`);
-    const { cmd, args } = toSpawnable([cmdPath, "-p", "hi"]);
-    equal(cmd, process.execPath);
-    equal(args[0], join(dir, "claude-shim.mjs"));
-    deepEqual(args.slice(1), ["-p", "hi"]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// An opaque .cmd cannot be peeled to a node script, and cmd.exe re-parses the argv it is
-// handed — a prompt containing quotes comes out mangled. Refusing names what to fix instead.
-test("toSpawnable refuses an opaque .cmd instead of routing it through cmd.exe", () => {
-  const cmdPath = join(tmpdir(), "swarm-opaque-shim", "claude.cmd");
-  const io = { _platform: "win32", _readFileSync: () => "@echo off\r\necho hello\r\n" };
-  throws(
-    () => toSpawnable([cmdPath, "-p", "hi"], io),
-    (e) => e.message.includes(cmdPath) && /not a node shim/.test(e.message)
-  );
-  // An unreadable shim is no more peelable than an opaque one — same refusal, not a fallthrough.
-  throws(
-    () => toSpawnable([cmdPath, "-p", "hi"], { _platform: "win32", _readFileSync: () => { throw new Error("EACCES"); } }),
-    (e) => e.message.includes(cmdPath) && /not a node shim/.test(e.message)
-  );
-});
-
-test("toSpawnable passes .exe and pathless resolution through untouched", { skip: process.platform !== "win32" }, () => {
-  const r = toSpawnable(["C:\\bin\\claude.exe", "-p", "x"]);
-  equal(r.cmd, "C:\\bin\\claude.exe");
-  deepEqual(r.args, ["-p", "x"]);
-});
-
-// ── windowsCommandLineLength (CreateProcess quoting) ───────────────────────────
-
-test("windowsCommandLineLength: plain args join with single spaces, no quoting", () => {
-  equal(windowsCommandLineLength(["claude", "-p", "hello", "--model", "claude-haiku-4-5-20251001"]), "claude -p hello --model claude-haiku-4-5-20251001".length);
-});
-
-test("windowsCommandLineLength: an arg with a space is wrapped in quotes", () => {
-  equal(windowsCommandLineLength(["claude", "-p", "hello world"]), 'claude -p "hello world"'.length);
-});
-
-test("windowsCommandLineLength: quote characters double the cost (escaped, plus wrapping quotes)", () => {
-  // a 4-char prompt of all quotes: each " becomes \" (2 chars), plus 2 wrapping quotes
-  const len = windowsCommandLineLength(["claude", "-p", '""""']);
-  // "claude -p " (10) + wrapping quote (1) + 4x(\") (8) + closing quote (1) = 20
-  equal(len, 10 + 1 + 8 + 1);
-});
-
-test("windowsCommandLineLength: a trailing backslash before the closing quote is doubled", () => {
-  // arg has a space (forces quoting) and ends in a backslash
-  const len = windowsCommandLineLength(["claude", "-p", "a b\\"]);
-  // quoted form: "a b\\" -> " a b \\ \\ " = 1 + 3 + 2 + 1 = 7, plus "claude -p " (10)
-  equal(len, 10 + 7);
-});
-
-test("resolveExecutable resolves a bare name via where on win32", { skip: process.platform !== "win32" }, () => {
-  const fakeWhere = (cmd, args) => ({ status: 0, stdout: "C:\\somewhere\\claude.cmd\r\nC:\\other\\claude.exe\r\n" });
-  equal(resolveExecutable("claude", { _spawnSync: fakeWhere }), "C:\\somewhere\\claude.cmd");
-  const missing = () => ({ status: 1, stdout: "" });
-  equal(resolveExecutable("claude", { _spawnSync: missing }), "claude");
-});
+// ── MCP roster + --tools/--allowedTools ───────────────────────────────────────
 
 test("mcpTools names each configured server; a wildcard would grant nothing", () => {
   const read = () => JSON.stringify({ mcpServers: { scout: {}, context7: {} } });
@@ -460,6 +398,48 @@ test("a leaf with no allowedTools still gets MCP, with no leading comma", () => 
   const fake = () => ["mcp__scout"];
   const d = buildDispatch({ provider: "claude", model: "claude-sonnet-5", allowedTools: "" }, "p", CFG, { _mcpTools: fake });
   equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "mcp__scout");
+});
+
+// ── --tools: the declared set is the set that EXISTS ──────────────────────────
+// --allowedTools pre-approves; it removes nothing. A read-only leaf that declares
+// Read,Grep,Glob still inherits every built-in the operator's session has, which is
+// how ten leaves declaring read-only ran Bash. --tools is the flag that decides
+// which built-ins exist, so it carries the same declared set.
+
+test("a leaf's declared built-ins become --tools, directly before --allowedTools", () => {
+  const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
+  const i = d.argv.indexOf("--tools");
+  ok(i > 0, `no --tools in ${d.argv.join(" ")}`);
+  deepEqual(d.argv.slice(i, i + 4), ["--tools", "Read,Grep,Glob", "--allowedTools", "Read,Grep,Glob"]);
+});
+
+test("--tools holds built-ins only: the pattern strips to the name, mcp__ names are dropped", () => {
+  const d = buildDispatch(task({ allowedTools: "read,Bash(git:*),mcp__scout__search" }), "p", CFG, { _mcpTools: NO_MCP });
+  equal(d.argv[d.argv.indexOf("--tools") + 1], "Read,Bash");
+});
+
+// An MCP-only leaf declares no built-ins: the flag must be present and empty, since
+// omitting it would hand that leaf all 36. The probe shows "" keeps the MCP roster.
+test("an MCP-only leaf gets --tools \"\", not an omitted flag", () => {
+  const d = buildDispatch(task({ allowedTools: "mcp__scout__search" }), "p", CFG, { _mcpTools: NO_MCP });
+  equal(d.argv[d.argv.indexOf("--tools") + 1], "");
+});
+
+test("an empty allowedTools is --tools \"\" too", () => {
+  const d = buildDispatch(task({ allowedTools: "" }), "p", CFG, { _mcpTools: NO_MCP });
+  equal(d.argv[d.argv.indexOf("--tools") + 1], "");
+});
+
+// The digest is a leaf like any other and inherits the same confinement.
+test("digest leaves carry --tools Read", () => {
+  const t = buildDigestTask({
+    cwd: "C:/work", resultsDir: "C:/work/.swarm/run-1", goal: "find it",
+    tasks: [{ id: "a", model: "m", timeoutMs: 600000 }],
+    digest: { model: "claude-haiku-4-5-20251001", provider: "claude" },
+  });
+  equal(t.allowedTools, "Read");
+  const d = buildDispatch(t, "p", CFG, { _mcpTools: NO_MCP });
+  equal(d.argv[d.argv.indexOf("--tools") + 1], "Read");
 });
 
 // A task whose cwd is a swarm-made worktree must pass dispatch exactly when it passes the
