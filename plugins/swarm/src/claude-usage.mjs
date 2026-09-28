@@ -29,7 +29,7 @@ function marked(reason, asOf) {
   });
 }
 
-function claudeSnapshot(parsed, provenance, asOf) {
+function claudeSnapshot(parsed, provenance, asOf, reason) {
   return providerUsageSnapshot({
     provider: "claude",
     buckets: (parsed.limits || []).map((l) => ({
@@ -41,6 +41,7 @@ function claudeSnapshot(parsed, provenance, asOf) {
     source: SOURCE,
     provenance,
     exhausted: parsed.exhausted === true,
+    ...(reason ? { reason } : {}),
     asOf,
   });
 }
@@ -79,5 +80,5 @@ export async function readClaudeUsage(context = {}) {
     return marked("anthropic usage endpoint unreachable, or no Claude Code credentials", new Date(nowMs).toISOString());
   }
   const provenance = { cache: "cache", endpoint: "live", stale: "stale" }[q.source] || "unknown";
-  return claudeSnapshot(q, provenance, new Date(q.asOfMs ?? nowMs).toISOString());
+  return claudeSnapshot(q, provenance, new Date(q.asOfMs ?? nowMs).toISOString(), q.reason);
 }

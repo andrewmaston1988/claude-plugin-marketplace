@@ -67,8 +67,11 @@ function writeEnvelope(envelope, { cachePath, pid }) {
 
 // The reader's shape: whatever `result` held, plus how to read it — provenance
 // and the moment it was fetched. The failure note rides along when one is
-// banked: it is why the reading is not this process's own fetch.
+// banked: it is why the reading is not this process's own fetch. A failure
+// newer than a stale reading is also its `reason`, which the banner reads.
 function flatten(envelope, fallbackProvider, provenance) {
+  const failedSince = provenance === "stale" && envelope.lastError != null
+    && (envelope.lastErrorAt ?? 0) >= envelope.fetchedAt;
   return {
     ...envelope.result,
     provider: envelope.result.provider ?? fallbackProvider,
@@ -77,6 +80,7 @@ function flatten(envelope, fallbackProvider, provenance) {
     asOf: new Date(envelope.fetchedAt).toISOString(),
     ...(envelope.lastError != null
       && { lastError: envelope.lastError, lastErrorAt: envelope.lastErrorAt ?? null }),
+    ...(failedSince && envelope.result.reason == null && { reason: envelope.lastError }),
   };
 }
 
@@ -114,6 +118,7 @@ export async function usageReading(provider, opts = {}) {
   const cached = readUsageEnvelope(provider, { cachePath });
   const fresh = cached != null && now - cached.fetchedAt < ttlOf(opts);
 
+  let served = cached;
   if (fetchLive && (force || !fresh)) {
     let result = null;
     try {
@@ -127,7 +132,9 @@ export async function usageReading(provider, opts = {}) {
       const banked = writeUsageReading(provider, { fetchedAt: now, result }, { cachePath, pid });
       return flatten(banked, provider, "live");
     }
+    // fetchLive may have recorded why it failed; serve the entry that says so.
+    served = readUsageEnvelope(provider, { cachePath }) ?? cached;
   }
-  if (!cached) return null;
-  return flatten(cached, provider, fresh ? "cached" : "stale");
+  if (!served) return null;
+  return flatten(served, provider, fresh ? "cached" : "stale");
 }

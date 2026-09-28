@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { usageReading, patchUsageEnvelope, quotaTtlMs } from "./usage-cache.mjs";
+import { usageReading, patchUsageEnvelope, recordUsageError, quotaTtlMs } from "./usage-cache.mjs";
 
 export const DEFAULT_QUOTA_PATTERNS = [
   "usage limit reached",
@@ -75,9 +75,9 @@ function readOAuthToken(credentialsPath) {
   }
 }
 
-export async function fetchUsageLimits({ fetch, url = DEFAULT_USAGE_URL, credentialsPath, onRetryAfter }) {
+export async function fetchUsageLimits({ fetch, url = DEFAULT_USAGE_URL, credentialsPath, onRetryAfter, onFail }) {
   const token = readOAuthToken(credentialsPath);
-  if (!token) return null;
+  if (!token) { onFail?.("no OAuth token"); return null; }
   try {
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${token}`, "anthropic-beta": "oauth-2025-04-20" },
@@ -85,10 +85,12 @@ export async function fetchUsageLimits({ fetch, url = DEFAULT_USAGE_URL, credent
     if (!res.ok) {
       const secs = Number(res.headers?.get?.("retry-after"));
       if (secs > 0) onRetryAfter?.(secs * 1000);
+      onFail?.(`HTTP ${res.status}`);
       return null;
     }
     return parseUsageLimits(await res.json());
-  } catch {
+  } catch (e) {
+    onFail?.(e?.message || String(e));
     return null;
   }
 }
@@ -101,7 +103,8 @@ function staleReading(reading, nowMs) {
     percent: l.resetsAt && Date.parse(l.resetsAt) <= nowMs ? 0 : l.percent,
     scope: l.scope ? { model: { display_name: l.scope } } : null,
   }));
-  return { ...parseUsageLimits({ limits }), source: "stale", asOfMs: reading.fetchedAt };
+  return { ...parseUsageLimits({ limits }), source: "stale", asOfMs: reading.fetchedAt,
+    ...(reading.reason && { reason: reading.reason }) };
 }
 
 // Cached best-effort quota check. The 5-minute TTL file lives under the swarm
@@ -124,14 +127,17 @@ export async function checkQuota({
     ttlMs: quotaTtlMs(cfg),
     fetchLive: async ({ cached }) => {
       if (cached?.retryAfter > now()) return null;
-      let retryMs = 0;
+      let retryMs = 0, failure = null;
       const parsed = await fetchUsageLimits({
         fetch,
         url: cfg.quotaUsageUrl || DEFAULT_USAGE_URL,
         credentialsPath,
         onRetryAfter: (ms) => { retryMs = ms; },
+        onFail: (reason) => { failure = reason; },
       });
       if (!parsed && retryMs) patchUsageEnvelope("claude", { retryAfter: now() + retryMs }, { cachePath });
+      // Written down, or a stale reading has no cause anyone can see.
+      if (!parsed && failure) recordUsageError("claude", failure, { cachePath, at: now() });
       return parsed;
     },
   });

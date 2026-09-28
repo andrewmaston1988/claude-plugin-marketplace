@@ -457,21 +457,8 @@ export function createCodexProviderAdapter(options = {}) {
   // Spawning the app-server just to read usage is opt-in unless a client is already live.
   const readUsage = async (context = {}) => {
     if (!context.client && context.usageOptIn !== true) return null;
-    const { readCodexUsage } = await import("./codex-usage.mjs");
-    const fetchLive = () => readCodexUsage(context.config || {}, { ...options, ...context });
-    const { usageReading } = await import("./usage-cache.mjs");
-    const raw = context.now;
-    const now = typeof raw === "function" ? raw() : (typeof raw === "number" ? raw : Date.now());
-    // A caller holding a live client already paid for the app-server, so the TTL
-    // must not suppress a question it has answered: forced live, and banked like
-    // every other live read so the next reader inherits the answer.
-    return usageReading("codex", {
-      env: context.env,
-      cachePath: context.cachePath,
-      now: () => now,
-      force: context.force === true || Boolean(context.client),
-      fetchLive,
-    });
+    const { readCodexUsageThroughCache } = await import("./codex-usage.mjs");
+    return readCodexUsageThroughCache(options, context);
   };
   return {
     id: "codex",

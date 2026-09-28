@@ -424,9 +424,12 @@ test("Codex runner parser registry exposes both provider factories", () => {
 // own answer, so it reads usage with no opt-in and spawns the app-server exactly as
 // the Claude preflight reads Anthropic's quota. A reading that never arrived is a
 // refusal, not a pass — nothing else here would notice a logged-out Codex.
-test("Codex preflight reads usage unasked, and refuses only a spent account", async () => {
+test("Codex preflight reads usage unasked, and refuses only a spent account", async (t) => {
   const adapter = createCodexProviderAdapter();
-  const context = { config: { providers: { codex: { enabled: true } } } };
+  // Forced live reads bank; keep them out of the real swarm home.
+  const home = mkdtempSync(join(tmpdir(), "swarm-codex-preflight-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  const context = { config: { providers: { codex: { enabled: true } } }, cachePath: join(home, "codex-usage.json") };
   const clientFor = (limits) => ({
     async initialize() {},
     async request(method) {

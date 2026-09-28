@@ -2,7 +2,7 @@
 // and the endpoint's Retry-After is honoured so the dashboard stops extending the 429.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { checkQuota } from "../src/quota.mjs";
@@ -70,4 +70,28 @@ test("the Claude adapter reports a held-over reading as provenance stale, dated 
     quotaCheck: async () => ({ limits: [{ kind: "session", percent: 40 }], source: "stale", asOfMs: T0 }) });
   equal(snap.provenance, "stale");
   equal(snap.asOf, new Date(T0).toISOString());
+});
+
+test("the Claude adapter carries a stale reading's failure reason onto its snapshot", async () => {
+  const { readClaudeUsage } = await import("../src/claude-usage.mjs");
+  const snap = await readClaudeUsage({ usageOptIn: true, now: T0 + 60 * 60_000,
+    quotaCheck: async () => ({ limits: [{ kind: "session", percent: 40 }], source: "stale", asOfMs: T0, reason: "HTTP 429" }) });
+  equal(snap.reason, "HTTP 429", "RED: the cause must reach the banner");
+});
+
+test("a failed read records why beside the reading it kept", async () => {
+  const s = setup();
+  try {
+    await checkQuota(s.opts(T0));
+    s.setReply({ ok: false, status: 503, headers: { get: () => null } });
+    const q = await checkQuota(s.opts(T0 + 10 * 60_000));
+    equal(q.reason, "HTTP 503", "RED: the reading served after a failed read names why");
+    const env = JSON.parse(readFileSync(join(s.home, "q.json"), "utf8"));
+    equal(env.lastError, "HTTP 503", "the refusal is recorded");
+    equal(env.lastErrorAt, T0 + 10 * 60_000);
+    equal(env.fetchedAt, T0, "the reading keeps the moment it was really read");
+    s.setReply(tooMany(3600));
+    await checkQuota(s.opts(T0 + 20 * 60_000));
+    equal(JSON.parse(readFileSync(join(s.home, "q.json"), "utf8")).lastError, "HTTP 429", "a rate limit says so");
+  } finally { rmSync(s.home, { recursive: true, force: true }); }
 });
