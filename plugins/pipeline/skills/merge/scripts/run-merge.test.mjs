@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
@@ -293,8 +293,8 @@ test("resolveTargetBranch: explicit target beats the pipeline row override", () 
   const dir = tmpRepo();
   const oldPath = process.env.PATH;
   try {
-    writeFileSync(join(dir, "pipeline.cmd"), '@echo {"target_branch":"develop"}\r\n');
-    process.env.PATH = `${dir};${oldPath}`;
+    stubRow(dir, '[{"target_branch":"develop"}]');
+    process.env.PATH = `${dir}${delimiter}${oldPath}`;
     equal(resolveTargetBranch("noproj", "feat-x", dir, "release"), "release");
   } finally {
     process.env.PATH = oldPath;
@@ -376,6 +376,18 @@ test("PAUSE: fires on {branch} too — known globally, unresolvable for a plans 
   }
 });
 
+test("PAUSE: a repo plans/ does not stand in for an unresolvable template", async () => {
+  const dir = tmpRepo();
+  try {
+    mkdirSync(join(dir, "plans"));
+    const outText = await runMain(dir, { plansDir: "{codeRoot}/x/{project}" });
+    match(outText, /PAUSE: Plans directory template cannot resolve/);
+    ok(!outText.includes("--plans-dir"), "must not emit the fallback --plans-dir");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // The false-positive guard: without it the pause could fire on everything and the suite
 // would report green.
 test("PAUSE: a valid template still reaches the spawn", async () => {
@@ -397,6 +409,132 @@ test("a missing branch is reported before the plansDir pause", async () => {
     const outText = await runMain(dir, { plansDir: "{codeRoot}/x" }, { branch: "autonomous/typo-brnach" });
     match(outText, /branch not found/);
     ok(!outText.includes("PAUSE: Plans directory template"), "branch check must come first");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Target-branch tiers — /merge's own order ─────────────────────────────────
+// A branch with no row must still merge to its plan's *Target-Branch:*, not origin/HEAD.
+
+// The fixture creates only `autonomous/feat-x`; a target has to exist as a ref or the
+// resolution is refused, so each test names the refs its scenario needs.
+function addBranch(dir, name) {
+  spawnSync("git", ["-c", "core.hooksPath=", "branch", name], { cwd: dir, encoding: "utf8" });
+}
+
+function originHead(dir, name) {
+  const g = (...a) => spawnSync("git", ["-c", "core.hooksPath=", ...a], { cwd: dir, encoding: "utf8" });
+  g("update-ref", `refs/remotes/origin/${name}`, "HEAD");
+  g("symbolic-ref", "refs/remotes/origin/HEAD", `refs/remotes/origin/${name}`);
+}
+
+function writePlan(dir, body, { complete = false } = {}) {
+  const plansDir = join(dir, "plans");
+  mkdirSync(complete ? join(plansDir, "complete") : plansDir, { recursive: true });
+  writeFileSync(join(plansDir, complete ? "complete/feat-x.md" : "feat-x.md"), body);
+}
+
+// pipeline-query shells out to the CLI; a shim on PATH answers for it — .cmd on Windows, a
+// shell script elsewhere (CI). The payload must be an ARRAY: rowField reads a row list, so a
+// bare object parses to "no value" and the stub silently answers nothing.
+function stubRow(dir, json) {
+  writeFileSync(join(dir, "pipeline.cmd"), `@echo ${json}\r\n`);
+  writeFileSync(join(dir, "pipeline"), `#!/bin/sh\necho '${json}'\n`, { mode: 0o755 });
+}
+
+test("main: the plan's *Target-Branch:* beats origin/HEAD", async () => {
+  const dir = tmpRepo();
+  try {
+    originHead(dir, "main");
+    addBranch(dir, "staging");
+    writePlan(dir, "*Target-Branch:* staging\n");
+    const outText = await runMain(dir, { plansDir: "{root}/plans" });
+    match(outText, /targetBranch:\s+staging \(tier: plan\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("main: the row's target_branch beats the plan annotation", async () => {
+  const dir = tmpRepo();
+  const oldPath = process.env.PATH;
+  try {
+    stubRow(dir, '[{"target_branch":"develop"}]');
+    process.env.PATH = `${dir}${delimiter}${oldPath}`;
+    addBranch(dir, "develop");
+    writePlan(dir, "*Target-Branch:* staging\n");
+    const outText = await runMain(dir, { plansDir: "{root}/plans" });
+    match(outText, /targetBranch:\s+develop \(tier: row\)/);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("main: the flag beats the row and the plan", async () => {
+  const dir = tmpRepo();
+  const oldPath = process.env.PATH;
+  try {
+    stubRow(dir, '[{"target_branch":"develop"}]');
+    process.env.PATH = `${dir}${delimiter}${oldPath}`;
+    addBranch(dir, "release");
+    writePlan(dir, "*Target-Branch:* staging\n");
+    const outText = await runMain(
+      dir,
+      { plansDir: "{root}/plans" },
+      { extraArgs: ["--target-branch", "release"] },
+    );
+    match(outText, /targetBranch:\s+release \(tier: flag\)/);
+  } finally {
+    process.env.PATH = oldPath;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A plan that declares the branch it works ON must not become the branch it merges
+// INTO — the same guard a row value gets, and the same trap *Branch:* exists for.
+test("main: an annotation naming the source branch is ignored, not merged onto itself", async () => {
+  const dir = tmpRepo();
+  try {
+    originHead(dir, "main");
+    writePlan(dir, "*Target-Branch:* autonomous/feat-x\n");
+    const outText = await runMain(dir, { plansDir: "{root}/plans" });
+    match(outText, /targetBranch:\s+main \(tier: default\)/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A resumed merge runs after step 6 moved the plan, so complete/ has to be searched. The
+// world probe reads complete/ too, so this run is complete and stops before the resolved
+// block — the target it names there is still the evidence that the plan supplied it.
+test("main: a plan already moved to complete/ still supplies the target", async () => {
+  const dir = tmpRepo();
+  try {
+    originHead(dir, "main");
+    addBranch(dir, "staging");
+    writePlan(dir, "*Target-Branch:* staging\n", { complete: true });
+    const outText = await runMain(dir, { plansDir: "{root}/plans" });
+    match(outText, /already applied to staging/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Reported as a missing SOURCE branch today, because collectSignals probes
+// `merge-base --is-ancestor <target> <branch>` and an unknown revision just exits 128.
+// The operator never typed the branch that is wrong.
+test("main: an unknown target is refused naming the target and the tier it came from", async () => {
+  const dir = tmpRepo();
+  try {
+    originHead(dir, "main");
+    writePlan(dir, "*Target-Branch:* staging\n");
+    const outText = await runMain(dir, { plansDir: "{root}/plans" });
+    match(outText, /REFUSED/);
+    match(outText, /'staging'/);
+    match(outText, /tier: plan/);
+    ok(!/would spawn a background agent/i.test(outText), "must not reach the spawn");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

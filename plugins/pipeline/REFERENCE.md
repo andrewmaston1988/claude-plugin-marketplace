@@ -580,6 +580,15 @@ A research row can hand off to a dev row via `pipeline research-complete <projec
 
 Once a row has `target_branch` stored, the column wins — the chain only runs at queue time. Hardcoded `"master"` is a defect; route through `detectDefaultBranch` instead.
 
+`/merge` (`skills/merge/scripts/run-merge.mjs`) resolves by its own order, which is **not** the chain above — the row is the normalised copy of the annotation, so it must not lose to the raw text it may have been set to correct:
+
+1. Operator's `--target-branch` flag on `run-merge.mjs`.
+2. Row's `target_branch` column.
+3. Plan file's `*Target-Branch: <name>*` annotation, read from the row's `plan_file` basename (else `<feature>.md`) in `plansDir`, then `plansDir/complete/` so a resumed merge still finds a plan already moved. A value naming the source branch or starting `autonomous/` is ignored, as at queue time.
+4. `origin/HEAD`, then `git config init.defaultBranch` — both reported as tier `default`.
+
+Both chains share one annotation parser (`planTargetBranch`, exported from `src/cli/queue.mjs`). A resolved target with neither a local ref nor an `origin/<target>` ref is refused before any signal collection, naming the target and the tier that supplied it — without that check an unknown target surfaces as a missing *source* branch, since `merge-base --is-ancestor <target> <branch>` exits 128 on an unknown revision. The resolved block prints the tier as `targetBranch: <name> (tier: <flag|row|plan|default>)`.
+
 `warnUnrecognisedTargetPrefix` emits a one-line warning (not error) when the resolved target carries a prefix not in `cfg.recognised_branch_types` (default `["autonomous", "interactive"]`). `lintTargetBranchProse` is the separate check that errors when plan prose mentions a target branch without an annotation.
 
 Below: the three mechanical guards applied during extraction/validation.

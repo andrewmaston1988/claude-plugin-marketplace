@@ -6,6 +6,7 @@ import { close, rowGet, rowAdd, rowUpdate, projectGetByName } from "../db/index.
 import { getFlag, detectDefaultBranch, formatRow } from "./helpers.mjs";
 import { lookupProjectOrFail } from "./project-lookup.mjs";
 import { loadPipelineConfig } from "../pipeline-config.mjs";
+import { planTargetBranch } from "../plans/target-branch.mjs";
 
 const QUEUE_STOP_WORDS = new Set([
   "a","an","the","for","in","on","at","to","of","and","or","but",
@@ -139,18 +140,7 @@ export function queueModelExtract(planFilePath, kind) {
 
 function queueTargetExtract(planFilePath) {
   try {
-    const lines = readFileSync(planFilePath, "utf8").split("\n");
-    for (const line of lines) {
-      const s = line.trim();
-      if (s.startsWith("*Target-Branch:") || s.startsWith("* Target-Branch:")) {
-        let value = s.split(":").slice(1).join(":").trim();
-        while (value && (value[0] === "*" || value[0] === " ")) value = value.slice(1);
-        while (value && (value[value.length - 1] === "*" || value[value.length - 1] === " ")) {
-          value = value.slice(0, -1);
-        }
-        return value || detectDefaultBranch(process.cwd());
-      }
-    }
+    return planTargetBranch(readFileSync(planFilePath, "utf8")) || detectDefaultBranch(process.cwd());
   } catch {}
   return detectDefaultBranch(process.cwd());
 }
