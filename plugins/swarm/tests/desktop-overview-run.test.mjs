@@ -115,3 +115,41 @@ test("every run-screen desktop rule also reaches the run opened on the hub", () 
   assert.deepEqual(bare.map((l) => l.trim().slice(0, 80)).filter((l) => !l.startsWith("main:has(> .banner):has(> .graph) {")), [], "run-screen rules the hub's .ovrun cannot reach");
   assert.match(css, /\.ovrun\)?\s*>\s*\.actionbar[^{]*\{[^}]*position:\s*static/, "the report bar sits in the opened run, never fixed over the hub");
 });
+
+// A leaf reached from the run the hub opened replaces that run under its row: the hub
+// never navigates away from its sidebar, and the leaf's way back to the tree returns.
+test("a leaf opened from the hub's run takes the run's place, and Show in tree returns", async () => {
+  const P = await hub({ run: runPayload("DONE_2") });
+  P.tap(rowNamed(P, "DONE_2"));
+  await settle(P, replies({ run: runPayload("DONE_2") }));
+  const leafRow = P.findByClass("row").find((e) => e.getAttribute("data-href").endsWith("/leaf/leaf-a"));
+  P.tap(leafRow);
+  await settle(P, replies({ run: runPayload("DONE_2") }), [/\/leaves\//]);
+  assert.equal(P.location.hash, "#/overview", "opening the leaf is not a navigation");
+  assert.equal(P.findByClass("ovleaf").length, 1, "the leaf opens beneath the row");
+  assert.equal(P.findByClass("ovrun").length, 0, "in the run's place");
+  assert.equal(P.findByClass("ovpanel").length, 1, "and the sidebar stays");
+  assert.ok(P.fetchLog.includes(OPENED_URL + "/leaves/leaf-a"), "from the leaf screen's own endpoint");
+  P.tap(P.findByClass("show")[0]);
+  await settle(P, replies({ run: runPayload("DONE_2") }));
+  assert.equal(P.findByClass("ovrun").length, 1, "Show in tree returns to the run");
+  assert.equal(P.findByClass("ovleaf").length, 0);
+  assert.equal(P.location.hash, "#/overview");
+});
+
+// The toggle heads the sidebar's column, not the feed: shut, the feed must not hold it.
+test("the flyout toggle is main's, beside the feed, open or shut", async () => {
+  const P = await hub();
+  const bar = () => P.findByClass("ovbar")[0];
+  assert.equal(bar().parentNode, P.main, "open: the toggle heads the sidebar column");
+  P.tap(P.findByClass("ovtoggle")[0]);
+  await settle(P);
+  assert.equal(bar().parentNode, P.main, "shut: still main's, never inside the feed");
+});
+
+test("the leaf screen and the hub's leaf fill main, uncapped", () => {
+  const css = readFileSync(new URL("../src/serve/desktop.css", import.meta.url), "utf8");
+  const leaf = css.split("\n").filter((l) => l.includes(".chips.hero") || l.includes(".ovleaf"));
+  assert.ok(leaf.length > 0);
+  assert.deepEqual(leaf.filter((l) => /max-width\s*:\s*1100px/.test(l)), [], "no leaf rule caps it at the reading width");
+});

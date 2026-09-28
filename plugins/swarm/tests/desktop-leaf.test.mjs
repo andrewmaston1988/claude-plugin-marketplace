@@ -67,18 +67,18 @@ test("the leaf body is two columns: the prose left, the figures beside it", () =
   const g = cssRule("main:has(> .chips.hero)");
   assert.match(g, /grid-template-columns:minmax\(0, 2fr\) minmax\(280px, 1fr\)/);
   assert.match(g, /align-content:start/);
-  assert.match(cssRule("main:has(> .chips.hero) > .card.flush"), /grid-area:3\/1\/4\/2/, "the prompt and output take the left column");
-  assert.match(cssRule("main:has(> .chips.hero) > .card:not(.flush)"), /grid-column:2/, "the position and token cards stack beside it");
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .card.flush"), /grid-area:3\/1\/4\/2/, "the prompt and output take the left column");
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .card:not(.flush)"), /grid-column:2/, "the position and token cards stack beside it");
 });
 
 test("the verdict and the chips span both columns, above the body", () => {
-  assert.match(cssRule("main:has(> .chips.hero) > .banner"), /grid-area:1\/1\/2\/3/);
-  assert.match(cssRule("main:has(> .chips.hero) > .chips.hero"), /grid-area:2\/1\/3\/3/);
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .banner"), /grid-area:1\/1\/2\/3/);
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .chips.hero"), /grid-area:2\/1\/3\/3/);
 });
 
 // The chips wear the grid's width, so they never run past the capped cards' right edge.
 test("the chips wear the grid's width, which is the cards' width", () => {
-  assert.match(cssRule("main:has(> .chips.hero) > .chips.hero"), /padding:0/);
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .chips.hero"), /padding:0/);
   // The rule it corrects is the phone's own, and it stays the phone's.
   assert.match(readFileSync(PAGE, "utf8"), /\.chips\.hero \{ padding:0 16px;/, "the phone keeps its gutter");
 });

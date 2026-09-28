@@ -463,7 +463,7 @@
   // landing, and the two readings are why it is one.
   const FLYOUT_KEY = "swarm.ovFlyout";
   const flyoutPref = () => { try { return localStorage.getItem(FLYOUT_KEY) !== "0"; } catch { return true; } };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, showSuperseded: false, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, flyout: flyoutPref(), hubRun: null, compact: { rank: compactPref("rank", false), leaders: compactPref("leaders", true) } };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, showSuperseded: false, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, flyout: flyoutPref(), hubRun: null, hubLeaf: null, compact: { rank: compactPref("rank", false), leaders: compactPref("leaders", true) } };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -531,22 +531,31 @@
   // fetch per tick. Opening another row drops it — one row is open at a time.
   let hubRun = null;
   async function expandedRun() {
-    const key = ui.hubRun;
-    if (hubRun && hubRun.key === key) return hubRun;
+    const key = ui.hubRun, leafId = ui.hubLeaf;
+    if (hubRun && hubRun.key === key && hubRun.leaf === leafId) return hubRun;
     hubRun = null;
     if (!key) return null;
     // The row's own key is `project/name`; either part may itself contain a slash, so the
     // split is on the FIRST one — the same rule the row built it with.
     const i = key.indexOf("/");
     try {
-      const run = endRun(await api(`/api/runs/${enc(key.slice(0, i))}/${enc(key.slice(i + 1))}`));
+      const base = `/api/runs/${enc(key.slice(0, i))}/${enc(key.slice(i + 1))}`;
+      // A leaf opened from the run takes the run's place under the row — the leaf
+      // screen's own markup, so the hub never navigates away from its sidebar.
+      if (leafId) {
+        const [run, leaf] = await Promise.all([api(base), api(`${base}/leaves/${enc(leafId)}`).catch(() => null)]);
+        hubRun = { key, leaf: leafId, html: renderLeafHtml(run, leaf, leafId).html };
+        return hubRun;
+      }
+      const run = endRun(await api(base));
       const { html, rows } = runScreen(run, isDesktop());
-      hubRun = { key, html, draw: () => drawRail(run.tasks, rows) };
+      hubRun = { key, leaf: null, html, draw: () => drawRail(run.tasks, rows) };
       return hubRun;
     } catch (e) {
       // A run that cannot be read closes the row rather than leaving an empty shelf.
       console.error("overview: opened run not read", e);
       ui.hubRun = null;
+      ui.hubLeaf = null;
       return null;
     }
   }
@@ -1533,7 +1542,15 @@
     }
     // A finished row on the hub: the run opens beneath the row, and the same row clicked
     // again closes it. The hash never moves — this is not a navigation.
-    if (t.dataset.hub != null) { ui.hubRun = ui.hubRun === t.dataset.hub ? null : t.dataset.hub; requestRoute(route); return; }
+    if (t.dataset.hub != null) { ui.hubRun = ui.hubRun === t.dataset.hub ? null : t.dataset.hub; ui.hubLeaf = null; requestRoute(route); return; }
+    // Inside the run the hub opened: a leaf replaces the run in place, and the leaf's way
+    // back to the tree returns to it. Every other link there still navigates.
+    const inHub = (cls) => { for (let n = t; n && n !== main; n = n.parentNode) if (n.classList?.contains(cls)) return true; return false; };
+    if (t.dataset.href && (inHub("ovrun") || inHub("ovleaf"))) {
+      const leaf = /\/leaf\/([^/]+)$/.exec(t.dataset.href);
+      const back = inHub("ovleaf") && t.dataset.focus != null;
+      if (leaf || back) { ui.hubLeaf = leaf ? decodeURIComponent(leaf[1]) : null; requestRoute(route); return; }
+    }
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
     if (t.dataset.superseded != null) { ui.showSuperseded = !ui.showSuperseded; requestRoute(route); return; }

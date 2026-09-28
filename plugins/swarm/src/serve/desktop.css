@@ -158,15 +158,17 @@
   :is(main:has(> .banner):has(> .graph), .ovrun) .graph:has(> .rthead) svg.overlay { top:var(--rthead); }
 
   /* The leaf screen: the verdict and the chips across the top, the prompt and output
-     down the left, the figures beside them. The chips wear the grid's width, which is
-     the cards' width, never the full main width over cards capped at 1100px. */
-  main:has(> .chips.hero) { display:grid; grid-template-columns:minmax(0, 2fr) minmax(280px, 1fr); gap:14px; align-items:start; align-content:start; max-width:1100px; margin:0 auto; padding:16px; }
-  main:has(> .chips.hero) > .banner { grid-area:1/1/2/3; margin:0; }
-  main:has(> .chips.hero) > .chips.hero { grid-area:2/1/3/3; padding:0; }
-  main:has(> .chips.hero) > .card.flush { grid-area:3/1/4/2; margin:0; }
+     down the left, the figures beside them — at main's full width, like every other
+     screen. The hub's leaf opened in place (.ovleaf) is the same cut. */
+  main:has(> .chips.hero) { display:grid; grid-template-columns:minmax(0, 2fr) minmax(280px, 1fr); gap:14px; align-items:start; align-content:start; padding:16px; }
+  .ovleaf { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0, 2fr) minmax(280px, 1fr); gap:14px; align-items:start; border-left:2px solid var(--accent); padding:0 0 8px 12px; }
+  :is(main:has(> .chips.hero), .ovleaf) > * { max-width:none; }
+  :is(main:has(> .chips.hero), .ovleaf) > .banner { grid-area:1/1/2/3; margin:0; }
+  :is(main:has(> .chips.hero), .ovleaf) > .chips.hero { grid-area:2/1/3/3; padding:0; }
+  :is(main:has(> .chips.hero), .ovleaf) > .card.flush { grid-area:3/1/4/2; margin:0; }
   /* The figure cards have no row of their own: both take column 2, so they stack beside
      the prose rather than under it. */
-  main:has(> .chips.hero) > .card:not(.flush) { grid-column:2; margin:0; }
+  :is(main:has(> .chips.hero), .ovleaf) > .card:not(.flush) { grid-column:2; margin:0; }
 
   /* A stalled leaf's tint: the phone paints it on .body, which the table lifts out of the box tree. */
   :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf.quiet:has(> .body > .col) { background:var(--warn-bg); }
@@ -199,14 +201,23 @@
      run's reading width, and the hub is a landing, not a document. */
   main:has(> .ovfeed) { display:grid; grid-template-columns:minmax(0, 1fr) clamp(300px, 25vw, 360px); align-items:start; align-content:start; gap:0 18px; padding-left:16px; padding-right:16px; }
   main:has(> .ovfeed.shut) { grid-template-columns:minmax(0, 1fr); }
+  /* The toggle is the sidebar's tab: row 1 of the panel's track, the panel under it, the
+     feed beside both from the top. Shut, it keeps the same top-right corner. */
+  main:has(> .ovfeed) > .ovbar { grid-area:1/2/2/3; display:flex; justify-content:flex-end; }
+  main:has(> .ovfeed) > .ovfeed { grid-area:1/1/3/2; }
+  main:has(> .ovfeed) > .ovpanel { grid-area:2/2/3/3; }
+  main:has(> .ovfeed.shut) > .ovbar { grid-area:1/1/2/2; padding-bottom:6px; }
+  main:has(> .ovfeed.shut) > .ovfeed { grid-area:2/1/3/2; }
   .ovfeed { min-width:0; display:grid; grid-template-columns:var(--feed-cols); column-gap:12px; align-content:start; align-items:start; }
   /* Everything that is not a card spans the feed's tracks: the two section rules, the
      finished stack, and the toggle's row. */
-  .ovfeed > .section, .ovfeed > ul, .ovfeed > .empty, .ovfeed > .ovbar { grid-column:1 / -1; }
+  .ovfeed > .section, .ovfeed > ul, .ovfeed > .empty { grid-column:1 / -1; }
   .ovfeed > .section { padding-left:0; padding-right:0; }
-  .ovbar { display:flex; justify-content:flex-end; padding:0 0 6px; }
   .ovtoggle { font:inherit; font-size:12px; letter-spacing:.04em; color:var(--muted); background:var(--surface); border:1px solid var(--rule); border-radius:999px; padding:4px 12px; cursor:pointer; }
   .ovtoggle.on { color:var(--accent); border-color:var(--accent); }
+  /* Open, it is the panel's own top edge: full width, square below, no seam. */
+  .ovbar .ovtoggle.on { flex:1; text-align:left; border-radius:10px 10px 0 0; border-color:var(--rule); border-bottom:0; padding:8px 16px; }
+  main:has(> .ovfeed) > .ovpanel { border-top-left-radius:0; border-top-right-radius:0; }
   /* The panel is the whole right track and stays put while a long feed scrolls past it. */
   /* It is one box, as the wireframe draws it: the Usage and Cost screens' own parts
      with their card chrome taken off, so each reads as a thin row under its head. */
