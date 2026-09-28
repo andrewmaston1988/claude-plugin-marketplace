@@ -25,6 +25,7 @@
     const { esc, enc } = h;
     const { aspects, models, cells } = data;
     if (!models.length) return `<div class="empty">no graded leaves yet — nothing to cover.</div>`;
+    if (h.desktop) return coverageTable(data, h);
     // One responsive SVG scaled to the phone by its viewBox. Each model gets a
     // small label line ABOVE its tile row, so the tiles take the full width and
     // the name never truncates. Tap a label → the model's page; tap an aspect
@@ -37,9 +38,7 @@
     const caption = (a) => a.slice(0, 5);
     const ROW = LBL + TILE;
     const w = aspects.length * CW, hgt = HEAD + models.length * ROW;
-    // Capped at 1.5x its design width: the labels live inside the SVG, so a desktop-wide
-    // main would otherwise scale 9-10px text several times over. A phone is narrower than the cap.
-    let svg = `<svg viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="xMinYMin meet" class="covgrid" style="max-width:${w * 1.5}px">${HATCH_DEFS}`;
+    let svg = `<svg viewBox="0 0 ${w} ${hgt}" preserveAspectRatio="xMinYMin meet" class="covgrid">${HATCH_DEFS}`;
     aspects.forEach((a, i) => {
       const x = i * CW + CW / 2;
       svg += `<text x="${x}" y="${HEAD - 5}" text-anchor="middle" font-size="9" fill="var(--muted)" data-href="#/perf/aspect/${enc(a)}" style="cursor:pointer"><title>${esc(a)}</title>${esc(caption(a))}</text>`;
@@ -58,6 +57,24 @@
     });
     svg += `</svg>`;
     return `<div class="cov">${svg}</div>`;
+  }
+
+  // The desktop coverage (the wireframe's): a 180px model column and one fr column per
+  // aspect, each cell its count on a tint — neutral at 0, amber while provisional, then
+  // deepening with the count up to 120. HTML, so its text is the page's size at any width.
+  function coverageTable(data, h) {
+    const { esc, enc } = h;
+    const { aspects, models, cells } = data;
+    const byKey = new Map(cells.map((c) => [JSON.stringify([c.model, c.aspect]), c]));
+    const cols = `grid-template-columns:180px repeat(${aspects.length},minmax(0,1fr))`;
+    const head = `<div class="cvhead" style="${cols}"><span>model</span>${aspects.map((a) => `<span data-href="#/perf/aspect/${enc(a)}" title="${esc(a)}">${esc(a.slice(0, 5))}</span>`).join("")}</div>`;
+    const rows = models.map((m) => `<div class="cvrow" data-href="#/perf/model/${enc(m)}" style="${cols}"><span class="cvname">${esc(m)}</span>${aspects.map((a) => {
+      const c = byKey.get(JSON.stringify([m, a])) || { n: 0 };
+      const kind = c.n === 0 ? " none" : c.provisional ? " prov" : "";
+      const depth = kind ? "" : ` style="--cv:${(Math.min(c.n, 120) / 120).toFixed(2)}"`;
+      return `<span class="cvcell${kind}"${depth} title="${esc(m)} · ${esc(a)} · n=${c.n}">${c.n}</span>`;
+    }).join("")}</div>`).join("");
+    return `<div class="covtable">${head}${rows}</div>`;
   }
 
   // A legend row always accompanies >=2 series (six outcome buckets here) —

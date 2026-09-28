@@ -72,4 +72,17 @@
   /* One column per provider: its cards stack inside it, never mixed with another provider's. */
   .costgrid { display:grid; grid-template-columns:repeat(auto-fit, minmax(360px, 1fr)); gap:0 20px; align-items:start; padding:0 16px; }
   .costcol > .card { margin-left:0; margin-right:0; }
+
+  /* Coverage: the wireframe's model × aspect table. A cell's tint deepens with its count
+     (--cv, 0..1 of 120 samples); none and provisional are their own flat tints. */
+  .covtable { padding:0 16px 16px; }
+  .cvhead, .cvrow { display:grid; gap:12px; align-items:center; }
+  .cvhead { font-size:12px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); padding:0 0 6px; border-bottom:1.5px solid var(--rule); }
+  .cvhead span[data-href] { cursor:pointer; text-align:center; }
+  .cvrow { font-size:15px; padding:8px 6px; margin:0 -6px; border-bottom:1px dashed var(--rule); cursor:pointer; }
+  .cvrow:hover { background:var(--surface-2); }
+  .cvname { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .cvcell { border-radius:4px; padding:2px 4px; text-align:center; font-variant-numeric:tabular-nums; background:color-mix(in oklch, var(--accent) calc(15% + var(--cv, 0) * 55%), transparent); }
+  .cvcell.none { background:var(--surface-2); color:var(--faint); }
+  .cvcell.prov { background:var(--warn-bg); }
 }

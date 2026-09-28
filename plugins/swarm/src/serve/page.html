@@ -1193,7 +1193,7 @@
       // The one DOM touch a build makes: a cached script load (appends once, reused
       // after), never a screen paint — nothing shows until commitView lands the markup.
       await loadPerfJs();
-      const h = { esc, enc, fmtScore, compact: ui.compact.leaders, rankBadge };
+      const h = { esc, enc, fmtScore, compact: ui.compact.leaders, rankBadge, desktop: isDesktop() };
       html += kind === "coverage" ? window.perfViews.coverageGrid(p.views.coverage, h)
         : kind === "reliability" ? window.perfViews.reliabilityBars(p.views.reliability, h)
         : window.perfViews.leadersList(p.views.leaders, h);
