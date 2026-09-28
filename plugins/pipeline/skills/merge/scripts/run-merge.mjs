@@ -26,7 +26,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { queryRow } from "./pipeline-query.mjs";
-import { planTargetBranch } from "../../../src/cli/queue.mjs";
+import { planTargetBranch } from "../../../src/plans/target-branch.mjs";
 import { resolvePlansDir, PLANS_DIR_KEYS } from "../../../src/plans-resolver.mjs";
 import { unresolvedPlaceholders } from "../../../src/worktree-paths.mjs";
 import { connectUnified, close, projectGetByName } from "../../../src/db/index.mjs";
@@ -340,9 +340,10 @@ export async function main({ _argv, _config, _projectRow } = {}) {
   });
   // A configured plans dir can legitimately not apply to THIS repo. Falling back to the
   // repo's own plans/ keeps the plan-move guard answerable; without it `planMoved` is
-  // permanently false and the resume never completes. Resolved here rather than after the
-  // target because the target's plan tier reads the plan file out of this directory.
-  if ((!plansDir || !existsSync(plansDir)) && existsSync(join(projectDir, "plans"))) {
+  // permanently false and the resume never completes. Resolved before the target, whose plan
+  // tier reads from it; never over an unresolved template, which must reach its refusal below.
+  const unresolved = unresolvedPlaceholders(plansDir, PLANS_DIR_KEYS);
+  if (!unresolved.length && (!plansDir || !existsSync(plansDir)) && existsSync(join(projectDir, "plans"))) {
     plansDir = join(projectDir, "plans").replace(/\\/g, "/");
   }
 
@@ -383,8 +384,7 @@ export async function main({ _argv, _config, _projectRow } = {}) {
   // --plans-dir reaches a real merge. Checked against PLANS_DIR_KEYS, not the global list:
   // {branch} is a legal placeholder elsewhere and is never substituted here.
   //
-  // Ordered after the branch check: a typo'd branch is the more actionable failure.
-  const unresolved = unresolvedPlaceholders(plansDir, PLANS_DIR_KEYS);
+  // Reported after the branch check: a typo'd branch is the more actionable failure.
   if (unresolved.length) {
     const source = projectPlansDir
       ? `the ${project} project row's plans_dir column`

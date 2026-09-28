@@ -376,6 +376,18 @@ test("PAUSE: fires on {branch} too — known globally, unresolvable for a plans 
   }
 });
 
+test("PAUSE: a repo plans/ does not stand in for an unresolvable template", async () => {
+  const dir = tmpRepo();
+  try {
+    mkdirSync(join(dir, "plans"));
+    const outText = await runMain(dir, { plansDir: "{codeRoot}/x/{project}" });
+    match(outText, /PAUSE: Plans directory template cannot resolve/);
+    ok(!outText.includes("--plans-dir"), "must not emit the fallback --plans-dir");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // The false-positive guard: without it the pause could fire on everything and the suite
 // would report green.
 test("PAUSE: a valid template still reaches the spawn", async () => {
@@ -403,11 +415,7 @@ test("a missing branch is reported before the plansDir pause", async () => {
 });
 
 // ── Target-branch tiers — /merge's own order ─────────────────────────────────
-// queue-plan stores the plan's *Target-Branch:* on the row, so a queued plan always
-// merged to the right branch. A branch with no row fell straight from the row lookup
-// to origin/HEAD, and a plan declaring `staging` merged to `master`. The plan tier
-// closes that gap; the tier each answer came from is reported so a target that looks
-// wrong can be traced to the source that supplied it.
+// A branch with no row must still merge to its plan's *Target-Branch:*, not origin/HEAD.
 
 // The fixture creates only `autonomous/feat-x`; a target has to exist as a ref or the
 // resolution is refused, so each test names the refs its scenario needs.
