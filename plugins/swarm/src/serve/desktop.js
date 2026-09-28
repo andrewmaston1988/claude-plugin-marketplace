@@ -43,8 +43,9 @@
       // The open run is injected straight after its own row, in the same list, so it
       // re-renders with the feed the poll rebuilds — never as a second screen.
       feed += sec("finished") + `<ul>${done.map((r) => runRow(r, true, labels, false, true)
-        + (expanded && expanded.key === keyOf(r) ? `<li class="ovrun" data-key="ov:${keyOf(r)}">${expanded.html}</li>` : "")).join("")}</ul>`;
+        + (expanded && expanded.key === `${r.project}/${r.name}` ? `<li class="ovrun" data-key="ov:${keyOf(r)}">${expanded.html}</li>` : "")).join("")}</ul>`;
     }
+    if (!feed) feed = h.noRuns;
     feed = `<div class="ovfeed${open ? "" : " shut"}">`
       + (panel ? `<div class="ovbar"><button type="button" class="ovtoggle${open ? " on" : ""}" data-flyout="1" aria-expanded="${open ? "true" : "false"}">usage and cost</button></div>` : "")
       + feed + `</div>`;

@@ -246,6 +246,55 @@ test("a failed run read closes the row again rather than leaving an empty shelf"
   assert.equal(P.location.hash, "#/overview");
 });
 
+// A project directory may carry `&` (`C:\code\R&D`); the row's key reaches the page
+// escaped in the attribute and decoded in the click, and both must name the same run.
+test("a finished row whose project carries & opens beneath its row", async () => {
+  const amp = { ...finished("AMP", 1), project: "C--code-R&D", group: "C--code-R&D" };
+  const runs = { ...RUNS, runs: [amp] };
+  const opened = { ...runPayload("AMP"), project: "C--code-R&D" };
+  const table = [[(u) => /^\/api\/runs(\?|$)/.test(u), runs], ...replies({ run: opened }).slice(1)];
+  const P = loadPage({ layout: "desktop", clock: () => T });
+  await settle(P, table);
+  const row = P.findByClass("row").find((e) => e.getAttribute("data-hub"));
+  // The harness keeps attributes as written; a browser hands dataset the decoded value.
+  row.dataset.hub = row.getAttribute("data-hub").replace(/&amp;/g, "&");
+  P.tap(row);
+  await settle(P, table);
+  assert.equal(P.findByClass("ovrun").length, 1, "the & row opens like any other");
+});
+
+test("the hub with no runs says so in the Runs screen's own words", async () => {
+  const P = loadPage({ layout: "desktop", clock: () => T });
+  await settle(P, [[(u) => /^\/api\/runs(\?|$)/.test(u), { ...RUNS, runs: [] }], ...replies().slice(1)]);
+  const empty = P.findByClass("empty").map((e) => e.textContent);
+  assert.ok(empty.some((t) => /no runs under ~\/\.swarm\/runs yet/.test(t)), "the hub's empty feed: " + JSON.stringify(empty));
+});
+
+// The flyout's reads are optional: one that never answers must not hold the feed back.
+test("a flyout read that stalls does not hold the run feed back", async () => {
+  const P = loadPage({ layout: "desktop", clock: () => T });
+  for (let n = 0; n < 4; n++) {
+    await P.flush();
+    for (const url of P.pendingUrls()) {
+      if (url === "/api/usage") continue; // never answers
+      const reply = replies().find(([m]) => m(url));
+      P.respond((u) => u === url, reply[1]);
+    }
+  }
+  P.fireTimers(1500);
+  await P.flush(); await P.flush();
+  assert.equal(P.findByClass("rcard").length, 2, "the live cards draw without the stalled read");
+});
+
+// The run screen's desktop cut is laid out by rules keyed to main's own children; the
+// hub nests that cut inside `.ovrun`, so every such rule must also reach it there.
+test("every run-screen desktop rule also reaches the run opened on the hub", () => {
+  const css = readFileSync(new URL("../src/serve/desktop.css", import.meta.url), "utf8");
+  const bare = css.split("\n").filter((l) => l.includes("main:has(> .banner):has(> .graph)") && !l.includes(":is(main:has(> .banner):has(> .graph), .ovrun)"));
+  assert.deepEqual(bare.map((l) => l.trim().slice(0, 80)).filter((l) => !l.startsWith("main:has(> .banner):has(> .graph) {")), [], "run-screen rules the hub's .ovrun cannot reach");
+  assert.match(css, /\.ovrun\)?\s*>\s*\.actionbar[^{]*\{[^}]*position:\s*static/, "the report bar sits in the opened run, never fixed over the hub");
+});
+
 // ── the rail ─────────────────────────────────────────────────────────────
 // The hub draws no graph, so a finished run's rail carries no lane — but the disc that
 // says how the run ended is drawn inside that same svg, and is the only at-a-glance state

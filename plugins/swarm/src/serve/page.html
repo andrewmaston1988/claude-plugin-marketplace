@@ -550,6 +550,8 @@
       return null;
     }
   }
+  // Runs and the hub say the same thing when there is nothing to show.
+  const NO_RUNS = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
   // Overview is a desktop-only hub: the run feed the Runs screen reads, plus the two
   // cached payloads its tabs already fetch (D5) — no new endpoint and no new figure.
   async function buildOverview() {
@@ -560,12 +562,16 @@
     const perfJs = loadPerfJs();
     const [usage, cost] = await Promise.all([
       { name: "usage" }, { name: "cost" },
-    ].map((v) => viaCache(v, false).catch((e) => { console.error(`overview: /api/${v.name} not read`, e); return null; })));
+    ].map((v) => Promise.race([
+      viaCache(v, false).catch((e) => { console.error(`overview: /api/${v.name} not read`, e); return null; }),
+      // A slow read stops holding the feed after this; it still lands in the cache for the next tick.
+      new Promise((r) => setTimeout(() => r(null), 1500)),
+    ])));
     await perfJs;
     const expanded = await expandedRun();
     const h = {
       esc, enc, seg: segSwitcher, runRow,
-      labels: runLabels(data.runs), expanded, flyout: ui.flyout,
+      labels: runLabels(data.runs), expanded, flyout: ui.flyout, noRuns: NO_RUNS,
     };
     return {
       header: headerHtml(TAB_TITLE.overview, ""),
@@ -642,7 +648,7 @@
         html += "</ul>";
       }
     }
-    if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
+    if (!runs.length) html = NO_RUNS;
     return { header, home: true, html, labels };
   }
   // Each table's columns, named once here and used for its own header row. The cells come out
@@ -1228,8 +1234,7 @@
       html: window.perfViews.usageScreen(usageData, { esc, seg: segSwitcher }, v.window),
     };
   }
-  // The grading-off note, drawn by the Performance tab and by the Overview's top-models
-  // column: one string, so the two can never disagree about why nothing is ranked.
+  // The grading-off note the Performance tab draws when nothing is ranked.
   const GRADING_OFF = `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`;
   async function buildPerf(v) {
     const { kind, which } = v;
