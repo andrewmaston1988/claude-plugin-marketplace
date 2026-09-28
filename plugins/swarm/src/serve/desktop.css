@@ -41,7 +41,7 @@
   .bnav[data-on=perf] [data-tab=perf], .bnav[data-on=cost] [data-tab=cost] { background:var(--surface-2); }
 
   /* A desktop window is wide: a run's rows must not stretch into an unreadable line. */
-  main > .graph, main > .banner, main > .totals, main > .card, main > .skeleton { max-width:1100px; margin-left:auto; margin-right:auto; }
+  main > .graph, main > .banner, main > .totals, main > .card:not(.rcard), main > .skeleton { max-width:1100px; margin-left:auto; margin-right:auto; }
 
   /* Runs: live runs are cards, so they go side by side above the finished stacks —
      everything that is not a card spans the full width. The shorthand's zeroed
@@ -50,6 +50,9 @@
   main:has(> .rcard) > .section, main:has(> .rcard) > ul, main:has(> .rcard) > .empty { grid-column:1 / -1; }
   main:has(> .rcard) > .section { padding-left:0; padding-right:0; }
   main:has(> .rcard) > .rcard { margin-left:0; margin-right:0; }
+  /* Fewer live runs than tracks: a lone card takes the row, two share it — no empty tracks beside them. */
+  main:not(:has(> .rcard ~ .rcard)) > .rcard, .ovfeed:not(:has(> .rcard ~ .rcard)) > .rcard { grid-column:1 / -1; }
+  main:has(> .rcard ~ .rcard):not(:has(> .rcard ~ .rcard ~ .rcard)), .ovfeed:has(> .rcard ~ .rcard):not(:has(> .rcard ~ .rcard ~ .rcard)) { grid-template-columns:repeat(2, minmax(0, 1fr)); }
 
   /* The finished stack as a table: the phone's row, cut into its columns, under a
      header row naming them. `display:contents` lifts the row's two wrapper boxes out
