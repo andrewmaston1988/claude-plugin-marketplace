@@ -116,22 +116,16 @@
   // row, its reliability bar.
   const providerLogo = (p, options) => window.swarmLogos?.providerLogo(p, options) ?? "";
 
-  function modelSummary(data, h) {
+  function modelSummary(data, h, grid = false) {
     const { esc, enc, fmtScore } = h;
     const { model, overall, rank, aspects, reliability, domainSelect, domain, cost } = data;
     const place = rank && rank.position <= 3 ? rank.position : 0;
     const rel = reliability[0];
     const total = rel ? rel.total : 0;
     const done = rel ? (rel.byOutcome.completed || 0) : 0;
-    // Cost is the model's coins within its provider plus one verdict chip — a bare
-    // multiplier means nothing without its neighbours, so that stays on the Cost screen.
     const verdict = cost?.value === "best" ? ["best value", "good"] : cost?.value === "worst" ? ["worst value", "bad"] : cost?.onFrontier ? ["frontier", "front"] : null;
-    // The bottom row is chips: the provider(s) first, in brand colour, then the value verdict.
     const providers = cost?.provider ? [cost.provider] : overall?.providers || [];
-    // The disc is decorative — the provider name sits right after it in the pill, so
-    // the chip stays aria-hidden rather than announcing the provider twice.
     const chips = providers.map((p) => `<span class="pchip ${esc(window.swarmLogos?.providerKey(p) ?? p)}">${providerLogo(p, { chip: true })}${esc(p)}</span>`).join("") + (verdict ? `<span class="vchip ${verdict[1]}">${verdict[0]}</span>` : "");
-    // Below the podium the position reads RAG: 4th green, amber midway, last red.
     const rag = (pos, of) => {
       const t = of > 4 ? Math.max(0, Math.min(1, (pos - 4) / (of - 4))) : 0;
       return t <= 0.5
@@ -154,15 +148,24 @@
       return `<div class="arow${none ? " none" : ""}" data-href="#/perf/aspect/${enc(a.aspect)}"><span class="alabel">${esc(a.aspect)}</span><div class="bar${c && c.provisional ? " prov" : ""}"><span style="width:${w}%"></span></div><span class="aval">${none ? "—" : fmtScore(c.weighted)}<small>${c ? " n=" + c.n : ""}</small></span></div>`;
     }).join("");
     const aspectWidget = `<div class="section"><span>aspects</span><span class="line"></span>${domainSelect ? `<span class="secsel">${domainSelect}</span>` : ""}</div><div class="aspects">${rows}</div>`;
-    return hero + aspectWidget;
+    return grid ? `<div class="model-hero">${hero}</div><div class="model-box model-aspects">${aspectWidget}</div>` : hero + aspectWidget;
   }
 
   function modelDashboard(data, h) {
-    const covWidget = `<div class="section"><span>coverage</span><span class="line"></span></div>${coverageGrid(data.coverage, h)}`;
+    const desktop = h.desktop ?? Boolean(window.swarmDesktop?.isDesktop?.());
+    const view = { ...h, desktop };
+    const summary = modelSummary(data, view, desktop);
+    const covWidget = `<div class="section"><span>coverage</span><span class="line"></span></div>${coverageGrid(data.coverage, view)}`;
     const relWidget = `<div class="section"><span>reliability</span><span class="line"></span></div>${reliabilityBars(data.reliability, h)}`;
-    return modelSummary(data, h) + covWidget + relWidget;
+    if (!desktop) return summary + covWidget + relWidget;
+    const cost = data.cost;
+    const multiplier = cost?.multiplier == null ? "—" : `${cost.multiplier >= 10 ? Math.round(cost.multiplier) : Math.round(cost.multiplier * 10) / 10}×`;
+    const costVerdict = cost?.dominatedBy ? `beaten by ${h.esc(cost.dominatedBy)}` : cost?.onFrontier ? "on the frontier" : cost ? "not graded — cost only" : "no cost reading";
+    const costContent = cost
+      ? `<div class="model-cost-value">${multiplier}</div>${cost.measuredRequests == null ? "" : `<div class="model-cost-evidence">${cost.measuredRequests} measured requests</div>`}<div class="model-cost-verdict">${costVerdict}</div>${h.badge ? h.badge(cost, 0.25) : ""}`
+      : `<div class="empty">no cost reading</div>`;
+    return `<div class="model-grid">${summary}<div class="model-box model-reliability">${relWidget}</div><div class="model-box model-cost"><div class="section"><span>cost</span><span class="line"></span></div>${costContent}</div><div class="model-box model-coverage">${covWidget}</div></div>`;
   }
-
   // The overall ranking: the page's own rankList under a thin adapter, plus the
   // superseded rows behind a disclosure. Supersession is read server-side
   // (`rankCells`), so this view only splits on it — the ranked list and the
