@@ -115,16 +115,18 @@
   // aspect bars (with the domain picker in the widget header), its coverage
   // row, its reliability bar.
   const providerLogo = (p, options) => window.swarmLogos?.providerLogo(p, options) ?? "";
+  // Never "0×" for a missing multiplier — that would read as free.
+  const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
 
-  function modelSummary(data, h) {
+  function modelSummary(data, h, grid = false) {
     const { esc, enc, fmtScore } = h;
     const { model, overall, rank, aspects, reliability, domainSelect, domain, cost } = data;
     const place = rank && rank.position <= 3 ? rank.position : 0;
     const rel = reliability[0];
     const total = rel ? rel.total : 0;
     const done = rel ? (rel.byOutcome.completed || 0) : 0;
-    // Cost is the model's coins within its provider plus one verdict chip — a bare
-    // multiplier means nothing without its neighbours, so that stays on the Cost screen.
+    // Cost is the model's coins within its provider plus one verdict chip — on the phone a bare
+    // multiplier means nothing without its neighbours, so there it stays on the Cost screen.
     const verdict = cost?.value === "best" ? ["best value", "good"] : cost?.value === "worst" ? ["worst value", "bad"] : cost?.onFrontier ? ["frontier", "front"] : null;
     // The bottom row is chips: the provider(s) first, in brand colour, then the value verdict.
     const providers = cost?.provider ? [cost.provider] : overall?.providers || [];
@@ -154,13 +156,23 @@
       return `<div class="arow${none ? " none" : ""}" data-href="#/perf/aspect/${enc(a.aspect)}"><span class="alabel">${esc(a.aspect)}</span><div class="bar${c && c.provisional ? " prov" : ""}"><span style="width:${w}%"></span></div><span class="aval">${none ? "—" : fmtScore(c.weighted)}<small>${c ? " n=" + c.n : ""}</small></span></div>`;
     }).join("");
     const aspectWidget = `<div class="section"><span>aspects</span><span class="line"></span>${domainSelect ? `<span class="secsel">${domainSelect}</span>` : ""}</div><div class="aspects">${rows}</div>`;
-    return hero + aspectWidget;
+    return grid ? `<div class="model-hero">${hero}</div><div class="model-box model-aspects">${aspectWidget}</div>` : hero + aspectWidget;
   }
 
   function modelDashboard(data, h) {
-    const covWidget = `<div class="section"><span>coverage</span><span class="line"></span></div>${coverageGrid(data.coverage, h)}`;
+    const desktop = h.desktop ?? Boolean(window.swarmDesktop?.isDesktop?.());
+    const view = { ...h, desktop };
+    const summary = modelSummary(data, view, desktop);
+    const covWidget = `<div class="section"><span>coverage</span><span class="line"></span></div>${coverageGrid(data.coverage, view)}`;
     const relWidget = `<div class="section"><span>reliability</span><span class="line"></span></div>${reliabilityBars(data.reliability, h)}`;
-    return modelSummary(data, h) + covWidget + relWidget;
+    if (!desktop) return summary + covWidget + relWidget;
+    const cost = data.cost;
+    const multiplier = fmtMult(cost?.multiplier);
+    const costVerdict = cost?.dominatedBy ? `beaten by ${h.esc(cost.dominatedBy)}` : cost?.onFrontier ? "on the frontier" : cost ? "not graded — cost only" : "no cost reading";
+    const costContent = cost
+      ? `<div class="model-cost-value">${multiplier}</div>${cost.measuredRequests == null ? "" : `<div class="model-cost-evidence">${cost.measuredRequests} measured requests</div>`}<div class="model-cost-verdict">${costVerdict}</div>`
+      : `<div class="empty">no cost reading</div>`;
+    return `<div class="model-grid">${summary}<div class="model-box model-reliability">${relWidget}</div><div class="model-box model-cost"><div class="section"><span>cost</span><span class="line"></span></div>${costContent}</div><div class="model-box model-coverage">${covWidget}</div></div>`;
   }
 
   // The overall ranking: the page's own rankList under a thin adapter, plus the
@@ -234,8 +246,6 @@
   // One provider cost page: its value hero, then a ranked card per model, or one fact card.
   function costSection(section, data, h) {
     const { esc, enc } = h;
-    // Never "0×" for a missing multiplier — that would read as free.
-    const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
     const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
     // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
     // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.
