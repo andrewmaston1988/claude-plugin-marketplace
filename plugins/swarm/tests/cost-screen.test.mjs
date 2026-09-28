@@ -134,3 +134,38 @@ test("each measured card carries its coin badge in the bottom-right corner; an u
   assert.match(html, /<div class="cfoot"><div class="sub">[^<]*<\/div><span class="cbadge coins" data-coins="3"><\/span><\/div><\/div>/);
   assert.equal((html.match(/class="cbadge/g) || []).length, 2, "the unmeasured card has no badge");
 });
+
+test("a shown elder wears [superseded by …] and stays a card; its ungraded successor's cost-only card carries the pitch", () => {
+  const { costScreen } = loadPerfViews();
+  const pitch = "needs grades — newer generation of sonnet-5 (#2 overall, best value)";
+  const html = costScreen({ sections: [section("claude", [
+    srow("sonnet-5", 1, { pendingSuccessor: "sonnet-5-5" }),
+    srow("sonnet-5-5", 1.5, { pitch }),
+  ], { points: [point("sonnet-5", 8, 1, { onFrontier: true, pendingSuccessor: "sonnet-5-5" })] })] }, H);
+  assert.equal(cards(html).length, 2);
+  assert.ok(html.includes("[superseded by sonnet-5-5]"), html);
+  assert.ok(html.includes(pitch), html);
+  assert.ok(!html.includes("not graded — cost only"), "the pitch replaces the bare cost-only line");
+  assert.equal(html.split("[superseded by").length, 2, "only the elder is chipped");
+});
+
+test("a successor with no predecessor keeps the plain cost-only line", () => {
+  const { costScreen } = loadPerfViews();
+  const html = costScreen({ sections: [section("ollama", [srow("glm", 1)])] }, H);
+  assert.ok(html.includes("not graded — cost only") && !html.includes("needs grades"));
+});
+
+test("costView's chip fields reach the Cost screen: the elder is chipped and the successor pitches it", async () => {
+  const { costView } = await import("../src/serve/perf-views.mjs");
+  const { costScreen } = loadPerfViews();
+  const grade = (model, score, count) => Array.from({ length: count }, (_, i) => ({
+    resultsDir: `C:/runs/${model}-${i}`, leaf: `${model}-${i}`, model, provider: "claude", domain: "node", outcome: "completed",
+    grades: { adherence: score, handoff: score, truthfulness: score, depth: score },
+  }));
+  const cost = (model, mult) => ({ provider: "claude", model, mult, requests: 500, measuredRequests: 500, weeks: 3, measuredWeeks: 3 });
+  const view = costView([...grade("claude-sonnet-5", 8, 6), ...grade("claude-sonnet-5-5", 8, 2)],
+    [cost("claude-sonnet-5", 1), cost("claude-sonnet-5-5", 1.5)]);
+  const html = costScreen(view, H);
+  assert.ok(html.includes("[superseded by claude-sonnet-5-5]"), html);
+  assert.match(html, /needs grades — newer generation of claude-sonnet-5/);
+});

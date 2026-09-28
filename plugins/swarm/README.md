@@ -502,7 +502,15 @@ replaces its rows rather than double-weighting the model.
 **`swarm validate`** prints the record the seating is decided on when grading is on: a
 `seats:` block per seated model (leaf ids, scores, cost band, frontier verdict) plus one
 line for launchable models it didn't seat. `never graded` / `cost unmeasured` are written
-in words, never a number — absence is not zero.
+in words, never a number — absence is not zero. When the manifest seats no launchable model
+below 20 graded rows, one `gap seat available:` line names the strongest candidate — seat it
+on one bounded leaf; a grade at n<20 is not a verdict.
+
+**`swarm perf --overall`** (grading on, a models cache present) opens with a `needs grades`
+block: every launchable model below 20 graded rows, read from the whole store so `--model` /
+`--domain` never add to it, and left out of the ranked table beneath. Newer generations of a
+best-value, then frontier, elder come first, chipped `newer generation of <elder> (#rank, verdicts)`;
+models with no predecessor follow. The elder's own row reads `[superseded by <successor>]`.
 
 ## Cost — the meter weight beside the score
 
@@ -518,7 +526,7 @@ carried measurable weekly segments (cached readings bank nothing).
 - **The multiplier's floor is a measured model with ≥ 200 measured requests.** A model with
   no history is **unmeasured** — excluded from comparison entirely, neither free nor dear.
 
-The dashboard Cost screen shows the newest model per family, whether or not it is denylisted; Performance keeps all generations. The multiplier is
+The dashboard Cost screen shows the newest model per family, whether or not it is denylisted; Performance keeps all generations. A newer model takes over its elder on the graded screens only once it has 5 graded rows: until then the elder stays, chipped `[superseded by …]`, and the successor's card reads `needs grades — newer generation of …`. The multiplier is
 the per-request meter weight against that floor, printed beside the grades, never collapsed into one number. A
 model is **dominated** when another is strictly higher-scoring *and* strictly cheaper — the only comparison made,
 since a ratio would let one cheap fluke leaf outrank a well-evidenced model.

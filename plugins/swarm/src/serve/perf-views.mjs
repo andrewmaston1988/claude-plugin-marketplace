@@ -63,12 +63,20 @@ export function rankCells(cells, { cloudSuffix = ":cloud" } = {}) {
   const { superseded, pending } = supersessionReading(cells, {
     providerKey: providerOf, cloudSuffix, ready: readyFrom(cells, providerOf),
   });
+  const rankOf = new Map(cells.map((cell, i) => [cell.model, i + 1]));
+  // A young successor wears its elder's pitch; a rank alone claims nothing, so it rides only with verdicts.
+  const pitchOf = new Map();
+  for (const [key, successor] of pending) {
+    const [provider, elder] = JSON.parse(key);
+    pitchOf.set(supersessionKey(provider, successor), successorPitch({ elder, rank: rankOf.get(elder) }));
+  }
   return cells.map((cell) => {
     const key = supersessionKey(providerOf(cell), cell.model);
     const by = superseded.get(key);
     const next = pending.get(key);
+    const pitch = pitchOf.get(key);
     if (by) return { ...cell, supersededBy: by };
-    return next ? { ...cell, pendingSuccessor: next } : cell;
+    return next || pitch ? { ...cell, ...(next && { pendingSuccessor: next }), ...(pitch && { pitch }) } : cell;
   });
 }
 
@@ -291,6 +299,19 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
       worst,
     };
   });
+  // A successor below the handover wears its elder's own record, read off the
+  // verdicts just decided so the chip cannot disagree with the hero.
+  const rankOf = new Map(quality.map((cell, i) => [cell.model, i + 1]));
+  for (const section of sections) {
+    const rowsOf = [...section.points, ...section.spread];
+    for (const elder of new Set(rowsOf.filter((r) => r.pendingSuccessor).map((r) => r.model))) {
+      const at = section.points.find((p) => p.model === elder);
+      const verdicts = at && section.best === at ? ["best value"] : at?.onFrontier ? ["frontier"] : [];
+      const pitch = successorPitch({ elder, rank: rankOf.get(elder), verdicts });
+      const successor = rowsOf.find((r) => r.model === elder).pendingSuccessor;
+      for (const r of rowsOf) if (r.model === successor) r.pitch = pitch;
+    }
+  }
   const global = providers.length === 1 ? verdicts(points, spread) : { best: null, worst: null };
   return {
     points, spread, sections, bands, valueMargin: margin,

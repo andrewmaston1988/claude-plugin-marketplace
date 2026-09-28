@@ -188,7 +188,7 @@
       label: esc(c.model),
       val: fmtScore(c.combined),
       none: c.combined == null,
-      sub: cellSub(c, universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)),
+      sub: [cellSub(c, universals.map((a) => `${short(a)} ${fmtScore(c.wtds[a])}`)), c.pendingSuccessor && `[superseded by ${esc(c.pendingSuccessor)}]`, c.pitch && esc(c.pitch)].filter(Boolean).join(" · "),
       frac: (c.combined ?? 0) / 10,
       prov: c.provisional,
       sup: !!c.supersededBy,
@@ -284,14 +284,14 @@
       if (best && best.model === r.model) return `best value${data.valueMargin == null ? "" : ` · within ${data.valueMargin} of the best`}`;
       if (p && p.dominatedBy) return `beaten by ${esc(p.dominatedBy)}`;
       if (p && p.onFrontier) return "on the frontier";
-      return "not graded — cost only";
+      return r.pitch ? esc(r.pitch) : "not graded — cost only";
     };
     let rank = 0;
     const cards = spread.map((r) => {
       const top = (rk, val) => `<div class="top"><span class="who"><span class="rk">${rk}</span><span class="nm">${esc(r.model)}</span></span><span class="val">${val}</span></div>`;
       const href = `data-href="#/perf/model/${enc(r.model)}"`;
       if (r.mult == null) return `<div class="card crow unm" ${href}>${top("·", "—")}<div class="sub">unmeasured — no price or banked history</div></div>`;
-      const evidence = [verdict(r), r.thin ? "thin evidence" : null, isMeter(r) && r.measuredRequests != null ? `${r.measuredRequests} measured requests` : null].filter(Boolean).join(" · ");
+      const evidence = [verdict(r), r.pitch && verdict(r) !== esc(r.pitch) ? esc(r.pitch) : null, r.pendingSuccessor ? `[superseded by ${esc(r.pendingSuccessor)}]` : null, r.thin ? "thin evidence" : null, isMeter(r) && r.measuredRequests != null ? `${r.measuredRequests} measured requests` : null].filter(Boolean).join(" · ");
       return `<div class="card crow" ${href}>${top(++rank, esc(fmtMult(r.mult)))}`
         + `<div class="cbar${r.thin ? " thin" : ""}"><span style="width:${costPct(r.mult).toFixed(1)}%"></span></div>`
         + `<div class="cfoot"><div class="sub">${evidence}</div>${h.badge ? h.badge(r) : ""}</div></div>`;
