@@ -115,6 +115,8 @@
   // aspect bars (with the domain picker in the widget header), its coverage
   // row, its reliability bar.
   const providerLogo = (p, options) => window.swarmLogos?.providerLogo(p, options) ?? "";
+  // Never "0×" for a missing multiplier — that would read as free.
+  const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
 
   function modelSummary(data, h, grid = false) {
     const { esc, enc, fmtScore } = h;
@@ -165,10 +167,10 @@
     const relWidget = `<div class="section"><span>reliability</span><span class="line"></span></div>${reliabilityBars(data.reliability, h)}`;
     if (!desktop) return summary + covWidget + relWidget;
     const cost = data.cost;
-    const multiplier = cost?.multiplier == null ? "—" : `${cost.multiplier >= 10 ? Math.round(cost.multiplier) : Math.round(cost.multiplier * 10) / 10}×`;
+    const multiplier = fmtMult(cost?.multiplier);
     const costVerdict = cost?.dominatedBy ? `beaten by ${h.esc(cost.dominatedBy)}` : cost?.onFrontier ? "on the frontier" : cost ? "not graded — cost only" : "no cost reading";
     const costContent = cost
-      ? `<div class="model-cost-value">${multiplier}</div>${cost.measuredRequests == null ? "" : `<div class="model-cost-evidence">${cost.measuredRequests} measured requests</div>`}<div class="model-cost-verdict">${costVerdict}</div>${h.badge ? h.badge(cost, 0.25) : ""}`
+      ? `<div class="model-cost-value">${multiplier}</div>${cost.measuredRequests == null ? "" : `<div class="model-cost-evidence">${cost.measuredRequests} measured requests</div>`}<div class="model-cost-verdict">${costVerdict}</div>`
       : `<div class="empty">no cost reading</div>`;
     return `<div class="model-grid">${summary}<div class="model-box model-reliability">${relWidget}</div><div class="model-box model-cost"><div class="section"><span>cost</span><span class="line"></span></div>${costContent}</div><div class="model-box model-coverage">${covWidget}</div></div>`;
   }
@@ -244,8 +246,6 @@
   // One provider cost page: its value hero, then a ranked card per model, or one fact card.
   function costSection(section, data, h) {
     const { esc, enc } = h;
-    // Never "0×" for a missing multiplier — that would read as free.
-    const fmtMult = (m) => m == null ? "—" : (m >= 10 ? Math.round(m) : Math.round(m * 10) / 10) + "×";
     const whyNone = (s) => (s.points || []).some((p) => p.wtd != null) ? "no clear best yet" : "not graded yet";
     // Log-scaled over 0.5×–20×: multipliers span decades, so a linear bar makes every
     // cheap model a stub and hides the 1×-vs-2× difference that decides a seat.

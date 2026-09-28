@@ -1,6 +1,6 @@
 // The run screen at desktop width: the verdict, the elapsed time and the token total as
 // three boxes across the top, and the leaves as a table grouped by wave. Every cell is a
-// value the run page already renders (D5) — the cut is the layout, never a new figure.
+// value the run payload already carries (D5) — the cut is the layout, never a new figure.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -12,7 +12,7 @@ const CSS = readFileSync(new URL("../src/serve/desktop.css", import.meta.url), "
 // the two whose latest tool is worth a column.
 const TASKS = [
   { id: "survey", state: "ok", model: "glm-5.2:cloud", tokens: { input: 1_200, output: 340 }, durationMs: 125_000, after: [], activity: "Read src/serve/page.html" },
-  { id: "impl", state: "running", startedMs: Date.now() - 30_000, lastEventMs: Date.now(), model: "gpt-6-luna", tokens: { input: 800, output: 90 }, after: ["survey"], activity: "Bash node --test" },
+  { id: "impl", state: "running", startedMs: Date.now() - 30_000, lastEventMs: Date.now(), model: "gpt-6-luna", tokens: { input: 800, output: 90 }, after: ["survey"], activity: "Bash node --test", coverage: { status: "incomplete", read: 3, required: 9 } },
 ];
 const RUN = () => ({ ...targetRun(), tasks: TASKS, waves: [["survey"], ["impl"]] });
 
@@ -116,6 +116,21 @@ test("the latest tool column carries the activity the leaf page already shows", 
   const desk = await runOn("desktop");
   assert.equal(cellsOf(desk, "survey")[5], "Read src/serve/page.html");
   assert.equal(cellsOf(desk, "impl")[5], "Bash node --test");
+});
+
+// A short read never fails the leaf, so the row is the only place it reaches the operator.
+test("a short read keeps its warning in the table — a mark on the name, the words on hover", async () => {
+  const desk = await runOn("desktop");
+  const warn = desk.findByClass("covwarn", rowOf(desk, "impl"));
+  assert.equal(warn.length, 1, "the desktop row carries the warning");
+  assert.equal(warn[0].getAttribute("title"), "read 3 of 9 required lines");
+  assert.equal(desk.findByClass("covwarn", rowOf(desk, "survey")).length, 0, "a complete read carries none");
+  const phone = await runOn();
+  assert.equal(phone.findByClass("covwarn", rowOf(phone, "impl")).length, 1, "the phone row still says it");
+});
+
+test("a stalled leaf keeps its tint in the table, where .body has no box to paint", () => {
+  assert.ok(CSS.includes(".row.leaf.quiet:has(> .body > .col) { background:var(--warn-bg); }"));
 });
 
 test("a leaf row keeps its link to the leaf page — the table replaces no navigation", async () => {

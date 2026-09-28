@@ -89,8 +89,8 @@
   /* ── Run and leaf screens (chunk 2b) ─────────────────────────────────────── */
 
   /* The run screen's verdict, elapsed time and token total as three boxes across the
-     top; its leaves as a table cut into columns. Nothing here is a figure the screen
-     did not already render (D5) — only where each one sits changes. */
+     top; its leaves as a table cut into columns. Nothing here is a figure the run payload
+     does not already carry (D5) — only where each one sits changes. */
   :root {
     /* One row of the run screen's leaf table. The rail leads the list because the
        overlay paints its lanes into that first track, from the same --rail the rows
@@ -153,8 +153,7 @@
 
   /* The leaf screen: the verdict and the chips across the top, the prompt and output
      down the left, the figures beside them. The chips wear the grid's width, which is
-     the cards' width — measured 2026-09-28, they ran the full main width over cards
-     capped at 1100px. */
+     the cards' width, never the full main width over cards capped at 1100px. */
   main:has(> .chips.hero) { display:grid; grid-template-columns:minmax(0, 2fr) minmax(280px, 1fr); gap:14px; align-items:start; align-content:start; max-width:1100px; margin:0 auto; padding:16px; }
   main:has(> .chips.hero) > .banner { grid-area:1/1/2/3; margin:0; }
   main:has(> .chips.hero) > .chips.hero { grid-area:2/1/3/3; padding:0; }
@@ -162,6 +161,9 @@
   /* The figure cards have no row of their own: both take column 2, so they stack beside
      the prose rather than under it. */
   main:has(> .chips.hero) > .card:not(.flush) { grid-column:2; margin:0; }
+
+  /* A stalled leaf's tint: the phone paints it on .body, which the table lifts out of the box tree. */
+  main:has(> .banner):has(> .graph) .row.leaf.quiet:has(> .body > .col) { background:var(--warn-bg); }
 
   /* end run and leaf */
 

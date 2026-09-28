@@ -40,6 +40,10 @@ test("desktop model: the cost box uses current figures and omits an estimate or 
   assert.doesNotMatch(cost, /floor|estimate|weeks|input|output|cache/i);
 });
 
+test("desktop model: the cost coins are drawn once — the hero carries them, the cost box does not repeat them", () => {
+  assert.equal(count(loadPerfViews().modelDashboard(data(), h(true)), /class="badge"/g), 1);
+});
+
 test("phone model: the existing summary and SVG coverage stay in the original composition", () => {
   const model = data();
   const views = loadPerfViews();

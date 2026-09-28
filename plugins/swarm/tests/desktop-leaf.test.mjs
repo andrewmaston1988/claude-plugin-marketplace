@@ -1,6 +1,6 @@
 // The leaf screen at desktop width: the verdict and the chips across the top, the prompt
 // and output down the left, the position and token cards beside them. The chips take the
-// grid's width — which is the cards' width, the 2026-09-28 measurement, as a rule.
+// grid's width — which is the cards' width, never past their right edge.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -76,8 +76,7 @@ test("the verdict and the chips span both columns, above the body", () => {
   assert.match(cssRule("main:has(> .chips.hero) > .chips.hero"), /grid-area:2\/1\/3\/3/);
 });
 
-// Measured 2026-09-28 at 1440px: the chips ran the full main width over cards capped at
-// 1100px, so they ended past the cards' right edge.
+// The chips wear the grid's width, so they never run past the capped cards' right edge.
 test("the chips wear the grid's width, which is the cards' width", () => {
   assert.match(cssRule("main:has(> .chips.hero) > .chips.hero"), /padding:0/);
   // The rule it corrects is the phone's own, and it stays the phone's.
