@@ -101,4 +101,40 @@ export function validateMustReadRunners(tasks, cfg, io, errors, label, providerR
         `run this task on a Claude, :cloud or codex model, or drop mustRead`);
     }
   }
+  validateResultPathReads(tasks, cfg, errors, label, providerRegistry);
+}
+
+// A prompt carrying {{resultPath:<dep>}} hands the leaf an absolute path, and
+// nothing else proves the leaf ever opened it — a verifier that never read the
+// finder's result verifies nothing, and the run reports its verdicts like any
+// other. Sits beside the runner check because the exemption needs the task's
+// runner, which only a normalized task carries.
+export function validateResultPathReads(tasks, cfg, errors, label, providerRegistry) {
+  for (const t of tasks) {
+    if (typeof t.prompt !== "string" || !t.prompt) continue;
+    // compute/integrate nodes spawn no leaf; a manifest node expands into its child.
+    if (t.compute !== undefined || t.integrate !== undefined || t.manifest !== undefined) continue;
+    // Only TRANSCRIPT_RUNNERS can prove a read at all, so demanding mustRead
+    // elsewhere would ask for exactly what the runner check then rejects.
+    if (!TRANSCRIPT_RUNNERS.has(transcriptRunner(t, cfg, providerRegistry))) continue;
+    const handed = new Set();
+    for (const m of t.prompt.matchAll(TEMPLATE_RE)) if (m[1] === "resultPath") handed.add(m[2]);
+    if (!handed.size) continue;
+    // An index doc expands and substitutes at check time, so a token may live
+    // inside it — unreadable here, satisfiable there.
+    if (t.mustRead?.some((e) => e && typeof e === "object" && !Array.isArray(e) && e.index !== undefined)) continue;
+    const covered = new Set();
+    for (const entry of Array.isArray(t.mustRead) ? t.mustRead : []) {
+      const s = typeof entry === "string" ? entry : entry && typeof entry === "object" && !Array.isArray(entry) ? entry.path : undefined;
+      if (typeof s !== "string") continue;
+      for (const m of s.matchAll(TEMPLATE_RE)) if (m[1] === "resultPath") covered.add(m[2]);
+    }
+    const l = label(t);
+    for (const id of handed) {
+      if (covered.has(id)) continue;
+      errors.push(
+        `${l}: the prompt hands this leaf {{resultPath:${id}}} but mustRead never names it — ` +
+        `nothing proves the leaf opened it. Add it: "mustRead": ["{{resultPath:${id}}}"]`);
+    }
+  }
 }
