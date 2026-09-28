@@ -26,6 +26,7 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 import { queryRow } from "./pipeline-query.mjs";
+import { planTargetBranch } from "../../../src/cli/queue.mjs";
 import { resolvePlansDir, PLANS_DIR_KEYS } from "../../../src/plans-resolver.mjs";
 import { unresolvedPlaceholders } from "../../../src/worktree-paths.mjs";
 import { connectUnified, close, projectGetByName } from "../../../src/db/index.mjs";
@@ -98,13 +99,45 @@ function git(args, cwd) {
   return r.status === 0 ? (r.stdout ?? "").trim() : "";
 }
 
-export function resolveTargetBranch(project, feature, projectDir, explicit) {
-  if (typeof explicit === "string" && explicit.length > 0) return explicit;
+// The plan's annotation, read from the file the row points at (else <feature>.md), in the
+// plans dir and then complete/ — a resumed merge runs after the archival move. Null when
+// there is no plans dir, no plan file, or no annotation.
+function planTargetOf(project, feature, plansDir) {
+  if (!plansDir) return null;
+  const planFile = queryRow(project, feature, "plan_file");
+  const stem = planFile ? String(planFile).split(/[/\\]/).pop() : `${feature}.md`;
+  for (const dir of [plansDir, join(plansDir, "complete")]) {
+    const path = join(dir, stem);
+    if (!existsSync(path)) continue;
+    try { return planTargetBranch(readFileSync(path, "utf8")); } catch { return null; }
+  }
+  return null;
+}
+
+// The resolved target AND the tier that supplied it. /merge's own order, which is not
+// queue-plan's: the row is the normalised copy of the annotation, so it must not lose to
+// the raw text it may have been set to correct. The tier is named in the refusal below.
+export function resolveTarget(project, feature, projectDir, explicit, opts = {}) {
+  if (typeof explicit === "string" && explicit.length > 0) return { branch: explicit, tier: "flag" };
+
   const override = queryRow(project, feature, "target_branch");
-  if (override) return override;
+  if (override) return { branch: override, tier: "row" };
+
+  // A plan naming the branch it works ON must not become the branch it merges INTO —
+  // the same guard a row value gets (merge.mjs ignores both, queue.mjs rewrites them).
+  const planBranch = planTargetOf(project, feature, opts.plansDir);
+  const source = opts.sourceBranch ?? `autonomous/${feature}`;
+  if (planBranch && !planBranch.startsWith("autonomous/") && planBranch !== source) {
+    return { branch: planBranch, tier: "plan" };
+  }
+
   const head = git(["symbolic-ref", "refs/remotes/origin/HEAD"], projectDir);
-  if (head) return head.split("/").pop();
-  return git(["config", "init.defaultBranch"], projectDir) || "main";
+  if (head) return { branch: head.split("/").pop(), tier: "default" };
+  return { branch: git(["config", "init.defaultBranch"], projectDir) || "main", tier: "default" };
+}
+
+export function resolveTargetBranch(project, feature, projectDir, explicit, opts) {
+  return resolveTarget(project, feature, projectDir, explicit, opts).branch;
 }
 
 export function featureOf(branch) {
@@ -287,12 +320,6 @@ export async function main({ _argv, _config, _projectRow } = {}) {
     return 1;
   }
 
-  const targetBranch = resolveTargetBranch(
-    project,
-    featureOf(branches[0]),
-    projectDir,
-    getFlag("target-branch", argv),
-  );
   // One resolver, four precedence tiers — see REFERENCE.md. The driver used to hand-roll a
   // {project}-only substitution here, which saw neither plansDirs[<project>] nor the project
   // row's plans_dir column.
@@ -310,6 +337,37 @@ export async function main({ _argv, _config, _projectRow } = {}) {
     projectPlansDir,
     _config: _config,
   });
+  // A configured plans dir can legitimately not apply to THIS repo. Falling back to the
+  // repo's own plans/ keeps the plan-move guard answerable; without it `planMoved` is
+  // permanently false and the resume never completes. Resolved here rather than after the
+  // target because the target's plan tier reads the plan file out of this directory.
+  if ((!plansDir || !existsSync(plansDir)) && existsSync(join(projectDir, "plans"))) {
+    plansDir = join(projectDir, "plans").replace(/\\/g, "/");
+  }
+
+  const { branch: targetBranch, tier: targetTier } = resolveTarget(
+    project,
+    featureOf(branches[0]),
+    projectDir,
+    getFlag("target-branch", argv),
+    { plansDir, sourceBranch: branches[0] },
+  );
+
+  // A target nothing can resolve otherwise surfaces inside collectSignals as a MISSING
+  // SOURCE branch — `merge-base --is-ancestor <target> <branch>` exits 128 on an unknown
+  // revision — so the operator is shown the name of a branch they typed correctly.
+  const hasRef = (ref) =>
+    spawnSync("git", ["rev-parse", "--verify", "--quiet", ref], { ...SPAWN, cwd: projectDir }).status === 0;
+  if (!hasRef(targetBranch) && !hasRef(`origin/${targetBranch}`)) {
+    process.stderr.write(
+      `REFUSED: resolved target branch '${targetBranch}' (tier: ${targetTier}) has no local ref ` +
+        `or origin/${targetBranch} in ${projectDir}.\n` +
+        `Create or fetch '${targetBranch}', or re-run with --target-branch naming the branch you mean. ` +
+        `Nothing was merged.\n`,
+    );
+    return 1;
+  }
+
   const signals = collectSignals(project, branches, projectDir, targetBranch);
   if (signals.missing.length) {
     process.stderr.write(
@@ -324,8 +382,7 @@ export async function main({ _argv, _config, _projectRow } = {}) {
   // --plans-dir reaches a real merge. Checked against PLANS_DIR_KEYS, not the global list:
   // {branch} is a legal placeholder elsewhere and is never substituted here.
   //
-  // Ordered after the branch check (a typo'd branch is the more actionable failure) and
-  // before the existence fallback below, which must only ever see a substituted path.
+  // Ordered after the branch check: a typo'd branch is the more actionable failure.
   const unresolved = unresolvedPlaceholders(plansDir, PLANS_DIR_KEYS);
   if (unresolved.length) {
     const source = projectPlansDir
@@ -349,13 +406,6 @@ export async function main({ _argv, _config, _projectRow } = {}) {
       ),
     );
     return 0;
-  }
-
-  // A configured plans dir can legitimately not apply to THIS repo. Falling back to the
-  // repo's own plans/ keeps the plan-move guard answerable; without it `planMoved` is
-  // permanently false and the resume never completes.
-  if ((!plansDir || !existsSync(plansDir)) && existsSync(join(projectDir, "plans"))) {
-    plansDir = join(projectDir, "plans").replace(/\\/g, "/");
   }
 
   // Resume: ask the WORLD what is already done before proposing any work. A merge
@@ -419,7 +469,7 @@ export async function main({ _argv, _config, _projectRow } = {}) {
       `  project:       ${project}`,
       `  projectDir:    ${projectDir}`,
       `  branches:      ${branches.join(", ")}`,
-      `  targetBranch:  ${targetBranch}`,
+      `  targetBranch:  ${targetBranch} (tier: ${targetTier})`,
       `  plansDir:      ${plansDir ?? "(unset — merge.mjs default)"}`,
       `  diverged:      ${signals.diverged}`,
       `  needsTesting:  ${signals.needsTesting}${skipTesting ? " (overridden by --skip-testing)" : ""}`,

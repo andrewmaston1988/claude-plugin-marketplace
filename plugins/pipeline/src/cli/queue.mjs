@@ -137,20 +137,27 @@ export function queueModelExtract(planFilePath, kind) {
 }
 
 
+// The `*Target-Branch:*` annotation, or null when the plan carries none. Shared with
+// /merge, which resolves the same annotation for a branch that has no pipeline row —
+// one parse, so a plan cannot mean two different branches to the two callers.
+export function planTargetBranch(text) {
+  for (const line of String(text ?? "").split("\n")) {
+    const s = line.trim();
+    if (s.startsWith("*Target-Branch:") || s.startsWith("* Target-Branch:")) {
+      let value = s.split(":").slice(1).join(":").trim();
+      while (value && (value[0] === "*" || value[0] === " ")) value = value.slice(1);
+      while (value && (value[value.length - 1] === "*" || value[value.length - 1] === " ")) {
+        value = value.slice(0, -1);
+      }
+      return value || null;
+    }
+  }
+  return null;
+}
+
 function queueTargetExtract(planFilePath) {
   try {
-    const lines = readFileSync(planFilePath, "utf8").split("\n");
-    for (const line of lines) {
-      const s = line.trim();
-      if (s.startsWith("*Target-Branch:") || s.startsWith("* Target-Branch:")) {
-        let value = s.split(":").slice(1).join(":").trim();
-        while (value && (value[0] === "*" || value[0] === " ")) value = value.slice(1);
-        while (value && (value[value.length - 1] === "*" || value[value.length - 1] === " ")) {
-          value = value.slice(0, -1);
-        }
-        return value || detectDefaultBranch(process.cwd());
-      }
-    }
+    return planTargetBranch(readFileSync(planFilePath, "utf8")) || detectDefaultBranch(process.cwd());
   } catch {}
   return detectDefaultBranch(process.cwd());
 }
