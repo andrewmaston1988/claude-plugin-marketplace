@@ -1,6 +1,7 @@
 import { providerUsageSnapshot } from "./contracts.mjs";
 import { codexExhausted } from "./usage.mjs";
 import { createCodexAppServerClient } from "./codex.mjs";
+import { recordUsageError, usageReading } from "./usage-cache.mjs";
 
 export const CODEX_RATE_LIMITS_METHOD = "account/rateLimits/read";
 export const CODEX_RATE_LIMITS_UPDATED_METHOD = "account/rateLimits/updated";
@@ -241,6 +242,34 @@ export async function readCodexUsage(config = {}, options = {}) {
 }
 
 export const getCodexUsage = readCodexUsage;
+
+// The provider adapter's usage read: the live read above, through the shared cache.
+// A read that failed outright is not a reading: banked, it would replace the last
+// real one. Like every other adapter's, it records why and yields nothing — and the
+// failure itself is what an empty cache hands back, so its cause still shows.
+export async function readCodexUsageThroughCache(options = {}, context = {}) {
+  const raw = context.now;
+  const now = typeof raw === "function" ? raw() : (typeof raw === "number" ? raw : Date.now());
+  let failed = null;
+  const fetchLive = async () => {
+    const result = await readCodexUsage(context.config || {}, { ...options, ...context });
+    if (result?.provenance !== "none") return result;
+    failed = result;
+    recordUsageError("codex", result.buckets?.[0]?.reason ?? "codex usage read failed", { env: context.env, cachePath: context.cachePath, at: now });
+    return null;
+  };
+  // A caller holding a live client already paid for the app-server, so the TTL
+  // must not suppress a question it has answered: forced live, and banked like
+  // every other live read so the next reader inherits the answer.
+  const reading = await usageReading("codex", {
+    env: context.env,
+    cachePath: context.cachePath,
+    now: () => now,
+    force: context.force === true || Boolean(context.client),
+    fetchLive,
+  });
+  return reading ?? failed;
+}
 
 export function createCodexUsageAdapter(options = {}) {
   return {

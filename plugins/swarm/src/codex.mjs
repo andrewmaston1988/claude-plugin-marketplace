@@ -457,32 +457,8 @@ export function createCodexProviderAdapter(options = {}) {
   // Spawning the app-server just to read usage is opt-in unless a client is already live.
   const readUsage = async (context = {}) => {
     if (!context.client && context.usageOptIn !== true) return null;
-    const { readCodexUsage } = await import("./codex-usage.mjs");
-    const { usageReading, recordUsageError } = await import("./usage-cache.mjs");
-    const raw = context.now;
-    const now = typeof raw === "function" ? raw() : (typeof raw === "number" ? raw : Date.now());
-    // A read that failed outright is not a reading: banked, it would replace the last
-    // real one. Like every other adapter's, it records why and yields nothing — and the
-    // failure itself is what an empty cache hands back, so its cause still shows.
-    let failed = null;
-    const fetchLive = async () => {
-      const result = await readCodexUsage(context.config || {}, { ...options, ...context });
-      if (result?.provenance !== "none") return result;
-      failed = result;
-      recordUsageError("codex", result.buckets?.[0]?.reason ?? "codex usage read failed", { env: context.env, cachePath: context.cachePath, at: now });
-      return null;
-    };
-    // A caller holding a live client already paid for the app-server, so the TTL
-    // must not suppress a question it has answered: forced live, and banked like
-    // every other live read so the next reader inherits the answer.
-    const reading = await usageReading("codex", {
-      env: context.env,
-      cachePath: context.cachePath,
-      now: () => now,
-      force: context.force === true || Boolean(context.client),
-      fetchLive,
-    });
-    return reading ?? failed;
+    const { readCodexUsageThroughCache } = await import("./codex-usage.mjs");
+    return readCodexUsageThroughCache(options, context);
   };
   return {
     id: "codex",
