@@ -408,11 +408,8 @@ export function costUnitLabel(provider = METER_PROVIDER) {
 // section's base. A provider with no source still gets a section, so the reader
 // sees that the provider exists and is unpriced rather than absent.
 //
-// Supersession drops an elder model's row the way the dashboard's Cost screen
-// does, and for the same reason: this is a price reference, not a dispatch
-// roster, so the denylist is not consulted and the newest of a family is the one
-// whose price anyone reading this wants. `hidden` is the count the caller prints.
-// The card's base model is never the row that goes — it IS the unit.
+// Supersession drops an elder's row as the dashboard's Cost screen does, and never
+// the card's base model — that row IS the unit. `hidden` is the count they made.
 export function costSections({ providers = COST_PROVIDERS, models = {}, snaps = [], cloudSuffix = ":cloud" } = {}) {
   return providers.map((provider) => {
     const card = rateCards()[provider];

@@ -151,13 +151,8 @@ export function assertPlausible(provider, prices, seed) {
     throw new Error(`${provider}: the published table does not price ${seed.baseModel}, which is the unit every other row is priced against — refusing to bank it`);
 }
 
-/**
- * Re-read both vendors' tables and bank them. Returns one summary per provider.
- * `rosterIds` is what the roster offered at read time, per provider, so a model
- * that arrives later re-prices the card instead of ranking at `unpriced` for ever.
- * A failed fetch or a refused parse banks `lastFailedAt` and rethrows, carrying the
- * provider on the error: without it an offline machine pays for the retry twice.
- */
+// A failure banks `lastFailedAt` and rethrows carrying the provider and the
+// summaries of the providers already banked; the caller's error path reads both.
 export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fetch, now = new Date(), rosterIds } = {}) {
   const store = readRateCardStore(path);
   const summaries = [];
@@ -177,6 +172,9 @@ export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fe
       store[provider] = { ...store[provider], lastFailedAt: now.toISOString() };
       writeRateCardStore(store, path);
       e.provider = provider;
+      // The providers before this one are banked by the write above; their
+      // summaries ride the throw so the caller can report them as refreshed.
+      e.summaries = summaries;
       throw e;
     }
   }
@@ -203,13 +201,8 @@ export function diffPrices(before, after) {
   return changes;
 }
 
-/**
- * Three ways a card goes stale, any one of them enough: it is older than the
- * refresh window, an explicit `staleAfter` has passed, or the roster names a model
- * it has never priced. The last is one-way — a model leaving needs no new prices,
- * a model arriving does, and a card banked before rosters were recorded has seen
- * nothing. An `asOf` that will not parse is never fresh.
- */
+// Past the window, past an explicit `staleAfter`, or the roster names a model the
+// card never priced (one-way — a leaver needs no prices). An unparsable `asOf` is stale.
 export function isRateCardStale(card, { now = Date.now(), rosterIds = [] } = {}) {
   const at = typeof now === "number" ? now : new Date(now).getTime();
   const readAt = Date.parse(card?.asOf ?? "");

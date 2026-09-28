@@ -121,6 +121,25 @@ test("costView uses the configured Ollama cloud suffix for model families", () =
   equal(view.points.find((row) => row.model === old).supersededBy, current);
 });
 
+test("costView never supersedes the card's own base model", () => {
+  // `claude-sonnet-5` is the 1x unit the section label names; once a refresh prices
+  // `claude-sonnet-5-5` it is the elder of its family and would leave the screen.
+  const base = "claude-sonnet-5";
+  const newer = "claude-sonnet-5-5";
+  const priced = (model, mult) => ({ ...cost(model, mult), baseModel: base });
+  const view = costView(
+    [...grades(base, 7), ...grades(newer, 8), ...grades("claude-opus-5", 6), ...grades("claude-opus-5-5", 5)],
+    [priced(base, 1), priced(newer, 1), priced("claude-opus-5", 5), priced("claude-opus-5-5", 5)],
+  );
+  const point = (model) => view.points.find((row) => row.model === model);
+
+  equal(point(base).supersededBy, undefined, "RED: the 1x row left the Cost screen");
+  equal(view.spread.find((row) => row.model === base).supersededBy, undefined,
+    "RED: the 1x row left the spread table");
+  // Supersession still runs for every family but that one.
+  equal(point("claude-opus-5").supersededBy, "claude-opus-5-5");
+});
+
 test("costScreen hides superseded cards and never names one as the hero leader", () => {
   const { costScreen } = loadPerfViews();
   const old = "claude-opus-5";

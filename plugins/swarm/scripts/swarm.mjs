@@ -1144,7 +1144,12 @@ async function main() {
         return await cmdCost();
       case "refresh-prices": {
         const { refreshPrices } = await import("../src/rate-card-cli.mjs");
-        return await refreshPrices({ out, err, dryRun: rest.includes("--dry-run") });
+        // The same roster `swarm cost` prices for, banked with the read: without
+        // it a manual refresh leaves the next cost query re-fetching both pages.
+        const roster = readProviderModelsCache()?.models || [];
+        return await refreshPrices({
+          out, err, dryRun: rest.includes("--dry-run"), rosterIds: modelsByProvider(roster),
+        });
       }
       case "usage":
         return await cmdUsage(rest);

@@ -14,6 +14,9 @@ const blankOutcomes = () => Object.fromEntries(OUTCOMES.map((o) => [o, 0]));
 function markSuperseded(rows, { providerKey = () => "unqualified", ...options } = {}) {
   const superseded = supersededByMap(rows, { providerKey, ...options });
   for (const row of rows) {
+    // A card's base model IS its section's unit: the screen labels every multiplier
+    // against it, so a newer sibling must never hide it.
+    if (row.baseModel !== undefined && row.model === row.baseModel) continue;
     const by = superseded.get(supersessionKey(providerKey(row), row.model));
     if (by) row.supersededBy = by;
   }

@@ -29,7 +29,7 @@ export function reportCardChanges(out, { provider, url, rows, changes }) {
  * price. `--dry-run` parses and reports without writing — the way to check a page
  * has not moved under the parser before letting it replace a working card.
  */
-export async function refreshPrices({ out, err, dryRun = false, path = rateCardStorePath(), _fetch = fetch } = {}) {
+export async function refreshPrices({ out, err, dryRun = false, path = rateCardStorePath(), _fetch = fetch, rosterIds } = {}) {
   if (dryRun) {
     const before = loadRateCards(path);
     for (const { provider, url, parse } of RATE_CARD_SOURCES) {
@@ -41,7 +41,7 @@ export async function refreshPrices({ out, err, dryRun = false, path = rateCardS
     out("dry run — nothing written");
     return 0;
   }
-  for (const summary of await refreshRateCards({ path, _fetch })) reportCardChanges(out, summary);
+  for (const summary of await refreshRateCards({ path, _fetch, rosterIds })) reportCardChanges(out, summary);
   out(`banked at ${path} — \`swarm cost\` now ranks on these`);
   return 0;
 }
@@ -52,10 +52,8 @@ export async function refreshPrices({ out, err, dryRun = false, path = rateCardS
  * card stands and its own stale banner already says so.
  *
  * The back-off is global and lives in the store, not in a caller's memory: one
- * failed read holds every surface for an hour, so an offline machine pays for the
- * attempt once rather than on every `swarm cost` and every Cost page load.
- * `rosterIds` is per provider — the ids the roster offers, to be banked with the
- * read so a model arriving later re-prices the card.
+ * failed read holds every surface for an hour. `rosterIds` is per provider, banked
+ * with the read so a model arriving later re-prices the card.
  */
 export async function refreshStaleRateCards({ out, err, path = rateCardStorePath(), _fetch = fetch, now = Date.now(), rosterIds } = {}) {
   const at = typeof now === "number" ? new Date(now) : now;
@@ -79,7 +77,11 @@ export async function refreshStaleRateCards({ out, err, path = rateCardStorePath
     for (const summary of summaries) if (summary.changes.length) reportCardChanges(out, summary);
     return { refreshed: summaries.map((s) => s.provider), failed: [], skipped: false };
   } catch (e) {
-    err(`rate cards are stale and could not be refreshed (${e.message}) — ranking on the cached table`);
-    return { refreshed: [], failed: [e.provider].filter(Boolean), skipped: false };
+    // Whatever banked before the failure is banked — reported as refreshed, so the
+    // message never calls a provider that just re-priced itself "cached".
+    const banked = e.summaries ?? [];
+    for (const summary of banked) if (summary.changes.length) reportCardChanges(out, summary);
+    err(`rate cards: ${e.provider ?? "a provider"} could not be refreshed (${e.message}) — its card stays cached`);
+    return { refreshed: banked.map((s) => s.provider), failed: [e.provider].filter(Boolean), skipped: false };
   }
 }

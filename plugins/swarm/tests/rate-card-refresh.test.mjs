@@ -9,7 +9,7 @@ import {
   refreshRateCards, resolveRatePrice,
   CODEX_RATE_CARD_SEED, CLAUDE_RATE_CARD_SEED, RATE_CARD_SOURCES,
 } from "../src/rate-card.mjs";
-import { refreshStaleRateCards } from "../src/rate-card-cli.mjs";
+import { refreshPrices, refreshStaleRateCards } from "../src/rate-card-cli.mjs";
 
 const fixture = (name) =>
   readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
@@ -22,6 +22,12 @@ const servePages = () => async (url) => ({
   ok: true,
   text: async () => fixture(url.includes("openai") ? "openai-pricing.md" : "anthropic-pricing.md"),
 });
+
+// The openai page as usual, claude's behind it down — codex is read first.
+const halfDown = () => {
+  const pages = servePages();
+  return async (url) => (url.includes("openai") ? pages(url) : { ok: false, status: 503 });
+};
 
 // The published page with the card's base model's row cut out — the shape a
 // vendor-side table reshuffle leaves behind.
@@ -228,6 +234,51 @@ test("refreshStaleRateCards: a refresh banks the card and reports what moved", a
   const card = readRateCardStore(path).claude;
   equal(card.asOf, "2026-10-03T09:00:00.000Z", "RED: a stale card was reported refreshed without re-reading it");
   deepEqual(card.rosterIds, ["claude-sonnet-4-6"], "RED: the roster the card was priced for was not banked");
+});
+
+test("refresh: a throw carries what the providers before it banked", async () => {
+  const path = storePath();
+  let caught;
+  try {
+    await refreshRateCards({ path, _fetch: halfDown(), now: new Date("2026-10-03T09:00:00Z") });
+  } catch (e) {
+    caught = e;
+  }
+  equal(caught.provider, "claude");
+  deepEqual(caught.summaries.map((s) => s.provider), ["codex"],
+    "RED: the banked provider's summary went down with the throw");
+  equal(readRateCardStore(path).codex.asOf, "2026-10-03T09:00:00.000Z",
+    "RED: the summary describes a read that was never banked");
+});
+
+test("refreshStaleRateCards: a banked provider is reported refreshed when the other fails", async () => {
+  const path = storePath();
+  const now = Date.parse("2026-10-03T09:00:00Z");
+  const errs = [];
+  const result = await refreshStaleRateCards({
+    out: () => {}, err: (line) => errs.push(line), path, _fetch: halfDown(), now,
+  });
+
+  deepEqual(result, { refreshed: ["codex"], failed: ["claude"], skipped: false },
+    "RED: a provider that banked new prices was reported as not refreshed");
+  equal(readRateCardStore(path).claude.lastFailedAt, new Date(now).toISOString());
+  equal(errs.length, 1);
+  equal(errs[0].includes("claude"), true, "RED: the failure must name the provider that failed");
+  equal(errs[0].includes("codex"), false, "RED: the message calls the banked provider's card cached");
+});
+
+test("refreshPrices banks the roster, so a manual refresh never wipes what the automatic one banked", async () => {
+  const path = storePath();
+  const rosterIds = { claude: ["claude-sonnet-5", "claude-opus-5-5"] };
+  await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-03T09:00:00Z"), rosterIds });
+
+  const code = await refreshPrices({ out: () => {}, err: () => {}, path, _fetch: servePages(), rosterIds });
+  equal(code, 0);
+
+  const card = overlayRateCard(CLAUDE_RATE_CARD_SEED, readRateCardStore(path).claude);
+  deepEqual(card.rosterIds, rosterIds.claude, "RED: the manual refresh wiped the banked roster");
+  equal(isRateCardStale(card, { rosterIds: rosterIds.claude }), false,
+    "RED: with no roster banked, every cost query re-fetches both vendor pages");
 });
 
 test("diffPrices: says what moved, which is the point of running a refresh", () => {
