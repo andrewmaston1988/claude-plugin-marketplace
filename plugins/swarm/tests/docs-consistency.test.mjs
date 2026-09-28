@@ -110,6 +110,7 @@ test("perf legend seats from the frontier, never by quality divided by cost", ()
 test("perf legend calls an em dash unmeasured, not free", () => {
   const legend = source("scripts/swarm.mjs").match(/const LEGEND = "([^"]+)";/)?.[1] || "";
   ok(legend.includes("— unmeasured, not free"), `legend mislabels unmeasured cost: ${legend}`);
+  ok(source("scripts/swarm.mjs").includes("(swarm cost) · — unmeasured, not free\"));"), "the swarm models footer reads the dash the same way");
 });
 
 test("setup routes an empty graded record to model descriptions", () => {

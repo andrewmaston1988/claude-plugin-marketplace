@@ -235,7 +235,7 @@ async function cmdModels(rest = [], {
     const cost = m.provider && m.provider !== "ollama" ? "—" : mult == null ? "—" : onFrontier.has(m.model) ? `* ${mult.toFixed(1)}x` : `${mult.toFixed(1)}x`;
     write(modelLine({ ...m, displayModel: displayModel(m, liveRoster) }) + mark + `  ${effortsCell(m, roster)}  ${cost}`);
   }
-  write(dim("* on the quality/cost frontier · N.Nx = meter weight vs the cheapest measured model (swarm cost) · — not yet measured"));
+  write(dim("* on the quality/cost frontier · N.Nx = meter weight vs the cheapest measured model (swarm cost) · — unmeasured, not free"));
   const hidden = liveRoster.length - shown.length;
   if (hidden) write(dim(`${hidden} superseded hidden — swarm models --all shows them`));
   return 0;
