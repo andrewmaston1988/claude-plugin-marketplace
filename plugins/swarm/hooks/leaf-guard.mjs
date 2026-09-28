@@ -2,8 +2,8 @@
 // PreToolUse hook, no matcher: run a project-owned guard script before every tool
 // call inside a swarm leaf, and deny the call when the guard says no.
 //
-// Why this exists: `allowedTools` scopes tool NAMES, not what a tool is asked to
-// do, and prompt prose ("only run the narrow test command") is not enforcement.
+// Why this exists: `allowedTools` confines Claude built-ins, but not what they do;
+// the repo guard enforces action limits that prompt prose cannot.
 // Observed: three parallel leaves each cold-compiled a multi-GB dependency tree
 // in their own worktrees despite prose forbidding it — tens of GB of build output
 // and a commit-charge peak that got every engine on the machine killed. A repo's

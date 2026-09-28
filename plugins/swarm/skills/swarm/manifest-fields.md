@@ -5,9 +5,9 @@ these fields; the decision of *whether* to use them lives in SKILL.md.
 
 ### Where a leaf runs — the write tools decide
 
-**A leaf that can write gets its own tree; a leaf that cannot reads the live repo.** Nothing
-declares this — `allowedTools` already says which a leaf is, and a second field saying the
-same thing is a second field to disagree with.
+**A leaf that can write gets its own tree; a leaf that cannot reads the live repo.** Claude
+`allowedTools` sets built-ins; unknown CLI names fail `validate`; `mustRead` needs `Read`.
+Codex uses it only to pick a sandbox.
 
 | The leaf holds | It runs in | Its branch |
 |---|---|---|

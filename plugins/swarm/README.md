@@ -54,9 +54,9 @@ warns instead, since the window may have since reset.
 
 ### Per-repo leaf guard (`projects`)
 
-A leaf is a full headless Claude Code session, and `allowedTools` scopes tool *names*, not
-what a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every
-leaf that runs under that repo:
+A Claude leaf gets only the built-ins in `allowedTools` (`--tools`). Patterns like `Bash(git:*)`
+pre-approve all of Bash; they never narrow it. The **repo-owned PreToolUse hook** decides
+what those tools may do:
 
 ```json
 { "projects": [{ "name": "myrepo", "hooks": { "preToolUse": "python scripts/leaf_guard.py" } }] }
