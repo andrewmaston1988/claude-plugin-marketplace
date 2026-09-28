@@ -123,9 +123,15 @@
     const rel = reliability[0];
     const total = rel ? rel.total : 0;
     const done = rel ? (rel.byOutcome.completed || 0) : 0;
+    // Cost is the model's coins within its provider plus one verdict chip — on the phone a bare
+    // multiplier means nothing without its neighbours, so there it stays on the Cost screen.
     const verdict = cost?.value === "best" ? ["best value", "good"] : cost?.value === "worst" ? ["worst value", "bad"] : cost?.onFrontier ? ["frontier", "front"] : null;
+    // The bottom row is chips: the provider(s) first, in brand colour, then the value verdict.
     const providers = cost?.provider ? [cost.provider] : overall?.providers || [];
+    // The disc is decorative — the provider name sits right after it in the pill, so
+    // the chip stays aria-hidden rather than announcing the provider twice.
     const chips = providers.map((p) => `<span class="pchip ${esc(window.swarmLogos?.providerKey(p) ?? p)}">${providerLogo(p, { chip: true })}${esc(p)}</span>`).join("") + (verdict ? `<span class="vchip ${verdict[1]}">${verdict[0]}</span>` : "");
+    // Below the podium the position reads RAG: 4th green, amber midway, last red.
     const rag = (pos, of) => {
       const t = of > 4 ? Math.max(0, Math.min(1, (pos - 4) / (of - 4))) : 0;
       return t <= 0.5
@@ -166,6 +172,7 @@
       : `<div class="empty">no cost reading</div>`;
     return `<div class="model-grid">${summary}<div class="model-box model-reliability">${relWidget}</div><div class="model-box model-cost"><div class="section"><span>cost</span><span class="line"></span></div>${costContent}</div><div class="model-box model-coverage">${covWidget}</div></div>`;
   }
+
   // The overall ranking: the page's own rankList under a thin adapter, plus the
   // superseded rows behind a disclosure. Supersession is read server-side
   // (`rankCells`), so this view only splits on it — the ranked list and the
