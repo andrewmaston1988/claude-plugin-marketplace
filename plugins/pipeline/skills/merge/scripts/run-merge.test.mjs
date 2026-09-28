@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
 import { readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, delimiter } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
@@ -293,8 +293,8 @@ test("resolveTargetBranch: explicit target beats the pipeline row override", () 
   const dir = tmpRepo();
   const oldPath = process.env.PATH;
   try {
-    writeFileSync(join(dir, "pipeline.cmd"), '@echo [{"target_branch":"develop"}]\r\n');
-    process.env.PATH = `${dir};${oldPath}`;
+    stubRow(dir, '[{"target_branch":"develop"}]');
+    process.env.PATH = `${dir}${delimiter}${oldPath}`;
     equal(resolveTargetBranch("noproj", "feat-x", dir, "release"), "release");
   } finally {
     process.env.PATH = oldPath;
@@ -435,11 +435,12 @@ function writePlan(dir, body, { complete = false } = {}) {
   writeFileSync(join(plansDir, complete ? "complete/feat-x.md" : "feat-x.md"), body);
 }
 
-// Same PATH stub the row-override test uses: pipeline-query shells out to the CLI, and a
-// .cmd shim on PATH answers for it. The payload must be an ARRAY — rowField reads a row
-// list, so a bare object parses to "no value" and the stub silently answers nothing.
+// pipeline-query shells out to the CLI; a shim on PATH answers for it — .cmd on Windows, a
+// shell script elsewhere (CI). The payload must be an ARRAY: rowField reads a row list, so a
+// bare object parses to "no value" and the stub silently answers nothing.
 function stubRow(dir, json) {
   writeFileSync(join(dir, "pipeline.cmd"), `@echo ${json}\r\n`);
+  writeFileSync(join(dir, "pipeline"), `#!/bin/sh\necho '${json}'\n`, { mode: 0o755 });
 }
 
 test("main: the plan's *Target-Branch:* beats origin/HEAD", async () => {
@@ -460,7 +461,7 @@ test("main: the row's target_branch beats the plan annotation", async () => {
   const oldPath = process.env.PATH;
   try {
     stubRow(dir, '[{"target_branch":"develop"}]');
-    process.env.PATH = `${dir};${oldPath}`;
+    process.env.PATH = `${dir}${delimiter}${oldPath}`;
     addBranch(dir, "develop");
     writePlan(dir, "*Target-Branch:* staging\n");
     const outText = await runMain(dir, { plansDir: "{root}/plans" });
@@ -476,7 +477,7 @@ test("main: the flag beats the row and the plan", async () => {
   const oldPath = process.env.PATH;
   try {
     stubRow(dir, '[{"target_branch":"develop"}]');
-    process.env.PATH = `${dir};${oldPath}`;
+    process.env.PATH = `${dir}${delimiter}${oldPath}`;
     addBranch(dir, "release");
     writePlan(dir, "*Target-Branch:* staging\n");
     const outText = await runMain(
