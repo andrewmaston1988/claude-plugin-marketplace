@@ -446,8 +446,18 @@ test("cost: a provider with no cost source renders an unpriced ROW, never an emp
   equal(point.baseModel, "gpt-5.6-luna", "the point names what it is relative to");
 });
 
-// ── the Performance ranking's supersession ──────────────────────────────────
+// `costHero` was split out of costSection so a screen can draw the hero without the ranked
+// cards, and the Overview reaches it through perfViews' own surface: the signature is a
+// contract two files share, not an internal detail — a third parameter nothing reads is a
+// contract that lies about what the hero needs.
+test("costHero reads its section and the page's helpers, and no more", () => {
+  const V = loadPerfViews();
+  equal(V.costHero.length, 2, "the hero takes (section, h) — the data payload is not its input");
+  equal(typeof V.noCost, "function", "the Cost screen's own empty state is on the same surface");
+  ok(V.noCost().includes("no cost history yet"), "and it is the words a screen short of history draws");
+});
 
+// ── the Performance ranking's supersession ──────────────────────────────────
 // Operator, 2026-09-26: "Hide, toggle to show" — a superseded model left the
 // ranked list, the same rule `swarm models` and the Cost screen already keep.
 test("rankCells: a superseded model leaves the ranking until the toggle shows it", () => {

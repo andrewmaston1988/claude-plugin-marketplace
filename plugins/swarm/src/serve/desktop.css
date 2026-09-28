@@ -15,6 +15,9 @@
        fr, minmax(<n>ch, 1fr) — never a raw percentage, which tracks the container
        rather than the content and stops lining the columns up). */
     --runs-cols: var(--rail) minmax(16ch, 2fr) minmax(11ch, 1fr) minmax(11ch, 1fr) minmax(13ch, 1fr) minmax(8ch, .8fr) 24px;
+    /* The live-run card row, shared by the Runs screen's band and the Overview's feed —
+       one track definition, so the two cannot disagree about how wide a card is. */
+    --feed-cols: repeat(auto-fill, minmax(320px, 1fr));
   }
 
   /* The shell: a fixed sidebar, a header across the main column, and main as the one
@@ -38,15 +41,18 @@
   .bnav[data-on=perf] [data-tab=perf], .bnav[data-on=cost] [data-tab=cost] { background:var(--surface-2); }
 
   /* A desktop window is wide: a run's rows must not stretch into an unreadable line. */
-  main > .graph, main > .banner, main > .totals, main > .card, main > .skeleton { max-width:1100px; margin-left:auto; margin-right:auto; }
+  main > .graph, main > .banner, main > .totals, main > .card:not(.rcard), main > .skeleton { max-width:1100px; margin-left:auto; margin-right:auto; }
 
   /* Runs: live runs are cards, so they go side by side above the finished stacks —
      everything that is not a card spans the full width. The shorthand's zeroed
      vertical half would take main's own padding-bottom with it. */
-  main:has(> .rcard) { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); column-gap:12px; align-content:start; align-items:start; padding-left:16px; padding-right:16px; }
+  main:has(> .rcard) { display:grid; grid-template-columns:var(--feed-cols); column-gap:12px; align-content:start; align-items:start; padding-left:16px; padding-right:16px; }
   main:has(> .rcard) > .section, main:has(> .rcard) > ul, main:has(> .rcard) > .empty { grid-column:1 / -1; }
   main:has(> .rcard) > .section { padding-left:0; padding-right:0; }
   main:has(> .rcard) > .rcard { margin-left:0; margin-right:0; }
+  /* Fewer live runs than tracks: a lone card takes the row, two share it — no empty tracks beside them. */
+  main:not(:has(> .rcard ~ .rcard)) > .rcard, .ovfeed:not(:has(> .rcard ~ .rcard)) > .rcard { grid-column:1 / -1; }
+  main:has(> .rcard ~ .rcard):not(:has(> .rcard ~ .rcard ~ .rcard)), .ovfeed:has(> .rcard ~ .rcard):not(:has(> .rcard ~ .rcard ~ .rcard)) { grid-template-columns:repeat(2, minmax(0, 1fr)); }
 
   /* The finished stack as a table: the phone's row, cut into its columns, under a
      header row naming them. `display:contents` lifts the row's two wrapper boxes out
@@ -103,67 +109,75 @@
   /* Both `:has` are the screen's identity: the node screen shares this renderer but has
      no verdict, and no other screen has both a banner and a graph under main. */
   main:has(> .banner):has(> .graph) { display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px; align-items:stretch; align-content:start; max-width:1100px; margin:0 auto; padding:16px; }
-  main:has(> .banner):has(> .graph) > .banner { grid-area:1/1/2/2; margin:0; flex-wrap:wrap; row-gap:2px; }
-  main:has(> .banner):has(> .graph) > .stat { grid-area:1/2/2/3; }
-  main:has(> .banner):has(> .graph) > .totals { grid-area:1/3/2/4; }
-  main:has(> .banner):has(> .graph) > .actionbar, main:has(> .banner):has(> .graph) > .graph { grid-column:1 / -1; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .banner { grid-area:1/1/2/2; margin:0; flex-wrap:wrap; row-gap:2px; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .stat { grid-area:1/2/2/3; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .totals { grid-area:1/3/2/4; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .actionbar, :is(main:has(> .banner):has(> .graph), .ovrun) > .graph { grid-column:1 / -1; }
 
   /* A box wears a name above its figure. The name is the stylesheet's, not the markup's:
      one box markup, three fills (D4), and the phone is shown none of it. */
-  main:has(> .banner):has(> .graph) > .stat, main:has(> .banner):has(> .graph) > .totals {
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .stat, :is(main:has(> .banner):has(> .graph), .ovrun) > .totals {
     display:flex; flex-direction:column; align-items:flex-start; gap:6px; margin:0; padding:14px;
     border:1px solid var(--rule); border-radius:14px; background:var(--surface); }
-  main:has(> .banner):has(> .graph) > .banner::before,
-  main:has(> .banner):has(> .graph) > .stat::before,
-  main:has(> .banner):has(> .graph) > .totals::before {
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .banner::before,
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .stat::before,
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .totals::before {
     font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); }
-  main:has(> .banner):has(> .graph) > .banner::before { content:"status"; flex:0 0 100%; }
-  main:has(> .banner):has(> .graph) > .stat::before { content:"elapsed"; }
-  main:has(> .banner):has(> .graph) > .totals::before { content:"tokens"; }
-  main:has(> .banner):has(> .graph) > .stat > span,
-  main:has(> .banner):has(> .graph) > .totals > .meta { font-size:24px; letter-spacing:-.02em; color:var(--ink); font-variant-numeric:tabular-nums; }
-  main:has(> .banner):has(> .graph) > .totals .bar { width:100%; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .banner::before { content:"status"; flex:0 0 100%; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .stat::before { content:"elapsed"; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .totals::before { content:"tokens"; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .stat > span,
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .totals > .meta { font-size:24px; letter-spacing:-.02em; color:var(--ink); font-variant-numeric:tabular-nums; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .totals .bar { width:100%; }
 
   /* The phone's action bar is fixed above the tab bar; on this layout it is a row of the
      grid, so the button sizes to itself instead of stretching across the window. */
-  main:has(> .banner):has(> .graph) > .actionbar { position:static; margin:0; padding:0; border:0; background:none; }
-  main:has(> .banner):has(> .graph) > .actionbar .primary { flex:0 0 auto; height:38px; padding:0 18px; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .actionbar { position:static; margin:0; padding:0; border:0; background:none; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .actionbar .primary { flex:0 0 auto; height:38px; padding:0 18px; }
 
   /* The leaves as a table: the phone's row, cut into its columns. `:has(> .body > .col)`
      is what tells a leaf row from the wave labels and manifest rows sharing the list —
      only the leaf row carries columns, so the phone's own renderer is untouched (D4). */
-  main:has(> .banner):has(> .graph) .row.leaf:has(> .body > .col) { display:grid; grid-template-columns:var(--task-cols); align-items:center; column-gap:12px; border-bottom:1px solid var(--rule); }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf:has(> .body > .col) { display:grid; grid-template-columns:var(--task-cols); align-items:center; column-gap:12px; border-bottom:1px solid var(--rule); }
   /* Its two wrapper boxes lifted out of the way, so the rail and the cells are the grid's
      own items and the cells ride the row's tracks — the Runs table's trick, same reason. */
-  main:has(> .banner):has(> .graph) .row.leaf:has(> .body > .col) > .body { display:contents; }
-  main:has(> .banner):has(> .graph) .row.leaf .col { min-width:0; padding:10px 0; font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
-  main:has(> .banner):has(> .graph) .row.leaf .col.nm { font-size:14px; font-weight:650; color:var(--ink); }
-  main:has(> .banner):has(> .graph) .row.leaf .col.nm.dim { color:var(--faint); }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf:has(> .body > .col) > .body { display:contents; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf .col { min-width:0; padding:10px 0; font-size:12px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf .col.nm { font-size:14px; font-weight:650; color:var(--ink); }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf .col.nm.dim { color:var(--faint); }
   /* The colour stays on the leaf's own `c-*` class — a bare `color` here would win on
      specificity and paint every state grey. */
-  main:has(> .banner):has(> .graph) .row.leaf .col.mdl,
-  main:has(> .banner):has(> .graph) .row.leaf .col.tm,
-  main:has(> .banner):has(> .graph) .row.leaf .col.tk { color:var(--muted); font-variant-numeric:tabular-nums; }
-  main:has(> .banner):has(> .graph) .row.leaf .col.act { color:var(--faint); }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf .col.mdl,
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf .col.tm,
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf .col.tk { color:var(--muted); font-variant-numeric:tabular-nums; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf .col.act { color:var(--faint); }
 
   /* The header row sits between the graph's top edge and the list, so the overlay —
      absolutely placed in the graph — starts below it, not at zero. */
-  main:has(> .banner):has(> .graph) .graph > .rthead { display:grid; grid-template-columns:var(--task-cols); align-items:center; column-gap:12px; height:var(--rthead); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); border-bottom:1px solid var(--rule); }
-  main:has(> .banner):has(> .graph) .graph:has(> .rthead) svg.overlay { top:var(--rthead); }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .graph > .rthead { display:grid; grid-template-columns:var(--task-cols); align-items:center; column-gap:12px; height:var(--rthead); font-size:11px; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); border-bottom:1px solid var(--rule); }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .graph:has(> .rthead) svg.overlay { top:var(--rthead); }
 
   /* The leaf screen: the verdict and the chips across the top, the prompt and output
-     down the left, the figures beside them. The chips wear the grid's width, which is
-     the cards' width, never the full main width over cards capped at 1100px. */
-  main:has(> .chips.hero) { display:grid; grid-template-columns:minmax(0, 2fr) minmax(280px, 1fr); gap:14px; align-items:start; align-content:start; max-width:1100px; margin:0 auto; padding:16px; }
-  main:has(> .chips.hero) > .banner { grid-area:1/1/2/3; margin:0; }
-  main:has(> .chips.hero) > .chips.hero { grid-area:2/1/3/3; padding:0; }
-  main:has(> .chips.hero) > .card.flush { grid-area:3/1/4/2; margin:0; }
+     down the left, the figures beside them — at main's full width, like every other
+     screen. The hub's leaf opened in place (.ovleaf) is the same cut. */
+  main:has(> .chips.hero) { display:grid; grid-template-columns:minmax(0, 2fr) minmax(280px, 1fr); gap:14px; align-items:start; align-content:start; padding:16px; }
+  .ovleaf { grid-column:1 / -1; display:grid; grid-template-columns:minmax(0, 2fr) minmax(280px, 1fr); gap:14px; align-items:start; border-left:2px solid var(--accent); padding:0 0 8px 12px; }
+  :is(main:has(> .chips.hero), .ovleaf) > * { max-width:none; }
+  :is(main:has(> .chips.hero), .ovleaf) > .banner { grid-area:1/1/2/3; margin:0; }
+  :is(main:has(> .chips.hero), .ovleaf) > .chips.hero { grid-area:2/1/3/3; padding:0; }
+  /* The prose spans both figure rows and the last is 1fr, so an opened prompt or output
+     grows into that row rather than pushing the second figure card down with it. */
+  :is(main:has(> .chips.hero), .ovleaf) { grid-template-rows:auto auto auto 1fr; }
+  :is(main:has(> .chips.hero), .ovleaf) > .card.flush { grid-area:3/1/5/2; margin:0; }
   /* The figure cards have no row of their own: both take column 2, so they stack beside
      the prose rather than under it. */
-  main:has(> .chips.hero) > .card:not(.flush) { grid-column:2; margin:0; }
+  :is(main:has(> .chips.hero), .ovleaf) > .card:not(.flush) { grid-column:2; margin:0; }
+  /* The way back to the waves heads the leaf, not the foot of its position card. */
+  :is(main:has(> .chips.hero), .ovleaf) .vchip.back { display:inline-block; margin-left:auto; --pc:var(--accent); }
+  :is(main:has(> .chips.hero), .ovleaf) .card .cf .show { display:none; }
 
   /* A stalled leaf's tint: the phone paints it on .body, which the table lifts out of the box tree. */
-  main:has(> .banner):has(> .graph) .row.leaf.quiet:has(> .body > .col) { background:var(--warn-bg); }
+  :is(main:has(> .banner):has(> .graph), .ovrun) .row.leaf.quiet:has(> .body > .col) { background:var(--warn-bg); }
 
   /* end run and leaf */
 
@@ -185,4 +199,68 @@
   .model-coverage .covtable { padding:0; }
 
   /* end model */
+
+  /* ── Overview (chunk 3) ─────────────────────────────────────────────────── */
+
+  /* The hub fills main: the feed takes the width the flyout does not, and the flyout
+     rides a clamp()'d track of its own. Nothing here is capped — the 1100px column is a
+     run's reading width, and the hub is a landing, not a document. */
+  main:has(> .ovfeed) { display:grid; grid-template-columns:minmax(0, 1fr) clamp(300px, 25vw, 360px); align-items:start; align-content:start; gap:0 18px; padding-left:16px; padding-right:16px; }
+  main:has(> .ovfeed.shut) { grid-template-columns:minmax(0, 1fr); }
+  /* The toggle is the sidebar's tab: row 1 of the panel's track, the panel under it, the
+     feed beside both from the top. Shut, it keeps the same top-right corner. */
+  /* Row 1 is the tab and nothing else: the feed spans both rows, and with two auto rows
+     a run opened in it would share its height into row 1 and push the panel down. */
+  main:has(> .ovfeed) { grid-template-rows:auto 1fr; }
+  main:has(> .ovfeed) > .ovbar { grid-area:1/2/2/3; display:flex; justify-content:flex-end; }
+  main:has(> .ovfeed) > .ovfeed { grid-area:1/1/3/2; }
+  main:has(> .ovfeed) > .ovpanel { grid-area:2/2/3/3; }
+  main:has(> .ovfeed.shut) > .ovbar { grid-area:1/1/2/2; padding-bottom:6px; }
+  main:has(> .ovfeed.shut) > .ovfeed { grid-area:2/1/3/2; }
+  .ovfeed { min-width:0; display:grid; grid-template-columns:var(--feed-cols); column-gap:12px; align-content:start; align-items:start; }
+  /* Everything that is not a card spans the feed's tracks: the two section rules, the
+     finished stack, and the toggle's row. */
+  .ovfeed > .section, .ovfeed > ul, .ovfeed > .empty { grid-column:1 / -1; }
+  .ovfeed > .section { padding-left:0; padding-right:0; }
+  .ovtoggle { font:inherit; font-size:12px; letter-spacing:.04em; color:var(--muted); background:var(--surface); border:1px solid var(--rule); border-radius:999px; padding:4px 12px; cursor:pointer; }
+  .ovtoggle.on { color:var(--accent); border-color:var(--accent); }
+  /* Open, it is the panel's own top edge: full width, square below, no seam. */
+  .ovbar .ovtoggle.on { flex:1; text-align:left; border-radius:10px 10px 0 0; border-color:var(--rule); border-bottom:0; padding:8px 16px; }
+  main:has(> .ovfeed) > .ovpanel { border-top-left-radius:0; border-top-right-radius:0; }
+  /* The panel is the whole right track and stays put while a long feed scrolls past it. */
+  /* It is one box, as the wireframe draws it: the Usage and Cost screens' own parts
+     with their card chrome taken off, so each reads as a thin row under its head. */
+  .ovpanel { min-width:0; position:sticky; top:0; background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:14px 16px; }
+  .ovpanel .phead { display:flex; justify-content:space-between; align-items:baseline; font-size:11px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); padding-bottom:4px; }
+  .ovpanel .phead a { font-size:12px; letter-spacing:0; text-transform:none; color:var(--accent); text-decoration:none; }
+  .ovpanel > * + .phead { margin-top:14px; padding-top:14px; border-top:1px solid var(--rule); }
+  aside.ovpanel > .card, aside.ovpanel > .uhero, aside.ovpanel > .empty { margin:0; padding:8px 0; background:none; border:0; border-radius:0; }
+  aside.ovpanel > .uhero { padding-top:6px; }
+  .ovpanel .uhero .fig { margin-top:6px; }
+  .ovpanel .uhero .fig b { font-size:36px; }
+  .ovpanel .uhero .ubar { margin-top:10px; }
+  .ovpanel .upc .sub, .ovpanel .uhero .sub { margin-top:4px; }
+  .ovpanel .upc .ubar { margin-top:6px; }
+  /* Best value: provider · model, then its score and cost — the claim and the bars stay
+     on the Cost screen, one link away. */
+  aside.ovpanel > .chero { display:grid; grid-template-columns:auto minmax(0, 1fr) auto auto; column-gap:10px; align-items:baseline; padding:8px 0; }
+  .ovpanel .chero .cl { display:contents; }
+  .ovpanel .chero .cl span:first-child { display:none; }
+  .ovpanel .chero .cl span:last-child { font-size:12px; letter-spacing:0; text-transform:none; color:var(--muted); }
+  .ovpanel .chero .fig { margin:0; font-size:14px; font-weight:600; letter-spacing:0; }
+  .ovpanel .chero .claim { display:none; }
+  .ovpanel .chero.none .claim { display:block; margin:0; grid-column:2 / -1; }
+  .ovpanel .chero .vbar { margin:0; gap:5px; }
+  .ovpanel .chero .vbar .bar { display:none; }
+  .ovpanel .chero .vbar .k { display:none; }
+  .ovpanel .chero .vbar b { width:auto; font-size:13px; }
+  /* The hub draws no graph above the feed's rows: the lane line goes, the state disc
+     (x 7–17, inside this svg) stays. A narrower svg would squash the disc, so the rail
+     keeps its width and the space right of the disc, less an 8px gap, is pulled back. */
+  .ovfeed .row .rail { margin-right:calc(25px - var(--rail)); }
+  .ovfeed .row .rail path { display:none; }
+  /* The run opened in place: the run screen's own body under the row it belongs to, so
+     it wants the feed's whole width and the row it hangs from kept in view. */
+  .ovrun { grid-column:1 / -1; display:grid; grid-template-columns:repeat(3, minmax(0, 1fr)); gap:14px; align-items:stretch; border-left:2px solid var(--accent); padding:0 0 8px 12px; }
+  .ovrun > .totals, .ovrun > .graph, .ovrun > .banner, .ovrun > .stat, .ovrun > .actionbar { max-width:none; margin-left:0; margin-right:0; }
 }

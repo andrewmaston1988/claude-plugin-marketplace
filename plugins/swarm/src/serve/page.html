@@ -303,6 +303,8 @@
   .card .fchip { padding:4px 8px; border-radius:8px; background:var(--surface-2); color:var(--ink); font-size:12.5px; }
   .card .cf { display:flex; justify-content:space-between; gap:8px; margin-top:12px; padding-top:12px; border-top:1px solid var(--rule); font-size:11.5px; color:var(--faint); }
   .card .show { color:var(--accent); cursor:pointer; }
+  /* The way back to the tree, at the top of the leaf — a desktop move; the phone keeps its link in the card. */
+  .vchip.back { display:none; }
   .segbar { display:flex; gap:2px; height:5px; margin-top:12px; border-radius:3px; overflow:hidden; background:var(--surface-2); }
   .legend { display:flex; flex-wrap:wrap; gap:16px; margin-top:12px; font-size:11.5px; color:var(--muted); }
   .legend i { display:inline-block; width:8px; height:8px; margin-right:6px; border-radius:2px; }
@@ -459,7 +461,11 @@
   const view = { name: "runs", project: null, run: null, leaf: null, node: null };
   // Per screen: Rank opens as cards, Leaders as the compact list.
   const compactPref = (screen, dflt) => { try { const v = localStorage.getItem(`swarm.perfCompact.${screen}`); return v == null ? dflt : v === "1"; } catch { return dflt; } };
-  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, showSuperseded: false, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, compact: { rank: compactPref("rank", false), leaders: compactPref("leaders", true) } };
+  // The hub's usage-and-cost flyout, open unless a reader closed it: the hub is a
+  // landing, and the two readings are why it is one.
+  const FLYOUT_KEY = "swarm.ovFlyout";
+  const flyoutPref = () => { try { return localStorage.getItem(FLYOUT_KEY) !== "0"; } catch { return true; } };
+  const ui = { closedWaves: new Set(), openProjects: new Set(), expandedProjects: new Set(), perfDomain: null, showSuperseded: false, pretty: false, promptOpen: false, outputOpen: false, focusId: null, focusScroll: false, flyout: flyoutPref(), hubRun: null, hubLeaf: null, compact: { rank: compactPref("rank", false), leaders: compactPref("leaders", true) } };
   let lastList = null;
   // `let`: both swapped whole at commit (a build computes fresh copies as values),
   // never mutated in place — a superseded build cannot leave a half-written mark.
@@ -522,33 +528,95 @@
     const { header, home, html, labels } = renderRunsHtml(data);
     return { header, home, html, state: { lastList: data, tickCfg: cadencesOf(data), groupLabels: labels, grading: data.grading } };
   }
-  // Overview is a desktop-only route — below the breakpoint the hash is rewritten
-  // away before this is reached, so it never paints on a phone. Its contents are the
-  // next chunk's; what this one owes is the plumbing: it reads the same /api/runs
-  // payload the Runs screen does, so the SSE `runs` event and the poll refresh it,
-  // and it commits the same state, so the sidebar count is live on it too.
+  // The run a hub row opened in place, held while it stays open: the hub's poll and its
+  // SSE refresh both rebuild the feed, and re-reading the same run each time would be a
+  // fetch per tick. Opening another row drops it — one row is open at a time. What is
+  // held is the payload, never the markup: a wave, prompt or output toggle re-renders it.
+  let hubRun = null;
+  const drawn = (h) => ({ ...h, ...h.render() });
+  async function expandedRun() {
+    const key = ui.hubRun, leafId = ui.hubLeaf;
+    if (hubRun && hubRun.key === key && hubRun.leaf === leafId) return drawn(hubRun);
+    hubRun = null;
+    if (!key) return null;
+    // The row's own key is `project/name`; either part may itself contain a slash, so the
+    // split is on the FIRST one — the same rule the row built it with.
+    const i = key.indexOf("/");
+    try {
+      const base = `/api/runs/${enc(key.slice(0, i))}/${enc(key.slice(i + 1))}`;
+      // A leaf opened from the run takes the run's place under the row — the leaf
+      // screen's own markup, so the hub never navigates away from its sidebar.
+      if (leafId) {
+        const [run, leaf] = await Promise.all([api(base), api(`${base}/leaves/${enc(leafId)}`).catch(() => null)]);
+        hubRun = { key, leaf: leafId, render: () => ({ html: renderLeafHtml(run, leaf, leafId).html }) };
+        return drawn(hubRun);
+      }
+      const run = endRun(await api(base));
+      hubRun = { key, leaf: null, render: () => {
+        const { html, rows } = runScreen(run, isDesktop());
+        return { html, draw: () => drawRail(run.tasks, rows) };
+      } };
+      return drawn(hubRun);
+    } catch (e) {
+      // A run that cannot be read closes the row rather than leaving an empty shelf.
+      console.error("overview: opened run not read", e);
+      ui.hubRun = null;
+      ui.hubLeaf = null;
+      return null;
+    }
+  }
+  // Runs and the hub say the same thing when there is nothing to show.
+  const NO_RUNS = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
+  // Overview is a desktop-only hub: the run feed the Runs screen reads, plus the two
+  // cached payloads its tabs already fetch (D5) — no new endpoint and no new figure.
   async function buildOverview() {
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
+    // Settled per source, never all at once: the run feed needs none of the other two,
+    // so a read that fails costs its own widget rather than the whole landing screen.
+    // perf.js carries every widget in the flyout; without it the hub draws the feed alone.
+    const perfJs = loadPerfJs();
+    const [usage, cost] = await Promise.all([
+      { name: "usage" }, { name: "cost" },
+    ].map((v) => Promise.race([
+      viaCache(v, false).catch((e) => { console.error(`overview: /api/${v.name} not read`, e); return null; }),
+      // A slow read stops holding the feed after this; it still lands in the cache for the next tick.
+      new Promise((r) => setTimeout(() => r(null), 1500)),
+    ])));
+    await perfJs;
+    const expanded = await expandedRun();
+    const h = {
+      esc, enc, seg: segSwitcher, runRow,
+      labels: runLabels(data.runs), expanded, flyout: ui.flyout, noRuns: NO_RUNS,
+    };
     return {
       header: headerHtml(TAB_TITLE.overview, ""),
-      html: window.swarmDesktop.overviewScreen(),
+      html: window.swarmDesktop.overviewScreen(data.runs, usage, cost, h),
       state: { lastList: data, tickCfg: cadencesOf(data), grading: data.grading },
+      draw: expanded?.draw,
     };
   }
-  function renderRunsHtml(data) {
-    // Labels merge into a fresh map — a value the commit swaps in, never a write to
-    // the committed one. A local shortProject shadows the module arrow so this
-    // build's markup reads this build's labels, not the last committed set.
+  // The labels a run payload names, as a fresh map — a value the commit swaps in,
+  // never a write to the committed one.
+  function runLabels(runs) {
     const labels = new Map(groupLabels);
-    const shortProject = (p) => labels.get(p) || p;
+    for (const r of runs) {
+      labels.set(r.project, r.groupLabel || r.project);
+      if (r.group) labels.set(r.group, r.groupLabel || r.group);
+    }
+    return labels;
+  }
+  function renderRunsHtml(data) {
+    // A local shortProject shadows the module arrow so this build's markup reads this
+    // build's labels, not the last committed set.
     const runs = data.runs;
+    const labels = runLabels(runs);
+    const shortProject = (p) => labels.get(p) || p;
     // One switch for the whole screen: desktop reads a table, the phone reads a row.
     const table = isDesktop();
     const active = runs.filter((r) => r.active);
     // Every project gets a section — the estate view — projects with a live run first,
     // ranked by that run's newest startedMs (see live.js projectOrder — stable across
     // polls, unlike mtimeMs); inside a section live rows lead, finished follow.
-    for (const r of runs) { labels.set(r.project, r.groupLabel || r.project); if (r.group) labels.set(r.group, r.groupLabel || r.group); }
     const byProject = new Map();
     for (const r of runs) { const g = r.group || r.project; if (!byProject.has(g)) byProject.set(g, []); byProject.get(g).push(r); }
     // Live rows sort by startedMs (most recently dispatched on top, staying there);
@@ -595,13 +663,15 @@
         html += "</ul>";
       }
     }
-    if (!runs.length) html = `<div class="empty">no runs under ~/.swarm/runs yet — dispatch a swarm and it appears here.</div>`;
+    if (!runs.length) html = NO_RUNS;
     return { header, home: true, html, labels };
   }
   // Each table's columns, named once here and used for its own header row. The cells come out
   // of the row renderers below: the same fields, in the same order, the phone joins or stacks.
   const RUN_COLS = ["project", "when", "state", "tokens"]; const TASK_COLS = ["leaf", "model", "state", "time", "tokens", "latest tool"];
-  function runRow(r, done, labels = groupLabels, columns = false) {
+  // `hub`: the row opens its run beneath itself instead of navigating — the same row, one
+  // different attribute, so the hub cannot drift into a second row renderer.
+  function runRow(r, done, labels = groupLabels, columns = false, hub = false) {
     const shortProject = (p) => labels.get(p) || p;
     const stack = (r) => /* one disc per provider, largest first, overlapping: a live run's running providers pulse in front and the idle dim behind, a finished run's are all solid, largest on top; a provider with no logo wears its initial */ { const run = new Set(r.providersRunning || []); const e = Object.entries(r.providerTokens || {}).filter(([p]) => p !== "unknown").sort((a, b) => b[1] - a[1]); const o = done ? e : [...e.filter(([p]) => run.has(p)), ...e.filter(([p]) => !run.has(p))]; return o.length ? `<span class="pstack">${o.map(([p], i) => `<span class="pitem${done ? "" : run.has(p) ? " pulse" : " dim"}" style="z-index:${o.length - i}${!done && run.has(p) ? `;animation-delay:${i * 1.2}s` : ""}">${window.swarmLogos?.providerLogo(p, { chip: true, label: p }) || `<span class="pinit" role="img" aria-label="${esc(p)}">${esc(p[0].toUpperCase())}</span>`}</span>`).join("")}</span>` : ""; };
     // Navigation is a data-href picked up by one delegated listener — never an inline
@@ -616,7 +686,7 @@
       const stale = !r.finishedMs && !r.stopped;
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
       const fields = [esc(shortProject(r.project)), when, countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState), `${fmtTok(r.tokens)}${r.hasDigest ? " · digest" : ""}`];
-      return `<li class="row tap" data-key="${key}" data-href="${esc(href)}">${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${columns ? fields.map((f) => `<span class="col">${f}</span>`).join("") : fields.join(" · ")}</span></div>${chevRight}</div></li>`;
+      return `<li class="row tap" data-key="${key}" ${hub ? `data-hub="${key}"` : `data-href="${esc(href)}"`}>${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${columns ? fields.map((f) => `<span class="col">${f}</span>`).join("") : fields.join(" · ")}</span></div>${chevRight}</div></li>`;
     }
     return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span>${stack(r)}<span class="tm">${elapsed}</span></div>`
       + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
@@ -839,10 +909,16 @@
   }
 
   let currentRun = null;
+  // One run's body — its chrome, then its graph — from one call, so the run screen and
+  // the hub's in-place expansion draw the same markup rather than two that agree today.
+  function runScreen(run, columns) {
+    const { html, rows } = renderRunHtml(run, run.tasks, run.waves, columns);
+    return { html: runChromeHtml(run, run.tasks) + html, rows };
+  }
   async function buildRun(project, name) {
     const run = endRun(await api(`/api/runs/${enc(project)}/${enc(name)}`));
-    const { html, rows } = renderRunHtml(run, run.tasks, run.waves, isDesktop());
-    return { header: runHeaderHtml(run, Date.now()), html: runChromeHtml(run, run.tasks) + html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
+    const { html, rows } = runScreen(run, isDesktop());
+    return { header: runHeaderHtml(run, Date.now()), html, state: { currentRun: run }, draw: () => drawRail(run.tasks, rows) };
   }
 
   // A manifest node's own screen: the same graph renderer, fed the task's own
@@ -885,8 +961,8 @@
     }
     if (view.name === "run" && currentRun) {
       setHeader(runHeaderHtml(currentRun, now));
-      const { html, rows } = renderRunHtml(currentRun, currentRun.tasks, currentRun.waves, isDesktop());
-      setHtml(main, runChromeHtml(currentRun, currentRun.tasks) + html);
+      const { html, rows } = runScreen(currentRun, isDesktop());
+      setHtml(main, html);
       drawRail(currentRun.tasks, rows);
       return;
     }
@@ -954,7 +1030,7 @@
     const quietSecsVal = window.swarmLive.quietSecs(t, now);
     const quiet = quietSecsVal != null && quietSecsVal * 1000 > (run.quietWarnMs || 60000);
     let html = leafBannerHtml(t, leaf, now, quiet ? quietSecsVal : null);
-    html += `<div class="chips hero"><span class="vchip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? (idChip.startsWith("<span class=\"pchip") ? idChip : `<span class="vchip" data-href="${modelHref}">${identity}</span>`) : ""}${t.kind && t.kind !== "leaf" ? `<span class="vchip">${esc(t.kind)}</span>` : ""}</div>`;
+    html += `<div class="chips hero"><span class="vchip ${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span>${t.model ? (idChip.startsWith("<span class=\"pchip") ? idChip : `<span class="vchip" data-href="${modelHref}">${identity}</span>`) : ""}${t.kind && t.kind !== "leaf" ? `<span class="vchip">${esc(t.kind)}</span>` : ""}<span class="vchip back" data-focus="${esc(id)}" data-href="#/run/${enc(run.project)}/${enc(run.name)}">‹ waves</span></div>`;
     // Position in graph: what it waited on, what it unblocks, and the way back to the rail.
     const fchips = (ids, none) => ids.length ? ids.map((x) => `<span class="fchip">${esc(x)}</span>`).join("") : `<span>${none}</span>`;
     const order = run.tasks.filter((x) => x.kind !== "digest").map((x) => x.id);
@@ -1099,7 +1175,7 @@
     if (v.name === "cost") return { tab: "cost", path: "/api/cost" };
     if (v.name !== "perf") return null;
     const qs = new URLSearchParams();
-    if (ui.perfDomain) qs.set("domain", ui.perfDomain);
+    if (ui.perfDomain && !v.allDomains) qs.set("domain", ui.perfDomain);
     if (v.kind === "model") qs.set("model", v.which);
     return { tab: "perf", path: `/api/perf${qs.toString() ? "?" + qs : ""}` };
   }
@@ -1156,10 +1232,12 @@
     if (tab !== "usage" || !data?.usages || Date.now() - at < HELD_STALE_MS) return data;
     return { ...data, usages: data.usages.map((u) => ({ ...u, provenance: "stale", lastSeen: at })) };
   }
-  async function viaCache(v) {
+  // `fresh:false`: a screen reading several sources at once (the Overview) is not
+  // switching to any of them, so only an aged-out reading revalidates.
+  async function viaCache(v, fresh = true) {
     const src = dataSource(v), e = heldEntry(src.path);
     if (!e) { const data = await api(src.path); hold(src.path, data); return data; }
-    if (!sameView(v, view) || Date.now() - e.at >= cadenceOf(src.tab)) revalidate(src);
+    if ((fresh && !sameView(v, view)) || Date.now() - e.at >= cadenceOf(src.tab)) revalidate(src);
     return markHeldStale(src.tab, e.data, e.at);
   }
   async function buildUsage(v) {
@@ -1171,6 +1249,8 @@
       html: window.perfViews.usageScreen(usageData, { esc, seg: segSwitcher }, v.window),
     };
   }
+  // The grading-off note the Performance tab draws when nothing is ranked.
+  const GRADING_OFF = `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`;
   async function buildPerf(v) {
     const { kind, which } = v;
     const aspect = kind === "aspect" ? which : null, model = kind === "model" ? which : null;
@@ -1178,10 +1258,7 @@
     const p = await viaCache(v);
     const title = model ? esc(model) : aspect ? esc(aspect) : NEW_PERF_KINDS.has(kind) ? kind : TAB_TITLE.perf;
     if (!p.grading) {
-      return {
-        header: headerHtml(TAB_TITLE.perf, "grading off"),
-        html: `<div class="note">grading is off, so nothing is ranked here. Turn it on with <code>grading.enabled: true</code> in ~/.swarm/config.json (<code>/swarm:swarm setup</code>); runs then ask for grades and this page fills from them.</div>`,
-      };
+      return { header: headerHtml(TAB_TITLE.perf, "grading off"), html: GRADING_OFF };
     }
     const summary = `${p.rows} graded leaves · ${p.overall.length} model${p.overall.length === 1 ? "" : "s"}${domain ? ` · ${esc(domain)}` : ""}`;
     const header = kind ? headerHtml(title, crumbs({ name: "perf", kind }, model || aspect || title)) : headerHtml(title, summary);
@@ -1460,8 +1537,26 @@
     setTimeout(() => { ui.focusId = null; rerender(); }, 2400);
   }
   main.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-href], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-superseded]");
+    const t = e.target.closest("[data-href], [data-hub], [data-flyout], [data-wave], [data-pretty], [data-project], [data-domain], [data-prompt], [data-output], [data-expand], [data-superseded]");
     if (!t || !main.contains(t)) return;
+    // The hub's flyout: one preference, written where the phone's compaction prefs live.
+    if (t.dataset.flyout != null) {
+      ui.flyout = !ui.flyout;
+      try { localStorage.setItem(FLYOUT_KEY, ui.flyout ? "1" : "0"); } catch { /* no storage */ }
+      requestRoute(route);
+      return;
+    }
+    // A finished row on the hub: the run opens beneath the row, and the same row clicked
+    // again closes it. The hash never moves — this is not a navigation.
+    if (t.dataset.hub != null) { ui.hubRun = ui.hubRun === t.dataset.hub ? null : t.dataset.hub; ui.hubLeaf = null; requestRoute(route); return; }
+    // Inside the run the hub opened: a leaf replaces the run in place, and the leaf's way
+    // back to the tree returns to it. Every other link there still navigates.
+    const inHub = (cls) => { for (let n = t; n && n !== main; n = n.parentNode) if (n.classList?.contains(cls)) return true; return false; };
+    if (t.dataset.href && (inHub("ovrun") || inHub("ovleaf"))) {
+      const leaf = /\/leaf\/([^/]+)$/.exec(t.dataset.href);
+      const back = inHub("ovleaf") && t.dataset.focus != null;
+      if (leaf || back) { ui.hubLeaf = leaf ? decodeURIComponent(leaf[1]) : null; requestRoute(route); return; }
+    }
     if (t.dataset.prompt != null) { ui.promptOpen = !ui.promptOpen; requestRoute(route); return; }
     if (t.dataset.output != null) { ui.outputOpen = !ui.outputOpen; requestRoute(route); return; }
     if (t.dataset.superseded != null) { ui.showSuperseded = !ui.showSuperseded; requestRoute(route); return; }
@@ -1479,7 +1574,9 @@
       const w = Number(t.dataset.wave);
       const isOpen = t.classList.contains("wave-label");
       if (isOpen) ui.closedWaves.add(w); else ui.closedWaves.delete(w);
-      rerender(); return;
+      // The hub's opened run is drawn by the hub's own build, which rerender has no cut for.
+      if (view.name === "overview") requestRoute(route); else rerender();
+      return;
     }
   });
   window.addEventListener("hashchange", route);

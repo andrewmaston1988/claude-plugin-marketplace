@@ -67,28 +67,34 @@ test("the leaf body is two columns: the prose left, the figures beside it", () =
   const g = cssRule("main:has(> .chips.hero)");
   assert.match(g, /grid-template-columns:minmax\(0, 2fr\) minmax\(280px, 1fr\)/);
   assert.match(g, /align-content:start/);
-  assert.match(cssRule("main:has(> .chips.hero) > .card.flush"), /grid-area:3\/1\/4\/2/, "the prompt and output take the left column");
-  assert.match(cssRule("main:has(> .chips.hero) > .card:not(.flush)"), /grid-column:2/, "the position and token cards stack beside it");
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .card.flush"), /grid-area:3\/1\/5\/2/, "the prompt and output take the left column, across both figure rows");
+  // With the last row flexible, an opened prompt or output grows into it and the second
+  // figure card holds its place instead of riding down with the prose.
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf)"), /grid-template-rows:auto auto auto 1fr/);
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .card:not(.flush)"), /grid-column:2/, "the position and token cards stack beside it");
 });
 
 test("the verdict and the chips span both columns, above the body", () => {
-  assert.match(cssRule("main:has(> .chips.hero) > .banner"), /grid-area:1\/1\/2\/3/);
-  assert.match(cssRule("main:has(> .chips.hero) > .chips.hero"), /grid-area:2\/1\/3\/3/);
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .banner"), /grid-area:1\/1\/2\/3/);
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .chips.hero"), /grid-area:2\/1\/3\/3/);
 });
 
 // The chips wear the grid's width, so they never run past the capped cards' right edge.
 test("the chips wear the grid's width, which is the cards' width", () => {
-  assert.match(cssRule("main:has(> .chips.hero) > .chips.hero"), /padding:0/);
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .chips.hero"), /padding:0/);
   // The rule it corrects is the phone's own, and it stays the phone's.
   assert.match(readFileSync(PAGE, "utf8"), /\.chips\.hero \{ padding:0 16px;/, "the phone keeps its gutter");
 });
 
 // The two screens share one renderer, so the layout they ask for is the boundary: the run
-// screen's two paint sites pass `isDesktop()`, the node screen's two do not.
+// screen's body is runScreen() and both its paint sites pass `isDesktop()`; the node screen
+// renders its subgraph through renderRunHtml directly, so nothing there can ask for the cut.
 test("only the run screen asks for the table columns, never the node screen", () => {
-  const calls = [...readFileSync(PAGE, "utf8").matchAll(/renderRunHtml\((.*?)\);/g)].map((m) => m[1]);
-  assert.equal(calls.length, 4, "two paint sites per screen");
-  assert.equal(calls.filter((c) => c.includes("isDesktop()")).length, 2, "the run screen's");
-  for (const bare of calls.filter((c) => !c.includes("isDesktop()")))
-    assert.match(bare, /^(run|currentRun), tasks, waves$/, "the node screen's subgraph, uncut");
+  const page = readFileSync(PAGE, "utf8");
+  const cut = [...page.matchAll(/runScreen\(([^\n]*)\);/g)].map((m) => m[1]);
+  assert.equal(cut.length, 3, "the run screen's two paint sites, and the hub's expansion");
+  for (const c of cut) assert.match(c, /, isDesktop\(\)$/, "every one of them the run's own cut");
+  const bare = [...page.matchAll(/renderRunHtml\((.*?)\);/g)].map((m) => m[1]);
+  for (const b of bare.filter((c) => c !== "run, run.tasks, run.waves, columns"))
+    assert.match(b, /^(run|currentRun), tasks, waves$/, "the node screen's subgraph, uncut");
 });
