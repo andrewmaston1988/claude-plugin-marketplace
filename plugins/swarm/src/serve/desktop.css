@@ -165,7 +165,10 @@
   :is(main:has(> .chips.hero), .ovleaf) > * { max-width:none; }
   :is(main:has(> .chips.hero), .ovleaf) > .banner { grid-area:1/1/2/3; margin:0; }
   :is(main:has(> .chips.hero), .ovleaf) > .chips.hero { grid-area:2/1/3/3; padding:0; }
-  :is(main:has(> .chips.hero), .ovleaf) > .card.flush { grid-area:3/1/4/2; margin:0; }
+  /* The prose spans both figure rows and the last is 1fr, so an opened prompt or output
+     grows into that row rather than pushing the second figure card down with it. */
+  :is(main:has(> .chips.hero), .ovleaf) { grid-template-rows:auto auto auto 1fr; }
+  :is(main:has(> .chips.hero), .ovleaf) > .card.flush { grid-area:3/1/5/2; margin:0; }
   /* The figure cards have no row of their own: both take column 2, so they stack beside
      the prose rather than under it. */
   :is(main:has(> .chips.hero), .ovleaf) > .card:not(.flush) { grid-column:2; margin:0; }

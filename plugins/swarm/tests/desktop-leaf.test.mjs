@@ -67,7 +67,10 @@ test("the leaf body is two columns: the prose left, the figures beside it", () =
   const g = cssRule("main:has(> .chips.hero)");
   assert.match(g, /grid-template-columns:minmax\(0, 2fr\) minmax\(280px, 1fr\)/);
   assert.match(g, /align-content:start/);
-  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .card.flush"), /grid-area:3\/1\/4\/2/, "the prompt and output take the left column");
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .card.flush"), /grid-area:3\/1\/5\/2/, "the prompt and output take the left column, across both figure rows");
+  // With the last row flexible, an opened prompt or output grows into it and the second
+  // figure card holds its place instead of riding down with the prose.
+  assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf)"), /grid-template-rows:auto auto auto 1fr/);
   assert.match(cssRule(":is(main:has(> .chips.hero), .ovleaf) > .card:not(.flush)"), /grid-column:2/, "the position and token cards stack beside it");
 });
 
