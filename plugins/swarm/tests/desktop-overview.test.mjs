@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { loadPage, listData, listRow, serialize } from "./helpers/page-harness.mjs";
 
 const T = 1_790_000_000_000;
@@ -144,6 +145,24 @@ test("Overview's finished rows keep the state disc their rail carries", async ()
   })(P.findByClass("ovruns")[0]);
   assert.equal(rails.length, 5, "one rail per finished run");
   for (const r of rails) assert.ok(r.childNodes.some((n) => n.tagName.toLowerCase() === "circle"), "the rail still carries its state disc");
+});
+
+// The pin above proves the markup; this one proves the stylesheet does not take the disc
+// back. A zeroed width did — dot() draws the disc inside the svg the rule sizes, so the
+// two leave together — and `preserveAspectRatio="none"` means a narrower width squashes it
+// rather than cropping it. The rule may hide the lane line and set nothing else.
+test("the hub's rail rule hides the lane, never the box that carries the disc", () => {
+  const css = readFileSync(new URL("../src/serve/desktop.css", import.meta.url), "utf8");
+  const rules = [...css.matchAll(/\.ovruns \.row \.rail([^{]*)\{([^}]*)\}/g)]
+    .map(([, sel, body]) => ({ sel: sel.trim(), body }));
+  assert.ok(rules.length, "desktop.css keeps a rule for the hub's finished-run rail");
+  for (const { sel, body } of rules) {
+    if (sel) continue;
+    assert.doesNotMatch(body, /(^|;)\s*width\s*:/,
+      "the rail's own rule sets a width — the svg beneath it carries the state disc, so a zero takes it and a narrow one squashes it");
+  }
+  assert.ok(rules.some(({ sel, body }) => sel === "path" && /display\s*:\s*none/.test(body)),
+    "the rule drops the lane line, which is the only part of the rail the hub has no use for");
 });
 
 // ── one source down ──────────────────────────────────────────────────────
