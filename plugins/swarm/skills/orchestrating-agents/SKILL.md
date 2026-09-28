@@ -157,8 +157,7 @@ Merging across a tier boundary is not free, and the two directions are not symme
   what the operator approved. This is a prohibition, not a trade.
 - **Effort is part of the pin.** Medium and max effort on one model share a model but not a
   cost, and a merged agent runs entirely at the higher one — same asymmetry, smaller
-  magnitude. The standing rule is to escalate within a tier before jumping tiers, so effort
-  boundaries are the ones you meet most often.
+  magnitude.
 - **A consent-gated top-tier pin is merge-hostile for a second reason.** Where every such pin
   needs the operator's explicit yes, merging a cheaper item into it silently widens the scope
   of that yes. Consent for one item is not consent for its neighbours.

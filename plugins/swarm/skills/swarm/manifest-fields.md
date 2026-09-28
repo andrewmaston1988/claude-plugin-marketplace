@@ -93,7 +93,7 @@ is not in that list; undeclared models accept any non-empty effort.
 - **medium** — balanced reasoning; the fallback when the leaf's job gives no strong signal either way (not a blanket default)
 - **high** — cross-file invariants, multi-step traces, structured findings that must be right
 - **xhigh** — hard cases between high and max; rare
-- **max** — depth-bound reasoning; you've tried shallower and it wasn't enough
+- **max** — depth-bound reasoning; the hardest jobs, at the highest cost
 
 The public provider registry supplies discovery, usage, and runner capabilities.
 
