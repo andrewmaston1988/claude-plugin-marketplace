@@ -6,7 +6,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { usageReading, patchUsageEnvelope } from "./usage-cache.mjs";
+import { usageReading, patchUsageEnvelope, quotaTtlMs } from "./usage-cache.mjs";
 
 export const DEFAULT_QUOTA_PATTERNS = [
   "usage limit reached",
@@ -16,10 +16,6 @@ export const DEFAULT_QUOTA_PATTERNS = [
 ];
 
 export const DEFAULT_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
-
-// One home for the Anthropic TTL, because two readers compare against it: the
-// live path and the cache-only adapter branch. They must expire together.
-export const quotaTtlMs = (cfg = {}) => (cfg.quotaCacheSecs ?? 300) * 1000;
 
 // "…reached your <weekly|session> usage limit, add extra usage: ollama.com/settings" —
 // keyed on the suffix so a later meter needs no edit. Deliberately NOT in `quotaPatterns`:

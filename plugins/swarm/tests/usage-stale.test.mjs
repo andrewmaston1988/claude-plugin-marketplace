@@ -57,16 +57,18 @@ test("notableLines: G7e a stale reading gets its own banner, not the cached one"
   const u = normalizeOllama({ ...OLLAMA_OK, provenance: "stale", reason: "expired-cookie", lastSeen: Date.parse("2026-09-08T14:49:00Z"), cookiePath: "cp" });
   const lines = notableLines([u], { now });
   ok(lines[0].startsWith("/!\\ Cookie Expired — figures below are the last reading"), lines.join("\n"));
+  ok(lines[0].includes("the refresh did not answer."), `a banked failure is what the banner is explaining: ${lines[0]}`);
   ok(lines[0].includes("stale · read 11m ago"), lines.join("\n"));
   ok(!/\d{4}-\d{2}-\d{2}T/.test(lines[0]), `an age, not an ISO stamp: ${lines[0]}`);
   ok(!lines[0].includes("figures below are cached"), lines[0]);
 });
 
 // The shared cache's stale shape: a provenance and the moment it was read, and
-// no failure note at all — a refresh that simply did not answer records no
-// reason of its own. Suppressing the banner over a missing reason left the one
-// reading the reader must not trust as the only reading that said nothing.
-test("notableLines: G7f a stale reading with no recorded reason still banners, and carries its age", () => {
+// no failure note at all — nothing TRIED to refresh it, so no failure is
+// recorded and the banner must not claim one. Suppressing the banner over a
+// missing reason left the one reading the reader must not trust as the only
+// reading that said nothing.
+test("notableLines: G7f a stale reading with no recorded reason banners as unrefreshed, not as a failed refresh", () => {
   const now = Date.parse("2026-09-08T15:00:00Z");
   const u = normalizeCodex({
     provider: "codex",
@@ -76,8 +78,8 @@ test("notableLines: G7f a stale reading with no recorded reason still banners, a
   });
   const lines = notableLines([u], { now });
   ok(lines.length, "a stale reading must never print nothing");
-  ok(lines[0].startsWith("/!\\ Usage Unread — figures below are the last reading"), lines.join("\n"));
-  ok(lines[0].includes("stale · read 12m ago"), lines.join("\n"));
+  ok(lines[0].startsWith("/!\\ Usage Unread — figures below are the last reading; not refreshed since 12m ago."), lines.join("\n"));
+  ok(!lines[0].includes("did not answer"), `nothing tried to refresh, so the banner must not claim one failed: ${lines[0]}`);
   ok(!/\d{4}-\d{2}-\d{2}T/.test(lines[0]), `an age, not an ISO stamp: ${lines[0]}`);
   // the age rides the figure too, not only the banner above it
   ok(usageLines([u], { now }).some((l) => l.endsWith(" · stale · read 12m ago")), usageLines([u], { now }).join("\n"));

@@ -9,6 +9,12 @@ import { swarmHome } from "./config.mjs";
 
 export const USAGE_TTL_MS = 5 * 60_000;
 
+// Anthropic's quota TTL is the same five minutes with a config override. It
+// lives here, beside the constant it defaults to, because two readers compare
+// against it — the live path and the cache-only adapter branch — and they must
+// expire together.
+export const quotaTtlMs = (cfg = {}) => (cfg.quotaCacheSecs ?? USAGE_TTL_MS / 1000) * 1000;
+
 const CACHE_FILENAME = {
   claude: "quota-cache.json",
   codex: "codex-usage.json",
@@ -44,11 +50,18 @@ export function readUsageEnvelope(provider, opts = {}) {
   }
 }
 
+// A cache is garnish, never a prerequisite: a read-only home, an EPERM rename
+// or an ENOSPC must not cost the reading that was just fetched, so every fs
+// failure here is swallowed and the in-memory envelope is still the answer.
 function writeEnvelope(envelope, { cachePath, pid }) {
-  const tmp = usageTmpPath(cachePath, pid);
-  mkdirSync(dirname(cachePath), { recursive: true });
-  writeFileSync(tmp, JSON.stringify(envelope, null, 2));
-  renameSync(tmp, cachePath);
+  try {
+    const tmp = usageTmpPath(cachePath, pid);
+    mkdirSync(dirname(cachePath), { recursive: true });
+    writeFileSync(tmp, JSON.stringify(envelope, null, 2));
+    renameSync(tmp, cachePath);
+  } catch {
+    // best-effort by design
+  }
   return envelope;
 }
 

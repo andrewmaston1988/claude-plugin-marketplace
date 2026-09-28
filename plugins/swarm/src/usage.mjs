@@ -13,11 +13,7 @@
 // is called from a UserPromptSubmit hook, so it must never fetch, never block and
 // never throw; a provider it cannot read is `unknown` and says nothing at all.
 import { providerUsageSnapshot } from "./contracts.mjs";
-import { cachedUsageReading, writeUsageReading } from "./usage-cache.mjs";
-import { quotaTtlMs } from "./quota.mjs";
-
-export const QUOTA_CACHE_FILENAME = "quota-cache.json";
-export const CODEX_USAGE_CACHE_FILENAME = "codex-usage.json";
+import { cachedUsageReading, writeUsageReading, quotaTtlMs } from "./usage-cache.mjs";
 
 // A limit window, uniform across providers. `scope` is Anthropic's per-model
 // bucket; cloud providers have no equivalent and leave it null. `window` is the
@@ -347,10 +343,14 @@ function ageText(ms) {
 // and the figures beneath it can never drift. `lastSeen` is what the ollama
 // reader banks; a reading straight out of the shared cache carries `fetchedAt`
 // instead. Both are numbers — an absent one makes no claim about age.
-function staleAgeMark(usage, now) {
+function staleAge(usage, now) {
   const at = usage?.lastSeen ?? usage?.fetchedAt;
-  if (usage?.provenance !== "stale" || typeof at !== "number") return "";
-  return `stale · read ${ageText(now - at)} ago`;
+  return usage?.provenance === "stale" && typeof at === "number" ? ageText(now - at) : "";
+}
+
+function staleAgeMark(usage, now) {
+  const age = staleAge(usage, now);
+  return age ? `stale · read ${age} ago` : "";
 }
 
 // The mark travels with the number the reader acts on rather than on a banner
@@ -419,14 +419,18 @@ export function provenanceBanner(usage, { now = Date.now() } = {}) {
     const lastSeen = usage.lastSeen ? `  last seen: ${new Date(usage.lastSeen).toISOString()}` : "";
     return [`/!\\ ${title} — figures below are cached.${lastSeen}`, refresh];
   }
-  // Stale: someone asked for a refresh and the provider did not answer, so the
-  // figures are the last ones banked. Distinct from `cached`, which is a
-  // reading that may be perfectly fresh.
+  // Stale: the figures are the last ones banked. A banked failure means a
+  // refresh was asked for and the provider did not answer; without one, nothing
+  // tried, and claiming a failed refresh would be a lie the reader acts on.
+  // Distinct from `cached`, which is a reading that may be perfectly fresh.
   if (usage.provenance === "stale") {
     // An age, never an ISO stamp: "read 3h ago" is what tells the reader whether
     // to act, and it is the same wording the figures below already carry.
-    const age = staleAgeMark(usage, now);
-    return [`/!\\ ${title} — figures below are the last reading; the refresh did not answer.${age ? `  ${age}` : ""}`, refresh];
+    const mark = staleAgeMark(usage, now);
+    const claim = usage.reason
+      ? `the refresh did not answer.${mark ? `  ${mark}` : ""}`
+      : `not refreshed${mark ? ` since ${staleAge(usage, now)} ago` : ""}.`;
+    return [`/!\\ ${title} — figures below are the last reading; ${claim}`, refresh];
   }
   // A partial read DID fetch this process — saying "no cached reading available"
   // over figures that just arrived live would be a lie the reader acts on.

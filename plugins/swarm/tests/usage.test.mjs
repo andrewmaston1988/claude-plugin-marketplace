@@ -1,18 +1,21 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
-import { mkdtempSync, writeFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   normalizeAnthropic, normalizeOllama, readCachedUsage, usageLines, notableLines,
-  formatResetTime, QUOTA_CACHE_FILENAME, normalizeCodex, codexUsageFromCache, writeCodexUsageCache,
+  formatResetTime, normalizeCodex, codexUsageFromCache, writeCodexUsageCache,
 } from "../src/usage.mjs";
 import { createProviderRegistry, defaultProviderAdapters } from "../src/providers.mjs";
-import { usageReading } from "../src/usage-cache.mjs";
+import { usageReading, usageCachePath } from "../src/usage-cache.mjs";
 import { providerUsageSnapshot } from "../src/contracts.mjs";
 import { cmdUsage } from "../scripts/swarm.mjs";
 
 const LONDON = "Europe/London";
+
+// The path the module itself resolves, never a filename restated here.
+const claudeCache = (home) => usageCachePath("claude", { SWARM_HOME: home });
 
 const ANTHROPIC = {
   limits: [
@@ -128,7 +131,7 @@ const stubOllama = (reading) => ({ usageFromCache: () => reading });
 
 test("readCachedUsage: G9 a fresh anthropic cache is read; an EXPIRED one is unknown, never stale", async () => {
   await withHome(async (home) => {
-    const cachePath = join(home, QUOTA_CACHE_FILENAME);
+    const cachePath = claudeCache(home);
     writeFileSync(cachePath, JSON.stringify({ fetchedAt: NOW - 1000, result: ANTHROPIC }));
     const fresh = await readCachedUsage({}, { now: NOW, cachePath });
     equal(fresh[0].state, "ok");
@@ -144,7 +147,7 @@ test("readCachedUsage: G9 a fresh anthropic cache is read; an EXPIRED one is unk
 
 test("readCachedUsage: G10 ollama appears only when enabled", async () => {
   await withHome(async (home) => {
-    const cachePath = join(home, QUOTA_CACHE_FILENAME);
+    const cachePath = claudeCache(home);
     const off = await readCachedUsage({}, { now: NOW, cachePath, _ollama: stubOllama(OLLAMA_OK) });
     deepEqual(off.map((u) => u.provider), ["anthropic"]);
 
@@ -164,7 +167,7 @@ test("readCachedUsage accepts canonical Ollama config and an injected Codex snap
       asOf: "2026-09-06T00:00:00Z",
     }) };
     const cfg = { providers: { codex: { enabled: true }, ollama: { cloud: { ollama: { enabled: false } } } } };
-    const out = await readCachedUsage(cfg, { now: NOW, cachePath: join(home, QUOTA_CACHE_FILENAME), _codex: codex });
+    const out = await readCachedUsage(cfg, { now: NOW, cachePath: claudeCache(home), _codex: codex });
     deepEqual(out.map((u) => u.provider), ["anthropic", "codex"]);
     equal(out[1].limits[0].percent, 10);
   });
@@ -175,7 +178,7 @@ test("readCachedUsage: G11 never throws — missing cache, corrupt cache, a prov
     const missing = await readCachedUsage({}, { now: NOW, cachePath: join(home, "nope.json") });
     equal(missing[0].state, "unknown");
 
-    const corrupt = join(home, QUOTA_CACHE_FILENAME);
+    const corrupt = claudeCache(home);
     writeFileSync(corrupt, "{not json");
     equal((await readCachedUsage({}, { now: NOW, cachePath: corrupt }))[0].state, "unknown");
 
@@ -222,7 +225,9 @@ test("codex cache: C2 a foreign or corrupt file is no reading, and a write never
 
     writeCodexUsageCache(CODEX_READING, env);
     ok(existsSync(path), "a well-formed reading is written atomically, .tmp renamed away");
-    equal(existsSync(path + ".tmp"), false);
+    // The writer's tmp is `<file>.<pid>.tmp`, so assert on what the writer names,
+    // not on one guessed filename: a readdir sweep catches a leak of any shape.
+    deepEqual(readdirSync(home).filter((f) => f.endsWith(".tmp")), [], "a tmp was abandoned beside the cache");
   });
 });
 
@@ -512,7 +517,7 @@ test("cmdUsage: a live Codex reading is banked for the cache-only readers", asyn
 
     // A cache-only walk is not a fetch and must leave the banked reading alone.
     rmSync(join(home, "codex-usage.json"));
-    await readCachedUsage(cfg, { env, providerRegistry: registry, cachePath: join(home, QUOTA_CACHE_FILENAME) });
+    await readCachedUsage(cfg, { env, providerRegistry: registry, cachePath: claudeCache(home) });
     equal(codexUsageFromCache(env), null, "nothing but the live read refreshes the cache");
   });
 });

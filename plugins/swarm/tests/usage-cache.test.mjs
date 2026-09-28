@@ -173,6 +173,30 @@ test("U8 a live write keeps retryAfter and lastError already in the file", async
   }
 });
 
+test("U10 an unwritable cache is best-effort: the reading that succeeded is still returned", async () => {
+  const dir = tmpDir();
+  try {
+    // A file where the directory should be, so every fs call in the write path
+    // fails — the same shape as a read-only home, EPERM on rename, or ENOSPC.
+    const blocker = join(dir, "not-a-dir");
+    writeFileSync(blocker, "not a directory");
+    const path = join(blocker, "codex-usage.json");
+
+    const r = await usageReading("codex", {
+      cachePath: path, now: () => T0,
+      fetchLive: async () => snapshot("live"),
+    });
+    equal(r?.provenance, "live", "RED: a cache that cannot be written must not cost the reading that succeeded");
+    equal(r.tag, "live");
+    equal(r.fetchedAt, T0);
+
+    const wrote = writeUsageReading("codex", { fetchedAt: T0, result: snapshot("x") }, { cachePath: path });
+    equal(wrote.result.tag, "x", "a write returns what it was given whether or not it landed");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("U9 recordUsageError writes beside the reading, never re-stamps it, and skips a cache that is absent or corrupt", () => {
   const dir = tmpDir();
   try {
