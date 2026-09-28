@@ -424,8 +424,6 @@ test("the shipped adapters declare their hydration: Claude local, Ollama and Cod
 
 const ROSTER_READERS = new Set([
   "src/discovery.mjs",
-  "src/serve/server.mjs",
-  "scripts/swarm.mjs",
 ]);
 
 function sourceFiles(dir) {

@@ -9,7 +9,7 @@ import { runCli, runCliAsync, runValidated, CLI } from "./helpers/cli.mjs";
 import { commitAll, gateConfig, gateHome, gitOut, tmp } from "./helpers/cli-fixture.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
-import { readRosterEnvelope } from "../src/discovery.mjs";
+import { readRosterEnvelope, writeRosterEntry } from "../src/discovery.mjs";
 import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -43,9 +43,9 @@ test("validate: bad manifest exits 1 with readable errors", () => {
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "models-cache.json"), JSON.stringify({ models: [
+    writeRosterEntry("claude", { hydratedAt: Date.now(), source: null, models: [
       { provider: "claude", model: "claude-sonnet-5", efforts: ["low", "medium", "high", "xhigh"] },
-    ] }));
+    ] }, { SWARM_HOME: home });
     const p = join(dir, "bad.json");
     writeFileSync(p, JSON.stringify({
       tasks: [
@@ -103,13 +103,10 @@ function seatsWorld({ enabled, store = "rows", corpus = false } = {}) {
   } else if (store === "empty") {
     writeFileSync(join(home, "model-scores.jsonl"), "");
   }
-  writeFileSync(join(home, "models-cache.json"), JSON.stringify({
-    updated: "2026-09-10T00:00:00Z",
-    models: [
-      { provider: "ollama", model: "glm-5.2:cloud", description: "graded" },
-      { provider: "ollama", model: "glm-5.3-flash:cloud", description: "unseated" },
-    ],
-  }));
+  writeRosterEntry("ollama", { hydratedAt: Date.now(), source: null, models: [
+    { provider: "ollama", model: "glm-5.2:cloud", description: "graded" },
+    { provider: "ollama", model: "glm-5.3-flash:cloud", description: "unseated" },
+  ] }, { SWARM_HOME: home });
   if (corpus) {
     const runDir = join(home, "runs", "some-proj", "old-1");
     mkdirSync(runDir, { recursive: true });
@@ -233,9 +230,9 @@ test("run: 3-task fan-out + digest end-to-end via the claude shim", () => {
   try {
     const home = join(dir, "home");
     mkdirSync(home, { recursive: true });
-    writeFileSync(join(home, "models-cache.json"), JSON.stringify({ models: [
+    writeRosterEntry("claude", { hydratedAt: Date.now(), source: null, models: [
       { provider: "claude", model: "claude-sonnet-5", efforts: ["low", "medium", "high", "xhigh"], defaultEffort: "high" },
-    ] }));
+    ] }, { SWARM_HOME: home });
     const shimLog = join(dir, "shim.log");
     const manifest = join(dir, "sweep.json");
     writeFileSync(manifest, JSON.stringify({

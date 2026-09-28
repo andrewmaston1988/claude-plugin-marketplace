@@ -12,7 +12,8 @@ import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
 import { costRowsFor, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
 import { rateCardStorePath, rateCards, refreshStaleRateCards } from "../rate-card.mjs";
-import { readModelsCache } from "../discovery.mjs";
+import { modelRoster, refreshRoster } from "../discovery.mjs";
+import { defaultProviderRegistry } from "../default-providers.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
 import { coverage, reliability, leaders, costView, rankCells } from "./perf-views.mjs";
@@ -70,7 +71,7 @@ const MANIFEST = {
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage, _refreshPrices = refreshStaleRateCards }) {
+export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage, _refreshPrices = refreshStaleRateCards, _modelRoster = modelRoster, _refreshRoster = refreshRoster }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
@@ -244,28 +245,25 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   let priceRefreshInFlight = false;
   let costCache = { mtimeMs: -1, snaps: [] };
   // The roster each provider is asked to price, so a scored model the table does
-  // not list still draws an `unpriced` ROW rather than a blank one. Cached by
-  // mtime like the two stores above — `swarm models` rewrites it.
-  const costModelsFile = join(home, "models-cache.json");
-  let costModelCache = { mtimeMs: -1, models: {} };
+  // not list still draws an `unpriced` ROW rather than a blank one. Read through
+  // the one reader: a raw parse of the cache file cannot see a local provider's
+  // rows, which live in a catalog this process never read.
+  const rosterEnv = { ...process.env, SWARM_HOME: home };
+  const rosterRegistry = defaultProviderRegistry();
+  let rosterRefreshInFlight = false;
   const costRoster = () => {
-    let mtimeMs = 0;
-    try { mtimeMs = statSync(costModelsFile).mtimeMs; } catch { mtimeMs = 0; }
-    if (mtimeMs !== costModelCache.mtimeMs) {
-      const byProvider = {};
-      let rows = [];
-      try {
-        rows = readModelsCache({ ...process.env, SWARM_HOME: home })?.models || [];
-      } catch {
-        // Display-only: a corrupt roster renders empty; the CLI is the loud path.
-      }
-      for (const row of rows) {
-        if (!row?.model) continue;
-        (byProvider[row.provider || "ollama"] ||= []).push(row.model);
-      }
-      costModelCache = { mtimeMs, models: byProvider };
+    const byProvider = {};
+    let rows = [];
+    try {
+      rows = _modelRoster({ env: rosterEnv, config: cfg, registry: rosterRegistry }).models;
+    } catch {
+      // Display-only: a corrupt roster renders empty; the CLI is the loud path.
     }
-    return costModelCache.models;
+    for (const row of rows) {
+      if (!row?.model) continue;
+      (byProvider[row.provider || "ollama"] ||= []).push(row.model);
+    }
+    return byProvider;
   };
   const costRows = () => {
     let mtimeMs = 0;
@@ -276,6 +274,15 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     // mapping discovery uses, never a second rule), and the rate cards price
     // theirs. `costView` sections the result by provider.
     const roster = costRoster();
+    // Renewed off the request path like the prices: the reader is cheap and
+    // synchronous, the network providers are not, and a dashboard open on a
+    // long-lived session would otherwise age past its own TTL.
+    if (!rosterRefreshInFlight) {
+      rosterRefreshInFlight = true;
+      Promise.resolve().then(() => _refreshRoster({ env: rosterEnv, config: cfg, registry: rosterRegistry }))
+        .catch(() => {})
+        .finally(() => { rosterRefreshInFlight = false; });
+    }
     if (!priceRefreshInFlight) {
       priceRefreshInFlight = true;
       Promise.resolve().then(() => _refreshPrices({ path: rateCardPath, rosterIds: roster, out: log, err: log }))

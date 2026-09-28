@@ -5,6 +5,7 @@ import { join, resolve, isAbsolute, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
 import { ASPECTS } from "../src/aspects.mjs";
+import { writeRosterEntry } from "../src/discovery.mjs";
 import { formatClosing } from "../src/results.mjs";
 
 function tmp() {
@@ -162,6 +163,36 @@ test("grade --file: a filled batch lands, with model and mechanical taken from t
     equal(rows[0].mechanical.numTurns, 6);
     equal(rows[0].mechanical.durationMs, 41000);
     equal(rows[1].grades, undefined, "a no-output row carried grades");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The declared columns come from the roster the reader serves, envelope and all
+// — a reader still parsing the flat file records null for every provider.
+test("grade --file records declared capabilities from the roster the reader serves", () => {
+  const dir = tmp();
+  try {
+    const run = fakeRun(dir);
+    const home = join(dir, "home");
+    writeRosterEntry("ollama", {
+      hydratedAt: Date.now(),
+      source: null,
+      models: [{
+        provider: "ollama", model: "glm-5.2:cloud",
+        capabilities: ["tools"], contextLength: 1000000, parameterCount: 756162687872,
+      }],
+    }, { SWARM_HOME: home });
+    const p = join(dir, "grades.json");
+    writeFileSync(p, JSON.stringify({
+      resultsDir: run,
+      session: "abc123",
+      rows: [{ leaf: "icons", domain: "godot", outcome: "completed", note: "", grades: { adherence: 9, handoff: 7, truthfulness: 8, depth: 8 } }],
+    }));
+    const r = runCli(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    deepEqual(rows[0].declared, { capabilities: ["tools"], contextLength: 1000000, parameterCount: 756162687872 });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -7,21 +7,23 @@ import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync, readdirSync, 
 import { join } from "node:path";
 import { runCli } from "./helpers/cli.mjs";
 import { gitOut, tmp } from "./helpers/cli-fixture.mjs";
+import { readRosterEnvelope, writeRosterEntry } from "../src/discovery.mjs";
 
 const MODEL = "claude-haiku-4-5-20251001";
 const OTHER_MODEL = "claude-sonnet-5";
 const REFUSAL = "has not been validated as written";
 
-// A repo + a pre-gated home + one manifest writing into <dir>/out. The models
-// cache is seeded so the seats resolve with no live probe, and so a row has a
+// A repo + a pre-gated home + one manifest writing into <dir>/out. The roster is
+// seeded so the seats resolve with no live probe, and so a row has a
 // defaultEffort to move underneath a validated manifest.
 function world({ tasks, extra = {}, resultsDir = "out" } = {}) {
   const dir = tmp();
   const home = join(dir, "home");
-  writeFileSync(join(home, "models-cache.json"), JSON.stringify({ models: [
+  const env = { SWARM_HOME: home };
+  writeRosterEntry("claude", { hydratedAt: Date.now(), source: null, models: [
     { provider: "claude", model: MODEL, efforts: ["low", "medium", "high"], defaultEffort: "high" },
     { provider: "claude", model: OTHER_MODEL, efforts: ["low", "medium", "high"], defaultEffort: "high" },
-  ] }));
+  ] }, env);
   const path = join(dir, "m.json");
   writeFileSync(path, JSON.stringify({
     ...(resultsDir ? { resultsDir } : {}),
@@ -116,16 +118,17 @@ for (const [label, mutate] of MUTATIONS) {
   });
 }
 
-test("validated: a models-cache defaultEffort moving underneath does not refuse", () => {
+test("validated: a roster defaultEffort moving underneath does not refuse", () => {
   const w = world({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: OTHER_MODEL }] });
   try {
     equal(validate(w).status, 0);
-    const cache = JSON.parse(readFileSync(join(w.home, "models-cache.json"), "utf8"));
-    writeFileSync(join(w.home, "models-cache.json"), JSON.stringify({
-      models: cache.models.map((m) => ({ ...m, defaultEffort: "low" })),
-    }));
+    const entry = readRosterEnvelope({ SWARM_HOME: w.home }).providers.claude;
+    writeRosterEntry("claude", {
+      ...entry,
+      models: entry.models.map((m) => ({ ...m, defaultEffort: "low" })),
+    }, { SWARM_HOME: w.home });
     const r = run(w);
-    equal(r.status, 0, `the cache is not part of the key:\n${r.stdout}${r.stderr}`);
+    equal(r.status, 0, `the roster is not part of the key:\n${r.stdout}${r.stderr}`);
   } finally {
     cleanup(w);
   }
