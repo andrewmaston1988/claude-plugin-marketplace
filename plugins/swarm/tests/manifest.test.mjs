@@ -73,6 +73,77 @@ test("settings.env cannot forge or clear the leaf guard vars", () => {
   }
 });
 
+// ── allowedTools: which built-ins a leaf actually gets ────────────────────────
+// The declared set is now also the set the CLI is handed, and the CLI matches names
+// exactly — an unmatched name silently grants nothing, so a wrong spelling must be
+// refused here rather than discovered as a leaf that cannot do its job.
+
+test("allowedTools: an unknown built-in name is refused, naming the field, the name and a correct example", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ allowedTools: "Read,WebSurf" })] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir)).join("\n");
+    ok(/allowedTools/.test(errs), `must name the field: ${errs}`);
+    ok(/'WebSurf'/.test(errs), `must name the offending tool: ${errs}`);
+    ok(/"allowedTools": "Read,Grep,Glob"/.test(errs), `must show a correct example inline: ${errs}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// "default" is the CLI's word for EVERY built-in — the exact opposite of what a
+// manifest means by listing tools, so it is refused by name rather than as unknown.
+test("allowedTools: 'default' is refused as the CLI's word for every tool", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ allowedTools: "default" })] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir)).join("\n");
+    ok(/["']default["']/.test(errs), errs);
+    ok(/every/i.test(errs), `must say what the CLI means by it: ${errs}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("allowedTools: mcp__ names and permission patterns are not unknown", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [
+      claudeTask({ id: "ro", allowedTools: "Read,Grep,mcp__scout__search,WebFetch" }),
+      claudeTask({ id: "w", allowedTools: "Read,Bash(git:*),Edit,PowerShell" }),
+    ] });
+    const plan = loadManifest(p, CFG, dir);
+    equal(plan.tasks[0].allowedTools, "Read,Grep,mcp__scout__search,WebFetch");
+    equal(plan.tasks[1].allowedTools, "Read,Bash(git:*),Edit,PowerShell");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// mustRead is checked against the transcript: a leaf that does not HAVE Read can
+// never prove a single entry, so the manifest is refused rather than failed later.
+test("mustRead without Read is refused, with the fix inline", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ allowedTools: "Grep,Glob", mustRead: ["src/a.mjs"] })] });
+    const errs = errorsOf(() => loadManifest(p, CFG, dir)).join("\n");
+    ok(/mustRead/.test(errs) && /Read/.test(errs), errs);
+    ok(/"allowedTools": "Read,Grep,Glob"/.test(errs), `must carry the fix inline: ${errs}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("mustRead beside a declared Read passes", () => {
+  const dir = tmp();
+  try {
+    const p = writeManifest(dir, { tasks: [claudeTask({ allowedTools: "Read,Grep", mustRead: ["src/a.mjs"] })] });
+    deepEqual(loadManifest(p, CFG, dir).tasks[0].mustRead, ["src/a.mjs"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("duplicate ids rejected", () => {
   const dir = tmp();
   try {

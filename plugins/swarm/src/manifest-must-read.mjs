@@ -3,6 +3,7 @@
 
 import { TEMPLATE_RE, TRANSCRIPT_RUNNERS } from "./coverage.mjs";
 import { transcriptRunner } from "./dispatch.mjs";
+import { builtinToolNames } from "./manifest-task-policy.mjs";
 
 // More `mustRead` entries than this is an authoring mistake — use an index entry.
 export const MUST_READ_MAX_ENTRIES = 500;
@@ -33,6 +34,16 @@ export function validateMustRead(rawTasks, errors, label) {
     }
     if (t.mustRead.length > MUST_READ_MAX_ENTRIES) {
       errors.push(`${l}: mustRead has ${t.mustRead.length} entries, over the ${MUST_READ_MAX_ENTRIES} limit — declare an index entry ({"index": "<path>"}) the engine expands at check time instead`);
+    }
+    // allowedTools decides which built-ins the leaf HAS, so a leaf without Read can
+    // never read what it must prove — the proof would fail every entry. Only a
+    // DECLARED set can fail this: silence defaults to Read,Grep,Glob, which has it.
+    if (t.allowedTools !== undefined && !builtinToolNames(t.allowedTools).includes("Read")) {
+      errors.push(
+        `${l}: mustRead needs the Read tool, which this task's allowedTools does not declare — ` +
+        `the leaf could never read what it must prove.\n` +
+        `    Add Read — e.g. "allowedTools": "Read,Grep,Glob"`
+      );
     }
     const deps = new Set(t.after || []);
     const checkTemplate = (s, what) => {
