@@ -3,9 +3,9 @@
    reads, so the two can never disagree about where the line is.
    Inlined into page.html by pageHtml(). */
 
-/* Below the breakpoint the phone keeps its four-tab bar: Overview and the run count
-   are hidden, not removed, because the sidebar and the bar are one element (D7). */
-.bnav a[data-tab="overview"], .bnav .navcount { display:none; }
+/* Below the breakpoint the phone keeps its four-tab bar: Overview, the run count and the
+   footer are hidden, not removed, because the sidebar and the bar are one element (D7). */
+.bnav a[data-tab="overview"], .bnav .navcount, .bnav .navfoot { display:none; }
 
 @media (min-width: 68.75em) {
   /* The single source: isDesktop() reads this string and no JS file names a width. */
@@ -27,17 +27,23 @@
   .bnav a { height:40px; flex-direction:row; justify-content:flex-start; gap:10px; padding:0 12px; border-radius:10px; font-size:13px; }
   .bnav a[data-tab="overview"] { display:flex; }
   .bnav .navcount { display:inline; margin-left:auto; color:var(--faint); font-variant-numeric:tabular-nums; }
-  .bnav[data-on=overview] [data-tab=overview] { color:var(--accent); }
+  /* The footer sits on the floor of the sidebar and holds the page's two non-run facts:
+     the socket it opened and when its estate read last landed. */
+  .bnav .navfoot { display:flex; flex-direction:column; gap:2px; margin-top:auto; padding:12px; border-top:1px solid var(--rule); font-size:11px; color:var(--faint); }
+  .bnav .navfoot .nf-conn[data-state=live] { color:var(--ok); }
+  .bnav .navfoot .nf-conn[data-state=offline] { color:var(--bad); }
+  .bnav[data-on=overview] [data-tab=overview] { color:var(--accent); background:var(--surface-2); }
   .bnav[data-on=overview] [data-tab=overview] svg { color:var(--accent); }
   .bnav[data-on=runs] [data-tab=runs], .bnav[data-on=usage] [data-tab=usage],
   .bnav[data-on=perf] [data-tab=perf], .bnav[data-on=cost] [data-tab=cost] { background:var(--surface-2); }
 
   /* A desktop window is wide: a run's rows must not stretch into an unreadable line. */
-  main > .graph, main > .banner, main > .card, main > .skeleton { max-width:1100px; margin-left:auto; margin-right:auto; }
+  main > .graph, main > .banner, main > .totals, main > .card, main > .skeleton { max-width:1100px; margin-left:auto; margin-right:auto; }
 
   /* Runs: live runs are cards, so they go side by side above the finished stacks —
-     everything that is not a card spans the full width. */
-  main:has(> .rcard) { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); column-gap:12px; align-content:start; align-items:start; padding:0 16px; }
+     everything that is not a card spans the full width. The shorthand's zeroed
+     vertical half would take main's own padding-bottom with it. */
+  main:has(> .rcard) { display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); column-gap:12px; align-content:start; align-items:start; padding-left:16px; padding-right:16px; }
   main:has(> .rcard) > .section, main:has(> .rcard) > ul, main:has(> .rcard) > .empty { grid-column:1 / -1; }
   main:has(> .rcard) > .section { padding-left:0; padding-right:0; }
   main:has(> .rcard) > .rcard { margin-left:0; margin-right:0; }
@@ -55,7 +61,7 @@
   .rtable .rhead .rail { height:34px; }
 
   /* Usage: the hero spans the screen, the provider cards sit beside each other. */
-  main:has(> .uhero) { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:0 16px; align-content:start; align-items:start; padding:0 16px; }
+  main:has(> .uhero) { display:grid; grid-template-columns:repeat(auto-fit, minmax(300px, 1fr)); gap:0 16px; align-content:start; align-items:start; padding-left:16px; padding-right:16px; }
   main:has(> .uhero) > .seg, main:has(> .uhero) > .uhero, main:has(> .uhero) > .section, main:has(> .uhero) > .empty { grid-column:1 / -1; }
   main:has(> .uhero) > .section { padding-left:0; padding-right:0; }
   main:has(> .uhero) > .uhero, main:has(> .uhero) > .card { margin-left:0; margin-right:0; }

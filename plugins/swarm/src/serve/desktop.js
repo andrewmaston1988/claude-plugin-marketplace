@@ -9,18 +9,12 @@
     catch { return false; }
   };
 
-  // Decision 3's routes, in one place because three callers ask: the route builder,
-  // boot and the resize listener. A bare load lands on Overview where there is room
-  // for it; #/overview is a dead end below the breakpoint; #/ is Runs in both.
-  const resolveHash = (hash, desktop) => {
-    const h = hash || "";
-    if (desktop) return h === "" || h === "#" ? "#/overview" : h;
-    return /^#\/overview\/?$/.test(h) ? "#/" : h;
-  };
+  // Decision 3's route rule is page.html's, not this file's: it has to hold when this
+  // asset never arrives, and a rule that lives in the missing file cannot be applied.
 
   // The Overview's contents are the next chunk's. A skeleton is the one screen that
   // cannot invent a figure the source tabs do not have (D5).
   const overviewScreen = () => `<div class="skeleton"><div class="sk hero"></div><div class="sk"></div><div class="sk"></div><div class="sk"></div></div>`;
 
-  window.swarmDesktop = { isDesktop, resolveHash, overviewScreen };
+  window.swarmDesktop = { isDesktop, overviewScreen };
 })();

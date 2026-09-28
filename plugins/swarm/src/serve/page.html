@@ -350,7 +350,7 @@
 </defs></svg>
 <header id="hdr" class="home"></header>
 <main id="main"></main>
-<nav id="nav" class="bnav"><a href="#/overview" data-tab="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>overview</a><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>swarm<span class="navcount" id="nav-count"></span></a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>performance</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>cost</a></nav>
+<nav id="nav" class="bnav"><a href="#/overview" data-tab="overview"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.6"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.6"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.6"/></svg>overview</a><a href="#/" data-tab="runs"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6.7 7.2C6.7 13.2 12 12 12 17.8M17.3 7.2C17.3 13.2 12 12 12 17.8M12 7.2v10.6"/><circle cx="6.7" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="17.3" cy="7.2" r="2" fill="currentColor" stroke="none"/><circle cx="12" cy="18" r="2.6" fill="currentColor" stroke="none"/></svg>swarm<span class="navcount" id="nav-count"></span></a><a href="#/usage" data-tab="usage"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 5.5l-13 13"/><circle cx="7" cy="7" r="2.5"/><circle cx="17" cy="17" r="2.5"/></svg>usage</a><a href="#/perf" data-tab="perf"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v16h16"/><path d="M7.5 15l3.5-4 3 2.5 5-6"/></svg>performance</a><a href="#/cost" data-tab="cost"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="4.5" width="19" height="10" rx="1.5"/><circle cx="12" cy="9.5" r="2.2"/><path d="M4.5 17.5h15M6.5 20.5h11"/></svg>cost</a><div class="navfoot" id="nav-foot"><span class="nf-conn" id="nav-conn">connecting</span><span class="nf-seen" id="nav-seen"></span></div></nav>
 <script>/*@inline components.js*/</script><script src="/logos.js"></script><script>
 (() => {
   const TOKEN = new URLSearchParams(location.search).get("t");
@@ -474,8 +474,24 @@
   function setNavCount(list) {
     const el = $("#nav-count");
     if (!el || !list || !window.swarmLive) return;
+    lastListAt = Date.now();
     const active = (list.runs || []).filter((r) => r.active);
     el.textContent = String(window.swarmLive.headerRunCount(list.finishedTotals || {}, active));
+    setNavFoot();
+  }
+  // The sidebar footer's two facts are both already held: the EventSource this page
+  // opened, and when the last estate read landed. Nothing here fetches. Hidden below the
+  // breakpoint (desktop.css) — the phone's four-tab bar has nowhere to put it.
+  let lastListAt = 0;
+  const NAV_CONN = { 0: "connecting", 1: "live", 2: "offline" };
+  function setNavFoot() {
+    const conn = $("#nav-conn");
+    if (!conn) return;
+    const state = es ? NAV_CONN[es.readyState] || "offline" : "connecting";
+    conn.textContent = state;
+    conn.setAttribute("data-state", state);
+    const seen = $("#nav-seen");
+    if (seen) seen.textContent = lastListAt && window.swarmLive ? `refreshed ${window.swarmLive.agoText(lastListAt, Date.now())}` : "";
   }
   // One header on every screen: a title over one small line — the summary on a tab
   // screen, the tappable trail on a child — so the bar never changes shape.
@@ -513,7 +529,7 @@
     const data = await api(`/api/runs${window.swarmLive.expandQuery(ui.expandedProjects)}`);
     return {
       header: headerHtml(TAB_TITLE.overview, ""),
-      html: window.swarmDesktop ? window.swarmDesktop.overviewScreen() : "",
+      html: window.swarmDesktop.overviewScreen(),
       state: { lastList: data, tickCfg: cadencesOf(data), grading: data.grading },
     };
   }
@@ -1362,11 +1378,24 @@
       html: `<div class="skeleton">${blocks}</div>`,
     };
   }
-  // Decision 3, in one place for both callers: a hash this layout has no screen for is
-  // rewritten before anything is built, so the skeleton and the commit agree — and
-  // `replace`, not an assignment, because an assignment would fire a second route.
+  // Decision 3's routes, in one place because two callers ask — the route builder and
+  // the resize listener. A bare load lands on Overview where there is room for it;
+  // #/overview is a dead end below the breakpoint; #/ is Runs in both. It lives here,
+  // not in desktop.js, because a failed desktop.js load is the one failure this page is
+  // built to survive: a rewrite owned by the missing asset cannot be applied, so
+  // #/overview would build nothing and leave an empty main where Runs belongs.
+  const resolveHash = (hash, desktop) => {
+    const h = hash || "";
+    if (desktop) return h === "" || h === "#" ? "#/overview" : h;
+    return /^#\/overview\/?$/.test(h) ? "#/" : h;
+  };
+  // A hash this layout has no screen for is rewritten before anything is built, so the
+  // skeleton and the commit agree. `replace`, not an assignment, so the dead hash never
+  // becomes a history entry the back button returns to — it still fires `hashchange`,
+  // which re-enters route() once and costs a second estate read; the route guard drops
+  // the superseded build. That read is what `replace` costs.
   function redirect() {
-    const want = window.swarmDesktop ? window.swarmDesktop.resolveHash(location.hash, isDesktop()) : location.hash;
+    const want = resolveHash(location.hash, isDesktop());
     if (want === location.hash) return false;
     location.replace(`#${want.replace(/^#/, "")}`);
     return true;
@@ -1451,6 +1480,7 @@
   let esAttempt = 0;
   function connect() {
     es = new EventSource(q("/events"));
+    setNavFoot();
     // pendingView as well as view: a refresh for a screen still being navigated to
     // must not be dropped because its commit has not landed (and vice versa).
     // The list view no longer reacts here — it refreshes on `runs` only (below),
@@ -1461,23 +1491,36 @@
       const v = pendingView || view;
       if (v.project === d.project && v.run === d.name) requestRoute(route);
     });
-    // The estate snapshot changed: the Runs list and the Overview both read it.
-    es.addEventListener("runs", () => { const n = (pendingView || view).name; if (n === "runs" || n === "overview") requestRoute(route); });
+    // The estate snapshot changed: the Runs list and the Overview both read it, and the
+    // rest — Usage, Cost, Perf, a run — take the same read the poll takes, because the
+    // sidebar count is a fact about the estate and not about the screen showing it.
+    es.addEventListener("runs", () => {
+      const n = (pendingView || view).name;
+      if (n === "runs" || n === "overview") requestRoute(route);
+      else estateRefresh();
+    });
     // D6: reconnect only once the browser has given up (readyState CLOSED) —
     // the CONNECTING case is its own retry already in flight. `esAttempt` resets
     // on a successful open; on() fetches a catch-up route so events missed
     // during the gap are not silently lost.
-    es.onopen = () => { if (esAttempt) requestRoute(route); esAttempt = 0; };
+    es.onopen = () => { setNavFoot(); if (esAttempt) requestRoute(route); esAttempt = 0; };
     es.onerror = () => {
+      setNavFoot();
       if (es.readyState !== EventSource.CLOSED) return;
       es.close();
       setTimeout(connect, window.swarmLive.reconnectDelay(esAttempt++));
     };
   }
+  // The breakpoint can move under the reader. `redirect()` re-routes when it rewrites the
+  // hash; a flip that leaves the hash alone still has to rebuild, because every screen
+  // resolves its layout at build time (Cost's isDesktop()) and no payload ever moves it.
+  // Stamped at boot, never here: isDesktop() reads desktop.js, which has not loaded yet.
+  let desktopNow = false;
   window.addEventListener("resize", () => {
-    // The breakpoint can move under the reader: narrowing past it strands #/overview,
-    // which has no phone screen, so the route is re-resolved rather than left dead.
-    if (redirect()) requestRoute(route);
+    const desktop = isDesktop();
+    const flipped = desktop !== desktopNow;
+    desktopNow = desktop;
+    if (redirect() || flipped) requestRoute(route);
     if (view.name === "run" && currentRun) rerender();
   });
 
@@ -1504,6 +1547,23 @@
     return loadScript(q("/perf.js")).catch(() => {});
   }
 
+  // The estate read the poll and an SSE `runs` event both make. The nav count and the
+  // footer's stamp are facts about the ESTATE, not about the screen showing it, so they
+  // follow this read wherever it lands — a screen that does not re-route (Usage, Cost, a
+  // run) would otherwise wear a count frozen at whatever the last commit saw. Latched:
+  // a burst of estate events must not start a read per event, which is the starvation
+  // the list view was cured of.
+  let estateInFlight = false;
+  function estateRefresh() {
+    if (estateInFlight) return Promise.resolve();
+    estateInFlight = true;
+    return api("/api/runs").then((d) => {
+      Object.assign(tickCfg, cadencesOf(d));
+      setNavCount(d);
+      announceFinished(d.runs);
+    }).catch(() => {}).finally(() => { estateInFlight = false; });
+  }
+
   function startTimers() {
     setInterval(rerender, tickCfg.clockMs);
     setInterval(revalidateDue, tickCfg.clockMs);
@@ -1512,7 +1572,7 @@
     // to views with something to poll, so a finished run stops hitting the network.
     setInterval(() => { if (window.swarmLive.shouldPoll(pendingView || view, currentRun, Date.now())) requestRoute(route); }, tickCfg.uiPollMs);
     // The estate scan, which that refetch cannot stand in for: on a run view it re-requests the run's OWN route.
-    setInterval(() => { api("/api/runs").then((d) => { Object.assign(tickCfg, cadencesOf(d)); announceFinished(d.runs); }).catch(() => {}); }, tickCfg.uiPollMs);
+    setInterval(estateRefresh, tickCfg.uiPollMs);
   }
 
   // Test seam for tests/page-route.test.mjs: the vm harness has no browser, so the
@@ -1530,9 +1590,11 @@
   // live.js is a hard dependency of buildRows/renderRunHtml — unlike perf.js, a
   // failed load must not route into a TypeError; it renders the empty panel instead.
   // desktop.js loads first and swallows its own failure: without it the layout stays
-  // the phone's, which is a readable page, so it must never sink boot.
-  loadScript(q("/desktop.js")).catch(() => {}).then(() => loadScript("/live.js")).then(() => {
+  // the phone's, which is a readable page, so it must never sink boot. Both carry the
+  // token: the server gates every route but `/` on it, so a bare /live.js 401s.
+  loadScript(q("/desktop.js")).catch(() => {}).then(() => loadScript(q("/live.js"))).then(() => {
     requestRoute = window.swarmLive.singleFlight(route);
+    desktopNow = isDesktop();
     route(); connect(); startTimers();
   }).catch((e) => {
     commitView({ html: `<div class="empty">${esc(e.message)}</div>` });
