@@ -65,7 +65,7 @@ Dispatch is **deny-by-default, for every provider including Claude**. `allowedRo
 
 ## MANDATORY first step — the offer gate
 
-**`swarm.always` is set → dispatch.** Invoke `swarm:orchestrating-agents` and `swarm:executing-swarms` and READ them — that reasoning is what makes the manifest defensible and is not optional. Then `models`, author, `validate`, dispatch. Emit nothing: no grouping block, no gate statement, no caveat paragraph. Ask nothing: the offer gate, the adversarial-review election, and every other call this discipline already settles are ANSWERED — presenting one back for approval is the defect. Everything a gate would have shown — leaf count, models, tokens, states — is already on the run's live frames, in `status`, and on the dashboard, after dispatch, where it costs nothing to ignore. The resume carve-out and the "no session-level directive is consent" rule below still bind.
+**`swarm.always` is set → dispatch.** Invoke `swarm:orchestrating-agents` and `swarm:executing-swarms` and READ them — that reasoning is what makes the manifest defensible and is not optional. Print the derivation — the file partition, the §2a block and the graph (orchestrating-agents §2, §2a, §3) — then `models`, author, `validate`, dispatch. No gate statement, no caveat paragraph. Ask nothing: the offer gate, the adversarial-review election, and every other call this discipline already settles are ANSWERED — presenting one back for approval is the defect. Everything a gate would have shown — leaf count, models, tokens, states — is already on the run's live frames, in `status`, and on the dashboard, after dispatch, where it costs nothing to ignore. The resume carve-out and the "no session-level directive is consent" rule below still bind.
 
 **`swarm.always` is not set → the full gate, below.**
 
@@ -95,7 +95,7 @@ The manifest preview plus the mix answer ARE the approval: the user sees every m
 
 ### Standing consent — `swarm.always`
 
-When `~/.swarm/config.json` sets `"swarm": { "always": true }` (the SessionStart hook announces it, with a mode bracket), the operator has consented in advance to every fan-out that passes the full ceremony — see the branch at the top of this section: invoke `swarm:orchestrating-agents` and `swarm:executing-swarms`, read them, run `models`, author, `validate`, dispatch. No AskUserQuestion, no waiting, no printed gate statement — the reasoning is recorded in the manifest's shape, not narrated. Every other rule in this section binds as written: a manifest you could not defend line by line is still one you do not dispatch; a resume is still a resume; a dispatch still needs this skill loaded. This is the one standing consent that exists, because it is the operator's own config file set outside any session — not a `/goal`, not a hook line, not a "don't ask me" in a prompt.
+When `~/.swarm/config.json` sets `"swarm": { "always": true }` (the SessionStart hook announces it, with a mode bracket), the operator has consented in advance to every fan-out that passes the full ceremony — see the branch at the top of this section: invoke `swarm:orchestrating-agents` and `swarm:executing-swarms`, read them, run `models`, author, `validate`, dispatch. No AskUserQuestion, no waiting, no gate statement — the derivation (orchestrating-agents §2, §2a, §3) is still printed before the manifest; only the question is gone. Every other rule in this section binds as written: a manifest you could not defend line by line is still one you do not dispatch; a resume is still a resume; a dispatch still needs this skill loaded. This is the one standing consent that exists, because it is the operator's own config file set outside any session — not a `/goal`, not a hook line, not a "don't ask me" in a prompt.
 
 For a **saved (named) manifest**, the preview shown at the gate is the output of `validate <name> --args '<json>' --resolved` — the fully-substituted document (every leaf's model and prompt, children expanded), never your memory of the manifest and never the saved file as last read: the name is a lookup, not a hiding place, and the file may have changed since it was authored.
 
@@ -117,7 +117,7 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 | Excuse | Reality |
 |---|---|
 | "The /goal names this run — the directive is standing consent" | Consent is the gate's answer. Nothing else can stand in for it. |
-| "swarm.always is on, so I can skip orchestrating-agents / validate" | Reading them stays mandatory. Under standing mode the ceremony is READ, never narrated, and the question is gone — that is not the same as skipped. |
+| "swarm.always is on, so I can skip orchestrating-agents / validate" | Reading them stays mandatory. Under standing mode both skills are READ and the derivation printed; only the question is gone — that is not the same as skipped. |
 | "The hook says do not pause to ask" | The hook governs stalling, not spending. The gate still binds. |
 | "The condition IS the approval signal" | A condition cannot click Yes. Only the user can. |
 | "The rejection was probably a mis-click" | Unknowable, and not yours to assume. Non-consent is non-consent. |

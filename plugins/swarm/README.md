@@ -607,8 +607,8 @@ Make offering swarm a standing habit by adding one line to your CLAUDE.md:
 
 `"swarm": { "always": true }` in `~/.swarm/config.json` is standing consent: the swarm
 skill runs its full ceremony (orchestrating-agents, executing-swarms, `models`, `validate`)
-then dispatches on a printed gate statement instead of an `AskUserQuestion`. A
-`SessionStart` hook announces it each session, mode-bracketed
+then prints its derivation (partition, block, graph) and dispatches without an
+`AskUserQuestion`. A `SessionStart` hook announces it each session, mode-bracketed
 (`[:cloud tier preferred]` under an `allowedRoots` cwd, `[Anthropic orchestration only]`
 otherwise). The keyword **`ultraswarm`** in a prompt injects the same block for that
 session without the config flag.
