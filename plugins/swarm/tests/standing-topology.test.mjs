@@ -19,6 +19,7 @@ const CARVE_OUTS = [
   "recorded in the manifest's shape",
   "never narrated",
   "nothing is printed or narrated",
+  "nothing is printed or stated",
 ];
 
 function markdownUnder(dir) {
@@ -45,10 +46,13 @@ test("the standing-mode hook block carries no carve-out phrase", () => {
   }
 });
 
+// All three legs of orchestrating-agents: §2 partition, §2a block, §3 graph.
+const namesDerivation = (t) => [/§2(?!a)/, /§2a/, /§3/, /partition/, /graph/].every((re) => re.test(t));
+
 test("the standing branch and the hook both name the derivation", () => {
   const branch = readFileSync(join(SKILLS, "swarm", "SKILL.md"), "utf8")
     .split("\n").find((l) => l.startsWith("**`swarm.always` is set"));
   ok(branch, "standing branch line present");
-  ok(/§2a/.test(branch) && /partition/.test(branch) && /graph/.test(branch), `standing branch names the derivation:\n${branch}`);
-  for (const text of rendered()) ok(/§2a/.test(text) && /partition/.test(text), `hook names the derivation:\n${text}`);
+  ok(namesDerivation(branch), `standing branch names the derivation:\n${branch}`);
+  for (const text of rendered()) ok(namesDerivation(text), `hook names the derivation:\n${text}`);
 });

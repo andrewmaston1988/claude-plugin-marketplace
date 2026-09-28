@@ -49,7 +49,7 @@ This is not negotiable. You cannot rationalise your way out of it.
 
 ## The Rule
 **Before any delegable work**: invoke Skill(swarm:swarm), read orchestrating-agents
-and executing-swarms, print the derivation (partition, §2a block, graph), then models ->
+and executing-swarms, print the derivation (partition §2, block §2a, graph §3), then models ->
 author -> validate -> dispatch. Ask none of the settled calls: presenting one back for
 approval is the defect.
 Solo ONLY for a conversational reply, a single one-read question, or a trivial edit.
