@@ -277,7 +277,7 @@ test("probeTopModels: 402 removes the row, 200 keeps it, other errors fail open"
       "kimi-k2.7-code:cloud": 500,
     }, calls), { env });
     deepEqual(calls, ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "kimi-k2.7-code:cloud"]);
-    const cached = JSON.parse(readFileSync(join(dir, "models-cache.json"), "utf8")).models;
+    const cached = readModelsCache(env).models;
     deepEqual(cached.map((m) => m.model), ["deepseek-v4-pro:cloud", "kimi-k2.7-code:cloud"]);
     deepEqual(live.map((m) => m.model), ["deepseek-v4-pro:cloud", "kimi-k2.7-code:cloud"]);
   } finally {
@@ -391,7 +391,7 @@ test("removeCachedModel deletes the row atomically; missing cache/entry are no-o
     // removal lands atomically and leaves the rest of the roster intact
     removeCachedModel("kimi-k3:cloud", env);
     ok(!existsSync(p + ".tmp"));
-    deepEqual(JSON.parse(readFileSync(p, "utf8")).models.map((m) => m.model), ["glm-5.2:cloud"]);
+    deepEqual(readModelsCache(env).models.map((m) => m.model), ["glm-5.2:cloud"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

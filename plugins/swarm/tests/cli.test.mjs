@@ -9,6 +9,7 @@ import { runCli, runCliAsync, runValidated, CLI } from "./helpers/cli.mjs";
 import { commitAll, gateConfig, gateHome, gitOut, tmp } from "./helpers/cli-fixture.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
+import { readRosterEnvelope } from "../src/discovery.mjs";
 import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -951,7 +952,7 @@ test("models: stub server + SWARM_HOME config -> names with descriptions, no ali
     ok(r.stdout.includes("glm-5.2:cloud — Frontier open model (size unreported, 1.0M ctx)"), r.stdout);
     ok(!r.stdout.includes("not-cloud:480b"), r.stdout);
     ok(!/(haiku|sonnet|opus)/.test(r.stdout), `Claude aliases must not be offered: ${r.stdout}`);
-    const cache = JSON.parse(readFileSync(join(home, "models-cache.json"), "utf8"));
+    const cache = readRosterEnvelope({ SWARM_HOME: home }).providers.ollama;
     deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud"]);
   } finally {
     server.close();
@@ -1004,7 +1005,7 @@ test("models: size-ordered collapsed roster, hidden-count footer, --all resurfac
     // probe fired on the refresh path, top-3-visible only — the hidden elder is not probed
     deepEqual(generateHits, ["glm-5.2:cloud"]);
     // cache keeps the full size-ordered roster and carries supersededBy
-    const cache = JSON.parse(readFileSync(join(home, "models-cache.json"), "utf8"));
+    const cache = readRosterEnvelope({ SWARM_HOME: home }).providers.ollama;
     deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud", "glm-5.1:cloud"]);
     equal(cache.models[1].supersededBy, "glm-5.2:cloud");
 
