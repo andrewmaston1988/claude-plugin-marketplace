@@ -4,8 +4,9 @@ import { mkdtempSync, rmSync, readFileSync, existsSync, appendFileSync, mkdirSyn
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, overall, scoresPath, shrink, fairPrior, PRIOR_WEIGHT, frontier, canonicalRunKey, gradedRunKeys,
+  validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, overall, scoresPath, shrink, fairPrior, PRIOR_WEIGHT, frontier, canonicalRunKey, gradedRunKeys, hideDisabledRows,
 } from "../src/scores.mjs";
+import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { transcriptModels, backfillRealmodel } from "../src/scores-backfill.mjs";
 import { ASPECTS, OUTCOMES } from "../src/aspects.mjs";
 import { runCli } from "./helpers/cli.mjs";
@@ -803,4 +804,24 @@ test("scores backfill-realmodel: a second run has nothing to do and writes no se
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ── hideDisabledRows: a provider-less row attributed through the roster ───────
+
+test("hideDisabledRows: a provider-less row is attributed through the roster; unattributable rows stay", () => {
+  const registry = defaultProviderRegistry();
+  const cfgWith = (on) => ({ providers: Object.fromEntries(["claude", "ollama", "codex"].map((id) => [id, { enabled: on.includes(id) }])) });
+  const roster = [{ provider: "codex", model: "gpt-6-luna" }];
+  const legacy = row({ model: "gpt-6-luna" });
+  const unknown = row({ model: "mystery-model" });
+  const models = (rows) => rows.map((r) => r.model);
+
+  deepEqual(models(hideDisabledRows([legacy, unknown], cfgWith(["claude", "ollama"]), registry, roster)), ["mystery-model"],
+    "codex off: the roster attributes the legacy gpt row to it, so it is hidden");
+  deepEqual(models(hideDisabledRows([legacy, unknown], cfgWith(["codex"]), registry, roster)), ["gpt-6-luna", "mystery-model"],
+    "codex on: the row shows");
+  deepEqual(models(hideDisabledRows([legacy], cfgWith(["claude", "ollama"]), registry, [])), ["gpt-6-luna"],
+    "no source attributes the row: kept");
+  deepEqual(models(hideDisabledRows([legacy], cfgWith(["ollama"]), registry, [{ provider: "codex", model: "gpt-6-luna" }, { provider: "ollama", model: "gpt-6-luna" }])), ["gpt-6-luna"],
+    "a model an enabled provider also lists is ambiguous: kept");
 });

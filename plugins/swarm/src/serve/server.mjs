@@ -237,7 +237,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const scoreRows = () => {
     let mtimeMs = 0;
     try { mtimeMs = statSync(scoresFile).mtimeMs; } catch { mtimeMs = 0; }
-    if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: hideDisabledRows(readRows(scoresFile), cfg, rosterRegistry) };
+    if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: hideDisabledRows(readRows(scoresFile), cfg, rosterRegistry, rosterRows()) };
     return scoreCache.rows;
   };
   // The cost half, cached the same way: snapshots re-read when the history's
@@ -254,15 +254,17 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const rosterRegistry = defaultProviderRegistry();
   const enabledProviders = enabledProviderIds(cfg, rosterRegistry);
   let rosterRefreshInFlight = false;
-  const costRoster = () => {
-    const byProvider = {};
-    let rows = [];
+  const rosterRows = () => {
     try {
-      rows = _modelRoster({ env: rosterEnv, config: cfg, registry: rosterRegistry }).models;
+      return _modelRoster({ env: rosterEnv, config: cfg, registry: rosterRegistry }).models;
     } catch {
       // Display-only: a corrupt roster renders empty; the CLI is the loud path.
+      return [];
     }
-    for (const row of rows) {
+  };
+  const costRoster = () => {
+    const byProvider = {};
+    for (const row of rosterRows()) {
       if (!row?.model) continue;
       (byProvider[row.provider || "ollama"] ||= []).push(row.model);
     }

@@ -162,11 +162,21 @@ export function readRows(path = scoresPath()) {
 }
 
 // Banked grades stay on disk; a row whose provider is registered but switched off never reaches
-// a surface. A row with no attributable provider (a legacy `gpt-*` row with no provider field,
-// which nothing infers) or an unregistered one is kept.
-export function hideDisabledRows(rows, config, registry) {
+// a surface. A provider-less row is attributed through the roster (the models each provider lists),
+// hidden only when every provider listing it is off; a row nothing attributes, or an unregistered one, is kept.
+export function hideDisabledRows(rows, config, registry, roster) {
   const off = new Set(registry.list().filter((a) => !a.enabled(config)).map((a) => a.id));
-  return rows.filter((r) => !off.has(identityOf(r).provider));
+  const listedBy = new Map();
+  for (const m of roster) {
+    const provider = identityOf(m).provider;
+    if (provider) listedBy.set(m.model, [...(listedBy.get(m.model) || []), provider]);
+  }
+  return rows.filter((r) => {
+    const { provider, model } = identityOf(r);
+    if (provider) return !off.has(provider);
+    const owners = listedBy.get(model);
+    return !(owners && owners.every((p) => off.has(p)));
+  });
 }
 
 // The one key both sides of a graded-ness comparison go through: a store row's

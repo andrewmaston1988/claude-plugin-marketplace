@@ -742,7 +742,8 @@ async function cmdPerf(rest) {
   const domain = getFlag("domain", rest);
   const cfg = getConfig();
   const path = scoresPath();
-  const rows = hideDisabledRows(readRows(path), cfg, defaultProviderRegistry());
+  const registry = defaultProviderRegistry();
+  const rows = hideDisabledRows(readRows(path), cfg, registry, modelRoster({ config: cfg, registry }).models);
   const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
   const costs = await meterCostRows();
   const settings = await costSettings(cfg);
