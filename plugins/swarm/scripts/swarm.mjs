@@ -172,10 +172,8 @@ async function cmdModels(rest = [], {
   }
   const showAll = rest.includes("--all");
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
-  // `swarm models` is the operator's forced refresh: every network provider
-  // re-fetches, then the reader serves what all of them now hold. A failed
-  // provider is reported but its previous rows remain banked, so one offline
-  // account cannot erase another provider's roster.
+  // The operator's forced refresh; a failed provider keeps its banked rows, so
+  // one offline account cannot erase another provider's roster.
   const refreshed = await refreshRoster({
     config: cfg,
     env,
@@ -199,10 +197,8 @@ async function cmdModels(rest = [], {
   const liveOllama = base && ollamaEnabled
     ? await probeTopModels(ollamaRows, base, fetchImpl, { isDenylisted, provider: "ollama" })
     : ollamaRows;
-  // A provider the config switched off is left out of the refresh above, so its
-  // entry still holds its last successful roster for a re-enable — never shown
-  // as launchable, never rewritten here.
-
+  // A disabled provider is left out of the refresh, so its entry keeps its last
+  // roster for a re-enable — never shown as launchable.
   // The one collapse site for every provider — without it a Codex or Claude
   // roster prints a superseded generation beside the model that replaced it,
   // and `--all` has no `supersededBy` to mark the row with.
