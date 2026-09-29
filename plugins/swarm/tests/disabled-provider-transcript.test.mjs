@@ -112,7 +112,7 @@ function scan(enabled) {
   };
   const outputs = {};
   try {
-    for (const args of [["cost"], ["perf"], ["perf", "--overall"], ["models", "--all"], ["serve", "doctor"], ["validate", join(base, "plan.json")], ["validate", join(base, "bare.json")]]) {
+    for (const args of [["cost"], ["perf"], ["perf", "--overall"], ["models", "--all"], ["serve", "doctor"], ["usage"], ["quota"], ["list"], ["validate", join(base, "plan.json")], ["validate", join(base, "bare.json")]]) {
       const r = runCli(args, { cwd: base, env });
       outputs[`swarm ${args.map((a) => a.replaceAll("\\", "/").split("/").pop()).join(" ")}`] = `${r.stdout}${r.stderr}`;
     }

@@ -160,15 +160,19 @@ export async function printQuota({ cfg, out, cachePath, credentialsPath, fetchIm
   const { normalizeAnthropic, normalizeOllama, normalizeCodex, codexUsageFromCache, usageLines, notableLines } =
     await import("./usage.mjs");
 
-  const q = await checkQuota({
-    cfg,
-    fetch: (...a) => fetchImpl(...a),
-    cachePath,
-    ...(credentialsPath && { credentialsPath }),
-  });
   const usages = [];
-  if (q) usages.push(normalizeAnthropic(q));
-  else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
+  // A disabled Claude is neither fetched nor named, same as Ollama and Codex below.
+  const { defaultProviderRegistry } = await import("./default-providers.mjs");
+  if (defaultProviderRegistry().get("claude").enabled(cfg)) {
+    const q = await checkQuota({
+      cfg,
+      fetch: (...a) => fetchImpl(...a),
+      cachePath,
+      ...(credentialsPath && { credentialsPath }),
+    });
+    if (q) usages.push(normalizeAnthropic(q));
+    else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
+  }
 
   const { usageFromCache, ollamaCloudConfig } = await import("./ollama-usage.mjs");
   if (ollamaCloudConfig(cfg).enabled === true) {
