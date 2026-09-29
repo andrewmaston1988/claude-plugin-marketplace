@@ -79,6 +79,19 @@ const MEASURE = `(() => {
   };
 })()`;
 
+// The loading skeleton, drawn alone in main as skeletonFor draws it, for a list screen and
+// for a run: its blocks' width is compared with the Runs screen's own section, so "the
+// skeleton is as wide as the screen it stands in for" is two measured boxes.
+const SKELETON_MEASURE = `(() => {
+  const main = document.querySelector("#main"), was = main.innerHTML, w = {};
+  for (const view of ["runs", "run"]) {
+    main.innerHTML = '<div class="skeleton" data-view="' + view + '"><div class="sk"></div></div>';
+    w[view] = Math.round(main.querySelector(".sk").getBoundingClientRect().width * 10) / 10;
+  }
+  main.innerHTML = was;
+  return w;
+})()`;
+
 // The hub's own quantities: where the feed's edges land, and where the flyout's right edge
 // lands once it is open. Read as a function so the same expression serves the closed, open
 // and re-closed reads — the three are compared to each other, so they must be one query.
@@ -226,6 +239,7 @@ async function measure(client, pass) {
   }
   await sleep(150); // settle the re-render before reading boxes
   const m = await evaluate(client, MEASURE);
+  if (pass.desktop) m.skel = await evaluate(client, SKELETON_MEASURE);
   if (missing) m.missing = missing;
   return m;
 }
@@ -280,6 +294,9 @@ function check(pass, m, failures) {
         if (Math.abs(row[i] - head[i]) > TOL_PX) failures.push(`${tag}: column ${i} drifts ${r2(row[i] - head[i])}px from the header`);
       }
     }
+    // A list screen's skeleton spans the screen it stands in for; a run's keeps the run's cap.
+    if (m.skel && m.secW != null && Math.abs(m.skel.runs - m.secW) > TOL_PX) failures.push(`${tag}: the Runs skeleton is ${m.skel.runs}px, the Runs screen's sections are ${m.secW}px`);
+    if (m.skel && m.skel.run > 1100 + TOL_PX) failures.push(`${tag}: the run skeleton is ${m.skel.run}px, past the run screen's 1100px cap`);
     // The fr tracks, as the ratio of the widths the four cells actually got.
     if (!m.cols.length) failures.push(`${tag}: the header cells were not measured (.rhead missing)`);
     else m.cols.forEach((w, i) => {
@@ -387,7 +404,7 @@ async function main() {
         check(pass, m, failures);
         if (m.secW != null) runsSecW.set(pass.width, m.secW);
         const cols = m.cols.length ? `  tracks ${m.cols.join(" / ")}` : "";
-        console.log(`${pass.name.padEnd(18)} ${String(m.vw).padStart(4)}px  sidebar ${String(m.navW).padStart(6)}  main ${String(m.mainW).padStart(6)}  gap ${String(r2(m.mainLeft - m.navRight)).padStart(5)}  section ${String(m.secW).padStart(6)}  overflow ${m.rootOverflow}/${m.mainOverflow}${cols}`);
+        console.log(`${pass.name.padEnd(18)} ${String(m.vw).padStart(4)}px  sidebar ${String(m.navW).padStart(6)}  main ${String(m.mainW).padStart(6)}  gap ${String(r2(m.mainLeft - m.navRight)).padStart(5)}  section ${String(m.secW).padStart(6)}  skeleton ${m.skel ? `${m.skel.runs}/${m.skel.run}` : "—"}  overflow ${m.rootOverflow}/${m.mainOverflow}${cols}`);
       }
     }
     console.log(`\n${PASSES.length} passes, tolerance ${TOL_PX}px and ${TOL_FR * 100}% on the fr ratio`);

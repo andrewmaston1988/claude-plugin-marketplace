@@ -1468,7 +1468,7 @@
         : '<div class="sk"></div>'.repeat(5);
     return {
       header: trailOf(v) ? childHeader(v, esc(title || v.kind || ""), title || v.which || v.kind || "") : headerHtml(esc(title), ""),
-      html: `<div class="skeleton">${blocks}</div>`,
+      html: `<div class="skeleton" data-view="${v.name}">${blocks}</div>`,
     };
   }
   // Decision 3's routes, in one place because two callers ask — the route builder and

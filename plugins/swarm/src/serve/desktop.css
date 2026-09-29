@@ -41,7 +41,7 @@
   .bnav[data-on=perf] [data-tab=perf], .bnav[data-on=cost] [data-tab=cost] { background:var(--surface-2); }
 
   /* A desktop window is wide: a run's rows must not stretch into an unreadable line. */
-  main > .graph, main > .banner, main > .totals, main > .card:not(.rcard), main > .skeleton { max-width:1100px; margin-left:auto; margin-right:auto; }
+  main > .graph, main > .banner, main > .totals, main > .card:not(.rcard), main > .skeleton[data-view=run] { max-width:1100px; margin-left:auto; margin-right:auto; }
 
   /* Runs: live runs are cards, so they go side by side above the finished stacks —
      everything that is not a card spans the full width. The shorthand's zeroed
