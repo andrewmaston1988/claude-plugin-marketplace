@@ -510,7 +510,7 @@ carried measurable weekly segments (cached readings bank nothing).
 - **The multiplier's floor is a measured model with ≥ 200 measured requests.** A model with
   no history is **unmeasured** — excluded from comparison entirely, neither free nor dear.
 
-The dashboard Cost screen shows current generations only; Performance keeps all generations. The multiplier is
+The dashboard Cost screen shows the newest model per family, whether or not it is denylisted; Performance keeps all generations. The multiplier is
 the per-request meter weight against that floor, printed beside the grades, never collapsed into one number. A
 model is **dominated** when another is strictly higher-scoring *and* strictly cheaper — the only comparison made,
 since a ratio would let one cheap fluke leaf outrank a well-evidenced model.
@@ -538,10 +538,11 @@ swarm refresh-prices --dry-run   # parse and report what moved, write nothing
   table, so a fresh or offline install still ranks honestly. The first refresh supersedes
   them, and a fixture test pins each seed against the page it was read off, so a seed
   cannot drift from the table unnoticed.
-- **A stale card refreshes itself.** Cards carry a `staleAfter` (the vendor's published
-  expiry, else 90 days from the read); past it, `swarm cost` re-reads before ranking. No
-  flag gates it — ranking on prices the vendor has already changed is never what anyone
-  wants. Offline, the cached card stands and its banner says so.
+- **A stale card refreshes itself every 12 hours.** The roster also triggers a refresh
+  when it gains a model the card has not seen; models leaving the roster do not. After a
+  failed refresh, retries for that provider back off for one hour — a vendor whose page
+  moved never holds a reachable vendor's prices stale. Both `swarm cost` and the dashboard
+  Cost screen use these rules. Offline, the cached card stands and its banner says so.
 - **A parse that comes back empty or implausible is refused, never banked** — that failure
   has no symptom except every model silently reading `unpriced`.
 - **A family does not share one price.** Every row is its own published line: `sonnet-4-6`

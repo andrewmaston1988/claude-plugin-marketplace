@@ -13,9 +13,9 @@ import { join, dirname } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { inferStoredIdentity } from "./results.mjs";
 import { costObservation as validateCostObservation } from "./contracts.mjs";
-import { deriveCloudName } from "./discovery.mjs";
+import { deriveCloudName, dropSuperseded } from "./discovery.mjs";
 import { provenanceBanner } from "./usage.mjs";
-import { RATE_CARDS, rateCardBanner, resolveRatePrice } from "./rate-card.mjs";
+import { RATE_CARD_SOURCES, rateCardBanner, rateCards, resolveRatePrice } from "./rate-card.mjs";
 
 export function usageHistoryPath(env = process.env) {
   return join(swarmHome(env), "usage-history.jsonl");
@@ -329,14 +329,16 @@ export function ollamaCloudCostRows(snaps) {
 // nothing downstream can tell it from a sourced one.
 //
 // The cards themselves, their provenance and their refresh live in rate-card.mjs;
-// this file owns only what turns a card into ranked rows.
-export { RATE_CARDS };
-export { CODEX_RATE_CARD, CLAUDE_RATE_CARD, RATE_CARD_STALE_WINDOW_DAYS } from "./rate-card.mjs";
+// this file owns only what turns a card into ranked rows, and reads them through
+// `rateCards()` so a refresh reaches a running process without a restart.
+export { rateCards };
 
 // The meter's provider id. Ollama's list is the one measured rather than
 // published, which is why the three stay separate even though the labels rhyme.
+// The list of providers is the SOURCES, not the store — a store missing a key
+// would silently drop a section rather than render it unpriced.
 export const METER_PROVIDER = "ollama";
-export const COST_PROVIDERS = [METER_PROVIDER, ...Object.keys(RATE_CARDS)];
+export const COST_PROVIDERS = [METER_PROVIDER, ...RATE_CARD_SOURCES.map((s) => s.provider)];
 
 // One row per model the caller names, plus one per model the table prices. A
 // model absent from the table is `unpriced` — a row the page can draw, because
@@ -363,6 +365,19 @@ function rateCardObservation(card, model) {
   });
 }
 
+// The roster grouped the way every cost surface asks for it — `{ provider: [ids] }`,
+// which is the `models` option costSections and costRowsFor take. A roster row with
+// no provider of its own is a meter model.
+export function modelsByProvider(rows = []) {
+  const byProvider = {};
+  for (const row of rows) {
+    if (!row?.model) continue;
+    const provider = row.provider || METER_PROVIDER;
+    (byProvider[provider] ||= []).push(row.model);
+  }
+  return byProvider;
+}
+
 // The roster decides what gets a row; the table only decides what it costs. Before
 // the cards were fetched they held the dispatchable models and nothing else, so
 // listing every priced model was the same set — a refreshed card carries the
@@ -384,8 +399,8 @@ export function rateCardRows(card, models = []) {
 // deliberately no branch through which one provider's derivation can feed
 // another's list — the units are incommensurable, and a shared floor would rank
 // a measured meter point against a published price.
-export function costRowsFor(provider, { models = [], snaps = [] } = {}) {
-  const card = RATE_CARDS[provider];
+export function costRowsFor(provider, { models = [], snaps = [], cards = rateCards() } = {}) {
+  const card = cards[provider];
   if (card) return rateCardRows(card, models);
   if (provider === METER_PROVIDER) return ollamaCloudCostRows(snaps);
   return [];
@@ -394,8 +409,8 @@ export function costRowsFor(provider, { models = [], snaps = [] } = {}) {
 // The unit each list is read in, named on the list itself — including what the
 // weight is relative to, because that is part of the weight. Two rate cards are
 // two units, not one: each names its own base.
-export function costUnitLabel(provider = METER_PROVIDER) {
-  const card = RATE_CARDS[provider];
+export function costUnitLabel(provider = METER_PROVIDER, { cards = rateCards() } = {}) {
+  const card = cards[provider];
   return card
     ? `published price, relative (${card.baseModel} = 1x)`
     : `measured meter points/request, relative to the cheapest model with >=${THIN_REQUESTS} requests`;
@@ -405,13 +420,23 @@ export function costUnitLabel(provider = METER_PROVIDER) {
 // a grouping, never a ranking: no row is ever re-weighted against another
 // section's base. A provider with no source still gets a section, so the reader
 // sees that the provider exists and is unpriced rather than absent.
-export function costSections({ providers = COST_PROVIDERS, models = {}, snaps = [] } = {}) {
+//
+// Supersession drops an elder's row as the dashboard's Cost screen does, and never
+// the card's base model — that row IS the unit. `hidden` is the count they made.
+export function costSections({ providers = COST_PROVIDERS, models = {}, snaps = [], cloudSuffix = ":cloud", cards = rateCards() } = {}) {
   return providers.map((provider) => {
-    const card = RATE_CARDS[provider];
+    const card = cards[provider];
+    const rows = costRowsFor(provider, { models: models[provider] || [], snaps, cards });
+    const kept = dropSuperseded(rows, {
+      providerKey: (row) => row.provider || "unqualified",
+      keep: (row) => row.model === card?.baseModel,
+      cloudSuffix,
+    });
     return {
       provider,
-      unit: costUnitLabel(provider),
-      rows: costRowsFor(provider, { models: models[provider] || [], snaps }),
+      unit: costUnitLabel(provider, { cards }),
+      rows: kept,
+      hidden: rows.length - kept.length,
       banner: card ? rateCardBanner(card) : [],
     };
   });

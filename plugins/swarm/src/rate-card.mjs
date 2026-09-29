@@ -11,20 +11,24 @@
 // ever have to retype a price — the seed exists to be superseded, and the fixture
 // test pins it against the page it was read off so it cannot drift unnoticed.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { provenanceBanner } from "./usage.mjs";
 import { parseAnthropicPricing, parseOpenAiPricing, resolveRatePrice } from "./rate-card-parse.mjs";
 
-// Cards with no published expiry are re-read after this deliberately short window.
-export const RATE_CARD_STALE_WINDOW_DAYS = 90;
+const HOUR_MS = 3600e3;
 
-export function defaultRateCardStaleAfter(asOf) {
-  const date = new Date(`${asOf}T00:00:00.000Z`);
-  date.setUTCDate(date.getUTCDate() + RATE_CARD_STALE_WINDOW_DAYS);
-  return date.toISOString().slice(0, 10);
-}
+// A card with no published expiry is re-read after this deliberately short window:
+// one extra fetch of a markdown page a day, and a vendor's new price reaches Cost
+// within half a day. Nothing computes a default `staleAfter` any more — an explicit
+// one is a hand-noted override (a promo floor), never a substitute for the window.
+export const RATE_CARD_REFRESH_HOURS = 12;
+
+// A failed read is not retried until this much later: an offline machine would
+// otherwise fetch on every `swarm cost` and every Cost page load, because a seed
+// can never become fresh on its own.
+export const RATE_CARD_FAILED_BACKOFF_HOURS = 1;
 
 // Standard-tier columns only: the batch, flex and fast tables republish the same
 // models at multiples of these and swarm dispatches none of them. Astra's figures
@@ -59,8 +63,7 @@ export const CLAUDE_RATE_CARD_SEED = {
   baseModel: "claude-sonnet-5",
   unit: "published-price-relative",
   source: "anthropic-rate-card",
-  asOf: "2026-09-23",
-  staleAfter: defaultRateCardStaleAfter("2026-09-23"), // No published expiry.
+  asOf: "2026-09-23", // No published expiry: the 12h window is the whole rule.
   prices: {
     "claude-haiku-4-5-20251001": { input: 1, cachedInput: 0.1, output: 5 },
     "claude-sonnet-5": { input: 2, cachedInput: 0.2, output: 10 },
@@ -101,7 +104,9 @@ export function readRateCardStore(path = rateCardStorePath()) {
 
 function writeRateCardStore(store, path = rateCardStorePath()) {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
+  // Per-writer temp: the daemon and the CLI both bank here, and a shared name
+  // makes the loser's rename throw ENOENT after the winner already took it.
+  const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
   renameSync(tmp, path);
 }
@@ -109,12 +114,26 @@ function writeRateCardStore(store, path = rateCardStorePath()) {
 /**
  * A refresh replaces the seed's prices wholesale rather than merging: a model the
  * vendor has dropped must go `unpriced`, not linger at its last-known rate. The
- * banked `asOf` is when the fetch happened, and the stale window restarts there.
+ * banked `asOf` is when the fetch happened, at full resolution — the stale window
+ * starts there, and 11 hours old and 23 hours old are the same day but only one of
+ * them is inside it.
  */
 export function overlayRateCard(seed, banked) {
   if (!banked?.prices || !Object.keys(banked.prices).length) return seed;
-  const asOf = String(banked.asOf ?? "").slice(0, 10) || seed.asOf;
-  return { ...seed, asOf, staleAfter: defaultRateCardStaleAfter(asOf), prices: banked.prices, refreshedFrom: banked.url };
+  // The seed's `staleAfter` is a hand note about the SEED's read — a promo floor.
+  // Riding onto a later read would mark every read after it stale for ever, and an
+  // always-stale card re-fetches on every cost query.
+  const { staleAfter, ...rest } = seed;
+  return {
+    ...rest,
+    asOf: banked.asOf ?? seed.asOf,
+    prices: banked.prices,
+    refreshedFrom: banked.url,
+    ...(banked.rosterIds ? { rosterIds: banked.rosterIds } : {}),
+    // `lastFailedAt` is the back-off marker, read from the raw store by whoever
+    // decides whether to retry. On the card it read as "the banner knows" when
+    // nothing but the raw read ever consulted it.
+  };
 }
 
 /**
@@ -123,36 +142,65 @@ export function overlayRateCard(seed, banked) {
  * the write and keep the card that works; the caller reports it and the operator
  * fixes the parser.
  */
-export function assertPlausible(provider, prices) {
+export function assertPlausible(provider, prices, seed) {
   const ids = Object.keys(prices);
   if (ids.length < 5) throw new Error(`${provider}: the published table parsed to ${ids.length} rows — the page shape moved, refusing to bank it`);
   for (const [id, p] of Object.entries(prices)) {
     if (!Number.isFinite(p.input) || p.input <= 0) throw new Error(`${provider}: ${id} parsed an input rate of ${p.input}`);
     if (!Number.isFinite(p.output) || p.output < p.input) throw new Error(`${provider}: ${id} parsed output ${p.output} below input ${p.input} — the columns are transposed`);
   }
+  // Without the base every multiplier in that section is null while the label
+  // still names it — and an automatic refresh would bank that in silence.
+  if (seed && !resolveRatePrice(prices, seed.baseModel))
+    throw new Error(`${provider}: the published table does not price ${seed.baseModel}, which is the unit every other row is priced against — refusing to bank it`);
 }
 
-/** Re-read both vendors' tables and bank them. Returns one summary per provider. */
-export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fetch, now = new Date() } = {}) {
+// A failure banks `lastFailedAt` and rethrows carrying the provider and the
+// summaries of the providers already banked; the caller's error path reads both.
+export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fetch, now = new Date(), rosterIds, providers = RATE_CARD_SOURCES } = {}) {
   const store = readRateCardStore(path);
   const summaries = [];
-  for (const { provider, url, parse, seed } of RATE_CARD_SOURCES) {
-    const res = await _fetch(url);
-    if (!res.ok) throw new Error(`${provider}: ${url} -> ${res.status}`);
-    const prices = parse(await res.text());
-    assertPlausible(provider, prices);
-    const before = overlayRateCard(seed, store[provider]).prices;
-    store[provider] = { url, asOf: now.toISOString(), prices };
-    summaries.push({ provider, url, rows: Object.keys(prices).length, changes: diffPrices(before, prices) });
+  for (const { provider, url, parse, seed } of providers) {
+    try {
+      const res = await _fetch(url);
+      if (!res.ok) throw new Error(`${provider}: ${url} -> ${res.status}`);
+      const prices = parse(await res.text());
+      assertPlausible(provider, prices, seed);
+      const before = overlayRateCard(seed, store[provider]).prices;
+      store[provider] = {
+        url, asOf: now.toISOString(), prices,
+        ...(rosterIds?.[provider] ? { rosterIds: rosterIds[provider] } : {}),
+      };
+      summaries.push({ provider, url, rows: Object.keys(prices).length, changes: diffPrices(before, prices) });
+    } catch (e) {
+      // Re-read before writing: another writer (the daemon against the CLI) may
+      // have banked a fresh card in the read-to-write window, and writing this
+      // run's opening snapshot back would revert it and bank an hour of back-off
+      // over prices that were just re-read.
+      const fresh = readRateCardStore(path);
+      for (const { provider: banked } of summaries) fresh[banked] = store[banked];
+      fresh[provider] = { ...fresh[provider], lastFailedAt: now.toISOString() };
+      writeRateCardStore(fresh, path);
+      e.provider = provider;
+      // The providers before this one are banked by the write above; their
+      // summaries ride the throw so the caller can report them as refreshed.
+      e.summaries = summaries;
+      throw e;
+    }
   }
-  writeRateCardStore(store, path);
+  // The same re-read as the failure path: a partial refresh (the other provider is
+  // backed off) must not put its opening snapshot back over a fresher bank.
+  const fresh = readRateCardStore(path);
+  for (const { provider } of summaries) fresh[provider] = store[provider];
+  writeRateCardStore(fresh, path);
   return summaries;
 }
 
 /**
  * What moved between two price tables — the whole point of running a refresh.
- * Both sides resolve by the same prefix rule the pricing does, so a dated id the
- * published table lists undated reads as unchanged rather than as dropped-and-added.
+ * Both sides resolve by the rule the pricing does — an exact key, or a trailing
+ * published date — so a dated id the table lists undated reads as unchanged
+ * rather than as dropped-and-added.
  */
 export function diffPrices(before, after) {
   const changes = [];
@@ -168,12 +216,16 @@ export function diffPrices(before, after) {
   return changes;
 }
 
-export function rateCardStaleAfter(card) {
-  return card.staleAfter || defaultRateCardStaleAfter(card.asOf);
-}
-
-export function isRateCardStale(card, now = Date.now()) {
-  return now > Date.parse(`${rateCardStaleAfter(card)}T23:59:59.999Z`);
+// Past the window, past an explicit `staleAfter`, or the roster names a model the
+// card never priced (one-way — a leaver needs no prices). An unparsable `asOf` is stale.
+export function isRateCardStale(card, { now = Date.now(), rosterIds = [] } = {}) {
+  const at = typeof now === "number" ? now : new Date(now).getTime();
+  const readAt = Date.parse(card?.asOf ?? "");
+  if (!Number.isFinite(readAt)) return true;
+  if (at - readAt >= RATE_CARD_REFRESH_HOURS * HOUR_MS) return true;
+  if (card.staleAfter && at > Date.parse(`${card.staleAfter}T23:59:59.999Z`)) return true;
+  const priced = new Set(card.rosterIds ?? []);
+  return rosterIds.some((id) => !priced.has(id));
 }
 
 export function rateCardBanner(card) {
@@ -193,10 +245,81 @@ export function loadRateCards(path = rateCardStorePath()) {
   return Object.fromEntries(RATE_CARD_SOURCES.map(({ provider, seed }) => [provider, overlayRateCard(seed, store[provider])]));
 }
 
-// Read once at import: every surface in a process should agree on the cards, and a
-// refresh is a separate process (`swarm refresh-prices`) or an explicit reload.
-export const RATE_CARDS = loadRateCards();
-export const CODEX_RATE_CARD = RATE_CARDS.codex;
-export const CLAUDE_RATE_CARD = RATE_CARDS.claude;
+const cache = new Map();
+
+/**
+ * The cards in force, cached per store path and re-read when that file's mtime
+ * moves. Reading once at import would freeze a running daemon on the prices it
+ * started with — a refresh has to reach it without a restart.
+ */
+export function rateCards(path = rateCardStorePath()) {
+  let mtimeMs = null;
+  try {
+    mtimeMs = statSync(path).mtimeMs;
+  } catch {
+    // No store yet: the seeds stand, and a later write moves the mtime off null.
+  }
+  const hit = cache.get(path);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.cards;
+  const cards = loadRateCards(path);
+  cache.set(path, { mtimeMs, cards });
+  return cards;
+}
+
+const money = (p) => (p == null ? "—" : `$${p.input}/$${p.output}`);
+
+export function reportCardChanges(out, { provider, url, rows, changes }) {
+  out(`── ${provider} — ${rows} models from ${url}`);
+  if (!changes.length) {
+    out("   no change");
+  } else {
+    for (const c of changes) {
+      out(c.kind === "repriced"
+        ? `   ${c.model.padEnd(28)} ${money(c.from)} -> ${money(c.to)}`
+        : `   ${c.model.padEnd(28)} ${c.kind}${c.to ? ` at ${money(c.to)}` : ""}`);
+    }
+  }
+  out("");
+}
+
+/**
+ * No flag gates this: a stale card ranks models on prices the vendor has already
+ * changed, and that is never what anyone wants. Best-effort — offline, the cached
+ * card stands and its own stale banner already says so.
+ *
+ * The back-off lives in the store, not in a caller's memory, and it is per
+ * provider: one vendor's moved page must not hold a healthy vendor's prices stale
+ * for the hour. `rosterIds` is per provider, banked with the read so a model
+ * arriving later re-prices the card.
+ *
+ * A skip writes nothing: the daemon asks on every cost request, and a line per
+ * poll is noise. `skipped` is the report.
+ */
+export async function refreshStaleRateCards({ out, err, path = rateCardStorePath(), _fetch = fetch, now = Date.now(), rosterIds } = {}) {
+  const at = typeof now === "number" ? new Date(now) : now;
+  const store = readRateCardStore(path);
+  const pending = RATE_CARD_SOURCES.filter(({ provider }) => {
+    const failedAt = Date.parse(store[provider]?.lastFailedAt ?? "");
+    return !(Number.isFinite(failedAt) && at.getTime() - failedAt < RATE_CARD_FAILED_BACKOFF_HOURS * 3600e3);
+  });
+
+  const cards = rateCards(path);
+  const stale = pending.some(({ provider }) =>
+    isRateCardStale(cards[provider], { now: at.getTime(), rosterIds: rosterIds?.[provider] }));
+  if (!stale) return { refreshed: [], failed: [], skipped: true };
+
+  try {
+    const summaries = await refreshRateCards({ path, _fetch, now: at, rosterIds, providers: pending });
+    for (const summary of summaries) if (summary.changes.length) reportCardChanges(out, summary);
+    return { refreshed: summaries.map((s) => s.provider), failed: [], skipped: false };
+  } catch (e) {
+    // Whatever banked before the failure is banked — reported as refreshed, so the
+    // message never calls a provider that just re-priced itself "cached".
+    const banked = e.summaries ?? [];
+    for (const summary of banked) if (summary.changes.length) reportCardChanges(out, summary);
+    err(`rate cards: ${e.provider ?? "a provider"} could not be refreshed (${e.message}) — its card stays cached`);
+    return { refreshed: banked.map((s) => s.provider), failed: [e.provider].filter(Boolean), skipped: false };
+  }
+}
 
 export { resolveRatePrice };

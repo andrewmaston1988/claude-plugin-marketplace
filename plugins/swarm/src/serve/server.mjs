@@ -11,17 +11,17 @@ import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
 import { costRowsFor, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
+import { rateCardStorePath, rateCards, refreshStaleRateCards } from "../rate-card.mjs";
 import { readModelsCache } from "../discovery.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
 import { coverage, reliability, leaders, costView, rankCells } from "./perf-views.mjs";
 import { projectGrouping } from "./grouping.mjs";
-import { buildSnapshot, filterRuns } from "./estate.mjs";
+import { createWorkerEstate, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
 import { providerConfig } from "../providers.mjs";
 import { logosScript } from "./logos.mjs";
 import { PAGE, pageHtml } from "./page-assets.mjs";
-import { matchDenylist } from "../manifest.mjs";
 
 // The three boot scripts served as-is; /logos.js is generated, so it stays a route.
 const JS_ASSETS = {
@@ -29,7 +29,6 @@ const JS_ASSETS = {
   "/desktop.js": fileURLToPath(new URL("./desktop.js", import.meta.url)),
   "/live.js": fileURLToPath(new URL("./live.js", import.meta.url)),
 };
-const ESTATE_WORKER = fileURLToPath(new URL("./estate-worker.mjs", import.meta.url));
 const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
 // The estate view: every live run, plus the newest few finished PER DISPLAY GROUP — a
 // global newest-N let one busy project crowd the others off the list entirely.
@@ -38,77 +37,6 @@ const FINISHED_PER_PROJECT = 10;
 // A handle can silently stop delivering (server.mjs's own long-standing note on the
 // old hub poll) — this just re-creates run.log watchers from the latest snapshot.
 const WATCHER_RECOVERY_MS = 10_000;
-
-// The default `_estate`: a worker owns buildSnapshot, restarting with backoff on
-// exit (1s -> 30s cap). `current()` resolves the first snapshot once it lands, or
-// after `_firstWaitMs` builds one in-thread so no request waits unboundedly.
-function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Worker, _setTimeout, _firstWaitMs }) {
-  let worker = null;
-  let latest = null;
-  let backoffMs = 1000;
-  let backoffTimer = null;
-  let closed = false;
-  const listeners = new Set();
-  let waiters = [];
-
-  const notify = (snapshot) => {
-    latest = snapshot;
-    const ws = waiters; waiters = [];
-    for (const resolve of ws) resolve(snapshot);
-    for (const cb of listeners) cb(snapshot);
-  };
-
-  const spawn = () => {
-    worker = new _Worker(ESTATE_WORKER, { workerData: { home, pollMs, heartbeatMs, quietWarnMs } });
-    worker.on("message", (msg) => {
-      if (msg?.type === "build-error") { dlog("estate-worker", { event: "build-error", msg: msg.msg }); return; }
-      if (msg?.type !== "snapshot") return;
-      backoffMs = 1000;
-      notify({ version: msg.version, rows: msg.rows });
-    });
-    worker.on("error", (e) => dlog("estate-worker", { event: "error", msg: e.message }));
-    worker.on("exit", (code) => {
-      if (closed) return;
-      dlog("estate-worker", { event: "exit", code });
-      const delay = backoffMs;
-      backoffMs = Math.min(30_000, backoffMs * 2);
-      backoffTimer = _setTimeout(() => { backoffTimer = null; spawn(); }, delay);
-    });
-  };
-  spawn();
-
-  // One fallback timer for every request waiting on the first snapshot: concurrent
-  // cold-start requests share a single in-thread build instead of one scan each.
-  let fallbackTimer = null;
-  return {
-    current() {
-      if (latest) return Promise.resolve(latest);
-      return new Promise((resolve) => {
-        waiters.push(resolve);
-        if (fallbackTimer) return;
-        fallbackTimer = _setTimeout(() => {
-          fallbackTimer = null;
-          if (latest || closed || !waiters.length) return;
-          dlog("estate-worker", { event: "fallback", msg: "in-thread snapshot" });
-          notify(buildSnapshot(home, new Map(), { now: Date.now(), heartbeatMs, quietWarnMs }));
-        }, _firstWaitMs);
-      });
-    },
-    refresh() { try { worker?.postMessage({ type: "refresh" }); } catch {} },
-    onSnapshot(cb) { listeners.add(cb); },
-    close() {
-      closed = true;
-      clearTimeout(backoffTimer); clearTimeout(fallbackTimer); fallbackTimer = null;
-      try { worker?.terminate(); } catch {}
-      // Nothing may wait on a closed estate: hand pending requests the last snapshot.
-      const ws = waiters; waiters = [];
-      for (const resolve of ws) resolve(latest ?? { version: "closed", rows: [] });
-    },
-    // An update handover closes the http server and, if the replacement fails,
-    // re-listens on the SAME server — the estate must come back with it.
-    reopen() { if (!closed) return; closed = false; backoffMs = 1000; spawn(); },
-  };
-}
 
 // A single path segment as the engine writes them (ids, encoded cwds, run names):
 // no separators, no dot-only names, nothing a URL decoder could turn into one.
@@ -142,7 +70,7 @@ const MANIFEST = {
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
 };
 
-export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage }) {
+export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage, _refreshPrices = refreshStaleRateCards }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
@@ -312,6 +240,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   // The cost half, cached the same way: snapshots re-read when the history's
   // mtime moves, the derivation (pure, cheap) on every request.
   const costFile = usageHistoryPath({ ...process.env, SWARM_HOME: home });
+  const rateCardPath = rateCardStorePath({ ...process.env, SWARM_HOME: home });
+  let priceRefreshInFlight = false;
   let costCache = { mtimeMs: -1, snaps: [] };
   // The roster each provider is asked to price, so a scored model the table does
   // not list still draws an `unpriced` ROW rather than a blank one. Cached by
@@ -346,16 +276,22 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     // mapping discovery uses, never a second rule), and the rate cards price
     // theirs. `costView` sections the result by provider.
     const roster = costRoster();
-    return COST_PROVIDERS.flatMap((provider) => costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps }));
+    if (!priceRefreshInFlight) {
+      priceRefreshInFlight = true;
+      Promise.resolve().then(() => _refreshPrices({ path: rateCardPath, rosterIds: roster, out: log, err: log }))
+        .catch(() => {})
+        .finally(() => { priceRefreshInFlight = false; });
+    }
+    const cards = rateCards(rateCardPath);
+    return COST_PROVIDERS.flatMap((provider) =>
+      costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps, cards }));
   };
   const rankOf = (cells, model) => {
     const ranked = rankCells(cells, { cloudSuffix }).filter((c) => c.combined != null && !c.supersededBy);
     const i = ranked.findIndex((c) => c.model === model);
     return i < 0 ? null : { position: i + 1, of: ranked.length };
   };
-  // The cloud suffix is shared by the Cost view and the Performance ranking; only
-  // Cost reads the denylist — the ranking supersedes regardless.
-  const isDenylisted = (model) => Boolean(matchDenylist(model, cfg));
+  // The cloud suffix is shared by Cost and Performance.
   const cloudSuffix = providerConfig(cfg, "ollama")?.cloudSuffix || ":cloud";
   const costOf = (rows, domain) => {
     const ollama = providerConfig(cfg, "ollama");
@@ -363,7 +299,6 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       domain,
       bands: resolveBands(ollama?.cloud?.ollama?.costBands),
       valueMargin: ollama?.cloud?.ollama?.valueMargin,
-      isDenylisted,
       cloudSuffix,
     });
   };

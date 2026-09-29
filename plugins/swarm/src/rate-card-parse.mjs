@@ -71,7 +71,7 @@ export function parseOpenAiPricing(md) {
 
 // Anthropic's table is keyed on display names, so the id is derived. The date
 // suffix on a dated id (`claude-haiku-4-5-20251001`) has no column to come from —
-// resolveRatePrice below matches it by prefix rather than inventing a key here.
+// resolveRatePrice below strips a trailing date rather than inventing a key here.
 function anthropicModelId(name) {
   const clean = name.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/\(.*$/, "").trim();
   const match = clean.match(/^Claude\s+([A-Za-z]+)\s+([\d.]+)$/);
@@ -97,18 +97,23 @@ export function parseAnthropicPricing(md) {
   return out;
 }
 
+// The only suffix the fallback strips: a published date, in either spelling.
+const DATED_SUFFIX = /^-(\d{8}|\d{4}-\d{2}-\d{2})$/;
+
 /**
- * The id swarm dispatches may carry a suffix the published table has no column
- * for — `claude-haiku-4-5-20251001` against the table's `Claude Haiku 4.5`. An
- * exact key wins; otherwise the longest key the id extends does, so a future
+ * The id swarm dispatches may carry a DATE the published table has no column for —
+ * `claude-haiku-4-5-20251001` against the table's `Claude Haiku 4.5`. An exact key
+ * wins; otherwise the longest key the id extends by a trailing date does, so
  * `claude-opus-5-5-20261101` prices as Opus 5.5 rather than reading `unpriced`.
- * Nothing shorter than a full segment matches, so `claude-opus-5` never claims
- * `claude-opus-5-5`.
+ *
+ * Only a date is stripped. A version segment is a different model at a different
+ * price — `claude-sonnet-5-5` borrowing sonnet-5's rate would rank it a third
+ * cheaper than it bills, and `unpriced` is the honest answer there.
  */
 export function resolveRatePrice(prices, model) {
   if (Object.hasOwn(prices, model)) return { key: model, price: prices[model] };
   const key = Object.keys(prices)
-    .filter((k) => model.startsWith(`${k}-`))
+    .filter((k) => model.startsWith(`${k}-`) && DATED_SUFFIX.test(model.slice(k.length)))
     .sort((a, b) => b.length - a.length)[0];
   return key ? { key, price: prices[key] } : null;
 }

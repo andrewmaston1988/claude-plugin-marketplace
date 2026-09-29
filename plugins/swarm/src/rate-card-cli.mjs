@@ -1,35 +1,24 @@
-// `swarm refresh-prices`, and the automatic version of it. Presentation only —
-// rate-card.mjs owns the fetching, parsing and banking. It lives here rather than
-// in scripts/swarm.mjs because that file is past the size at which a file may keep
-// growing; `out` and `err` are passed in so the CLI keeps one writer.
+// `swarm refresh-prices` — the manual form. The CLI's wrapper: rate-card.mjs owns
+// the fetching, parsing and banking, and the automatic refresh with them. It lives
+// here rather than in scripts/swarm.mjs because that file is past the size at which
+// a file may keep growing; `out` and `err` are passed in so the CLI keeps one writer.
 
 import {
-  RATE_CARD_SOURCES, diffPrices, isRateCardStale, loadRateCards,
-  rateCardStorePath, refreshRateCards,
+  RATE_CARD_SOURCES, diffPrices, loadRateCards, rateCardStorePath, refreshRateCards, reportCardChanges,
 } from "./rate-card.mjs";
 
-const money = (p) => (p == null ? "—" : `$${p.input}/$${p.output}`);
-
-export function reportCardChanges(out, { provider, url, rows, changes }) {
-  out(`── ${provider} — ${rows} models from ${url}`);
-  if (!changes.length) {
-    out("   no change");
-  } else {
-    for (const c of changes) {
-      out(c.kind === "repriced"
-        ? `   ${c.model.padEnd(28)} ${money(c.from)} -> ${money(c.to)}`
-        : `   ${c.model.padEnd(28)} ${c.kind}${c.to ? ` at ${money(c.to)}` : ""}`);
-    }
-  }
-  out("");
-}
+// The automatic refresh is rate-card.mjs's: the dashboard runs it too, and a daemon
+// must not reach into a CLI module for its policy. Re-exported at this path because
+// `swarm cost` imports it from here.
+export { refreshStaleRateCards } from "./rate-card.mjs";
+export { reportCardChanges };
 
 /**
  * Rate cards come from the vendors' published tables, not from anyone retyping a
  * price. `--dry-run` parses and reports without writing — the way to check a page
  * has not moved under the parser before letting it replace a working card.
  */
-export async function refreshPrices({ out, err, dryRun = false, path = rateCardStorePath(), _fetch = fetch } = {}) {
+export async function refreshPrices({ out, err, dryRun = false, path = rateCardStorePath(), _fetch = fetch, rosterIds } = {}) {
   if (dryRun) {
     const before = loadRateCards(path);
     for (const { provider, url, parse } of RATE_CARD_SOURCES) {
@@ -41,23 +30,7 @@ export async function refreshPrices({ out, err, dryRun = false, path = rateCardS
     out("dry run — nothing written");
     return 0;
   }
-  for (const summary of await refreshRateCards({ path, _fetch })) reportCardChanges(out, summary);
+  for (const summary of await refreshRateCards({ path, _fetch, rosterIds })) reportCardChanges(out, summary);
   out(`banked at ${path} — \`swarm cost\` now ranks on these`);
   return 0;
-}
-
-/**
- * No flag gates this: a stale card ranks models on prices the vendor has already
- * changed, and that is never what anyone wants. Best-effort — offline, the cached
- * card stands and its own stale banner already says so.
- */
-export async function refreshStaleRateCards({ out, err, path = rateCardStorePath(), _fetch = fetch } = {}) {
-  if (!Object.values(loadRateCards(path)).some((card) => isRateCardStale(card))) return;
-  try {
-    for (const summary of await refreshRateCards({ path, _fetch })) {
-      if (summary.changes.length) reportCardChanges(out, summary);
-    }
-  } catch (e) {
-    err(`rate cards are stale and could not be refreshed (${e.message}) — ranking on the cached table`);
-  }
 }

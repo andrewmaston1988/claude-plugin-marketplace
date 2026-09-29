@@ -3,10 +3,14 @@
 // snapshot storage and the meter-derived multiplier arithmetic.
 import { test } from "node:test";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
+import { mkdtempSync, writeFileSync, utimesSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   ollamaCloudCostRows, costRowsFor, costSections, costUnitLabel, rateCardRows,
-  COST_PROVIDERS, RATE_CARDS, CODEX_RATE_CARD, CLAUDE_RATE_CARD,
+  COST_PROVIDERS,
 } from "../src/cost.mjs";
+import { rateCards, CODEX_RATE_CARD_SEED, CLAUDE_RATE_CARD_SEED } from "../src/rate-card.mjs";
 import { snap, seg } from "./helpers/cost-snapshots.mjs";
 
 // ── provider-local rate cards ─────────────────────────────────────────────────
@@ -22,6 +26,24 @@ const collidingSnaps = () => [
   snap(1, [seg("gpt-5.6-luna:cloud", 100, 50), seg("cheap:cloud", 900, 50)], 50),
 ];
 
+// A synthetic provider, injected into the cards the whole process shares and taken
+// back out again. Only the two sourced providers can come from a store file, so a
+// test card has to arrive through the cards themselves.
+const withCards = (entries, fn) => {
+  const cards = rateCards();
+  for (const [provider, card] of Object.entries(entries)) cards[provider] = card;
+  try {
+    return fn();
+  } finally {
+    for (const provider of Object.keys(entries)) delete cards[provider];
+  }
+};
+
+const synthetic = (provider, card = {}) => ({
+  provider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
+  asOf: new Date().toISOString(), prices: { base: { input: 1, output: 1 } }, ...card,
+});
+
 // The plan's named RED anchor. Nothing guarded this before: the Ollama
 // derivation and the provider tables had no seam between them.
 test("costRowsFor: an Ollama meter multiplier never attaches to a Codex model", () => {
@@ -35,7 +57,7 @@ test("costRowsFor: an Ollama meter multiplier never attaches to a Codex model", 
   ok(luna, "the Codex base is missing from its own list");
   equal(luna.mult, 1, "RED: the Ollama meter's weight leaked onto a Codex model");
   equal(luna.baseModel, "gpt-5.6-luna");
-  equal(luna.costDomain, `codex:${CODEX_RATE_CARD.unit}`, "a Codex row lives in the Codex cost domain");
+  equal(luna.costDomain, `codex:${rateCards().codex.unit}`, "a Codex row lives in the Codex cost domain");
   ok(rows.every((r) => r.unit !== "meter-points"), "RED: a meter unit reached the Codex list");
   ok(rows.every((r) => r.source !== "ollama-settings"), "RED: an Ollama source reached the Codex list");
   ok(rows.every((r) => r.provider === "codex"), "RED: another provider's row landed in the Codex list");
@@ -56,8 +78,8 @@ test("costRowsFor: a Codex weight is never derived from the usage history or a q
 });
 
 test("costRowsFor: each provider's list is normalised to its own named base", () => {
-  equal(CODEX_RATE_CARD.baseModel, "gpt-5.6-luna");
-  equal(CLAUDE_RATE_CARD.baseModel, "claude-sonnet-5");
+  equal(rateCards().codex.baseModel, "gpt-5.6-luna");
+  equal(rateCards().claude.baseModel, "claude-sonnet-5");
   const codex = costRowsFor("codex", { models: ["gpt-5.6-luna", "gpt-5.6-sol"] });
   equal(codex.find((r) => r.model === "gpt-5.6-luna").mult, 1, "RED: the Codex base is not exactly 1x");
   const claude = costRowsFor("claude", { models: ["claude-sonnet-5", "claude-opus-5"] });
@@ -95,7 +117,7 @@ test("costRowsFor: a model absent from its table is an unpriced row, never a bla
   equal(absent.mult, null, "RED: a weight was invented for a model with no published price");
   equal(absent.classification, "unpriced");
   equal(absent.provider, "codex");
-  ok(costRowsFor("codex").some((r) => r.model === CODEX_RATE_CARD.baseModel), "the table's own models are always listed");
+  ok(costRowsFor("codex").some((r) => r.model === rateCards().codex.baseModel), "the table's own models are always listed");
   ok(costRowsFor("claude", { models: ["claude-opus-5"] }).some((r) => r.model === "claude-opus-5"));
 });
 
@@ -106,24 +128,24 @@ test("costRowsFor: a model absent from its table is an unpriced row, never a bla
 test("rate cards: each price is the published columns, so a column change updates the card", () => {
   // developers.openai.com/api/docs/pricing, standard tier. Astra's is its
   // sub-272k tier — the one row on the page with breakpoint pricing.
-  deepEqual(CODEX_RATE_CARD.prices["gpt-6-astra"], { input: 10, cachedInput: 1, output: 50 });
-  deepEqual(CODEX_RATE_CARD.prices["gpt-6-sol"], { input: 2, cachedInput: 0.2, output: 10 });
-  deepEqual(CODEX_RATE_CARD.prices["gpt-6-luna"], { input: 0.1, cachedInput: 0.01, output: 0.5 });
-  deepEqual(CODEX_RATE_CARD.prices["gpt-5.6-cyber"], { input: 12.5, cachedInput: 1.25, output: 75 });
-  deepEqual(CODEX_RATE_CARD.prices["gpt-5.6-sol"], { input: 4, cachedInput: 0.4, output: 20 });
-  deepEqual(CODEX_RATE_CARD.prices["gpt-5.6-terra"], { input: 2, cachedInput: 0.2, output: 12 });
-  deepEqual(CODEX_RATE_CARD.prices["gpt-5.6-luna"], { input: 0.2, cachedInput: 0.02, output: 1.2 });
-  deepEqual(CODEX_RATE_CARD.prices["gpt-5.5"], { input: 5, cachedInput: 0.5, output: 30 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-astra"], { input: 10, cachedInput: 1, output: 50 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-sol"], { input: 2, cachedInput: 0.2, output: 10 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-luna"], { input: 0.1, cachedInput: 0.01, output: 0.5 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-cyber"], { input: 12.5, cachedInput: 1.25, output: 75 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-sol"], { input: 4, cachedInput: 0.4, output: 20 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-terra"], { input: 2, cachedInput: 0.2, output: 12 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-luna"], { input: 0.2, cachedInput: 0.02, output: 1.2 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.5"], { input: 5, cachedInput: 0.5, output: 30 });
 
   // platform.claude.com/docs/en/about-claude/pricing. Cache reads are 0.1x base
   // input, except opus-5-5 (0.05x) and fable-5-1 (0.025x) — both footnoted there.
-  deepEqual(CLAUDE_RATE_CARD.prices["claude-haiku-4-5-20251001"], { input: 1, cachedInput: 0.1, output: 5 });
-  deepEqual(CLAUDE_RATE_CARD.prices["claude-sonnet-5"], { input: 2, cachedInput: 0.2, output: 10 });
-  deepEqual(CLAUDE_RATE_CARD.prices["claude-sonnet-4-6"], { input: 3, cachedInput: 0.3, output: 15 });
-  deepEqual(CLAUDE_RATE_CARD.prices["claude-opus-5-5"], { input: 4, cachedInput: 0.2, output: 20 });
-  deepEqual(CLAUDE_RATE_CARD.prices["claude-opus-5"], { input: 5, cachedInput: 0.5, output: 25 });
-  deepEqual(CLAUDE_RATE_CARD.prices["claude-fable-5"], { input: 10, cachedInput: 1, output: 50 });
-  deepEqual(CLAUDE_RATE_CARD.prices["claude-fable-5-1"], { input: 10, cachedInput: 0.25, output: 50 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-haiku-4-5-20251001"], { input: 1, cachedInput: 0.1, output: 5 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-sonnet-5"], { input: 2, cachedInput: 0.2, output: 10 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-sonnet-4-6"], { input: 3, cachedInput: 0.3, output: 15 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-opus-5-5"], { input: 4, cachedInput: 0.2, output: 20 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-opus-5"], { input: 5, cachedInput: 0.5, output: 25 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-fable-5"], { input: 10, cachedInput: 1, output: 50 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-fable-5-1"], { input: 10, cachedInput: 0.25, output: 50 });
 });
 
 // The basis is the INPUT column. Swarm leaves are input- and cache-read
@@ -144,12 +166,12 @@ test("costRowsFor: a rate-card multiplier is the input column over the card's na
   equal(mult("gpt-5.6-cyber"), 62.5, "RED: cyber is $12.50 input against luna's $0.20");
   // The base is pinned, not derived. gpt-6-luna is cheaper than it, and the day
   // the base follows the cheapest row every banked codex multiplier restates.
-  equal(CODEX_RATE_CARD.baseModel, "gpt-5.6-luna",
+  equal(rateCards().codex.baseModel, "gpt-5.6-luna",
     "RED: the unit moved to the new cheapest model — every prior multiplier now means something else");
 });
 
-test("CLAUDE_RATE_CARD: the published ratios, keyed on the ids swarm dispatches", () => {
-  const rows = costRowsFor("claude");
+test("CLAUDE_RATE_CARD_SEED: the published ratios, keyed on the ids swarm dispatches", () => {
+  const rows = rateCardRows(CLAUDE_RATE_CARD_SEED);
   const mult = (id) => rows.find((r) => r.model === id)?.mult;
   equal(mult("claude-haiku-4-5-20251001"), 0.5, "RED: haiku is $1 input against sonnet's $2");
   equal(mult("claude-sonnet-5"), 1, "RED: the base must be exactly 1x");
@@ -166,8 +188,20 @@ test("CLAUDE_RATE_CARD: the published ratios, keyed on the ids swarm dispatches"
   equal(mult("claude-opus-4-6"), 2.5, "RED: opus-4-6 is $5 input");
   // The catalog's haiku id carries a date suffix the rate doc's does not. Keying
   // on the doc's bare id renders the model swarm actually seats as `unpriced`.
-  ok(!Object.keys(CLAUDE_RATE_CARD.prices).includes("claude-haiku-4-5"),
+  ok(!Object.keys(CLAUDE_RATE_CARD_SEED.prices).includes("claude-haiku-4-5"),
     "RED: the card is keyed on the doc's bare haiku id, not the one swarm dispatches");
+});
+
+test("rateCardRows: a dispatched dated id prices against the table's undated row", () => {
+  // A refresh banks the vendor's undated id; swarm dispatches the dated one. With
+  // no date fallback the model actually seated reads `unpriced` for ever after.
+  const banked = {
+    ...CLAUDE_RATE_CARD_SEED,
+    prices: { "claude-sonnet-5": { input: 2, cachedInput: 0.2, output: 10 }, "claude-haiku-4-5": { input: 1, cachedInput: 0.1, output: 5 } },
+  };
+  const haiku = rateCardRows(banked, ["claude-haiku-4-5-20251001"]).find((r) => r.model === "claude-haiku-4-5-20251001");
+  equal(haiku.mult, 0.5, "RED: the seated model reads unpriced after a refresh");
+  equal(haiku.classification, "api-equivalent estimate");
 });
 
 // A price READ off the table and a price inferred from a sibling are not the
@@ -177,36 +211,32 @@ test("CLAUDE_RATE_CARD: the published ratios, keyed on the ids swarm dispatches"
 // No shipped row is inferred any more, so the marker is exercised on a card of
 // its own: a mechanism with no live instance is pinned or it rots.
 test("rate cards: an inferred price is marked as one, a directly published price is not", () => {
-  for (const card of Object.values(RATE_CARDS))
+  for (const card of Object.values(rateCards()))
     for (const [id, price] of Object.entries(card.prices))
       equal(price.via, undefined, `RED: ${id} is inferred from a sibling — every shipped row must be its own published line`);
 
   const provider = "test-inferred-price";
-  RATE_CARDS[provider] = {
-    provider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
-    asOf: "2020-01-01", staleAfter: "2099-01-01",
-    prices: { base: { input: 2, output: 10 }, sibling: { input: 2, output: 10, via: "base" } },
-  };
-  try {
-    const row = (id) => costRowsFor(provider).find((r) => r.model === id);
-    equal(row("sibling").pricedVia, "base", "RED: the marker never reached the row");
-    equal(row("base").pricedVia, undefined, "RED: a published row was marked as inferred");
-    // The inference marks provenance; it must not change the number.
-    equal(row("sibling").mult, row("base").mult);
-  } finally {
-    delete RATE_CARDS[provider];
-  }
+  const row = (id) => withCards({
+    [provider]: synthetic(provider, {
+      prices: { base: { input: 2, output: 10 }, sibling: { input: 2, output: 10, via: "base" } },
+    }),
+  }, () => costRowsFor(provider).find((r) => r.model === id));
+
+  equal(row("sibling").pricedVia, "base", "RED: the marker never reached the row");
+  equal(row("base").pricedVia, undefined, "RED: a published row was marked as inferred");
+  // The inference marks provenance; it must not change the number.
+  equal(row("sibling").mult, row("base").mult);
 });
 
 // The pinned key sets ARE the sourcing record: adding a row without reading it
 // off a published table fails here, which is the only thing standing between a
 // guessed price and a permanent mis-rank.
 test("rate cards: no price is invented — every key traces to a published table", () => {
-  deepEqual(Object.keys(CODEX_RATE_CARD.prices).sort(), [
+  deepEqual(Object.keys(CODEX_RATE_CARD_SEED.prices).sort(), [
     "gpt-5.5", "gpt-5.6-cyber", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra",
     "gpt-6-astra", "gpt-6-luna", "gpt-6-sol",
   ], "RED: a Codex price was added or removed without updating the published set");
-  deepEqual(Object.keys(CLAUDE_RATE_CARD.prices).sort(), [
+  deepEqual(Object.keys(CLAUDE_RATE_CARD_SEED.prices).sort(), [
     "claude-fable-5", "claude-fable-5-1", "claude-haiku-4-5-20251001",
     "claude-opus-4-6", "claude-opus-4-7", "claude-opus-4-8",
     "claude-opus-5", "claude-opus-5-5", "claude-sonnet-4-6", "claude-sonnet-5",
@@ -226,8 +256,8 @@ test("rate cards: a published-price weight is an api-equivalent estimate, never 
 
 test("costUnitLabel: each list is labelled in its own unit, naming its own base", () => {
   match(costUnitLabel("ollama"), /meter points/);
-  ok(costUnitLabel("codex").includes(CODEX_RATE_CARD.baseModel), "the Codex label must name what it is relative to");
-  ok(costUnitLabel("claude").includes(CLAUDE_RATE_CARD.baseModel));
+  ok(costUnitLabel("codex").includes(rateCards().codex.baseModel), "the Codex label must name what it is relative to");
+  ok(costUnitLabel("claude").includes(rateCards().claude.baseModel));
   ok(costUnitLabel("codex") !== costUnitLabel("claude"), "two bases are two units, not one label");
 });
 
@@ -252,75 +282,66 @@ test("costSections: one section per provider, never a merged list", () => {
 
 test("costSections: a past-dated rate card announces its stale published prices", () => {
   const provider = "test-stale-rate-card";
-  RATE_CARDS[provider] = {
-    provider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
-    asOf: "2020-01-01", staleAfter: "2020-02-01", prices: { base: { input: 1, output: 1 } },
-  };
-  try {
-    const section = costSections({ providers: [provider] })[0];
-    ok(section.banner.length > 0, "RED: a past-dated rate card must announce itself");
-    match(section.banner.join("\n"), /Stale Rate Card/);
-    match(section.banner.join("\n"), new RegExp(provider));
-    match(section.banner.join("\n"), /2020-01-01T00:00:00\.000Z/);
-    equal(section.banner[1], "    Refresh: swarm refresh-prices");
-  } finally {
-    delete RATE_CARDS[provider];
-  }
+  const section = withCards({ [provider]: synthetic(provider, { asOf: "2020-01-01" }) },
+    () => costSections({ providers: [provider] })[0]);
+
+  ok(section.banner.length > 0, "RED: a past-dated rate card must announce itself");
+  match(section.banner.join("\n"), /Stale Rate Card/);
+  match(section.banner.join("\n"), new RegExp(provider));
+  match(section.banner.join("\n"), /2020-01-01T00:00:00\.000Z/);
+  equal(section.banner[1], "    Refresh: swarm refresh-prices");
 });
 
-test("costSections: a fresh rate card stays silent", () => {
+test("costSections: a card read inside the 12h window stays silent", () => {
   const provider = "test-fresh-rate-card";
-  RATE_CARDS[provider] = {
-    provider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
-    asOf: "2020-01-01", staleAfter: "2099-01-01", prices: { base: { input: 1, output: 1 } },
-  };
-  try {
-    const section = costSections({ providers: [provider] })[0];
-    deepEqual(section.banner, [], "RED: a fresh rate card must not print a stale-data banner");
-  } finally {
-    delete RATE_CARDS[provider];
-  }
+  const section = withCards({ [provider]: synthetic(provider) },
+    () => costSections({ providers: [provider] })[0]);
+  deepEqual(section.banner, [], "RED: a fresh rate card must not print a stale-data banner");
 });
 
 test("costSections: a stale rate-card row keeps its published value", () => {
   const provider = "test-stale-value";
-  RATE_CARDS[provider] = {
-    provider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
-    asOf: "2020-01-01", staleAfter: "2020-02-01", prices: { base: { input: 7, output: 1 } },
-  };
-  try {
-    const row = costSections({ providers: [provider] })[0].rows.find((candidate) => candidate.model === "base");
-    equal(row.value, 7, "RED: a stale rate card must retain its published price");
-  } finally {
-    delete RATE_CARDS[provider];
-  }
+  const row = withCards({ [provider]: synthetic(provider, { asOf: "2020-01-01", prices: { base: { input: 7, output: 1 } } }) },
+    () => costSections({ providers: [provider] })[0].rows.find((candidate) => candidate.model === "base"));
+  equal(row.value, 7, "RED: a stale rate card must retain its published price");
 });
 
-test("costSections: a default shelf life does not override an explicit expiry", () => {
-  const explicitProvider = "test-explicit-expiry";
-  const defaultProvider = "test-default-expiry";
-  RATE_CARDS[explicitProvider] = {
-    provider: explicitProvider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
-    asOf: "2020-01-01", staleAfter: "2099-01-01", prices: { base: { input: 1, output: 1 } },
-  };
-  RATE_CARDS[defaultProvider] = {
-    provider: defaultProvider, baseModel: "base", unit: "published-price-relative", source: "test-rate-card",
-    asOf: "2020-01-01", prices: { base: { input: 1, output: 1 } },
-  };
-  try {
-    const [explicit, defaulted] = costSections({ providers: [explicitProvider, defaultProvider] });
-    deepEqual(explicit.banner, [], "RED: an explicit staleAfter must win over the default shelf life");
-    ok(defaulted.banner.length > 0, "RED: a card with no expiry must use the default shelf life");
-  } finally {
-    delete RATE_CARDS[explicitProvider];
-    delete RATE_CARDS[defaultProvider];
-  }
+test("costSections: an explicit expiry can only shorten a card's life, never extend it", () => {
+  const expired = "test-expired";
+  const kept = "test-kept";
+  const ancient = "test-ancient";
+  const sectionOf = (provider) => withCards({
+    [expired]: synthetic(expired, { staleAfter: "2020-02-01" }),
+    [kept]: synthetic(kept, { staleAfter: "2099-01-01" }),
+    [ancient]: synthetic(ancient, { asOf: "2020-01-01", staleAfter: "2099-01-01" }),
+  }, () => costSections({ providers: [expired, kept, ancient] }));
+
+  const [a, b, c] = sectionOf();
+  ok(a.banner.length > 0, "RED: a passed expiry must expire an otherwise fresh card");
+  deepEqual(b.banner, [], "RED: an unexpired marker must not make a fresh card stale");
+  ok(c.banner.length > 0, "RED: a 2099 marker is not a licence to keep ranking on a 2020 read");
 });
 
-test("rate cards: shipped staleAfter dates are still in the future", () => {
-  for (const card of [CODEX_RATE_CARD, CLAUDE_RATE_CARD]) {
-    ok(card.staleAfter, `RED: ${card.provider} must state when its rate card goes stale`);
-    ok(Date.parse(`${card.staleAfter}T23:59:59.999Z`) > Date.now(),
-      `RED: ${card.provider}'s rate card is past ${card.staleAfter}; re-read the published price table`);
-  }
+test("rateCards: a refreshed rate-cards.json reaches the cards without a restart", () => {
+  const home = mkdtempSync(join(tmpdir(), "swarm-rc-live-"));
+  const path = join(home, "rate-cards.json");
+  const write = (input, when) => {
+    writeFileSync(path, JSON.stringify({ claude: { url: "test://", asOf: "2026-10-01T00:00:00.000Z", prices: { "claude-sonnet-5": { input } } } }), "utf8");
+    utimesSync(path, new Date(when), new Date(when));
+  };
+
+  write(9, "2026-10-01T00:00:00Z");
+  equal(rateCards(path).claude.prices["claude-sonnet-5"].input, 9);
+  write(3, "2026-10-01T00:00:01Z");
+  equal(rateCards(path).claude.prices["claude-sonnet-5"].input, 3,
+    "RED: the cards are frozen at import, so a refresh never reaches a running daemon");
+});
+
+test("rate cards: the Codex seed's hand-noted expiry is still in the future", () => {
+  // The one expiry anyone typed: Sol's promo floor. The Claude seed has none —
+  // its freshness is the 12h window, and a seed read at midnight is already stale.
+  equal(CLAUDE_RATE_CARD_SEED.staleAfter, undefined);
+  ok(CODEX_RATE_CARD_SEED.staleAfter, "RED: the Codex seed must state when its promo floor moves");
+  ok(Date.parse(`${CODEX_RATE_CARD_SEED.staleAfter}T23:59:59.999Z`) > Date.now(),
+    `RED: the Codex seed is past ${CODEX_RATE_CARD_SEED.staleAfter}; re-read the published price table`);
 });

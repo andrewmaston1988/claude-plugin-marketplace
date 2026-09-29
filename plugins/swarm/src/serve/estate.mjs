@@ -3,9 +3,15 @@
 // server.mjs's scoreCache/costCache, keyed per run instead of per file. `filterRuns`
 // is the cap/expand/finishedTotals logic, unchanged from the old handler, now run
 // over an in-memory snapshot instead of a fresh disk scan.
+//
+// `createWorkerEstate` is the other half of that: the scan is expensive enough to
+// want its own thread, and the two are read together — which is why the estate and
+// the worker that owns it live in one module, not split across a line count.
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { Worker } from "node:worker_threads";
 import { readRun, listRuns } from "../runlog.mjs";
 import { tokenTotal } from "../stream.mjs";
 import { projectGrouping } from "./grouping.mjs";
@@ -74,4 +80,77 @@ export function filterRuns(rows, { finishedPerProject = 10, expanded = new Set()
     return n < finishedPerProject;
   });
   return { rows: picked, finishedTotals };
+}
+
+const ESTATE_WORKER = fileURLToPath(new URL("./estate-worker.mjs", import.meta.url));
+
+// The default `_estate`: a worker owns buildSnapshot, restarting with backoff on
+// exit (1s -> 30s cap). `current()` resolves the first snapshot once it lands, or
+// after `_firstWaitMs` builds one in-thread so no request waits unboundedly.
+export function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Worker, _setTimeout, _firstWaitMs }) {
+  let worker = null;
+  let latest = null;
+  let backoffMs = 1000;
+  let backoffTimer = null;
+  let closed = false;
+  const listeners = new Set();
+  let waiters = [];
+
+  const notify = (snapshot) => {
+    latest = snapshot;
+    const ws = waiters; waiters = [];
+    for (const resolve of ws) resolve(snapshot);
+    for (const cb of listeners) cb(snapshot);
+  };
+
+  const spawn = () => {
+    worker = new _Worker(ESTATE_WORKER, { workerData: { home, pollMs, heartbeatMs, quietWarnMs } });
+    worker.on("message", (msg) => {
+      if (msg?.type === "build-error") { dlog("estate-worker", { event: "build-error", msg: msg.msg }); return; }
+      if (msg?.type !== "snapshot") return;
+      backoffMs = 1000;
+      notify({ version: msg.version, rows: msg.rows });
+    });
+    worker.on("error", (e) => dlog("estate-worker", { event: "error", msg: e.message }));
+    worker.on("exit", (code) => {
+      if (closed) return;
+      dlog("estate-worker", { event: "exit", code });
+      const delay = backoffMs;
+      backoffMs = Math.min(30_000, backoffMs * 2);
+      backoffTimer = _setTimeout(() => { backoffTimer = null; spawn(); }, delay);
+    });
+  };
+  spawn();
+
+  // One fallback timer for every request waiting on the first snapshot: concurrent
+  // cold-start requests share a single in-thread build instead of one scan each.
+  let fallbackTimer = null;
+  return {
+    current() {
+      if (latest) return Promise.resolve(latest);
+      return new Promise((resolve) => {
+        waiters.push(resolve);
+        if (fallbackTimer) return;
+        fallbackTimer = _setTimeout(() => {
+          fallbackTimer = null;
+          if (latest || closed || !waiters.length) return;
+          dlog("estate-worker", { event: "fallback", msg: "in-thread snapshot" });
+          notify(buildSnapshot(home, new Map(), { now: Date.now(), heartbeatMs, quietWarnMs }));
+        }, _firstWaitMs);
+      });
+    },
+    refresh() { try { worker?.postMessage({ type: "refresh" }); } catch {} },
+    onSnapshot(cb) { listeners.add(cb); },
+    close() {
+      closed = true;
+      clearTimeout(backoffTimer); clearTimeout(fallbackTimer); fallbackTimer = null;
+      try { worker?.terminate(); } catch {}
+      // Nothing may wait on a closed estate: hand pending requests the last snapshot.
+      const ws = waiters; waiters = [];
+      for (const resolve of ws) resolve(latest ?? { version: "closed", rows: [] });
+    },
+    // An update handover closes the http server and, if the replacement fails,
+    // re-listens on the SAME server — the estate must come back with it.
+    reopen() { if (!closed) return; closed = false; backoffMs = 1000; spawn(); },
+  };
 }

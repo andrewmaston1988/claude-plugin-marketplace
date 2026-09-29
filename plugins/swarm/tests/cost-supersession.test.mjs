@@ -1,7 +1,11 @@
 import { test } from "node:test";
-import { equal } from "node:assert/strict";
+import { deepEqual, equal, ok } from "node:assert/strict";
 import { costView } from "../src/serve/perf-views.mjs";
+import { costSections } from "../src/cost.mjs";
+import { dropSuperseded } from "../src/discovery.mjs";
+import { rateCards } from "../src/rate-card.mjs";
 import { H, loadPerfViews } from "./helpers/perf-views-harness.mjs";
+import { snap, seg } from "./helpers/cost-snapshots.mjs";
 
 const grades = (model, score) => Array.from({ length: 6 }, (_, i) => ({
   resultsDir: "C:/runs/cost-supersession",
@@ -68,16 +72,27 @@ test("costView never chooses a superseded row as worst", () => {
   equal(view.points.find((row) => row.model === "claude-opus-5").supersededBy, "claude-opus-5-5");
 });
 
-test("a denylisted newest model does not hide its elder in costView", () => {
+test("a denylisted newest model hides its elder in costView", () => {
+  // Cost is a price reference, not a dispatch roster: both models here are
+  // denylisted and the elder still goes, because the newest of a family is the
+  // one whose price anyone reading this screen wants.
+  const old = "claude-fable-5";
+  const newest = "claude-fable-5-1";
+  const rows = [...grades(old, 7), ...grades(newest, 8)];
+  const view = costView(rows, [cost(old, 5), cost(newest, 5)], { isDenylisted: () => true });
+
+  equal(view.points.find((row) => row.model === old).supersededBy, newest);
+  equal(view.spread.find((row) => row.model === old).supersededBy, newest);
+});
+
+test("costView reads no denylist at all, so nothing on Cost can resurrect an elder", () => {
   const old = "claude-opus-5";
   const newest = "claude-opus-5-5";
   const rows = [...grades(old, 7), ...grades(newest, 8)];
-  const view = costView(rows, [cost(old, 2), cost(newest, 1)], {
-    isDenylisted: (model) => model === newest,
-  });
+  const costs = [cost(old, 2), cost(newest, 1)];
 
-  equal(view.points.find((row) => row.model === old).supersededBy, undefined);
-  equal(view.spread.find((row) => row.model === old).supersededBy, undefined);
+  deepEqual(costView(rows, costs, { isDenylisted: () => true }), costView(rows, costs),
+    "RED: the denylist can still move what Cost shows");
 });
 
 test("superseded points get verdicts from visible rows but never dominate them", () => {
@@ -105,6 +120,25 @@ test("costView uses the configured Ollama cloud suffix for model families", () =
   const view = costView(rows, costs, { cloudSuffix: ":local" });
 
   equal(view.points.find((row) => row.model === old).supersededBy, current);
+});
+
+test("costView never supersedes the card's own base model", () => {
+  // `claude-sonnet-5` is the 1x unit the section label names; once a refresh prices
+  // `claude-sonnet-5-5` it is the elder of its family and would leave the screen.
+  const base = "claude-sonnet-5";
+  const newer = "claude-sonnet-5-5";
+  const priced = (model, mult) => ({ ...cost(model, mult), baseModel: base });
+  const view = costView(
+    [...grades(base, 7), ...grades(newer, 8), ...grades("claude-opus-5", 6), ...grades("claude-opus-5-5", 5)],
+    [priced(base, 1), priced(newer, 1), priced("claude-opus-5", 5), priced("claude-opus-5-5", 5)],
+  );
+  const point = (model) => view.points.find((row) => row.model === model);
+
+  equal(point(base).supersededBy, undefined, "RED: the 1x row left the Cost screen");
+  equal(view.spread.find((row) => row.model === base).supersededBy, undefined,
+    "RED: the 1x row left the spread table");
+  // Supersession still runs for every family but that one.
+  equal(point("claude-opus-5").supersededBy, "claude-opus-5-5");
 });
 
 test("costScreen hides superseded cards and never names one as the hero leader", () => {
@@ -155,4 +189,66 @@ test("the perf model page keeps the cost chip for a superseded model", () => {
   equal(costPoint.coins > 0, true);
   equal(html.includes(`data-coins="${costPoint.coins}"`), true);
   equal(html.includes('<span class="vchip front">frontier</span>'), true);
+});
+
+// `swarm cost` prints one section per provider, and it is the same table the
+// dashboard draws — so it drops the same rows, by the same reading, with no
+// denylist of its own.
+test("dropSuperseded honours the denylist it is handed, as supersededByMap does", () => {
+  // The table form shares the map's reading; an option it swallowed in silence
+  // would be a no-op that no caller could see.
+  const rows = [{ provider: "claude", model: "claude-opus-5" }, { provider: "claude", model: "claude-opus-5-5" }];
+  const providerKey = (row) => row.provider;
+
+  deepEqual(dropSuperseded(rows, { providerKey, isDenylisted: (model) => model === "claude-opus-5-5" })
+    .map((row) => row.model), ["claude-opus-5", "claude-opus-5-5"],
+  "RED: a denylisted superseder still hid its elder");
+  deepEqual(dropSuperseded(rows, { providerKey }).map((row) => row.model), ["claude-opus-5-5"]);
+});
+
+test("costSections: drops superseded rows and counts them", () => {
+  const section = costSections({
+    providers: ["claude"],
+    models: { claude: ["claude-opus-5", "claude-opus-5-5"] },
+  })[0];
+  const models = section.rows.map((row) => row.model);
+
+  equal(models.includes("claude-opus-5"), false, "RED: the elder of a family still carries a row");
+  equal(models.includes("claude-opus-5-5"), true);
+  equal(models.includes("claude-sonnet-5"), true, "the card's base model is the unit and is always listed");
+  equal(section.hidden, 1, "RED: the CLI cannot say how many rows it dropped");
+});
+
+test("costSections: a superseded base model keeps its row — it IS the unit", () => {
+  const provider = "test-superseded-base";
+  const cards = rateCards();
+  // Two families: the card's own base is the elder of one, and the other is there
+  // so the assertion can tell "kept the unit" from "supersession never ran".
+  cards[provider] = {
+    provider, baseModel: "m-1", unit: "published-price-relative", source: "test-rate-card",
+    asOf: new Date().toISOString(),
+    prices: {
+      "m-1": { input: 2, output: 10 }, "m-2": { input: 4, output: 20 },
+      "n-1": { input: 2, output: 10 }, "n-2": { input: 3, output: 15 },
+    },
+  };
+  try {
+    const section = costSections({ providers: [provider] })[0];
+    const models = section.rows.map((row) => row.model);
+    ok(models.includes("m-1"), "RED: the 1x row was dropped, leaving the list without its unit");
+    equal(models.includes("n-1"), false, "RED: supersession never ran in this section");
+    equal(section.hidden, 1);
+  } finally {
+    delete cards[provider];
+  }
+});
+
+test("costSections: the meter's own rows supersede on the configured cloud suffix", () => {
+  const snaps = [snap(1, [seg("kimi-k3:cloud", 400, 60), seg("kimi-k3.1:cloud", 400, 40)], 50)];
+  const section = costSections({ providers: ["ollama"], snaps })[0];
+  const models = section.rows.map((row) => row.model);
+
+  equal(models.includes("kimi-k3:cloud"), false, "RED: the meter's elder row survived the collapse");
+  equal(models.includes("kimi-k3.1:cloud"), true);
+  equal(section.hidden, 1);
 });
