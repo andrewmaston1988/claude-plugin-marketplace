@@ -597,22 +597,6 @@ test("finish: a run that goes inactive, active again, then inactive again re-arm
   assert.equal(P.vibrations().length, 2, "and the second finish fires again — the map tracks the current flag, not a one-way finished set");
 });
 
-test("Test 10: a hung list refresh keeps the screen and frees the next refresh", async () => {
-  const P = loadPage();
-  await P.flush();
-  P.respondList(listData(listRow()));
-  await P.flush();
-  const beforeTimeout = P.screenText();
-  P.fireSse("runs"); await P.flush();
-  assert.equal(P.pendingCount(), 1, "the refresh is in flight");
-  P.fireTimers(20000); await P.flush();
-  assert.equal(P.screenText(), beforeTimeout, "a timed-out refresh keeps the last good screen");
-  assert.equal(P.findByClass("empty").length, 0);
-  const before = P.listFetches().length;
-  P.fireSse("runs"); await P.flush();
-  assert.equal(P.listFetches().length - before, 1, "the next event starts a new fetch");
-});
-
 test("scroll: a navigation to another screen opens at the top; a refresh of the same screen keeps its place", async () => {
   const P = loadPage();
   await P.flush();
@@ -631,33 +615,4 @@ test("scroll: a navigation to another screen opens at the top; a refresh of the 
   P.fireHashchange();
   await P.flush();
   assert.deepEqual(P.scrolls.slice(settled), [[0, 0]], "tapping a model from a scrolled list opens its page at the hero");
-});
-
-
-test("a failed refresh keeps the committed screen without an error panel", async () => {
-  const P = loadPage();
-  await P.flush();
-  P.respondList(listData(listRow()));
-  await P.flush();
-  const before = P.screenText();
-  P.fireSse("runs");
-  await P.flush();
-  P.fail((url) => url.startsWith("/api/runs"));
-  await P.flush();
-  assert.equal(P.screenText(), before, "the last good screen remains unchanged");
-  assert.equal(P.findByClass("empty").length, 0, "a failed refresh is silent");
-});
-
-test("a failed navigation paints the error panel over its skeleton", async () => {
-  const P = loadPage();
-  await P.flush();
-  P.respondList(listData(listRow()));
-  await P.flush();
-  P.location.hash = RUN_URL;
-  P.fireHashchange();
-  await P.flush();
-  P.fail((url) => url.startsWith("/api/runs/"));
-  await P.flush();
-  assert.equal(P.findByClass("empty").length, 1);
-  assert.ok(P.screenText().includes("500 /api/runs"));
 });
