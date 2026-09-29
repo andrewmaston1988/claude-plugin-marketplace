@@ -6,7 +6,7 @@ function fmtParams(n) {
   return n >= 1e12 ? `${(n / 1e12).toFixed(1)}T` : `${Math.round(n / 1e9)}B`;
 }
 
-function fmtCtx(n) {
+export function fmtCtx(n) {
   return n >= 1e6 ? `${(n / 1e6).toFixed(1)}M ctx` : `${Math.round(n / 1e3)}k ctx`;
 }
 

@@ -13,6 +13,7 @@ import { checkCommandLineLengths, measurablePrompt } from "./manifest-dispatch-b
 import { validateTaskShapes } from "./manifest-task-shape.mjs";
 import { detectCycle, validateTaskRelations, validateWorktreeGroups } from "./manifest-relations.mjs";
 import { validateMustRead, validateMustReadRunners } from "./manifest-must-read.mjs";
+import { validateContextFit } from "./manifest-context-fit.mjs";
 import { PROVIDERS, checkDenylist, checkHeadroom, resolveProvider } from "./manifest-model-gates.mjs";
 import { ValidationError } from "./validation-error.mjs";
 
@@ -156,6 +157,7 @@ function loadChild(node, parentPath, cwd, cfg, resultsDir, errors, { args, usedA
   });
   checkCommandLineLengths(tasks, cfg, io, errors, label);
   validateMustReadRunners(tasks, cfg, io, errors, label, providerRegistry);
+  validateContextFit(tasks, { cache, errors, label });
   // `path` is the file that was actually read — the gate keys on its bytes, and
   // only loadChild knows where resolution landed.
   return { tasks, path: childPath };
@@ -285,6 +287,7 @@ export function loadManifest(path, cfg, cwd = process.cwd(), { args, fromRegistr
   });
   checkCommandLineLengths(tasks, cfg, resolvedIo, errors, label);
   validateMustReadRunners(tasks, cfg, resolvedIo, errors, label, providerRegistry);
+  validateContextFit(tasks, { cache, errors, label });
 
   let digest;
   // Set when the digest's own governance check already refused its cwd — the
