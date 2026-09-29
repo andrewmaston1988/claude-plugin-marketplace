@@ -84,3 +84,30 @@ test("returns: a schema with no strict form writes no schema file", async () => 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// dropNullOptionals only helps validation if the stored output is the stripped value
+// too — compute/when/forEach.from read the stored text, and the docs promise no nulls.
+test("returns: a null optional is dropped from the stored output, citations or not", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: '{"findings":["one"],"note":null}' }));
+    const p = plan(dir, [task("a", { cwd: dir, returns: RETURNS })]);
+    await runPlan(p, CFG, makeIo(spawn));
+    deepEqual(JSON.parse(readResult(p.resultsDir, "a").output), { findings: ["one"] });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// Codex strict mode needs an object root; a non-object root gets no file and runs unbound.
+test("returns: a non-object root writes no schema file", async () => {
+  const dir = tmp();
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: '["x"]' }));
+    const p = plan(dir, [task("a", { cwd: dir, returns: { type: "array", items: { type: "string" } } })]);
+    await runPlan(p, CFG, makeIo(spawn));
+    ok(!existsSync(join(p.resultsDir, "a.schema.json")), "no strict copy for a non-object root");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

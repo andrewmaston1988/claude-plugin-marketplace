@@ -83,8 +83,8 @@ test("no --max-budget-usd for any model family", () => {
   ok(!d.argv.includes("--max-budget-usd"));
 });
 
-// A leaf otherwise never learns its `returns` until the re-ask — 555 of 706 leaves
-// with a schema needed one. Claude binds it natively instead, as JSON on argv.
+// A leaf otherwise never learns its `returns` until the re-ask, so
+// Claude binds it natively instead, as JSON on argv.
 test("a returns task carries --json-schema <the schema>, for Claude and Ollama alike", () => {
   const returns = { type: "object", required: ["findings"], properties: { findings: { type: "array" } } };
   for (const [provider, model] of [["claude", "claude-haiku-4-5-20251001"], ["ollama", "glm-4.6:cloud"]]) {

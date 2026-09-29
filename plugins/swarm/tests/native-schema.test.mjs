@@ -64,17 +64,16 @@ test("strictSchema never mutates its input", () => {
 
 test("strictSchema is total over the engine's five keywords", () => {
   for (const schema of [
-    { type: "string" },
-    { type: "integer" },
-    { enum: [1, 2] },
-    { type: "array" },
-    { type: "array", items: { enum: ["a", "b"] } },
+    { type: "object", properties: { a: { type: "string" } } },
+    { type: "object", properties: { a: { type: "integer" }, b: { enum: [1, 2] } } },
+    { type: "object", properties: { a: { type: "array" } } },
+    { type: "object", properties: { a: { type: "array", items: { enum: ["a", "b"] } } } },
     { type: "object", properties: { a: { type: "boolean" } } },
   ]) {
     equal(typeof strictSchema(schema), "object");
   }
-  deepEqual(strictSchema({ type: "array", items: { enum: ["a", "b"] } }),
-    { type: "array", items: { enum: ["a", "b"] } });
+  deepEqual(strictSchema({ type: "object", required: ["a"], properties: { a: { type: "array", items: { enum: ["a", "b"] } } } }),
+    { type: "object", properties: { a: { type: "array", items: { enum: ["a", "b"] } } }, additionalProperties: false, required: ["a"] });
 });
 
 test("dropNullOptionals removes null optionals at every depth, keeps a required null", () => {
@@ -100,11 +99,10 @@ test("dropNullOptionals leaves a non-null value byte-identical", () => {
   deepEqual(dropNullOptionals(value, undefined), value);
 });
 
-// Engine-legal shapes the strict conversion has to survive (found by the live probe
-// leaves, 2026-09-29).
+// Engine-legal shapes the strict conversion has to survive.
 test("strictSchema: an untyped node carries the type its properties or items imply", () => {
   equal(strictSchema({ properties: { a: { type: "string" } } }).type, "object");
-  equal(strictSchema({ items: { type: "string" } }).type, "array");
+  equal(strictSchema({ properties: { a: { items: { type: "string" } } }, required: ["a"] }).properties.a.type, "array");
 });
 
 // Strict form lists every required key under properties; a required key with no
@@ -124,4 +122,9 @@ test("strictSchema: an optional property that already admits null is not widened
 test("dropNullOptionals: a null the schema itself admits is an answer, not a placeholder", () => {
   const schema = { type: "object", properties: { n: { type: "null" }, s: { type: ["string", "null"] }, e: { type: "string", enum: ["A", null] }, x: { type: "string" } } };
   deepEqual(dropNullOptionals({ n: null, s: null, e: null, x: null }, schema), { n: null, s: null, e: null });
+});
+
+test("strictSchema: a non-object root has no strict form", () => {
+  equal(strictSchema({ type: "array", items: { type: "string" } }), null);
+  equal(strictSchema({ type: "string" }), null);
 });

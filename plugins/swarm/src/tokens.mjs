@@ -39,16 +39,8 @@ export function workTokens(t) {
   return t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
 }
 
-// Runner usage contract — two accumulation disciplines, chosen by emission shape:
-//  - delta emitters (Claude: one usage per message) -> SUM per id, latest-per-id
-//    winning (this accumulator);
-//  - cumulative emitters (Codex: a running total per event) -> REPLACE with the
-//    latest event (recordUsage in the Codex parser).
-// A new adapter must pick by what its provider emits; summing a cumulative
-// stream counts every turn again, replacing a delta stream drops all but one.
-//
-// stream-json may re-emit an assistant message (same id) as content blocks
-// complete; latest usage per id wins so re-emits never double-count.
+// Delta emitters (Claude) SUM per id, latest usage per id winning; cumulative emitters
+// (Codex) REPLACE with the latest event — summing a cumulative stream double-counts.
 export function createUsageAccumulator() {
   const byMsg = new Map();
   return {

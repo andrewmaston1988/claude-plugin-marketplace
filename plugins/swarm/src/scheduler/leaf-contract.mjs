@@ -96,11 +96,12 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
       logCitations(cite);
       out = {
         ...out,
-        output: JSON.stringify(a.parsed),
         citations: { checked: cite.checked, drifted: cite.drifted.length, refuted: cite.refuted.length },
       };
       if (cite.refuted.length) out.citationRefuted = cite.refuted.map((c) => ({ path: c.path, reason: c.reason }));
     }
+    // The stripped, annotated value is what validated, so it is what gets stored.
+    if (task.returns && a.parsed !== undefined) out = { ...out, output: JSON.stringify(a.parsed) };
     if (a.cov) {
       logCoverage(a.cov, retried);
       out = { ...out, coverage: { status: a.cov.status, required: a.cov.required, read: a.cov.read, missed: a.cov.missed } };

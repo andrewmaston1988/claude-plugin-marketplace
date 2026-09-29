@@ -32,9 +32,7 @@ function nullable(node) {
   return out;
 }
 
-/** Rewrite a `returns` schema into OpenAI strict form. Pure — never mutates its input.
- *  Null when the schema has no strict form: a required key strict mode cannot list. */
-export function strictSchema(schema) {
+function convert(schema) {
   if (!isPlainObject(schema)) return schema;
   const out = {};
   const type = schema.type !== undefined ? schema.type : inferredType(schema);
@@ -46,7 +44,7 @@ export function strictSchema(schema) {
   if (isPlainObject(schema.properties)) {
     out.properties = {};
     for (const [name, sub] of Object.entries(schema.properties)) {
-      const child = strictSchema(sub);
+      const child = convert(sub);
       if (child === null) return null;
       out.properties[name] = required.includes(name) ? child : nullable(child);
     }
@@ -56,10 +54,18 @@ export function strictSchema(schema) {
     out.required = Object.keys(props);
   }
   if (isPlainObject(schema.items)) {
-    out.items = strictSchema(schema.items);
+    out.items = convert(schema.items);
     if (out.items === null) return null;
   }
   return out;
+}
+
+/** Rewrite a `returns` schema into OpenAI strict form. Pure — never mutates its input.
+ *  Null when the schema has no strict form: a non-object root (codex needs an object
+ *  root) or a required key strict mode cannot list. */
+export function strictSchema(schema) {
+  const root = isPlainObject(schema) ? convert(schema) : null;
+  return root?.type === "object" ? root : null;
 }
 
 // Strict form forces every property present, so an optional one arrives as an explicit
