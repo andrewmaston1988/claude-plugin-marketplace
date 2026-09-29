@@ -229,6 +229,10 @@ export function dedupe(rows) {
 // Pure: rows in, cells out. Every aspect in the requested set gets an entry
 // even with no rows — absence is evidence, and a silently missing row reads as
 // coverage that does not exist.
+// Grades below which a cell is a coin toss: flagged provisional in every table, and
+// the n a successor needs before it takes over an elder's family.
+export const PROVISIONAL_N = 5;
+
 export function aggregate(rows, { aspect, model, provider, domain, combineProviders = false } = {}) {
   if (aspect && !ASPECTS.includes(aspect)) {
     throw new Error(`unknown aspect ${JSON.stringify(aspect)} — use one of ${ASPECTS.join(" | ")}`);
@@ -291,7 +295,7 @@ export function aggregate(rows, { aspect, model, provider, domain, combineProvid
       const raw = [...cells.values()].map(({ sum, ...c }) => ({
         ...c,
         mean: c.n ? Number((sum / c.n).toFixed(2)) : null,
-        provisional: c.n < 5,
+        provisional: c.n < PROVISIONAL_N,
       }));
       const prior = fairPrior(raw);
       const list = raw.map((c) => ({ ...c, weighted: shrink(c.mean, c.n, prior) }));

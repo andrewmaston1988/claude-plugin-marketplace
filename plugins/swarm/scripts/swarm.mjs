@@ -99,11 +99,16 @@ async function meterCostRows(env = process.env) {
 
 // The cached roster, grouped by provider — what `swarm cost` asks each provider
 // to price. A model the table does not list still gets a row, marked unpriced.
-// Band edges are config (`providers.ollama.cloud.ollama.costBands`), shared with the
+// Band edges, the value margin and the cloud suffix are config, shared with the
 // dashboard's server — one source, never two.
 async function costBands(cfg = getConfig()) {
   const { resolveBands } = await import("../src/cost.mjs");
   return resolveBands(providerConfig(cfg, "ollama")?.cloud?.ollama?.costBands);
+}
+
+async function costSettings(cfg = getConfig()) {
+  const ollama = providerConfig(cfg, "ollama");
+  return { bands: await costBands(cfg), valueMargin: ollama?.cloud?.ollama?.valueMargin, cloudSuffix: ollama?.cloudSuffix || ":cloud" };
 }
 
 // Read usage through registered provider capabilities. `live` lets an adapter
@@ -291,7 +296,7 @@ async function seatBlock(plan, cfg) {
     rows,
     costRows: await meterCostRows(),
     roster: await launchableRoster(cfg),
-    bands: await costBands(),
+    ...(await costSettings()),
   });
 }
 
@@ -753,7 +758,8 @@ async function cmdPerf(rest) {
   const rows = readRows(path);
   const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
   const costs = await meterCostRows();
-  const bands = await costBands();
+  const settings = await costSettings(cfg);
+  const { bands } = settings;
   // A model is dominated only when another is strictly better AND strictly
   // cheaper; `*` marks the frontier. Unmeasured cost renders "—": blank would
   // read as dominated when the truth is unknown.
@@ -781,7 +787,7 @@ async function cmdPerf(rest) {
   if (filters) out(`filters: ${filters}`);
   out("");
   if (rest.includes("--overall")) {
-    const o = await (await import("../src/serve/perf-views.mjs")).perfOverall({ cfg, roster: await launchableRoster(cfg), rows, costRows: costs, bands, model, domain, out });
+    const o = (await import("../src/perf-overall.mjs")).perfOverall({ cfg, roster: await launchableRoster(cfg), rows, costRows: costs, ...settings, model, domain, out });
     const costByModel = byModel(frontier(rows, costs, { model, domain, bands }));
     const w = Math.max(5, ...o.cells.map((c) => c.model.length));
     out(`    ${"model".padEnd(w)}    n  overall  ${o.universals.map((a) => a.slice(0, 5).padStart(5)).join("  ")}  cost  frontier`);

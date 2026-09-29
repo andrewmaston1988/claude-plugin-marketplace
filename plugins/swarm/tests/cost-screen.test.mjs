@@ -156,7 +156,7 @@ test("a successor with no predecessor keeps the plain cost-only line", () => {
 });
 
 test("costView's chip fields reach the Cost screen: the elder is chipped and the successor pitches it", async () => {
-  const { costView } = await import("../src/serve/perf-views.mjs");
+  const { costView } = await import("../src/cost-view.mjs");
   const { costScreen } = loadPerfViews();
   const grade = (model, score, count) => Array.from({ length: count }, (_, i) => ({
     resultsDir: `C:/runs/${model}-${i}`, leaf: `${model}-${i}`, model, provider: "claude", domain: "node", outcome: "completed",

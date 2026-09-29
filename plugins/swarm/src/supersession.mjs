@@ -1,6 +1,7 @@
 // Which rows a lineage collapse hides: the supersession reading, the elders
 // still waiting on a graded successor, and the tables that drop them.
 import { collapseFamilies, visibleModels } from "./discovery.mjs";
+import { PROVISIONAL_N } from "./scores.mjs";
 
 // The key a supersession reading is looked up by. Provider-qualified at this one
 // site: two providers that share a model name must never chain into each other's
@@ -50,4 +51,19 @@ export function supersededByMap(rows, options) {
 export function dropSuperseded(rows, { providerKey = () => "unqualified", keep = () => false, cloudSuffix = ":cloud", isDenylisted = () => false } = {}) {
   const superseded = supersededByMap(rows, { providerKey, cloudSuffix, isDenylisted });
   return rows.filter((row) => keep(row) || !superseded.has(supersessionKey(providerKey(row), row.model)));
+}
+
+// A successor takes over its elder's family once it has earned this many grades.
+export const isReady = (n) => (n || 0) >= PROVISIONAL_N;
+
+// The chip a young successor wears, in the one place its wording lives — the
+// dashboard and `swarm perf` render the same sentence. Rank and verdicts are the
+// elder's own; with neither there is nothing to claim but the generation.
+export function successorPitch({ elder, rank, verdicts = [], n } = {}) {
+  if (!elder) return `needs grades, n=${n ?? 0}`;
+  const claims = verdicts.filter(Boolean);
+  // Rank qualifies a verdict; alone it is a position on a list, not a reason.
+  if (!claims.length) return `needs grades — newer generation of ${elder}`;
+  if (rank != null) claims.unshift(`#${rank} overall`);
+  return `needs grades — newer generation of ${elder} (${claims.join(", ")})`;
 }

@@ -6,6 +6,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { runCli } from "./helpers/cli.mjs";
 import { gateHome, tmp } from "./helpers/cli-fixture.mjs";
+import { snap, seg } from "./helpers/cost-snapshots.mjs";
 
 const HEADING = "seat one of these on a bounded leaf in your next run — they cannot rank until graded";
 
@@ -106,5 +107,36 @@ test("perf --overall: --domain and --model never relabel a well-graded model as 
       equal(split(r.stdout).block, plain, extra.join(" "));
       ok(!split(r.stdout).block.includes("deep:cloud"), extra.join(" "));
     }
+  } finally { rmSync(w.dir, { recursive: true, force: true }); }
+});
+
+test("perf --overall: --model naming a block model still prints that model's row", () => {
+  const w = world();
+  try {
+    const r = perf(w, ["--model", "glm-5.2:cloud"]);
+    equal(r.status, 0, r.stderr);
+    ok(/^\s+glm-5\.2:cloud\s/m.test(split(r.stdout).table), split(r.stdout).table);
+  } finally { rmSync(w.dir, { recursive: true, force: true }); }
+});
+
+// glm-5.1 (#1, dear) is a frontier elder; kimi-k2 (#2, cheap, within the margin of
+// the top) is the best-value one — so kimi-k3 outranks glm-5.2 despite the elder's rank.
+test("perf --overall: the successor of a best-value elder sorts ahead of a higher-ranked frontier elder's", () => {
+  const w = world();
+  try {
+    writeFileSync(join(w.home, "model-scores.jsonl"), [
+      ...rowsFor("glm-5.1:cloud", 6, 9),
+      ...rowsFor("glm-5.2:cloud", 2, 8),
+      ...rowsFor("kimi-k2:cloud", 6, 8.8),
+      ...rowsFor("deep:cloud", 20, 5),
+    ].join("\n") + "\n");
+    writeFileSync(join(w.home, "usage-history.jsonl"), JSON.stringify(snap(1, [
+      seg("glm-5.1", 2000, 60), seg("kimi-k2", 2000, 10), seg("deep", 2000, 5),
+    ], 50)) + "\n");
+    const r = perf(w);
+    equal(r.status, 0, r.stderr);
+    const { block } = split(r.stdout);
+    deepEqual([...block.matchAll(/^\s+([a-z0-9.\-]+:cloud)\s/gm)].map((m) => m[1]), ["kimi-k3:cloud", "glm-5.2:cloud", "fresh:cloud", "solo:cloud"], block);
+    ok(block.includes("kimi-k3:cloud  n=0  needs grades — newer generation of kimi-k2:cloud (#2 overall, best value)"), block);
   } finally { rmSync(w.dir, { recursive: true, force: true }); }
 });

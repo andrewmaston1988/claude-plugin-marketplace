@@ -2,7 +2,8 @@ import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
 import { aggregate, dedupe, overall } from "../src/scores.mjs";
 import { OUTCOMES } from "../src/aspects.mjs";
-import { coverage, reliability, leaders, costView, rankCells } from "../src/serve/perf-views.mjs";
+import { coverage, reliability, leaders, rankCells } from "../src/serve/perf-views.mjs";
+import { costView } from "../src/cost-view.mjs";
 import { DEFAULT_COST_BANDS, costRowsFor as providerCostRows } from "../src/cost.mjs";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
 

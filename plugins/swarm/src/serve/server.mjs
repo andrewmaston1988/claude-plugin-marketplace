@@ -16,7 +16,8 @@ import { modelRoster, refreshRoster } from "../roster.mjs";
 import { defaultProviderRegistry } from "../default-providers.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
-import { coverage, reliability, leaders, costView, rankCells } from "./perf-views.mjs";
+import { coverage, reliability, leaders, rankCells } from "./perf-views.mjs";
+import { costView } from "../cost-view.mjs";
 import { projectGrouping } from "./grouping.mjs";
 import { createWorkerEstate, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
@@ -319,17 +320,18 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const live = dedupe(rows);
     const domains = [...new Set(live.map((r) => r.domain).filter(Boolean))].sort();
     const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
+    const cost = costOf(rows, domain);
     send(res, 200, {
       grading, path: scoresFile, lines: rows.length, rows: live.length, priorWeight: PRIOR_WEIGHT,
       aspects: ASPECTS, universals: UNIVERSAL, domains,
       filters: report.filters,
-      overall: rankCells(overall(rows, { model, domain, combineProviders: true }).cells, { cloudSuffix }),
+      overall: rankCells(overall(rows, { model, domain, combineProviders: true }).cells, { cloudSuffix, view: cost }),
       // Drill-in: where this model sits among the models the ranking draws, not every graded one.
       ...(model ? { rank: rankOf(overall(rows, { domain, combineProviders: true }).cells, model) } : {}),
       report: report.aspects,
       views: {
         coverage: coverage(report), reliability: reliability(live), leaders: leaders(report),
-        cost: costOf(rows, domain),
+        cost,
       },
     });
   };

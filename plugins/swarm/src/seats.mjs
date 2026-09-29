@@ -9,7 +9,8 @@ import { aggregate, frontier, overall } from "./scores.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
 import { identityOf, identityKey, CLAUDE_ALIASES, claudeFamilyOf } from "./contracts.mjs";
 import { collapseRoster } from "./discovery.mjs";
-import { costView, successorPitch } from "./serve/perf-views.mjs";
+import { costView, verdictsIn } from "./cost-view.mjs";
+import { successorPitch } from "./supersession.mjs";
 
 // The seating canon: 20 graded runs per model per capability slot. Under it a
 // grade is not a verdict — printed as n<20, the rule's own term, which reads as
@@ -77,20 +78,14 @@ function resolveSeatIdentity(target, byIdentity) {
     .sort((a, b) => (b.entry.n || 0) - (a.entry.n || 0))[0] || null;
 }
 
-// Where an ungraded model gets its seat: the launchable models still short of
-// the canon, each with the elder it would replace and that elder's own record.
-// Sorted to sell the strongest case first — the successor of a best-value elder,
-// then of a frontier one, then the rest by the elder's rank, and last the models
-// with no predecessor at all. `swarm perf` and validate read the same list, so
-// both say the same thing about the same model. n counts GRADED rows only, so a
-// model whose every row failed reads never graded — it has graded nothing yet.
-export function gapCandidates({ roster = [], rows = [], costRows = [], bands = DEFAULT_COST_BANDS } = {}) {
+// Launchable models short of the canon, each with the elder it would replace (the
+// family member whose successor it is, read backwards) and that elder's record.
+// Sorted best-value elder's successor, frontier elder's, the rest by elder rank, no elder last.
+export function gapCandidates({ roster = [], rows = [], costRows = [], bands = DEFAULT_COST_BANDS, valueMargin, cloudSuffix } = {}) {
   if (!roster.length || !rows.length) return [];
   const byIdentity = new Map(frontier(rows, costRows, { bands })
     .map((e) => [identityKey(identityOf(e)), { identity: identityOf(e), entry: e }]));
-  // The elder is the family member whose own successor is this model — the same
-  // chain `swarm models` collapses, read backwards. Store rows join the roster so
-  // an elder that has left the roster is still found.
+  // Store rows join the roster so an elder that has left it is still found.
   const family = collapseRoster([...roster, ...[...byIdentity.values()].map(({ identity }) => identity)]
     .map((m) => {
       const identity = identityOf(m);
@@ -98,26 +93,12 @@ export function gapCandidates({ roster = [], rows = [], costRows = [], bands = D
     }));
   const elderOf = (identity) => family.find((row) => row.supersededBy === identity.model
     && (row.provider || "ollama") === (identity.provider || "ollama"))?.model || null;
-  const rankByKey = new Map();
-  const rankByName = new Map();
-  overall(rows).cells.forEach((cell, i) => {
-    rankByKey.set(identityKey(identityOf(cell)), i + 1);
-    if (!rankByName.has(cell.model)) rankByName.set(cell.model, i + 1);
-  });
-  // The verdict words are the Cost screen's own — read off the view rather than
-  // re-decided here, so one model cannot be best value on one screen and not the other.
-  const view = costRows.length ? costView(rows, costRows, { bands }) : null;
-  const pointOf = (provider, model) => {
-    const section = view?.sections.find((s) => (s.provider || "unqualified") === (provider || "unqualified"));
-    return section?.points.find((p) => p.model === model) || null;
-  };
-  const verdictsOf = (provider, model) => {
-    const point = pointOf(provider, model);
-    if (!point) return [];
-    const best = view.sections.find((s) => (s.provider || "unqualified") === (provider || "unqualified"))?.best;
-    if (best && best === point) return ["best value"];
-    return point.onFrontier ? ["frontier"] : [];
-  };
+  // The rank and verdict words are the table's and the Cost screen's own — the
+  // combined-provider ranking and the same costView options the dashboard resolves.
+  const rankOf = new Map(overall(rows, { combineProviders: true }).cells.map((cell, i) => [cell.model, i + 1]));
+  const view = costRows.length ? costView(rows, costRows, { bands, valueMargin, cloudSuffix }) : null;
+  const verdictsOf = (provider, model) => verdictsIn(
+    view?.sections.find((s) => (s.provider || "unqualified") === (provider || "unqualified")), model);
 
   const candidates = [];
   for (const modelEntry of roster) {
@@ -133,7 +114,7 @@ export function gapCandidates({ roster = [], rows = [], costRows = [], bands = D
       ...(target.explicit ? { provider: target.provider } : {}),
       n,
       elder,
-      rank: elder ? rankByKey.get(identityKey({ provider: target.provider, model: elder })) ?? rankByName.get(elder) ?? null : null,
+      rank: elder ? rankOf.get(elder) ?? null : null,
       verdicts: elder ? verdictsOf(target.provider, elder) : [],
     });
   }
@@ -147,7 +128,7 @@ export function gapCandidates({ roster = [], rows = [], costRows = [], bands = D
 // the seating canon is exactly what a fresh author has not read.
 const GAP_INSTRUCTION = "seat it on one bounded leaf this run; a grade at n<20 is not a verdict";
 
-export function seatReport({ models = [], rows = [], costRows = [], roster = [], bands = DEFAULT_COST_BANDS } = {}) {
+export function seatReport({ models = [], rows = [], costRows = [], roster = [], bands = DEFAULT_COST_BANDS, valueMargin, cloudSuffix } = {}) {
   if (!models.length || !rows.length) return [];
 
   // One record per model straight from the source aggregators: frontier's wtd
@@ -197,7 +178,7 @@ export function seatReport({ models = [], rows = [], costRows = [], roster = [],
   const unseated = (roster || []).filter((m) => !seated.has(identityKey(identityOf(m))));
   // The manifest that already seats a model short of the canon needs no nudge —
   // the seat is taken — so the line only fires when every gap is still open.
-  const gaps = gapCandidates({ roster, rows, costRows, bands });
+  const gaps = gapCandidates({ roster, rows, costRows, bands, valueMargin, cloudSuffix });
   const gap = gaps.some((c) => seated.has(identityKey(identityOf(c)))) ? null : gaps[0] ?? null;
   if (gap) {
     const state = gap.n > 0 ? nPart(gap.n) : "never graded";

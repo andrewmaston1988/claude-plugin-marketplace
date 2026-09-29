@@ -343,3 +343,23 @@ test("seatReport: the unseated roster resolves aliases too", () => {
   }).join("\n");
   ok(/haiku n=12 n<20/.test(out), `the unseated list must carry the alias's real n, got: ${out}`);
 });
+
+test("gapCandidates: the elder's rank is the combined-provider rank the table prints", () => {
+  const under = (provider, model, g, n) => many(model, g, n).map((r) => ({ ...r, provider, resultsDir: `${r.resultsDir}-${provider}` }));
+  const rows = [...under("ollama", "m-1", 9, 6), ...under("beta", "m-1", 4, 6), ...under("ollama", "m-2", 7, 6)];
+  const combined = overall(rows, { combineProviders: true }).cells.map((c) => c.model);
+  const candidates = gapCandidates({ roster: [{ model: "m-3" }], rows });
+  const m3 = candidates.find((c) => c.model === "m-3");
+  equal(m3.elder, "m-2");
+  equal(m3.rank, combined.indexOf("m-2") + 1, `the table ranks ${combined.join(" > ")}`);
+});
+
+test("gapCandidates: verdicts follow the configured valueMargin, as costView's do", () => {
+  const rows = [...many("kimi-k2.6:cloud", 8.6, 24), ...many("glm-5.2:cloud", 9, 24)];
+  const costRows = [priced("kimi-k2.6:cloud", 1), priced("glm-5.2:cloud", 3)];
+  const roster = [{ model: "kimi-k2.7-code:cloud" }, { model: "glm-5.3:cloud" }];
+  const verdicts = (opts) => Object.fromEntries(gapCandidates({ roster, rows, costRows, ...opts }).map((c) => [c.elder, c.verdicts]));
+  deepEqual(verdicts({}), { "kimi-k2.6:cloud": ["best value"], "glm-5.2:cloud": ["frontier"] });
+  deepEqual(verdicts({ valueMargin: 0.1 }), { "kimi-k2.6:cloud": ["frontier"], "glm-5.2:cloud": ["best value"] },
+    "a tight margin moves best value to the top scorer, on the dashboard and here alike");
+});

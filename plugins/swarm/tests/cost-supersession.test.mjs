@@ -1,9 +1,10 @@
 import { test } from "node:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
-import { costView, rankCells, successorPitch } from "../src/serve/perf-views.mjs";
+import { rankCells } from "../src/serve/perf-views.mjs";
+import { costView } from "../src/cost-view.mjs";
 import { overall } from "../src/scores.mjs";
 import { costSections } from "../src/cost.mjs";
-import { dropSuperseded } from "../src/supersession.mjs";
+import { dropSuperseded, successorPitch } from "../src/supersession.mjs";
 import { rateCards } from "../src/rate-card.mjs";
 import { H, loadPerfViews } from "./helpers/perf-views-harness.mjs";
 import { snap, seg } from "./helpers/cost-snapshots.mjs";
@@ -367,4 +368,15 @@ test("costSections: the meter's own rows supersede on the configured cloud suffi
   equal(models.includes("kimi-k3:cloud"), false, "RED: the meter's elder row survived the collapse");
   equal(models.includes("kimi-k3.1:cloud"), true);
   equal(section.hidden, 1);
+});
+
+test("rankCells hands a young successor the same chip text Cost shows", () => {
+  const elder = "claude-opus-5", successor = "claude-opus-5-5";
+  const rows = [...grades(elder, 9), ...grades(successor, 8).slice(0, 2)];
+  const view = costView(rows, [cost(elder, 1), cost(successor, 4)]);
+  const costPitch = view.points.find((p) => p.model === successor).pitch;
+  ok(costPitch.includes("#1 overall"), costPitch);
+
+  const cells = rankCells(overall(rows, { combineProviders: true }).cells, { view });
+  equal(cells.find((c) => c.model === successor).pitch, costPitch);
 });
