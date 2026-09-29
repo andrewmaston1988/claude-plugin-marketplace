@@ -533,11 +533,15 @@
   // SSE refresh both rebuild the feed, and re-reading the same run each time would be a
   // fetch per tick. Opening another row drops it — one row is open at a time. What is
   // held is the payload, never the markup: a wave, prompt or output toggle re-renders it.
+  // A live run is the exception: it is re-read on every rebuild, as its own screen is, and
+  // a failed re-read keeps the last drawing rather than closing the row.
   let hubRun = null;
   const drawn = (h) => ({ ...h, ...h.render() });
+  const runIsLive = (run) => run.finishedMs == null && run.abortedMs == null && run.stoppedMs == null;
   async function expandedRun() {
     const key = ui.hubRun, leafId = ui.hubLeaf;
-    if (hubRun && hubRun.key === key && hubRun.leaf === leafId) return drawn(hubRun);
+    const held = hubRun && hubRun.key === key && hubRun.leaf === leafId ? hubRun : null;
+    if (held && !held.live) return drawn(held);
     hubRun = null;
     if (!key) return null;
     // The row's own key is `project/name`; either part may itself contain a slash, so the
@@ -549,16 +553,17 @@
       // screen's own markup, so the hub never navigates away from its sidebar.
       if (leafId) {
         const [run, leaf] = await Promise.all([api(base), api(`${base}/leaves/${enc(leafId)}`).catch(() => null)]);
-        hubRun = { key, leaf: leafId, render: () => ({ html: renderLeafHtml(run, leaf, leafId).html }) };
+        hubRun = { key, leaf: leafId, live: runIsLive(run), render: () => ({ html: renderLeafHtml(run, leaf, leafId).html }) };
         return drawn(hubRun);
       }
       const run = endRun(await api(base));
-      hubRun = { key, leaf: null, render: () => {
+      hubRun = { key, leaf: null, live: runIsLive(run), render: () => {
         const { html, rows } = runScreen(run, isDesktop());
         return { html, draw: () => drawRail(run.tasks, rows) };
       } };
       return drawn(hubRun);
     } catch (e) {
+      if (held) { hubRun = held; return drawn(held); }
       // A run that cannot be read closes the row rather than leaving an empty shelf.
       console.error("overview: opened run not read", e);
       ui.hubRun = null;
@@ -689,7 +694,7 @@
       const fields = [esc(shortProject(r.project)), when, countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState), `${fmtTok(r.tokens)}${r.hasDigest ? " · digest" : ""}`];
       return `<li class="row tap" data-key="${key}" ${hub ? `data-hub="${key}"` : `data-href="${esc(href)}"`}>${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${columns ? fields.map((f) => `<span class="col">${f}</span>`).join("") : fields.join(" · ")}</span></div>${chevRight}</div></li>`;
     }
-    return `<div class="card rcard ${st}" data-key="${key}" data-href="${esc(href)}"><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span>${stack(r)}<span class="tm">${elapsed}</span></div>`
+    return `<div class="card rcard ${st}" data-key="${key}" ${hub ? `data-hub="${key}"` : `data-href="${esc(href)}"`}><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span>${stack(r)}<span class="tm">${elapsed}</span></div>`
       + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
   }
 

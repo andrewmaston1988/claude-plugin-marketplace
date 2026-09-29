@@ -20,6 +20,42 @@ test("a finished row opens its run beneath the row, and the hash never moves", a
   assert.match(opened[0].textContent, /leaf-a/, "the run's own leaves are drawn");
 });
 
+test("a live card opens its run beneath the card too, and the hash never moves", async () => {
+  const P = await hub({ run: runPayload("LIVE_A") });
+  const card = () => P.findByClass("rcard").find((e) => /LIVE_A/.test(e.textContent));
+  assert.equal(card().getAttribute("data-href"), "", "a hub card does not navigate");
+  P.tap(card());
+  await settle(P, replies({ run: runPayload("LIVE_A") }));
+  assert.equal(P.location.hash, "#/overview", "expanding a live run is not a navigation");
+  const opened = P.findByClass("ovrun");
+  assert.equal(opened.length, 1, "the live run opens beneath its card");
+  const parent = card().parentNode;
+  assert.equal(parent.childNodes.indexOf(opened[0]), parent.childNodes.indexOf(card()) + 1, "beneath THAT card");
+});
+
+test("an open live run re-reads on each hub refresh, so its leaves keep moving", async () => {
+  const liveRun = (state) => ({ ...runPayload("LIVE_A"), finishedMs: null,
+    tasks: [{ id: "leaf-a", state, model: "glm", tokens: { input: 10, output: 20 }, after: [] }], waves: [["leaf-a"]] });
+  const P = await hub({ run: liveRun("running") });
+  P.tap(P.findByClass("rcard").find((e) => /LIVE_A/.test(e.textContent)));
+  await settle(P, replies({ run: liveRun("running") }));
+  assert.match(P.findByClass("ovrun")[0].textContent, /leaf-aglm◐ running/);
+  P.fireSse("runs", "{}");
+  await settle(P, replies({ run: liveRun("ok") }));
+  assert.equal(P.fetchLog.filter(isRunUrl).length, 2, "the live run is read again");
+  assert.match(P.findByClass("ovrun")[0].textContent, /leaf-aglm✓ ok/, "and redrawn with its new state");
+});
+
+test("a live run whose re-read fails keeps its last drawing open", async () => {
+  const liveRun = { ...runPayload("LIVE_A"), finishedMs: null };
+  const P = await hub({ run: liveRun });
+  P.tap(P.findByClass("rcard").find((e) => /LIVE_A/.test(e.textContent)));
+  await settle(P, replies({ run: liveRun }));
+  P.fireSse("runs", "{}");
+  await settle(P, replies({ run: liveRun }), [/^\/api\/runs\/C--code-listproj\/LIVE_A$/]);
+  assert.equal(P.findByClass("ovrun").length, 1, "a blip does not close the open run");
+});
+
 test("the hub expands a run with the run screen's own markup", async () => {
   const P = await hub({ run: runPayload("DONE_2") });
   P.tap(rowNamed(P, "DONE_2"));
