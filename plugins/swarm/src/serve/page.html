@@ -1504,6 +1504,7 @@
       commitView({ ...next, view: v });
     } catch (e) {
       if (!guardOk(seq, routeSeq)) return;
+      if (!moved) { pendingView = null; return; }
       // No header in the description: an error panel overlays the current screen,
       // and the header already describes it.
       commitView({ view: v, html: `<div class="empty">${esc(e.message)}</div>` });

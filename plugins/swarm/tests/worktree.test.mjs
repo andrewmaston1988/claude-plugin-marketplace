@@ -835,3 +835,23 @@ test("branchNameFor: an explicit branchName wins over scope and sanitising", () 
 test("branchNameFor: no branchScope keeps today's swarm/<name>", () => {
   equal(branchNameFor({ id: "x", worktreeName: "x" }, CFG), "swarm/x");
 });
+
+
+test("prepareIsolation names a worktree-add timeout caused by a slow reference hook", { timeout: 10000 }, () => {
+  const repo = initRepo();
+  const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
+  const hooks = mkdtempSync(join(tmpdir(), "swarm-wt-hooks-"));
+  try {
+    const hook = join(hooks, "reference-transaction");
+    writeFileSync(hook, '#!/bin/sh\nnode -e "setTimeout(() => {}, 2000)"\n', { mode: 0o755 });
+    spawnSync("git", ["config", "core.hooksPath", hooks], { cwd: repo, windowsHide: true });
+    let error;
+    try {
+      prepareIsolation({ id: "slow", originalCwd: repo }, CFG, resultsDir, { addTimeoutMs: 100 });
+    } catch (e) { error = e; }
+    ok(error, "the timed-out add throws");
+    ok(/timed out after/.test(error.message), error.message);
+  } finally {
+    cleanup(resultsDir, hooks, repo);
+  }
+});
