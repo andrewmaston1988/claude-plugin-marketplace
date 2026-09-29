@@ -53,3 +53,11 @@ test("V4: visible while already OPEN opens nothing new", async () => {
   assert.equal(P.esCount(), before, "no second stream");
   assert.equal(P.esClosedCount(), 0, "the live stream is untouched");
 });
+
+test("V5: visible while the stream is still CONNECTING opens nothing new", async () => {
+  const P = loadPage();
+  await P.flush();
+  const before = P.esCount();
+  P.fireVisibility("visible");
+  assert.equal(P.esCount(), before, "a background-opened tab keeps its one connecting stream");
+});

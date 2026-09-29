@@ -1625,7 +1625,7 @@
   // streams starve every fetch. Visible again reconnects; esAttempt >= 1 makes onopen catch up.
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "hidden") { clearTimeout(esTimer); esTimer = null; es?.close(); setNavFoot(); return; }
-    if (es?.readyState === EventSource.OPEN) return;
+    if (es && es.readyState !== EventSource.CLOSED) return;
     esAttempt = Math.max(esAttempt, 1); connect();
   });
   // The breakpoint can move under the reader. `redirect()` re-routes when it rewrites the
