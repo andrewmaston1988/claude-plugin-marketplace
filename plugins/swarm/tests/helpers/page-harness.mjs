@@ -178,6 +178,7 @@ export function loadPage(opts = {}) {
   const window = { addEventListener: (t, f) => { (winListeners[t] ||= []).push(f); }, scrollTo: (x, y) => scrolls.push([x, y]), getComputedStyle };
   let esListeners = {};
   const esInstances = [];
+  let esClosed = 0;
   const fetchLog = [];
   const pendingFetches = [];
   // The haptic is the only celebration instrument that can COUNT: two celebrations
@@ -196,8 +197,11 @@ export function loadPage(opts = {}) {
   const timers = [];
 
   const context = {}; // closed over by the document stub below
+  const docListeners = {};
   const document = {
     title: "swarm",
+    visibilityState: opts.hidden ? "hidden" : "visible",
+    addEventListener: (t, f) => { (docListeners[t] ||= []).push(f); },
     documentElement,
     querySelector: (sel) => (sel.startsWith("#") && !sel.includes(" ") && ids.has(sel.slice(1))) ? ids.get(sel.slice(1)) : (chrome[sel] || makeElement("div", ids)),
     createElement: (tag) => makeElement(tag, ids),
@@ -221,7 +225,7 @@ export function loadPage(opts = {}) {
   // reconnect wiring — a fresh instance per connect() call, CONNECTING until a
   // test drives it to OPEN or CLOSED, since nothing here simulates a real socket.
   const EventSource = function () {
-    const es = { readyState: EventSource.CONNECTING, addEventListener: (t, f) => { (esListeners[t] ||= []).push(f); }, close: () => { es.readyState = EventSource.CLOSED; } };
+    const es = { readyState: EventSource.CONNECTING, addEventListener: (t, f) => { (esListeners[t] ||= []).push(f); }, close: () => { es.readyState = EventSource.CLOSED; esClosed++; } };
     esInstances.push(es);
     return es;
   };
@@ -276,6 +280,10 @@ export function loadPage(opts = {}) {
     fireResize: () => (winListeners.resize || []).forEach((f) => f()),
     fireSse: (t, d) => (esListeners[t] || []).forEach((f) => f({ data: d || "{}" })),
     esCount: () => esInstances.length,
+    esClosedCount: () => esClosed,
+    // Timeouts still armed (not fired, not cleared): a pending reconnect backoff shows here.
+    armedTimeouts: () => timers.filter((t) => t.fn && !t.every).length,
+    fireVisibility: (state) => { document.visibilityState = state; (docListeners.visibilitychange || []).forEach((f) => f()); },
     // Drives the CURRENT (latest) EventSource — the one page.html's connect() just
     // created — since a reconnect replaces `es` with a fresh instance.
     fireEsOpen: () => { const es = esInstances[esInstances.length - 1]; es.readyState = EventSource.OPEN; es.onopen && es.onopen(); },

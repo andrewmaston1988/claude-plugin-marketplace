@@ -1587,7 +1587,7 @@
 
   // ── live ────────────────────────────────────────────────────────────────
   let es;
-  let esAttempt = 0;
+  let esAttempt = 0, esTimer = null;
   function connect() {
     es = new EventSource(q("/events"));
     setNavFoot();
@@ -1618,9 +1618,16 @@
       setNavFoot();
       if (es.readyState !== EventSource.CLOSED) return;
       es.close();
-      setTimeout(connect, window.swarmLive.reconnectDelay(esAttempt++));
+      esTimer = setTimeout(connect, window.swarmLive.reconnectDelay(esAttempt++));
     };
   }
+  // A hidden tab releases its stream: browsers cap connections per host across tabs, and idle
+  // streams starve every fetch. Visible again reconnects; esAttempt >= 1 makes onopen catch up.
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") { clearTimeout(esTimer); esTimer = null; es?.close(); setNavFoot(); return; }
+    if (es && es.readyState !== EventSource.CLOSED) return;
+    esAttempt = Math.max(esAttempt, 1); connect();
+  });
   // The breakpoint can move under the reader. `redirect()` re-routes when it rewrites the
   // hash; a flip that leaves the hash alone still has to rebuild, because every screen
   // resolves its layout at build time (Cost's isDesktop()) and no payload ever moves it.
@@ -1705,7 +1712,7 @@
   loadScript(q("/desktop.js")).catch(() => {}).then(() => loadScript(q("/live.js"))).then(() => {
     requestRoute = window.swarmLive.singleFlight(route);
     desktopNow = isDesktop();
-    route(); connect(); startTimers();
+    route(); if (document.visibilityState !== "hidden") connect(); startTimers();
   }).catch((e) => {
     commitView({ html: `<div class="empty">${esc(e.message)}</div>` });
   });
