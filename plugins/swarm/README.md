@@ -205,6 +205,14 @@ annotation: each refresh probes the top cloud entries with one token each, and a
 rejection removes that row from `~/.swarm/models-cache.json` until the account can run it
 again.
 
+The roster banks itself per provider and renews without a command: Claude's entry is rebuilt
+whenever the catalog it was read from changes, and each network provider every 12 hours. Every
+caller — `validate`, `run`, `cost`, `grade` and the dashboard's Cost screen — reads whatever is
+already banked and never waits on a probe; the dashboard fires a renewal off its own Cost
+requests. `swarm models` is the one command that forces it, which is also how the first run
+populates the network providers. One consequence worth knowing: a model released between
+renewals is not launchable until the next one, or until you run `swarm models`.
+
 ## Example manifest
 
 ```json
@@ -481,7 +489,7 @@ require grades, the rest forbid them — `not-capable` records the model couldn'
 thing *on this harness*.
 
 Each row also snapshots mechanical columns (`ok`, `durationMs`, `tokens`, `numTurns`,
-citation counts) and the model's declared capabilities from `models-cache.json` — auditable
+citation counts) and the model's declared capabilities from the model roster — auditable
 context, never a substitute for the grade.
 
 **Store:** `~/.swarm/model-scores.jsonl`, append-only, line-atomic. Re-grading a run

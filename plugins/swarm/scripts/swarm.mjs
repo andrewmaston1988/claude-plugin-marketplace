@@ -6,7 +6,8 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, swarmHome, getConfig } from "../src/config.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
-import { readModelsCache as readProviderModelsCache, refreshModelsCache, writeCompositeModelsCache, collapseRoster, visibleModels, probeTopModels } from "../src/discovery.mjs";
+import { modelRoster, refreshRoster } from "../src/roster.mjs";
+import { collapseRoster, visibleModels, probeTopModels } from "../src/discovery.mjs";
 import { providerConfig } from "../src/providers.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
@@ -171,36 +172,33 @@ async function cmdModels(rest = [], {
   }
   const showAll = rest.includes("--all");
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
-  // The registry chooses every enabled provider with discovery capability. A
-  // failed provider is reported but its previous rows remain in the composite
-  // cache, so one offline account cannot erase another provider's roster.
-  const refreshed = await refreshModelsCache({
+  // The operator's forced refresh; a failed provider keeps its banked rows, so
+  // one offline account cannot erase another provider's roster.
+  const refreshed = await refreshRoster({
     config: cfg,
     env,
     registry,
     fetchImpl,
+    force: true,
     rich: true,
   });
   for (const [provider, message] of Object.entries(refreshed.errors)) {
     write(`⚠ ${provider} model discovery unavailable — using cached rows (${message})`);
   }
-  const roster = refreshed.models;
+  const read = modelRoster({ config: cfg, env, registry });
+  writeRosterErrors(read.errors, write);
+  const roster = read.models;
   const ollamaRows = roster.filter((m) => (m.provider || "ollama") === "ollama");
   const ollama = providerConfig(cfg, "ollama");
   const base = String(ollama.url || "").replace(/\/+$/, "");
   const ollamaEnabled = providerEnabled(registry, cfg, { provider: "ollama" });
   // Every models run re-discovers, so this is the one place the top-3
-  // entitlement probe fires. 402 removals rewrite the cache just written.
+  // entitlement probe fires. A 402 evicts the row from its own provider entry.
   const liveOllama = base && ollamaEnabled
     ? await probeTopModels(ollamaRows, base, fetchImpl, { isDenylisted, provider: "ollama" })
     : ollamaRows;
-  // Keep disabled-provider rows in the cache so re-enabling a provider can use
-  // its last successful roster, but never present those rows as launchable.
-  const cachedOllama = ollamaEnabled ? liveOllama : ollamaRows;
-  writeCompositeModelsCache([
-    ...roster.filter((m) => (m.provider || "ollama") !== "ollama"),
-    ...cachedOllama,
-  ], env);
+  // A disabled provider is left out of the refresh, so its entry keeps its last
+  // roster for a re-enable — never shown as launchable.
   // The one collapse site for every provider — without it a Codex or Claude
   // roster prints a superseded generation beside the model that replaced it,
   // and `--all` has no `supersededBy` to mark the row with.
@@ -264,11 +262,11 @@ function seatedModels(plan) {
   }));
 }
 
-// The launchable roster `swarm models` prints, from the cache it wrote —
-// never a fresh probe: validate must not gain a network call.
+// The launchable roster `swarm models` prints, from the roster the one reader
+// serves — never a fresh probe: validate must not gain a network call.
 async function launchableRoster(cfg, { env = process.env, registry = defaultProviderRegistry() } = {}) {
   const isDenylisted = (name) => !!matchDenylist(name, cfg);
-  const cached = readProviderModelsCache(env)?.models || [];
+  const cached = modelRoster({ config: cfg, env, registry }).models;
   const enabled = collapseRoster(cached.filter((m) => providerEnabled(registry, cfg, m)),
     { cloudSuffix: providerConfig(cfg, "ollama")?.cloudSuffix });
   const visible = new Set(visibleProviderModels(enabled, { isDenylisted }).map(identityKey));
@@ -297,12 +295,19 @@ async function seatBlock(plan, cfg) {
   });
 }
 
+// The reader never throws, so a roster it could not read or hydrate says so here.
+function writeRosterErrors(errors, write) {
+  for (const [provider, message] of Object.entries(errors)) write(`roster: ${provider} — ${message}`);
+}
+
 async function cmdValidate(rest) {
   const cfg = getConfig();
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: readProviderModelsCache(process.env)?.models || [], ...(fromRegistry && { ref: rest[0] }) });
+  const roster = modelRoster({ config: cfg, env: process.env, registry: defaultProviderRegistry() });
+  writeRosterErrors(roster.errors, err);
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: roster.models, ...(fromRegistry && { ref: rest[0] }) });
   out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
   // The preview IS the approval: with forEach or composition in play, show the
   // worst-case leaf count the caps permit before anything runs.
@@ -382,7 +387,7 @@ async function cmdRun(rest) {
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: readProviderModelsCache(process.env)?.models || [], ...(fromRegistry && { ref: rest[0] }) });
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: modelRoster({ config: cfg, env: process.env, registry: defaultProviderRegistry() }).models, ...(fromRegistry && { ref: rest[0] }) });
   // Shared by the end-of-run status and the scheduler's single-shot cost warn.
   const { createNotifier } = await import("../src/notify.mjs");
   const notify = createNotifier({ notifyCmd: cfg.notifyCmd });
@@ -650,7 +655,18 @@ async function cmdGradeFile(path) {
     return 1;
   }
 
-  const cacheEntries = await readModelsCache();
+  // What each model was declared to be, keyed the way a result names it — the
+  // same identity reading the roster merges on, so a provider cannot split a row.
+  const cacheEntries = new Map();
+  for (const m of modelRoster({ config: getConfig(), registry: defaultProviderRegistry() }).models) {
+    const declared = {
+      capabilities: m.capabilities ?? null,
+      contextLength: m.contextLength ?? null,
+      parameterCount: m.parameterCount ?? null,
+    };
+    cacheEntries.set(identityKey(m), declared);
+    if (!m.provider) cacheEntries.set(m.model, declared);
+  }
   const date = new Date().toISOString().slice(0, 10);
   const ts = new Date().toISOString();
   const manifestTasks = await readManifestTasks(dir);
@@ -666,7 +682,7 @@ async function cmdGradeFile(path) {
     const result = readResult(dir, r.leaf);
     const declared = cacheEntries.get(identityKey(result)) || cacheEntries.get(result.model);
     const { isClaudeModel } = await import("../src/models.mjs");
-    if (!declared && !isClaudeModel(result.model)) err(dim(`warning: ${result.provider ? `${result.provider}/` : ""}${result.model} is not in models-cache.json — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
+    if (!declared && !isClaudeModel(result.model)) err(dim(`warning: ${result.provider ? `${result.provider}/` : ""}${result.model} is not in the model roster — declared capabilities recorded as null (run \`swarm models\` to refresh)`));
     rows.push({
       ts,
       resultsDir: dir,
@@ -713,24 +729,6 @@ async function cmdGradeWaive(dir, reason) {
   renameSync(`${p}.tmp`, p);
   out(p);
   return 0;
-}
-
-async function readModelsCache() {
-  const map = new Map();
-  try {
-    const { readFileSync } = await import("node:fs");
-    const cache = JSON.parse(readFileSync(join(swarmHome(), "models-cache.json"), "utf8"));
-    for (const m of cache?.models || []) {
-      const declared = {
-        capabilities: m.capabilities ?? null,
-        contextLength: m.contextLength ?? null,
-        parameterCount: m.parameterCount ?? null,
-      };
-      map.set(identityKey(m), declared);
-      if (!m.provider) map.set(m.model, declared);
-    }
-  } catch { /* no cache — declared stays null and the caller warns */ }
-  return map;
 }
 
 // Effort is a manifest field, not a result field; the snapshot at dispatch is
@@ -1064,7 +1062,7 @@ async function main() {
         const { modelsByProvider } = await import("../src/cost.mjs");
         // The same roster `swarm cost` prices for, banked with the read: without
         // it a manual refresh leaves the next cost query re-fetching both pages.
-        const roster = readProviderModelsCache()?.models || [];
+        const roster = modelRoster({ config: getConfig(), registry: defaultProviderRegistry() }).models;
         return await refreshPrices({
           out, err, dryRun: rest.includes("--dry-run"), rosterIds: modelsByProvider(roster),
         });

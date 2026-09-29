@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, rejects } from "node:assert/strict";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { EventEmitter } from "node:events";
@@ -10,9 +10,26 @@ import {
   deriveCloudName, enrichWithShow, sortModelsBySize,
   removeCachedModel, probeTopModels,
   createOllamaProviderAdapter, discoverOllamaModels, mergeProviderModelCaches,
-  normalizeOllamaModelDescriptor, readModelsCache, refreshModelsCache,
-  writeCompositeModelsCache,
+  normalizeOllamaModelDescriptor,
 } from "../src/discovery.mjs";
+import { writeRosterEnvelope, readRosterEnvelope, rosterModels, refreshRoster } from "../src/roster.mjs";
+import { createProviderRegistry } from "../src/providers.mjs";
+
+// Rows banked per provider, the way the one writer files them.
+function seedRoster(rows, env) {
+  const providers = {};
+  for (const row of mergeProviderModelCaches([rows])) {
+    (providers[row.provider] ||= { hydratedAt: Date.now(), source: null, models: [] }).models.push(row);
+  }
+  return writeRosterEnvelope(providers, env);
+}
+const cachedRoster = (env) => rosterModels(readRosterEnvelope(env).providers);
+// A writer's per-pid tmp name is not a fixed one, so look for any leftover.
+const strayTmps = (dir) => readdirSync(dir).filter((name) => name.endsWith(".tmp"));
+const networkRegistry = (discoverers) => createProviderRegistry(Object.entries(discoverers).map(([id, discoverModels]) => ({
+  id, runnerId: "claude", rosterHydration: "network", enabled: () => true, validateTask: () => [],
+  capabilities: { discoverModels },
+})));
 
 // User-confirmed live schema of the recommendations endpoint (2026-07-07),
 // verbatim — the fixture the engine is contract-tested against.
@@ -269,7 +286,7 @@ test("probeTopModels: 402 removes the row, 200 keeps it, other errors fail open"
       { model: "deepseek-v4-pro:cloud" },
       { model: "kimi-k2.7-code:cloud" },
     ];
-    writeCompositeModelsCache(roster, env);
+    seedRoster(roster, env);
     const calls = [];
     const live = await probeTopModels(roster, "http://x", probeFetch({
       "kimi-k3:cloud": 402,
@@ -277,7 +294,7 @@ test("probeTopModels: 402 removes the row, 200 keeps it, other errors fail open"
       "kimi-k2.7-code:cloud": 500,
     }, calls), { env });
     deepEqual(calls, ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "kimi-k2.7-code:cloud"]);
-    const cached = JSON.parse(readFileSync(join(dir, "models-cache.json"), "utf8")).models;
+    const cached = cachedRoster(env);
     deepEqual(cached.map((m) => m.model), ["deepseek-v4-pro:cloud", "kimi-k2.7-code:cloud"]);
     deepEqual(live.map((m) => m.model), ["deepseek-v4-pro:cloud", "kimi-k2.7-code:cloud"]);
   } finally {
@@ -290,7 +307,7 @@ test("probeTopModels: fetch throw keeps the row (fail open)", async () => {
   try {
     const env = { SWARM_HOME: dir };
     const roster = [{ model: "glm-5.2:cloud" }];
-    writeCompositeModelsCache(roster, env);
+    seedRoster(roster, env);
     const before = readFileSync(join(dir, "models-cache.json"), "utf8");
     const live = await probeTopModels(roster, "http://x", probeFetch({ "glm-5.2:cloud": "throw" }, []), { env });
     equal(readFileSync(join(dir, "models-cache.json"), "utf8"), before);
@@ -310,7 +327,7 @@ test("probeTopModels: only the top 3 visible entries; non-cloud names never prob
       { model: "glm-5.2:cloud" },
       { model: "minimax-m3:cloud" }, // 4th — outside the top 3
     ];
-    writeCompositeModelsCache(roster, env);
+    seedRoster(roster, env);
     const calls = [];
     await probeTopModels(roster, "http://x", probeFetch({}, calls), { env });
     deepEqual(calls, ["kimi-k3:cloud", "glm-5.2:cloud"]);
@@ -329,7 +346,7 @@ test("probeTopModels: denylisted entries neither probed nor occupying a slot", a
       { model: "kimi-k2.7-code:cloud" },
       { model: "minimax-m3:cloud" }, // takes the freed third slot
     ];
-    writeCompositeModelsCache(roster, env);
+    seedRoster(roster, env);
     const calls = [];
     await probeTopModels(roster, "http://x", probeFetch({}, calls), {
       env, isDenylisted: (n) => n.includes("nemotron"),
@@ -351,7 +368,7 @@ test("probeTopModels: a removal cascades to the resurfaced elder, capped at 6 pr
       { model: "kimi-k2.7-code:cloud" },
       { model: "kimi-k2.6:cloud", supersededBy: "kimi-k3:cloud" },
     ];
-    writeCompositeModelsCache(roster, env);
+    seedRoster(roster, env);
     const calls = [];
     const live = await probeTopModels(roster, "http://x", probeFetch({ "kimi-k3:cloud": 402 }, calls), { env });
     deepEqual(calls, ["kimi-k3:cloud", "deepseek-v4-pro:cloud", "kimi-k2.7-code:cloud", "kimi-k2.6:cloud"]);
@@ -363,7 +380,7 @@ test("probeTopModels: a removal cascades to the resurfaced elder, capped at 6 pr
     for (let v = 9; v >= 2; v--) {
       chain.push({ model: `glm-5.${v}:cloud`, ...(v < 9 ? { supersededBy: `glm-5.${v + 1}:cloud` } : {}) });
     }
-    writeCompositeModelsCache(chain, env);
+    seedRoster(chain, env);
     const chainCalls = [];
     const verdicts = Object.fromEntries(chain.map((m) => [m.model, 402]));
     await probeTopModels(chain, "http://x", probeFetch(verdicts, chainCalls), { env });
@@ -381,7 +398,7 @@ test("removeCachedModel deletes the row atomically; missing cache/entry are no-o
     // missing cache -> silent no-op
     removeCachedModel("glm-5.2:cloud", env);
     ok(!existsSync(p));
-    writeCompositeModelsCache([{ model: "kimi-k3:cloud" }, { model: "glm-5.2:cloud" }], env);
+    seedRoster([{ model: "kimi-k3:cloud" }, { model: "glm-5.2:cloud" }], env);
     // missing entry -> no write (compact hand-written JSON survives byte-identical;
     // a rewrite would re-indent)
     const compact = JSON.stringify(JSON.parse(readFileSync(p, "utf8")));
@@ -390,8 +407,8 @@ test("removeCachedModel deletes the row atomically; missing cache/entry are no-o
     equal(readFileSync(p, "utf8"), compact);
     // removal lands atomically and leaves the rest of the roster intact
     removeCachedModel("kimi-k3:cloud", env);
-    ok(!existsSync(p + ".tmp"));
-    deepEqual(JSON.parse(readFileSync(p, "utf8")).models.map((m) => m.model), ["glm-5.2:cloud"]);
+    deepEqual(strayTmps(dir), []);
+    deepEqual(cachedRoster(env).map((m) => m.model), ["glm-5.2:cloud"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -424,48 +441,48 @@ test("provider-qualified model caches merge and preserve failed-provider rows", 
       { model: "same", provider: "ollama" },
       { provider: "codex", model: "same" },
     ]);
-    writeCompositeModelsCache([
+    seedRoster([
       { provider: "ollama", model: "old:cloud" },
       { provider: "codex", model: "gpt-5-codex" },
     ], env);
-    const refreshed = await refreshModelsCache({
+    const refreshed = await refreshRoster({
       env,
-      providers: ["ollama", "codex"],
-      discoverers: {
+      force: true,
+      registry: networkRegistry({
         ollama: async () => [{ model: "new:cloud" }],
         codex: async () => { throw new Error("offline"); },
-      },
+      }),
     });
     deepEqual(refreshed.models, [
       { model: "new:cloud", provider: "ollama" },
       { provider: "codex", model: "gpt-5-codex" },
     ]);
     equal(refreshed.errors.codex, "offline");
-    deepEqual(readModelsCache(env).models, refreshed.models);
-    ok(!existsSync(join(dir, "models-cache.json.tmp")));
+    deepEqual(cachedRoster(env), refreshed.models);
+    deepEqual(strayTmps(dir), []);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("refreshModelsCache: a zero-row discover keeps a populated roster and names the provider", async () => {
+test("refreshRoster: a zero-row discover keeps a populated roster and names the provider", async () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-zero-row-"));
   try {
     const env = { SWARM_HOME: dir };
-    writeCompositeModelsCache([
+    seedRoster([
       { provider: "ollama", model: "glm-5.2:cloud" },
       { provider: "codex", model: "gpt-5-codex" },
     ], env);
-    const before = readModelsCache(env).models;
-    const refreshed = await refreshModelsCache({
+    const before = cachedRoster(env);
+    const refreshed = await refreshRoster({
       env,
-      providers: ["ollama"],
-      discoverers: { ollama: async () => [] },
+      force: true,
+      registry: networkRegistry({ ollama: async () => [], codex: async () => [{ provider: "codex", model: "gpt-5-codex" }] }),
     });
     // Both halves matter: an assertion on `errors` alone also passes while the
     // roster is still wiped, because the report is written either way.
     deepEqual(refreshed.models, before, "a zero-row resolve must not empty the roster");
-    deepEqual(readModelsCache(env).models, before, "the written cache must keep the roster too");
+    deepEqual(cachedRoster(env), before, "the written cache must keep the roster too");
     ok(refreshed.errors.ollama, "the operator must be told the discovery returned nothing");
     ok(refreshed.errors.ollama.includes("ollama"), "the report must name the provider");
   } finally {
@@ -473,17 +490,17 @@ test("refreshModelsCache: a zero-row discover keeps a populated roster and names
   }
 });
 
-test("refreshModelsCache: a first-ever zero-row discover still writes the empty roster", async () => {
+test("refreshRoster: a first-ever zero-row discover still writes the empty roster", async () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-zero-row-first-"));
   try {
     const env = { SWARM_HOME: dir }; // no cache at all — nothing to keep
-    const refreshed = await refreshModelsCache({
+    const refreshed = await refreshRoster({
       env,
-      providers: ["codex"],
-      discoverers: { codex: async () => [] },
+      force: true,
+      registry: networkRegistry({ codex: async () => [] }),
     });
     deepEqual(refreshed.models, []);
-    deepEqual(readModelsCache(env).models, []);
+    deepEqual(cachedRoster(env), []);
     equal(refreshed.errors.codex, undefined, "a legitimate empty is not a failure to report");
   } finally {
     rmSync(dir, { recursive: true, force: true });

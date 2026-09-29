@@ -8,40 +8,51 @@ import { equal, deepEqual, ok, throws, rejects } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readModelsCache, refreshModelsCache, mergeProviderModelCaches, removeCachedModel } from "../src/discovery.mjs";
+import { mergeProviderModelCaches, removeCachedModel } from "../src/discovery.mjs";
+import { readRosterEnvelope, refreshRoster } from "../src/roster.mjs";
+import { createProviderRegistry } from "../src/providers.mjs";
+
+const networkRegistry = () => createProviderRegistry([{
+  id: "ollama",
+  runnerId: "claude",
+  rosterHydration: "network",
+  enabled: () => true,
+  validateTask: () => [],
+  capabilities: { discoverModels: async () => [] },
+}]);
 
 // Truncated mid-row: the shape a killed write or a hand-edit leaves behind.
 const CORRUPT = '{"updated":"2026-09-21T00:00:00.000Z","models":[{"model":"glm-5';
 
-test("readModelsCache throws on a corrupt cache file, naming the file", () => {
+test("readRosterEnvelope throws on a corrupt cache file, naming the file", () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-corrupt-"));
   try {
     const env = { SWARM_HOME: dir };
     const p = join(dir, "models-cache.json");
     writeFileSync(p, CORRUPT);
-    throws(() => readModelsCache(env), (err) => err.message.includes(p));
+    throws(() => readRosterEnvelope(env), (err) => err.message.includes(p));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("readModelsCache returns null only for a missing file (first-ever install)", () => {
+test("readRosterEnvelope reads an empty roster only for a missing file (first-ever install)", () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-nocache-"));
   try {
-    equal(readModelsCache({ SWARM_HOME: dir }), null);
+    deepEqual(readRosterEnvelope({ SWARM_HOME: dir }).providers, {});
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("refreshModelsCache on a corrupt cache throws instead of writing an empty roster", async () => {
+test("refreshRoster on a corrupt cache throws instead of writing an empty roster", async () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-corrupt-refresh-"));
   try {
     const env = { SWARM_HOME: dir };
     const p = join(dir, "models-cache.json");
     writeFileSync(p, CORRUPT);
     await rejects(
-      () => refreshModelsCache({ env, providers: ["ollama"], discoverers: { ollama: async () => [] } }),
+      () => refreshRoster({ env, registry: networkRegistry(), force: true }),
     );
     equal(readFileSync(p, "utf8"), CORRUPT, "the corrupt file is left untouched — no empty write");
   } finally {

@@ -2,7 +2,8 @@
 // shape as cmd-serve.mjs. The cost modules stay lazily imported inside the command,
 // so no other subcommand pays for loading them.
 import { getConfig } from "../src/config.mjs";
-import { readModelsCache as readProviderModelsCache } from "../src/discovery.mjs";
+import { modelRoster } from "../src/roster.mjs";
+import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { providerConfig } from "../src/providers.mjs";
 import { dim, out, err } from "../src/ui.mjs";
 
@@ -15,7 +16,7 @@ import { dim, out, err } from "../src/ui.mjs";
 // row rather than a blank.
 export async function cmdCost() {
   const cfg = getConfig();
-  const roster = readProviderModelsCache()?.models || [];
+  const roster = modelRoster({ config: cfg, registry: defaultProviderRegistry() }).models;
   const {
     costSections, readSnapshots, usageHistoryPath, THIN_REQUESTS, modelsByProvider,
     METER_PROVIDER, METER_POINTS_UNIT, UNPRICED_CLASSIFICATION, API_EQUIVALENT_CLASSIFICATION,

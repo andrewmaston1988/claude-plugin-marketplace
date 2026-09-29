@@ -5,6 +5,7 @@ import { join, resolve, isAbsolute, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
 import { ASPECTS } from "../src/aspects.mjs";
+import { writeRosterEntry } from "../src/roster.mjs";
 import { formatClosing } from "../src/results.mjs";
 
 function tmp() {
@@ -167,6 +168,36 @@ test("grade --file: a filled batch lands, with model and mechanical taken from t
   }
 });
 
+// The declared columns come from the roster the reader serves, envelope and all
+// — a reader still parsing the flat file records null for every provider.
+test("grade --file records declared capabilities from the roster the reader serves", () => {
+  const dir = tmp();
+  try {
+    const run = fakeRun(dir);
+    const home = join(dir, "home");
+    writeRosterEntry("ollama", {
+      hydratedAt: Date.now(),
+      source: null,
+      models: [{
+        provider: "ollama", model: "glm-5.2:cloud",
+        capabilities: ["tools"], contextLength: 1000000, parameterCount: 756162687872,
+      }],
+    }, { SWARM_HOME: home });
+    const p = join(dir, "grades.json");
+    writeFileSync(p, JSON.stringify({
+      resultsDir: run,
+      session: "abc123",
+      rows: [{ leaf: "icons", domain: "godot", outcome: "completed", note: "", grades: { adherence: 9, handoff: 7, truthfulness: 8, depth: 8 } }],
+    }));
+    const r = runCli(["grade", "--file", p], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    deepEqual(rows[0].declared, { capabilities: ["tools"], contextLength: 1000000, parameterCount: 756162687872 });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // The closing block is the only mechanical prompt to grade — a SKILL.md step is
 // trust, and the store only fills if something asks. It must be printed by the
 // engine, last, and carry a runnable command.
@@ -282,6 +313,34 @@ test("grade --init: a sentinel-model (compute) result gets no row", () => {
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
     equal(batch.rows.length, 3);
     ok(!batch.rows.some((x) => x.leaf === "dedupe"), "a compute node produced a row");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("grade --file: a corrupt roster does not abort the batch; declared is recorded as null", () => {
+  const dir = tmp();
+  try {
+    const run = fakeRun(dir);
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    const corrupt = '{"models":[{"model":"glm-5';
+    writeFileSync(join(home, "models-cache.json"), corrupt);
+    const filled = {
+      resultsDir: run,
+      session: "abc123",
+      rows: [{
+        leaf: "icons", provider: "ollama", domain: "node", outcome: "completed", note: "",
+        grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 },
+      }],
+    };
+    writeFileSync(join(run, "grades-corrupt.json"), JSON.stringify(filled));
+    const r = runCli(["grade", "--file", join(run, "grades-corrupt.json")], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    ok(r.stderr.includes("not in the model roster"), r.stderr);
+    const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    equal(rows[0].declared, null);
+    equal(readFileSync(join(home, "models-cache.json"), "utf8"), corrupt);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

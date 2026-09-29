@@ -1,10 +1,11 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual, throws } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { matchDenylist, ValidationError } from "../src/manifest.mjs";
+import { readRosterEnvelope } from "../src/roster.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { runCliAsync } from "./helpers/cli.mjs";
@@ -197,8 +198,8 @@ test("swarm models: denylist filters at print only — absent from output, prese
     ok(!r.stdout.includes("nemotron"), r.stdout);
     ok(!/haiku|sonnet|opus/.test(r.stdout), "Claude aliases are no longer offered as launchable models: " + r.stdout);
     // the cache keeps the full roster — the denylist is a display filter, not a discovery one
-    const cache = JSON.parse(readFileSync(join(home, "models-cache.json"), "utf8"));
-    deepEqual(cache.models.map((m) => m.model), ["glm-5.2:cloud", "nemotron-3-super:cloud"]);
+    const cache = readRosterEnvelope({ SWARM_HOME: home });
+    deepEqual(cache.providers.ollama.models.map((m) => m.model), ["glm-5.2:cloud", "nemotron-3-super:cloud"]);
     // and a denylisted model is never offered, so the refresh probe skips it
     deepEqual(generateHits, ["glm-5.2:cloud"]);
   } finally {

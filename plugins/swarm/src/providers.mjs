@@ -2,7 +2,7 @@ import { CLAUDE_ALIASES, isClaudeModel, claudeFamilyOf } from "./contracts.mjs";
 import { join } from "node:path";
 import { checkQuota } from "./quota.mjs";
 import { swarmHome } from "./config.mjs";
-import { readClaudeCatalog } from "./claude-models.mjs";
+import { readClaudeCatalog, claudeCatalogIdentity } from "./claude-models.mjs";
 import { readClaudeUsage } from "./claude-usage.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 
@@ -16,7 +16,16 @@ export const PROVIDER_CAPABILITIES = new Set([
   "costObservations",
   "billsInUsd",
   "familyOf",
+  "rosterSource",
+  "rosterStale",
 ]);
+
+// How a provider's roster is renewed. `local` is a read of something already on
+// this machine (Claude's catalog file), safe on any synchronous path; `network`
+// costs a call and only ever runs where one is already expected. A provider that
+// declares neither is treated as network: an unknown adapter's discovery is not
+// something a request path may run.
+export const ROSTER_HYDRATION = new Set(["local", "network"]);
 
 // Probe clock. The ollama endpoint is a local daemon: if it is there it answers in
 // milliseconds, and if it is not, nothing is gained by waiting longer than this.
@@ -101,6 +110,9 @@ function adapterShape(adapter) {
     if (!PROVIDER_CAPABILITIES.has(name)) throw new Error(`provider '${adapter.id}' has unknown capability '${name}'`);
     if (typeof capability !== "function") throw new Error(`provider '${adapter.id}' capability '${name}' must be a function`);
   }
+  if (adapter.rosterHydration !== undefined && !ROSTER_HYDRATION.has(adapter.rosterHydration)) {
+    throw new Error(`provider '${adapter.id}' rosterHydration must be one of: ${[...ROSTER_HYDRATION].join(", ")}`);
+  }
   return adapter;
 }
 
@@ -109,10 +121,11 @@ function configured(config, id, fallback) {
   return typeof block?.enabled === "boolean" ? block.enabled : fallback;
 }
 
-function descriptor({ id, runnerId, defaultEnabled, validateModel = () => null, capabilities = {} }) {
+function descriptor({ id, runnerId, defaultEnabled, validateModel = () => null, capabilities = {}, rosterHydration }) {
   return {
     id,
     runnerId,
+    ...(rosterHydration ? { rosterHydration } : {}),
     enabled: (config) => configured(config, id, defaultEnabled),
     validateTask: (task) => {
       const problem = validateModel(String(task?.model || ""));
@@ -226,13 +239,25 @@ export function defaultProviderAdapters({ codexAdapter, ollamaCapabilities = {} 
       id: "claude",
       runnerId: "claude",
       defaultEnabled: true,
+      rosterHydration: "local",
       validateModel: (model) => isClaudeModel(model) ? null : `model '${model}' is not a Claude model — provider "claude" needs a full id such as "claude-opus-5"`,
-      capabilities: { preflight: preflightClaude, discoverModels: readClaudeCatalog, readUsage: readClaudeUsage, billsInUsd: () => true, familyOf: claudeFamilyOf },
+      capabilities: {
+        preflight: preflightClaude,
+        discoverModels: readClaudeCatalog,
+        readUsage: readClaudeUsage,
+        billsInUsd: () => true,
+        familyOf: claudeFamilyOf,
+        rosterSource: (context = {}) => claudeCatalogIdentity(context?.env ?? process.env),
+        // The catalog is a local file whose change is an exact signal, so this
+        // provider ages on its identity, never on a clock.
+        rosterStale: (entry, context = {}) => entry?.source !== claudeCatalogIdentity(context?.env ?? process.env),
+      },
     }),
     descriptor({
       id: "ollama",
       runnerId: "claude",
       defaultEnabled: true,
+      rosterHydration: "network",
       validateModel: (model) => isClaudeModel(model) ? `model '${model}' is a Claude model — use "provider": "claude"` : null,
       capabilities: { preflight: pingOllamaEndpoint, ...ollamaCapabilities },
     }),
@@ -240,6 +265,7 @@ export function defaultProviderAdapters({ codexAdapter, ollamaCapabilities = {} 
       id: "codex",
       runnerId: "codex",
       defaultEnabled: false,
+      rosterHydration: "network",
     }),
   ];
 }

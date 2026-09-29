@@ -1,9 +1,7 @@
-import { mkdirSync, writeFileSync, readFileSync, renameSync } from "node:fs";
-import { join } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
-import { swarmHome } from "./config.mjs";
 import { modelDescriptor, OLLAMA_CLOUD_RE, identityOf, identityKey } from "./contracts.mjs";
 import { providerConfig } from "./providers.mjs";
+import { readRosterFile, writeRosterFile, writeRosterEnvelope, isPlainObject } from "./roster.mjs";
 
 // Model discovery — the ollama cloud catalog ONLY: recommendations ∪ /api/tags,
 // enriched free via /api/show, family-collapsed, size-ordered. `ollama list` and
@@ -300,10 +298,9 @@ export const ENTITLEMENT_RE = /uses extra usage only|extra usage balance is empt
 // and the next refresh restores it if the probe/dispatch stops 402ing.
 // Missing cache or entry is a silent no-op.
 export function removeCachedModel(model, env = process.env, provider) {
-  const p = join(swarmHome(env), "models-cache.json");
-  let cache;
-  try { cache = JSON.parse(readFileSync(p, "utf8")); } catch { return; }
-  const models = Array.isArray(cache?.models) ? cache.models : [];
+  let parsed;
+  try { parsed = readRosterFile(env); } catch { return; }
+  if (!parsed || typeof parsed !== "object") return;
   const wanted = identityOf(model);
   const wantedProvider = provider && identityOf({ model: wanted.model, provider }).provider;
   const matches = (row) => {
@@ -315,10 +312,23 @@ export function removeCachedModel(model, env = process.env, provider) {
     if (!row.provider || !wantedProvider) return true;
     return identity.provider === wantedProvider;
   };
-  if (!models.some(matches)) return;
-  cache.models = models.filter((m) => !matches(m));
-  writeFileSync(p + ".tmp", JSON.stringify(cache, null, 2) + "\n");
-  renameSync(p + ".tmp", p);
+  // An old-shape file has no entries to edit: the row leaves the flat list, so a
+  // 402 eviction is never a silent no-op on the way through the rebuild.
+  if (Array.isArray(parsed.models)) {
+    if (!parsed.models.some(matches)) return;
+    parsed.models = parsed.models.filter((row) => !matches(row));
+    writeRosterFile(parsed, env);
+    return;
+  }
+  const providers = isPlainObject(parsed.providers) ? parsed.providers : {};
+  let changed = false;
+  for (const [id, entry] of Object.entries(providers)) {
+    const rows = Array.isArray(entry?.models) ? entry.models : [];
+    if (!rows.some(matches)) continue;
+    providers[id] = { ...entry, models: rows.filter((row) => !matches(row)) };
+    changed = true;
+  }
+  if (changed) writeRosterEnvelope(providers, env);
 }
 
 // Bounded entitlement probe, discovery-refresh path only: a one-token generate at
@@ -427,19 +437,6 @@ export function createOllamaProviderAdapter(options = {}) {
   };
 }
 
-export function readModelsCache(env = process.env) {
-  const p = join(swarmHome(env), "models-cache.json");
-  try {
-    return JSON.parse(readFileSync(p, "utf8"));
-  } catch (error) {
-    // Missing file = first-ever install. Anything else (truncated, hand-edited)
-    // must be loud: silent null disarms the zero-row protection in
-    // refreshModelsCache and blanks the roster.
-    if (error?.code === "ENOENT") return null;
-    throw new Error(`models cache is unreadable: ${p} (${error?.message || error})`);
-  }
-}
-
 export function providerQualifiedModels(provider, models = []) {
   return models.map((row) => ({
     ...(typeof row === "object" && row ? row : { model: row }),
@@ -460,68 +457,4 @@ export function mergeProviderModelCaches(caches = []) {
     }
   }
   return [...merged.values()];
-}
-
-
-export function writeCompositeModelsCache(models, env = process.env) {
-  const dir = swarmHome(env);
-  mkdirSync(dir, { recursive: true });
-  const p = join(dir, "models-cache.json");
-  const qualified = mergeProviderModelCaches([models]);
-  writeFileSync(p + ".tmp", JSON.stringify({ updated: new Date().toISOString(), models: qualified }, null, 2) + "\n");
-  renameSync(p + ".tmp", p);
-  return p;
-}
-
-// Refresh only the providers named by discoverers. A failed provider keeps its
-// previous rows while successful providers are replaced atomically in one file.
-export async function refreshModelsCache({
-  config = {},
-  env = process.env,
-  providers,
-  registry,
-  discoverers = {},
-  fetchImpl,
-  spawnImpl,
-  rich = false,
-} = {}) {
-  const cached = readModelsCache(env);
-  const existing = Array.isArray(cached?.models) ? cached.models : [];
-  const byProvider = new Map();
-  for (const row of existing) {
-    const provider = row?.provider || "ollama";
-    if (!byProvider.has(provider)) byProvider.set(provider, []);
-    byProvider.get(provider).push({ ...row, provider });
-  }
-  const errors = {};
-  const targets = providers || (registry
-    ? registry.list().filter((adapter) => adapter.enabled(config) && adapter.capabilities.discoverModels).map((adapter) => adapter.id)
-    : ["ollama"]);
-  for (const provider of targets) {
-    const discover = discoverers[provider]
-      || (registry ? registry.capability(provider, "discoverModels") : null)
-      || (provider === "ollama" ? (context) => discoverOllamaModels(context.config, context) : null);
-    if (!discover) continue;
-    try {
-      const rows = await discover({ config, env, fetchImpl, spawnImpl, rich });
-      if (!rows.length) {
-        // A resolve with zero rows (an empty 200, a provider mid-outage) is not
-        // the same answer as "this provider has no models". Where a roster is
-        // already cached, keep it and say so; a first-ever empty is written.
-        const cached = mergeProviderModelCaches([readModelsCache(env)?.models || []])
-          .filter((row) => row.provider === provider);
-        if (cached.length) {
-          byProvider.set(provider, cached);
-          errors[provider] = `model discovery returned no rows for ${provider} — kept the ${cached.length} cached model(s)`;
-          continue;
-        }
-      }
-      byProvider.set(provider, providerQualifiedModels(provider, rows));
-    } catch (error) {
-      errors[provider] = error?.message || String(error);
-    }
-  }
-  const models = mergeProviderModelCaches([...byProvider.values()]);
-  const path = writeCompositeModelsCache(models, env);
-  return { models, path, errors };
 }
