@@ -33,8 +33,8 @@ test("the heartbeat advances while the main thread is blocked", async () => {
   }
 });
 
-// The writer runs in its own worker and counts what it throws: a lost beat is a writer error
-// (rename's EPERM on Windows) whatever the load, where a beat-rate floor starves on a busy box.
+// The writer runs in its own worker and counts what it throws: a lost beat is a write that
+// throws against the reader, whatever the load, where a beat-rate floor starves on a busy box.
 const WRITER = `
 const { workerData, parentPort } = require("node:worker_threads");
 import(workerData.url).then(({ touchHeartbeat }) => {

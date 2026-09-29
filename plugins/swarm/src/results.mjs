@@ -189,9 +189,9 @@ export function recordedSessionIds(dir) {
 
 // ── liveness control files ────────────────────────────────────────────────────
 // heartbeat: one line, ISO timestamp + pid, overwritten in place on every tick — the
-// file's own mtime IS the liveness signal. Never truncated and never renamed: a
-// truncating write shows readers an empty file, and on Windows rename throws EPERM
-// against a concurrent reader.
+// file's own mtime IS the liveness signal. Never renamed, and never truncated once the
+// line's width is set: a truncating write shows readers an empty file, and on Windows
+// rename throws EPERM against a concurrent reader.
 // stop: presence alone is the signal — `swarm stop` creates it, the engine
 // notices it on its next heartbeat tick. A fresh engine clears it on start
 // (see runPlan) so a resumed run isn't stopped by its predecessor's marker.
