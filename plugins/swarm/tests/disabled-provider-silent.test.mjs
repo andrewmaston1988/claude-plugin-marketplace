@@ -16,6 +16,7 @@ import { costSections } from "../src/cost.mjs";
 import { createServer } from "../src/serve/server.mjs";
 import { runCli } from "./helpers/cli.mjs";
 import { loadPerfViews, H } from "./helpers/perf-views-harness.mjs";
+import { hub, COST } from "./helpers/overview-hub.mjs";
 
 const RECORD = new URL("./helpers/record-fetch.mjs", import.meta.url).href;
 const fixture = (name) => readFileSync(new URL(`./fixtures/${name}`, import.meta.url), "utf8");
@@ -183,6 +184,7 @@ test("/api/cost with codex disabled carries no codex section and the dashboard f
   ok(!body.sections.some((s) => s.provider === "codex"), "no codex section");
   ok(!/codex|gpt-/i.test(JSON.stringify(body)), "nothing in the payload names codex or a gpt model");
   ok(!rec.urls.some((u) => u.includes(OPENAI)), `the dashboard's price refresh reached codex's vendor: ${rec.urls}`);
+  ok(rec.urls.some((u) => CLAUDE_HOSTS.test(u)), `an enabled vendor is still refreshed by the dashboard: ${rec.urls}`);
 });
 
 test("/api/cost with only codex enabled carries no claude section and no anthropic request", async () => {
@@ -227,4 +229,11 @@ test("grading off: the cost page draws no best-value card and no 'not graded yet
 test("grading on with no grades still says 'not graded yet'", () => {
   const html = loadPerfViews().costScreen(priced(true), H);
   ok(html.includes("not graded yet") && html.includes("chero"));
+});
+
+test("the Overview flyout draws no best-value section when grading is off, and does when it is on", async () => {
+  const off = await hub({ cost: { ...COST, grading: false } });
+  equal(off.findByClass("chero").length, 0, "no value hero without grades");
+  ok(!/not graded yet|best value/.test(off.findByClass("ovpanel")[0].textContent), "and no reason for one");
+  equal((await hub({ cost: { ...COST, grading: true } })).findByClass("chero").length, 2, "grading on keeps them");
 });
