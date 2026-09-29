@@ -38,10 +38,11 @@ const CHROME = [
   "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
 ];
 
-// One project with a live run and six finished ones: a live card above, and a finished
+// One project with two live runs and six finished ones: two live cards, and a finished
 // stack deep enough that a misaligned column shows up as a row-to-row difference.
 const PROJECT = "C--code-probe";
 const LIVE = { project: PROJECT, name: "live-run", active: true, aborted: false, stopped: false, mtimeMs: Date.now(), group: PROJECT, groupLabel: "probe", startedMs: Date.now() - 60_000, finishedMs: null, byState: { running: 2, ok: 1 }, leaves: 3, waves: 1, tokens: 48_000, hasDigest: false };
+const LIVE_2 = { ...LIVE, name: "live-run-2" };
 const FINISHED = Array.from({ length: 6 }, (_, i) => ({
   project: PROJECT, name: `finished-run-${i}`, active: false, aborted: false, stopped: false,
   mtimeMs: Date.now() - (i + 1) * 3_600_000, group: PROJECT, groupLabel: "probe",
@@ -78,6 +79,19 @@ const MEASURE = `(() => {
   };
 })()`;
 
+// The loading skeleton, drawn alone in main as skeletonFor draws it, for a list screen and
+// for a run: its blocks' width is compared with the Runs screen's own section, so "the
+// skeleton is as wide as the screen it stands in for" is two measured boxes.
+const SKELETON_MEASURE = `(() => {
+  const main = document.querySelector("#main"), was = main.innerHTML, w = {};
+  for (const view of ["runs", "run"]) {
+    main.innerHTML = '<div class="skeleton" data-view="' + view + '"><div class="sk"></div></div>';
+    w[view] = Math.round(main.querySelector(".sk").getBoundingClientRect().width * 10) / 10;
+  }
+  main.innerHTML = was;
+  return w;
+})()`;
+
 // The hub's own quantities: where the feed's edges land, and where the flyout's right edge
 // lands once it is open. Read as a function so the same expression serves the closed, open
 // and re-closed reads — the three are compared to each other, so they must be one query.
@@ -95,6 +109,24 @@ const HUB_MEASURE = `(() => {
     mainOverflow: main.scrollWidth - main.clientWidth,
     vw: window.innerWidth,
   };
+})()`;
+
+// A live run opened in place: the hub draws its .ovrun straight after the card (desktop.js
+// openBeneath). The opened run's own content needs a run on disk, so the probe stands in a
+// block of fixed height where it lands — what is measured is where the grid puts that
+// block and the card beside it, which the stylesheet alone decides.
+const OPEN_LIVE_MEASURE = `(() => {
+  const r1 = (n) => Math.round(n * 10) / 10;
+  const cards = [...document.querySelectorAll(".ovfeed > .rcard")];
+  if (cards.length < 2) return { missing: "fewer than two live cards on the hub" };
+  const open = document.createElement("div");
+  open.className = "ovrun"; open.style.height = "120px";
+  cards[0].after(open);
+  const [a, b] = cards.map((c) => c.getBoundingClientRect()), o = open.getBoundingClientRect();
+  const feed = document.querySelector(".ovfeed").getBoundingClientRect();
+  open.remove();
+  const box = (r) => ({ left: r1(r.left), right: r1(r.right), top: r1(r.top), bottom: r1(r.bottom) });
+  return { feed: box(feed), first: box(a), second: box(b), open: box(o), cardGap: r1(parseFloat(getComputedStyle(cards[0]).marginTop)) };
 })()`;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -207,6 +239,7 @@ async function measure(client, pass) {
   }
   await sleep(150); // settle the re-render before reading boxes
   const m = await evaluate(client, MEASURE);
+  if (pass.desktop) m.skel = await evaluate(client, SKELETON_MEASURE);
   if (missing) m.missing = missing;
   return m;
 }
@@ -234,6 +267,7 @@ async function measureHub(client, pass) {
   await evaluate(client, click);
   await sleep(200);
   m.reclosed = await evaluate(client, HUB_MEASURE);
+  m.openLive = await evaluate(client, OPEN_LIVE_MEASURE);
   return m;
 }
 
@@ -260,6 +294,9 @@ function check(pass, m, failures) {
         if (Math.abs(row[i] - head[i]) > TOL_PX) failures.push(`${tag}: column ${i} drifts ${r2(row[i] - head[i])}px from the header`);
       }
     }
+    // A list screen's skeleton spans the screen it stands in for; a run's keeps the run's cap.
+    if (m.skel && m.secW != null && Math.abs(m.skel.runs - m.secW) > TOL_PX) failures.push(`${tag}: the Runs skeleton is ${m.skel.runs}px, the Runs screen's sections are ${m.secW}px`);
+    if (m.skel && m.skel.run > 1100 + TOL_PX) failures.push(`${tag}: the run skeleton is ${m.skel.run}px, past the run screen's 1100px cap`);
     // The fr tracks, as the ratio of the widths the four cells actually got.
     if (!m.cols.length) failures.push(`${tag}: the header cells were not measured (.rhead missing)`);
     else m.cols.forEach((w, i) => {
@@ -303,6 +340,18 @@ function checkHub(pass, m, failures, runsSecW) {
     if (m.open.panelRight > m.open.vw + TOL_PX) failures.push(`${tag}: the flyout's right edge ${m.open.panelRight} is past the viewport's ${m.open.vw}`);
     if (m.open.feedW >= m.closed.feedW) failures.push(`${tag}: opening the flyout did not take a track (feed ${m.open.feedW}px, was ${m.closed.feedW}px)`);
   }
+  // The hub's live runs are an accordion: every card spans the feed, and an opened run
+  // drops beneath its own card, on the card's edges, at the gap the cards keep, with the
+  // next card after it.
+  const ol = m.openLive;
+  if (!ol || ol.missing) failures.push(`${tag}: ${ol ? ol.missing : "no open-live measurement"}`);
+  else {
+    for (const [what, b] of [["first card", ol.first], ["second card", ol.second], ["open run", ol.open]]) {
+      if (Math.abs(b.left - ol.feed.left) > TOL_PX || Math.abs(b.right - ol.feed.right) > TOL_PX) failures.push(`${tag}: the ${what} spans ${b.left}–${b.right}, not the feed's ${ol.feed.left}–${ol.feed.right}`);
+    }
+    if (Math.abs(ol.open.top - ol.first.bottom - ol.cardGap) > TOL_PX) failures.push(`${tag}: the open run starts ${r2(ol.open.top - ol.first.bottom)}px under its card, not the cards' ${ol.cardGap}px gap`);
+    if (ol.second.top < ol.open.bottom) failures.push(`${tag}: the second card (top ${ol.second.top}) is not below the open run (bottom ${ol.open.bottom})`);
+  }
   if (m.reclosed && Math.abs(m.reclosed.feedW - m.closed.feedW) > TOL_PX) {
     failures.push(`${tag}: re-shutting the flyout left the feed at ${m.reclosed.feedW}px, not ${m.closed.feedW}px`);
   }
@@ -316,7 +365,7 @@ async function main() {
   const exe = findBrowser();
   home = mkdtempSync(join(tmpdir(), "swarm-desktop-probe-"));
   profile = mkdtempSync(join(tmpdir(), "swarm-desktop-profile-"));
-  const rows = [LIVE, ...FINISHED];
+  const rows = [LIVE, LIVE_2, ...FINISHED];
   const estate = { current: () => Promise.resolve({ version: 1, rows }), refresh() {}, onSnapshot() {}, close() {} };
   const cfg = { dashboard: { port: 0, bind: "127.0.0.1", token: null }, grading: true };
   const server = createServer({ home, cfg, _estate: estate, _watch: () => ({ close() {} }), _heartbeatMs: 60_000, _pollMs: 60_000 });
@@ -350,12 +399,12 @@ async function main() {
         checkHub(pass, m, failures, runsSecW.get(pass.width));
         const shut = m.closed ? `${m.closed.feedW}px` : "—";
         const open = m.open ? `${m.open.feedW}px flyout -> ${m.open.panelRight} of ${m.open.vw}` : "—";
-        console.log(`${pass.name.padEnd(18)} ${String(m.closed ? m.closed.vw : pass.width).padStart(4)}px  feed shut ${shut.padStart(7)}  open ${open}  overflow ${m.closed ? `${m.closed.rootOverflow}/${m.open ? m.open.rootOverflow : "-"}` : "-"}`);
+        console.log(`${pass.name.padEnd(18)} ${String(m.closed ? m.closed.vw : pass.width).padStart(4)}px  feed shut ${shut.padStart(7)}  open ${open}  overflow ${m.closed ? `${m.closed.rootOverflow}/${m.open ? m.open.rootOverflow : "-"}` : "-"}  open-live ${m.openLive && !m.openLive.missing ? `gap ${r2(m.openLive.open.top - m.openLive.first.bottom)}px, card ${m.openLive.first.left}–${m.openLive.first.right}, run ${m.openLive.open.left}–${m.openLive.open.right}` : "—"}`);
       } else {
         check(pass, m, failures);
         if (m.secW != null) runsSecW.set(pass.width, m.secW);
         const cols = m.cols.length ? `  tracks ${m.cols.join(" / ")}` : "";
-        console.log(`${pass.name.padEnd(18)} ${String(m.vw).padStart(4)}px  sidebar ${String(m.navW).padStart(6)}  main ${String(m.mainW).padStart(6)}  gap ${String(r2(m.mainLeft - m.navRight)).padStart(5)}  section ${String(m.secW).padStart(6)}  overflow ${m.rootOverflow}/${m.mainOverflow}${cols}`);
+        console.log(`${pass.name.padEnd(18)} ${String(m.vw).padStart(4)}px  sidebar ${String(m.navW).padStart(6)}  main ${String(m.mainW).padStart(6)}  gap ${String(r2(m.mainLeft - m.navRight)).padStart(5)}  section ${String(m.secW).padStart(6)}  skeleton ${m.skel ? `${m.skel.runs}/${m.skel.run}` : "—"}  overflow ${m.rootOverflow}/${m.mainOverflow}${cols}`);
       }
     }
     console.log(`\n${PASSES.length} passes, tolerance ${TOL_PX}px and ${TOL_FR * 100}% on the fr ratio`);

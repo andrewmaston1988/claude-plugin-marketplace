@@ -30,6 +30,9 @@
     const done = runs.filter((r) => !r.active).sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, HUB_FINISHED);
     const sec = (label) => `<div class="section"><span>${esc(label)}</span><span class="line"></span></div>`;
     const keyOf = (r) => esc(`${r.project}/${r.name}`);
+    // The open run, drawn straight after its own row or card in whichever list holds it.
+    const openBeneath = (r, tag) => (expanded && expanded.key === `${r.project}/${r.name}`
+      ? `<${tag} class="${expanded.leaf ? "ovleaf" : "ovrun"}" data-key="ov:${keyOf(r)}">${expanded.html}</${tag}>` : "");
     // Every widget in the panel is perf.js's, so a /perf.js that never arrived
     // (loadPerfJs swallows its onerror) leaves the run feed as the whole hub — which is
     // why the feed needs nothing from it, and why a toggle for a panel that cannot open
@@ -38,12 +41,11 @@
     const panel = V && (usage || cost);
     const open = panel && flyout;
     let feed = "";
-    if (live.length) feed += sec("live") + live.map((r) => runRow(r)).join("");
+    if (live.length) feed += sec("live") + live.map((r) => runRow(r, false, labels, false, true) + openBeneath(r, "div")).join("");
     if (done.length) {
       // The open run is injected straight after its own row, in the same list, so it
       // re-renders with the feed the poll rebuilds — never as a second screen.
-      feed += sec("finished") + `<ul>${done.map((r) => runRow(r, true, labels, false, true)
-        + (expanded && expanded.key === `${r.project}/${r.name}` ? `<li class="${expanded.leaf ? "ovleaf" : "ovrun"}" data-key="ov:${keyOf(r)}">${expanded.html}</li>` : "")).join("")}</ul>`;
+      feed += sec("finished") + `<ul>${done.map((r) => runRow(r, true, labels, false, true) + openBeneath(r, "li")).join("")}</ul>`;
     }
     if (!feed) feed = h.noRuns;
     // The toggle heads the sidebar's own column, open or shut, so it reads as the panel's
