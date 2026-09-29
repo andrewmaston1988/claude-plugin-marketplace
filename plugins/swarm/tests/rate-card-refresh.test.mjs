@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { deepEqual, equal, ok, rejects, throws } from "node:assert/strict";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -76,6 +76,16 @@ test("overlay: a fresh read does not inherit the seed's hand-noted expiry", () =
   equal(CODEX_RATE_CARD_SEED.staleAfter, "2026-11-21", "the seed itself still carries it");
 });
 
+test("overlay: the back-off marker stays in the store, never on the card", () => {
+  // Nothing reads it off a card: the banner judges `asOf`, `staleAfter` and the
+  // roster, and the retry decision reads the raw store.
+  const card = overlayRateCard(CLAUDE_RATE_CARD_SEED, {
+    asOf: "2026-10-01T12:00:00Z", prices: { "claude-sonnet-5": { input: 2, output: 10 } },
+    lastFailedAt: "2026-10-01T13:00:00Z",
+  });
+  equal(card.lastFailedAt, undefined, "RED: a store marker rode onto a card nothing reads it from");
+});
+
 test("overlay: a card the vendor has dropped goes unpriced rather than lingering", () => {
   const seed = { ...CODEX_RATE_CARD_SEED };
   const card = overlayRateCard(seed, { asOf: "2026-10-01T00:00:00Z", prices: { "gpt-6-luna": { input: 1, output: 2 } } });
@@ -103,6 +113,15 @@ test("staleness: 11h is fresh, 13h is stale, and an asOf that will not parse is 
   // A seed's date-only asOf parses as midnight UTC, so a fresh install is stale
   // on first use and re-reads rather than ranking on a hand-read for 12 hours.
   equal(isRateCardStale(at("2026-10-02"), { now }), true);
+});
+
+test("staleness: the 12h boundary itself — an instant under it is fresh, the mark is stale", () => {
+  const asOf = Date.parse("2026-10-02T00:00:00Z");
+  const card = { asOf: new Date(asOf).toISOString() };
+  // Stepped in a literal 12h, not RATE_CARD_REFRESH_HOURS: against the constant
+  // the boundary would move with it and the pin would never bite.
+  equal(isRateCardStale(card, { now: asOf + 12 * 3600e3 - 1 }), false, "RED: an instant inside the window was called stale");
+  equal(isRateCardStale(card, { now: asOf + 12 * 3600e3 }), true, "RED: the 12h mark itself must be stale");
 });
 
 test("staleness: an explicit expiry expires a card inside the window, and only then", () => {
@@ -186,10 +205,101 @@ test("a parse that has lost the seed's base model is refused, not banked", async
   deepEqual(readRateCardStore(path).claude.prices, good.claude.prices, "RED: a base-less parse was banked");
 });
 
-test("refreshStaleRateCards: a failed attempt backs every surface off for an hour", async () => {
+test("refresh: a failure never writes back a snapshot taken before another writer banked", async () => {
+  const path = storePath();
+  const pages = servePages();
+  await refreshRateCards({ path, _fetch: pages, now: new Date("2026-10-01T12:00:00Z") });
+  const now = new Date("2026-10-02T12:00:00Z");
+
+  // The other writer — the daemon against the CLI — banks a fresh claude card
+  // inside this run's read-to-write window: the store is read at the top of the
+  // refresh, and written again on claude's failure, minutes of fetching later.
+  const other = {
+    url: "https://example.test/pricing.md",
+    asOf: "2026-10-02T11:59:00.000Z",
+    prices: { "claude-sonnet-5": { input: 9, output: 9 } },
+  };
+  await rejects(refreshRateCards({
+    path, now,
+    _fetch: async (url) => {
+      if (url.includes("openai")) return pages(url);
+      writeFileSync(path, JSON.stringify({ ...readRateCardStore(path), claude: other }), "utf8");
+      return { ok: false, status: 503 };
+    },
+  }), /503/);
+
+  const store = readRateCardStore(path);
+  equal(store.claude.asOf, other.asOf, "RED: the failure path reverted a card another writer had just banked");
+  deepEqual(store.claude.prices, other.prices, "RED: the failure path put stale prices back over a fresher read");
+  equal(store.claude.lastFailedAt, now.toISOString(), "RED: the failure must still be banked");
+  equal(store.codex.asOf, now.toISOString(), "RED: this run's own banked provider went down with the write");
+});
+
+test("refresh: a partial refresh never writes back a card another writer banked meanwhile", async () => {
+  const path = storePath();
+  const pages = servePages();
+  await refreshRateCards({ path, _fetch: pages, now: new Date("2026-10-01T12:00:00Z") });
+  const now = new Date("2026-10-02T12:00:00Z");
+
+  // A run that reads codex alone — what the per-provider back-off produces — and
+  // the other writer banked claude inside its window.
+  const other = {
+    url: "https://example.test/pricing.md",
+    asOf: "2026-10-02T11:59:00.000Z",
+    prices: { "claude-sonnet-5": { input: 9, output: 9 } },
+  };
+  await refreshRateCards({
+    path, now, providers: [RATE_CARD_SOURCES[0]],
+    _fetch: async (url) => {
+      writeFileSync(path, JSON.stringify({ ...readRateCardStore(path), claude: other }), "utf8");
+      return pages(url);
+    },
+  });
+
+  const store = readRateCardStore(path);
+  equal(store.claude.asOf, other.asOf, "RED: a codex-only refresh wrote its opening snapshot back over a fresh claude card");
+  deepEqual(store.claude.prices, other.prices);
+  equal(store.codex.asOf, now.toISOString(), "RED: the provider that was read did not land");
+});
+
+test("refresh: a foreign writer's temp at the shared name never blocks the bank", async () => {
+  const path = storePath();
+  // The name a fixed `${path}.tmp` collides on: two writers racing for it leave
+  // the loser renaming a file the winner has already taken.
+  mkdirSync(`${path}.tmp`);
+  const summaries = await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-01T12:00:00Z") });
+
+  deepEqual(summaries.map((s) => s.provider), ["codex", "claude"]);
+  equal(readRateCardStore(path).claude.asOf, "2026-10-01T12:00:00.000Z");
+});
+
+test("refreshStaleRateCards: one vendor's back-off does not hold the other's prices stale", async () => {
+  const path = storePath();
+  const now = Date.parse("2026-10-02T12:00:00Z");
+  await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-01T12:00:00Z") });
+  // codex's page moved and failed a minute ago; claude's is reachable and its card
+  // is a day old. Holding claude back costs a full day of a price it can re-read.
+  const store = readRateCardStore(path);
+  store.codex = { ...store.codex, lastFailedAt: new Date(now - 60e3).toISOString() };
+  writeFileSync(path, JSON.stringify(store), "utf8");
+
+  const asked = [];
+  const pages = servePages();
+  const result = await refreshStaleRateCards({
+    out: () => {}, err: () => {}, path, now,
+    _fetch: async (url) => { asked.push(url.includes("openai") ? "codex" : "claude"); return pages(url); },
+  });
+
+  deepEqual(result.refreshed, ["claude"], "RED: a healthy provider was held back by another vendor's back-off");
+  deepEqual(asked, ["claude"], "RED: the provider that backed off was asked again");
+  equal(readRateCardStore(path).claude.asOf, new Date(now).toISOString(), "RED: the reachable vendor's prices were left stale");
+  equal(readRateCardStore(path).codex.lastFailedAt, new Date(now - 60e3).toISOString(),
+    "RED: the back-off marker was cleared without a successful read");
+});
+
+test("refreshStaleRateCards: a failed attempt backs that provider off for an hour", async () => {
   const path = storePath();
   await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-01T12:00:00Z") });
-  const banked = readRateCardStore(path);
 
   const failedAt = Date.parse("2026-10-02T12:00:00Z");
   let calls = 0;
@@ -203,22 +313,28 @@ test("refreshStaleRateCards: a failed attempt backs every surface off for an hou
   equal(readRateCardStore(path).codex.lastFailedAt, new Date(failedAt).toISOString(), "RED: a failed attempt must be banked");
   ok(errs.some((line) => /could not be refreshed/.test(line)), "RED: a failed refresh must say so");
 
-  // 59 minutes later the card is still stale, but the failure is not retried.
+  // 59 minutes later codex is not retried — but claude, which has never failed,
+  // still is. One vendor's dead page must not hold the other's prices stale.
   const second = await refreshStaleRateCards({ ...io, path, _fetch: offline, now: failedAt + 59 * 60e3 });
-  deepEqual(second, { refreshed: [], failed: [], skipped: true },
-    "RED: an offline machine must not re-fetch on every cost query");
-  equal(calls, 1);
-
-  // Past the hour it tries again — the card is still stale and still unpriced.
-  const third = await refreshStaleRateCards({ ...io, path, _fetch: offline, now: failedAt + 61 * 60e3 });
+  deepEqual(second.failed, ["claude"]);
   equal(calls, 2);
-  deepEqual(third.failed, ["codex"]);
+
+  // Both have now failed, so a call inside the hour fetches nothing at all.
+  const third = await refreshStaleRateCards({ ...io, path, _fetch: offline, now: failedAt + 59.5 * 60e3 });
+  deepEqual(third, { refreshed: [], failed: [], skipped: true },
+    "RED: an offline machine must not re-fetch on every cost query");
+  equal(calls, 2);
+
+  // Past codex's hour the back-off lifts — the card is still stale and unpriced.
+  const fourth = await refreshStaleRateCards({ ...io, path, _fetch: offline, now: failedAt + 61 * 60e3 });
+  equal(calls, 3);
+  deepEqual(fourth.failed, ["codex"]);
 
   // A card that is not stale is never fetched at all.
   await refreshRateCards({ path, _fetch: servePages(), now: new Date("2026-10-02T18:00:00Z") });
   const quiet = await refreshStaleRateCards({ ...io, path, _fetch: offline, now: Date.parse("2026-10-02T19:00:00Z") });
   deepEqual(quiet, { refreshed: [], failed: [], skipped: true });
-  equal(calls, 2);
+  equal(calls, 3);
 });
 
 test("refreshStaleRateCards: a refresh banks the card and reports what moved", async () => {

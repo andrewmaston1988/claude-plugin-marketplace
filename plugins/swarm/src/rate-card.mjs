@@ -104,7 +104,9 @@ export function readRateCardStore(path = rateCardStorePath()) {
 
 function writeRateCardStore(store, path = rateCardStorePath()) {
   mkdirSync(dirname(path), { recursive: true });
-  const tmp = `${path}.tmp`;
+  // Per-writer temp: the daemon and the CLI both bank here, and a shared name
+  // makes the loser's rename throw ENOENT after the winner already took it.
+  const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(store, null, 2), "utf8");
   renameSync(tmp, path);
 }
@@ -128,7 +130,9 @@ export function overlayRateCard(seed, banked) {
     prices: banked.prices,
     refreshedFrom: banked.url,
     ...(banked.rosterIds ? { rosterIds: banked.rosterIds } : {}),
-    ...(banked.lastFailedAt ? { lastFailedAt: banked.lastFailedAt } : {}),
+    // `lastFailedAt` is the back-off marker, read from the raw store by whoever
+    // decides whether to retry. On the card it read as "the banner knows" when
+    // nothing but the raw read ever consulted it.
   };
 }
 
@@ -153,10 +157,10 @@ export function assertPlausible(provider, prices, seed) {
 
 // A failure banks `lastFailedAt` and rethrows carrying the provider and the
 // summaries of the providers already banked; the caller's error path reads both.
-export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fetch, now = new Date(), rosterIds } = {}) {
+export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fetch, now = new Date(), rosterIds, providers = RATE_CARD_SOURCES } = {}) {
   const store = readRateCardStore(path);
   const summaries = [];
-  for (const { provider, url, parse, seed } of RATE_CARD_SOURCES) {
+  for (const { provider, url, parse, seed } of providers) {
     try {
       const res = await _fetch(url);
       if (!res.ok) throw new Error(`${provider}: ${url} -> ${res.status}`);
@@ -169,8 +173,14 @@ export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fe
       };
       summaries.push({ provider, url, rows: Object.keys(prices).length, changes: diffPrices(before, prices) });
     } catch (e) {
-      store[provider] = { ...store[provider], lastFailedAt: now.toISOString() };
-      writeRateCardStore(store, path);
+      // Re-read before writing: another writer (the daemon against the CLI) may
+      // have banked a fresh card in the read-to-write window, and writing this
+      // run's opening snapshot back would revert it and bank an hour of back-off
+      // over prices that were just re-read.
+      const fresh = readRateCardStore(path);
+      for (const { provider: banked } of summaries) fresh[banked] = store[banked];
+      fresh[provider] = { ...fresh[provider], lastFailedAt: now.toISOString() };
+      writeRateCardStore(fresh, path);
       e.provider = provider;
       // The providers before this one are banked by the write above; their
       // summaries ride the throw so the caller can report them as refreshed.
@@ -178,14 +188,19 @@ export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fe
       throw e;
     }
   }
-  writeRateCardStore(store, path);
+  // The same re-read as the failure path: a partial refresh (the other provider is
+  // backed off) must not put its opening snapshot back over a fresher bank.
+  const fresh = readRateCardStore(path);
+  for (const { provider } of summaries) fresh[provider] = store[provider];
+  writeRateCardStore(fresh, path);
   return summaries;
 }
 
 /**
  * What moved between two price tables — the whole point of running a refresh.
- * Both sides resolve by the same prefix rule the pricing does, so a dated id the
- * published table lists undated reads as unchanged rather than as dropped-and-added.
+ * Both sides resolve by the rule the pricing does — an exact key, or a trailing
+ * published date — so a dated id the table lists undated reads as unchanged
+ * rather than as dropped-and-added.
  */
 export function diffPrices(before, after) {
   const changes = [];
@@ -249,6 +264,62 @@ export function rateCards(path = rateCardStorePath()) {
   const cards = loadRateCards(path);
   cache.set(path, { mtimeMs, cards });
   return cards;
+}
+
+const money = (p) => (p == null ? "—" : `$${p.input}/$${p.output}`);
+
+export function reportCardChanges(out, { provider, url, rows, changes }) {
+  out(`── ${provider} — ${rows} models from ${url}`);
+  if (!changes.length) {
+    out("   no change");
+  } else {
+    for (const c of changes) {
+      out(c.kind === "repriced"
+        ? `   ${c.model.padEnd(28)} ${money(c.from)} -> ${money(c.to)}`
+        : `   ${c.model.padEnd(28)} ${c.kind}${c.to ? ` at ${money(c.to)}` : ""}`);
+    }
+  }
+  out("");
+}
+
+/**
+ * No flag gates this: a stale card ranks models on prices the vendor has already
+ * changed, and that is never what anyone wants. Best-effort — offline, the cached
+ * card stands and its own stale banner already says so.
+ *
+ * The back-off lives in the store, not in a caller's memory, and it is per
+ * provider: one vendor's moved page must not hold a healthy vendor's prices stale
+ * for the hour. `rosterIds` is per provider, banked with the read so a model
+ * arriving later re-prices the card.
+ *
+ * A skip writes nothing: the daemon asks on every cost request, and a line per
+ * poll is noise. `skipped` is the report.
+ */
+export async function refreshStaleRateCards({ out, err, path = rateCardStorePath(), _fetch = fetch, now = Date.now(), rosterIds } = {}) {
+  const at = typeof now === "number" ? new Date(now) : now;
+  const store = readRateCardStore(path);
+  const pending = RATE_CARD_SOURCES.filter(({ provider }) => {
+    const failedAt = Date.parse(store[provider]?.lastFailedAt ?? "");
+    return !(Number.isFinite(failedAt) && at.getTime() - failedAt < RATE_CARD_FAILED_BACKOFF_HOURS * 3600e3);
+  });
+
+  const cards = rateCards(path);
+  const stale = pending.some(({ provider }) =>
+    isRateCardStale(cards[provider], { now: at.getTime(), rosterIds: rosterIds?.[provider] }));
+  if (!stale) return { refreshed: [], failed: [], skipped: true };
+
+  try {
+    const summaries = await refreshRateCards({ path, _fetch, now: at, rosterIds, providers: pending });
+    for (const summary of summaries) if (summary.changes.length) reportCardChanges(out, summary);
+    return { refreshed: summaries.map((s) => s.provider), failed: [], skipped: false };
+  } catch (e) {
+    // Whatever banked before the failure is banked — reported as refreshed, so the
+    // message never calls a provider that just re-priced itself "cached".
+    const banked = e.summaries ?? [];
+    for (const summary of banked) if (summary.changes.length) reportCardChanges(out, summary);
+    err(`rate cards: ${e.provider ?? "a provider"} could not be refreshed (${e.message}) — its card stays cached`);
+    return { refreshed: banked.map((s) => s.provider), failed: [e.provider].filter(Boolean), skipped: false };
+  }
 }
 
 export { resolveRatePrice };

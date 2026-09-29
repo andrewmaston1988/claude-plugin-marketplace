@@ -246,8 +246,8 @@ export function supersededByMap(rows, { providerKey = () => "unqualified", isDen
 // The same reading applied to a table: superseded rows leave, unless `keep` says
 // otherwise — a card's base model is the unit every other row is a multiple of,
 // so it is never the row that goes.
-export function dropSuperseded(rows, { providerKey = () => "unqualified", keep = () => false, cloudSuffix = ":cloud" } = {}) {
-  const superseded = supersededByMap(rows, { providerKey, cloudSuffix });
+export function dropSuperseded(rows, { providerKey = () => "unqualified", keep = () => false, cloudSuffix = ":cloud", isDenylisted = () => false } = {}) {
+  const superseded = supersededByMap(rows, { providerKey, cloudSuffix, isDenylisted });
   return rows.filter((row) => keep(row) || !superseded.has(supersessionKey(providerKey(row), row.model)));
 }
 

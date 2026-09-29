@@ -2,6 +2,7 @@ import { test } from "node:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
 import { costView } from "../src/serve/perf-views.mjs";
 import { costSections } from "../src/cost.mjs";
+import { dropSuperseded } from "../src/discovery.mjs";
 import { rateCards } from "../src/rate-card.mjs";
 import { H, loadPerfViews } from "./helpers/perf-views-harness.mjs";
 import { snap, seg } from "./helpers/cost-snapshots.mjs";
@@ -193,6 +194,18 @@ test("the perf model page keeps the cost chip for a superseded model", () => {
 // `swarm cost` prints one section per provider, and it is the same table the
 // dashboard draws — so it drops the same rows, by the same reading, with no
 // denylist of its own.
+test("dropSuperseded honours the denylist it is handed, as supersededByMap does", () => {
+  // The table form shares the map's reading; an option it swallowed in silence
+  // would be a no-op that no caller could see.
+  const rows = [{ provider: "claude", model: "claude-opus-5" }, { provider: "claude", model: "claude-opus-5-5" }];
+  const providerKey = (row) => row.provider;
+
+  deepEqual(dropSuperseded(rows, { providerKey, isDenylisted: (model) => model === "claude-opus-5-5" })
+    .map((row) => row.model), ["claude-opus-5", "claude-opus-5-5"],
+  "RED: a denylisted superseder still hid its elder");
+  deepEqual(dropSuperseded(rows, { providerKey }).map((row) => row.model), ["claude-opus-5-5"]);
+});
+
 test("costSections: drops superseded rows and counts them", () => {
   const section = costSections({
     providers: ["claude"],

@@ -10,9 +10,8 @@ import { readRun, projectKeys, resultSuperseded, resolveTaskId } from "../runlog
 import { DIGEST_ID } from "../digest.mjs";
 import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
-import { costRowsFor, rateCardRows, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
-import { rateCardStorePath, rateCards } from "../rate-card.mjs";
-import { refreshStaleRateCards } from "../rate-card-cli.mjs";
+import { costRowsFor, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
+import { rateCardStorePath, rateCards, refreshStaleRateCards } from "../rate-card.mjs";
 import { readModelsCache } from "../discovery.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
@@ -356,9 +355,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
         .finally(() => { priceRefreshInFlight = false; });
     }
     const cards = rateCards(rateCardPath);
-    return COST_PROVIDERS.flatMap((provider) => cards[provider]
-      ? rateCardRows(cards[provider], roster[provider] || [])
-      : costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps }));
+    return COST_PROVIDERS.flatMap((provider) =>
+      costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps, cards }));
   };
   const rankOf = (cells, model) => {
     const ranked = rankCells(cells, { cloudSuffix }).filter((c) => c.combined != null && !c.supersededBy);

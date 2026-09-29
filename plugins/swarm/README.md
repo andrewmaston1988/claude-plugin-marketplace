@@ -540,8 +540,9 @@ swarm refresh-prices --dry-run   # parse and report what moved, write nothing
   cannot drift from the table unnoticed.
 - **A stale card refreshes itself every 12 hours.** The roster also triggers a refresh
   when it gains a model the card has not seen; models leaving the roster do not. After a
-  failed refresh, retries back off for one hour. Both `swarm cost` and the dashboard Cost
-  screen use these rules. Offline, the cached card stands and its banner says so.
+  failed refresh, retries for that provider back off for one hour — a vendor whose page
+  moved never holds a reachable vendor's prices stale. Both `swarm cost` and the dashboard
+  Cost screen use these rules. Offline, the cached card stands and its banner says so.
 - **A parse that comes back empty or implausible is refused, never banked** — that failure
   has no symptom except every model silently reading `unpriced`.
 - **A family does not share one price.** Every row is its own published line: `sonnet-4-6`
