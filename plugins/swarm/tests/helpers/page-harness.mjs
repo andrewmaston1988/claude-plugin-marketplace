@@ -200,7 +200,7 @@ export function loadPage(opts = {}) {
   const docListeners = {};
   const document = {
     title: "swarm",
-    visibilityState: "visible",
+    visibilityState: opts.hidden ? "hidden" : "visible",
     addEventListener: (t, f) => { (docListeners[t] ||= []).push(f); },
     documentElement,
     querySelector: (sel) => (sel.startsWith("#") && !sel.includes(" ") && ids.has(sel.slice(1))) ? ids.get(sel.slice(1)) : (chrome[sel] || makeElement("div", ids)),

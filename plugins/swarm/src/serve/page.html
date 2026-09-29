@@ -1712,7 +1712,7 @@
   loadScript(q("/desktop.js")).catch(() => {}).then(() => loadScript(q("/live.js"))).then(() => {
     requestRoute = window.swarmLive.singleFlight(route);
     desktopNow = isDesktop();
-    route(); connect(); startTimers();
+    route(); if (document.visibilityState !== "hidden") connect(); startTimers();
   }).catch((e) => {
     commitView({ html: `<div class="empty">${esc(e.message)}</div>` });
   });

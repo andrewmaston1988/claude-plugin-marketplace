@@ -61,3 +61,11 @@ test("V5: visible while the stream is still CONNECTING opens nothing new", async
   P.fireVisibility("visible");
   assert.equal(P.esCount(), before, "a background-opened tab keeps its one connecting stream");
 });
+
+test("V6: a tab that boots hidden opens no stream until it is shown", async () => {
+  const P = loadPage({ hidden: true });
+  await P.flush();
+  assert.equal(P.esCount(), 0, "a background-opened tab holds no socket");
+  P.fireVisibility("visible");
+  assert.equal(P.esCount(), 1, "showing it connects once");
+});
