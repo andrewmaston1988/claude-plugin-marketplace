@@ -13,7 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { readRun, listRuns } from "../runlog.mjs";
-import { tokenTotal } from "../stream.mjs";
+import { workTokens } from "../stream.mjs";
 import { projectGrouping } from "./grouping.mjs";
 
 const safeStat = (p) => { try { return statSync(p); } catch { return null; } };
@@ -47,7 +47,7 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
     const providersRunning = new Set();
     for (const task of run?.tasks || []) {
       const provider = task.provider || "unknown";
-      providerTokens[provider] = (providerTokens[provider] || 0) + tokenTotal(task.tokens);
+      providerTokens[provider] = (providerTokens[provider] || 0) + workTokens(task.tokens);
       if (task.state === "running") providersRunning.add(provider);
     }
     return {
@@ -55,7 +55,7 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
       group, groupLabel: labelOf(group),
       startedMs: run?.startedMs ?? null, finishedMs: run?.finishedMs ?? null,
       byState: run?.totals.byState ?? {}, leaves: run?.tasks.length ?? 0, waves: run?.waves.length ?? 0,
-      tokens: run ? run.tasks.reduce((n, t) => n + tokenTotal(t.tokens), 0) : 0,
+      tokens: run ? run.tasks.reduce((n, t) => n + workTokens(t.tokens), 0) : 0,
       providers: [...new Set((run?.tasks || []).map((task) => task.provider).filter(Boolean))],
       providerTokens, providersRunning: [...providersRunning],
       hasDigest: !!(run?.digestPath || run?.reportPath),

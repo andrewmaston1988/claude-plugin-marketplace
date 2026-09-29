@@ -1025,12 +1025,12 @@ async function main() {
         if (refuseLiveEngine(resultsDir, cfg, "asking")) return 1;
         const { askLeaf } = await import("../src/ask.mjs");
         const { formatTokens } = await import("../src/results.mjs");
-        const { tokenTotal } = await import("../src/stream.mjs");
+        const { workTokens } = await import("../src/stream.mjs");
         const r = await askLeaf({ resultsDir, taskId, question, model, cfg });
         if (!r.ok) { err(`swarm: ask failed: ${r.answer}`); return 1; }
         out(r.answer);
         out("");
-        out(dim(`tokens: ${formatTokens(tokenTotal(r.tokens))} · session ${r.sessionId} · log: results/${taskId}.ask.log`));
+        out(dim([workTokens(r.tokens) > 0 && `tokens: ${formatTokens(workTokens(r.tokens))}`, r.tokens?.cacheRead && `cache read ${formatTokens(r.tokens.cacheRead)}`, `session ${r.sessionId}`, `log: results/${taskId}.ask.log`].filter(Boolean).join(" · ")));
         return 0;
       }
       case "grade": {

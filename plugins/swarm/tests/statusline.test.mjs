@@ -35,7 +35,7 @@ function fleetHome({ now, quietMs = 0, finished = false, launcher = "sess-1" }) 
   return home;
 }
 
-test("fleet bar: shows this session's live run — done/total, live symbol, seated models, work tokens (cache reads excluded)", () => {
+test("fleet bar: shows this session's live run — done/total, live symbol, the running leaf's model, work tokens (cache reads excluded)", () => {
   const now = Date.now();
   const home = fleetHome({ now });
   try {
@@ -43,7 +43,7 @@ test("fleet bar: shows this session's live run — done/total, live symbol, seat
     assert.match(line, /swarm/);
     assert.match(line, /sweep 1\/2 ◐/, line);
     assert.match(line, /minimax-m3/, "the model on the running leaf");
-    assert.match(line, /7\.5k/, "900+100+5000+1000+500, cacheRead counted");
+    assert.match(line, /2\.5k/, "900+100+1000+500, cacheRead excluded"); // 7.5k until 2026-09-29, when cache reads left the headline
     assert.equal(renderFleet({ home, now, session: { session_id: "someone-else" } }), "", "another session's run is not ours");
   } finally {
     rmSync(home, { recursive: true, force: true });
@@ -264,30 +264,46 @@ function fleetRuns({ now, runs }) {
 
 const LEAVES = [{ id: "a", model: "glm-5.2:cloud", input: 400 }, { id: "b", model: "minimax-m3:cloud", input: 9000 }];
 
-test("fleet bar: a lone run lists every seated model, by model alone — no provider prefix", () => {
+// Moved 2026-09-29 (swarm-token-headline-work): the bar counts running leaves, not distinct
+// models — it used to list a lone run's models, so all-one-model seating never showed a count.
+test("fleet bar: a lone run names its deepest-context model and counts the other running leaves", () => {
   const now = Date.now();
   const home = fleetRuns({ now, runs: [{ name: "solo-1", leaves: LEAVES }] });
   try {
     const line = renderFleet({ home, now, session: { session_id: "sess-1" } }).replace(/\x1b\[[0-9;]*m/g, "");
-    assert.match(line, /glm-5\.2, minimax-m3/, `both models, in full: ${line}`);
-    assert.doesNotMatch(line, /ollama/, `the provider is gone: ${line}`);
-    assert.doesNotMatch(line, /more\)/, `a lone run never condenses: ${line}`);
+    assert.match(line, /solo 0\/2 ◐ minimax-m3 \(\+1 more\)/, `deepest leaf's model plus the count: ${line}`);
+    assert.doesNotMatch(line, /ollama|glm-5\.2/, `no provider prefix, no second model name: ${line}`);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("fleet bar: with several runs each names its deepest-context model and counts the rest", () => {
+test("fleet bar: one running leaf shows its model alone", () => {
+  const now = Date.now();
+  const home = fleetRuns({ now, runs: [{ name: "solo-1", leaves: [LEAVES[0]] }] });
+  try {
+    const line = renderFleet({ home, now, session: { session_id: "sess-1" } }).replace(/\x1b\[[0-9;]*m/g, "");
+    assert.match(line, /solo 0\/1 ◐ glm-5\.2/, line);
+    assert.doesNotMatch(line, /more\)/, `a lone leaf has nothing to count: ${line}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("fleet bar: with several runs each names its deepest-context model and counts the running leaves", () => {
   const now = Date.now();
   const home = fleetRuns({ now, runs: [
     { name: "one-1", leaves: LEAVES },
     // reversed depths: the same two models, but glm-5.2 is the fuller leaf here
     { name: "two-1", leaves: [{ id: "c", model: "glm-5.2:cloud", input: 9000 }, { id: "d", model: "minimax-m3:cloud", input: 400 }] },
+    // one model on three leaves: distinct models would count 0 here, running leaves count 2
+    { name: "three-1", leaves: [{ id: "e", model: "glm-5.2:cloud", input: 100 }, { id: "f", model: "glm-5.2:cloud", input: 300 }, { id: "g", model: "glm-5.2:cloud", input: 200 }] },
   ] });
   try {
     const line = renderFleet({ home, now, session: { session_id: "sess-1" } }).replace(/\x1b\[[0-9;]*m/g, "");
     assert.match(line, /one 0\/2 ◐ minimax-m3 \(\+1 more\)/, `deepest leaf's model wins: ${line}`);
     assert.match(line, /two 0\/2 ◐ glm-5\.2 \(\+1 more\)/, `and it is per-run, not global: ${line}`);
+    assert.match(line, /three 0\/3 ◐ glm-5\.2 \(\+2 more\)/, `leaves, not distinct models: ${line}`);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

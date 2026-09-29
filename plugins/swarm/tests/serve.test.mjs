@@ -1128,26 +1128,26 @@ test("S6: a snapshot with a newly active run gets its run.log watched — no roo
   } finally { rmSync(home, { recursive: true, force: true }); }
 });
 
-// The dashboard row total, the page's own per-leaf total and the leaf detail panel's
-// figures (input+cacheCreation, output, cache read) must be one number, not three.
-test("token total: estate row, page tokTotal and the leaf detail panel agree for the real impl-followup payload", () => {
+// Row total, page per-leaf total and panel headline are one number: work tokens. Moved 2026-09-29
+// (swarm-token-headline-work): 4,710,122 → 131,659, cacheRead is a breakdown line.
+test("token total: estate row, page tokWork and the leaf detail panel agree for the real impl-followup payload", () => {
   const tokens = { input: 100, output: 20747, cacheCreation: 110812, cacheRead: 4578463 };
   const run = { tasks: [{ id: "impl-followup", provider: "claude", tokens }], totals: { byState: {} }, waves: [] };
   const snap = buildSnapshot("home", new Map(), { now: NOW, _listRuns: () => [{ dir: "d", project: "p", name: "n" }], _readRun: () => run });
   const row = snap.rows[0];
-  assert.equal(row.tokens, 4_710_122);
-  assert.equal(row.providerTokens.claude, 4_710_122);
+  assert.equal(row.tokens, 131_659);
+  assert.equal(row.providerTokens.claude, 131_659);
 
   const src = readFileSync(new URL("../src/serve/page.html", import.meta.url), "utf8");
-  const tokTotal = new Function(`${src.match(/const tokTotal = [^\n]+/)[0]}; return tokTotal;`)();
-  assert.equal(tokTotal(tokens), row.tokens, "page tokTotal must match the estate row");
+  const tokWork = new Function(`${src.match(/const tokWork = [^\n]+/)[0]}; return tokWork;`)();
+  assert.equal(tokWork(tokens), row.tokens, "page tokWork must match the estate row");
 
   // The panel's headline is lifted from page.html's own template and evaluated, not
   // recomputed here: the previous version added the three figures up itself, which is true
-  // by arithmetic whatever the page prints. RED when the headline drops cacheRead.
+  // by arithmetic whatever the page prints. RED when the headline counts cacheRead.
   const headlineExpr = src.match(/tokens<b>\$\{fmtTok\((.+?)\)\}<\/b>/)[1];
   const billedIn = tokens.input + tokens.cacheCreation;
-  const headline = new Function("t", "tk", "inp", "outp", "cc", "cr", "billedIn", "tokTotal", `return ${headlineExpr};`)(
-    tokens, tokens, tokens.input, tokens.output, tokens.cacheCreation, tokens.cacheRead, billedIn, tokTotal);
+  const headline = new Function("t", "tk", "inp", "outp", "cc", "cr", "billedIn", "tokWork", `return ${headlineExpr};`)(
+    tokens, tokens, tokens.input, tokens.output, tokens.cacheCreation, tokens.cacheRead, billedIn, tokWork);
   assert.equal(headline, row.tokens, "the leaf panel headline must be the same total as the estate row");
 });

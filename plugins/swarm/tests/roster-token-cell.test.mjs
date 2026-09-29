@@ -4,7 +4,7 @@
 // workTokens directly would pass without the cell in results.mjs ever changing.
 import { test } from "node:test";
 import { equal, ok, match } from "node:assert/strict";
-import { renderRoster } from "../src/results.mjs";
+import { renderRoster, formatClosing } from "../src/results.mjs";
 import { buildSnapshot } from "../src/serve/estate.mjs";
 
 const NOW = Date.parse("2026-07-11T12:04:12Z");
@@ -59,15 +59,39 @@ test("roster cell: cache WRITES are work and stay in the cell", () => {
   equal(cellFor(block, "warm"), "5.5k");
 });
 
-test("roster footer: the run total still counts cacheRead", () => {
-  // The regression half: the full figure is right for a run total, so the cell
-  // change must not be applied repo-wide. Reddens if :386 moves to workTokens.
+// Flipped 2026-09-29 (swarm-token-headline-work): the run total was the cacheRead-inclusive
+// figure (9M here) and is now work, so it agrees with the cells above it.
+test("roster footer: the run total excludes cacheRead", () => {
   const tasks = [{ id: "claude-impl", model: "opus", state: "ok", durationMs: 1000, tokens: CLAUDE_SHAPED }];
   const block = renderRoster({ title: "t", tasks, now: NOW, startedMs: NOW - 1000 });
-  match(footerOf(block), /9M tokens$/);
+  match(footerOf(block), /1\.5k tokens$/);
 });
 
-test("estate totals still count cacheRead", () => {
+// The real ctxbuild leaf (session 2e57a857): 2,075,458 cache reads on 105,630 of work. The
+// footer three lines under its own 105.6k row used to say 2.18M.
+test("roster footer: a one-leaf run headlines its work, never its cache reads", () => {
+  const tokens = tok({ input: 6, output: 8324, cacheCreation: 97300, cacheRead: 2_075_458 });
+  const tasks = [{ id: "ctxbuild", model: "opus", state: "ok", durationMs: 1000, tokens }];
+  const block = renderRoster({ title: "t", tasks, now: NOW, startedMs: NOW - 1000 });
+  equal(cellFor(block, "ctxbuild"), "105.6k");
+  match(footerOf(block), /105\.6k tokens$/);
+  ok(!block.includes("2.18M"), block);
+});
+
+test("tokens: line headlines work and still breaks out cache read", () => {
+  const line = formatClosing({ summaryPath: "S", totalTokens: tok({ input: 100, output: 20, cacheCreation: 30, cacheRead: 9_000_000 }) })
+    .split("\n").find((l) => l.includes("tokens:"));
+  match(line, /tokens: 150 \(input 130 · output 20 · cache read 9M\)/);
+});
+
+// formatTokens(0) is "—": a workTokens figure under a tokenTotal guard printed `tokens: —`.
+test("tokens: line prints no — headline for a run whose usage is all cache reads", () => {
+  const out = formatClosing({ summaryPath: "S", totalTokens: tok({ cacheRead: 50_000 }) });
+  ok(!/tokens:.*—/.test(out), out);
+  ok(!out.includes("tokens:"), out);
+});
+
+test("estate totals exclude cacheRead", () => {
   const run = {
     tasks: [{ id: "a", provider: "anthropic", tokens: CLAUDE_SHAPED }],
     totals: { byState: {} }, waves: [], startedMs: NOW,
@@ -76,6 +100,6 @@ test("estate totals still count cacheRead", () => {
     _listRuns: () => [{ dir: "/r/one", project: "p", name: "one", active: false, mtimeMs: 1 }],
     _readRun: () => run,
   }).rows;
-  equal(rows[0].tokens, 9_001_500);
-  equal(rows[0].providerTokens.anthropic, 9_001_500);
+  equal(rows[0].tokens, 1_500);
+  equal(rows[0].providerTokens.anthropic, 1_500);
 });

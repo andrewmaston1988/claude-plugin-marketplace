@@ -367,7 +367,11 @@ Leaves dispatch with `--output-format stream-json`; a provider that emits plain 
 instead degrades gracefully (raw stdout becomes `output`, token columns stay empty).
 
 Stdout repaints a roster snapshot on every state change and heartbeat (`heartbeatSecs`,
-default 15): glyph, id, model, duration, work tokens, plus a counts footer. Running rows
+default 15): glyph, id, model, duration, work tokens, plus a counts footer. Every token headline
+— roster, footer, `tokens:` line, `swarm ask`, dashboard, status bar — is work tokens (input +
+output + cache writes). Cache reads are never a headline: a re-read prompt prefix grows with
+turns × context, not with the work done. They show only as a labelled `cache read` breakdown
+(the `tokens:` line, `swarm ask`, the dashboard's leaf panel). Running rows
 show the leaf's latest tool call; a leaf silent past `quietWarnSecs` (default 60) shows
 `⚠ quiet Ns` instead. Failed tasks block their dependents; independent branches continue;
 re-`run` resumes (`ok` work skipped, `rate-limited` retries). A live engine (heartbeat
@@ -591,9 +595,10 @@ turns it off.
 swarm statusline install   # writes ~/.swarm/statusline.mjs, prints the settings.json block
 ```
 
-Shows every live run this session launched: `swarm ▮1 · sweep 3/8 ◐ glm-5.2,minimax-m3
-1.2M · ⚠ sweep verify-b quiet 6m` — running/ok/failed/quiet counts and per-model tokens,
-read from `run.log` the same way the dashboard and `swarm status` do (never from scanning
+Shows every live run this session launched: `swarm ▮1 · sweep 3/8 ◐ minimax-m3 (+2 more)
+1.2M · ⚠ sweep verify-b quiet 6m` — ok/failed/quiet counts, the deepest running leaf's model
+with `(+n more)` counting the *other running leaves* (not distinct models), and the run's
+work tokens, read from `run.log` the same way the dashboard and `swarm status` do (never from scanning
 `results/` for file presence). Only runs launched by *this* session show (the engine
 stamps the launching session id); a manual run with no stdin shows every live run.
 `/swarm:swarm setup` offers this install as one of its stages.
