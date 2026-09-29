@@ -23,6 +23,9 @@ test("swarm reference docs do not restate roster token arithmetic", () => {
     !/input\s*\+\s*output\s*\+\s*cacheCreation/.test(roster),
     "reading-the-roster.md must not restate the token bucket arithmetic",
   );
+  const skill = readFileSync(new URL("../skills/swarm/SKILL.md", import.meta.url), "utf8");
+  ok(!/tokenTotal|workTokens/.test(skill), "SKILL.md must not name the token functions");
+  ok(!/input\s*\+\s*output\s*\+\s*cacheCreation/.test(skill), "SKILL.md must not restate the token bucket arithmetic");
 });
 
 // R8: item 14 ships every provider disabled until setup writes the roots, so an

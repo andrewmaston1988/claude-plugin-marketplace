@@ -113,12 +113,12 @@ export function render(opts = {}) {
     const short = run.replaceAll("scenario-", "").replaceAll("-impl-1", "").replaceAll("-1", "");
     // ✓ all leaves done (green), ◐ a leaf is live, ○ nothing running, not done
     const [sym, col] = ok === total ? ["✓", G] : running.length ? ["◐", BLUE] : ["○", BLUE];
-    // Every run, alone or sharing the bar, names its fullest running leaf's model — the one
-    // deepest into its context — and counts the other running LEAVES (not distinct models).
+    // Every run, alone or sharing the bar, names the model of its running leaf with the most
+    // work tokens, and counts the other running LEAVES (not distinct models).
     const deepest = running.length
       ? model.get(running.reduce((a, b) => (leafTokens?.get(b) || 0) > (leafTokens?.get(a) || 0) ? b : a))
       : "";
-    const agents = running.length > 1 ? `${deepest} (+${running.length - 1} more)` : deepest;
+    const agents = deepest && running.length > 1 ? `${deepest} (+${running.length - 1} more)` : deepest;
     const tail = [agents, formatTokens(tokens)].filter(Boolean).join(" ");
     parts.push(`${short} ${col}${ok}/${total} ${sym}${X}` + (failed ? ` ${Y}✗${failed}${X}` : "") + (tail ? ` ${D}${tail}${X}` : ""));
     if (quiet > QUIET_FLAG_MS && (stalest === null || quiet > stalest.quiet)) {

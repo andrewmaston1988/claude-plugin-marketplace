@@ -122,7 +122,7 @@ test("renderRoster: header, aligned rows, counts footer with total tokens", () =
   // token cells right-align: rows with the same cell widths have equal length
   equal(lines[2].length, lines[3].length);
   equal(lines[5], "");
-  equal(lines[6], "  1 ok · 1 running · 1 pending · 30.6k tokens"); // 35.6k until 2026-09-29 (swarm-token-headline-work)
+  equal(lines[6], "  1 ok · 1 running · 1 pending · 30.6k tokens"); // 35.6k until 2026-09-29, when cache reads left the headline
 });
 
 test("renderRoster: running rows show activity; stale rows warn quiet", () => {
@@ -279,7 +279,7 @@ test("renderStatus: rebuilds the roster from run.log with live tokens and elapse
     match(out, /✓ {2}a\s+haiku\s+30s\s+1\.5k/);
     match(out, /◐ {2}b\s+glm-5\.2:cloud\s+42s\s+7\.3k {2}Grep src\/auth/); // live activity from run.log
     match(out, /· {2}c\s+haiku\s+—\s+—/);
-    ok(out.includes("1 ok · 1 running · 1 pending · 8.8k tokens"), out); // 8.9k until 2026-09-29 (swarm-token-headline-work)
+    ok(out.includes("1 ok · 1 running · 1 pending · 8.8k tokens"), out); // 8.9k until 2026-09-29, when cache reads left the headline
     ok(out.includes(`results: ${join(rd, "results")}`), out);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -414,7 +414,7 @@ test("formatClosing covers digest present, absent, failed, and total tokens", ()
   ok(withWt.includes("impl: swarm/impl at R/wt-impl"));
   ok(formatClosing(base).includes("summary: S/summary.json"));
   const withTok = formatClosing({ ...base, totalTokens: { input: 100000, output: 60200, cacheCreation: 0, cacheRead: 999 } });
-  ok(withTok.includes("tokens: 160.2k (input 100k · output 60.2k · cache read 999)"), withTok); // 161.2k until 2026-09-29 (swarm-token-headline-work)
+  ok(withTok.includes("tokens: 160.2k (input 100k · output 60.2k · cache read 999)"), withTok); // 161.2k until 2026-09-29, when cache reads left the headline
   ok(!formatClosing(base).includes("tokens:"), "no tokens line when nothing counted");
 });
 

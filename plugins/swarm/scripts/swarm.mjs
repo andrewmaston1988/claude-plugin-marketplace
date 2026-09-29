@@ -1030,7 +1030,8 @@ async function main() {
         if (!r.ok) { err(`swarm: ask failed: ${r.answer}`); return 1; }
         out(r.answer);
         out("");
-        out(dim(`tokens: ${formatTokens(workTokens(r.tokens))}${r.tokens?.cacheRead ? ` · cache read ${formatTokens(r.tokens.cacheRead)}` : ""} · session ${r.sessionId} · log: results/${taskId}.ask.log`));
+        const work = workTokens(r.tokens), cacheRead = r.tokens?.cacheRead;
+        out(dim([work > 0 && `tokens: ${formatTokens(work)}`, cacheRead && `cache read ${formatTokens(cacheRead)}`, `session ${r.sessionId}`, `log: results/${taskId}.ask.log`].filter(Boolean).join(" · ")));
         return 0;
       }
       case "grade": {

@@ -35,7 +35,7 @@ function fleetHome({ now, quietMs = 0, finished = false, launcher = "sess-1" }) 
   return home;
 }
 
-test("fleet bar: shows this session's live run — done/total, live symbol, seated models, work tokens (cache reads excluded)", () => {
+test("fleet bar: shows this session's live run — done/total, live symbol, the running leaf's model, work tokens (cache reads excluded)", () => {
   const now = Date.now();
   const home = fleetHome({ now });
   try {
@@ -43,7 +43,7 @@ test("fleet bar: shows this session's live run — done/total, live symbol, seat
     assert.match(line, /swarm/);
     assert.match(line, /sweep 1\/2 ◐/, line);
     assert.match(line, /minimax-m3/, "the model on the running leaf");
-    assert.match(line, /2\.5k/, "900+100+1000+500, cacheRead excluded"); // 7.5k until 2026-09-29 (swarm-token-headline-work)
+    assert.match(line, /2\.5k/, "900+100+1000+500, cacheRead excluded"); // 7.5k until 2026-09-29, when cache reads left the headline
     assert.equal(renderFleet({ home, now, session: { session_id: "someone-else" } }), "", "another session's run is not ours");
   } finally {
     rmSync(home, { recursive: true, force: true });

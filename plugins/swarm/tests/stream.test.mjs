@@ -122,7 +122,7 @@ test("Codex cached > input clamps input to zero, never negative", () => {
   equal(u.cacheRead, 900);
 });
 
-test("the headline includes cache reads; workTokens keeps the old figure", () => {
+test("tokenTotal includes cache reads; workTokens, the headline, excludes them", () => {
   const u = usageTokens(IMPL_FOLLOWUP);
   equal(tokenTotal(u), 4710122);
   equal(workTokens(u), 131659);
