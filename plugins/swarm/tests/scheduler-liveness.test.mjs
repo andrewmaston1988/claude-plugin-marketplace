@@ -180,6 +180,29 @@ test("liveness: a stop file kills every tracked child, writes the summary exactl
   }
 });
 
+test("liveness: a run stopped mid-backoff leaves no ref'd retry timer behind once runPlan resolves", async () => {
+  const dir = tmp();
+  try {
+    // Park from a settled 429, not a killed child: the fake child's own timer survives kill().
+    let parked = false;
+    const spawn = fakeSpawnFactory(() => { parked = true; return { exit: 1, output: "429 rate limit" }; });
+    const io = makeIo(spawn);
+    const p = plan(dir, [task("leaf")]);
+    const timeouts = () => process.getActiveResourcesInfo().filter((r) => r === "Timeout").length;
+    const before = timeouts();
+    const runPromise = runPlan(p, { ...CFG, heartbeatSecs: 0.05, retry: { backoffMs: 60_000, rateLimited: 2 } }, io);
+    const deadline = Date.now() + 10_000;
+    while (!parked && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+    ok(parked, "the leaf never reached its 429");
+    writeFileSync(stopPath(p.resultsDir), "");
+    const r = await runPromise;
+    equal(r.summary.stopped, true);
+    equal(timeouts(), before, "a stopped run must not leave its parked retry timer alive");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("resume: a stop file leftover from a prior `swarm stop` is cleared on start, so the run is not immediately stopped", async () => {
   const dir = tmp();
   try {

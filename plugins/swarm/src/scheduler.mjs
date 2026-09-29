@@ -89,6 +89,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     stopRequested: false,
     stopReason: null,
     retryWaiting: 0,            // leaves sleeping out a backoff
+    retryTimers: new Set(),     // their timer handles; the finally clears any still parked
     // Single-shot projection warn: spend so far vs worst-case remaining leaves.
     completedLeaves: 0,
     spentTokens: 0,
@@ -316,6 +317,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   }
   } finally {
     clearInterval(ctx.heartbeat); ctx.beat.stop();
+    for (const timer of ctx.retryTimers) clearTimeout(timer);
     process.off("SIGINT", ctx.sigintHandler);
     process.off("SIGTERM", ctx.sigtermHandler);
   }

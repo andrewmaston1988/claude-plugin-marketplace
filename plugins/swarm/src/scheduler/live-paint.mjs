@@ -85,12 +85,14 @@ export function createLivePaint(ctx) {
     // Deliberately ref'd (unlike the heartbeat): a parked retry is pending
     // work, and with nothing else running an unref'd timer lets the event
     // loop drain — node exits 13 with the run's top-level await unsettled.
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      ctx.retryTimers.delete(timer);
       ctx.retryWaiting--;
       ctx.state.set(task.id, "pending");
       ctx.activityMap.delete(task.id);
       ctx.wake();
     }, delayMs);
+    ctx.retryTimers.add(timer);
   };
 
   // Park a leaf for low memory: no timer. The heartbeat (ref'd for as long as
