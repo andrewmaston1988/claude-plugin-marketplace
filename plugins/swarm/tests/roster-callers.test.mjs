@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runCli } from "./helpers/cli.mjs";
-import { readRosterEnvelope } from "../src/discovery.mjs";
+import { readRosterEnvelope } from "../src/roster.mjs";
 
 const CATALOG_MODEL = "claude-fable-5-1";
 // Absent from the shipped Claude card: a priced name would print from the table

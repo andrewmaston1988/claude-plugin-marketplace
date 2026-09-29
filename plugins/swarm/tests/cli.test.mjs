@@ -9,7 +9,7 @@ import { runCli, runCliAsync, runValidated, CLI } from "./helpers/cli.mjs";
 import { commitAll, gateConfig, gateHome, gitOut, tmp } from "./helpers/cli-fixture.mjs";
 import { decide as hookDecide } from "../hooks/ultraswarm.mjs";
 import { prepareIsolation } from "../src/worktree.mjs";
-import { readRosterEnvelope, writeRosterEntry } from "../src/discovery.mjs";
+import { readRosterEnvelope, writeRosterEntry } from "../src/roster.mjs";
 import { withoutLeafNotices } from "../src/leaf-notices.mjs";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

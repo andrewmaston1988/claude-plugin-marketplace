@@ -12,7 +12,7 @@ import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
 import { costRowsFor, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
 import { rateCardStorePath, rateCards, refreshStaleRateCards } from "../rate-card.mjs";
-import { modelRoster, refreshRoster } from "../discovery.mjs";
+import { modelRoster, refreshRoster } from "../roster.mjs";
 import { defaultProviderRegistry } from "../default-providers.mjs";
 import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";

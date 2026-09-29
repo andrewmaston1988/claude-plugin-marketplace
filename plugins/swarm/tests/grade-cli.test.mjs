@@ -5,7 +5,7 @@ import { join, resolve, isAbsolute, basename } from "node:path";
 import { tmpdir } from "node:os";
 import { runCli } from "./helpers/cli.mjs";
 import { ASPECTS } from "../src/aspects.mjs";
-import { writeRosterEntry } from "../src/discovery.mjs";
+import { writeRosterEntry } from "../src/roster.mjs";
 import { formatClosing } from "../src/results.mjs";
 
 function tmp() {

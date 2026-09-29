@@ -7,7 +7,7 @@ import { mkdirSync, renameSync, rmSync, writeFileSync, existsSync, readdirSync, 
 import { join } from "node:path";
 import { runCli } from "./helpers/cli.mjs";
 import { gitOut, tmp } from "./helpers/cli-fixture.mjs";
-import { readRosterEnvelope, writeRosterEntry } from "../src/discovery.mjs";
+import { readRosterEnvelope, writeRosterEntry } from "../src/roster.mjs";
 
 const MODEL = "claude-haiku-4-5-20251001";
 const OTHER_MODEL = "claude-sonnet-5";

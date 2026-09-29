@@ -2,7 +2,7 @@
 // shape as cmd-serve.mjs. The cost modules stay lazily imported inside the command,
 // so no other subcommand pays for loading them.
 import { getConfig } from "../src/config.mjs";
-import { modelRoster } from "../src/discovery.mjs";
+import { modelRoster } from "../src/roster.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { providerConfig } from "../src/providers.mjs";
 import { dim, out, err } from "../src/ui.mjs";

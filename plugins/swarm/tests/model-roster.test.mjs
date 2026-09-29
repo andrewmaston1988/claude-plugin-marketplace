@@ -9,12 +9,13 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, readdirSyn
 import { join, relative, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import * as roster from "../src/discovery.mjs";
+import * as roster from "../src/roster.mjs";
+import { removeCachedModel } from "../src/discovery.mjs";
 import { createProviderRegistry, createDefaultProviderRegistry, PROVIDER_CAPABILITIES } from "../src/providers.mjs";
 
 // Named through the namespace so a missing export fails its own row rather than
 // the whole file at link time.
-const { modelRoster, refreshRoster, readRosterEnvelope, writeRosterEntry, removeCachedModel } = roster;
+const { modelRoster, refreshRoster, readRosterEnvelope, writeRosterEntry } = roster;
 
 // The plan's own number, as a literal: a test stepping against the exported
 // constant moves with it and never goes red.
@@ -423,7 +424,7 @@ test("the shipped adapters declare their hydration: Claude local, Ollama and Cod
 // ── One reader, one writer ──
 
 const ROSTER_READERS = new Set([
-  "src/discovery.mjs",
+  "src/roster.mjs",
 ]);
 
 function sourceFiles(dir) {

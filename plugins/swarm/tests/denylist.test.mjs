@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";
 import { matchDenylist, ValidationError } from "../src/manifest.mjs";
-import { readRosterEnvelope } from "../src/discovery.mjs";
+import { readRosterEnvelope } from "../src/roster.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { runCliAsync } from "./helpers/cli.mjs";
