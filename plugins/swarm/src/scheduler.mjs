@@ -43,7 +43,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   if (plan.digest) tasks.push(buildDigestTask(plan));
   const providerRegistry = suppliedProviderRegistry || defaultProviderRegistry();
   const effectiveRunnerRegistry = runnerRegistry || createDispatchRegistry({ providerRegistry }).runnerRegistry;
-  const runtime = { providerRegistry, runnerRegistry: effectiveRunnerRegistry };
+  const runtime = { providerRegistry, runnerRegistry: effectiveRunnerRegistry, resultsDir: plan.resultsDir };
 
   // The one object holding every local the closure groups share. Each group is
   // a createX(ctx) factory in src/scheduler/, created in the order below; a

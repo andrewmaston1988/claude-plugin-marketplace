@@ -384,6 +384,8 @@ export function buildCodexInvocation(task, prompt, context = {}) {
   if (task.model) args.push("--model", task.model);
   writeEffortArg(args, task.effort ?? task.reasoningEffort ?? "medium");
   writeSandboxArg(args, task, context);
+  // The scheduler writes this file — codex takes only strict form, and the builder stays pure.
+  if (task.returns && context.schemaPath) args.push("--output-schema", context.schemaPath);
   const addDirs = task.additionalDirs || context.additionalDirs || cfg.additionalDirs || [];
   // Existing entries are emitted first, verbatim — the write targets only append.
   // Everything already writable (the primary cwd, or an entry emitted above) is

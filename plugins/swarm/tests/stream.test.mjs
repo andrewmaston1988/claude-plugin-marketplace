@@ -186,6 +186,31 @@ test("runner parser: a re-emitted Claude message id does not double-count its us
   deepEqual(parser.result().usage, { input: 120, output: 53, cacheCreation: 0, cacheRead: 0 });
 });
 
+// With a bound schema the CLI hands the parsed object back on the result event.
+// structured_output is the value the runner itself validated, so it wins over `result`
+// — which carries the same JSON as a string when the tool was called, and prose when it
+// was not.
+test("runner parser: structured_output wins over the result text, which stays the fallback", () => {
+  const bound = createRunnerParser("claude");
+  // `result` is the model's raw text and may be pretty-printed; structured_output is the
+  // parsed value the runner validated. They must not be interchangeable here, or the
+  // assertion would hold under either branch.
+  bound.feed(JSON.stringify({
+    type: "result", subtype: "success", is_error: false,
+    result: '{\n  "concerns": []\n}',
+    structured_output: { concerns: [{ label: "ADVISORY" }] },
+    num_turns: 2,
+  }) + "\n");
+  bound.end();
+  equal(bound.result().output, '{"concerns":[{"label":"ADVISORY"}]}');
+  equal(bound.result().terminal, true);
+
+  const plain = createRunnerParser("claude");
+  plain.feed(JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "final answer" }) + "\n");
+  plain.end();
+  equal(plain.result().output, "final answer");
+});
+
 test("runner parser registry: Codex raw JSONL without a terminal event is not a success", () => {
   const parser = createRunnerParser("codex");
   parser.feed('{"type":"thread.started","thread_id":"t-1"}\n{"type":"response.output_text.delta","delta":"partial"}\n');

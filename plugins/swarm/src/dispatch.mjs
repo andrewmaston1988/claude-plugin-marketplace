@@ -70,6 +70,9 @@ function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpToo
     // interrogation path: continue an existing leaf session (`swarm ask`)
     ...(task.resume ? ["--resume", task.resume] : []),
     "--output-format", "stream-json", "--verbose",
+    // The CLI hands the model a StructuredOutput tool built from this schema, so a
+    // leaf is bound to the shape from its first turn instead of only at the re-ask.
+    ...(task.returns ? ["--json-schema", JSON.stringify(task.returns)] : []),
   ];
 
   if (providerId === "claude") {
@@ -175,9 +178,8 @@ export function buildDispatch(task, prompt, cfg = {}, options = {}) {
   }
   const invocation = runner.buildInvocation(
     { ...task, ...identity }, prompt,
-    // _mcpTools is the test seam: options is where it rides now that the 4th
-    // positional belongs to the provider registry.
-    { config: cfg, provider: identity.provider, mcpTools: options._mcpTools }
+    // schemaPath is the scheduler's strict-copy file — the one flag a runner cannot build itself.
+    { config: cfg, provider: identity.provider, mcpTools: options._mcpTools, schemaPath: options.schemaPath }
   );
   const parser = runner.parser || runner.parserId || runner.id;
   if (!runnerParserFactories.has(String(parser).toLowerCase())) {

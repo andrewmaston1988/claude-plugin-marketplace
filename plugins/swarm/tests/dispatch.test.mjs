@@ -83,6 +83,23 @@ test("no --max-budget-usd for any model family", () => {
   ok(!d.argv.includes("--max-budget-usd"));
 });
 
+// A leaf otherwise never learns its `returns` until the re-ask, so
+// Claude binds it natively instead, as JSON on argv.
+test("a returns task carries --json-schema <the schema>, for Claude and Ollama alike", () => {
+  const returns = { type: "object", required: ["findings"], properties: { findings: { type: "array" } } };
+  for (const [provider, model] of [["claude", "claude-haiku-4-5-20251001"], ["ollama", "glm-4.6:cloud"]]) {
+    const d = buildDispatch(task({ provider, model, returns }), "p", CFG, { _mcpTools: NO_MCP });
+    const i = d.argv.indexOf("--json-schema");
+    ok(i > 0, `${provider}: no --json-schema in ${d.argv.join(" ")}`);
+    equal(d.argv[i + 1], JSON.stringify(returns));
+  }
+});
+
+test("a task with no returns carries no --json-schema", () => {
+  const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
+  ok(!d.argv.includes("--json-schema"));
+});
+
 test("launch mode: template split with {model} substitution and {args} splice", () => {
   const cfg = { provider: { ...CFG.provider, mode: "launch" } };
   const d = buildDispatch(task({ provider: "ollama", model: "qwen3-coder:cloud", effort: "high" }), "the prompt", cfg, { _mcpTools: NO_MCP });
@@ -225,6 +242,27 @@ test("Codex dispatch: provider registry selects exact fresh argv, runner, and pa
   equal(d.runner, "codex");
   equal(d.parser, "codex");
   deepEqual(d.env, {});
+});
+
+// The schema file's path travels the way mcpTools already does — buildDispatch's
+// options into the runner context. Without that forwarding an authored `returns`
+// never reaches the codex runner at all.
+test("Codex dispatch: options.schemaPath reaches the runner context for a returns task", () => {
+  const root = process.cwd();
+  const cfg = {
+    providers: {
+      claude: { enabled: true },
+      ollama: { enabled: true, allowedRoots: [root] },
+      codex: { enabled: true, path: "codex", allowedRoots: [root] },
+    },
+  };
+  const d = buildDispatch({
+    provider: "codex", model: "gpt-5-codex", returns: { type: "object" },
+    cwd: root, originalCwd: root,
+  }, "inspect", cfg, { schemaPath: "C:/run/a.schema.json" });
+  const i = d.argv.indexOf("--output-schema");
+  ok(i > 1, d.argv.join(" "));
+  equal(d.argv[i + 1], "C:/run/a.schema.json");
 });
 
 test("Codex leaf with no manifest effort dispatches medium", () => {
