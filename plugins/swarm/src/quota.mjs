@@ -161,10 +161,11 @@ export async function printQuota({ cfg, out, cachePath, credentialsPath, fetchIm
     await import("./usage.mjs");
 
   const usages = [];
+  let q = null;
   // A disabled Claude is neither fetched nor named, same as Ollama and Codex below.
   const { defaultProviderRegistry } = await import("./default-providers.mjs");
   if (defaultProviderRegistry().get("claude").enabled(cfg)) {
-    const q = await checkQuota({
+    q = await checkQuota({
       cfg,
       fetch: (...a) => fetchImpl(...a),
       cachePath,
