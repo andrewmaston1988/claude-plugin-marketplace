@@ -3,7 +3,7 @@ import { equal, deepEqual, ok, throws, match } from "node:assert/strict";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { buildDispatch, toSpawnable, resolveExecutable, windowsCommandLineLength, mcpTools } from "../src/dispatch.mjs";
+import { buildDispatch, toSpawnable, resolveExecutable, windowsCommandLineLength } from "../src/dispatch.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 
 // The MCP roster is the operator's own machine; pin it out of argv assertions.
@@ -477,29 +477,6 @@ test("resolveExecutable resolves a bare name via where on win32", { skip: proces
   equal(resolveExecutable("claude", { _spawnSync: missing }), "claude");
 });
 
-test("mcpTools names each configured server; a wildcard would grant nothing", () => {
-  const read = () => JSON.stringify({ mcpServers: { scout: {}, context7: {} } });
-  deepEqual(mcpTools(read), ["mcp__scout", "mcp__context7"]);
-});
-
-test("mcpTools is empty when the file is missing, unreadable or has no servers", () => {
-  deepEqual(mcpTools(() => { throw new Error("ENOENT"); }), []);
-  deepEqual(mcpTools(() => "not json"), []);
-  deepEqual(mcpTools(() => JSON.stringify({})), []);
-});
-
-test("every leaf's allowedTools carries the MCP servers", () => {
-  const fake = () => ["mcp__scout"];
-  const d = buildDispatch({ provider: "claude", model: "claude-sonnet-5", allowedTools: "Read,Grep" }, "p", CFG, { _mcpTools: fake });
-  equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "Read,Grep,Skill,mcp__scout");
-});
-
-test("a leaf with no allowedTools still gets Skill and MCP, with no leading comma", () => {
-  const fake = () => ["mcp__scout"];
-  const d = buildDispatch({ provider: "claude", model: "claude-sonnet-5", allowedTools: "" }, "p", CFG, { _mcpTools: fake });
-  equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "Skill,mcp__scout");
-});
-
 // A task whose cwd is a swarm-made worktree must pass dispatch exactly when it passes the
 // manifest gate — judged by the repo the tree was cut from, never by the literal path.
 test("dispatch: a swarm worktree of an allowed repo dispatches; one of a stranger repo is refused", () => {
@@ -517,19 +494,4 @@ test("dispatch: a swarm worktree of an allowed repo dispatches; one of a strange
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
-});
-
-// Skill goes to every Claude-runner leaf, whatever list its author wrote: skills are
-// the operator's own tooling, like the MCP servers beside them.
-const toolsOf = (d) => d.argv[d.argv.indexOf("--allowedTools") + 1].split(",");
-test("every Claude-runner leaf may invoke Skill: default, explicit write list, and Ollama", () => {
-  for (const over of [{}, { allowedTools: "Read,Edit,Bash" }, { provider: "ollama", model: "minimax-m3:cloud" }]) {
-    const tools = toolsOf(buildDispatch(task(over), "p", CFG, { _mcpTools: NO_MCP }));
-    equal(tools.filter((t) => t === "Skill").length, 1, `${JSON.stringify(over)} → ${tools}`);
-  }
-});
-
-test("an author who already lists Skill gets it once", () => {
-  const tools = toolsOf(buildDispatch(task({ allowedTools: "Read,Skill" }), "p", CFG, { _mcpTools: NO_MCP }));
-  deepEqual(tools, ["Read", "Skill"]);
 });
