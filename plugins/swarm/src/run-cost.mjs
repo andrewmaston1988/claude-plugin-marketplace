@@ -1,12 +1,6 @@
-// What a leaf or a run cost, priced in the unit its seat is actually metered in and printed
-// beside the work tokens. Three units, never added together:
-//   - billed dollars: the summary row's `costUsd`, which the engine only records for a
-//     real-key leaf. A result file's `costUsd` is never read — the Claude runner reports an
-//     Anthropic-rate price for a subscription leaf and for a `:cloud` one, and neither is a bill.
-//   - api-equivalent dollars: the rate card's $/Mtok applied to the four token buckets.
-//   - a share of the weekly quota: a `:cloud` leaf's turns (one request each) x the meter's
-//     points per request.
-// Unknown is blank, never zero. Dollars print only when the operator set `display.money`.
+// A leaf's cost in its seat's own unit, never summed across units. Billed means the summary
+// row's real-key `costUsd`: a result file's `costUsd` is an Anthropic-rate figure even for a
+// subscription or `:cloud` leaf, so it is never read. Unknown is blank, never zero.
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import { resolveRatePrice } from "./rate-card-parse.mjs";

@@ -37,6 +37,7 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
   // derivation must not shift with whatever happens to survive the cap.
   const { groupOf, labelOf } = projectGrouping([...new Set(all.map((r) => r.project))]);
   const seenDirs = new Set();
+  const deps = costDeps(home);
   const rows = all.map((r) => {
     seenDirs.add(r.dir);
     const key = keyOf(r.dir);
@@ -51,7 +52,7 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
       providerTokens[provider] = (providerTokens[provider] || 0) + workTokens(task.tokens);
       if (task.state === "running") providersRunning.add(provider);
     }
-    const cost = runCost(run?.tasks || [], costDeps(home));
+    const cost = runCost(run?.tasks || [], deps);
     return {
       project: r.project, name: r.name, active: r.active, aborted: r.aborted, stopped: r.stopped, mtimeMs: r.mtimeMs,
       group, groupLabel: labelOf(group),

@@ -76,7 +76,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       roster = (entry.tasks || []).map(rosterTask);
       startedMs = Date.parse(entry.ts) || now;
       enginePid = Number.isInteger(entry.pid) ? entry.pid : null;
-      state.clear(); tokens.clear(); durations.clear(); runningSince.clear();
+      state.clear(); tokens.clear(); turns.clear(); durations.clear(); runningSince.clear();
       activity.clear(); lastEvent.clear(); clones.clear(); children.clear(); coverage.clear();
       continue;
     }

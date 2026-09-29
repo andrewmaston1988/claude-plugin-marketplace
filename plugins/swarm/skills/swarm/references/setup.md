@@ -301,8 +301,8 @@ empty — nothing fires and every leaf runs as before.
 
 Beside every work-token headline swarm prints what the run cost in the seat's own unit: a `:cloud`
 leaf as a `% of week` share, which needs no setting. `display.money` adds dollars: `$` for a
-leaf billed on a real API key, `≈$… api-eq` for a rate-card estimate — never a subscription
-charge. Off (the shipped default): no `$` anywhere. Ask; write `"display": {"money": true}` only
+leaf billed on a real API key (on the run's closing `tokens:` line; the roster and dashboard show
+it as `≈$… api-eq`), `≈$… api-eq` for a rate-card estimate — never a subscription charge. Off (the shipped default): no `$` anywhere. Ask; write `"display": {"money": true}` only
 on a yes, and leave the key out on a no.
 
 ### Stage 8 — advanced, only on request

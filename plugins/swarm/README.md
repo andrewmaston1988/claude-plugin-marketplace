@@ -374,8 +374,9 @@ turns × context, not with the work done. They show only as a labelled `cache re
 (the `tokens:` line, `swarm ask`, the dashboard's leaf panel). Beside the work tokens each
 leaf is priced in its own unit, and units are never summed: a `:cloud` leaf as `% of week` (its
 requests × the meter's points per request), and only with `display.money: true` a dollar
-figure — `$` when billed on a real key, `≈$… api-eq` when a rate-card estimate, never a
-subscription charge. With no `display.money` no `$` appears anywhere. Running rows
+figure — `$` when billed on a real key (the closing `tokens:` line only; the roster and
+dashboard read `run.log`, which carries no bill, so they show it as `≈$… api-eq`), `≈$… api-eq`
+when a rate-card estimate, never a subscription charge. With no `display.money` no `$` appears anywhere. Running rows
 show the leaf's latest tool call; a leaf silent past `quietWarnSecs` (default 60) shows
 `⚠ quiet Ns` instead. Failed tasks block their dependents; independent branches continue;
 re-`run` resumes (`ok` work skipped, `rate-limited` retries). A live engine (heartbeat

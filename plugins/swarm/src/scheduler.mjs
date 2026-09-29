@@ -240,6 +240,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     for (const t of tasks) {
       if (!cachedIds.has(t.id)) continue;
       const prior = readResult(plan.resultsDir, t.id);
+      if (prior.numTurns != null) ctx.turnsMap.set(t.id, prior.numTurns);
       ctx.record(t, "skipped", prior.durationMs ?? null, prior.tokens);
       if (t.isDigest) ctx.digestPath = writeDigestMd(plan.resultsDir, prior.output);
     }

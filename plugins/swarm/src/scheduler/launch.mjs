@@ -244,6 +244,9 @@ export function createLaunch(ctx) {
         return task.id;
       }
 
+      // Every attempt's turns are requests the meter charged, a retried one included.
+      if (r.numTurns != null) ctx.turnsMap.set(task.id, (ctx.turnsMap.get(task.id) ?? 0) + r.numTurns);
+
       if (!r.ok) {
         const retry = cfg.retry || {};
         const n = ctx.attempts.get(task.id) || 0;
@@ -327,7 +330,6 @@ export function createLaunch(ctx) {
         else ctx.digestFailed = true;
       }
 
-      if (r.numTurns != null) ctx.turnsMap.set(task.id, r.numTurns);
       ctx.record(task, st, r.durationMs, r.tokens);
 
       // Projection warn: this leaf is terminal (retry/fallback paths returned

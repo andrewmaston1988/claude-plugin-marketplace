@@ -1,12 +1,6 @@
-// One finished run mixing a subscription Claude leaf, a Codex leaf and a `:cloud` leaf, in a
-// throwaway SWARM_HOME with a measured meter for the `:cloud` model. Every surface pin in
-// run-cost*.test.mjs reads this same run, so they agree on the figures:
-//   claude haiku  100k in + 1M cache read + 24k out at $1/$0.10/$5  = $0.32 api-equivalent
-//   codex luna    1M in + 5M cache read + 400k out at $0.10/$0.01/$0.50 = $0.35 api-equivalent
-//   glm :cloud    32 turns x 0.1 pts/request                          = 3.2% of week
-// The result files carry a `costUsd` on the Claude and the `:cloud` leaf — the unfiltered
-// Anthropic-rate figure the runner reports for both — and the summary carries none, because
-// neither leaf ran on a real key. No surface may price from those result files.
+// One finished run mixing a subscription Claude leaf, a Codex leaf and a `:cloud` leaf, which
+// every surface pin in run-cost*.test.mjs reads. The result files' `costUsd` is the runner's
+// unfiltered figure and no surface may price from it.
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -15,6 +9,7 @@ import { snap, seg } from "./cost-snapshots.mjs";
 export const PROJECT = "C--code-mix";
 export const NAME = "mixed-1";
 export const DEFAULT_TEXT = "3.2% of week";
+// claude $0.32 + codex $0.35 api-eq; glm 32 turns x 0.1 pts/request.
 export const MONEY_TEXT = "≈$0.67 api-eq · 3.2% of week";
 
 const CLAUDE_TOKENS = { input: 100_000, output: 24_000, cacheCreation: 0, cacheRead: 1_000_000 };

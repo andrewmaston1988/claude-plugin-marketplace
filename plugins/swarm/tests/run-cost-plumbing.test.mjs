@@ -7,7 +7,7 @@ import { equal, ok } from "node:assert/strict";
 import { readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { runPlan } from "../src/scheduler.mjs";
-import { readRun } from "../src/runlog.mjs";
+import { readRun, readRunLog } from "../src/runlog.mjs";
 import { readResult } from "../src/results.mjs";
 import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, sentPrompt } from "./helpers/scheduler-fixtures.mjs";
 import { runCli, runValidated } from "./helpers/cli.mjs";
@@ -89,4 +89,32 @@ test("swarm ask: the ask entry carries its own turns, and the summary row sums t
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test("a rate-limited attempt's turns count toward the leaf's requests", () => {
+  let calls = 0;
+  const limited = JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, result: "429 rate limit", num_turns: 2 }) + "\n";
+  return withRun([task("a")], () => (++calls === 1 ? { exit: 1, output: limited } : { output: turnsStream("done", "s-1", 3) }),
+    { cfg: { ...CFG, retry: { rateLimited: 2, backoffMs: 10 } } }, ({ r }) => {
+      equal(calls, 2);
+      equal(r.summary.tasks.find((t) => t.id === "a").numTurns, 5, "both attempts' requests");
+    });
+});
+
+test("a cache-replayed leaf keeps its recorded turns on the summary row", () =>
+  withRun([task("a")], () => ({ output: turnsStream("done", "s-1", 4) }), {}, async ({ p }) => {
+    const spawn = fakeSpawnFactory(() => ({ output: "should not run" }));
+    const again = await runPlan(p, CFG, makeIo(spawn));
+    equal(spawn.calls.length, 0);
+    equal(again.summary.tasks.find((t) => t.id === "a").numTurns, 4);
+  }));
+
+test("a run-start resets the turn counts it read from an earlier attempt", () => {
+  const ev = (o) => JSON.stringify({ ts: "2026-09-29T00:00:00Z", ...o });
+  const log = [
+    ev({ event: "run-start", tasks: ["a"] }),
+    ev({ id: "a", state: "ok", numTurns: 5 }),
+    ev({ event: "run-start", tasks: ["a"] }),
+  ].join("\n") + "\n";
+  equal(readRunLog(log).tasks.find((t) => t.id === "a").numTurns, undefined);
 });

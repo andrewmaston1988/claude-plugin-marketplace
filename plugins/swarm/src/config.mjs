@@ -150,8 +150,8 @@ function validateProviderConfig(cfg) {
 }
 
 // Every check a config must pass, in one place: loadConfig runs it on the merged
-// view, initConfig on the object it is about to write. Five checks — the
-// valve/minFreeMemMb ordering below is the one an extraction keeps dropping.
+// view, initConfig on the object it is about to write. The valve/minFreeMemMb
+// ordering below is the one an extraction keeps dropping.
 function validateConfig(cfg, configPath) {
   validateProviderConfig(cfg);
   validateModelDenylist(cfg.modelDenylist, configPath);
