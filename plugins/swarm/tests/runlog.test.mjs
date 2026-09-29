@@ -559,7 +559,7 @@ test("P1: resultSuperseded is true for exactly the unsettled states", () => {
   // `expand` event and is never in manifest.tasks, so a contracted expansion leaves the
   // dropped clone's result on disk with nothing to match it — superseded by construction.
   assert.equal(resultSuperseded(undefined), true);
-  // Compound states reach the log through a variable (scheduler.mjs:1038) and are settled.
+  // Compound states reach the log through a variable (classifyFailure, src/scheduler/run-task.mjs) and are settled.
   assert.equal(resultSuperseded('failed:timeout'), false);
 });
 

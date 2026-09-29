@@ -73,7 +73,7 @@ function buildIndex() {
       "plugins/swarm/src/runlog.mjs",
       "plugins/swarm/src/scheduler.mjs",
       "plugins/swarm/src/stream.mjs",
-      "plugins/swarm/tests/scheduler.test.mjs",
+      "plugins/swarm/tests/scheduler-dispatch.test.mjs",
     ],
   };
   const entries = preflight.changed.map((rel) => {

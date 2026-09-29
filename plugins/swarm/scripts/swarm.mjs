@@ -326,13 +326,13 @@ async function cmdValidate(rest) {
   // guaranteed shape, and what the guarantee costs when output misses.
   const ret = plan.tasks.filter((t) => t.returns);
   if (ret.length) {
-    out(`returns validated: ${ret.map((t) => t.id).join(", ")} (invalid output gets one corrective re-ask, then fails)`);
+    out(`returns validated: ${ret.map((t) => t.id).join(", ")} (invalid output gets up to 3 corrective re-asks, then fails)`);
   }
   // N3: mechanical verification is approval-surface behavior — say which tasks
   // will have their {file,line,quote} citations checked against real files.
   const cited = ret.filter((t) => t.verifyCitations !== false && citationPaths(t.returns).length);
   if (cited.length) {
-    out(`citations verified mechanically: ${cited.map((t) => t.id).join(", ")} (file/line/quote checked against the task cwd; refuted citations get one corrective re-ask, then fail)`);
+    out(`citations verified mechanically: ${cited.map((t) => t.id).join(", ")} (file/line/quote checked against the task cwd; a refuted citation gets one corrective re-ask, then is annotated — never fails the leaf)`);
   }
   // Read coverage is approval-surface too, and independent of returns: name the
   // tasks whose transcript will be checked against their mustRead declaration.
