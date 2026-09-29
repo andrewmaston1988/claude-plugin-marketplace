@@ -28,18 +28,18 @@ const STREAM_FLAGS = ["--output-format", "stream-json", "--verbose"];
 
 test("claude model: exact argv, no env overrides", () => {
   const d = buildDispatch(task({ provider: "claude", model: "claude-haiku-4-5-20251001", effort: "high" }), "the prompt", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "the prompt", "--model", "claude-haiku-4-5-20251001", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "the prompt", "--model", "claude-haiku-4-5-20251001", "--effort", "high", "--allowedTools", "Read,Grep,Glob,Skill", ...STREAM_FLAGS]);
   deepEqual(d.env, {});
 });
 
 test("claude model with the normalized default carries --effort", () => {
   const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--allowedTools", "Read,Grep,Glob,Skill", ...STREAM_FLAGS]);
 });
 
 test("open model env mode: same argv plus exact env trio, model verbatim", () => {
   const d = buildDispatch(task({ provider: "ollama", model: "minimax-m3:cloud" }), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "minimax-m3:cloud", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "minimax-m3:cloud", "--effort", "medium", "--allowedTools", "Read,Grep,Glob,Skill", ...STREAM_FLAGS]);
   deepEqual(d.env, {
     ANTHROPIC_BASE_URL: "http://localhost:11434",
     ANTHROPIC_API_KEY: "ollama",
@@ -49,7 +49,7 @@ test("open model env mode: same argv plus exact env trio, model verbatim", () =>
 
 test("contextWindow 1m suffixes only the CLI model name, keeping the provider model bare", () => {
   const d = buildDispatch(task({ provider: "ollama", model: "glm-5.3:cloud", contextWindow: "1m" }), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "glm-5.3:cloud[1m]", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "glm-5.3:cloud[1m]", "--effort", "medium", "--allowedTools", "Read,Grep,Glob,Skill", ...STREAM_FLAGS]);
   deepEqual(d.env, {
     ANTHROPIC_BASE_URL: "http://localhost:11434",
     ANTHROPIC_API_KEY: "ollama",
@@ -105,7 +105,7 @@ test("launch mode: template split with {model} substitution and {args} splice", 
   const d = buildDispatch(task({ provider: "ollama", model: "qwen3-coder:cloud", effort: "high" }), "the prompt", cfg, { _mcpTools: NO_MCP });
   deepEqual(d.argv, [
     "ollama", "launch", "claude", "--model", "qwen3-coder:cloud", "--",
-    "-p", "the prompt", "--model", "qwen3-coder:cloud", "--effort", "high", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS,
+    "-p", "the prompt", "--model", "qwen3-coder:cloud", "--effort", "high", "--allowedTools", "Read,Grep,Glob,Skill", ...STREAM_FLAGS,
   ]);
   deepEqual(d.env, {});
 });
@@ -128,12 +128,12 @@ test("launch mode applies only to non-Claude models", () => {
 test("task.settings adds --settings <json> right after --allowedTools", () => {
   const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5", settings: { env: { X: "0" } } }), "p", CFG, { _mcpTools: NO_MCP });
   const i = d.argv.indexOf("--allowedTools");
-  deepEqual(d.argv.slice(i, i + 4), ["--allowedTools", "Read,Grep,Glob", "--settings", '{"env":{"X":"0"}}']);
+  deepEqual(d.argv.slice(i, i + 4), ["--allowedTools", "Read,Grep,Glob,Skill", "--settings", '{"env":{"X":"0"}}']);
 });
 
 test("no settings key: exact argv, no --settings", () => {
   const d = buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-haiku-4-5-20251001", "--effort", "medium", "--allowedTools", "Read,Grep,Glob,Skill", ...STREAM_FLAGS]);
   ok(!d.argv.includes("--settings"));
 });
 
@@ -143,13 +143,13 @@ test("disable1mContext: false + Claude model injects --settings with the 1M env 
   const cfg = { ...CFG, disable1mContext: false };
   const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5" }), "p", cfg, { _mcpTools: NO_MCP });
   const i = d.argv.indexOf("--allowedTools");
-  deepEqual(d.argv.slice(i, i + 4), ["--allowedTools", "Read,Grep,Glob", "--settings", '{"env":{"CLAUDE_CODE_DISABLE_1M_CONTEXT":"0"}}']);
+  deepEqual(d.argv.slice(i, i + 4), ["--allowedTools", "Read,Grep,Glob,Skill", "--settings", '{"env":{"CLAUDE_CODE_DISABLE_1M_CONTEXT":"0"}}']);
 });
 
 test("disable1mContext: true + no task settings → no --settings (byte-identical to the shipped-default argv)", () => {
   const cfg = { ...CFG, disable1mContext: true };
   const d = buildDispatch(task({ provider: "claude", model: "claude-sonnet-5" }), "p", cfg, { _mcpTools: NO_MCP });
-  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-sonnet-5", "--effort", "medium", "--allowedTools", "Read,Grep,Glob", ...STREAM_FLAGS]);
+  deepEqual(d.argv, ["claude", "-p", "p", "--model", "claude-sonnet-5", "--effort", "medium", "--allowedTools", "Read,Grep,Glob,Skill", ...STREAM_FLAGS]);
   ok(!d.argv.includes("--settings"));
 });
 
@@ -491,13 +491,13 @@ test("mcpTools is empty when the file is missing, unreadable or has no servers",
 test("every leaf's allowedTools carries the MCP servers", () => {
   const fake = () => ["mcp__scout"];
   const d = buildDispatch({ provider: "claude", model: "claude-sonnet-5", allowedTools: "Read,Grep" }, "p", CFG, { _mcpTools: fake });
-  equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "Read,Grep,mcp__scout");
+  equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "Read,Grep,Skill,mcp__scout");
 });
 
-test("a leaf with no allowedTools still gets MCP, with no leading comma", () => {
+test("a leaf with no allowedTools still gets Skill and MCP, with no leading comma", () => {
   const fake = () => ["mcp__scout"];
   const d = buildDispatch({ provider: "claude", model: "claude-sonnet-5", allowedTools: "" }, "p", CFG, { _mcpTools: fake });
-  equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "mcp__scout");
+  equal(d.argv[d.argv.indexOf("--allowedTools") + 1], "Skill,mcp__scout");
 });
 
 // A task whose cwd is a swarm-made worktree must pass dispatch exactly when it passes the
@@ -517,4 +517,19 @@ test("dispatch: a swarm worktree of an allowed repo dispatches; one of a strange
     rmSync(root, { recursive: true, force: true });
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+// Skill goes to every Claude-runner leaf, whatever list its author wrote: skills are
+// the operator's own tooling, like the MCP servers beside them.
+const toolsOf = (d) => d.argv[d.argv.indexOf("--allowedTools") + 1].split(",");
+test("every Claude-runner leaf may invoke Skill: default, explicit write list, and Ollama", () => {
+  for (const over of [{}, { allowedTools: "Read,Edit,Bash" }, { provider: "ollama", model: "minimax-m3:cloud" }]) {
+    const tools = toolsOf(buildDispatch(task(over), "p", CFG, { _mcpTools: NO_MCP }));
+    equal(tools.filter((t) => t === "Skill").length, 1, `${JSON.stringify(over)} → ${tools}`);
+  }
+});
+
+test("an author who already lists Skill gets it once", () => {
+  const tools = toolsOf(buildDispatch(task({ allowedTools: "Read,Skill" }), "p", CFG, { _mcpTools: NO_MCP }));
+  deepEqual(tools, ["Read", "Skill"]);
 });

@@ -60,9 +60,9 @@ function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpToo
     "-p", prompt,
     "--model", cliModel,
     "--effort", task.effort ?? "medium",
-    // MCP goes to every leaf: the roster is the operator's own, and a leaf that loses
-    // scout falls back to grepping the tree.
-    "--allowedTools", [task.allowedTools, ..._mcpTools()].filter(Boolean).join(","),
+    // Skill and MCP go to every leaf: both are the operator's own tooling, and a leaf
+    // that loses scout falls back to grepping the tree.
+    "--allowedTools", [...new Set([...String(task.allowedTools || "").split(",").map((t) => t.trim()), "Skill", ..._mcpTools()].filter(Boolean))].join(","),
     // A shell env var LOSES to the user's settings.json env block, and Claude Code
     // has no [1m] model alias — --settings is highest-precedence in the CLI's
     // settings chain, so it's the only route that overrides that block per-leaf.
