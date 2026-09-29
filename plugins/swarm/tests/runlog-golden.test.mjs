@@ -8,6 +8,9 @@
 // Move 2026-09-21 (same day, later): the PER-LEAF CELL went back to work tokens, so `fix[0]`
 // returned 67k → 17k while the run total stayed 374.1k — the cell shows a leaf's work, the
 // total shows everything the providers processed. Only that one row moved.
+//
+// Move 2026-09-29 (swarm-token-headline-work): the run total is work tokens again, so it went
+// 374.1k → 324.1k — `fix[0]`'s 50k cacheRead left the headline. No row moved.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";

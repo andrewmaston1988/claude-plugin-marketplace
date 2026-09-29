@@ -2,7 +2,7 @@
 // view, the report footnote and the closing block. Storage lives in results.mjs.
 import { join, resolve } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
-import { tokenTotal, workTokens } from "./stream.mjs";
+import { workTokens } from "./stream.mjs";
 import { readRun } from "./runlog.mjs";
 
 // ── stdout contract ───────────────────────────────────────────────────────────
@@ -111,7 +111,7 @@ export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLin
     glyph: GLYPHS[t.state] || "?",
     dur: t.state === "running" && t.startedMs != null ? fmtSecs(now - t.startedMs)
       : t.durationMs != null ? fmtSecs(t.durationMs) : "—",
-    tok: formatTokens(workTokens(t.tokens)), // the leaf's work — tokenTotal's cacheRead is not work
+    tok: formatTokens(workTokens(t.tokens)), // the leaf's work, same figure as the footer
     tag: TAGGED.has(t.state) ? ` [${t.state}]` : "",
     act: activityCell(t),
   }));
@@ -150,7 +150,7 @@ export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLin
   // counts and total span EVERY leaf — a collapsed row must not vanish from the tally
   const counts = tally(all);
   const segments = FOOTER_ORDER.filter((k) => counts[k]).map((k) => paint(k, `${counts[k]} ${k}`));
-  const total = all.reduce((n, t) => n + tokenTotal(t.tokens), 0);
+  const total = all.reduce((n, t) => n + workTokens(t.tokens), 0);
   if (total > 0) segments.push(bold(`${formatTokens(total)} tokens`));
   lines.push(...spacer, `  ${segments.join(dim(" · "))}`);
   return lines.join("\n");
@@ -300,9 +300,9 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
   // how you ask for a report and are left wondering where it went.
   else if (reportMissing) lines.push(`${bold("report:")} ${red("NOT WRITTEN")} — report was requested but the digest leaf produced no report.md`);
   lines.push(`${bold("summary:")} ${summaryPath}`);
-  if (totalTokens && tokenTotal(totalTokens) > 0) {
+  if (totalTokens && workTokens(totalTokens) > 0) {
     const input = formatTokens(totalTokens.input + totalTokens.cacheCreation);
-    let line = `${bold("tokens:")} ${formatTokens(tokenTotal(totalTokens))} (input ${input} · output ${formatTokens(totalTokens.output)}${totalTokens.cacheRead ? ` · cache read ${formatTokens(totalTokens.cacheRead)}` : ""})`;
+    let line = `${bold("tokens:")} ${formatTokens(workTokens(totalTokens))} (input ${input} · output ${formatTokens(totalTokens.output)}${totalTokens.cacheRead ? ` · cache read ${formatTokens(totalTokens.cacheRead)}` : ""})`;
     // actual-vs-estimate closes the consent loop and audits the corpus
     if (estimate?.tokens) {
       const actual = workTokens(totalTokens);

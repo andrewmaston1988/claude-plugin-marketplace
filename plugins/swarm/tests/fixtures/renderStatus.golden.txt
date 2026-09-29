@@ -12,7 +12,7 @@ swarm · fixture-1 · 9 tasks · 10m00s
   ·  review~test  haiku             —      —
   ·  __digest     sonnet            —      —
 
-  1 ok · 1 failed · 1 rate-limited · 2 running · 4 pending · 374.1k tokens
+  1 ok · 1 failed · 1 rate-limited · 2 running · 4 pending · 324.1k tokens
 
 results: <dir>/results
 digest: <dir>/digest.md

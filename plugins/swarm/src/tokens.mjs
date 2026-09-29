@@ -25,16 +25,18 @@ export function addTokens(a, b) {
   };
 }
 
-// Headline count: tokens the provider processed. `input` means UNCACHED input on
-// every provider (codexUsage subtracts the cached subset OpenAI folds into it), so
-// the four fields are disjoint and this sum counts each processed token once.
+// Tokens the provider processed, cache reads included. NEVER a display figure — a re-read
+// prefix grows with turns × context, not with work. It is the any-usage predicate and the
+// stored audit column; headlines use workTokens. `input` means UNCACHED input on every
+// provider (codexUsage subtracts the cached subset OpenAI folds into it), so the four
+// fields are disjoint and this sum counts each processed token once.
 // Tolerates partial shapes — a summary row may omit buckets.
 export function tokenTotal(t) {
   return t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) + (t.cacheRead || 0) : 0;
 }
 
-// Work tokens (input + output + cache writes), excluding cache reads. For cost
-// estimation, where a re-served prefix really is cheaper than fresh input.
+// Work tokens (input + output + cache writes), excluding cache reads: THE headline figure on
+// every surface, and the cost estimate's basis (a re-served prefix really is cheaper).
 export function workTokens(t) {
   return t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
 }

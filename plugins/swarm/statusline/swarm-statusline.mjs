@@ -18,7 +18,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { pathToFileURL } from "node:url";
-import { tokenTotal } from "../src/stream.mjs";
+import { workTokens } from "../src/stream.mjs";
 import { formatTokens } from "../src/results.mjs";
 import { readRun, runLiveness } from "../src/runlog.mjs";
 
@@ -41,7 +41,7 @@ function runMeta(logPath) {
     }
   } catch { /* unreadable */ }
   let tokens = 0;
-  for (const t of latest.values()) tokens += tokenTotal(t);
+  for (const t of latest.values()) tokens += workTokens(t);
   return { tokens, launcher };
 }
 
@@ -80,9 +80,9 @@ export function liveRuns({ home = join(homedir(), ".swarm"), now = Date.now(), s
       const providerTokens = new Map();
       for (const t of rr.tasks) {
         model.set(t.id, identityLabel(t));
-        leafTokens.set(t.id, tokenTotal(t.tokens));
+        leafTokens.set(t.id, workTokens(t.tokens));
         const provider = t.provider || "unknown";
-        providerTokens.set(provider, (providerTokens.get(provider) || 0) + tokenTotal(t.tokens));
+        providerTokens.set(provider, (providerTokens.get(provider) || 0) + workTokens(t.tokens));
         if (t.state === "ok" || t.state === "skipped") ok++;
         // "failed:timeout" and a stopped-mid-run leaf both count as failed here.
         else if (t.state === "failed" || t.state === "failed:timeout" || t.state === "failed:stopped" || t.state === "blocked") failed++;
@@ -113,15 +113,12 @@ export function render(opts = {}) {
     const short = run.replaceAll("scenario-", "").replaceAll("-impl-1", "").replaceAll("-1", "");
     // ✓ all leaves done (green), ◐ a leaf is live, ○ nothing running, not done
     const [sym, col] = ok === total ? ["✓", G] : running.length ? ["◐", BLUE] : ["○", BLUE];
-    // The models seated on the live leaves, deduped. One run owns the whole bar, so it
-    // lists them all; several runs share it, so each names only its fullest leaf's model
-    // — the one deepest into its context — and counts the rest.
-    const seated = [...new Set(running.map((id) => model.get(id)).filter(Boolean))];
-    const deepest = () => model.get(running.reduce((a, b) =>
-      (leafTokens?.get(b) || 0) > (leafTokens?.get(a) || 0) ? b : a));
-    const agents = runs.length === 1 || seated.length <= 1
-      ? seated.join(", ")
-      : `${deepest()} (+${seated.length - 1} more)`;
+    // Every run, alone or sharing the bar, names its fullest running leaf's model — the one
+    // deepest into its context — and counts the other running LEAVES (not distinct models).
+    const deepest = running.length
+      ? model.get(running.reduce((a, b) => (leafTokens?.get(b) || 0) > (leafTokens?.get(a) || 0) ? b : a))
+      : "";
+    const agents = running.length > 1 ? `${deepest} (+${running.length - 1} more)` : deepest;
     const tail = [agents, formatTokens(tokens)].filter(Boolean).join(" ");
     parts.push(`${short} ${col}${ok}/${total} ${sym}${X}` + (failed ? ` ${Y}✗${failed}${X}` : "") + (tail ? ` ${D}${tail}${X}` : ""));
     if (quiet > QUIET_FLAG_MS && (stalest === null || quiet > stalest.quiet)) {

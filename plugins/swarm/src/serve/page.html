@@ -389,8 +389,8 @@
   const ago = (ms) => window.swarmLive.agoText(ms, Date.now());
   // A run's elapsed time, shared by the runs table's `when` cell and the run screen's box.
   const runElapsed = (r) => r.finishedMs ? fmtDur(r.finishedMs - r.startedMs) : r.startedMs ? window.swarmLive.elapsedText({ state: "running", startedMs: r.startedMs }, Date.now()) : "—";
-  // Mirrors stream.mjs tokenTotal (processed total, cache reads included) — the browser cannot import it; serve.test.mjs pins the two together.
-  const tokTotal = (t) => t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) + (t.cacheRead || 0) : 0;
+  // Mirrors stream.mjs workTokens (input + output + cache writes; cache reads excluded) — the browser cannot import it; serve.test.mjs pins the two together.
+  const tokWork = (t) => t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
   // The server groups runs (grouping.mjs) and labels every row; the page only draws.
   // shortProject falls back to the raw key so an old payload still renders.
   // `let`: a runs build computes the next label map as a value; commitView swaps it in.
@@ -758,7 +758,7 @@
     const n = (...ks) => ks.reduce((a, k) => a + (b[k] || 0), 0);
     const done = n("ok", "skipped");
     const failed = n("failed", "failed:timeout", "failed:stopped", "blocked");
-    const tok = fmtTok(tasks.reduce((a, t) => a + tokTotal(t.tokens), 0));
+    const tok = fmtTok(tasks.reduce((a, t) => a + tokWork(t.tokens), 0));
     const dhref = (run.digestPath || run.reportPath) ? `#/run/${enc(run.project)}/${enc(run.name)}/digest` : null;
 
     if (run.abortedMs) return tile("bad", "✕", "Aborted — the engine is gone", `${done} of ${tasks.length} finished · ${tok} tokens`, dhref);
@@ -804,7 +804,7 @@
     const quietWarn = run.quietWarnMs || 60000;
     let html = "";
     const totalsByState = byStateOf(tasks);
-    const total = tasks.reduce((n, t) => n + tokTotal(t.tokens), 0);
+    const total = tasks.reduce((n, t) => n + tokWork(t.tokens), 0);
     html += `<div class="totals">${countsHtml(totalsByState)}<span class="meta">${fmtTok(total)}</span>${barHtml(totalsByState, tasks.length)}</div>`;
     html += `<div class="graph">${columns ? `<div class="rthead"><span class="rail"></span>${TASK_COLS.map((c) => `<span>${c}</span>`).join("")}</div>` : ""}<svg class="overlay" id="rail" data-keep></svg><ul id="rows">`;
     for (const r of rows) {
@@ -818,7 +818,7 @@
           html += `<li class="wave-label${live ? " live" : ""} tap" data-wave="${r.wave}"><span>${isDigest ? "digest" : label}</span><small>· ${desc}</small></li>`;
         } else {
           const st = stateOfGroup(r.tasks);
-          html += `<li class="row leaf tap" data-node="wave:${r.wave}" data-wave="${r.wave}"><div class="rail"></div><div class="body"><div class="txt"><span class="meta"><span style="letter-spacing:.12em;text-transform:uppercase;font-size:11px;color:${live ? "var(--accent)" : "var(--faint)"}">${label}</span> · ${desc}</span>${stripHtml(r.tasks)}<span class="meta">${countsHtml(byStateOf(r.tasks))} · ${fmtTok(r.tasks.reduce((n, t) => n + tokTotal(t.tokens), 0))}</span></div>${chev(false)}</div></li>`;
+          html += `<li class="row leaf tap" data-node="wave:${r.wave}" data-wave="${r.wave}"><div class="rail"></div><div class="body"><div class="txt"><span class="meta"><span style="letter-spacing:.12em;text-transform:uppercase;font-size:11px;color:${live ? "var(--accent)" : "var(--faint)"}">${label}</span> · ${desc}</span>${stripHtml(r.tasks)}<span class="meta">${countsHtml(byStateOf(r.tasks))} · ${fmtTok(r.tasks.reduce((n, t) => n + tokWork(t.tokens), 0))}</span></div>${chev(false)}</div></li>`;
         }
         continue;
       }
@@ -828,7 +828,7 @@
         const t = r.task;
         const clones = new Set(r.kids.map((k) => /^\[(\d+)\]/.exec(k.id.slice(t.id.length))?.[1])).size;
         const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
-        html += `<li class="row leaf tap" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· forEach ×${clones}</span></span><span class="meta">${countsHtml(byStateOf(r.kids))} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
+        html += `<li class="row leaf tap" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· forEach ×${clones}</span></span><span class="meta">${countsHtml(byStateOf(r.kids))} · ${fmtTok(r.kids.reduce((n, k) => n + tokWork(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       if (r.type === "node") {
@@ -836,7 +836,7 @@
         // screen, never flattened inline; its dot strip is the row's own summary.
         const t = r.task;
         const href = `#/run/${enc(run.project)}/${enc(run.name)}/node/${enc(t.id)}`;
-         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${identityHtml(t, { chip: true })} · ${fmtTok(r.kids.reduce((n, k) => n + tokTotal(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
+         html += `<li class="row leaf tap${focus !== t.id && inFocus(t.id) ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body"><div class="txt"><span class="name">${esc(t.id)} <span class="meta">· manifest · ${r.kids.length} inside</span></span>${stripHtml(r.kids, true)}<span class="meta">${countsHtml(byStateOf(r.kids))} · ${identityHtml(t, { chip: true })} · ${fmtTok(r.kids.reduce((n, k) => n + tokWork(k.tokens), 0))}</span></div>${chevRight}</div></li>`;
         continue;
       }
       const t = r.task;
@@ -844,7 +844,7 @@
       const quiet = quietSecs != null && quietSecs * 1000 > quietWarn;
       // A short read never fails the leaf, so the state glyph cannot carry it — the row
       // marks it instead: the badge on the phone, the sentence on the table's hover title.
-      const identity = identityName(t) ? identityHtml(t, { chip: true }) : "", sub = t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : identity, nm = r.block ? sessionName(t.id) : esc(t.id), tk = fmtTok(tokTotal(t.tokens)), tm = window.swarmLive.elapsedText(t, now), short = window.swarmLive.coverageWarn(t);
+      const identity = identityName(t) ? identityHtml(t, { chip: true }) : "", sub = t.kind === "agentless" ? `agentless${t.after?.length ? " · after " + t.after.length : ""}` : identity, nm = r.block ? sessionName(t.id) : esc(t.id), tk = fmtTok(tokWork(t.tokens)), tm = window.swarmLive.elapsedText(t, now), short = window.swarmLive.coverageWarn(t);
       const href = `#/run/${enc(run.project)}/${enc(run.name)}/leaf/${enc(t.id)}`;
       // One row, one set of values, two cuts: the phone stacks them, the table's cells are them.
       html += `<li class="row leaf tap${quiet ? " quiet" : ""}${focus === t.id ? " flash" : ""}" data-key="${esc(t.id)}" data-node="${esc(t.id)}" data-href="${esc(href)}"><div class="rail"></div><div class="body">${columns ? `<span class="col nm${t.state === "pending" ? " dim" : ""}">${nm}${short ? ` <span class="covwarn" title="${esc(short)}">⚠</span>` : ""}</span><span class="col mdl">${identity}</span><span class="col c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(t.state)}</span><span class="col tm">${tm ?? "—"}</span><span class="col tk">${tk}</span><span class="col act">${t.activity ? esc(t.activity) : ""}</span>` : `<div class="txt"><span class="name${t.state === "pending" ? " dim" : ""}">${nm}</span><span class="meta">${sub}${short ? ` · <span class="covwarn">⚠ ${esc(window.swarmLive.coverageBadge(t))}</span>` : ""}</span></div><div class="right"><span class="c-${cls(t.state)}">${GLYPH[t.state] || "?"} ${esc(tm ?? t.state)}</span><span>${tk}</span></div>`}</div></li>`;
@@ -990,7 +990,7 @@
 
   // One leaf → one verdict tile. No chevron: the leaf IS the destination.
   function leafBannerHtml(t, leaf, now, quietSecs) {
-    const tok = `${fmtTok(tokTotal(t.tokens || leaf?.tokens))} tokens`;
+    const tok = `${fmtTok(tokWork(t.tokens || leaf?.tokens))} tokens`;
     const took = t.durationMs != null ? fmtDur(t.durationMs) : window.swarmLive.elapsedText(t, now) ?? "—";
     const last = t.lastEventMs ? ` · last event ${ago(t.lastEventMs)}` : "";
     const identity = identityName(t) ? identityHtml(t) : "";
@@ -1045,18 +1045,18 @@
     if (tk) {
       // "input" means what the CLI means by it (results.mjs:369): input + cacheCreation.
       // On a Claude leaf the whole prompt is cache-written on turn 1, so `input` alone is
-      // just the uncached tail. cacheRead is its own segment: re-read transcript, not billed.
+      // just the uncached tail. Input + Output sum to the work headline; cacheRead (the re-read transcript) is its own line.
       const billedIn = (tk.input || 0) + (tk.cacheCreation || 0), outp = tk.output || 0, cr = tk.cacheRead || 0;
       // A live Ollama tick is a running total — the whole prompt as input, no output, no cache —
       // and the split only exists in the final result. Zeros drawn from it would be a claim.
       const noSplit = LIVE.has(t.state) && !outp && !cr && !tk.cacheCreation;
       const seg = (n, colour) => `<span style="flex:${n};background:${colour}"></span>`;
       const key = (colour, label, n) => `<span><i style="background:${colour}"></i>${label} ${n ? fmtTok(n) : "0"}</span>`;
-      html += `<div class="card"><div class="cl">tokens<b>${fmtTok(tokTotal(tk))}</b></div>`
+      html += `<div class="card"><div class="cl">tokens<b>${fmtTok(tokWork(tk))}</b></div>`
         + (noSplit ? `<div class="cf"><span>running total — the input / output / cache split arrives when the leaf finishes</span></div>` : "")
-        + (noSplit ? "" : `<div class="segbar">${seg(billedIn, "var(--accent)")}${seg(outp, "var(--ok)")}${seg(cr, "var(--rule)")}</div>`
-          + `<div class="legend">${key("var(--accent)", "Input", billedIn)}${key("var(--ok)", "Output", outp)}${key("var(--rule)", "Cache", cr)}</div>`)
-        + (!noSplit && !tk.cacheCreation && !cr ? `<div class="cf"><span>no cache buckets from this provider — every turn re-sends the transcript</span></div>` : "")
+        + (noSplit ? "" : `<div class="segbar">${seg(billedIn, "var(--accent)")}${seg(outp, "var(--ok)")}</div>`
+          + `<div class="legend">${key("var(--accent)", "Input", billedIn)}${key("var(--ok)", "Output", outp)}</div>`)
+        + (!noSplit && (cr || !tk.cacheCreation) ? `<div class="cf"><span>${cr ? `cache read ${fmtTok(cr)}` : "no cache buckets from this provider — every turn re-sends the transcript"}</span></div>` : "")
         + `</div>`;
     }
     // Prompt and output: both long crafted text, collapsed by default — this screen is read

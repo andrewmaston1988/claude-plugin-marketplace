@@ -83,14 +83,17 @@ test("the position card names what the leaf waited on and what it feeds, and lin
   assert.equal(back.getAttribute("data-href"), RUN_URL, "Show in tree returns to the run");
 });
 
-test("the tokens card splits into billed input, output and cache read, and says so", async () => {
-  const P = await paintLeaf({ state: "ok", tokens: { input: 10, cacheCreation: 990, output: 500, cacheRead: 4000 } });
+// Moved 2026-09-29 (swarm-token-headline-work): the bar is the work headline's two parts, so
+// cache read left it (it was a third segment) and is its own line under the bar.
+test("the tokens card splits its work headline into billed input and output, with cache read as its own line", async () => {
+  const P = await paintLeaf({ state: "ok", tokens: { input: 10, cacheCreation: 14990, output: 5000, cacheRead: 4_000_000 } });
   const segs = P.findByClass("segbar")[0].childNodes.filter((n) => n.nodeType === 1);
-  assert.equal(segs.length, 3, "three segments");
-  assert.deepEqual(segs.map((s) => s.getAttribute("style").match(/flex:(\d+)/)[1]), ["1000", "500", "4000"],
+  assert.equal(segs.length, 2, "two segments");
+  assert.deepEqual(segs.map((s) => s.getAttribute("style").match(/flex:(\d+)/)[1]), ["15000", "5000"],
     "input is input + cacheCreation — what the CLI reports as input");
   const text = P.screenText();
-  assert.ok(text.includes("Input 1k") && text.includes("Output 500") && text.includes("Cache 4k"));
+  assert.ok(text.includes("20k") && text.includes("Input 15k") && text.includes("Output 5k"), "headline is the sum of the two");
+  assert.ok(text.includes("cache read 4.0M") && !text.includes("Cache 4.0M"), "cache read is a line, not a legend entry");
 });
 
 test("prompt and output are two disclosure rows, both collapsed on arrival", async () => {
