@@ -1400,6 +1400,7 @@
   // The view the newest in-flight route is building. SSE and the poll consult it, so
   // a refresh is never dropped just because its target screen has not committed yet.
   let pendingView = null;
+  let built = false; // a build has committed a screen, so a failed refresh has one to keep
   // Every run-family screen lights Runs. The value must be the nav's own `data-tab`:
   // "performance" matched no anchor, so that tab never lit on a phone either.
   const TAB = { overview: "overview", usage: "usage", perf: "perf", cost: "cost" };
@@ -1502,9 +1503,10 @@
       const next = await buildFor(v);
       if (!guardOk(seq, routeSeq)) return;
       commitView({ ...next, view: v });
+      built = true;
     } catch (e) {
       if (!guardOk(seq, routeSeq)) return;
-      if (!moved) { pendingView = null; return; }
+      if (!moved && built) { pendingView = null; return; }
       // No header in the description: an error panel overlays the current screen,
       // and the header already describes it.
       commitView({ view: v, html: `<div class="empty">${esc(e.message)}</div>` });

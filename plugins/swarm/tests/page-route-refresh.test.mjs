@@ -47,3 +47,11 @@ test("a failed navigation paints the error panel over its skeleton", async () =>
   assert.equal(P.findByClass("empty").length, 1);
   assert.ok(P.screenText().includes("500 /api/runs"));
 });
+
+test("a failed first list load paints the error panel", async () => {
+  const P = loadPage();
+  await P.flush();
+  P.fail((url) => url.startsWith("/api/runs"));
+  await P.flush();
+  assert.equal(P.findByClass("empty").length, 1);
+});

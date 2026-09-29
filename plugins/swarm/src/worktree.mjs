@@ -68,6 +68,7 @@ function isRegisteredWorktree(path, repo) {
 // partial diff survives and the leaf resumes in place, rather than 0s-failing on
 // a re-create. `reset` (the --force redo) scrubs it back to HEAD first.
 export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTimeoutMs } = {}) {
+  if (!(Number.isFinite(addTimeoutMs) && addTimeoutMs > 0)) throw new Error("prepareIsolation requires a positive addTimeoutMs");
   const repo = task.originalCwd || task.cwd;
   // Ordered siblings sharing a name meet in one tree; without one, the task's
   // own id names a private tree.

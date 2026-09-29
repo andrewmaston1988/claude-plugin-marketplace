@@ -20,7 +20,8 @@ test("prepareIsolation names a worktree-add timeout caused by a slow reference h
   try {
     git("init", "-q", "-b", "main");
     git("-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "--allow-empty", "-m", "init");
-    writeFileSync(join(hooks, "reference-transaction"), '#!/bin/sh\nnode -e "setTimeout(() => {}, 2000)"\n', { mode: 0o755 });
+    const done = join(hooks, "done").replaceAll("\\", "/");
+    writeFileSync(join(hooks, "reference-transaction"), `#!/bin/sh\nnode -e "setTimeout(() => require('fs').writeFileSync('${done}', ''), 2000)"\n`, { mode: 0o755 });
     git("config", "core.hooksPath", hooks);
     let error;
     try {
@@ -29,9 +30,22 @@ test("prepareIsolation names a worktree-add timeout caused by a slow reference h
     ok(error, "the timed-out add throws");
     ok(/timed out after/.test(error.message), error.message);
   } finally {
-    // Killing git leaves the hook alive holding the repo as cwd; Windows refuses the delete until it exits.
+    // Killing git leaves hooks alive holding the repo as cwd; wait for the first hook's marker, then retry the delete until the chained ones exit.
     const until = Date.now() + 10000;
     while (!existsSync(join(hooks, "done")) && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-    for (const d of [resultsDir, hooks, repo]) rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    for (const d of [resultsDir, hooks, repo]) {
+      for (const stop = Date.now() + 10000; ; Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)) {
+        try { rmSync(d, { recursive: true, force: true }); break; } catch (e) { if (Date.now() > stop) throw e; }
+      }
+    }
+  }
+});
+
+test("prepareIsolation requires addTimeoutMs and names it in the error", () => {
+  for (const opts of [undefined, {}, { addTimeoutMs: 0 }, { addTimeoutMs: "5" }]) {
+    let error;
+    try { prepareIsolation({ id: "x", originalCwd: "." }, CFG, ".", opts); } catch (e) { error = e; }
+    ok(error, `throws for ${JSON.stringify(opts)}`);
+    ok(/addTimeoutMs/.test(error.message), error.message);
   }
 });
