@@ -619,8 +619,8 @@ async function cmdPerf(rest) {
   const costs = await meterCostRows();
   const settings = await costSettings(cfg);
   const { bands } = settings;
-  // A model is dominated only when another is strictly better AND strictly
-  // cheaper; `*` marks the frontier. Unmeasured cost renders "—": blank would
+  // A model is dominated when another is at least as good on both and better
+  // on one; `*` marks the frontier. Unmeasured cost renders "—": blank would
   // read as dominated when the truth is unknown.
   const costCols = (f) => ({
     cost: f && f.band != null ? "$".repeat(f.band) : "—",
@@ -635,7 +635,7 @@ async function cmdPerf(rest) {
     }
     return new Map([...grouped].map(([name, list]) => [name, list.length === 1 ? list[0] : { providerLocal: true }]));
   };
-  const LEGEND = "    cost $/$$/$$$ = meter weight band vs the cheapest measured model (swarm cost) · * on the quality/cost frontier · dom <model> = a better AND cheaper model exists · provider-local = multiple providers for this model · — unmeasured, not free · seat from the frontier, never by quality÷cost";
+  const LEGEND = "    cost $/$$/$$$ = meter weight band vs the cheapest measured model (swarm cost) · * on the quality/cost frontier · dom <model> = a model at least as good and as cheap, better on one, exists · provider-local = multiple providers for this model · — unmeasured, not free · seat from the frontier, never by quality÷cost";
   const filters = Object.entries(report.filters).filter(([, v]) => v).map(([k, v]) => `${k}=${v}`).join(" · ");
   // Lines and rows differ after a re-grade: the store is append-only and the
   // newest row per (resultsDir, leaf) wins, so say both rather than let the raw
