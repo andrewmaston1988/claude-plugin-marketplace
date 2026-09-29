@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 import {
   assertPlausible, diffPrices, isRateCardStale, overlayRateCard, readRateCardStore,
-  refreshRateCards, resolveRatePrice,
+  refreshRateCards, reportCardChanges, resolveRatePrice,
   CODEX_RATE_CARD_SEED, CLAUDE_RATE_CARD_SEED, RATE_CARD_SOURCES,
 } from "../src/rate-card.mjs";
 import { refreshPrices, refreshStaleRateCards } from "../src/rate-card-cli.mjs";
@@ -424,6 +424,23 @@ test("diffPrices: a moved cache rate counts as a reprice", () => {
   // across a family — a card that only watched `input` would miss the change.
   const changes = diffPrices({ m: { input: 4, cachedInput: 0.4, output: 20 } }, { m: { input: 4, cachedInput: 0.2, output: 20 } });
   deepEqual(changes.map((c) => c.kind), ["repriced"]);
+});
+
+test("reportCardChanges: a cache-write-only reprice shows both write prices", () => {
+  // `input/output` alone renders `$1/$5 -> $1/$5`, which reads as a no-op.
+  const before = { m: { input: 1, output: 5, cacheWrite: 1.25 }, same: { input: 2, output: 6, cacheWrite: 2.5 } };
+  const after = { m: { input: 1, output: 5, cacheWrite: 2 }, same: { input: 2, output: 6, cacheWrite: 2.5 } };
+  const lines = [];
+  reportCardChanges((l) => lines.push(l), { provider: "p", url: "u", rows: 2, changes: diffPrices(before, after) });
+  const line = lines.find((l) => /^\s+m\s/.test(l));
+  ok(/1\.25[^>]*->.*\$2\b/.test(line ?? ""), `RED: the write column moved but the line hides it: ${line}`);
+});
+
+test("reportCardChanges: an input/output reprice stays terse", () => {
+  const lines = [];
+  reportCardChanges((l) => lines.push(l), { provider: "p", url: "u", rows: 1,
+    changes: diffPrices({ m: { input: 1, output: 5, cacheWrite: 1.25 } }, { m: { input: 2, output: 5, cacheWrite: 1.25 } }) });
+  equal(lines[1].trim().replace(/\s+/g, " "), "m $1/$5 -> $2/$5", "RED: an unchanged write column cluttered the line");
 });
 
 test("diffPrices: a dated id the table publishes undated is unchanged, not dropped", () => {

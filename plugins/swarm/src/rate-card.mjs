@@ -272,7 +272,7 @@ export function rateCards(path = rateCardStorePath()) {
   return cards;
 }
 
-const money = (p) => (p == null ? "—" : `$${p.input}/$${p.output}`);
+const money = (p, write = false) => (p == null ? "—" : `$${p.input}/$${p.output}${write ? ` (write $${p.cacheWrite})` : ""}`);
 
 export function reportCardChanges(out, { provider, url, rows, changes }) {
   out(`── ${provider} — ${rows} models from ${url}`);
@@ -280,8 +280,10 @@ export function reportCardChanges(out, { provider, url, rows, changes }) {
     out("   no change");
   } else {
     for (const c of changes) {
+      // input/output alone would render a write-only reprice as `$1/$5 -> $1/$5`.
+      const write = c.kind === "repriced" && c.from.cacheWrite !== c.to.cacheWrite;
       out(c.kind === "repriced"
-        ? `   ${c.model.padEnd(28)} ${money(c.from)} -> ${money(c.to)}`
+        ? `   ${c.model.padEnd(28)} ${money(c.from, write)} -> ${money(c.to, write)}`
         : `   ${c.model.padEnd(28)} ${c.kind}${c.to ? ` at ${money(c.to)}` : ""}`);
     }
   }
