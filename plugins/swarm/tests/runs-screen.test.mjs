@@ -181,7 +181,7 @@ test("a finished run's chips are at rest, in token order, the largest drawn on t
 test("the pulsing disc takes its stagger from its chip", async () => {
   const { readFileSync } = await import("node:fs");
   const css = readFileSync(new URL("../src/serve/page.html", import.meta.url), "utf8");
-  assert.match(css, /\.pitem\.pulse \.pdisc\s*\{[^}]*animation:chipPulse[^}]*;\s*animation-delay:inherit;/);
+  assert.match(css, /\.pitem\.pulse \.pdisc\s*\{[^}]*animation:discArrive[^}]*discBeat[^}]*;\s*animation-delay:inherit;/);
 });
 
 test("the chip pulse is off under prefers-reduced-motion", async () => {
