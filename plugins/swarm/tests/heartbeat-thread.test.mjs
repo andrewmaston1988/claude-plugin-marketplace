@@ -6,7 +6,9 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startHeartbeat } from "../src/heartbeat.mjs";
-import { heartbeatPath } from "../src/results.mjs";
+import { heartbeatPath, touchHeartbeat } from "../src/results.mjs";
+import { Worker } from "node:worker_threads";
+import { once } from "node:events";
 
 const stamp = (dir) => Date.parse(readFileSync(heartbeatPath(dir), "utf8").split(" ")[0]);
 
@@ -31,26 +33,43 @@ test("the heartbeat advances while the main thread is blocked", async () => {
   }
 });
 
-test("a reader hammering the heartbeat never sees it empty, and every beat lands", () => {
+// The writer runs in its own worker and counts what it throws: a lost beat is a writer error
+// (rename's EPERM on Windows) whatever the load, where a beat-rate floor starves on a busy box.
+const WRITER = `
+const { workerData, parentPort } = require("node:worker_threads");
+import(workerData.url).then(({ touchHeartbeat }) => {
+  let writes = 0, errors = 0;
+  const end = Date.now() + workerData.ms;
+  while (Date.now() < end) {
+    try { touchHeartbeat(workerData.dir, new Date().toISOString(), process.pid); writes++; } catch { errors++; }
+  }
+  parentPort.postMessage({ writes, errors });
+});`;
+
+test("a reader hammering the heartbeat never sees it empty, and every beat lands", async () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-hb-"));
-  const beat = startHeartbeat(dir, new Date().toISOString(), 1);
+  touchHeartbeat(dir, new Date().toISOString(), process.pid);
+  const url = new URL("../src/results.mjs", import.meta.url).href;
+  const writer = new Worker(WRITER, { eval: true, workerData: { dir, url, ms: 2000 } });
+  const done = once(writer, "message");
   try {
+    let reads = 0;
     let unparseable = 0;
     let errors = 0;
-    const seen = new Set();
     const end = Date.now() + 2000;
     while (Date.now() < end) {
       try {
-        const s = stamp(dir);
-        if (Number.isNaN(s)) unparseable++;
-        else seen.add(s);
+        if (Number.isNaN(stamp(dir))) unparseable++;
+        reads++;
       } catch { errors++; }
     }
-    assert.equal(unparseable, 0, `${unparseable} unparseable reads`);
+    const [w] = await done;
+    assert.equal(unparseable, 0, `${unparseable} of ${reads} reads unparseable`);
     assert.equal(errors, 0, `${errors} read errors`);
-    assert.ok(seen.size >= 100, `only ${seen.size} distinct stamps seen — beats were lost`);
+    assert.equal(w.errors, 0, `${w.errors} of ${w.writes + w.errors} beats threw — lost`);
+    assert.ok(w.writes > 0 && reads > 0, "the writer and the reader both ran");
   } finally {
-    beat.stop();
+    await writer.terminate();
     rmSync(dir, { recursive: true, force: true });
   }
 });
