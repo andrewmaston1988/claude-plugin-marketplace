@@ -1,8 +1,11 @@
 // The engine's top-level leaf primitives: default io, the two template passes,
 // failure classification, the stop valve's pick, and the one dispatch path.
 import { freemem } from "node:os";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { spawn as nodeSpawn } from "node:child_process";
 import { toSpawnable, buildDispatch } from "../dispatch.mjs";
+import { strictSchema } from "../native-schema.mjs";
 import { resultPath, readResult } from "../results.mjs";
 import { createRunnerParser, emptyTokens } from "../stream.mjs";
 import { createSnapshotWriter, liveViewLines } from "../ui.mjs";
@@ -94,15 +97,31 @@ export function pickNewestRunning(ids, state, startedAt, children) {
   return runningIds.reduce((a, b) => ((startedAt.get(b) ?? 0) > (startedAt.get(a) ?? 0) ? b : a));
 }
 
+// The strict copy codex demands, beside the transcript it belongs to. None when the
+// schema has no strict form: codex then runs unbound and the re-ask is the backstop.
+function writeStrictSchema(resultsDir, id, returns) {
+  const strict = strictSchema(returns);
+  if (strict === null) return undefined;
+  const path = join(resultsDir, `${id}.schema.json`);
+  writeFileSync(path, JSON.stringify(strict, null, 2));
+  return path;
+}
+
 // Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
 export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, onChild, onSession } = {}, runtime = {}) {
   return new Promise((resolve) => {
+    // Codex only accepts a schema in strict form, and the builders stay pure — so the
+    // strict copy is written here, where resultsDir already is.
+    const schemaPath = task.returns && runtime.resultsDir
+      ? writeStrictSchema(runtime.resultsDir, task.id, task.returns)
+      : undefined;
     let dispatch;
     try {
       dispatch = buildDispatch(task, prompt, cfg, {
         providerRegistry: runtime.providerRegistry,
         runnerRegistry: runtime.runnerRegistry,
         cache: runtime.cache,
+        schemaPath,
       });
     } catch (e) {
       const done = () => resolve({

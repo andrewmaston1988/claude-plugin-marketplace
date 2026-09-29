@@ -149,6 +149,27 @@ test("Codex runner invocation is sandboxed, resumable, and contract-valid", () =
   assertRunnerAdapterContract(createCodexRunnerAdapter(), { task: { provider: "codex", model: "gpt-5-codex" } });
 });
 
+// The scheduler writes the strict copy and passes its path (the builder stays pure).
+// Before `resume`, the flag still binds the resumed turn (probed live); after the
+// prompt, it would be read as prompt text.
+test("Codex: a returns task with a schema path passes --output-schema before resume and the prompt", () => {
+  const invocation = buildCodexInvocation(
+    { model: "gpt-5-codex", returns: { type: "object" }, sessionId: "thread-1" },
+    "solve this",
+    { schemaPath: "C:/run/a.schema.json" }
+  );
+  const i = invocation.argv.indexOf("--output-schema");
+  ok(i > 1, invocation.argv.join(" "));
+  equal(invocation.argv[i + 1], "C:/run/a.schema.json");
+  ok(i < invocation.argv.indexOf("resume"), "--output-schema must precede resume");
+  equal(invocation.argv.at(-1), "solve this");
+});
+
+test("Codex: no --output-schema unless both a returns schema and a path are present", () => {
+  ok(!buildCodexInvocation({ model: "gpt-5-codex", returns: { type: "object" } }, "p", {}).argv.includes("--output-schema"));
+  ok(!buildCodexInvocation({ model: "gpt-5-codex" }, "p", { schemaPath: "C:/a.json" }).argv.includes("--output-schema"));
+});
+
 // ── engine writeRoots → native directory arguments ────────────────────────────
 
 // A `file` target has no file-level equivalent in `--add-dir`, so it contributes

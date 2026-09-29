@@ -1,5 +1,6 @@
 import { runnerEvent } from "./contracts.mjs";
 import { parseJsonObjectLine } from "./jsonl.mjs";
+import { emptyTokens, createUsageAccumulator, pickFinalTokens } from "./tokens.mjs";
 
 // Incremental parser for `claude -p --output-format stream-json` stdout, plus
 // token bookkeeping. The engine feeds raw chunks as they arrive; anything that
@@ -7,73 +8,12 @@ import { parseJsonObjectLine } from "./jsonl.mjs";
 // old CLI) that emits plain text degrades to zero events — the caller's raw
 // buffer remains the source of truth for output in that case.
 
-export function emptyTokens() {
-  return { input: 0, output: 0, cacheCreation: 0, cacheRead: 0 };
-}
-
-// API usage object -> our token shape. Tolerates absent/partial usage.
-export function usageTokens(usage) {
-  return {
-    input: usage?.input_tokens || 0,
-    output: usage?.output_tokens || 0,
-    cacheCreation: usage?.cache_creation_input_tokens || 0,
-    cacheRead: usage?.cache_read_input_tokens || 0,
-  };
-}
-
-export function addTokens(a, b) {
-  return {
-    input: a.input + b.input,
-    output: a.output + b.output,
-    cacheCreation: a.cacheCreation + b.cacheCreation,
-    cacheRead: a.cacheRead + b.cacheRead,
-  };
-}
-
-// Headline count: tokens the provider processed. `input` means UNCACHED input on
-// every provider (codexUsage subtracts the cached subset OpenAI folds into it), so
-// the four fields are disjoint and this sum counts each processed token once.
-// Tolerates partial shapes — a summary row may omit buckets.
-export function tokenTotal(t) {
-  return t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) + (t.cacheRead || 0) : 0;
-}
-
-// Work tokens (input + output + cache writes), excluding cache reads. For cost
-// estimation, where a re-served prefix really is cheaper than fresh input.
-export function workTokens(t) {
-  return t ? (t.input || 0) + (t.output || 0) + (t.cacheCreation || 0) : 0;
-}
-
-// Runner usage contract — two accumulation disciplines, chosen by emission shape:
-//  - delta emitters (Claude: one usage per message) -> SUM per id, latest-per-id
-//    winning (this accumulator);
-//  - cumulative emitters (Codex: a running total per event) -> REPLACE with the
-//    latest event (recordUsage in the Codex parser).
-// A new adapter must pick by what its provider emits; summing a cumulative
-// stream counts every turn again, replacing a delta stream drops all but one.
-//
-// stream-json may re-emit an assistant message (same id) as content blocks
-// complete; latest usage per id wins so re-emits never double-count.
-export function createUsageAccumulator() {
-  const byMsg = new Map();
-  return {
-    record(id, usage) {
-      byMsg.set(id, usageTokens(usage));
-    },
-    totals() {
-      let t = emptyTokens();
-      for (const u of byMsg.values()) t = addTokens(t, u);
-      return t;
-    },
-  };
-}
-
-// The result event's usage aggregates the whole session — authoritative when
-// present; the live accumulation is the fallback (timeout, kill, old CLI).
-export function pickFinalTokens(resultUsage, accumulated) {
-  const t = usageTokens(resultUsage);
-  return tokenTotal(t) > 0 ? t : accumulated;
-}
+// Re-exported: token accounting now lives in tokens.mjs, and every importer of
+// these names still reaches them through this path.
+export {
+  emptyTokens, usageTokens, addTokens, tokenTotal, workTokens,
+  createUsageAccumulator, pickFinalTokens,
+} from "./tokens.mjs";
 
 // One tool_use block -> a short human line for the roster's activity cell.
 // Argument preference: the most locating field first; nothing scalar -> bare name.
@@ -427,7 +367,12 @@ export function createClaudeRunnerParser(options = {}) {
       send({ type: "activity", ...(sessionId ? { sessionId: String(sessionId) } : {}), activity: { kind: "tool", label: activity } });
     },
     onResult(result) {
-      output = typeof result.result === "string" ? result.result : output;
+      // A bound `--json-schema` gives the CLI a StructuredOutput tool; its parsed value is
+      // what the runner validated. `result` re-states it as the model's raw text — and is
+      // prose when the tool was never called, so it stays the fallback.
+      output = result.structured_output != null
+        ? JSON.stringify(result.structured_output)
+        : typeof result.result === "string" ? result.result : output;
       // Read BEFORE the error branch returns. A failed attempt still knows how
       // many turns it got down, and that count is the only thing telling the
       // scheduler whether there is a session worth resuming.

@@ -4,6 +4,7 @@ import { readFileSync, createWriteStream } from "node:fs";
 import { join } from "node:path";
 import { transcriptPath, appendRunLog } from "../results.mjs";
 import { validateValue } from "../schema.mjs";
+import { dropNullOptionals } from "../native-schema.mjs";
 import { extractCitations, verifyCitations, citationErrorLines, annotateCitations } from "../citations.mjs";
 import { parseReadCalls, computeCoverage, coverageRetryBlock } from "../coverage.mjs";
 import { addTokens, emptyTokens } from "../stream.mjs";
@@ -57,6 +58,9 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
       if (parsed === undefined) {
         schemaErrs = ["output is not JSON — reply with a single JSON value matching the schema"];
       } else {
+        // A bound schema forces every property present, so an optional one the model
+        // declined arrives as null — no information, and the author's schema is what counts.
+        parsed = dropNullOptionals(parsed, task.returns);
         const errs = validateValue(parsed, task.returns);
         if (errs.length) schemaErrs = errs;
         else if (task.verifyCitations !== false) {
