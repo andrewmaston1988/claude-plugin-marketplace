@@ -17,7 +17,7 @@ import { mdToHtml } from "../md_to_html.mjs";
 import { renderIconPng, ICON_SIZES } from "./icon.mjs";
 import { coverage, reliability, leaders, costView, rankCells } from "./perf-views.mjs";
 import { projectGrouping } from "./grouping.mjs";
-import { buildSnapshot, filterRuns } from "./estate.mjs";
+import { createWorkerEstate, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
 import { providerConfig } from "../providers.mjs";
 import { logosScript } from "./logos.mjs";
@@ -29,7 +29,6 @@ const JS_ASSETS = {
   "/desktop.js": fileURLToPath(new URL("./desktop.js", import.meta.url)),
   "/live.js": fileURLToPath(new URL("./live.js", import.meta.url)),
 };
-const ESTATE_WORKER = fileURLToPath(new URL("./estate-worker.mjs", import.meta.url));
 const SEGMENT_RE = /^[A-Za-z0-9._\[\]~-]+$/;
 // The estate view: every live run, plus the newest few finished PER DISPLAY GROUP — a
 // global newest-N let one busy project crowd the others off the list entirely.
@@ -38,77 +37,6 @@ const FINISHED_PER_PROJECT = 10;
 // A handle can silently stop delivering (server.mjs's own long-standing note on the
 // old hub poll) — this just re-creates run.log watchers from the latest snapshot.
 const WATCHER_RECOVERY_MS = 10_000;
-
-// The default `_estate`: a worker owns buildSnapshot, restarting with backoff on
-// exit (1s -> 30s cap). `current()` resolves the first snapshot once it lands, or
-// after `_firstWaitMs` builds one in-thread so no request waits unboundedly.
-function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Worker, _setTimeout, _firstWaitMs }) {
-  let worker = null;
-  let latest = null;
-  let backoffMs = 1000;
-  let backoffTimer = null;
-  let closed = false;
-  const listeners = new Set();
-  let waiters = [];
-
-  const notify = (snapshot) => {
-    latest = snapshot;
-    const ws = waiters; waiters = [];
-    for (const resolve of ws) resolve(snapshot);
-    for (const cb of listeners) cb(snapshot);
-  };
-
-  const spawn = () => {
-    worker = new _Worker(ESTATE_WORKER, { workerData: { home, pollMs, heartbeatMs, quietWarnMs } });
-    worker.on("message", (msg) => {
-      if (msg?.type === "build-error") { dlog("estate-worker", { event: "build-error", msg: msg.msg }); return; }
-      if (msg?.type !== "snapshot") return;
-      backoffMs = 1000;
-      notify({ version: msg.version, rows: msg.rows });
-    });
-    worker.on("error", (e) => dlog("estate-worker", { event: "error", msg: e.message }));
-    worker.on("exit", (code) => {
-      if (closed) return;
-      dlog("estate-worker", { event: "exit", code });
-      const delay = backoffMs;
-      backoffMs = Math.min(30_000, backoffMs * 2);
-      backoffTimer = _setTimeout(() => { backoffTimer = null; spawn(); }, delay);
-    });
-  };
-  spawn();
-
-  // One fallback timer for every request waiting on the first snapshot: concurrent
-  // cold-start requests share a single in-thread build instead of one scan each.
-  let fallbackTimer = null;
-  return {
-    current() {
-      if (latest) return Promise.resolve(latest);
-      return new Promise((resolve) => {
-        waiters.push(resolve);
-        if (fallbackTimer) return;
-        fallbackTimer = _setTimeout(() => {
-          fallbackTimer = null;
-          if (latest || closed || !waiters.length) return;
-          dlog("estate-worker", { event: "fallback", msg: "in-thread snapshot" });
-          notify(buildSnapshot(home, new Map(), { now: Date.now(), heartbeatMs, quietWarnMs }));
-        }, _firstWaitMs);
-      });
-    },
-    refresh() { try { worker?.postMessage({ type: "refresh" }); } catch {} },
-    onSnapshot(cb) { listeners.add(cb); },
-    close() {
-      closed = true;
-      clearTimeout(backoffTimer); clearTimeout(fallbackTimer); fallbackTimer = null;
-      try { worker?.terminate(); } catch {}
-      // Nothing may wait on a closed estate: hand pending requests the last snapshot.
-      const ws = waiters; waiters = [];
-      for (const resolve of ws) resolve(latest ?? { version: "closed", rows: [] });
-    },
-    // An update handover closes the http server and, if the replacement fails,
-    // re-listens on the SAME server — the estate must come back with it.
-    reopen() { if (!closed) return; closed = false; backoffMs = 1000; spawn(); },
-  };
-}
 
 // A single path segment as the engine writes them (ids, encoded cwds, run names):
 // no separators, no dot-only names, nothing a URL decoder could turn into one.

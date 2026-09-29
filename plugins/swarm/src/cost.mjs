@@ -365,6 +365,19 @@ function rateCardObservation(card, model) {
   });
 }
 
+// The roster grouped the way every cost surface asks for it — `{ provider: [ids] }`,
+// which is the `models` option costSections and costRowsFor take. A roster row with
+// no provider of its own is a meter model.
+export function modelsByProvider(rows = []) {
+  const byProvider = {};
+  for (const row of rows) {
+    if (!row?.model) continue;
+    const provider = row.provider || METER_PROVIDER;
+    (byProvider[provider] ||= []).push(row.model);
+  }
+  return byProvider;
+}
+
 // The roster decides what gets a row; the table only decides what it costs. Before
 // the cards were fetched they held the dispatchable models and nothing else, so
 // listing every priced model was the same set — a refreshed card carries the
