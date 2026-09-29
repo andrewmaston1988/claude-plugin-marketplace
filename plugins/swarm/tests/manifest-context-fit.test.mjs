@@ -46,7 +46,7 @@ test("context-fit: refuses over-budget reads, naming task, model, window, estima
   equal(errs.length, 1);
   const e = errs[0];
   ok(e.startsWith("task 'x': seats 'small:cloud' (131k ctx), but its mustRead is ~92k tokens (368 KB)"), e);
-  ok(e.includes("over the 50% budget (65k)"), e);
+  ok(e.includes("over the 50% budget (65.5k)"), e);
   ok(e.includes("'swarm models' prints ctx per row") && e.includes("split the reads across more lanes"), e);
 });
 
@@ -151,4 +151,40 @@ test("context-fit: the prompt's own bytes count toward the estimate", () => {
   writeFileSync(join(dir, "f.txt"), "a".repeat(199990));
   deepEqual(fit(dir, { tasks: [seat("mid:cloud", { mustRead: ["f.txt"] })] }), []);
   equal(fit(dir, { tasks: [seat("mid:cloud", { prompt: "x".repeat(20), mustRead: ["f.txt"] })] }).length, 1);
+});
+
+// A :cloud leaf runs through the claude CLI, which keeps its default 200k window unless the
+// task opts into "1m" — the catalogue's 1M figure is not the window that leaf gets.
+const CLI_CACHE = [...CACHE, { provider: "ollama", model: "wide:cloud", contextLength: 1048576, runner: "claude" }];
+
+test("context-fit: a claude-runner seat is budgeted at 200k unless contextWindow is 1m", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "big.txt"), "a".repeat(400000)); // 100k tokens: over 50% of 200k, under 50% of 1M
+  const errs = fit(dir, { tasks: [seat("wide:cloud", { mustRead: ["big.txt"] })] }, CLI_CACHE);
+  equal(errs.length, 1);
+  ok(errs[0].includes("(200k ctx"), errs[0]);
+  ok(errs[0].includes('"contextWindow": "1m"'), errs[0]);
+  deepEqual(fit(dir, { tasks: [seat("wide:cloud", { contextWindow: "1m", mustRead: ["big.txt"] })] }, CLI_CACHE), []);
+});
+
+test("context-fit: a worktree leaf's estimate is a floor — it reads the tree cut at dispatch", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "big.txt"), "a".repeat(KB300));
+  const errs = fit(dir, { tasks: [seat("mid:cloud", { allowedTools: "Read,Edit,Bash", mustRead: ["big.txt"] })] });
+  equal(errs.length, 1);
+  ok(errs[0].includes("mustRead is ≥"), errs[0]);
+});
+
+test("context-fit: a model name with surrounding whitespace still finds its roster row", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "big.txt"), "a".repeat(KB300));
+  equal(fit(dir, { tasks: [seat(" mid:cloud ", { mustRead: ["big.txt"] })] }).length, 1);
+});
+
+test("context-fit: a sub-2000-token budget still prints a number", () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "f.txt"), "a".repeat(20000));
+  const errs = fit(dir, { tasks: [seat("tiny:cloud", { mustRead: ["f.txt"] })] }, [...CACHE, { provider: "ollama", model: "tiny:cloud", contextLength: 3000 }]);
+  equal(errs.length, 1);
+  ok(errs[0].includes("budget (1.5k)"), errs[0]);
 });

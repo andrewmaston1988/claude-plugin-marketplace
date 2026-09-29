@@ -506,7 +506,7 @@ in words, never a number — absence is not zero. When the manifest seats no lau
 below 20 graded rows, one `gap seat available:` line names the strongest candidate — seat it
 on one bounded leaf; a grade at n<20 is not a verdict.
 
-**Context fit.** `swarm validate` refuses a seat whose `mustRead` reads (bytes/4, plus the prompt) exceed 50% of the seated model's declared `contextLength` — the other half is left for tool framing, output and a schema re-ask. It checks `fallbackModel` seats against their own windows, and counts only the ranges a `{path, lines}` entry names. A model whose roster row declares no `contextLength` (today every Claude and Codex row) is not checked, and a `{{resultPath:…}}` entry cannot be sized, so such an estimate prints as a `≥` floor.
+**Context fit.** `swarm validate` refuses a seat whose `mustRead` reads (bytes/4, plus the prompt) exceed 50% of the seated model's declared `contextLength` — the other half is left for tool framing, output and a schema re-ask. It checks `fallbackModel` seats against their own windows, and counts only the ranges a `{path, lines}` entry names. A `:cloud` seat runs through the claude CLI, so its window is the CLI default (200k) unless the task sets `"contextWindow": "1m"`. A model whose roster row declares no `contextLength` (today every Claude and Codex row) is not checked. When some reads cannot be sized — a `{{resultPath:…}}` entry, or a worktree leaf whose tree is cut at dispatch — the estimate prints as a `≥` floor; a task with nothing sizeable at all is not checked.
 
 **`swarm perf --overall`** (grading on, a models cache present) opens with a `needs grades`
 block: every launchable model below 20 graded rows, read from the whole store so `--model` /
