@@ -3,9 +3,11 @@
 import { basename } from "node:path";
 import { appendRunLog, renderRoster } from "../results.mjs";
 import { tokenTotal } from "../stream.mjs";
+import { costOfFor } from "../run-cost.mjs";
 
 export function createLivePaint(ctx) {
   const { cfg, io, plan } = ctx;
+  const costOf = costOfFor(cfg);
 
   let lastPaintMs = 0;
   const paint = (force = true) => {
@@ -19,6 +21,7 @@ export function createLivePaint(ctx) {
         durationMs: ctx.durations.get(t.id),
         startedMs: ctx.startedAt.get(t.id),
         tokens: ctx.tokensMap.get(t.id),
+        numTurns: ctx.turnsMap.get(t.id),
         activity: ctx.activityMap.get(t.id),
         // a leaf that never emitted an event counts as quiet since launch
         lastEventMs: ctx.lastEventAt.get(t.id) ?? ctx.startedAt.get(t.id),
@@ -27,6 +30,7 @@ export function createLivePaint(ctx) {
       startedMs: ctx.runStartMs,
       quietWarnMs: (cfg.quietWarnSecs ?? 60) * 1000,
       maxLines: io.maxLines ?? null,
+      costOf,
     }));
   };
 
@@ -40,6 +44,7 @@ export function createLivePaint(ctx) {
       ...ctx.durableIdentity(task),
       ...(durationMs != null && { durationMs }),
       ...(ctx.tokensMap.has(task.id) && st !== "running" && { tokens: ctx.tokensMap.get(task.id) }),
+      ...(ctx.turnsMap.has(task.id) && st !== "running" && { numTurns: ctx.turnsMap.get(task.id) }),
       ...(note && { note }),
     });
     paint();
@@ -104,7 +109,7 @@ export function createLivePaint(ctx) {
     ctx.memoryParkCount++;
     ctx.state.set(task.id, "retrying");
     ctx.activityMap.set(task.id, `⏸ low memory — ${(io.freeMemMb() / 1024).toFixed(1)} GB free`);
-    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, state: "retrying", note: "memory-park" });
+    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, state: "retrying", note: "memory-park", ...(ctx.turnsMap.has(task.id) && { numTurns: ctx.turnsMap.get(task.id) }) });
     paint();
     if (ctx.heartbeat.ref) ctx.heartbeat.ref();
   };

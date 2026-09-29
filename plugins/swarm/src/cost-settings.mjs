@@ -10,7 +10,9 @@ export async function costBands(cfg = getConfig()) {
   return resolveBands(providerConfig(cfg, "ollama")?.cloud?.ollama?.costBands);
 }
 
+export const cloudSuffixOf = (cfg) => providerConfig(cfg, "ollama")?.cloudSuffix || ":cloud";
+
 export async function costSettings(cfg = getConfig()) {
   const ollama = providerConfig(cfg, "ollama");
-  return { bands: await costBands(cfg), valueMargin: ollama?.cloud?.ollama?.valueMargin, cloudSuffix: ollama?.cloudSuffix || ":cloud" };
+  return { bands: await costBands(cfg), valueMargin: ollama?.cloud?.ollama?.valueMargin, cloudSuffix: cloudSuffixOf(cfg) };
 }

@@ -17,7 +17,7 @@ const anthropic = parseAnthropicPricing(fixture("anthropic-pricing.md"));
 test("openai: the short-context columns are read, and the qualifier is not part of the id", () => {
   // Astra is the one row with breakpoint pricing — $10/$50 below 272k, $20/$75 above.
   // Reading the long columns by mistake shows up here and nowhere else.
-  deepEqual(openai["gpt-6-astra"], { input: 10, cachedInput: 1, output: 50 });
+  deepEqual(openai["gpt-6-astra"], { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 });
   // Published as `gpt-5.5 (<272K context length)`; the parenthetical is prose.
   deepEqual(openai["gpt-5.5"], { input: 5, cachedInput: 0.5, output: 30 });
   equal(openai["gpt-5.5 (<272K context length)"], undefined, "RED: the qualifier leaked into the id");
@@ -32,9 +32,9 @@ test("openai: a dash in the cache column means no cached rate, not zero", () => 
 
 test("anthropic: display names become api ids, footnotes and links are stripped", () => {
   // `$0.20 / MTok<sup>2</sup>` — the marker must not end up in the number.
-  deepEqual(anthropic["claude-opus-5-5"], { input: 4, cachedInput: 0.2, output: 20 });
+  deepEqual(anthropic["claude-opus-5-5"], { input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20 });
   // `Claude Mythos 5.1 ([limited availability](...))` — a linked qualifier in the name cell.
-  deepEqual(anthropic["claude-mythos-5-1"], { input: 10, cachedInput: 0.25, output: 50 });
+  deepEqual(anthropic["claude-mythos-5-1"], { input: 10, cachedInput: 0.25, cacheWrite: 12.5, output: 50 });
   // The cache column is read, never derived: this row is 0.025x input, not the usual 0.1x.
   equal(anthropic["claude-fable-5-1"].cachedInput, 0.25);
   equal(anthropic["claude-fable-5"].cachedInput, 1);

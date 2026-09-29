@@ -297,6 +297,14 @@ Windows); a task opts out with `"leafGuard": false`, the only accepted value. As
 operator has, or wants, a guard script for any repo they run leaves in; if not, leave `projects`
 empty — nothing fires and every leaf runs as before.
 
+### Stage 7d — dollar figures (`display.money`)
+
+Beside every work-token headline swarm prints what the run cost in the seat's own unit: a `:cloud`
+leaf as a `% of week` share, which needs no setting. `display.money` adds dollars: `$` for a
+leaf billed on a real API key (on the run's closing `tokens:` line; the roster and dashboard show
+it as `≈$… api-eq`), `≈$… api-eq` for a rate-card estimate — never a subscription charge. Off (the shipped default): no `$` anywhere. Ask; write `"display": {"money": true}` only
+on a yes, and leave the key out on a no.
+
 ### Stage 8 — advanced, only on request
 
 Say once: "the remaining keys are tuning — timeouts, retries, concurrency, quota thresholds,
@@ -348,6 +356,7 @@ from the appendix. If no, close.
 | `swarm.always` | `false` | Stage 3. |
 | `swarm.workflowNudge` | `true` | One-time "consider swarm" on the first `Workflow` call of a session on an armed machine. |
 | `grading.enabled` | `false` | Stage 7. |
+| `display.money` | *(unset = off)* | Stage 7d. `true` adds dollar figures (`$` billed, `≈$… api-eq` estimate) beside the work tokens; a non-boolean fails the config load. |
 | `projects` | `[]` | Stage 7c. Array of `{ name, hooks: { preToolUse } }`: the repo's own PreToolUse hook for leaves whose repo root basename matches `name`; payload on stdin, exit 0 allows, exit 2 denies with stderr, anything else denies (fail-closed); probed once at `validate`; `"leafGuard": false` opts a task out. |
 
 ## Common mistakes

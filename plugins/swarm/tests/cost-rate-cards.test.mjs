@@ -128,24 +128,24 @@ test("costRowsFor: a model absent from its table is an unpriced row, never a bla
 test("rate cards: each price is the published columns, so a column change updates the card", () => {
   // developers.openai.com/api/docs/pricing, standard tier. Astra's is its
   // sub-272k tier — the one row on the page with breakpoint pricing.
-  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-astra"], { input: 10, cachedInput: 1, output: 50 });
-  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-sol"], { input: 2, cachedInput: 0.2, output: 10 });
-  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-luna"], { input: 0.1, cachedInput: 0.01, output: 0.5 });
-  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-cyber"], { input: 12.5, cachedInput: 1.25, output: 75 });
-  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-sol"], { input: 4, cachedInput: 0.4, output: 20 });
-  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-terra"], { input: 2, cachedInput: 0.2, output: 12 });
-  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-luna"], { input: 0.2, cachedInput: 0.02, output: 1.2 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-astra"], { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-sol"], { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-6-luna"], { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-cyber"], { input: 12.5, cachedInput: 1.25, cacheWrite: 15.625, output: 75 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-sol"], { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-terra"], { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 });
+  deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.6-luna"], { input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 });
   deepEqual(CODEX_RATE_CARD_SEED.prices["gpt-5.5"], { input: 5, cachedInput: 0.5, output: 30 });
 
   // platform.claude.com/docs/en/about-claude/pricing. Cache reads are 0.1x base
   // input, except opus-5-5 (0.05x) and fable-5-1 (0.025x) — both footnoted there.
-  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-haiku-4-5-20251001"], { input: 1, cachedInput: 0.1, output: 5 });
-  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-sonnet-5"], { input: 2, cachedInput: 0.2, output: 10 });
-  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-sonnet-4-6"], { input: 3, cachedInput: 0.3, output: 15 });
-  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-opus-5-5"], { input: 4, cachedInput: 0.2, output: 20 });
-  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-opus-5"], { input: 5, cachedInput: 0.5, output: 25 });
-  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-fable-5"], { input: 10, cachedInput: 1, output: 50 });
-  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-fable-5-1"], { input: 10, cachedInput: 0.25, output: 50 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-haiku-4-5-20251001"], { input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-sonnet-5"], { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-sonnet-4-6"], { input: 3, cachedInput: 0.3, cacheWrite: 3.75, output: 15 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-opus-5-5"], { input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-opus-5"], { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 25 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-fable-5"], { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 });
+  deepEqual(CLAUDE_RATE_CARD_SEED.prices["claude-fable-5-1"], { input: 10, cachedInput: 0.25, cacheWrite: 12.5, output: 50 });
 });
 
 // The basis is the INPUT column. Swarm leaves are input- and cache-read

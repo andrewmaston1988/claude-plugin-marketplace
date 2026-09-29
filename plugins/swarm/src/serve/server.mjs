@@ -23,6 +23,8 @@ import { createWorkerEstate, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
 import { enabledProviderIds, providerConfig } from "../providers.mjs";
 import { logosScript } from "./logos.mjs";
+import { costText, formatCost } from "../run-cost.mjs";
+import { cloudSuffixOf } from "../cost-settings.mjs";
 import { PAGE, pageHtml } from "./page-assets.mjs";
 
 // The three boot scripts served as-is; /logos.js is generated, so it stays a route.
@@ -76,6 +78,8 @@ const MANIFEST = {
 export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage, _refreshPrices = refreshStaleRateCards, _modelRoster = modelRoster, _refreshRoster = refreshRoster }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
+  // Shared by Cost, Performance and the per-run cost text.
+  const cloudSuffix = cloudSuffixOf(cfg);
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
   const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
   const pollMs = _pollMs ?? dash.livenessPollMs ?? 10_000;
@@ -90,7 +94,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
 
   // Holds the latest snapshot for the server's lifetime — independent of whether any
   // SSE client is connected, since /api/runs needs it either way.
-  const estate = _estate ?? createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Worker, _setTimeout, _firstWaitMs });
+  const estate = _estate ?? createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, cloudSuffix, dlog, _Worker, _setTimeout, _firstWaitMs });
   let lastRows = [];
   estate.onSnapshot((s) => {
     lastRows = s.rows;
@@ -215,6 +219,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   // grading.enabled drives the page's Performance entry: greyed when off, the
   // store still readable so old grades are not hidden.
   const grading = cfg.grading?.enabled === true;
+  // Dollars leave the server only under the opt-in; every screen prints the `costText` it is handed.
+  const money = cfg.display?.money === true;
 
   const routes = {
     "/api/runs": async (res, url) => {
@@ -224,7 +230,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       // reaches a path join, so a stale bookmark cannot fault the estate view.
       const expanded = new Set(url.searchParams.getAll("expand"));
       const { rows, finishedTotals } = filterRuns(s.rows, { finishedPerProject, expanded });
-      send(res, 200, { runs: rows, finishedTotals, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, usagePollMs: dash.usagePollMs ?? 60000, statsPollMs: dash.statsPollMs ?? 300000, grading });
+      const runs = rows.map(({ cost, ...row }) => ({ ...row, ...(cost && { costText: formatCost(cost, { money }) }) }));
+      send(res, 200, { runs, finishedTotals, clockMs: dash.clockMs ?? 1000, uiPollMs: dash.uiPollMs ?? 5000, usagePollMs: dash.usagePollMs ?? 60000, statsPollMs: dash.statsPollMs ?? 300000, grading });
     },
   };
 
@@ -304,8 +311,6 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const i = ranked.findIndex((c) => c.model === model);
     return i < 0 ? null : { position: i + 1, of: ranked.length };
   };
-  // The cloud suffix is shared by Cost and Performance.
-  const cloudSuffix = providerConfig(cfg, "ollama")?.cloudSuffix || ":cloud";
   const costOf = (rows, domain) => {
     const ollama = providerConfig(cfg, "ollama");
     return costView(rows, costRows(), {
@@ -402,7 +407,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       // projectKeys, never listRuns: the label needs the raw key SET, and a full
       // estate scan here ran on every run/node/leaf fetch including the 5 s poll.
       const { groupOf, labelOf } = projectGrouping(_projectKeys(home));
-      return send(res, 200, { ...run, groupLabel: labelOf(groupOf(run.project)) });
+      return send(res, 200, { ...run, groupLabel: labelOf(groupOf(run.project)), costText: costText(run.tasks, { home, money, cloudSuffix }) });
     }
     // Already HTML — served as written, never through mdToHtml. 20 runs on disk
     // carry one and nothing could reach them before this route existed.
@@ -426,8 +431,8 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       // Both cases serve the manifest's authored prompt, which is what you want to see
       // mid-run anyway. Flagged `authored` because {{result:…}} placeholders are
       // substituted at dispatch, not in the snapshot.
-      const leafState = readRun(dir, { now: now(), quietWarnMs, heartbeatMs })?.tasks
-        .find((t) => t.id === seg[3])?.state;
+      const leafRow = readRun(dir, { now: now(), quietWarnMs, heartbeatMs })?.tasks.find((t) => t.id === seg[3]);
+      const leafState = leafRow?.state;
       if (!existsSync(file) || resultSuperseded(leafState)) {
         const prompt = authoredPrompt(dir, seg[3]);
         return prompt ? send(res, 200, { id: seg[3], prompt, authored: true }) : notFound(res);
@@ -436,8 +441,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       try { r = JSON.parse(readFileSync(file, "utf8")); } catch { return notFound(res); }
       // `prompt` is exposed deliberately — the leaf view renders it as a collapsed
       // accordion, and it is the one field that says what the leaf was actually asked.
-      const { id, provider, runner, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd, coverage } = r;
-      return send(res, 200, { id, provider, runner, model, ok, exit, durationMs, tokens, costUsd, numTurns, prompt, output, outputJson, citations, worktree, cwd, coverage });
+      // Priced from the run's own row, never `r.costUsd`: the Claude runner reports an
+      // Anthropic-rate figure for a subscription or `:cloud` leaf, which is no bill.
+      const { id, provider, runner, model, ok, exit, durationMs, tokens, numTurns, prompt, output, outputJson, citations, worktree, cwd, coverage } = r;
+      return send(res, 200, { id, provider, runner, model, ok, exit, durationMs, tokens, numTurns, prompt, output, outputJson, citations, worktree, cwd, coverage, costText: leafRow ? costText([leafRow], { home, money, cloudSuffix }) : "" });
     }
     return notFound(res);
   };

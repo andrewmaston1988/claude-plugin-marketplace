@@ -38,9 +38,9 @@ function tableRows(md, headerTest, sectionTest = () => true) {
   return rows;
 }
 
-function price(input, cachedInput, output) {
+function price(input, cachedInput, output, cacheWrite) {
   if (input == null || output == null) return null;
-  return { input, ...(cachedInput == null ? {} : { cachedInput }), output };
+  return { input, ...(cachedInput == null ? {} : { cachedInput }), ...(cacheWrite == null ? {} : { cacheWrite }), output };
 }
 
 // The page's service-tier sections, of which swarm dispatches only the standard one:
@@ -63,7 +63,7 @@ export function parseOpenAiPricing(md) {
     // `gpt-5.5 (<272K context length)` — the qualifier is prose, not part of the id.
     const model = cells[0].replace(/\s*\(.*$/, "").trim();
     if (!/^gpt-/i.test(model) || Object.hasOwn(out, model)) continue;
-    const row = price(money(cells[1]), money(cells[2]), money(cells[4]));
+    const row = price(money(cells[1]), money(cells[2]), money(cells[4]), money(cells[3]));
     if (row) out[model] = row;
   }
   return out;
@@ -82,6 +82,7 @@ function anthropicModelId(name) {
 /**
  * platform.claude.com/docs/en/about-claude/pricing.md — the model pricing table.
  * Columns: model, base input, 5m cache write, 1h cache write, cache hit, output.
+ * The 5m write is the one read: it is what a default Claude Code cache write is billed at.
  * The cache-hit column is the one swarm cares about: its runs are cache-read
  * dominated, and the multiplier is not uniform (0.1x, but 0.05x on Opus 5.5 and
  * 0.025x on Fable 5.1), so it is read rather than derived from the input column.
@@ -91,7 +92,7 @@ export function parseAnthropicPricing(md) {
   for (const cells of tableRows(md, (l) => /cache hits and refreshes/i.test(l))) {
     const id = anthropicModelId(cells[0]);
     if (!id) continue;
-    const row = price(money(cells[1]), money(cells[4]), money(cells[5]));
+    const row = price(money(cells[1]), money(cells[4]), money(cells[5]), money(cells[2]));
     if (row) out[id] = row;
   }
   return out;

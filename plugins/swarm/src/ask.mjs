@@ -96,6 +96,8 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   return {
     answer: askEntry.answer,
     tokens: askEntry.tokens,
+    model: askEntry.model,
+    ...(askEntry.numTurns != null && { numTurns: askEntry.numTurns }),
     sessionId: updated.sessionId,
     ok: askEntry.ok,
     ...(askEntry.provider && { provider: askEntry.provider }),

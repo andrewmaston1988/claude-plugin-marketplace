@@ -5,7 +5,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { buildSnapshot } from "./estate.mjs";
 
-const { home, pollMs, heartbeatMs, quietWarnMs } = workerData;
+const { home, pollMs, heartbeatMs, quietWarnMs, cloudSuffix } = workerData;
 const cache = new Map();
 let lastVersion = null;
 
@@ -26,7 +26,7 @@ const rebuild = singleFlight(() => {
   let snapshot;
   // A failing build must be visible: report it rather than let singleFlight's
   // catch swallow it and leave every request on the in-thread fallback, silently.
-  try { snapshot = buildSnapshot(home, cache, { now: Date.now(), heartbeatMs, quietWarnMs }); }
+  try { snapshot = buildSnapshot(home, cache, { now: Date.now(), heartbeatMs, quietWarnMs, cloudSuffix }); }
   catch (e) { parentPort.postMessage({ type: "build-error", msg: String(e?.stack ?? e) }); return; }
   if (snapshot.version === lastVersion) return;
   lastVersion = snapshot.version;

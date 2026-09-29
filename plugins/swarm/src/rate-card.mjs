@@ -43,14 +43,14 @@ export const CODEX_RATE_CARD_SEED = {
   asOf: "2026-09-23",
   staleAfter: "2026-11-21", // Sol's $4.00 promo floor, not the default window.
   prices: {
-    "gpt-6-luna": { input: 0.1, cachedInput: 0.01, output: 0.5 },
-    "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, output: 1.2 },
-    "gpt-6-sol": { input: 2, cachedInput: 0.2, output: 10 },
-    "gpt-5.6-terra": { input: 2, cachedInput: 0.2, output: 12 },
-    "gpt-5.6-sol": { input: 4, cachedInput: 0.4, output: 20 },
+    "gpt-6-luna": { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 },
+    "gpt-5.6-luna": { input: 0.2, cachedInput: 0.02, cacheWrite: 0.25, output: 1.2 },
+    "gpt-6-sol": { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 },
+    "gpt-5.6-terra": { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 12 },
+    "gpt-5.6-sol": { input: 4, cachedInput: 0.4, cacheWrite: 5, output: 20 },
     "gpt-5.5": { input: 5, cachedInput: 0.5, output: 30 },
-    "gpt-6-astra": { input: 10, cachedInput: 1, output: 50 },
-    "gpt-5.6-cyber": { input: 12.5, cachedInput: 1.25, output: 75 },
+    "gpt-6-astra": { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 },
+    "gpt-5.6-cyber": { input: 12.5, cachedInput: 1.25, cacheWrite: 15.625, output: 75 },
   },
 };
 
@@ -65,16 +65,16 @@ export const CLAUDE_RATE_CARD_SEED = {
   source: "anthropic-rate-card",
   asOf: "2026-09-23", // No published expiry: the 12h window is the whole rule.
   prices: {
-    "claude-haiku-4-5-20251001": { input: 1, cachedInput: 0.1, output: 5 },
-    "claude-sonnet-5": { input: 2, cachedInput: 0.2, output: 10 },
-    "claude-sonnet-4-6": { input: 3, cachedInput: 0.3, output: 15 },
-    "claude-opus-5-5": { input: 4, cachedInput: 0.2, output: 20 },
-    "claude-opus-5": { input: 5, cachedInput: 0.5, output: 25 },
-    "claude-opus-4-8": { input: 5, cachedInput: 0.5, output: 25 },
-    "claude-opus-4-7": { input: 5, cachedInput: 0.5, output: 25 },
-    "claude-opus-4-6": { input: 5, cachedInput: 0.5, output: 25 },
-    "claude-fable-5": { input: 10, cachedInput: 1, output: 50 },
-    "claude-fable-5-1": { input: 10, cachedInput: 0.25, output: 50 },
+    "claude-haiku-4-5-20251001": { input: 1, cachedInput: 0.1, cacheWrite: 1.25, output: 5 },
+    "claude-sonnet-5": { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 },
+    "claude-sonnet-4-6": { input: 3, cachedInput: 0.3, cacheWrite: 3.75, output: 15 },
+    "claude-opus-5-5": { input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20 },
+    "claude-opus-5": { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 25 },
+    "claude-opus-4-8": { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 25 },
+    "claude-opus-4-7": { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 25 },
+    "claude-opus-4-6": { input: 5, cachedInput: 0.5, cacheWrite: 6.25, output: 25 },
+    "claude-fable-5": { input: 10, cachedInput: 1, cacheWrite: 12.5, output: 50 },
+    "claude-fable-5-1": { input: 10, cachedInput: 0.25, cacheWrite: 12.5, output: 50 },
   },
 };
 
@@ -216,7 +216,7 @@ export function diffPrices(before, after) {
     const now = at(after, id);
     if (!was) changes.push({ model: id, kind: "added", to: now });
     else if (!now) changes.push({ model: id, kind: "dropped", from: was });
-    else if (was.input !== now.input || was.output !== now.output || was.cachedInput !== now.cachedInput)
+    else if (was.input !== now.input || was.output !== now.output || was.cachedInput !== now.cachedInput || was.cacheWrite !== now.cacheWrite)
       changes.push({ model: id, kind: "repriced", from: was, to: now });
   }
   return changes;
@@ -272,7 +272,7 @@ export function rateCards(path = rateCardStorePath()) {
   return cards;
 }
 
-const money = (p) => (p == null ? "—" : `$${p.input}/$${p.output}`);
+const money = (p, write = false) => (p == null ? "—" : `$${p.input}/$${p.output}${write ? ` (write $${p.cacheWrite})` : ""}`);
 
 export function reportCardChanges(out, { provider, url, rows, changes }) {
   out(`── ${provider} — ${rows} models from ${url}`);
@@ -280,8 +280,10 @@ export function reportCardChanges(out, { provider, url, rows, changes }) {
     out("   no change");
   } else {
     for (const c of changes) {
+      // input/output alone would render a write-only reprice as `$1/$5 -> $1/$5`.
+      const write = c.kind === "repriced" && c.from.cacheWrite !== c.to.cacheWrite;
       out(c.kind === "repriced"
-        ? `   ${c.model.padEnd(28)} ${money(c.from)} -> ${money(c.to)}`
+        ? `   ${c.model.padEnd(28)} ${money(c.from, write)} -> ${money(c.to, write)}`
         : `   ${c.model.padEnd(28)} ${c.kind}${c.to ? ` at ${money(c.to)}` : ""}`);
     }
   }

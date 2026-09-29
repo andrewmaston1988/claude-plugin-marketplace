@@ -150,13 +150,16 @@ function validateProviderConfig(cfg) {
 }
 
 // Every check a config must pass, in one place: loadConfig runs it on the merged
-// view, initConfig on the object it is about to write. Five checks — the
-// valve/minFreeMemMb ordering below is the one an extraction keeps dropping.
+// view, initConfig on the object it is about to write. The valve/minFreeMemMb
+// ordering below is the one an extraction keeps dropping.
 function validateConfig(cfg, configPath) {
   validateProviderConfig(cfg);
   validateModelDenylist(cfg.modelDenylist, configPath);
   if (typeof cfg.disable1mContext !== "boolean") {
     throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
+  }
+  if (cfg.display?.money !== undefined && typeof cfg.display.money !== "boolean") {
+    throw new Error('display.money must be true or false — e.g. "display": {"money": true} in ~/.swarm/config.json shows dollar figures beside the work tokens; leave it out to show none');
   }
   validateProjects(cfg.projects);
   validateMemFloor(cfg, "minFreeMemMb");

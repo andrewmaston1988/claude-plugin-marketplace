@@ -6,8 +6,9 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { askLeaf } from "../src/ask.mjs";
 import {
-  initResultsDir, writeResult, readResult, writeManifestSnapshot,
+  initResultsDir, writeResult, readResult, writeManifestSnapshot, appendRunLog, writeSummary, readSummary,
 } from "../src/results.mjs";
+import { readRun } from "../src/runlog.mjs";
 import { fakeSpawnFactory, makeIo, promptOf, STREAM } from "./helpers/fake-io.mjs";
 
 const CFG = {
@@ -293,5 +294,40 @@ test("askLeaf: a leaf approved in a swarm worktree of an allowed repo can be ask
   } finally {
     if (prevHome === undefined) delete process.env.SWARM_HOME; else process.env.SWARM_HOME = prevHome;
     for (const d of [dir, root, home]) rmSync(d, { recursive: true, force: true });
+  }
+});
+
+test("askLeaf: run.log, readRun and summary.json all read the leaf's cumulative turns, prior plus this ask", async () => {
+  const dir = setup();
+  try {
+    const M = "claude-haiku-4-5-20251001";
+    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [
+      { id: "leaf", provider: "claude", model: M }, { id: "other", provider: "claude", model: M },
+    ] });
+    // The finished run: leaf spent 5 turns (a retry included), other spent 7.
+    const ts = new Date().toISOString();
+    appendRunLog(dir, { ts, event: "run-start", pid: 1, tasks: [{ id: "leaf", model: M }, { id: "other", model: M }] });
+    appendRunLog(dir, { ts, id: "leaf", state: "ok", durationMs: 5, numTurns: 5 });
+    appendRunLog(dir, { ts, id: "other", state: "ok", durationMs: 5, numTurns: 7 });
+    writeSummary(dir, {
+      started: ts, finished: ts, worktreesKept: [],
+      tasks: [
+        { id: "leaf", model: M, state: "ok", durationMs: 5, numTurns: 5, resultPath: "x" },
+        { id: "other", model: M, state: "ok", durationMs: 5, numTurns: 7, resultPath: "y" },
+      ],
+    });
+    const stream = [
+      JSON.stringify({ type: "system", subtype: "init", session_id: "s-2" }),
+      JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "ans", num_turns: 2, usage: { input_tokens: 9, output_tokens: 1 } }),
+    ].join("\n") + "\n";
+    const r = await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why?", cfg: CFG, io: makeIo(fakeSpawnFactory(() => ({ output: stream }))) });
+
+    equal(r.numTurns, 2, "the ask's own entry still records just its turns");
+    const rows = Object.fromEntries(readRun(dir).tasks.map((t) => [t.id, t.numTurns]));
+    equal(rows.leaf, 7, "run.log / readRun: prior 5 + ask 2");
+    equal(rows.other, 7, "an untouched leaf keeps its turns across the ask's run-start");
+    equal(readSummary(dir).tasks.find((t) => t.id === "leaf").numTurns, 7, "summary.json: not double-counted");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

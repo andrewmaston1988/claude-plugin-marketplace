@@ -60,6 +60,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     durations: new Map(),
     tokensMap: new Map(),
     costMap: new Map(),         // id -> costUsd, real-key leaves only (feeds the corpus)
+    turnsMap: new Map(),        // id -> requests the leaf made: a :cloud leaf's weekly-quota share
     startedAt: new Map(),
     activityMap: new Map(),     // id -> latest tool-call description
     lastEventAt: new Map(),     // id -> ms of last stream event (liveness)
@@ -215,9 +216,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     // rebuilds per-task state from scratch on every run-start line, so replaying
     // anything else here is what `status` would show for these tasks post-ask.
     const priorSummary = readSummary(plan.resultsDir, { normalize: false });
+    // Turns are seeded for every row, the asked leaf included: the ask adds to them,
+    // and run-start wipes run.log's per-task turns, so an unseeded row would lose them.
     for (const t of tasks) {
-      if (t.id === ask.taskId) continue;
       const priorRow = priorSummary?.tasks?.find((r) => r.id === t.id);
+      if (priorRow?.numTurns != null) ctx.turnsMap.set(t.id, priorRow.numTurns);
+      if (t.id === ask.taskId) continue;
       ctx.record(t, priorRow?.state ?? "skipped", priorRow?.durationMs ?? null, priorRow?.tokens ?? null);
     }
   } else if (!force) {
@@ -239,6 +243,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     for (const t of tasks) {
       if (!cachedIds.has(t.id)) continue;
       const prior = readResult(plan.resultsDir, t.id);
+      if (prior.numTurns != null) ctx.turnsMap.set(t.id, prior.numTurns);
       ctx.record(t, "skipped", prior.durationMs ?? null, prior.tokens);
       if (t.isDigest) ctx.digestPath = writeDigestMd(plan.resultsDir, prior.output);
     }
@@ -337,6 +342,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       state: "ok",
       durationMs: (priorRow?.durationMs ?? 0) + (ctx.durations.get(ask.taskId) ?? 0),
       tokens: addTokens(priorRow?.tokens ?? emptyTokens(), ctx.tokensMap.get(ask.taskId) ?? emptyTokens()),
+      ...(ctx.turnsMap.has(ask.taskId) && { numTurns: ctx.turnsMap.get(ask.taskId) }), // already prior + ask
     };
     const mergedTasks = priorSummary.tasks.map((t) => (t.id === ask.taskId ? askedRow : t));
     summary = {
@@ -360,6 +366,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         durationMs: ctx.durations.get(t.id) ?? null,
         tokens: ctx.tokensMap.get(t.id) ?? null,
         ...(ctx.costMap.has(t.id) && { costUsd: ctx.costMap.get(t.id) }),
+        ...(ctx.turnsMap.has(t.id) && { numTurns: ctx.turnsMap.get(t.id) }),
         resultPath: resultPath(plan.resultsDir, t.id),
       })),
       blocked: tasks.filter((t) => ctx.state.get(t.id) === "blocked").map((t) => t.id),

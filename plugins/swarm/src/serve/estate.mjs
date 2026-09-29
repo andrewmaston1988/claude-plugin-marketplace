@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { readRun, listRuns } from "../runlog.mjs";
+import { runCost, costDeps } from "../run-cost.mjs";
 import { workTokens } from "../stream.mjs";
 import { projectGrouping } from "./grouping.mjs";
 
@@ -30,12 +31,13 @@ function keyOf(dir) {
 
 // Pure: `cache` is a Map<dir, { key, run }> the caller owns across calls — the
 // worker keeps one for its whole lifetime, tests keep one per assertion.
-export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_000, quietWarnMs = 60_000, _listRuns = listRuns, _readRun = readRun } = {}) {
+export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_000, quietWarnMs = 60_000, cloudSuffix = ":cloud", _listRuns = listRuns, _readRun = readRun } = {}) {
   const all = _listRuns(home, { now, heartbeatMs });
   // Groups derive from EVERY raw key, before any filtering — the common-prefix
   // derivation must not shift with whatever happens to survive the cap.
   const { groupOf, labelOf } = projectGrouping([...new Set(all.map((r) => r.project))]);
   const seenDirs = new Set();
+  const deps = costDeps(home, cloudSuffix);
   const rows = all.map((r) => {
     seenDirs.add(r.dir);
     const key = keyOf(r.dir);
@@ -50,6 +52,7 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
       providerTokens[provider] = (providerTokens[provider] || 0) + workTokens(task.tokens);
       if (task.state === "running") providersRunning.add(provider);
     }
+    const cost = runCost(run?.tasks || [], deps);
     return {
       project: r.project, name: r.name, active: r.active, aborted: r.aborted, stopped: r.stopped, mtimeMs: r.mtimeMs,
       group, groupLabel: labelOf(group),
@@ -59,6 +62,8 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
       providers: [...new Set((run?.tasks || []).map((task) => task.provider).filter(Boolean))],
       providerTokens, providersRunning: [...providersRunning],
       hasDigest: !!(run?.digestPath || run?.reportPath),
+      // Each unit priced apart and left raw: the server turns it into text under `display.money`.
+      ...(Object.keys(cost).length && { cost }),
     };
   });
   for (const dir of [...cache.keys()]) if (!seenDirs.has(dir)) cache.delete(dir);
@@ -87,7 +92,7 @@ const ESTATE_WORKER = fileURLToPath(new URL("./estate-worker.mjs", import.meta.u
 // The default `_estate`: a worker owns buildSnapshot, restarting with backoff on
 // exit (1s -> 30s cap). `current()` resolves the first snapshot once it lands, or
 // after `_firstWaitMs` builds one in-thread so no request waits unboundedly.
-export function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Worker, _setTimeout, _firstWaitMs }) {
+export function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, cloudSuffix, dlog, _Worker, _setTimeout, _firstWaitMs }) {
   let worker = null;
   let latest = null;
   let backoffMs = 1000;
@@ -104,7 +109,7 @@ export function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlo
   };
 
   const spawn = () => {
-    worker = new _Worker(ESTATE_WORKER, { workerData: { home, pollMs, heartbeatMs, quietWarnMs } });
+    worker = new _Worker(ESTATE_WORKER, { workerData: { home, pollMs, heartbeatMs, quietWarnMs, cloudSuffix } });
     worker.on("message", (msg) => {
       if (msg?.type === "build-error") { dlog("estate-worker", { event: "build-error", msg: msg.msg }); return; }
       if (msg?.type !== "snapshot") return;
@@ -135,7 +140,7 @@ export function createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlo
           fallbackTimer = null;
           if (latest || closed || !waiters.length) return;
           dlog("estate-worker", { event: "fallback", msg: "in-thread snapshot" });
-          notify(buildSnapshot(home, new Map(), { now: Date.now(), heartbeatMs, quietWarnMs }));
+          notify(buildSnapshot(home, new Map(), { now: Date.now(), heartbeatMs, quietWarnMs, cloudSuffix }));
         }, _firstWaitMs);
       });
     },
