@@ -266,7 +266,7 @@ test("COST_PROVIDERS: one entry per provider with a cost source, Ollama's meter 
 });
 
 test("costSections: one section per provider, never a merged list", () => {
-  const sections = costSections({ snaps: collidingSnaps(), models: { codex: ["gpt-5.6-sol"] } });
+  const sections = costSections({ providers: COST_PROVIDERS, snaps: collidingSnaps(), models: { codex: ["gpt-5.6-sol"] } });
   deepEqual(sections.map((s) => s.provider), ["ollama", "codex", "claude"], "a provider with no source still gets a section");
   ok(sections.every((s) => s.rows.every((r) => (r.provider || "ollama") === s.provider)),
     "RED: one provider's rows landed in another's section");

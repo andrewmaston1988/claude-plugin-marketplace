@@ -8,7 +8,7 @@ import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationE
 import { resolveRef, listManifests } from "../src/registry.mjs";
 import { modelRoster, refreshRoster } from "../src/roster.mjs";
 import { collapseRoster, visibleModels, probeTopModels } from "../src/discovery.mjs";
-import { providerConfig } from "../src/providers.mjs";
+import { enabledProviderIds, providerConfig } from "../src/providers.mjs";
 import { costBands, costSettings } from "../src/cost-settings.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
@@ -1056,9 +1056,10 @@ async function main() {
         const { modelsByProvider } = await import("../src/cost.mjs");
         // The same roster `swarm cost` prices for, banked with the read: without
         // it a manual refresh leaves the next cost query re-fetching both pages.
-        const roster = modelRoster({ config: getConfig(), registry: defaultProviderRegistry() }).models;
+        const cfg = getConfig(), registry = defaultProviderRegistry();
+        const roster = modelRoster({ config: cfg, registry }).models;
         return await refreshPrices({
-          out, err, dryRun: rest.includes("--dry-run"), rosterIds: modelsByProvider(roster),
+          out, err, dryRun: rest.includes("--dry-run"), rosterIds: modelsByProvider(roster), enabled: enabledProviderIds(cfg, registry),
         });
       }
       case "usage":

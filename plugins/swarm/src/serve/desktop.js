@@ -64,7 +64,8 @@
       const u = V.usageParts(usage, h, "week");
       side += head("usage", "#/usage", "view all →") + (u.empty || u.hero + u.cards.join(""));
     }
-    if (cost) {
+    // The panel holds only best-value heroes, and grading off means there are none.
+    if (cost && cost.grading !== false) {
       const sections = V.costSections(cost);
       side += head("best value", "#/cost", "cost →") + (sections.length ? sections.map((s) => V.costHero(s, h)).join("") : V.noCost());
     }

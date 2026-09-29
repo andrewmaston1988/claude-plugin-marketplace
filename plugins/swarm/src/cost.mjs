@@ -341,6 +341,10 @@ export { rateCards };
 export const METER_PROVIDER = "ollama";
 export const COST_PROVIDERS = [METER_PROVIDER, ...RATE_CARD_SOURCES.map((s) => s.provider)];
 
+// The catalogue narrowed to the providers the config has switched on — what every cost
+// list is built from, so a disabled provider gets no row, section or card.
+export const costProvidersFor = (enabled) => COST_PROVIDERS.filter((p) => enabled.includes(p));
+
 // One row per model the caller names, plus one per model the table prices. A
 // model absent from the table is `unpriced` — a row the page can draw, because
 // a blank panel reads as broken and an unpriced row reads as honest.
@@ -424,7 +428,7 @@ export function costUnitLabel(provider = METER_PROVIDER, { cards = rateCards() }
 //
 // Supersession drops an elder's row as the dashboard's Cost screen does, and never
 // the card's base model — that row IS the unit. `hidden` is the count they made.
-export function costSections({ providers = COST_PROVIDERS, models = {}, snaps = [], cloudSuffix = ":cloud", cards = rateCards() } = {}) {
+export function costSections({ providers, models = {}, snaps = [], cloudSuffix = ":cloud", cards = rateCards() } = {}) {
   return providers.map((provider) => {
     const card = cards[provider];
     const rows = costRowsFor(provider, { models: models[provider] || [], snaps, cards });

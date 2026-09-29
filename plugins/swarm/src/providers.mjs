@@ -276,6 +276,12 @@ export function createDefaultProviderRegistry({ codexAdapter, ollamaCapabilities
   return registry;
 }
 
+// The one answer to "which providers is swarm allowed to reach": every surface that
+// contacts or lists a provider filters through it, so a disabled one stays silent.
+export function enabledProviderIds(config, registry) {
+  return registry.list().filter((a) => a.enabled(config)).map((a) => a.id);
+}
+
 export function createProviderRegistry(initial = []) {
   const adapters = new Map();
 

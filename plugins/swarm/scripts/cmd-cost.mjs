@@ -4,7 +4,7 @@
 import { getConfig } from "../src/config.mjs";
 import { modelRoster } from "../src/roster.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
-import { providerConfig } from "../src/providers.mjs";
+import { enabledProviderIds, providerConfig } from "../src/providers.mjs";
 import { dim, out, err } from "../src/ui.mjs";
 
 // swarm cost — one list per provider, cheapest → dearest within each. The
@@ -16,21 +16,23 @@ import { dim, out, err } from "../src/ui.mjs";
 // row rather than a blank.
 export async function cmdCost() {
   const cfg = getConfig();
-  const roster = modelRoster({ config: cfg, registry: defaultProviderRegistry() }).models;
+  const registry = defaultProviderRegistry();
+  const roster = modelRoster({ config: cfg, registry }).models;
+  const enabled = enabledProviderIds(cfg, registry);
   const {
-    costSections, readSnapshots, usageHistoryPath, THIN_REQUESTS, modelsByProvider,
+    costSections, costProvidersFor, readSnapshots, usageHistoryPath, THIN_REQUESTS, modelsByProvider,
     METER_PROVIDER, METER_POINTS_UNIT, UNPRICED_CLASSIFICATION, API_EQUIVALENT_CLASSIFICATION,
   } = await import("../src/cost.mjs");
   // The roster is what the cards are priced for: a model that arrives between
   // refreshes is one the banked card has never seen, and it re-prices rather than
   // ranking `unpriced` for half a day.
   await (await import("../src/rate-card-cli.mjs")).refreshStaleRateCards({
-    out, err, rosterIds: modelsByProvider(roster),
+    out, err, rosterIds: modelsByProvider(roster), enabled,
   });
   const path = usageHistoryPath();
   const snaps = readSnapshots(path);
   const sections = costSections({
-    models: modelsByProvider(roster), snaps,
+    providers: costProvidersFor(enabled), models: modelsByProvider(roster), snaps,
     cloudSuffix: providerConfig(cfg, "ollama")?.cloudSuffix,
   });
   out("cost — one list per provider, cheapest to dearest within each. The units are not comparable across sections.");

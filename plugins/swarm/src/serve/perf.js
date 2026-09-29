@@ -274,7 +274,8 @@
     const { esc, enc } = h;
     const { points, spread, best } = section;
     const isMeter = (r) => !r.unit || r.unit === "meter-points" || r.unit === "quota-weight" || r.unit === "meter-points/request";
-    const head = costHero(section, h);
+    // Best value is score over cost: with grading off there is no score, so no hero and no reason for one.
+    const head = data.grading === false ? "" : costHero(section, h);
     if (!spread.some((r) => r.mult != null)) {
       return head + `<div class="card cfact"><b>Not measured yet</b><div class="sub">no ${esc(name(section))} model has a price or banked history yet — a live usage fetch starts it.</div></div>`;
     }
