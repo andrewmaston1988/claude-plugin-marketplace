@@ -61,6 +61,7 @@ test("routes: runs list, run, leaf (no raw log; prompt exposed for the accordion
       const manifest = await get("/manifest.webmanifest");
       assert.equal(manifest.status, 200);
       assert.equal(manifest.body.display, "standalone");
+      assert.deepEqual(manifest.body.launch_handler, { client_mode: "navigate-existing" }, "a link opens in the installed window, not a new one");
       assert.ok(manifest.body.icons.some((i) => i.sizes === "512x512" && i.type === "image/png"), "a 512 PNG for Android");
       const page = await get("/", { raw: true });
       assert.equal(page.status, 200);
