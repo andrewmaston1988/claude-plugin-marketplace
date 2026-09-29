@@ -164,7 +164,7 @@ test("four grades hand nothing over: the elder stays, pending, and still leads",
   equal(point(old).pendingSuccessor, next);
   equal(spread(old).pendingSuccessor, next);
   equal(point(next).pendingSuccessor, undefined, "only the row under a successor carries the flag");
-  equal(view.best.model, old, "the pending elder is still eligible for best value");
+  equal(view.best.model, old, "the pending elder is the section's only candidate, so the fallback keeps it as best value");
 });
 
 test("five grades hand over: the elder is superseded and leaves the verdict", () => {
@@ -199,7 +199,7 @@ test("an outcome-only successor has earned no handover, whatever provisional say
   equal(view.points.find((row) => row.model === next), undefined, "no grade, no point");
   equal(view.points.find((row) => row.model === old).supersededBy, undefined);
   equal(view.points.find((row) => row.model === old).pendingSuccessor, next);
-  equal(view.best.model, old);
+  equal(view.best.model, old, "the only candidate falls back to the pending elder — the card is never blanked");
 });
 
 test("readiness is per provider: one provider's grades never retire a same-named model under another", () => {
@@ -379,4 +379,13 @@ test("rankCells hands a young successor the same chip text Cost shows", () => {
 
   const cells = rankCells(overall(rows, { combineProviders: true }).cells, { view });
   equal(cells.find((c) => c.model === successor).pitch, costPitch);
+});
+
+test("a graded non-elder beside a pending elder wins best, however far the elder outscores it", () => {
+  const elder = "claude-opus-5", successor = "claude-opus-5-5", other = "claude-sonnet-5-5";
+  const rows = [...grades(elder, 10), ...grades(successor, 6).slice(0, 2), ...grades(other, 8)];
+  const view = costView(rows, [cost(elder, 2.5), cost(successor, 4), cost(other, 1)]);
+
+  equal(view.points.find((row) => row.model === elder).pendingSuccessor, successor);
+  equal(view.best.model, other, "the elder is dropped from the candidates, so it does not set the margin's top either");
 });

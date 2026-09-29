@@ -413,10 +413,15 @@ export function shrink(mean, n, prior, k = PRIOR_WEIGHT) {
   return Number(((n * mean + k * prior) / (n + k)).toFixed(2));
 }
 
+// Pareto dominance: at least as good on score, at least as cheap, strictly
+// better on one. Exact equality on both is not dominance.
+export const dominates = (a, b) => a.wtd >= b.wtd && a.multiplier <= b.multiplier
+  && (a.wtd > b.wtd || a.multiplier < b.multiplier);
+
 // The domination frontier — quality against cost WITHOUT collapsing the two
-// into one ratio. A model is dominated iff another participant is strictly
-// better (higher wtd) AND strictly cheaper (lower multiplier); everyone else
-// is on the frontier. A ratio fails both directions at once: it lets one cheap
+// into one ratio. A model is dominated iff another participant dominates it
+// (see `dominates`); everyone else is on the frontier — including a model
+// that only ties on both axes. A ratio fails both directions at once: it lets one cheap
 // graded leaf outrank a well-evidenced model, and it silently ranks an
 // expensive model low without naming the cheaper model that beat it.
 // A model with no multiplier — a Claude tier the history has never priced, or
@@ -473,7 +478,7 @@ export function frontier(rows, costs, { aspect, model, provider, domain, costDom
   for (const e of participants) {
     // The first dominator in aggregate order is the highest-quality one, so a
     // dominated row names the best model that beat it, not just any.
-    const dominator = participants.find((p) => p !== e && p.costDomain === e.costDomain && p.wtd > e.wtd && p.multiplier < e.multiplier);
+    const dominator = participants.find((p) => p !== e && p.costDomain === e.costDomain && dominates(p, e));
     if (dominator) e.dominatedBy = displayIdentity(identityOf(dominator));
     else e.onFrontier = true;
   }

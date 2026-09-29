@@ -1,7 +1,7 @@
 // The cost read-model behind the Cost screen and `swarm perf`'s needs-grades
 // block, and the supersession marking both read. Pure over injected rows, and it
 // imports nothing from `serve/` — the CLI needs the same view the dashboard serves.
-import { overall } from "./scores.mjs";
+import { overall, dominates } from "./scores.mjs";
 import { identityOf } from "./contracts.mjs";
 import { supersessionReading, supersessionKey, successorPitch, isReady } from "./supersession.mjs";
 import { band, coins, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_COST_BANDS } from "./cost.mjs";
@@ -144,12 +144,16 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
   const verdicts = (sectionPoints, sectionSpread) => {
     const domains = new Set(sectionSpread.map((row) => row.costDomain || "legacy"));
     if (domains.size > 1) return { best: null, worst: null };
-    const candidates = sectionPoints.filter((p) => !p.supersededBy && p.onFrontier && p.multiplier != null && !p.thin);
+    const eligible = sectionPoints.filter((p) => !p.supersededBy && p.onFrontier && p.multiplier != null && !p.thin);
+    // A pending elder is the generation on trial: it neither sets the margin's
+    // top nor takes the card, unless it is all the section has.
+    const settled = eligible.filter((p) => !p.pendingSuccessor);
+    const candidates = settled.length ? settled : eligible;
     const topWtd = candidates.reduce((m, p) => (p.wtd > m ? p.wtd : m), -Infinity);
     const best = candidates.filter((p) => p.wtd >= topWtd - margin)
       .sort((a, z) => a.multiplier - z.multiplier || z.wtd - a.wtd || compareIdentity(a, z))[0] ?? null;
-    // A pending elder is still the generation on trial, not this provider's
-    // worst buy — it does not collect that verdict on its way out.
+    // Nor is it this provider's worst buy — it does not collect that verdict
+    // on its way out.
     const worst = sectionPoints.filter((p) => !p.supersededBy && !p.pendingSuccessor && p.dominatedBy != null)
       .sort((a, z) => z.multiplier - a.multiplier || a.wtd - z.wtd || compareIdentity(a, z))[0] ?? null;
     return { best, worst };
@@ -162,8 +166,7 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
     for (const point of comparable) {
       const dominator = participants.find((other) => other !== point
         && other.costDomain === point.costDomain
-        && other.wtd > point.wtd
-        && other.multiplier < point.multiplier);
+        && dominates(other, point));
       if (dominator) point.dominatedBy = displayOf(identityOf(dominator));
       else point.onFrontier = true;
     }

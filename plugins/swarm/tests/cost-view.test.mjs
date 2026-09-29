@@ -86,8 +86,8 @@ const many = (model, s, n = 6) => Array.from({ length: n }, (_, i) => g4(`${mode
 
 test("best: the highest-quality FRONTIER member — never an unmeasured model that outscores it", () => {
   // The onFrontier filter's real bite is UNMEASURED models, not dominated ones:
-  // the top-wtd model can never be dominated (domination needs someone strictly
-  // better), so among priced models the filter is a no-op. An unpriced model,
+  // here the top-wtd priced model is dominated only by an equal-score, cheaper
+  // row, so among priced models the filter is nearly a no-op. An unpriced model,
   // though, sits in `points` with onFrontier false and can top the wtd column —
   // and naming it "best value" would price something the history never priced.
   const rows = [...many("v-mid", 8), ...many("v-low", 4), ...many("v-unpriced", 9)];
@@ -282,4 +282,39 @@ test("costHero reads its section and the page's helpers, and no more", () => {
   equal(V.costHero.length, 2, "the hero takes (section, h) — the data payload is not its input");
   equal(typeof V.noCost, "function", "the Cost screen's own empty state is on the same surface");
   ok(V.noCost().includes("no cost history yet"), "and it is the words a screen short of history draws");
+});
+
+// ── elder exclusion and equal-cost ties ───────────────────────────────────
+// Claude-shaped fixtures: `claude-opus-5` has a successor with one grade, so it
+// is a pending elder (kept on the view, never the pick while others remain).
+const claudeCost = (model, mult) => costRow(model, mult, { provider: "claude", unit: "usd", costDomain: "claude:usd:rate-card" });
+const claudeMany = (model, s, n = 6) => Array.from({ length: n }, (_, i) => graded({
+  leaf: `${model}${i}`, provider: "claude", model, grades: { adherence: s, handoff: s, truthfulness: s, depth: s },
+}));
+const claudeSection = (rows, costs) => costView(rows, costs).sections.find((s) => s.provider === "claude");
+
+test("best: a pending elder neither wins the card nor sets the margin's top while another candidate remains", () => {
+  const rows = [...claudeMany("claude-opus-5", 9), ...claudeMany("claude-opus-5-5", 5, 1), ...claudeMany("claude-sonnet-5-5", 8)];
+  const section = claudeSection(rows, [claudeCost("claude-opus-5", 2.5), claudeCost("claude-opus-5-5", 4), claudeCost("claude-sonnet-5-5", 1)]);
+  const elder = section.points.find((p) => p.model === "claude-opus-5");
+  equal(elder.pendingSuccessor, "claude-opus-5-5", "fixture precondition: the elder is pending, not superseded");
+  equal(elder.onFrontier, true, "fixture precondition: the elder is on the frontier and outscores the pick by more than the margin");
+  equal(section.best.model, "claude-sonnet-5-5", "RED: the elder set topWtd, pushed sonnet outside the 0.5 margin and took the card");
+});
+
+test("dominance: a pending elder still dominates a same-cost lower-scoring row", () => {
+  const rows = [...claudeMany("claude-opus-5", 9), ...claudeMany("claude-opus-5-5", 5, 1), ...claudeMany("claude-haiku-5", 8)];
+  const { points } = costView(rows, [claudeCost("claude-opus-5", 2.5), claudeCost("claude-opus-5-5", 4), claudeCost("claude-haiku-5", 2.5)]);
+  equal(points.find((p) => p.model === "claude-haiku-5").dominatedBy, "claude/claude-opus-5",
+    "RED: equal cost never counted as dominance, so the lower row stayed on the frontier");
+});
+
+test("dominance: at equal cost the lower score is dominated; identical score and cost are not", () => {
+  const by = (view, m) => view.points.find((p) => p.model === m);
+  const tied = costView([...many("e-hi", 8), ...many("e-lo", 6)], [costRow("e-hi", 1), costRow("e-lo", 1)]);
+  equal(by(tied, "e-lo").dominatedBy, "e-hi", "RED: equal cost with a lower score was left on the frontier");
+  equal(by(tied, "e-hi").onFrontier, true);
+  const exact = costView([...many("x-a", 8), ...many("x-b", 8)], [costRow("x-a", 1), costRow("x-b", 1)]);
+  equal(by(exact, "x-a").dominatedBy, null, "guard: exact equality on both axes is not dominance");
+  equal(by(exact, "x-b").dominatedBy, null);
 });
