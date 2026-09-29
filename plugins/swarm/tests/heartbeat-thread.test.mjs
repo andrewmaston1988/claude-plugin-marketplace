@@ -20,7 +20,9 @@ test("the heartbeat advances while the main thread is blocked", async () => {
     const t0 = Date.now();
     while (stamp(dir) <= Date.parse(started) && Date.now() - t0 < 5000) await new Promise((r) => setTimeout(r, 20));
     const blockStart = Date.now();
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);
+    // Long enough that a loaded CI runner descheduling the worker cannot miss it; a beat on
+    // the main thread lands none at all, however long the block.
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
     assert.ok(stamp(dir) >= blockStart + 150, "no beat landed while the main thread was blocked");
   } finally {
     beat.stop();
