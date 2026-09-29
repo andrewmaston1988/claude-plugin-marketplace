@@ -188,9 +188,10 @@ export function recordedSessionIds(dir) {
 }
 
 // ── liveness control files ────────────────────────────────────────────────────
-// heartbeat: one line, ISO timestamp + pid, overwritten whole on every tick — a
-// torn write costs one tick, and the file's own mtime IS the liveness signal, so
-// tmp+rename (which would also bump mtime, just later) buys nothing here.
+// heartbeat: one line, ISO timestamp + pid, overwritten in place on every tick — the
+// file's own mtime IS the liveness signal. Never truncated and never renamed: a
+// truncating write shows readers an empty file, and on Windows rename throws EPERM
+// against a concurrent reader.
 // stop: presence alone is the signal — `swarm stop` creates it, the engine
 // notices it on its next heartbeat tick. A fresh engine clears it on start
 // (see runPlan) so a resumed run isn't stopped by its predecessor's marker.
@@ -207,7 +208,12 @@ export function waiverPath(dir) {
 }
 
 export function touchHeartbeat(dir, iso, pid) {
-  writeFileSync(heartbeatPath(dir), `${iso} ${pid}\n`);
+  const p = heartbeatPath(dir);
+  const line = `${iso} ${pid}\n`;
+  // toISOString is fixed-width, so a same-length line overwrites in place and a reader sees
+  // the old line or the new one; only the first write, or a pid of another width, replaces the file.
+  if (existsSync(p) && statSync(p).size === Buffer.byteLength(line)) writeFileSync(p, line, { flag: "r+" });
+  else writeFileSync(p, line);
 }
 
 export function readHeartbeat(dir) {
