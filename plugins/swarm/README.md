@@ -54,7 +54,7 @@ warns instead, since the window may have since reset.
 
 ### Per-repo leaf guard (`projects`)
 
-A leaf is a full headless Claude Code session, and `allowedTools` scopes tool *names*, not
+A leaf is a full headless Claude Code session (a Claude-runner leaf always also gets `Skill` and the MCP servers), and `allowedTools` scopes tool *names*, not
 what a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every
 leaf that runs under that repo:
 
