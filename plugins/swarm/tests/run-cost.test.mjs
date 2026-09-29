@@ -6,7 +6,8 @@ import { deepEqual, equal, ok, throws, match } from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { leafCost, runCost, formatCost } from "../src/run-cost.mjs";
+import { leafCost, runCost, formatCost, costDeps } from "../src/run-cost.mjs";
+import { snap, seg } from "./helpers/cost-snapshots.mjs";
 import { loadConfig } from "../src/config.mjs";
 import { diffPrices } from "../src/rate-card.mjs";
 import { parseOpenAiPricing, parseAnthropicPricing } from "../src/rate-card-parse.mjs";
@@ -99,6 +100,29 @@ test("runCost: a run with nothing priced is empty, not zero", () => {
   deepEqual(runCost([{ provider: "claude", model: "claude-sonnet-9", tokens: claude.tokens }], deps), {});
   deepEqual(runCost([], deps), {});
 });
+
+// ── costDeps: everything is read from the home it is handed ─────────────────────
+
+function withTempHome(fn) {
+  const home = mkdtempSync(join(tmpdir(), "swarm-costdeps-"));
+  try { return fn(home); } finally { rmSync(home, { recursive: true, force: true }); }
+}
+
+test("costDeps: the rate cards come from the given home's store, not the process's SWARM_HOME", () => withTempHome((home) => {
+  const model = "claude-only-in-this-home-9";
+  const store = { claude: { url: "https://example.test", asOf: "2026-09-01T00:00:00.000Z", prices: { [model]: { input: 7, output: 9 } } } };
+  writeFileSync(join(home, "rate-cards.json"), JSON.stringify(store));
+  const leaf = { provider: "claude", model, tokens: tokens(1_000_000, 0, 0, 0) };
+  deepEqual(leafCost(leaf, costDeps(home, ":cloud")), { usd: 7, usdKind: "api-equivalent" });
+}));
+
+test("costDeps: a cloud leaf under a non-default cloudSuffix still gets its meter share", () => withTempHome((home) => {
+  writeFileSync(join(home, "usage-history.jsonl"), JSON.stringify(snap("2026-09-01T00:00:00.000Z", [seg("glm-5.3", 100, 20)], 50)) + "\n");
+  const leaf = { provider: "ollama", model: "glm-5.3:x", numTurns: 10, tokens: cloud.tokens };
+  const priced = leafCost(leaf, costDeps(home, ":x"));
+  ok(priced.weekPct > 0, JSON.stringify(priced));
+  deepEqual(leafCost({ ...leaf, model: "glm-5.3:cloud" }, costDeps(home, ":cloud")), { weekPct: priced.weekPct }, "the default suffix prices the same meter row");
+}));
 
 // ── formatCost: money is opt-in ─────────────────────────────────────────────────
 

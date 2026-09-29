@@ -4,8 +4,9 @@
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import { resolveRatePrice } from "./rate-card-parse.mjs";
-import { rateCards } from "./rate-card.mjs";
+import { rateCards, rateCardStorePath } from "./rate-card.mjs";
 import { swarmHome } from "./config.mjs";
+import { cloudSuffixOf } from "./cost-settings.mjs";
 import { ollamaCloudCostRows, readSnapshots } from "./cost.mjs";
 
 const isCloud = (row) => row.provider === "ollama" || /:cloud$/.test(row.model || "");
@@ -56,21 +57,25 @@ export function formatCost(cost, { money = false } = {}) {
 // The meter rows are a derivation over the whole usage history, so they are cached against
 // the file's stamp: the live roster prices on every repaint.
 const meterCache = new Map();
-function meterRowsFor(home) {
+// Named with the configured suffix, so a leaf's model (which carries it) finds its row.
+function meterRowsFor(home, cloudSuffix) {
   const path = join(home, "usage-history.jsonl");
-  let key = "none";
-  try { const s = statSync(path); key = `${s.mtimeMs}:${s.size}`; } catch { /* no history yet */ }
+  let key = `${cloudSuffix}:none`;
+  try { const s = statSync(path); key = `${cloudSuffix}:${s.mtimeMs}:${s.size}`; } catch { /* no history yet */ }
   const hit = meterCache.get(path);
   if (hit?.key === key) return hit.rows;
-  const rows = ollamaCloudCostRows(readSnapshots(path));
+  const rows = ollamaCloudCostRows(readSnapshots(path), cloudSuffix);
   meterCache.set(path, { key, rows });
   return rows;
 }
 
-export const costDeps = (home) => ({ cards: rateCards(), meterRows: meterRowsFor(home) });
+export const costDeps = (home, cloudSuffix) => ({
+  cards: rateCards(rateCardStorePath({ ...process.env, SWARM_HOME: home })),
+  meterRows: meterRowsFor(home, cloudSuffix),
+});
 
 // The one call every surface makes: rows in, the text beside the work tokens out.
-export const costText = (rows, { home, money }) => formatCost(runCost(rows, costDeps(home)), { money });
+export const costText = (rows, { home, money, cloudSuffix }) => formatCost(runCost(rows, costDeps(home, cloudSuffix)), { money });
 
 // The roster footer's callback: tasks in, cost text out, for the configured money setting.
-export const costOfFor = (cfg, home = swarmHome()) => (rows) => costText(rows, { home, money: cfg.display?.money === true });
+export const costOfFor = (cfg, home = swarmHome()) => (rows) => costText(rows, { home, money: cfg.display?.money === true, cloudSuffix: cloudSuffixOf(cfg) });

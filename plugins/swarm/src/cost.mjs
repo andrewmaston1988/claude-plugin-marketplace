@@ -292,7 +292,7 @@ export function relativeCostRows(rows, { baseModel, baseModels = {} } = {}) {
 // this known Ollama boundary, map those names to the roster's cloud form and
 // make the inferred provider explicit. Provider-qualified non-Ollama rows are
 // already in their canonical form and must pass through unchanged.
-export function ollamaCloudCostRows(snaps) {
+export function ollamaCloudCostRows(snaps, cloudSuffix = ":cloud") {
   const canonical = snaps.map((snapshot) => ({
     ...snapshot,
     weeklyModels: meterSegments(snapshot).map((segment) => {
@@ -303,7 +303,7 @@ export function ollamaCloudCostRows(snaps) {
       return {
         ...segment,
         provider: "ollama",
-        model: deriveCloudName(segment.model),
+        model: deriveCloudName(segment.model, cloudSuffix),
         costDomain: `ollama:${unit}:${classification}`,
       };
     }),

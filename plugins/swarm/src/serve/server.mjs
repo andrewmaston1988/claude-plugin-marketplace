@@ -24,6 +24,7 @@ import { createLogger } from "./log.mjs";
 import { enabledProviderIds, providerConfig } from "../providers.mjs";
 import { logosScript } from "./logos.mjs";
 import { costText, formatCost } from "../run-cost.mjs";
+import { cloudSuffixOf } from "../cost-settings.mjs";
 import { PAGE, pageHtml } from "./page-assets.mjs";
 
 // The three boot scripts served as-is; /logos.js is generated, so it stays a route.
@@ -77,6 +78,8 @@ const MANIFEST = {
 export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch = fsWatch, _heartbeatMs = 5000, _debounceMs = 250, _pollMs, _projectKeys = projectKeys, _estate, _Worker = Worker, _setTimeout = setTimeout, _firstWaitMs = 5000, _readProviderUsage, _refreshPrices = refreshStaleRateCards, _modelRoster = modelRoster, _refreshRoster = refreshRoster }) {
   const runsRoot = resolve(join(home, "runs"));
   const dash = cfg.dashboard || {};
+  // Shared by Cost, Performance and the per-run cost text.
+  const cloudSuffix = cloudSuffixOf(cfg);
   const quietWarnMs = (cfg.quietWarnSecs ?? 60) * 1000;
   const heartbeatMs = Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000);
   const pollMs = _pollMs ?? dash.livenessPollMs ?? 10_000;
@@ -91,7 +94,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
 
   // Holds the latest snapshot for the server's lifetime — independent of whether any
   // SSE client is connected, since /api/runs needs it either way.
-  const estate = _estate ?? createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, dlog, _Worker, _setTimeout, _firstWaitMs });
+  const estate = _estate ?? createWorkerEstate({ home, pollMs, heartbeatMs, quietWarnMs, cloudSuffix, dlog, _Worker, _setTimeout, _firstWaitMs });
   let lastRows = [];
   estate.onSnapshot((s) => {
     lastRows = s.rows;
@@ -308,8 +311,6 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     const i = ranked.findIndex((c) => c.model === model);
     return i < 0 ? null : { position: i + 1, of: ranked.length };
   };
-  // The cloud suffix is shared by Cost and Performance.
-  const cloudSuffix = providerConfig(cfg, "ollama")?.cloudSuffix || ":cloud";
   const costOf = (rows, domain) => {
     const ollama = providerConfig(cfg, "ollama");
     return costView(rows, costRows(), {
@@ -406,7 +407,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       // projectKeys, never listRuns: the label needs the raw key SET, and a full
       // estate scan here ran on every run/node/leaf fetch including the 5 s poll.
       const { groupOf, labelOf } = projectGrouping(_projectKeys(home));
-      return send(res, 200, { ...run, groupLabel: labelOf(groupOf(run.project)), costText: costText(run.tasks, { home, money }) });
+      return send(res, 200, { ...run, groupLabel: labelOf(groupOf(run.project)), costText: costText(run.tasks, { home, money, cloudSuffix }) });
     }
     // Already HTML — served as written, never through mdToHtml. 20 runs on disk
     // carry one and nothing could reach them before this route existed.
@@ -443,7 +444,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       // Priced from the run's own row, never `r.costUsd`: the Claude runner reports an
       // Anthropic-rate figure for a subscription or `:cloud` leaf, which is no bill.
       const { id, provider, runner, model, ok, exit, durationMs, tokens, numTurns, prompt, output, outputJson, citations, worktree, cwd, coverage } = r;
-      return send(res, 200, { id, provider, runner, model, ok, exit, durationMs, tokens, numTurns, prompt, output, outputJson, citations, worktree, cwd, coverage, costText: leafRow ? costText([leafRow], { home, money }) : "" });
+      return send(res, 200, { id, provider, runner, model, ok, exit, durationMs, tokens, numTurns, prompt, output, outputJson, citations, worktree, cwd, coverage, costText: leafRow ? costText([leafRow], { home, money, cloudSuffix }) : "" });
     }
     return notFound(res);
   };
