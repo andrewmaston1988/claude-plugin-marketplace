@@ -744,7 +744,7 @@ async function readManifestTasks(dir) {
 }
 
 async function cmdPerf(rest) {
-  const { readRows, aggregate, overall, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
+  const { readRows, aggregate, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
   const aspect = getFlag("aspect", rest);
   const model = getFlag("model", rest);
   const domain = getFlag("domain", rest);
@@ -781,22 +781,7 @@ async function cmdPerf(rest) {
   if (filters) out(`filters: ${filters}`);
   out("");
   if (rest.includes("--overall")) {
-    // One table: models ranked on the mean of the four universal weighted
-    // scores; per-aspect columns beside it so the average cannot hide a hole.
-    const o = overall(rows, { model, domain, combineProviders: true });
-    // Read from the unfiltered store: a filter must not relabel a well-graded model as needing grades.
-    const gaps = cfg.grading?.enabled === true
-      ? (await import("../src/seats.mjs")).gapCandidates({ roster: await launchableRoster(cfg), rows, costRows: costs, bands })
-      : [];
-    if (gaps.length) {
-      const { successorPitch } = await import("../src/serve/perf-views.mjs");
-      out("needs grades — seat one of these on a bounded leaf in your next run — they cannot rank until graded");
-      for (const g of gaps) out(`    ${g.model}  ${g.elder ? `n=${g.n}  ` : ""}${successorPitch(g)}`);
-      out("");
-    }
-    const held = new Set(gaps.map((g) => g.model));
-    const supersededBy = new Map(gaps.filter((g) => g.elder).map((g) => [g.elder, g.model]));
-    o.cells = o.cells.filter((c) => !held.has(c.model));
+    const o = await (await import("../src/serve/perf-views.mjs")).perfOverall({ cfg, roster: await launchableRoster(cfg), rows, costRows: costs, bands, model, domain, out });
     const costByModel = byModel(frontier(rows, costs, { model, domain, bands }));
     const w = Math.max(5, ...o.cells.map((c) => c.model.length));
     out(`    ${"model".padEnd(w)}    n  overall  ${o.universals.map((a) => a.slice(0, 5).padStart(5)).join("  ")}  cost  frontier`);
@@ -807,7 +792,7 @@ async function cmdPerf(rest) {
         ? { cost: "—", frontier: "provider-local" }
         : costCols(candidate);
       const flag = (c.combined == null ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "")
-        + (supersededBy.has(c.model) ? dim(`  [superseded by ${supersededBy.get(c.model)}]`) : "");
+        + (c.supersededBy ? dim(`  [superseded by ${c.supersededBy}]`) : "");
       const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
       const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
       out(`    ${c.model.padEnd(w)}  ${String(c.n).padStart(3)}  ${(c.combined == null ? "—" : c.combined.toFixed(2)).padStart(7)}  ${cols}  ${cost.padEnd(4)}${fm}${flag}${tail}`);

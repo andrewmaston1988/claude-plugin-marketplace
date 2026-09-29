@@ -3,7 +3,7 @@ import { deepEqual, equal, ok } from "node:assert/strict";
 import { costView, rankCells, successorPitch } from "../src/serve/perf-views.mjs";
 import { overall } from "../src/scores.mjs";
 import { costSections } from "../src/cost.mjs";
-import { dropSuperseded } from "../src/discovery.mjs";
+import { dropSuperseded } from "../src/supersession.mjs";
 import { rateCards } from "../src/rate-card.mjs";
 import { H, loadPerfViews } from "./helpers/perf-views-harness.mjs";
 import { snap, seg } from "./helpers/cost-snapshots.mjs";
