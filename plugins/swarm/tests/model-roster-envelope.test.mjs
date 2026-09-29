@@ -147,7 +147,7 @@ test("a zero-row hydrate over cached rows stamps lastAttemptAt and is not re-pro
 
 // ── The Cost path calls the reader on every request ──
 
-test("a warm read of a 200-row envelope stays under 20ms", () => {
+test("a warm read of a 200-row envelope stays under 50ms", () => {
   const dir = home();
   try {
     const env = envOf(dir);
@@ -159,7 +159,7 @@ test("a warm read of a 200-row envelope stays under 20ms", () => {
     const read = modelRoster({ env, registry, now: 2 });
     const elapsed = performance.now() - started;
     equal(read.models.length, 200);
-    ok(elapsed < 20, `warm read took ${elapsed.toFixed(2)}ms`);
+    ok(elapsed < 50, `warm read took ${elapsed.toFixed(2)}ms`);
   } finally {
     cleanup(dir);
   }

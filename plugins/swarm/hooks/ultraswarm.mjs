@@ -33,9 +33,11 @@ const IDENTITY = 'You have swarm. The operator has decided in advance: swarm is 
 
 // The one line of the locked block that names providers: it lists what is enabled, never a
 // vendor that is switched off (operator, 2026-09-29: "It should list what is enabled, or setup pending.").
+// The locked Anthropic criterion stays whenever Claude is enabled; only a Claude-off install loses the name.
 function agentRow(enabled) {
   const tier = enabled.length ? enabled.join(', ') : 'setup pending';
-  return `| "An Agent/Workflow will do" | Swarm is the fan-out tier (${tier}); Agent only for one run that must stay on this host. |`;
+  const where = enabled.includes('claude') ? 'must be on Anthropic' : 'must stay on this host';
+  return `| "An Agent/Workflow will do" | Swarm is the fan-out tier (${tier}); Agent only for one run that ${where}. |`;
 }
 
 function blockLines(mode, identity, enabled) {

@@ -302,7 +302,8 @@ export function createProviderRegistry(initial = []) {
 
   // Only providers switched on are named: an error line lands in a transcript, and a disabled
   // provider appears nowhere but the setting that enables it.
-  const enabledIds = (config) => [...adapters.values()].filter((a) => a.enabled(config)).map((a) => a.id).join(", ") || "none enabled";
+  const list = () => [...adapters.values()];
+  const enabledIds = (config) => enabledProviderIds(config, { list }).join(", ") || "none enabled";
 
   function identity(adapter, model, config, allowDisabled) {
     // The shipped config.default.json disables every provider, so a fresh install's first
@@ -338,7 +339,7 @@ export function createProviderRegistry(initial = []) {
   return {
     register,
     get,
-    list: () => [...adapters.values()],
+    list,
     resolve,
     capability(provider, name) {
       if (!PROVIDER_CAPABILITIES.has(name)) throw new Error(`unknown provider capability '${name}'`);

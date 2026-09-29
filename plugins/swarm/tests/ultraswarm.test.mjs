@@ -1,5 +1,5 @@
 import { test } from "node:test";
-import { equal, ok, match } from "node:assert/strict";
+import { equal, ok, match, rejects } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { decide, modeFor, standingBlock, KEYWORD_LINE, MODE_ARMED, MODE_UNARMED } from "../hooks/ultraswarm.mjs";
@@ -66,7 +66,7 @@ Solo ONLY for a conversational reply, a single one-read question, or a trivial e
 | "A leaf will do it worse" | You verify every leaf; committee judgement beats one pass. |
 | "I'll check with the operator first" | They answered in advance. Asking back is the defect. |
 | "I know the command, I can skip the skill" | The command arrives without the rules that govern it. |
-| "An Agent/Workflow will do" | Swarm is the fan-out tier (${tier}); Agent only for one run that must stay on this host. |
+| "An Agent/Workflow will do" | Swarm is the fan-out tier (${tier}); Agent only for one run that ${/claude/.test(tier) ? "must be on Anthropic" : "must stay on this host"}. |
 | "I'll peek at the leaf's log" | One status check, then hands-off until the notification. |
 
 Mode: ${mode}
@@ -91,6 +91,12 @@ test("the Agent row lists the enabled providers, never a disabled one", async ()
   equal(row(standingBlock(MODE_ARMED, [])), '| "An Agent/Workflow will do" | Swarm is the fan-out tier (setup pending); Agent only for one run that must stay on this host. |');
   const setup = await decide({ enabled: ["codex"], event: "SessionStart", cwd: "C:/code/x", config: null });
   ok(row(setup).includes("(setup pending)"), row(setup));
+  // The operator-locked Anthropic criterion stands whenever Claude is enabled.
+  equal(row(standingBlock(MODE_ARMED, ["claude", "codex"])), '| "An Agent/Workflow will do" | Swarm is the fan-out tier (claude, codex); Agent only for one run that must be on Anthropic. |');
+});
+
+test("decide requires the enabled provider list on an armed event", async () => {
+  await rejects(decide({ event: "SessionStart", cwd: "C:/code/x", config: armed }), TypeError);
 });
 
 // R8b — a fresh install gets nothing at SessionStart today, so the session learns the
