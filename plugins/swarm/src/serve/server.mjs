@@ -8,7 +8,7 @@ import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readRun, projectKeys, resultSuperseded, resolveTaskId } from "../runlog.mjs";
 import { DIGEST_ID } from "../digest.mjs";
-import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
+import { readRows, hideDisabledRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
 import { costRowsFor, costProvidersFor, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
 import { rateCardStorePath, rateCards, refreshStaleRateCards } from "../rate-card.mjs";
@@ -237,7 +237,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const scoreRows = () => {
     let mtimeMs = 0;
     try { mtimeMs = statSync(scoresFile).mtimeMs; } catch { mtimeMs = 0; }
-    if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: readRows(scoresFile) };
+    if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: hideDisabledRows(readRows(scoresFile), cfg, rosterRegistry) };
     return scoreCache.rows;
   };
   // The cost half, cached the same way: snapshots re-read when the history's

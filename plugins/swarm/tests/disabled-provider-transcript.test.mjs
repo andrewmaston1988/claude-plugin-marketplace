@@ -8,7 +8,8 @@
 // card, history and a finished run, so a leak is a read that ignored the enabled flag,
 // then drives the real entry points as child processes. Every fetch is recorded and
 // answered 599: none leaves the machine, and none may go to a disabled provider's vendor.
-// No line is exempted: the one allowed mention (the setting that enables a provider) is a
+// Score rows carry an explicit provider; a legacy row with none and a `gpt-*` model cannot be
+// attributed, so it is kept (nothing infers codex from a model name). No line is exempted: the one allowed mention (the setting that enables a provider) is a
 // config key, and none of these commands prints one.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
@@ -67,7 +68,7 @@ function seedHome(base, enabled) {
   write(join(home, "ollama-usage.json"), { fetchedAt: NOW, result: { weeklyPctUsed: 96, weeklyResetsAt: FUTURE, sessionPctUsed: 40 } });
 
   const score = (provider, model, i) => JSON.stringify({
-    ts: new Date(NOW - i * 3600e3).toISOString(), resultsDir: `/r/${provider}-${i}`, leaf: `leaf-${provider}-${i}`, model, effort: null,
+    provider, ts: new Date(NOW - i * 3600e3).toISOString(), resultsDir: `/r/${provider}-${i}`, leaf: `leaf-${provider}-${i}`, model, effort: null,
     domain: "node", grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 }, outcome: "completed", note: "", assessedBy: { session: "t" },
   });
   write(join(home, "model-scores.jsonl"), IDS.flatMap((id) => PROVIDERS[id].models.flatMap((m, i) => [score(id, m, i), score(id, m, i + 2)])).join("\n") + "\n");

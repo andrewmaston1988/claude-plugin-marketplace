@@ -161,6 +161,14 @@ export function readRows(path = scoresPath()) {
   return rows;
 }
 
+// Banked grades stay on disk; a row whose provider is registered but switched off never reaches
+// a surface. A row with no attributable provider (a legacy `gpt-*` row with no provider field,
+// which nothing infers) or an unregistered one is kept.
+export function hideDisabledRows(rows, config, registry) {
+  const off = new Set(registry.list().filter((a) => !a.enabled(config)).map((a) => a.id));
+  return rows.filter((r) => !off.has(identityOf(r).provider));
+}
+
 // The one key both sides of a graded-ness comparison go through: a store row's
 // resultsDir and a runs-tree walk path. Measured in the real store, 349 of 355
 // rows use forward slashes while a readdirSync+path.join walk on Windows yields

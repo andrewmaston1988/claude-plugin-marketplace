@@ -736,13 +736,13 @@ async function readManifestTasks(dir) {
 }
 
 async function cmdPerf(rest) {
-  const { readRows, aggregate, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
+  const { readRows, hideDisabledRows, aggregate, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
   const aspect = getFlag("aspect", rest);
   const model = getFlag("model", rest);
   const domain = getFlag("domain", rest);
   const cfg = getConfig();
   const path = scoresPath();
-  const rows = readRows(path);
+  const rows = hideDisabledRows(readRows(path), cfg, defaultProviderRegistry());
   const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
   const costs = await meterCostRows();
   const settings = await costSettings(cfg);
