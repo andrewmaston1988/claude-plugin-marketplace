@@ -9,6 +9,7 @@ import { resolveRef, listManifests } from "../src/registry.mjs";
 import { modelRoster, refreshRoster } from "../src/roster.mjs";
 import { collapseRoster, visibleModels, probeTopModels } from "../src/discovery.mjs";
 import { providerConfig } from "../src/providers.mjs";
+import { costBands, costSettings } from "../src/cost-settings.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
@@ -95,20 +96,6 @@ async function usageHeadroom(cfg, { env = process.env, fetchImpl = globalThis.fe
 async function meterCostRows(env = process.env) {
   const { ollamaCloudCostRows, readSnapshots, usageHistoryPath } = await import("../src/cost.mjs");
   return ollamaCloudCostRows(readSnapshots(usageHistoryPath(env)));
-}
-
-// The cached roster, grouped by provider — what `swarm cost` asks each provider
-// to price. A model the table does not list still gets a row, marked unpriced.
-// Band edges, the value margin and the cloud suffix are config, shared with the
-// dashboard's server — one source, never two.
-async function costBands(cfg = getConfig()) {
-  const { resolveBands } = await import("../src/cost.mjs");
-  return resolveBands(providerConfig(cfg, "ollama")?.cloud?.ollama?.costBands);
-}
-
-async function costSettings(cfg = getConfig()) {
-  const ollama = providerConfig(cfg, "ollama");
-  return { bands: await costBands(cfg), valueMargin: ollama?.cloud?.ollama?.valueMargin, cloudSuffix: ollama?.cloudSuffix || ":cloud" };
 }
 
 // Read usage through registered provider capabilities. `live` lets an adapter
@@ -846,7 +833,8 @@ async function cmdPerf(rest) {
 async function cmdScoresRealmodel(rest) {
   const dryRun = rest.includes("--dry-run");
   const { readFileSync, writeFileSync, copyFileSync, existsSync } = await import("node:fs");
-  const { backfillRealmodel, scoresPath } = await import("../src/scores.mjs");
+  const { scoresPath } = await import("../src/scores.mjs");
+  const { backfillRealmodel } = await import("../src/scores-backfill.mjs");
   const { transcriptPath } = await import("../src/results.mjs");
 
   const path = scoresPath();
