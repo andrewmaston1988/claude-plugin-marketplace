@@ -123,7 +123,7 @@ swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
 swarm quota                # Anthropic plus cached cloud-provider utilization
 swarm usage [--provider X] # live usage from enabled provider capabilities
 swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
-swarm grade --init <resultsDir>   # write grades.json — one skeleton row per provider leaf
+swarm grade --init <resultsDir>   # write grades.json — one skeleton row per model leaf, no model names on it
 swarm grade --file <grades.json>  # validate the filled batch and append it to the score store
 swarm perf [--aspect X] [--model Y] [--domain D]   # aspect x model table with sample counts
 ```
@@ -463,9 +463,9 @@ the session Stop hook (every turn end, not once). `swarm grade --waive <resultsD
 only party that knows what each leaf was *asked* for.
 
 ```bash
-swarm grade --init <resultsDir>   # → <resultsDir>/grades.json, one row per :cloud leaf
+swarm grade --init <resultsDir>   # → <resultsDir>/grades.json, one row per model leaf, keyed by leaf id
 # fill in session, and per row: domain, outcome, note, grades
-swarm grade --file <resultsDir>/grades.json
+swarm grade --file <resultsDir>/grades.json   # reads each leaf's model and provider from its result
 swarm grade --waive <resultsDir> --reason "<why>"   # excuse a run instead — no store row
 swarm perf --aspect search --domain godot
 ```
