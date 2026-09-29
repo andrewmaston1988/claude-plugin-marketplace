@@ -38,7 +38,9 @@ test("grade --init: one row per model leaf, Claude leaves included", () => {
     equal(r.status, 0, r.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
     equal(batch.rows.length, 3);
-    ok(batch.rows.some((x) => x.leaf === "verdict" && x.model === "claude-sonnet-5"), "the Claude leaf gets a row too");
+    ok(batch.rows.some((x) => x.leaf === "verdict"), "the Claude leaf gets a row too");
+    // Blind: the grader judges the output, not the name on it — grade --file reads the model from disk.
+    for (const row of batch.rows) ok(!("model" in row) && !("provider" in row), `${row.leaf} names no model or provider`);
     // every aspect key present and null — the skeleton is a form to fill, and
     // validation refuses it until it has been
     for (const row of batch.rows) {
@@ -49,7 +51,7 @@ test("grade --init: one row per model leaf, Claude leaves included", () => {
   }
 });
 
-test("grade skeletons and stored rows preserve provider identity", () => {
+test("stored rows keep provider identity though the skeleton names none", () => {
   const dir = tmp();
   try {
     const run = fakeRun(dir);
@@ -66,15 +68,14 @@ test("grade skeletons and stored rows preserve provider identity", () => {
     const init = runCli(["grade", "--init", run], { cwd: dir, env: { SWARM_HOME: home } });
     equal(init.status, 0, init.stderr);
     const batch = JSON.parse(readFileSync(join(run, "grades.json"), "utf8"));
-    const same = batch.rows.filter((r) => r.model === "same-model");
+    const same = batch.rows.filter((r) => r.leaf.startsWith("same-"));
     equal(same.length, 2);
-    equal(new Set(same.map((r) => r.provider)).size, 2);
 
     const filled = {
       resultsDir: run,
       session: "abc123",
       rows: same.map((r) => ({
-        leaf: r.leaf, provider: r.provider, domain: "node", outcome: "completed", note: "",
+        leaf: r.leaf, domain: "node", outcome: "completed", note: "",
         grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 },
       })),
     };

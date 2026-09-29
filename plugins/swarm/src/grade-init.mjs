@@ -74,9 +74,9 @@ export function buildSkeleton(leaves, { resultsDir }) {
     resultsDir,
     session: "<this session's id>",
     rows: leaves.map((l) => ({
+      // No model or provider beside the grades: rows from different vendors sit side by side,
+      // and grade --file reads the identity from the result on disk.
       leaf: l.id,
-      ...(l.provider ? { provider: l.provider } : {}),
-      model: l.model,
       read: { result: l.resultPath, transcript: l.transcriptPath },
       domain: DOMAIN_HINT,
       outcome: outcomeFor(l.result),
