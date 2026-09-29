@@ -109,7 +109,7 @@ export function createLivePaint(ctx) {
     ctx.memoryParkCount++;
     ctx.state.set(task.id, "retrying");
     ctx.activityMap.set(task.id, `⏸ low memory — ${(io.freeMemMb() / 1024).toFixed(1)} GB free`);
-    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, state: "retrying", note: "memory-park" });
+    appendRunLog(plan.resultsDir, { ts: new Date().toISOString(), id: task.id, state: "retrying", note: "memory-park", ...(ctx.turnsMap.has(task.id) && { numTurns: ctx.turnsMap.get(task.id) }) });
     paint();
     if (ctx.heartbeat.ref) ctx.heartbeat.ref();
   };

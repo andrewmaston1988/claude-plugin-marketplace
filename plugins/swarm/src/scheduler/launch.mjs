@@ -237,15 +237,15 @@ export function createLaunch(ctx) {
 
       writeTaskResult(plan.resultsDir, task, result);
 
+      // Every attempt's turns are requests the meter charged, a retried or parked one included.
+      if (r.numTurns != null) ctx.turnsMap.set(task.id, (ctx.turnsMap.get(task.id) ?? 0) + r.numTurns);
+
       // D4/D5: land the valve's kill as a park, not a retry — it never
       // touches attempts, so it can never exhaust a leaf's retry budget.
       if (isMemoryStop) {
         ctx.parkForMemory(task);
         return task.id;
       }
-
-      // Every attempt's turns are requests the meter charged, a retried one included.
-      if (r.numTurns != null) ctx.turnsMap.set(task.id, (ctx.turnsMap.get(task.id) ?? 0) + r.numTurns);
 
       if (!r.ok) {
         const retry = cfg.retry || {};

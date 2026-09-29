@@ -120,6 +120,54 @@ test("M4: the valve kills the newest running leaf under the low-memory floor, an
   }
 });
 
+test("M4-turns: a valve-killed attempt's turns survive the park — run.log, summary and the resumed total agree", async () => {
+  const dir = tmp();
+  try {
+    let nowN = 0;
+    let memN = 0;
+    let bCalls = 0;
+    const freeMemMb = () => (++memN === 2 ? 500 : 99999);
+    const spawn = fakeSpawnFactory((call) => {
+      const p = promptOf(call);
+      if (p === "do a") return { output: "a done", delayMs: 300 };
+      bCalls++;
+      if (bCalls === 1) {
+        return {
+          // the killed attempt already reported 3 turns on an error terminal event
+          output: [
+            JSON.stringify({ type: "system", subtype: "init", session_id: "s-b1" }),
+            JSON.stringify({ type: "result", subtype: "error", is_error: true, result: "killed", num_turns: 3, usage: { input_tokens: 1, output_tokens: 1 } }),
+          ].join("\n") + "\n",
+          outputAtMs: 5,
+          delayMs: 3000,
+        };
+      }
+      return {
+        output: [
+          JSON.stringify({ type: "system", subtype: "init", session_id: "s-b1" }),
+          JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "b done", num_turns: 2, usage: { input_tokens: 1, output_tokens: 1 } }),
+        ].join("\n") + "\n",
+        delayMs: 10,
+      };
+    });
+    const io = makeIo(spawn, { freeMemMb, now: () => (nowN += 10) });
+    const p = plan(dir, [task("a"), task("b")]);
+    const cfg = { ...CFG, minFreeMemMb: 2048, valveFreeMemMb: 1024, heartbeatSecs: 0.05 };
+    const r = await runPlan(p, cfg, io);
+
+    equal(bCalls, 2, "b: one killed attempt, one resumed attempt");
+    const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    const park = logLines.find((l) => l.id === "b" && l.state === "retrying" && l.note === "memory-park");
+    equal(park?.numTurns, 3, "the parked record carries the killed attempt's turns");
+    const bRow = r.summary.tasks.find((t) => t.id === "b");
+    equal(bRow.numTurns, 5, "summary: killed attempt's 3 + resumed attempt's 2");
+    const finalOk = logLines.filter((l) => l.id === "b" && l.state === "ok").at(-1);
+    equal(finalOk.numTurns, 5, "run.log's final ok row agrees with summary");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // M5: a memory park must never consume a retry attempt. The independent "b"
 // leaf is shallower than the decoy chain, so wave-first seating gives it the
 // first free seat after one valve kill. With retry.spawnError: 0, any attempt
