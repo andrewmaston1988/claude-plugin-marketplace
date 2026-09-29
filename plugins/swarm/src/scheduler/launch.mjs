@@ -57,7 +57,7 @@ export function createLaunch(ctx) {
         const updated = { ...prior, asks: [...(prior.asks || []), askEntry] };
         if (r.ok && r.sessionId) updated.sessionId = r.sessionId;
         writeResult(plan.resultsDir, task.id, updated);
-        if (r.numTurns != null) ctx.turnsMap.set(task.id, r.numTurns);
+        if (r.numTurns != null) ctx.turnsMap.set(task.id, (ctx.turnsMap.get(task.id) ?? 0) + r.numTurns);
         ctx.record(task, "ok", r.durationMs, r.tokens, r.ok ? undefined : `ask failed: ${r.output}`);
         return task.id;
       }

@@ -216,9 +216,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     // rebuilds per-task state from scratch on every run-start line, so replaying
     // anything else here is what `status` would show for these tasks post-ask.
     const priorSummary = readSummary(plan.resultsDir, { normalize: false });
+    // Turns are seeded for every row, the asked leaf included: the ask adds to them,
+    // and run-start wipes run.log's per-task turns, so an unseeded row would lose them.
     for (const t of tasks) {
-      if (t.id === ask.taskId) continue;
       const priorRow = priorSummary?.tasks?.find((r) => r.id === t.id);
+      if (priorRow?.numTurns != null) ctx.turnsMap.set(t.id, priorRow.numTurns);
+      if (t.id === ask.taskId) continue;
       ctx.record(t, priorRow?.state ?? "skipped", priorRow?.durationMs ?? null, priorRow?.tokens ?? null);
     }
   } else if (!force) {
@@ -339,7 +342,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       state: "ok",
       durationMs: (priorRow?.durationMs ?? 0) + (ctx.durations.get(ask.taskId) ?? 0),
       tokens: addTokens(priorRow?.tokens ?? emptyTokens(), ctx.tokensMap.get(ask.taskId) ?? emptyTokens()),
-      ...((priorRow?.numTurns != null || ctx.turnsMap.has(ask.taskId)) && { numTurns: (priorRow?.numTurns ?? 0) + (ctx.turnsMap.get(ask.taskId) ?? 0) }),
+      ...(ctx.turnsMap.has(ask.taskId) && { numTurns: ctx.turnsMap.get(ask.taskId) }), // already prior + ask
     };
     const mergedTasks = priorSummary.tasks.map((t) => (t.id === ask.taskId ? askedRow : t));
     summary = {
