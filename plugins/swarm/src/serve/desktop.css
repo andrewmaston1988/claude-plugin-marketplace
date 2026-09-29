@@ -51,8 +51,8 @@
   main:has(> .rcard) > .section { padding-left:0; padding-right:0; }
   main:has(> .rcard) > .rcard { margin-left:0; margin-right:0; }
   /* Fewer live runs than tracks: a lone card takes the row, two share it — no empty tracks beside them. */
-  main:not(:has(> .rcard ~ .rcard)) > .rcard, .ovfeed:not(:has(> .rcard ~ .rcard)) > .rcard { grid-column:1 / -1; }
-  main:has(> .rcard ~ .rcard):not(:has(> .rcard ~ .rcard ~ .rcard)), .ovfeed:has(> .rcard ~ .rcard):not(:has(> .rcard ~ .rcard ~ .rcard)) { grid-template-columns:repeat(2, minmax(0, 1fr)); }
+  main:not(:has(> .rcard ~ .rcard)) > .rcard { grid-column:1 / -1; }
+  main:has(> .rcard ~ .rcard):not(:has(> .rcard ~ .rcard ~ .rcard)) { grid-template-columns:repeat(2, minmax(0, 1fr)); }
 
   /* The finished stack as a table: the phone's row, cut into its columns, under a
      header row naming them. `display:contents` lifts the row's two wrapper boxes out
@@ -218,9 +218,12 @@
   main:has(> .ovfeed.shut) > .ovbar { grid-area:1/1/2/2; padding-bottom:6px; }
   main:has(> .ovfeed.shut) > .ovfeed { grid-area:2/1/3/2; }
   .ovfeed { min-width:0; display:grid; grid-template-columns:var(--feed-cols); column-gap:12px; align-content:start; align-items:start; }
-  /* Everything that is not a card spans the feed's tracks: the two section rules, the
-     finished stack, and the toggle's row. */
-  .ovfeed > .section, .ovfeed > ul, .ovfeed > .empty { grid-column:1 / -1; }
+  /* Everything spans the feed's tracks. The live cards are an accordion, one to a row on the
+     feed's edges, so a run opened beneath its card sits on the card's edges and moves no
+     other card sideways; it keeps the gap the cards keep. */
+  .ovfeed > .section, .ovfeed > ul, .ovfeed > .empty, .ovfeed > .rcard { grid-column:1 / -1; }
+  .ovfeed > .rcard { margin-left:0; margin-right:0; }
+  .ovfeed > .ovrun, .ovfeed > .ovleaf { margin-top:10px; }
   .ovfeed > .section { padding-left:0; padding-right:0; }
   .ovtoggle { font:inherit; font-size:12px; letter-spacing:.04em; color:var(--muted); background:var(--surface); border:1px solid var(--rule); border-radius:999px; padding:4px 12px; cursor:pointer; }
   .ovtoggle.on { color:var(--accent); border-color:var(--accent); }
