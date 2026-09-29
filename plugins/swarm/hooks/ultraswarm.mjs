@@ -31,10 +31,14 @@ function readJSON(p) {
 // locked text verbatim, so any edit outside an operator decision fails there first.
 const IDENTITY = 'You have swarm. The operator has decided in advance: swarm is PRE-AUTHORISED.';
 
-// The one line of the locked block that names a provider; main() drops it when Claude is switched off.
-const ANTHROPIC_ROW = '| "An Agent/Workflow will do" | Swarm is the fan-out tier; Agent only for one run that must be on Anthropic. |';
+// The one line of the locked block that names providers: it lists what is enabled, never a
+// vendor that is switched off (operator, 2026-09-29: "It should list what is enabled, or setup pending.").
+function agentRow(enabled) {
+  const tier = enabled.length ? enabled.join(', ') : 'setup pending';
+  return `| "An Agent/Workflow will do" | Swarm is the fan-out tier (${tier}); Agent only for one run that must stay on this host. |`;
+}
 
-function blockLines(mode, identity) {
+function blockLines(mode, identity, enabled) {
   return [
     '<EXTREMELY_IMPORTANT>',
     identity,
@@ -62,7 +66,7 @@ function blockLines(mode, identity) {
     '| "A leaf will do it worse" | You verify every leaf; committee judgement beats one pass. |',
     '| "I\'ll check with the operator first" | They answered in advance. Asking back is the defect. |',
     '| "I know the command, I can skip the skill" | The command arrives without the rules that govern it. |',
-    ANTHROPIC_ROW,
+    agentRow(enabled),
     '| "I\'ll peek at the leaf\'s log" | One status check, then hands-off until the notification. |',
     '',
     `Mode: ${mode}`,
@@ -70,8 +74,8 @@ function blockLines(mode, identity) {
   ];
 }
 
-export function standingBlock(mode) {
-  return blockLines(mode, IDENTITY).join('\n');
+export function standingBlock(mode, enabled) {
+  return blockLines(mode, IDENTITY, enabled).join('\n');
 }
 
 // A fresh install has no config file at all, so nothing here can be pre-authorised yet: the
@@ -81,7 +85,7 @@ export function standingBlock(mode) {
 const SETUP_IDENTITY = 'You have the swarm plugin but it is not configured, the operator has installed it and expects it to work. The first thing that you must do is run /swarm:swarm setup';
 
 function setupBlock(mode) {
-  return blockLines(mode, SETUP_IDENTITY).join('\n');
+  return blockLines(mode, SETUP_IDENTITY, []).join('\n');
 }
 
 // Every id that could own roots: the canonical blocks the operator wrote, plus the two ids
@@ -123,7 +127,7 @@ export const KEYWORD_LINE = '`ultraswarm` in this prompt is the operator asking 
 // Pure: which event, what prompt, what config/cwd/usage -> standing block or null.
 // `usage` is readCachedUsage()'s array; the caller reads it, so this stays pure
 // and an absent argument behaves exactly as before usage existed.
-export async function decide({ event, prompt = '', cwd, config, usage = [] }) {
+export async function decide({ event, prompt = '', cwd, config, enabled, usage = [] }) {
   // SessionStart alone may fire without swarm.always: an install with no roots dispatches
   // nothing, so the session has to learn the way out before it tries. The keyword event is
   // unchanged — a user asking for the swarm on a prompt still gets the standing block.
@@ -134,7 +138,7 @@ export async function decide({ event, prompt = '', cwd, config, usage = [] }) {
   if (!armed) return null;
   const mode = await modeFor({ cwd, config });
   const head = event === 'UserPromptSubmit' ? `${KEYWORD_LINE}\n` : '';
-  const block = head + (unconfigured ? setupBlock(mode) : standingBlock(mode));
+  const block = head + (unconfigured ? setupBlock(mode) : standingBlock(mode, enabled));
   const lines = notableLines(usage);
   return lines.length ? `${block}\n${lines.join('\n')}` : block;
 }
@@ -158,14 +162,13 @@ async function main() {
     prompt: String(payload.prompt || ''),
     cwd: payload.cwd || process.cwd(),
     config,
+    enabled: enabledProviderIds(config, registry),
     usage: await readCachedUsage(config, { providerRegistry: registry }),
   });
   if (!ctx) process.exit(0);
-  // Nothing injected into a transcript names a provider that is switched off.
-  const text = enabledProviderIds(config, registry).includes('claude') ? ctx : ctx.split('\n').filter((l) => l !== ANTHROPIC_ROW).join('\n');
 
   process.stdout.write(JSON.stringify({
-    hookSpecificOutput: { hookEventName: event, additionalContext: text },
+    hookSpecificOutput: { hookEventName: event, additionalContext: ctx },
   }) + '\n');
   process.exit(0);
 }
