@@ -1056,8 +1056,7 @@ async function main() {
         const { modelsByProvider } = await import("../src/cost.mjs");
         // The same roster `swarm cost` prices for, banked with the read: without
         // it a manual refresh leaves the next cost query re-fetching both pages.
-        const cfg = getConfig(), registry = defaultProviderRegistry();
-        const roster = modelRoster({ config: cfg, registry }).models;
+        const cfg = getConfig(), registry = defaultProviderRegistry(), roster = modelRoster({ config: cfg, registry }).models;
         return await refreshPrices({
           out, err, dryRun: rest.includes("--dry-run"), rosterIds: modelsByProvider(roster), enabled: enabledProviderIds(cfg, registry),
         });
