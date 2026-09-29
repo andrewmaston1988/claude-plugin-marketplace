@@ -114,6 +114,9 @@ export async function modeFor({ cwd, config }) {
 // The keyword as a standalone word — `ultraswarm.mjs` in a prompt about this file is not an opt-in.
 const KEYWORD_RE = /(^|[^\w./-])ultraswarm(?![\w./-])/i;
 
+// A session that has seen the block at SessionStart reads it as routine and hunts the word instead.
+export const KEYWORD_LINE = '`ultraswarm` in this prompt is the operator asking for this work to be swarmed — the block below is what that means.';
+
 // Pure: which event, what prompt, what config/cwd/usage -> standing block or null.
 // `usage` is readCachedUsage()'s array; the caller reads it, so this stays pure
 // and an absent argument behaves exactly as before usage existed.
@@ -127,7 +130,8 @@ export async function decide({ event, prompt = '', cwd, config, usage = [] }) {
       : false;
   if (!armed) return null;
   const mode = await modeFor({ cwd, config });
-  const block = unconfigured ? setupBlock(mode) : standingBlock(mode);
+  const head = event === 'UserPromptSubmit' ? `${KEYWORD_LINE}\n` : '';
+  const block = head + (unconfigured ? setupBlock(mode) : standingBlock(mode));
   const lines = notableLines(usage);
   return lines.length ? `${block}\n${lines.join('\n')}` : block;
 }
