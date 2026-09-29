@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual, throws } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer } from "node:http";

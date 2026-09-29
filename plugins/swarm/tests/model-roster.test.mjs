@@ -345,39 +345,149 @@ test("a disabled provider's rows survive both a read and a refresh", async () =>
 
 // ── The old file shape ──
 
-test("an old { updated, models } file reads as stale for every provider and is rebuilt", async () => {
+test("an old { updated, models } file carries its rows forward, banked at the file's age", () => {
   const dir = home();
   try {
     const env = envOf(dir);
     writeFileSync(cachePath(dir), JSON.stringify({
       updated: "2026-09-21T00:00:00.000Z",
-      models: [{ provider: "net", model: "net-old" }],
+      models: [{ provider: "ollama", model: "glm-5.2:cloud" }, { provider: "ollama", model: "kimi-k3:cloud" }],
     }));
-    const log = [];
-    const registry = createProviderRegistry([networkAdapter("net", { log })]);
-    // No force: an old-shape file is stale by definition, so a plain refresh rebuilds it.
-    const refreshed = await refreshRoster({ env, registry, now: 9 });
-    equal(log.length, 1);
-    deepEqual(namesOf(refreshed.models), ["net-new"], "the flat rows are not migrated");
-    deepEqual(Object.keys(readRosterEnvelope(env).providers), ["net"]);
+    const aged = 1_700_000_000_000;
+    utimesSync(cachePath(dir), new Date(aged), new Date(aged));
+    const read = modelRoster({ env, registry: createDefaultProviderRegistry(), now: aged + 1000 });
+    deepEqual(namesOf(read.models).sort(), ["glm-5.2:cloud", "kimi-k3:cloud"]);
+    deepEqual(read.errors, {});
+    const written = JSON.parse(readFileSync(cachePath(dir), "utf8"));
+    ok(written.providers && !written.models, "the file is rewritten in the envelope shape");
+    deepEqual(namesOf(written.providers.ollama.models).sort(), ["glm-5.2:cloud", "kimi-k3:cloud"]);
+    equal(written.providers.ollama.hydratedAt, aged, "the rows read as their true age, not as fresh");
   } finally {
     cleanup(dir);
   }
 });
 
-test("a truncated cache file is loud, never an empty roster", async () => {
+test("a carried-forward provider renews on the normal TTL", async () => {
+  const dir = home();
+  try {
+    const env = envOf(dir);
+    writeFileSync(cachePath(dir), JSON.stringify({ models: [{ provider: "net", model: "net-old" }] }));
+    const aged = 1_700_000_000_000;
+    utimesSync(cachePath(dir), new Date(aged), new Date(aged));
+    const log = [];
+    const registry = createProviderRegistry([networkAdapter("net", { log })]);
+    await refreshRoster({ env, registry, now: aged + TWELVE_H - 1 });
+    equal(log.length, 0, "younger than 12h by the file's mtime: not stale");
+    const refreshed = await refreshRoster({ env, registry, now: aged + TWELVE_H });
+    equal(log.length, 1);
+    deepEqual(namesOf(refreshed.models), ["net-new"]);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("an old-shape row with no provider is dropped and reported", () => {
+  const dir = home();
+  try {
+    const env = envOf(dir);
+    writeFileSync(cachePath(dir), JSON.stringify({
+      models: [{ provider: "ollama", model: "kept" }, { model: "orphan" }],
+    }));
+    const read = modelRoster({ env, registry: createProviderRegistry([]) });
+    deepEqual(namesOf(read.models), ["kept"]);
+    ok(JSON.stringify(read.errors).includes("orphan"), "the drop is reported");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("a truncated cache file never empties the roster: the reader reports it, the refresher throws", async () => {
   const dir = home();
   try {
     const env = envOf(dir);
     const corrupt = '{"updated":"2026-09-21T00:00:00.000Z","models":[{"model":"glm-5';
     writeFileSync(cachePath(dir), corrupt);
     throws(() => readRosterEnvelope(env), (error) => error.message.includes(cachePath(dir)));
-    throws(() => modelRoster({ env, registry: createDefaultProviderRegistry() }), (error) => error.message.includes(cachePath(dir)));
+    const read = modelRoster({ env, registry: createDefaultProviderRegistry() });
+    deepEqual(read.models, []);
+    ok(read.errors.file.includes(cachePath(dir)));
     await rejects(
       () => refreshRoster({ env, registry: createProviderRegistry([networkAdapter("net")]) }),
       (error) => error.message.includes(cachePath(dir)),
     );
     equal(readFileSync(cachePath(dir), "utf8"), corrupt, "the corrupt file is left untouched — no empty write");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── A failing provider is retried once per TTL, not per request ──
+
+test("a failed hydrate stamps lastAttemptAt, so the next refresh inside the TTL skips it", async () => {
+  const dir = home();
+  try {
+    const env = envOf(dir);
+    const log = [];
+    const registry = createProviderRegistry([networkAdapter("net", { fail: "offline", log })]);
+    writeRosterEntry("net", entryOf("net", "net-old", 1), env);
+    const t0 = 5 * TWELVE_H;
+    await refreshRoster({ env, registry, now: t0 });
+    equal(readRosterEnvelope(env).providers.net.lastAttemptAt, t0);
+    await refreshRoster({ env, registry, now: t0 + 60_000 });
+    equal(log.length, 1, "a dead provider is not re-probed inside the TTL");
+    await refreshRoster({ env, registry, now: t0 + TWELVE_H });
+    equal(log.length, 2, "and is retried once the TTL passes");
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("a first-ever failure is also throttled", async () => {
+  const dir = home();
+  try {
+    const env = envOf(dir);
+    const log = [];
+    const registry = createProviderRegistry([networkAdapter("net", { fail: "offline", log })]);
+    await refreshRoster({ env, registry, now: 1000 });
+    await refreshRoster({ env, registry, now: 2000 });
+    equal(log.length, 1);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+test("a zero-row hydrate over cached rows stamps lastAttemptAt and is not re-probed", async () => {
+  const dir = home();
+  try {
+    const env = envOf(dir);
+    const log = [];
+    const registry = createProviderRegistry([networkAdapter("net", { rows: [], log })]);
+    writeRosterEntry("net", entryOf("net", "net-old", 1), env);
+    const t0 = 5 * TWELVE_H;
+    await refreshRoster({ env, registry, now: t0 });
+    equal(readRosterEnvelope(env).providers.net.lastAttemptAt, t0);
+    await refreshRoster({ env, registry, now: t0 + 60_000 });
+    equal(log.length, 1);
+  } finally {
+    cleanup(dir);
+  }
+});
+
+// ── The Cost path calls the reader on every request ──
+
+test("a warm read of a 200-row envelope stays under 20ms", () => {
+  const dir = home();
+  try {
+    const env = envOf(dir);
+    const models = Array.from({ length: 200 }, (_, i) => ({ provider: "net", model: `m-${i}` }));
+    const registry = createProviderRegistry([networkAdapter("net")]);
+    writeRosterEntry("net", { hydratedAt: 1, source: null, models }, env);
+    modelRoster({ env, registry, now: 2 });
+    const started = performance.now();
+    const read = modelRoster({ env, registry, now: 2 });
+    const elapsed = performance.now() - started;
+    equal(read.models.length, 200);
+    ok(elapsed < 20, `warm read took ${elapsed.toFixed(2)}ms`);
   } finally {
     cleanup(dir);
   }
@@ -451,4 +561,16 @@ test("no module reads models-cache.json outside the roster envelope functions", 
   }
   deepEqual([...found].sort(), [...ROSTER_READERS].sort(),
     "the roster file has one reader — move any caller onto modelRoster() and shrink this list");
+});
+
+test("no module under src/ or scripts/ imports or defines the retired flat-cache functions", () => {
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const retired = /\b(readModelsCache|writeCompositeModelsCache|refreshModelsCache)\b/;
+  const found = [];
+  for (const sub of ["src", "scripts"]) {
+    for (const path of sourceFiles(join(root, sub))) {
+      if (retired.test(readFileSync(path, "utf8"))) found.push(relative(root, path).split(sep).join("/"));
+    }
+  }
+  deepEqual(found, [], "the roster file has one reader and one writer — use modelRoster / refreshRoster");
 });

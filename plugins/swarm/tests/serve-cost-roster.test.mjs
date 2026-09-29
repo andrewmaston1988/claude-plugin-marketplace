@@ -1,4 +1,4 @@
-// CS-4 made readModelsCache THROW on a corrupt roster where it used to return null.
+// A corrupt roster once threw out of the reader and 500ed the request.
 // The dashboard's cost view reads that roster, so without a catch the throw escapes
 // the request and 500s a page whose only job is display. The row drives the real
 // endpoint, not the helper: a unit test on costRoster would pass with the catch
@@ -43,7 +43,7 @@ async function getPerf(home) {
 test("serve: a corrupt models-cache renders an empty cost roster instead of 500ing the perf page", async () => {
   const home = mkdtempSync(join(tmpdir(), "swarm-cost-roster-"));
   mkdirSync(join(home, "runs"), { recursive: true });
-  // Not JSON at all — the shape readModelsCache now throws on.
+  // Not JSON at all — the shape the envelope reader still throws on.
   writeFileSync(join(home, "models-cache.json"), "{ this is not json", "utf8");
   try {
     const { status, body } = await getPerf(home);

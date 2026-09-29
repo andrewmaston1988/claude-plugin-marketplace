@@ -187,7 +187,9 @@ async function cmdModels(rest = [], {
   for (const [provider, message] of Object.entries(refreshed.errors)) {
     write(`⚠ ${provider} model discovery unavailable — using cached rows (${message})`);
   }
-  const roster = modelRoster({ config: cfg, env, registry }).models;
+  const read = modelRoster({ config: cfg, env, registry });
+  writeRosterErrors(read.errors, write);
+  const roster = read.models;
   const ollamaRows = roster.filter((m) => (m.provider || "ollama") === "ollama");
   const ollama = providerConfig(cfg, "ollama");
   const base = String(ollama.url || "").replace(/\/+$/, "");
@@ -297,12 +299,19 @@ async function seatBlock(plan, cfg) {
   });
 }
 
+// The reader never throws, so a roster it could not read or hydrate says so here.
+function writeRosterErrors(errors, write) {
+  for (const [provider, message] of Object.entries(errors)) write(`roster: ${provider} — ${message}`);
+}
+
 async function cmdValidate(rest) {
   const cfg = getConfig();
   const args = parseArgsFlag(rest);
   const ref = resolveManifestRef(rest[0]);
   const fromRegistry = ref.source !== "path";
-  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: modelRoster({ config: cfg, env: process.env, registry: defaultProviderRegistry() }).models, ...(fromRegistry && { ref: rest[0] }) });
+  const roster = modelRoster({ config: cfg, env: process.env, registry: defaultProviderRegistry() });
+  writeRosterErrors(roster.errors, err);
+  const plan = loadManifest(ref.path, cfg, process.cwd(), { args, fromRegistry, headroom: await usageHeadroom(cfg), cache: roster.models, ...(fromRegistry && { ref: rest[0] }) });
   out(`manifest OK: ${plan.tasks.length} task(s)${plan.digest ? " + digest" : ""}`);
   // The preview IS the approval: with forEach or composition in play, show the
   // worst-case leaf count the caps permit before anything runs.
@@ -653,7 +662,7 @@ async function cmdGradeFile(path) {
   // What each model was declared to be, keyed the way a result names it — the
   // same identity reading the roster merges on, so a provider cannot split a row.
   const cacheEntries = new Map();
-  for (const m of modelRoster({ registry: defaultProviderRegistry() }).models) {
+  for (const m of modelRoster({ config: getConfig(), registry: defaultProviderRegistry() }).models) {
     const declared = {
       capabilities: m.capabilities ?? null,
       contextLength: m.contextLength ?? null,

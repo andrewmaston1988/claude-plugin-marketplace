@@ -1,10 +1,7 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import { modelDescriptor, OLLAMA_CLOUD_RE, identityOf, identityKey } from "./contracts.mjs";
 import { providerConfig } from "./providers.mjs";
-import {
-  readRosterFile, writeRosterFile, writeRosterEnvelope, isPlainObject, rosterModels, rosterPath,
-  readRosterEnvelope, rosterSource, bankRosterEntry, recordRosterFailure,
-} from "./roster.mjs";
+import { readRosterFile, writeRosterFile, writeRosterEnvelope, isPlainObject } from "./roster.mjs";
 
 // Model discovery — the ollama cloud catalog ONLY: recommendations ∪ /api/tags,
 // enriched free via /api/show, family-collapsed, size-ordered. `ollama list` and
@@ -460,67 +457,4 @@ export function mergeProviderModelCaches(caches = []) {
     }
   }
   return [...merged.values()];
-}
-
-// ── The flat-file callers, until they move onto the reader above ──
-
-export function readModelsCache(env = process.env) {
-  const parsed = readRosterFile(env);
-  if (parsed === null) return null;
-  if (!isPlainObject(parsed?.providers)) return parsed;
-  const banked = Object.values(parsed.providers).map((entry) => Number(entry?.hydratedAt) || 0);
-  return {
-    updated: new Date(Math.max(0, ...banked)).toISOString(),
-    models: rosterModels(parsed.providers),
-  };
-}
-
-export function writeCompositeModelsCache(models, env = process.env) {
-  const byProvider = new Map();
-  for (const row of mergeProviderModelCaches([models])) {
-    const provider = row.provider || "ollama";
-    if (!byProvider.has(provider)) byProvider.set(provider, []);
-    byProvider.get(provider).push(row);
-  }
-  const providers = {};
-  for (const [provider, rows] of byProvider) {
-    providers[provider] = { hydratedAt: Date.now(), source: null, models: rows };
-  }
-  return writeRosterEnvelope(providers, env);
-}
-
-// Refresh only the providers named by discoverers. A failed provider keeps its
-// previous rows while successful providers are replaced.
-export async function refreshModelsCache({
-  config = {},
-  env = process.env,
-  providers,
-  registry,
-  discoverers = {},
-  fetchImpl,
-  spawnImpl,
-  rich = false,
-} = {}) {
-  readRosterEnvelope(env);
-  const errors = {};
-  const now = Date.now();
-  const targets = providers || (registry
-    ? registry.list().filter((adapter) => adapter.enabled(config) && adapter.capabilities.discoverModels).map((adapter) => adapter.id)
-    : ["ollama"]);
-  for (const provider of targets) {
-    const adapter = registry?.list().find((candidate) => candidate.id === provider) || null;
-    const discover = discoverers[provider]
-      || (registry ? registry.capability(provider, "discoverModels") : null)
-      || (provider === "ollama" ? (context) => discoverOllamaModels(context.config, context) : null);
-    if (!discover) continue;
-    const prior = readRosterEnvelope(env).providers[provider];
-    const source = adapter ? rosterSource(registry, adapter, { config, env, now }) : null;
-    try {
-      const rows = await discover({ config, env, fetchImpl, spawnImpl, rich });
-      bankRosterEntry(provider, { rows: Array.isArray(rows) ? rows : [], prior, source, now, env, errors });
-    } catch (error) {
-      recordRosterFailure(provider, error, { prior, env, errors });
-    }
-  }
-  return { models: rosterModels(readRosterEnvelope(env).providers), path: rosterPath(env), errors };
 }

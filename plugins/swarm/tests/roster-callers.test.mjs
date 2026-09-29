@@ -4,7 +4,7 @@
 
 import { test } from "node:test";
 import { deepEqual, equal, ok } from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
@@ -122,6 +122,45 @@ test("swarm cost prices a model the catalog just carried in, with no models run"
     equal(r.status, 0, r.stderr);
     ok(r.stdout.includes(UNPRICED_MODEL), `the catalog's model is missing from the cost list:\n${r.stdout}`);
     ok(/unpriced/.test(r.stdout.slice(r.stdout.indexOf(UNPRICED_MODEL))), "the row must be the roster's unpriced listing, not a table entry");
+  } finally {
+    cleanup(w.dir);
+  }
+});
+
+test("swarm validate names a corrupt roster on stderr instead of reading it as empty", () => {
+  const w = world();
+  try {
+    const p = join(w.dir, "m.json");
+    writeFileSync(p, JSON.stringify({ tasks: [{ id: "a", prompt: "x", provider: "claude", model: CATALOG_MODEL }] }));
+    writeFileSync(join(w.home, "models-cache.json"), "{ not json");
+    const r = runCli(["validate", p], { cwd: w.dir, env: { SWARM_HOME: w.home } });
+    ok(/^roster: file — .*models cache is unreadable/m.test(r.stderr), `${r.stdout}${r.stderr}`);
+  } finally {
+    cleanup(w.dir);
+  }
+});
+
+test("swarm models prints a local provider's hydration failure as a roster line", async () => {
+  const { cmdModels } = await import("../scripts/swarm.mjs");
+  const { defaultProviderRegistry } = await import("../src/default-providers.mjs");
+  const w = world({ catalog: false });
+  const env = { ...process.env, SWARM_HOME: w.home, HOME: w.home, USERPROFILE: w.home };
+  const broken = {
+    id: "brokenlocal",
+    runnerId: "claude",
+    rosterHydration: "local",
+    enabled: () => true,
+    validateTask: () => [],
+    capabilities: { discoverModels: () => { throw new Error("boom"); } },
+  };
+  try {
+    const lines = [];
+    const cfg = JSON.parse(readFileSync(join(w.home, "config.json"), "utf8"));
+    await cmdModels([], {
+      cfg, env, registry: defaultProviderRegistry({ additionalProviders: [broken] }),
+      fetchImpl: async () => ({ ok: true }), write: (line) => lines.push(line),
+    });
+    ok(lines.includes("roster: brokenlocal — boom"), lines.join("\n"));
   } finally {
     cleanup(w.dir);
   }

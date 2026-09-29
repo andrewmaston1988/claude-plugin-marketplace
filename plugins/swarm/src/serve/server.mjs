@@ -274,9 +274,10 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     // mapping discovery uses, never a second rule), and the rate cards price
     // theirs. `costView` sections the result by provider.
     const roster = costRoster();
-    // Renewed off the request path like the prices: the reader is cheap and
-    // synchronous, the network providers are not, and a dashboard open on a
-    // long-lived session would otherwise age past its own TTL.
+    // Renewed off the request path like the prices: the network providers are not
+    // cheap, and a dashboard open on a long-lived session would otherwise age past
+    // its own TTL. The reader itself is unmemoised — a warm 200-row read is
+    // measured under 20ms in model-roster.test.mjs, so no mtime guard is needed.
     if (!rosterRefreshInFlight) {
       rosterRefreshInFlight = true;
       Promise.resolve().then(() => _refreshRoster({ env: rosterEnv, config: cfg, registry: rosterRegistry }))

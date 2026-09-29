@@ -74,7 +74,9 @@ test("serve: Cost fires a roster refresh once while one is in flight, bound to i
     log: () => {},
     _watch: () => ({ close() {} }),
     _estate: noopEstate,
+    _modelRoster: () => ({ models: [], errors: {} }),
     _refreshRoster: (options) => { calls.push(options); return refreshPending; },
+    _refreshPrices: () => Promise.resolve(),
   });
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   try {
@@ -105,6 +107,7 @@ test("serve: the Cost roster is whatever the reader returns, read through the ho
     _watch: () => ({ close() {} }),
     _estate: noopEstate,
     _refreshPrices: (options) => { priced.push(options); return Promise.resolve(); },
+    _refreshRoster: () => Promise.resolve(),
     _modelRoster: (options) => {
       seen.push(options);
       return { models: [{ provider: "codex", model: "gpt-6-luna" }], errors: {} };

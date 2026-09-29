@@ -29,7 +29,7 @@ function readCatalogFile(path) {
 // The catalog the reader serves: the highest embedded `fetchedAt` on disk. Never
 // the newest mtime — catalog files accumulate and the two disagree, so mtime would
 // pick a file whose contents are older than the one it replaced.
-export function selectedClaudeCatalog(env = process.env) {
+function selectedClaudeCatalog(env = process.env) {
   const directory = join(catalogHome(env), ".claude", "cache", "model-catalog");
   let files;
   try {

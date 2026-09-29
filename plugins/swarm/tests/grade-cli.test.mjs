@@ -317,3 +317,31 @@ test("grade --init: a sentinel-model (compute) result gets no row", () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("grade --file: a corrupt roster does not abort the batch; declared is recorded as null", () => {
+  const dir = tmp();
+  try {
+    const run = fakeRun(dir);
+    const home = join(dir, "home");
+    mkdirSync(home, { recursive: true });
+    const corrupt = '{"models":[{"model":"glm-5';
+    writeFileSync(join(home, "models-cache.json"), corrupt);
+    const filled = {
+      resultsDir: run,
+      session: "abc123",
+      rows: [{
+        leaf: "icons", provider: "ollama", domain: "node", outcome: "completed", note: "",
+        grades: { adherence: 8, handoff: 8, truthfulness: 8, depth: 8 },
+      }],
+    };
+    writeFileSync(join(run, "grades-corrupt.json"), JSON.stringify(filled));
+    const r = runCli(["grade", "--file", join(run, "grades-corrupt.json")], { cwd: dir, env: { SWARM_HOME: home } });
+    equal(r.status, 0, r.stderr);
+    ok(r.stderr.includes("not in the model roster"), r.stderr);
+    const rows = readFileSync(join(home, "model-scores.jsonl"), "utf8").trim().split("\n").map((line) => JSON.parse(line));
+    equal(rows[0].declared, null);
+    equal(readFileSync(join(home, "models-cache.json"), "utf8"), corrupt);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -8,7 +8,7 @@ import http from "node:http";
 import { fixtureRegistry, fixtureRunner, FIXTURE_MODEL } from "./fixtures/fourth-provider.mjs";
 import { createProviderRegistry } from "../src/providers.mjs";
 import { providerUsageSnapshot } from "../src/contracts.mjs";
-import { refreshModelsCache, readModelsCache, writeCompositeModelsCache } from "../src/discovery.mjs";
+import { refreshRoster, readRosterEnvelope, rosterModels, writeRosterEntry } from "../src/roster.mjs";
 import { loadManifest, effectivePlanDoc } from "../src/manifest.mjs";
 import { buildDispatch, createDispatchRegistry } from "../src/dispatch.mjs";
 import { runPlan } from "../src/scheduler.mjs";
@@ -69,8 +69,8 @@ test("a fourth provider crosses discovery, usage, manifest, scheduler, persisten
   const env = { ...process.env, SWARM_HOME: home, HOME: home, USERPROFILE: home };
   const registry = fixtureRegistry();
   try {
-    const refreshed = await refreshModelsCache({ config: cfg, env, registry, providers: ["fixture"] });
-    deepEqual(readModelsCache(env).models, refreshed.models);
+    const refreshed = await refreshRoster({ config: cfg, env, registry, force: true });
+    deepEqual(rosterModels(readRosterEnvelope(env).providers), refreshed.models);
     equal(refreshed.models[0].provider, "fixture");
 
     const plan = loadManifest(manifest, cfg, root, { providerRegistry: registry, cache: refreshed.models });
@@ -196,7 +196,7 @@ test("CLI roster hides disabled/denylisted cached providers", async () => {
     await cmdModels([], { cfg: { ...cfg, modelDenylist: [FIXTURE_MODEL] }, env, registry, fetchImpl: async () => ({ ok: true }), write: (line) => denylisted.push(line) });
     ok(!denylisted.some((line) => line.includes(FIXTURE_MODEL)), denylisted.join("\n"));
 
-    writeCompositeModelsCache([{ provider: "fixture", model: FIXTURE_MODEL }], env);
+    writeRosterEntry("fixture", { hydratedAt: Date.now(), source: null, models: [{ provider: "fixture", model: FIXTURE_MODEL }] }, env);
     const disabledCfg = { ...cfg, providers: { ...cfg.providers, fixture: { ...cfg.providers.fixture, enabled: false } } };
     const disabled = [];
     await cmdModels([], { cfg: disabledCfg, env, registry, fetchImpl: async () => ({ ok: true }), write: (line) => disabled.push(line) });
