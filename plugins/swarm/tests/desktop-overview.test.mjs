@@ -14,7 +14,9 @@ test("Overview reuses live run cards and caps finished runs at five", async () =
     Array.from({ length: 5 }, (_, i) => "C--code-listproj/DONE_" + (i + 1)));
   const cards = markup(P, "rcard");
   await sourceScreen(P, "#/");
-  assert.deepEqual(cards, markup(P, "rcard"), "live cards use the Runs markup");
+  // The one difference is the click: Overview opens a live run beneath its card.
+  const runsCards = markup(P, "rcard").map((m) => m.replace(/data-href="#\/run\/([^"]+)"/, 'data-hub="$1"'));
+  assert.deepEqual(cards, runsCards, "live cards use the Runs markup, opening in place");
 });
 
 // The hub fills #main: the run feed is a direct child of main, at its full width, and
