@@ -296,9 +296,13 @@ export function createProviderRegistry(initial = []) {
 
   function get(id) {
     const adapter = adapters.get(String(id || "").toLowerCase());
-    if (!adapter) throw new Error(`unknown provider '${id}' (registered: ${[...adapters.keys()].join(", ")})`);
+    if (!adapter) throw new Error(`unknown provider '${id}'`);
     return adapter;
   }
+
+  // Only providers switched on are named: an error line lands in a transcript, and a disabled
+  // provider appears nowhere but the setting that enables it.
+  const enabledIds = (config) => [...adapters.values()].filter((a) => a.enabled(config)).map((a) => a.id).join(", ") || "none enabled";
 
   function identity(adapter, model, config, allowDisabled) {
     // The shipped config.default.json disables every provider, so a fresh install's first
@@ -320,12 +324,14 @@ export function createProviderRegistry(initial = []) {
     if (typeof task.provider !== "string" || !task.provider.trim()) {
       throw new Error(
         `model '${model}' has no "provider" — every leaf names one and nothing is inferred. ` +
-        `Add "provider" beside "model" (registered: ${[...adapters.keys()].join(", ")}), e.g. { "provider": "claude", "model": "claude-opus-5" }`
+        `Add "provider" beside "model" (registered: ${enabledIds(config)})`
       );
     }
     if (CLAUDE_ALIASES.has(model.toLowerCase())) {
       throw new Error(`model '${model}' is a Claude alias, and aliases are not accepted — name the full model id, e.g. "claude-opus-5" with "provider": "claude"`);
     }
+    const wanted = task.provider.trim().toLowerCase();
+    if (!adapters.has(wanted)) throw new Error(`unknown provider '${task.provider}' (registered: ${enabledIds(config)})`);
     return identity(get(task.provider), model, config, allowDisabled);
   }
 

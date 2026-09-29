@@ -179,7 +179,7 @@ test("provider is required: fallback, digest, unknown ids and aliases are each r
     has(errs({ tasks: [claudeTask({ fallbackModel: "claude-sonnet-5" })] }), "fallbackModel", "fallbackProvider");
     has(errs({ tasks: [claudeTask({ fallbackProvider: "claude" })] }), "fallbackProvider", "fallbackModel");
     has(errs({ tasks: [claudeTask(), claudeTask({ id: "b" })], digest: { model: "claude-haiku-4-5-20251001" } }), "digest", "no \"provider\"");
-    has(errs({ tasks: [claudeTask({ provider: "nope" })] }), "unknown provider 'nope'", "registered: claude, ollama, codex");
+    has(errs({ tasks: [claudeTask({ provider: "nope" })] }), "unknown provider 'nope'", "registered: claude, ollama");
     has(errs({ tasks: [claudeTask({ model: "sonnet" })] }), "Claude alias");
     has(errs({ tasks: [claudeTask({ fallbackModel: "haiku", fallbackProvider: "claude" })] }), "Claude alias");
 

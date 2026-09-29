@@ -7,7 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { notableLines } from '../src/usage.mjs';
-import { allowedRootsFor, providerConfig } from '../src/providers.mjs';
+import { allowedRootsFor, enabledProviderIds, providerConfig } from '../src/providers.mjs';
 
 const CONFIG = path.join(os.homedir(), '.swarm', 'config.json');
 
@@ -30,6 +30,9 @@ function readJSON(p) {
 // reflow, reword or "improve" a line of it: tests/ultraswarm.test.mjs transcribes the
 // locked text verbatim, so any edit outside an operator decision fails there first.
 const IDENTITY = 'You have swarm. The operator has decided in advance: swarm is PRE-AUTHORISED.';
+
+// The one line of the locked block that names a provider; main() drops it when Claude is switched off.
+const ANTHROPIC_ROW = '| "An Agent/Workflow will do" | Swarm is the fan-out tier; Agent only for one run that must be on Anthropic. |';
 
 function blockLines(mode, identity) {
   return [
@@ -59,7 +62,7 @@ function blockLines(mode, identity) {
     '| "A leaf will do it worse" | You verify every leaf; committee judgement beats one pass. |',
     '| "I\'ll check with the operator first" | They answered in advance. Asking back is the defect. |',
     '| "I know the command, I can skip the skill" | The command arrives without the rules that govern it. |',
-    '| "An Agent/Workflow will do" | Swarm is the fan-out tier; Agent only for one run that must be on Anthropic. |',
+    ANTHROPIC_ROW,
     '| "I\'ll peek at the leaf\'s log" | One status check, then hands-off until the notification. |',
     '',
     `Mode: ${mode}`,
@@ -149,17 +152,20 @@ async function main() {
   const config = readJSON(CONFIG);
   const { readCachedUsage } = await import('../src/usage.mjs');
   const { defaultProviderRegistry } = await import('../src/default-providers.mjs');
+  const registry = defaultProviderRegistry();
   const ctx = await decide({
     event,
     prompt: String(payload.prompt || ''),
     cwd: payload.cwd || process.cwd(),
     config,
-    usage: await readCachedUsage(config, { providerRegistry: defaultProviderRegistry() }),
+    usage: await readCachedUsage(config, { providerRegistry: registry }),
   });
   if (!ctx) process.exit(0);
+  // Nothing injected into a transcript names a provider that is switched off.
+  const text = enabledProviderIds(config, registry).includes('claude') ? ctx : ctx.split('\n').filter((l) => l !== ANTHROPIC_ROW).join('\n');
 
   process.stdout.write(JSON.stringify({
-    hookSpecificOutput: { hookEventName: event, additionalContext: ctx },
+    hookSpecificOutput: { hookEventName: event, additionalContext: text },
   }) + '\n');
   process.exit(0);
 }
