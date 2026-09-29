@@ -1,8 +1,9 @@
-// The provider-usage gate's end-to-end rows. Sibling of scheduler.test.mjs,
-// which is over the 500-line bar and may not grow.
+// The provider-usage gate's end-to-end rows. Split out of the deleted
+// tests/scheduler.test.mjs, which was over the 500-line bar; its siblings are the topic
+// files tests/scheduler-*.test.mjs, which may not grow past that bar either.
 //
 // Defect CS-3 — the gate reads `usage?.exhausted` off the raw adapter reading
-// (`scheduler.mjs:539`), and the Codex adapter forwards straight to
+// (that read sits in runPlan, src/scheduler.mjs), and the Codex adapter forwards straight to
 // `readCodexUsage`, which returned a snapshot with no such field. `swarm usage`
 // showed the truth; the gate read `undefined` and dispatched a leaf into an
 // exhausted allowance. Codex has no other gate: its adapter declares no
@@ -119,7 +120,7 @@ test("preflight: a Codex reading under its cap does not trip the gate", async ()
   }
 });
 
-// The exemption `scheduler.mjs:539` already states: a leaf carrying its own
+// The exemption runPlan's gate (src/scheduler.mjs) already states: a leaf carrying its own
 // fallback is allowed through an exhausted provider.
 test("preflight: an exhausted Codex reading still dispatches a leaf that has a fallback", async () => {
   const dir = tmp();
@@ -137,8 +138,8 @@ test("preflight: an exhausted Codex reading still dispatches a leaf that has a f
   }
 });
 
-// Claude's row — same gate, real adapter. The reading reaches `scheduler.mjs:539`
-// through readClaudeUsage and the contract's record(), so `exhausted` has to
+// Claude's row — same gate, real adapter. The reading reaches runPlan's check
+// (src/scheduler.mjs) through readClaudeUsage and the contract's record(), so `exhausted` has to
 // survive the snapshot round-trip to ground the dispatch. quotaPreflight is off:
 // preflightClaude refuses exhaustion with its own message, and this row exists
 // for the GATE — the refusal it asserts names the gate, not the preflight.

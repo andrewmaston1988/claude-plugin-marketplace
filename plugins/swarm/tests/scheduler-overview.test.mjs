@@ -1,15 +1,12 @@
 import { test } from "node:test";
-import { equal, deepEqual, ok, rejects, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, createWriteStream } from "node:fs";
+import { equal, deepEqual, ok, match } from "node:assert/strict";
+import { rmSync, readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn as nodeSpawn, spawnSync } from "node:child_process";
-import { EventEmitter } from "node:events";
+import { spawn as nodeSpawn } from "node:child_process";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
-import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
-import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
-import { DIGEST_ID } from "../src/digest.mjs";
+import { runPlan, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
+import { writeResult, readResult } from "../src/results.mjs";
 import { CFG, tmp, task, plan, computeTask, childPlanOf, fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading, SHIM, streamOut, gitInRepo, initGitRepo, commitAllInRepo, fakeWorktree, buildStrandPlan, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
 
 test("fan-out: all tasks run, results + summary + run.log written", async () => {
@@ -191,7 +188,7 @@ test("classifyFailure matrix", () => {
 // Verbatim from land-two-plans-1/results/review-turn.log, 2026-09-06. The 429 makes
 // RATE_LIMIT_RE match, so an unrecognised body is retried — 2 swarm retries on top of
 // the CLI's own 10 — against a meter that cannot clear for hours.
-const OLLAMA_WEEKLY_429 = "API Error: Request rejected (429) · you (andrewmaston1988) have reached your weekly usage limit, add extra usage: https://ollama.com/settings (ref: 71c45403-11cd-42ad-822e-817dffb9d3e2)";
+const OLLAMA_WEEKLY_429 = "API Error: Request rejected (429) · you (someone) have reached your weekly usage limit, add extra usage: https://ollama.com/settings";
 const OLLAMA_SESSION_429 = "API Error: Request rejected (429) · you (someone) have reached your session usage limit, add extra usage: https://ollama.com/settings";
 
 test("classifyFailure: an ollama meter 429 is quota, not rate-limited", () => {

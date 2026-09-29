@@ -59,7 +59,7 @@
       ]
     },
     {
-      "path": "C:\\code\\claude-plugin-marketplace\\plugins\\swarm\\tests\\scheduler.test.mjs",
+      "path": "C:\\code\\claude-plugin-marketplace\\plugins\\swarm\\tests\\scheduler-dispatch.test.mjs",
       "lines": [
         [
           1,

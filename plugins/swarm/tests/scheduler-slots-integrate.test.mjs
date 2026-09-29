@@ -1,34 +1,17 @@
 import { test } from "node:test";
-import { equal, deepEqual, ok, rejects, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, createWriteStream } from "node:fs";
-import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { equal, deepEqual, ok } from "node:assert/strict";
+import { rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
-import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
-import { CFG, tmp, task, plan, computeTask, childPlanOf, fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading, SHIM, streamOut, gitInRepo, initGitRepo, commitAllInRepo, fakeWorktree, buildStrandPlan, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
-// --- engine-slot-leak-and-from, Lane A: the `running` map slot leak ---
-// See plans/engine-slot-leak-and-from.md and its test-plan companion.
-//
-// S1/S3 share one reproduction: a leaf whose IIFE resolves a value other than
-// the id it was launched under — the class `running.delete(finished)` cannot
-// handle. `io.notify` is the only lawful in-scope seam that fires inside the
-// launch IIFE (after `record()`'s real bookkeeping, before the final
-// `return task.id`), so the hook corrupts `task.id` for that one read, then
-// reverts it via queueMicrotask — enqueued before the promise's `.finally()`
-// reaction, so it always wins the race to run first. That makes the two
-// mechanisms diverge exactly the way the fix intends: the OLD code captures
-// the corrupted value into the promise's resolution (permanent, immune to
-// the later revert); the NEW code reads `task.id` fresh inside `.finally()`,
-// after the revert has already run, and sees the real id.
-//
-// costWarnTokens is tuned so the cost-warn block — the only place `io.notify`
-// fires — trips on "b"'s completion specifically: projectRun refuses to
-// project before 2 completions, so "b" is arranged to be the 2nd leaf done.
+import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, promptOf, gitInRepo, initGitRepo, commitAllInRepo, buildStrandPlan, integrateLeaf } from "./helpers/scheduler-fixtures.mjs";
+// S1/S3 pin the `running` map slot leak: a leaf whose IIFE resolves a value other than
+// the id it launched under, which `running.delete(finished)` cannot handle. Seam —
+// `io.notify` fires inside the launch IIFE (after `record()`, before `return task.id`),
+// so the hook corrupts `task.id` for one read and reverts it via queueMicrotask, queued
+// ahead of `.finally()`. costWarnTokens trips that block on "b", the 2nd leaf done.
 
 test("S1: a stranded slot must not permanently narrow the run", { timeout: 5000 }, async () => {
   const dir = tmp();
@@ -270,13 +253,9 @@ test("IS3: integrate's missing-ref throw still fires for a ref absent for a reas
   }
 });
 
-// The documented mixed topology (skills/executing-swarms/SKILL.md): an agentless
-// seed integrate node creates a writer's tree BEFORE the writer runs, so the
-// writer takes prepareIsolation's reuse path rather than creating its own ref.
-// An integrate node carries no branchScope (manifest.mjs excludes it), while the
-// writer in the same tree does — so the seed's branch and the writer's derived
-// one are two names for one tree. The join must merge the ref the seed created,
-// because that is the ref the writer's commits actually landed on.
+// The documented mixed topology: an agentless seed integrate node creates a writer's
+// tree BEFORE the writer runs, so the writer reuses that tree under a different branch
+// name. The join must merge the ref the seed created — where the writer's commits landed.
 test("IS4: a seed integrate node's tree, reused by a workspace writer, joins on the branch the seed created", async () => {
   const repo = initGitRepo();
   const dir = tmp();

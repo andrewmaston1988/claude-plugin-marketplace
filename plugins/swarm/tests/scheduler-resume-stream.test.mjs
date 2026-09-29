@@ -1,16 +1,14 @@
 import { test } from "node:test";
-import { equal, deepEqual, ok, rejects, match } from "node:assert/strict";
+import { equal, deepEqual, ok, rejects } from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, createWriteStream } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
-import { EventEmitter } from "node:events";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
-import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
-import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
+import { runPlan, runTask, classifyFailure } from "../src/scheduler.mjs";
+import { writeResult, readResult, initResultsDir, writeDigestMd, readHeartbeat } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
-import { CFG, tmp, task, plan, computeTask, childPlanOf, fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading, SHIM, streamOut, gitInRepo, initGitRepo, commitAllInRepo, fakeWorktree, buildStrandPlan, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
+import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, promptOf, SHIM, streamOut, initGitRepo, commitAllInRepo } from "./helpers/scheduler-fixtures.mjs";
 test("resume: a dependent whose upstream re-runs is invalidated, and the digest is not stale", async () => {
   const dir = tmp();
   try {

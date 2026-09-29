@@ -1,15 +1,12 @@
 import { test } from "node:test";
 import { equal, deepEqual, ok, rejects, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, createWriteStream } from "node:fs";
-import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { rmSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn as nodeSpawn, spawnSync } from "node:child_process";
+import { spawn as nodeSpawn } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
-import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
-import { DIGEST_ID } from "../src/digest.mjs";
+import { writeResult, readResult, initResultsDir, resultPath } from "../src/results.mjs";
 import { CFG, tmp, task, plan, computeTask, childPlanOf, fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading, SHIM, streamOut, gitInRepo, initGitRepo, commitAllInRepo, fakeWorktree, buildStrandPlan, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
 // errorCode/ENAMETOOLONG: a spawn error whose e.code is a deterministic argv-size
 // failure must never burn a retry attempt on a leaf that will fail identically.
@@ -100,12 +97,9 @@ test("returns-validation failure classifies failed, not rate-limited, despite 42
   }
 });
 
-// A claude -p session that dies mid-thinking still exits 0 with an empty result —
-// the false-green that let a dead leaf read as "ok" and drove the orchestrator to
-// forensically (and destructively) discover the failure. The truthful signal: a
-// leaf that emitted assistant events but never reached a terminal result event
-// (of any kind) did not cleanly finish. A genuinely cut leaf never gets that far,
-// so `includeResult: false` is what actually represents mid-stream death.
+// A claude -p session that dies mid-thinking still exits 0 with an empty result — the
+// false-green that read as "ok". The signal: assistant events with no terminal result
+// event of any kind, so `includeResult: false` is what represents mid-stream death.
 const streamStop = (stopReason, { result = "", includeResult = true } = {}) => [
   JSON.stringify({ type: "system", subtype: "init", session_id: "s-1" }),
   JSON.stringify({ type: "assistant", message: { id: "m1", stop_reason: stopReason } }),

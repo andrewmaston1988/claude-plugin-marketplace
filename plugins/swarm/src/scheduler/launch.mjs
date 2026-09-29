@@ -183,16 +183,11 @@ export function createLaunch(ctx) {
       if (task.checkoutToplevel) result.checkoutToplevel = task.checkoutToplevel;
       result.allowedTools = task.allowedTools;
 
-      // returns-validation failures are semantic — the leaf itself ran fine.
-      // Never classify them by transcript grep: a stray "429" (line number,
-      // token count) in the raw stream would misread them as transient.
-      // A leaf the valve just killed produced no output text classifyFailure
-      // could ever match — memoryStopped is set directly by the heartbeat, so
-      // it is checked ahead of everything else, even a stray r.ok race. The
-      // `!r.ok` guard covers the valve racing a leaf that had already exited
-      // ok: pickNewestRunning excludes dead children, but the flag can still
-      // be set from the same tick that kills a genuinely live one, so clear
-      // it unconditionally here to avoid leaking a stale entry either way.
+      // returns-validation failures are semantic — never classify them by transcript
+      // grep (a stray "429" in the raw stream would read as transient). A valve-killed
+      // leaf produced no text classifyFailure could match, so memoryStopped is checked
+      // ahead of the whole ladder, even against a stray r.ok race. The `!r.ok` guard
+      // covers the valve racing an already-exited leaf, so clear it unconditionally.
       const isMemoryStop = ctx.memoryStopped.has(task.id) && !r.ok;
       ctx.memoryStopped.delete(task.id);
       const st = isMemoryStop ? "memory"

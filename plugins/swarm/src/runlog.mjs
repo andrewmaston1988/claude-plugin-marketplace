@@ -25,8 +25,8 @@ export const ALIVE_STATES = new Set(["pending", "running", "retrying"]);
 //
 // Asking "is it unsettled" rather than "is it settled" is deliberate. The settled
 // vocabulary includes compound states reached only through a variable (`failed:timeout`,
-// scheduler.mjs:1038), and a whitelist that missed one would HIDE a real result — the
-// worse failure of the two.
+// classifyFailure in src/scheduler/run-task.mjs), and a whitelist that missed one would
+// HIDE a real result — the worse failure of the two.
 //
 // Deliberately not an mtime comparison: a touch (restore, copy, AV scan) would mark a
 // finished result superseded permanently, which is what summarySuperseded's own comment

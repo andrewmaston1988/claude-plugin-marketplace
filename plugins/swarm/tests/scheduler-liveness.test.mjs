@@ -1,15 +1,12 @@
 import { test } from "node:test";
-import { equal, deepEqual, ok, rejects, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, createWriteStream } from "node:fs";
+import { equal, deepEqual, ok } from "node:assert/strict";
+import { rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn as nodeSpawn, spawnSync } from "node:child_process";
-import { EventEmitter } from "node:events";
+import { spawn as nodeSpawn } from "node:child_process";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
-import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
-import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
-import { DIGEST_ID } from "../src/digest.mjs";
+import { runPlan } from "../src/scheduler.mjs";
+import { readResult, initResultsDir, writeSummary, stopPath } from "../src/results.mjs";
 import { CFG, tmp, task, plan, computeTask, childPlanOf, fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading, SHIM, streamOut, gitInRepo, initGitRepo, commitAllInRepo, fakeWorktree, buildStrandPlan, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
 // ── memory survivability (D3/D4/D5/D6) ──────────────────────────────────────
 

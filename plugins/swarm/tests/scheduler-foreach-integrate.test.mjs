@@ -1,29 +1,17 @@
 import { test } from "node:test";
-import { equal, deepEqual, ok, rejects, match } from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync, mkdirSync, createWriteStream } from "node:fs";
+import { equal, deepEqual, ok } from "node:assert/strict";
+import { rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
-import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
-import { writeResult, readResult, initResultsDir, resultPath, writeDigestMd, writeSummary, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
-import { CFG, tmp, task, plan, computeTask, childPlanOf, fakeSpawnFactory, makeIo, promptOf, sentPrompt, usageEnv, codexReading, SHIM, streamOut, gitInRepo, initGitRepo, commitAllInRepo, fakeWorktree, buildStrandPlan, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
-// ── F3-F7: integrate.from over a forEach parent (foreach-integrate-fold-back) ──
-// A forEach parent named in integrate.from has no branch of its own — its
-// clones ('id[0]', 'id[1]', …) do. These reuse IS1-IS3's real-git-repo rig.
-//
-// F3/F4/F5/F7 hand-build the POST-expansion shape (an aggregate "fix" plus
-// numbered clone leaves) instead of driving it through a real `forEach`
-// template, so they can pin the collect/merge behaviour independently of
-// expansion itself. `expandForEach` mints each clone's worktree as
-// `${parentId}-${i}` (dash — a bracket is not a valid git ref char) while
-// keeping the bracketed id (`fix[0]`, `fix[1]`) the CLONE_RE convention and
-// `resolveIntegrateFrom` expect; F9 below drives a real `forEach` template
-// (non-empty source, per-clone trees) end to end through
-// actual expansion instead.
+import { CFG, tmp, fakeSpawnFactory, makeIo, promptOf, initGitRepo, commitAllInRepo, integrateLeaf, forEachFixLeaf, fixCloneTasks } from "./helpers/scheduler-fixtures.mjs";
+// ── F3-F7: integrate.from over a forEach parent ──────────────────────────────
+// The parent has no branch of its own — its clones do. These hand-build the POST-expansion
+// shape, pinning the seam where `expandForEach` mints the tree as `${parentId}-${i}` (a
+// bracket is not a valid git ref char) while the id keeps its brackets, as CLONE_RE and
+// resolveIntegrateFrom expect. F9 drives the real expansion end to end.
 
 test("F3: integrate.from over a forEach parent merges exactly the clones that expanded, in index order", async () => {
   const repo = initGitRepo();

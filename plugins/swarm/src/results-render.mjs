@@ -74,17 +74,10 @@ export function displayIdentity(value, roster = []) {
   return providers.size > 1 && value?.provider ? `${value.provider}/${model}` : model;
 }
 
-// Full-run snapshot. tasks: [{ id, model, state, durationMs?, startedMs?,
-// tokens?, activity?, lastEventMs? }] — durationMs for terminal states,
-// startedMs for running (elapsed ticks against `now`), tokens in the
-// src/stream.mjs shape. Running rows show their latest tool call; one that has
-// been silent longer than quietWarnMs shows a staleness warning instead.
-//
-// maxLines caps the rendered height. The Claude Code harness renders the live
-// view through a fixed-height window, so a taller roster loses its header and
-// top rows off the top — a 15-leaf run showed nothing but its last few pending
-// leaves. Any budget costs the blank spacers; past that the leaves worth
-// watching keep their rows and the rest collapse into one count line. Header
+// Full-run snapshot. tasks: [{ id, model, state, durationMs?, startedMs?, tokens?,
+// activity?, lastEventMs? }] in the src/stream.mjs shape. maxLines caps the rendered
+// height — the harness renders through a fixed-height window, so a taller roster loses
+// its header and top rows. Past the budget the rest collapse into one count line; header
 // and footer are never dropped, and the footer counts EVERY leaf, shown or not.
 export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLines }) {
   const all = tasks.map((t) => ({ ...t, model: displayIdentity(t, tasks) }));
@@ -202,15 +195,10 @@ export function renderRun(run, { now = Date.now(), quietWarnMs = 60000 } = {}) {
 }
 
 // ── report provenance — a one-line footnote, APPENDED ───────────────────────────
-// A report is about its SUBJECT. Run mechanics are process the reader
-// commissioned and does not want narrated, so provenance is a single italic Run
-// line at the bottom — no goal heading (the leaf titles the report itself), no
-// table, no token column, no cost column, no token-accounting footnote (that is
-// MODEL-facing guidance and has no place in a human's report).
-//
-// The ONE exception: a coverage failure (a truncated verifier input, a capped
-// fan-out) changes what the reader should believe, so it stays LOUD — reusing the
-// exact truncationLines wording. The model may not know to say it; the engine does.
+// A report is about its SUBJECT, so provenance is a single italic Run line at the
+// bottom — no goal heading, table, or token/cost column (that is MODEL-facing).
+// The ONE exception: a coverage failure stays LOUD, reusing the exact
+// truncationLines wording. The model may not know to say it; the engine does.
 
 // Both truncation kinds, worded exactly as the closing block words them — a cut
 // only the engine knows about is how an unverified finding reads as verified.

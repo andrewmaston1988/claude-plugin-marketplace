@@ -135,12 +135,9 @@ export function forEachFixLeaf(over = {}) {
 }
 
 
-// Hand-built already-expanded shape: an aggregate "fix" over `n` numbered
-// clone leaves, each with its own valid (non-bracketed) worktree name.
-// timeoutMs is generous (not the 5000 default) because these clones do real
-// git worktree creation — spawnSync calls that block the event loop and can
-// starve a tight per-task timer under load, a false failure unrelated to the
-// code under test.
+// Hand-built already-expanded shape: an aggregate "fix" over `n` numbered clone
+// leaves. timeoutMs is 30000, not the 5000 default, because these clones do real git
+// worktree creation — spawnSync blocks the loop and starves a tight per-task timer.
 export function fixCloneTasks(n, over = {}) {
   const clones = Array.from({ length: n }, (_, i) =>
     integrateLeaf(`fix[${i}]`, { worktreeName: `fix-${i}`, timeoutMs: 30000, ...over }));

@@ -1,5 +1,6 @@
-// The realModel stamp at scheduler.mjs:1233. Sibling of scheduler.test.mjs,
-// which is over the 500-line bar and may not grow.
+// The realModel stamp in launch (src/scheduler/launch.mjs). Split out of the deleted
+// tests/scheduler.test.mjs, which was over the 500-line bar; its siblings are the topic
+// files tests/scheduler-*.test.mjs, which may not grow past that bar either.
 //
 // A Claude leaf records the REAL model id the init event reports, keeping the
 // manifest name as `modelAlias` — grade rows resolve the model from here, so a

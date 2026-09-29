@@ -48,12 +48,9 @@ export function createWorktreeGroups(ctx) {
       if (!ctx.groupMembers.has(n)) ctx.groupMembers.set(n, []);
       ctx.groupMembers.get(n).push(t.id);
     }
-    // Reachability must be GLOBAL, not group-local: two members of one tree can
-    // be ordered entirely through tasks in other groups (helper -> migrate-x ->
-    // cleanup, where migrate-x has its own tree). A group-local scan sees no
-    // edge, picks the FIRST task as the collector, and sweeps the tree before
-    // the last member has run — silently dropping its work. This mirrors
-    // validateWorktreeGroups, which already permits such a topology.
+    // Reachability must be GLOBAL, not group-local: members of one tree can be ordered
+    // through tasks in other groups, and a group-local scan would pick the FIRST task as
+    // collector and sweep the tree before the last member ran — dropping its work.
     const reaches = makeReaches(tasks);
     for (const [name, ids] of ctx.groupMembers) {
       ctx.groupFinal.set(name, ids.find((id) => !ids.some((o) => o !== id && reaches(o, id))) ?? ids[ids.length - 1]);

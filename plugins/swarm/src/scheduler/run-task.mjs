@@ -121,21 +121,11 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
     try {
       child = io.spawn(argv[0], argv.slice(1), {
         cwd: task.cwd,
-        // A leaf is a headless session: CORRELATION_ID is the marker every
-        // session hook already honours to stay out of autonomous runs (the
-        // checkpoint plugin's resume offer, keepalive tick, stop nudge and
-        // pre-compact snapshot all exit on it). Without it the resume offer
-        // reaches the leaf's first turn — a model that follows it literally
-        // burns the leaf (mistral-large-3, twice, 2026-08-27). A caller's own
-        // CORRELATION_ID wins so a pipeline-launched swarm keeps its id.
-        // SWARM_LEAF is the one marker a hook can trust to mean "this IS a leaf".
-        // Unlike CORRELATION_ID it never yields to a caller's value: a parent's
-        // correlation id legitimately flows through, but a parent claiming to be a
-        // leaf would arm foreground-guard's deny in an interactive session. It is
-        // spread LAST so neither the inherited env nor a dispatch env can unset it.
-        // SWARM_LEAF_GUARD/_PROJECT are the engine's own resolution of task.leafGuard
-        // (set by manifest.mjs's guardFor, never by the task's own env) — same
-        // reasoning as SWARM_LEAF: a task cannot forge or unset its own guard.
+        // A leaf is a headless session: CORRELATION_ID is the marker every session hook
+        // honours to stay out of autonomous runs, and it yields to a caller's own value
+        // so a pipeline-launched swarm keeps its id. SWARM_LEAF never yields — a parent
+        // claiming to be a leaf would arm foreground-guard's deny — and is spread LAST,
+        // where neither env can unset it. SWARM_LEAF_GUARD/_PROJECT come from guardFor.
         env: {
           ...(io.env || process.env),
           CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`,
