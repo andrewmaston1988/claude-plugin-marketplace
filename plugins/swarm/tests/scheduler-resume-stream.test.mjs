@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { spawn as nodeSpawn, spawnSync } from "node:child_process";
 import { oracleSnapKey } from "./helpers/snap-key.mjs";
 import { runPlan, runTask, classifyFailure } from "../src/scheduler.mjs";
-import { writeResult, readResult, initResultsDir, writeDigestMd, readHeartbeat } from "../src/results.mjs";
+import { writeResult, readResult, initResultsDir, writeDigestMd, readHeartbeat, stopPath } from "../src/results.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, promptOf, SHIM, streamOut, initGitRepo, commitAllInRepo } from "./helpers/scheduler-fixtures.mjs";
 test("resume: a dependent whose upstream re-runs is invalidated, and the digest is not stale", async () => {
@@ -421,21 +421,26 @@ test("classifyFailure: a stopped leaf reads failed:stopped even when it also tim
 test("liveness: heartbeat file is touched on every tick, including while a leaf sits in backoff", async () => {
   const dir = tmp();
   try {
-    let calls = 0;
-    const spawn = fakeSpawnFactory(() => (++calls === 1 ? { exit: 1, output: "429 rate limit" } : { output: "recovered" }));
+    let parked = false;
+    const spawn = fakeSpawnFactory(() => { parked = true; return { exit: 1, output: "429 rate limit" }; });
     const io = makeIo(spawn);
     const p = plan(dir, [task("leaf")]);
-    const seen = new Set();
+    let atPark = null;
+    let sawNew = false;
+    const deadline = Date.now() + 10_000;
+    // Wait on the condition, not the clock: the stop file ends the run the moment a new mtime appears.
     const poll = setInterval(() => {
       const hb = readHeartbeat(p.resultsDir);
-      if (hb) seen.add(hb.mtimeMs);
-    }, 15);
+      if (parked && atPark === null && hb) { atPark = hb.mtimeMs; }
+      if (atPark !== null && hb && hb.mtimeMs !== atPark) sawNew = true;
+      if (sawNew || Date.now() > deadline) { clearInterval(poll); writeFileSync(stopPath(p.resultsDir), ""); }
+    }, 10);
     try {
-      await runPlan(p, { ...CFG, heartbeatSecs: 0.05, retry: { backoffMs: 150, rateLimited: 2 } }, io);
+      await runPlan(p, { ...CFG, heartbeatSecs: 0.05, retry: { backoffMs: 60_000, rateLimited: 2 } }, io);
     } finally {
       clearInterval(poll);
     }
-    ok(seen.size >= 2, `expected the heartbeat file touched more than once (incl. during backoff), saw ${seen.size} distinct mtimes`);
+    ok(sawNew, "the heartbeat file never changed after the leaf parked in backoff");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
