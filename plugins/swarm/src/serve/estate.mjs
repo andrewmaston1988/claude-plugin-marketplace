@@ -13,6 +13,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 import { readRun, listRuns } from "../runlog.mjs";
+import { runCost, costDeps } from "../run-cost.mjs";
 import { workTokens } from "../stream.mjs";
 import { projectGrouping } from "./grouping.mjs";
 
@@ -50,6 +51,7 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
       providerTokens[provider] = (providerTokens[provider] || 0) + workTokens(task.tokens);
       if (task.state === "running") providersRunning.add(provider);
     }
+    const cost = runCost(run?.tasks || [], costDeps(home));
     return {
       project: r.project, name: r.name, active: r.active, aborted: r.aborted, stopped: r.stopped, mtimeMs: r.mtimeMs,
       group, groupLabel: labelOf(group),
@@ -59,6 +61,8 @@ export function buildSnapshot(home, cache, { now = Date.now(), heartbeatMs = 15_
       providers: [...new Set((run?.tasks || []).map((task) => task.provider).filter(Boolean))],
       providerTokens, providersRunning: [...providersRunning],
       hasDigest: !!(run?.digestPath || run?.reportPath),
+      // Each unit priced apart and left raw: the server turns it into text under `display.money`.
+      ...(Object.keys(cost).length && { cost }),
     };
   });
   for (const dir of [...cache.keys()]) if (!seenDirs.has(dir)) cache.delete(dir);

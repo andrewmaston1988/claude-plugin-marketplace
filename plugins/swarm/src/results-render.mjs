@@ -79,7 +79,9 @@ export function displayIdentity(value, roster = []) {
 // height — the harness renders through a fixed-height window, so a taller roster loses
 // its header and top rows. Past the budget the rest collapse into one count line; header
 // and footer are never dropped, and the footer counts EVERY leaf, shown or not.
-export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLines }) {
+// `costOf(tasks)` is the text priced beside the work tokens, handed in rather than imported:
+// run-cost.mjs reaches this file through cost.mjs -> results.mjs, so importing it back would cycle.
+export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLines, costOf }) {
   const all = tasks.map((t) => ({ ...t, model: displayIdentity(t, tasks) }));
   // Under a budget the blank spacers always go: the windowed view renders them
   // inconsistently, so keeping them makes the rendered height unpredictable for
@@ -152,13 +154,15 @@ export function renderRoster({ title, tasks, now, startedMs, quietWarnMs, maxLin
   const segments = FOOTER_ORDER.filter((k) => counts[k]).map((k) => paint(k, `${counts[k]} ${k}`));
   const total = all.reduce((n, t) => n + workTokens(t.tokens), 0);
   if (total > 0) segments.push(bold(`${formatTokens(total)} tokens`));
+  const cost = costOf?.(all);
+  if (cost) segments.push(dim(cost));
   lines.push(...spacer, `  ${segments.join(dim(" · "))}`);
   return lines.join("\n");
 }
 
 // One-shot progress view for `swarm.mjs status <resultsDir>` — read-only,
 // rebuilt from run.log so it matches the live snapshot exactly.
-export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
+export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000, costOf) {
   // Absolutise first: a relative resultsDir silently resolves against the
   // *viewer's* cwd (watch terminal), not the run's — the classic mismatch.
   dir = resolve(dir);
@@ -166,13 +170,13 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000) {
   if (!run) {
     return `no run.log at ${join(dir, "run.log")} (absolute) — either the run has not started or this is not the run's resultsDir; pass the absolute path printed at dispatch.`;
   }
-  return renderRun(run, { now, quietWarnMs });
+  return renderRun(run, { now, quietWarnMs, costOf });
 }
 
 // The roster view of an already-read run (see src/runlog.mjs readRun). Rows the
 // log never mentioned are graph-only (agentless nodes) and stay off the roster,
 // which counts leaves the engine dispatched.
-export function renderRun(run, { now = Date.now(), quietWarnMs = 60000 } = {}) {
+export function renderRun(run, { now = Date.now(), quietWarnMs = 60000, costOf } = {}) {
   const { dir } = run;
   // A dead engine settles nothing: run.log's last word for its live leaves stays
   // "running" forever, so the heartbeat (via readRun's abortedMs) overrides it.
@@ -184,7 +188,7 @@ export function renderRun(run, { now = Date.now(), quietWarnMs = 60000 } = {}) {
     `${bold("run:")} ${cyan(dir)}`,
     ...(dead ? [yellow(`⚠ engine dead — no heartbeat since ${new Date(run.abortedMs).toISOString()}. Re-run the manifest: interrupted leaves resume their own sessions.`)] : []),
     "",
-    renderRoster({ title: run.name, tasks, now, startedMs: run.startedMs ?? now, quietWarnMs }),
+    renderRoster({ title: run.name, tasks, now, startedMs: run.startedMs ?? now, quietWarnMs, costOf }),
     "",
     `${bold("results:")} ${join(dir, "results")}`,
   ];
@@ -265,7 +269,7 @@ export function gradeFooter({ count, resultsDir, cli }) {
   ].join("\n");
 }
 
-export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], coverageGaps = [], estimate, gradeable, resultsDir, engine, memoryParks = 0 }) {
+export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], coverageGaps = [], estimate, gradeable, resultsDir, engine, memoryParks = 0, costText }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -303,6 +307,7 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
   if (totalTokens && workTokens(totalTokens) > 0) {
     const input = formatTokens(totalTokens.input + totalTokens.cacheCreation);
     let line = `${bold("tokens:")} ${formatTokens(workTokens(totalTokens))} (input ${input} · output ${formatTokens(totalTokens.output)}${totalTokens.cacheRead ? ` · cache read ${formatTokens(totalTokens.cacheRead)}` : ""})`;
+    if (costText) line += ` · ${costText}`;
     // actual-vs-estimate closes the consent loop and audits the corpus
     if (estimate?.tokens) {
       const actual = workTokens(totalTokens);

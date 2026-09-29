@@ -51,11 +51,13 @@ export function createLaunch(ctx) {
           ...(r.runner && { runner: r.runner }),
           ...(tokenTotal(r.tokens) > 0 && { tokens: r.tokens }),
           ...(r.sessionId && { sessionId: r.sessionId }),
+          ...(r.numTurns != null && { numTurns: r.numTurns }),
         };
         // The leaf's own identity is what it ran as; an override's identity lives on its ask entry.
         const updated = { ...prior, asks: [...(prior.asks || []), askEntry] };
         if (r.ok && r.sessionId) updated.sessionId = r.sessionId;
         writeResult(plan.resultsDir, task.id, updated);
+        if (r.numTurns != null) ctx.turnsMap.set(task.id, r.numTurns);
         ctx.record(task, "ok", r.durationMs, r.tokens, r.ok ? undefined : `ask failed: ${r.output}`);
         return task.id;
       }
@@ -325,6 +327,7 @@ export function createLaunch(ctx) {
         else ctx.digestFailed = true;
       }
 
+      if (r.numTurns != null) ctx.turnsMap.set(task.id, r.numTurns);
       ctx.record(task, st, r.durationMs, r.tokens);
 
       // Projection warn: this leaf is terminal (retry/fallback paths returned

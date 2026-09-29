@@ -168,6 +168,7 @@ export async function enforceLeafContract(task, r, taskCwd, resultsDir, cfg, io,
       durationMs: cur.durationMs + next.durationMs,
       tokens: addTokens(cur.tokens || emptyTokens(), next.tokens || emptyTokens()),
       ...((cur.costUsd != null || next.costUsd != null) && { costUsd: (cur.costUsd || 0) + (next.costUsd || 0) }),
+      ...((cur.numTurns != null || next.numTurns != null) && { numTurns: (cur.numTurns || 0) + (next.numTurns || 0) }),
       sessionId: next.sessionId ?? cur.sessionId,
       schemaRetried: true,
     };

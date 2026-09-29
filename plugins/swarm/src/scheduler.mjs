@@ -60,6 +60,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     durations: new Map(),
     tokensMap: new Map(),
     costMap: new Map(),         // id -> costUsd, real-key leaves only (feeds the corpus)
+    turnsMap: new Map(),        // id -> requests the leaf made: a :cloud leaf's weekly-quota share
     startedAt: new Map(),
     activityMap: new Map(),     // id -> latest tool-call description
     lastEventAt: new Map(),     // id -> ms of last stream event (liveness)
@@ -337,6 +338,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
       state: "ok",
       durationMs: (priorRow?.durationMs ?? 0) + (ctx.durations.get(ask.taskId) ?? 0),
       tokens: addTokens(priorRow?.tokens ?? emptyTokens(), ctx.tokensMap.get(ask.taskId) ?? emptyTokens()),
+      ...((priorRow?.numTurns != null || ctx.turnsMap.has(ask.taskId)) && { numTurns: (priorRow?.numTurns ?? 0) + (ctx.turnsMap.get(ask.taskId) ?? 0) }),
     };
     const mergedTasks = priorSummary.tasks.map((t) => (t.id === ask.taskId ? askedRow : t));
     summary = {
@@ -360,6 +362,7 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         durationMs: ctx.durations.get(t.id) ?? null,
         tokens: ctx.tokensMap.get(t.id) ?? null,
         ...(ctx.costMap.has(t.id) && { costUsd: ctx.costMap.get(t.id) }),
+        ...(ctx.turnsMap.has(t.id) && { numTurns: ctx.turnsMap.get(t.id) }),
         resultPath: resultPath(plan.resultsDir, t.id),
       })),
       blocked: tasks.filter((t) => ctx.state.get(t.id) === "blocked").map((t) => t.id),

@@ -43,6 +43,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
   let enginePid = null;
   const state = new Map();
   const tokens = new Map();
+  const turns = new Map();
   const durations = new Map();
   const runningSince = new Map();
   const activity = new Map();
@@ -129,6 +130,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       if (entry.state === "running") runningSince.set(entry.id, Date.parse(entry.ts) || now);
       if (entry.durationMs != null) durations.set(entry.id, entry.durationMs);
       if (entry.tokens) tokens.set(entry.id, entry.tokens);
+      if (entry.numTurns != null) turns.set(entry.id, entry.numTurns);
     }
   }
   const tasks = roster.map(({ id, model, provider, runner, providerInferred, runnerInferred }) => {
@@ -143,6 +145,7 @@ export function readRunLog(content, { now = Date.now() } = {}) {
       durationMs: durations.get(id),
       startedMs: runningSince.get(id),
       tokens: tokens.get(id),
+      numTurns: turns.get(id),
       activity: activity.get(id),
       coverage: coverage.get(id),
       lastEventMs: last,

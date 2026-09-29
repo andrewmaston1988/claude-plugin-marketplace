@@ -691,11 +691,11 @@
       // closed it (killed, crashed, machine slept). Say so rather than "done".
       const stale = !r.finishedMs && !r.stopped;
       const when = r.aborted ? `aborted · engine gone · ${ago(r.mtimeMs)}` : r.stopped ? `stopped · ${ago(r.mtimeMs)}` : stale ? `stale · last event ${ago(r.mtimeMs)}` : ago(r.finishedMs);
-      const fields = [esc(shortProject(r.project)), when, countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState), `${fmtTok(r.tokens)}${r.hasDigest ? " · digest" : ""}`];
+      const fields = [esc(shortProject(r.project)), when, countsHtml(done && !r.finishedMs ? abortCounts(r.byState) : r.byState), `${fmtTok(r.tokens)}${r.costText ? ` · ${esc(r.costText)}` : ""}${r.hasDigest ? " · digest" : ""}`];
       return `<li class="row tap" data-key="${key}" ${hub ? `data-hub="${key}"` : `data-href="${esc(href)}"`}>${dot(r.aborted || r.stopped ? "bad" : stale ? "pend" : st)}<div class="body" style="flex-direction:row;align-items:center;gap:8px"><div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px"><span style="display:flex;align-items:center;gap:4px;min-width:0"><span class="name" style="font-size:14px;color:#c9cdd8">${esc(r.name)}</span>${stack(r)}</span><span class="meta faint">${columns ? fields.map((f) => `<span class="col">${f}</span>`).join("") : fields.join(" · ")}</span></div>${chevRight}</div></li>`;
     }
     return `<div class="card rcard ${st}" data-key="${key}" ${hub ? `data-hub="${key}"` : `data-href="${esc(href)}"`}><div class="rh">${st === "run" ? `<span class="rspin">${SPIN}</span>` : `<i class="rdot" style="background:${COLOR[st]}"></i>`}<span class="nm">${esc(r.name)}</span>${stack(r)}<span class="tm">${elapsed}</span></div>`
-      + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
+      + `<div class="rs">${countsHtml(r.byState)}${r.leaves} leaves · ${r.waves} wave${r.waves === 1 ? "" : "s"} · ${fmtTok(r.tokens)}${r.costText ? ` · ${esc(r.costText)}` : ""}</div><div class="rbar">${barHtml(r.byState, r.leaves)}</div></div>`;
   }
 
   // ── run view: rows + rail ──────────────────────────────────────────────
@@ -764,12 +764,13 @@
     const done = n("ok", "skipped");
     const failed = n("failed", "failed:timeout", "failed:stopped", "blocked");
     const tok = fmtTok(tasks.reduce((a, t) => a + tokWork(t.tokens), 0));
+    const cost = run.costText ? ` · ${esc(run.costText)}` : "";
     const dhref = (run.digestPath || run.reportPath) ? `#/run/${enc(run.project)}/${enc(run.name)}/digest` : null;
 
-    if (run.abortedMs) return tile("bad", "✕", "Aborted — the engine is gone", `${done} of ${tasks.length} finished · ${tok} tokens`, dhref);
-    if (run.stoppedMs) return tile("bad", "✗", "Stopped by hand", `${tasks.length - done} never finished · ${tok} tokens`, dhref);
-    if (failed) return tile("bad", "✗", `${failed} of ${tasks.length} failed`, `${tok} tokens · ${run.finishedMs ? ago(run.finishedMs) : "still running"}`, dhref);
-    if (run.finishedMs) return tile("ok", "✓", run.digestPath ? "Digest ready" : "Finished", `${done} of ${tasks.length} leaves · ${tok} tokens`, dhref);
+    if (run.abortedMs) return tile("bad", "✕", "Aborted — the engine is gone", `${done} of ${tasks.length} finished · ${tok} tokens${cost}`, dhref);
+    if (run.stoppedMs) return tile("bad", "✗", "Stopped by hand", `${tasks.length - done} never finished · ${tok} tokens${cost}`, dhref);
+    if (failed) return tile("bad", "✗", `${failed} of ${tasks.length} failed`, `${tok} tokens${cost} · ${run.finishedMs ? ago(run.finishedMs) : "still running"}`, dhref);
+    if (run.finishedMs) return tile("ok", "✓", run.digestPath ? "Digest ready" : "Finished", `${done} of ${tasks.length} leaves · ${tok} tokens${cost}`, dhref);
     // The longest quiet stretch is the single most useful fact about a live run that
     // has one; below the threshold there is nothing to warn about.
     const quiet = tasks
@@ -782,7 +783,7 @@
     // there is no reachable run that has started nothing to give a tone of its own. A live
     // run with no leaf running (between waves, engine alive) is still a live run.
     const running = n("running", "retrying");
-    return tile("", SPIN, `${running} running`, `${done} of ${tasks.length} done · ${tok} tokens`, null);
+    return tile("", SPIN, `${running} running`, `${done} of ${tasks.length} done · ${tok} tokens${cost}`, null);
   }
 
   // The RUN screen's chrome: the verdict tile, then the one action that screen exists
@@ -1058,6 +1059,7 @@
       const seg = (n, colour) => `<span style="flex:${n};background:${colour}"></span>`;
       const key = (colour, label, n) => `<span><i style="background:${colour}"></i>${label} ${n ? fmtTok(n) : "0"}</span>`;
       html += `<div class="card"><div class="cl">tokens<b>${fmtTok(tokWork(tk))}</b></div>`
+        + (leaf?.costText ? `<div class="cf"><span>${esc(leaf.costText)}</span></div>` : "")
         + (noSplit ? `<div class="cf"><span>running total — the input / output / cache split arrives when the leaf finishes</span></div>` : "")
         + (noSplit ? "" : `<div class="segbar">${seg(billedIn, "var(--accent)")}${seg(outp, "var(--ok)")}</div>`
           + `<div class="legend">${key("var(--accent)", "Input", billedIn)}${key("var(--ok)", "Output", outp)}</div>`)

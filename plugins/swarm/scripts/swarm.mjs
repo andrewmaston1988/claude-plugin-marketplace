@@ -4,6 +4,7 @@
 import { join, resolve, dirname, basename, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadConfig, swarmHome, getConfig } from "../src/config.mjs";
+import { costOfFor } from "../src/run-cost.mjs";
 import { loadManifest, effectivePlanDoc, matchDenylist, isAgentless, ValidationError } from "../src/manifest.mjs";
 import { resolveRef, listManifests } from "../src/registry.mjs";
 import { modelRoster, refreshRoster } from "../src/roster.mjs";
@@ -450,6 +451,7 @@ async function cmdRun(rest) {
     engine: fileURLToPath(import.meta.url),
     gradeable,
     memoryParks: r.memoryParks,
+    costText: costOfFor(cfg)(r.summary.tasks),
   }));
 
   const bad = r.summary.tasks.filter((t) => !["ok", "skipped"].includes(t.state) && t.id !== "__digest");
@@ -981,13 +983,13 @@ async function main() {
           const maxTicks = Number(process.env.SWARM_WATCH_TICKS) || Infinity;
           for (let i = 0; i < maxTicks; i++) {
             process.stdout.write("\x1b[2J\x1b[H");
-            out(renderStatus(rest[0], Date.now(), quietWarnMs));
+            out(renderStatus(rest[0], Date.now(), quietWarnMs, costOfFor(getConfig())));
             out(dim(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`));
             await new Promise((r) => setTimeout(r, secs * 1000));
           }
           return 0;
         }
-        out(renderStatus(rest[0], Date.now(), quietWarnMs));
+        out(renderStatus(rest[0], Date.now(), quietWarnMs, costOfFor(getConfig())));
         return 0;
       }
       case "wait": {
@@ -1030,7 +1032,7 @@ async function main() {
         if (!r.ok) { err(`swarm: ask failed: ${r.answer}`); return 1; }
         out(r.answer);
         out("");
-        out(dim([workTokens(r.tokens) > 0 && `tokens: ${formatTokens(workTokens(r.tokens))}`, r.tokens?.cacheRead && `cache read ${formatTokens(r.tokens.cacheRead)}`, `session ${r.sessionId}`, `log: results/${taskId}.ask.log`].filter(Boolean).join(" · ")));
+        out(dim([workTokens(r.tokens) > 0 && `tokens: ${formatTokens(workTokens(r.tokens))}`, costOfFor(cfg)([r]), r.tokens?.cacheRead && `cache read ${formatTokens(r.tokens.cacheRead)}`, `session ${r.sessionId}`, `log: results/${taskId}.ask.log`].filter(Boolean).join(" · ")));
         return 0;
       }
       case "grade": {

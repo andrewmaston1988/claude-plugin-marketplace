@@ -158,6 +158,9 @@ function validateConfig(cfg, configPath) {
   if (typeof cfg.disable1mContext !== "boolean") {
     throw new Error('disable1mContext must be true or false — e.g. "disable1mContext": false in ~/.swarm/config.json gives every Claude leaf the 1M window');
   }
+  if (cfg.display?.money !== undefined && typeof cfg.display.money !== "boolean") {
+    throw new Error('display.money must be true or false — e.g. "display": {"money": true} in ~/.swarm/config.json shows dollar figures beside the work tokens; leave it out to show none');
+  }
   validateProjects(cfg.projects);
   validateMemFloor(cfg, "minFreeMemMb");
   validateMemFloor(cfg, "valveFreeMemMb");

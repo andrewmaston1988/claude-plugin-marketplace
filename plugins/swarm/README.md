@@ -371,7 +371,11 @@ default 15): glyph, id, model, duration, work tokens, plus a counts footer. Ever
 — roster, footer, `tokens:` line, `swarm ask`, dashboard, status bar — is work tokens (input +
 output + cache writes). Cache reads are never a headline: a re-read prompt prefix grows with
 turns × context, not with the work done. They show only as a labelled `cache read` breakdown
-(the `tokens:` line, `swarm ask`, the dashboard's leaf panel). Running rows
+(the `tokens:` line, `swarm ask`, the dashboard's leaf panel). Beside the work tokens each
+leaf is priced in its own unit, and units are never summed: a `:cloud` leaf as `% of week` (its
+requests × the meter's points per request), and only with `display.money: true` a dollar
+figure — `$` when billed on a real key, `≈$… api-eq` when a rate-card estimate, never a
+subscription charge. With no `display.money` no `$` appears anywhere. Running rows
 show the leaf's latest tool call; a leaf silent past `quietWarnSecs` (default 60) shows
 `⚠ quiet Ns` instead. Failed tasks block their dependents; independent branches continue;
 re-`run` resumes (`ok` work skipped, `rate-limited` retries). A live engine (heartbeat
