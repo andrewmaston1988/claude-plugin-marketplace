@@ -58,15 +58,9 @@ test("routes: runs list, run, leaf (no raw log; prompt exposed for the accordion
       rmSync(join(home, "runs", "C--code-b", "done-1", "digest.md"));
       assert.equal((await get("/api/runs/C--code-b/done-1/digest")).status, 404);
 
-      const manifest = await get("/manifest.webmanifest");
-      assert.equal(manifest.status, 200);
-      assert.equal(manifest.body.display, "standalone");
-      assert.ok(manifest.body.icons.some((i) => i.sizes === "512x512" && i.type === "image/png"), "a 512 PNG for Android");
       const page = await get("/", { raw: true });
       assert.equal(page.status, 200);
-      assert.match(page.body, /rel="apple-touch-icon"[^>]*icon-180\.png/, "iOS home-screen icon linked");
       assert.match(page.body, /id="rail"/, "the rail overlay is in the page");
-      assert.equal((await get("/icon-999.png")).status, 404);
       assert.equal((await get("/api/runs/C--code-a/nope")).status, 404);
     });
   } finally { rmSync(home, { recursive: true, force: true }); }

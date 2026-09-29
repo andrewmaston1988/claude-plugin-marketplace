@@ -67,6 +67,7 @@ const MANIFEST = {
   short_name: "swarm",
   start_url: "/",
   display: "standalone",
+  launch_handler: { client_mode: "navigate-existing" },
   background_color: "#101219",
   theme_color: "#101219",
   icons: ICON_SIZES.map((s) => ({ src: `/icon-${s}.png`, sizes: `${s}x${s}`, type: "image/png", purpose: "any" })),
