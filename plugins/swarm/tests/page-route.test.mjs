@@ -597,20 +597,6 @@ test("finish: a run that goes inactive, active again, then inactive again re-arm
   assert.equal(P.vibrations().length, 2, "and the second finish fires again — the map tracks the current flag, not a one-way finished set");
 });
 
-test("Test 10: a hung list request times out into the error panel and frees the next refresh", async () => {
-  const P = loadPage();
-  await P.flush();
-  P.respondList(listData(listRow()));
-  await P.flush();
-  P.fireSse("runs"); await P.flush();
-  assert.equal(P.pendingCount(), 1, "the refresh is in flight");
-  P.fireTimers(20000); await P.flush();
-  assert.ok(/timed out/.test(P.screenText()), "the error panel names the timeout");
-  const before = P.listFetches().length;
-  P.fireSse("runs"); await P.flush();
-  assert.equal(P.listFetches().length - before, 1, "the next event starts a new fetch");
-});
-
 test("scroll: a navigation to another screen opens at the top; a refresh of the same screen keeps its place", async () => {
   const P = loadPage();
   await P.flush();

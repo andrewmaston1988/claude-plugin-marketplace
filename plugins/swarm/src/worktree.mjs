@@ -3,14 +3,16 @@ import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
-// `timeout` is required: snapshot calls pass a long one, and a silent 60 s default
+export const WORKTREE_ADD_TIMEOUT_MS = 180000;
+
+// `timeout` is required: snapshot calls pass a long one, and a silent timeout
 // mid-checkout would leave a locked, half-populated tree. `env` merges over process.env.
 function git(args, cwd, { timeout, env }) {
   const r = spawnSync("git", args, {
     cwd, encoding: "utf8", windowsHide: true, timeout,
     env: env ? { ...process.env, ...env } : process.env,
   });
-  return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim() };
+  return { status: r.status, stdout: (r.stdout || "").trim(), stderr: (r.stderr || "").trim(), timedOut: r.error?.code === "ETIMEDOUT" };
 }
 
 // Commits on `branch` not already landed on `base`, compared by PATCH (`git
@@ -65,7 +67,8 @@ function isRegisteredWorktree(path, repo) {
 // worktree may already exist (kept on timeout for salvage): re-enter it so the
 // partial diff survives and the leaf resumes in place, rather than 0s-failing on
 // a re-create. `reset` (the --force redo) scrubs it back to HEAD first.
-export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) {
+export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTimeoutMs } = {}) {
+  if (!(Number.isFinite(addTimeoutMs) && addTimeoutMs > 0)) throw new Error("prepareIsolation requires a positive addTimeoutMs");
   const repo = task.originalCwd || task.cwd;
   // Ordered siblings sharing a name meet in one tree; without one, the task's
   // own id names a private tree.
@@ -102,7 +105,7 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
     };
   }
 
-  let add = git(["worktree", "add", path, "-b", branch, "--no-track", head.stdout], repo, { timeout: 60000 });
+  let add = git(["worktree", "add", path, "-b", branch, "--no-track", head.stdout], repo, { timeout: addTimeoutMs });
   if (add.status !== 0 && /already exists/i.test(add.stderr)) {
     // Stale branch (path was cleaned but the branch lingered): force it to HEAD.
     // But -B RESETS the branch, so refuse when it still carries unlanded work.
@@ -114,9 +117,12 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false } = {}) 
         `    inspect:  git log ${branch}\n` +
         `    reuse it: name a different worktree, merge/delete '${branch}' yourself, or re-run with --force`);
     }
-    add = git(["worktree", "add", path, "-B", branch, "--no-track", head.stdout], repo, { timeout: 60000 });
+    add = git(["worktree", "add", path, "-B", branch, "--no-track", head.stdout], repo, { timeout: addTimeoutMs });
   }
   if (add.status !== 0) {
+    if (add.timedOut) {
+      throw new Error(`git worktree add timed out after ${addTimeoutMs / 1000}s for '${task.id}' — a slow repo hook (post-checkout / reference-transaction) is the usual cause: ${add.stderr}`);
+    }
     throw new Error(`git worktree add failed for '${task.id}': ${add.stderr}`);
   }
 
@@ -175,7 +181,7 @@ export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSou
 // than borrowing a tree a leaf is using, so nothing races.
 export function integrate(task, cfg, resultsDir, { repo: repoOverride } = {}) {
   const repo = repoOverride || task.originalCwd || task.cwd;
-  const wt = prepareIsolation({ ...task, originalCwd: repo }, cfg, resultsDir);
+  const wt = prepareIsolation({ ...task, originalCwd: repo }, cfg, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
 
   const merged = [];
   const conflicts = [];

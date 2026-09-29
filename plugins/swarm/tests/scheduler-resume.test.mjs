@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { runPlan } from "../src/scheduler.mjs";
 import { writeResult, readResult, initResultsDir, appendRunLog } from "../src/results.mjs";
-import { prepareIsolation } from "../src/worktree.mjs";
+import { prepareIsolation, WORKTREE_ADD_TIMEOUT_MS } from "../src/worktree.mjs";
 import { createCodexStreamParser } from "../src/stream.mjs";
 import { fakeSpawnFactory, makeIo, usageEnv, codexReading } from "./helpers/fake-io.mjs";
 
@@ -114,7 +114,7 @@ test("R1: a leaf reseated onto another provider dispatches with no resume", asyn
       ts: new Date().toISOString(), id: "prose", event: "session",
       sessionId: CODEX_SID, provider: "codex", runner: "codex",
     });
-    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir);
+    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -151,7 +151,7 @@ test("R2: a session whose attempt completed no turn is not resumed — same prov
       ts: new Date().toISOString(), id: "prose", event: "session",
       sessionId: CODEX_SID, provider: "ollama", runner: "claude",
     });
-    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir);
+    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -176,7 +176,7 @@ test("R3: a same-provider leaf that completed turns before dying still resumes",
     writeResult(p.resultsDir, "impl", priorAttempt("impl", {
       durationMs: 2400000, numTurns: 40, tokens: TURNS, sessionId: OLLAMA_SID,
     }));
-    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir);
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -199,7 +199,7 @@ test("R4: a leaf with no recorded session starts cold and claims no decline", as
     initResultsDir(p.resultsDir);
     // A tree from an earlier generation, but no result and no session record for
     // this leaf: there is nothing to decline, so nothing may be claimed.
-    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir);
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -242,7 +242,7 @@ test("R6: --force still resets the tree and clears every session", async () => {
       ts: new Date().toISOString(), id: "impl", event: "session",
       sessionId: OLLAMA_SID, provider: "ollama", runner: "claude",
     });
-    const wt = prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir);
+    const wt = prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
     writeFileSync(join(wt.path, "partial.txt"), "kept partial work\n");
 
     const spawn = fakeSpawnFactory(writesInTree);
@@ -341,7 +341,7 @@ test("Z-codex: a codex leaf that failed at zero turns dispatches with no resume"
       ts: new Date().toISOString(), id: "prose", event: "session",
       sessionId: CODEX_SID, provider: "codex", runner: "codex",
     });
-    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CODEX_CFG, p.resultsDir);
+    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CODEX_CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
 
     const spawn = fakeSpawnFactory(writesInTree);
     // The codex preflight reads the meter first, so the home must already hold a
@@ -370,7 +370,7 @@ test("U1: an absent turn count behaves as today — the session is still resumed
       tokens: TURNS, sessionId: OLLAMA_SID,
       output: "leaf ended with a runner error: Claude runner failed",
     }));
-    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir);
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -397,7 +397,7 @@ test("U2: a turn count in the field wins over a zero in the output text", async 
       output: 'leaf ended with a runner error: Claude runner failed\n'
         + JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, num_turns: 0 }),
     }));
-    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir);
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
