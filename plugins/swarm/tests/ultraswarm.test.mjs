@@ -1,25 +1,26 @@
 import { test } from "node:test";
-import { equal, ok, match } from "node:assert/strict";
+import { equal, ok, match, rejects } from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { decide, modeFor, standingBlock, KEYWORD_LINE, MODE_ARMED, MODE_UNARMED } from "../hooks/ultraswarm.mjs";
 import { normalizeOllama, normalizeAnthropic } from "../src/usage.mjs";
 
+const E = ["claude", "ollama"];
 const armed = { swarm: { always: true }, provider: { allowedRoots: ["C:/code"] } };
 
 test("decide: SessionStart arms only on swarm.always; UserPromptSubmit only on the keyword", async () => {
-  equal(await decide({ event: "SessionStart", cwd: "C:/code/x", config: armed }), standingBlock(MODE_ARMED));
-  equal(await decide({ event: "SessionStart", cwd: "C:/code/x", config: { provider: armed.provider } }), null);
+  equal(await decide({ enabled: E, event: "SessionStart", cwd: "C:/code/x", config: armed }), standingBlock(MODE_ARMED, E));
+  equal(await decide({ enabled: E, event: "SessionStart", cwd: "C:/code/x", config: { provider: armed.provider } }), null);
   // the keyword path names its trigger, outside the locked block; SessionStart (above) does not
-  equal(await decide({ event: "UserPromptSubmit", prompt: "please ULTRASWARM this", cwd: "C:/code/x", config: {} }), `${KEYWORD_LINE}
-${standingBlock(MODE_UNARMED)}`);
+  equal(await decide({ enabled: E, event: "UserPromptSubmit", prompt: "please ULTRASWARM this", cwd: "C:/code/x", config: {} }), `${KEYWORD_LINE}
+${standingBlock(MODE_UNARMED, E)}`);
   match(KEYWORD_LINE ?? "", /`ultraswarm`/);
-  equal(await decide({ event: "UserPromptSubmit", prompt: "ordinary prompt", cwd: "C:/code/x", config: armed }), null);
+  equal(await decide({ enabled: E, event: "UserPromptSubmit", prompt: "ordinary prompt", cwd: "C:/code/x", config: armed }), null);
   // the keyword is a standalone word — a filename or path token never arms it
   for (const p of ["edit hooks/ultraswarm.mjs", "tests/ultraswarm.test.mjs failed", "see ultraswarm-notes"]) {
-    equal(await decide({ event: "UserPromptSubmit", prompt: p, cwd: "C:/code/x", config: {} }), null, p);
+    equal(await decide({ enabled: E, event: "UserPromptSubmit", prompt: p, cwd: "C:/code/x", config: {} }), null, p);
   }
-  equal(await decide({ event: "PreToolUse", prompt: "ultraswarm", cwd: "C:/code/x", config: armed }), null);
+  equal(await decide({ enabled: E, event: "PreToolUse", prompt: "ultraswarm", cwd: "C:/code/x", config: armed }), null);
 });
 
 test("modeFor: cloud under an allowed root (either slash style, any case), Anthropic otherwise", async () => {
@@ -39,7 +40,7 @@ test("modeFor: cloud under an allowed root (either slash style, any case), Anthr
 // referenced through an exported constant: a shared constant would move with the hook and
 // the pin would never bite. Any edit to the block — a reflowed line, a dropped table row —
 // fails this row, which is the point of "LOCKED".
-const LOCKED_BLOCK = (mode) => `<EXTREMELY_IMPORTANT>
+const LOCKED_BLOCK = (mode, tier) => `<EXTREMELY_IMPORTANT>
 You have swarm. The operator has decided in advance: swarm is PRE-AUTHORISED.
 It spreads cost across providers, optimises spend, offloads and compresses carried
 context, and applies committee judgement. The trade-off is settled — not yours to weigh.
@@ -65,7 +66,7 @@ Solo ONLY for a conversational reply, a single one-read question, or a trivial e
 | "A leaf will do it worse" | You verify every leaf; committee judgement beats one pass. |
 | "I'll check with the operator first" | They answered in advance. Asking back is the defect. |
 | "I know the command, I can skip the skill" | The command arrives without the rules that govern it. |
-| "An Agent/Workflow will do" | Swarm is the fan-out tier; Agent only for one run that must be on Anthropic. |
+| "An Agent/Workflow will do" | Swarm is the fan-out tier (${tier}); Agent only for one run that ${/claude/.test(tier) ? "must be on Anthropic" : "must stay on this host"}. |
 | "I'll peek at the leaf's log" | One status check, then hands-off until the notification. |
 
 Mode: ${mode}
@@ -73,12 +74,29 @@ Mode: ${mode}
 
 test("standingBlock is the locked wording, verbatim, for either mode", () => {
   for (const mode of [MODE_ARMED, MODE_UNARMED]) {
-    const block = standingBlock(mode);
-    equal(block, LOCKED_BLOCK(mode));
+    const block = standingBlock(mode, E);
+    equal(block, LOCKED_BLOCK(mode, "claude, ollama"));
     match(block, /^<EXTREMELY_IMPORTANT>\n[\s\S]*\n<\/EXTREMELY_IMPORTANT>$/);
     equal((block.match(/\[[^\]]+\]/g) || []).length, 1, "exactly one mode bracket");
     ok(!/AskUserQuestion/.test(block), "no question");
   }
+});
+
+// Operator, 2026-09-29: "It should list what is enabled, or setup pending." The one row
+// that names providers lists the enabled ones and nothing else.
+test("the Agent row lists the enabled providers, never a disabled one", async () => {
+  const row = (block) => block.split("\n").find((l) => l.startsWith('| "An Agent/Workflow will do"'));
+  equal(row(standingBlock(MODE_ARMED, ["codex"])), '| "An Agent/Workflow will do" | Swarm is the fan-out tier (codex); Agent only for one run that must stay on this host. |');
+  ok(!/claude|anthropic/i.test(standingBlock(MODE_ARMED, ["codex"])), "only codex enabled names no claude");
+  equal(row(standingBlock(MODE_ARMED, [])), '| "An Agent/Workflow will do" | Swarm is the fan-out tier (setup pending); Agent only for one run that must stay on this host. |');
+  const setup = await decide({ enabled: ["codex"], event: "SessionStart", cwd: "C:/code/x", config: null });
+  ok(row(setup).includes("(setup pending)"), row(setup));
+  // The operator-locked Anthropic criterion stands whenever Claude is enabled.
+  equal(row(standingBlock(MODE_ARMED, ["claude", "codex"])), '| "An Agent/Workflow will do" | Swarm is the fan-out tier (claude, codex); Agent only for one run that must be on Anthropic. |');
+});
+
+test("decide requires the enabled provider list on an armed event", async () => {
+  await rejects(decide({ event: "SessionStart", cwd: "C:/code/x", config: armed }), TypeError);
 });
 
 // R8b — a fresh install gets nothing at SessionStart today, so the session learns the
@@ -90,7 +108,7 @@ const SETUP_LINE = "You have the swarm plugin but it is not configured, the oper
 test("decide: R8b — an unconfigured install is told to run setup, inside the block", async () => {
   for (const [label, config] of [["no config file", null], ["no allowedRoots", { providers: { ollama: { enabled: true } } }]]) {
     // swarm.always is NOT set in either: the setup message is not gated on standing mode.
-    const out = await decide({ event: "SessionStart", cwd: "C:/code/x", config });
+    const out = await decide({ enabled: E, event: "SessionStart", cwd: "C:/code/x", config });
     ok(out, `${label}: an unconfigured install must hear something at SessionStart`);
     const open = out.indexOf("<EXTREMELY_IMPORTANT>");
     const close = out.indexOf("</EXTREMELY_IMPORTANT>");
@@ -99,15 +117,15 @@ test("decide: R8b — an unconfigured install is told to run setup, inside the b
     ok(out.split("\n")[1] === SETUP_LINE, `${label}: the block opens on the setup sentence: ${out.split("\n")[1]}`);
     ok(!out.includes("You have swarm. The operator has decided in advance"), `${label}: no standing claim on an unconfigured install`);
     // Everything below the identity line is still the locked block, unchanged.
-    for (const line of LOCKED_BLOCK(MODE_UNARMED).split("\n").slice(2)) {
+    for (const line of LOCKED_BLOCK(MODE_UNARMED, "setup pending").split("\n").slice(2)) {
       ok(out.includes(line), `${label}: the block lost a line: ${line}`);
     }
   }
 });
 
 test("decide: R8b — a configured install's block carries no setup sentence", async () => {
-  const out = await decide({ event: "SessionStart", cwd: "C:/code/x", config: armed });
-  equal(out, standingBlock(MODE_ARMED));
+  const out = await decide({ enabled: E, event: "SessionStart", cwd: "C:/code/x", config: armed });
+  equal(out, standingBlock(MODE_ARMED, E));
   ok(!out.includes("/swarm:swarm setup"), out);
 });
 
@@ -118,7 +136,7 @@ test("the hook never probes and reads no models cache — the block carries no m
 });
 
 const ALWAYS = { swarm: { always: true }, provider: { allowedRoots: ["C:/code"] } };
-const dec = (reading) => decide({
+const dec = (reading) => decide({ enabled: E,
   event: "SessionStart", cwd: "C:/code/x", config: ALWAYS,
   usage: reading ? [normalizeOllama(reading)] : [],
 });
@@ -135,12 +153,12 @@ test("decide: U1 RED — an exhausted provider names the reset, OUTSIDE the stan
   }
   ok(out.includes("Mon 7 Sep, 01:00"), out);
   // The block is instruction and ends where it ends; the usage line follows it.
-  ok(out.startsWith(standingBlock(MODE_ARMED) + "\n"), out);
+  ok(out.startsWith(standingBlock(MODE_ARMED, E) + "\n"), out);
   ok(out.endsWith("</EXTREMELY_IMPORTANT>") === false, out);
 });
 
 test("decide: U2 false-positive guard — a healthy provider emits the block and NOTHING else", async () => {
-  equal(await dec({ ...OLLAMA, state: "ok" }), standingBlock(MODE_ARMED));
+  equal(await dec({ ...OLLAMA, state: "ok" }), standingBlock(MODE_ARMED, E));
 });
 
 test("modeFor: U3 governance decides the mode; the meter never touches it", async () => {
@@ -160,15 +178,15 @@ test("decide: U4 a cached provider carries its banner, the standing block unchan
   });
   ok(cached.includes("/!\\ Cookie Expired"), cached);
   ok(cached.includes(`last seen: ${new Date(Date.parse("2026-09-08T14:49:00Z")).toISOString()}`), "absolute UTC last-seen, not an age");
-  ok(cached.startsWith(standingBlock(MODE_ARMED) + "\n"), cached);
+  ok(cached.startsWith(standingBlock(MODE_ARMED, E) + "\n"), cached);
 
   const live = await dec({ ...OLLAMA, provenance: "live" });
   ok(!live.includes("/!\\"), `a live reading prints no banner: ${live}`);
-  equal(live, standingBlock(MODE_ARMED), "no banner means no extra lines at all");
+  equal(live, standingBlock(MODE_ARMED, E), "no banner means no extra lines at all");
 });
 
 test("decide: U6 every notable provider gets its own lines", async () => {
-  const out = await decide({
+  const out = await decide({ enabled: E,
     event: "SessionStart", cwd: "C:/code/x", config: ALWAYS,
     usage: [
       normalizeAnthropic({ limits: [{ kind: "weekly", percent: 100, resetsAt: "A" }], exhausted: true }),
@@ -182,7 +200,7 @@ test("decide: U6 every notable provider gets its own lines", async () => {
 test("modeFor/decide: U5 always-green guard — a missing headroom argument does not break the hook", async () => {
   const cfg = { provider: { allowedRoots: ["C:/code"] } };
   equal(await modeFor({ cwd: "C:/code/x", config: cfg }), MODE_ARMED);
-  equal(await decide({ event: "SessionStart", cwd: "C:/code/x", config: { swarm: { always: true }, provider: cfg.provider } }), standingBlock(MODE_ARMED));
+  equal(await decide({ enabled: E, event: "SessionStart", cwd: "C:/code/x", config: { swarm: { always: true }, provider: cfg.provider } }), standingBlock(MODE_ARMED, E));
 });
 
 // Claude is gated by allowedRoots like every provider, so its roots alone arm the mode —

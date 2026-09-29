@@ -29,7 +29,7 @@ function markdownUnder(dir) {
 
 // The hook's block is an array of lines, so a phrase can straddle two literals —
 // only the rendered text is checked, never the source file.
-const rendered = () => [standingBlock(MODE_ARMED), standingBlock(MODE_UNARMED)].map((t) => t.replace(/\s+/g, " "));
+const rendered = () => [standingBlock(MODE_ARMED, ["claude"]), standingBlock(MODE_UNARMED, ["claude"])].map((t) => t.replace(/\s+/g, " "));
 
 test("no swarm skill tells a standing-mode session to keep the derivation off the page", () => {
   const hits = [];

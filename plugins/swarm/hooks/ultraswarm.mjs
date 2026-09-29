@@ -7,7 +7,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { notableLines } from '../src/usage.mjs';
-import { allowedRootsFor, providerConfig } from '../src/providers.mjs';
+import { allowedRootsFor, enabledProviderIds, providerConfig } from '../src/providers.mjs';
 
 const CONFIG = path.join(os.homedir(), '.swarm', 'config.json');
 
@@ -31,7 +31,16 @@ function readJSON(p) {
 // locked text verbatim, so any edit outside an operator decision fails there first.
 const IDENTITY = 'You have swarm. The operator has decided in advance: swarm is PRE-AUTHORISED.';
 
-function blockLines(mode, identity) {
+// The one line of the locked block that names providers: it lists what is enabled, never a
+// vendor that is switched off (operator, 2026-09-29: "It should list what is enabled, or setup pending.").
+// The locked Anthropic criterion stays whenever Claude is enabled; only a Claude-off install loses the name.
+function agentRow(enabled) {
+  const tier = enabled.length ? enabled.join(', ') : 'setup pending';
+  const where = enabled.includes('claude') ? 'must be on Anthropic' : 'must stay on this host';
+  return `| "An Agent/Workflow will do" | Swarm is the fan-out tier (${tier}); Agent only for one run that ${where}. |`;
+}
+
+function blockLines(mode, identity, enabled) {
   return [
     '<EXTREMELY_IMPORTANT>',
     identity,
@@ -59,7 +68,7 @@ function blockLines(mode, identity) {
     '| "A leaf will do it worse" | You verify every leaf; committee judgement beats one pass. |',
     '| "I\'ll check with the operator first" | They answered in advance. Asking back is the defect. |',
     '| "I know the command, I can skip the skill" | The command arrives without the rules that govern it. |',
-    '| "An Agent/Workflow will do" | Swarm is the fan-out tier; Agent only for one run that must be on Anthropic. |',
+    agentRow(enabled),
     '| "I\'ll peek at the leaf\'s log" | One status check, then hands-off until the notification. |',
     '',
     `Mode: ${mode}`,
@@ -67,8 +76,8 @@ function blockLines(mode, identity) {
   ];
 }
 
-export function standingBlock(mode) {
-  return blockLines(mode, IDENTITY).join('\n');
+export function standingBlock(mode, enabled) {
+  return blockLines(mode, IDENTITY, enabled).join('\n');
 }
 
 // A fresh install has no config file at all, so nothing here can be pre-authorised yet: the
@@ -78,7 +87,7 @@ export function standingBlock(mode) {
 const SETUP_IDENTITY = 'You have the swarm plugin but it is not configured, the operator has installed it and expects it to work. The first thing that you must do is run /swarm:swarm setup';
 
 function setupBlock(mode) {
-  return blockLines(mode, SETUP_IDENTITY).join('\n');
+  return blockLines(mode, SETUP_IDENTITY, []).join('\n');
 }
 
 // Every id that could own roots: the canonical blocks the operator wrote, plus the two ids
@@ -120,7 +129,7 @@ export const KEYWORD_LINE = '`ultraswarm` in this prompt is the operator asking 
 // Pure: which event, what prompt, what config/cwd/usage -> standing block or null.
 // `usage` is readCachedUsage()'s array; the caller reads it, so this stays pure
 // and an absent argument behaves exactly as before usage existed.
-export async function decide({ event, prompt = '', cwd, config, usage = [] }) {
+export async function decide({ event, prompt = '', cwd, config, enabled, usage = [] }) {
   // SessionStart alone may fire without swarm.always: an install with no roots dispatches
   // nothing, so the session has to learn the way out before it tries. The keyword event is
   // unchanged — a user asking for the swarm on a prompt still gets the standing block.
@@ -131,7 +140,7 @@ export async function decide({ event, prompt = '', cwd, config, usage = [] }) {
   if (!armed) return null;
   const mode = await modeFor({ cwd, config });
   const head = event === 'UserPromptSubmit' ? `${KEYWORD_LINE}\n` : '';
-  const block = head + (unconfigured ? setupBlock(mode) : standingBlock(mode));
+  const block = head + (unconfigured ? setupBlock(mode) : standingBlock(mode, enabled));
   const lines = notableLines(usage);
   return lines.length ? `${block}\n${lines.join('\n')}` : block;
 }
@@ -149,12 +158,14 @@ async function main() {
   const config = readJSON(CONFIG);
   const { readCachedUsage } = await import('../src/usage.mjs');
   const { defaultProviderRegistry } = await import('../src/default-providers.mjs');
+  const registry = defaultProviderRegistry();
   const ctx = await decide({
     event,
     prompt: String(payload.prompt || ''),
     cwd: payload.cwd || process.cwd(),
     config,
-    usage: await readCachedUsage(config, { providerRegistry: defaultProviderRegistry() }),
+    enabled: enabledProviderIds(config, registry),
+    usage: await readCachedUsage(config, { providerRegistry: registry }),
   });
   if (!ctx) process.exit(0);
 

@@ -552,10 +552,13 @@ swarm reads them off the vendors' own pricing pages rather than anyone transcrib
 number: both serve markdown at `<page URL>.md`, so a refresh is a table parse.
 
 ```bash
-swarm refresh-prices             # re-read both tables, bank them at ~/.swarm/rate-cards.json
+swarm refresh-prices             # re-read the enabled providers' tables, bank them at ~/.swarm/rate-cards.json
 swarm refresh-prices --dry-run   # parse and report what moved, write nothing
 ```
 
+- **A disabled provider is never contacted or listed.** Its pricing page is not fetched (not even
+  by `swarm refresh-prices --dry-run`), and it gets no section on `swarm cost` or the dashboard
+  Cost screen. Only `providers.<name>.enabled` decides.
 - **The shipped cards are seeds, not the source of truth** — the last hand-read of each
   table, so a fresh or offline install still ranks honestly. The first refresh supersedes
   them, and a fixture test pins each seed against the page it was read off, so a seed

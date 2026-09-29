@@ -276,6 +276,12 @@ export function createDefaultProviderRegistry({ codexAdapter, ollamaCapabilities
   return registry;
 }
 
+// The one answer to "which providers is swarm allowed to reach": every surface that
+// contacts or lists a provider filters through it, so a disabled one stays silent.
+export function enabledProviderIds(config, registry) {
+  return registry.list().filter((a) => a.enabled(config)).map((a) => a.id);
+}
+
 export function createProviderRegistry(initial = []) {
   const adapters = new Map();
 
@@ -290,9 +296,14 @@ export function createProviderRegistry(initial = []) {
 
   function get(id) {
     const adapter = adapters.get(String(id || "").toLowerCase());
-    if (!adapter) throw new Error(`unknown provider '${id}' (registered: ${[...adapters.keys()].join(", ")})`);
+    if (!adapter) throw new Error(`unknown provider '${id}'`);
     return adapter;
   }
+
+  // Only providers switched on are named: an error line lands in a transcript, and a disabled
+  // provider appears nowhere but the setting that enables it.
+  const list = () => [...adapters.values()];
+  const enabledIds = (config) => enabledProviderIds(config, { list }).join(", ") || "none enabled";
 
   function identity(adapter, model, config, allowDisabled) {
     // The shipped config.default.json disables every provider, so a fresh install's first
@@ -314,19 +325,21 @@ export function createProviderRegistry(initial = []) {
     if (typeof task.provider !== "string" || !task.provider.trim()) {
       throw new Error(
         `model '${model}' has no "provider" — every leaf names one and nothing is inferred. ` +
-        `Add "provider" beside "model" (registered: ${[...adapters.keys()].join(", ")}), e.g. { "provider": "claude", "model": "claude-opus-5" }`
+        `Add "provider" beside "model" (registered: ${enabledIds(config)})`
       );
     }
     if (CLAUDE_ALIASES.has(model.toLowerCase())) {
       throw new Error(`model '${model}' is a Claude alias, and aliases are not accepted — name the full model id, e.g. "claude-opus-5" with "provider": "claude"`);
     }
+    const wanted = task.provider.trim().toLowerCase();
+    if (!adapters.has(wanted)) throw new Error(`unknown provider '${task.provider}' (registered: ${enabledIds(config)})`);
     return identity(get(task.provider), model, config, allowDisabled);
   }
 
   return {
     register,
     get,
-    list: () => [...adapters.values()],
+    list,
     resolve,
     capability(provider, name) {
       if (!PROVIDER_CAPABILITIES.has(name)) throw new Error(`unknown provider capability '${name}'`);

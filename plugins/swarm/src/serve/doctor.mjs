@@ -7,7 +7,7 @@
 // import, and none of them runs a probe.
 import { doctorChecks, doctorExit, defaultStartupDir, readPid, isAlive } from "./daemon.mjs";
 import { defaultProviderRegistry } from "../default-providers.mjs";
-import { probeProvider } from "../providers.mjs";
+import { enabledProviderIds, probeProvider } from "../providers.mjs";
 
 // `home`, `installed`, `port` and `cfg` are the daemon's, already resolved by the
 // caller — this only decides what a doctor run reports.
@@ -19,7 +19,7 @@ export async function runDoctor({ home, installed, port, cfg, shimPath, out, sta
     bind: cfg.dashboard?.bind ?? "0.0.0.0", startupDir, shimPath,
     // Switched ON only: a provider that is on and cannot dispatch is the thing worth
     // reporting, and one that is off is not making a claim anyone needs checked.
-    providers: registry.list().filter((a) => a.enabled(cfg)).map((a) => a.id),
+    providers: enabledProviderIds(cfg, registry),
     config: cfg,
     _probeProvider: (id, opts) => probeProvider(id, { ...opts, registry, env: process.env }),
   });

@@ -102,7 +102,7 @@ test("serve: the Cost roster is whatever the reader returns, read through the ho
   const priced = [];
   const server = createServer({
     home,
-    cfg: { quietWarnSecs: 60, grading: { enabled: false }, dashboard: { port: 0, bind: "127.0.0.1", token: null } },
+    cfg: { quietWarnSecs: 60, grading: { enabled: false }, providers: { codex: { enabled: true } }, dashboard: { port: 0, bind: "127.0.0.1", token: null } },
     log: () => {},
     _watch: () => ({ close() {} }),
     _estate: noopEstate,

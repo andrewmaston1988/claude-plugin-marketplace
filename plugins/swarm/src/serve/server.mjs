@@ -8,9 +8,9 @@ import { join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { readRun, projectKeys, resultSuperseded, resolveTaskId } from "../runlog.mjs";
 import { DIGEST_ID } from "../digest.mjs";
-import { readRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
+import { readRows, hideDisabledRows, dedupe, aggregate, overall, scoresPath, PRIOR_WEIGHT } from "../scores.mjs";
 import { ASPECTS, UNIVERSAL } from "../aspects.mjs";
-import { costRowsFor, COST_PROVIDERS, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
+import { costRowsFor, costProvidersFor, readSnapshots, usageHistoryPath, resolveBands } from "../cost.mjs";
 import { rateCardStorePath, rateCards, refreshStaleRateCards } from "../rate-card.mjs";
 import { modelRoster, refreshRoster } from "../roster.mjs";
 import { defaultProviderRegistry } from "../default-providers.mjs";
@@ -21,7 +21,7 @@ import { costView } from "../cost-view.mjs";
 import { projectGrouping } from "./grouping.mjs";
 import { createWorkerEstate, filterRuns } from "./estate.mjs";
 import { createLogger } from "./log.mjs";
-import { providerConfig } from "../providers.mjs";
+import { enabledProviderIds, providerConfig } from "../providers.mjs";
 import { logosScript } from "./logos.mjs";
 import { PAGE, pageHtml } from "./page-assets.mjs";
 
@@ -237,7 +237,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   const scoreRows = () => {
     let mtimeMs = 0;
     try { mtimeMs = statSync(scoresFile).mtimeMs; } catch { mtimeMs = 0; }
-    if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: readRows(scoresFile) };
+    if (mtimeMs !== scoreCache.mtimeMs) scoreCache = { mtimeMs, rows: hideDisabledRows(readRows(scoresFile), cfg, rosterRegistry, rosterRows()) };
     return scoreCache.rows;
   };
   // The cost half, cached the same way: snapshots re-read when the history's
@@ -252,16 +252,19 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
   // rows, which live in a catalog this process never read.
   const rosterEnv = { ...process.env, SWARM_HOME: home };
   const rosterRegistry = defaultProviderRegistry();
+  const enabledProviders = enabledProviderIds(cfg, rosterRegistry);
   let rosterRefreshInFlight = false;
-  const costRoster = () => {
-    const byProvider = {};
-    let rows = [];
+  const rosterRows = () => {
     try {
-      rows = _modelRoster({ env: rosterEnv, config: cfg, registry: rosterRegistry }).models;
+      return _modelRoster({ env: rosterEnv, config: cfg, registry: rosterRegistry }).models;
     } catch {
       // Display-only: a corrupt roster renders empty; the CLI is the loud path.
+      return [];
     }
-    for (const row of rows) {
+  };
+  const costRoster = () => {
+    const byProvider = {};
+    for (const row of rosterRows()) {
       if (!row?.model) continue;
       (byProvider[row.provider || "ollama"] ||= []).push(row.model);
     }
@@ -288,12 +291,12 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     }
     if (!priceRefreshInFlight) {
       priceRefreshInFlight = true;
-      Promise.resolve().then(() => _refreshPrices({ path: rateCardPath, rosterIds: roster, out: log, err: log }))
+      Promise.resolve().then(() => _refreshPrices({ path: rateCardPath, rosterIds: roster, enabled: enabledProviders, out: log, err: log }))
         .catch(() => {})
         .finally(() => { priceRefreshInFlight = false; });
     }
     const cards = rateCards(rateCardPath);
-    return COST_PROVIDERS.flatMap((provider) =>
+    return costProvidersFor(enabledProviders).flatMap((provider) =>
       costRowsFor(provider, { models: roster[provider] || [], snaps: costCache.snaps, cards }));
   };
   const rankOf = (cells, model) => {
@@ -372,7 +375,7 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
     if (p === "/logos.js") return send(res, 200, logosScript(), "text/javascript; charset=utf-8");
     if (p === "/api/perf") return perf(res, url);
     // Grading-independent: prices exist without grades, so only the value verdicts need the store.
-    if (p === "/api/cost") return send(res, 200, costOf(grading ? scoreRows() : []));
+    if (p === "/api/cost") return send(res, 200, { ...costOf(grading ? scoreRows() : []), grading });
     // A live read of every provider: swarm.mjs injects it, since importing swarm.mjs here deadlocks on its top-level await.
     if (p === "/api/usage") {
       if (!_readProviderUsage) throw new Error("no _readProviderUsage seam wired");

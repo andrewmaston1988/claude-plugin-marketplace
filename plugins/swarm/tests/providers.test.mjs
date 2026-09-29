@@ -25,15 +25,15 @@ test("resolve() reads the authored provider and infers nothing", () => {
 
 test("a model with no provider throws, even one the discovery cache knows", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
-  throws(() => registry.resolve({ model: "gpt-new-uncached" }, { config }), /no "provider".*registered: claude, ollama, codex/);
+  throws(() => registry.resolve({ model: "gpt-new-uncached" }, { config }), /no "provider".*registered: claude, ollama/);
   throws(() => registry.resolve({ model: "gpt-5" }, { config, cache: [{ provider: "codex", model: "gpt-5" }], allowDisabled: true }), /no "provider"/);
   throws(() => registry.resolve({ model: "gpt-oss:20b-cloud" }, { config }), /no "provider"/);
   throws(() => registry.resolve({ model: "claude-opus-5", provider: "  " }, { config }), /no "provider"/);
 });
 
-test("an unknown provider id is refused, naming the registered ids", () => {
+test("an unknown provider id is refused, naming the enabled ids only", () => {
   const registry = createProviderRegistry(defaultProviderAdapters());
-  throws(() => registry.resolve({ provider: "nope", model: "x" }, { config }), /unknown provider 'nope' \(registered: claude, ollama, codex\)/);
+  throws(() => registry.resolve({ provider: "nope", model: "x" }, { config }), /unknown provider 'nope' \(registered: claude, ollama\)/);
 });
 
 test("Claude aliases are refused as model names, under any provider", () => {

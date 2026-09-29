@@ -86,6 +86,12 @@ export const RATE_CARD_SOURCES = [
   { provider: "claude", url: "https://platform.claude.com/docs/en/about-claude/pricing.md", parse: parseAnthropicPricing, seed: CLAUDE_RATE_CARD_SEED },
 ];
 
+// The sources for the providers the config has switched on. A vendor whose provider
+// is off is never a request: callers pass what this returns, never the catalogue.
+export function rateCardSourcesFor(enabled) {
+  return RATE_CARD_SOURCES.filter(({ provider }) => enabled.includes(provider));
+}
+
 export function rateCardStorePath(env = process.env) {
   return join(swarmHome(env), "rate-cards.json");
 }
@@ -157,7 +163,7 @@ export function assertPlausible(provider, prices, seed) {
 
 // A failure banks `lastFailedAt` and rethrows carrying the provider and the
 // summaries of the providers already banked; the caller's error path reads both.
-export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fetch, now = new Date(), rosterIds, providers = RATE_CARD_SOURCES } = {}) {
+export async function refreshRateCards({ path = rateCardStorePath(), _fetch = fetch, now = new Date(), rosterIds, providers } = {}) {
   const store = readRateCardStore(path);
   const summaries = [];
   for (const { provider, url, parse, seed } of providers) {
@@ -295,10 +301,10 @@ export function reportCardChanges(out, { provider, url, rows, changes }) {
  * A skip writes nothing: the daemon asks on every cost request, and a line per
  * poll is noise. `skipped` is the report.
  */
-export async function refreshStaleRateCards({ out, err, path = rateCardStorePath(), _fetch = fetch, now = Date.now(), rosterIds } = {}) {
+export async function refreshStaleRateCards({ out, err, path = rateCardStorePath(), _fetch = fetch, now = Date.now(), rosterIds, enabled } = {}) {
   const at = typeof now === "number" ? new Date(now) : now;
   const store = readRateCardStore(path);
-  const pending = RATE_CARD_SOURCES.filter(({ provider }) => {
+  const pending = rateCardSourcesFor(enabled).filter(({ provider }) => {
     const failedAt = Date.parse(store[provider]?.lastFailedAt ?? "");
     return !(Number.isFinite(failedAt) && at.getTime() - failedAt < RATE_CARD_FAILED_BACKOFF_HOURS * 3600e3);
   });
