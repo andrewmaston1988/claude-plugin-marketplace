@@ -9,6 +9,7 @@ import { resolveRef, listManifests } from "../src/registry.mjs";
 import { modelRoster, refreshRoster } from "../src/roster.mjs";
 import { collapseRoster, visibleModels, probeTopModels } from "../src/discovery.mjs";
 import { providerConfig } from "../src/providers.mjs";
+import { costBands, costSettings } from "../src/cost-settings.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
@@ -95,15 +96,6 @@ async function usageHeadroom(cfg, { env = process.env, fetchImpl = globalThis.fe
 async function meterCostRows(env = process.env) {
   const { ollamaCloudCostRows, readSnapshots, usageHistoryPath } = await import("../src/cost.mjs");
   return ollamaCloudCostRows(readSnapshots(usageHistoryPath(env)));
-}
-
-// The cached roster, grouped by provider — what `swarm cost` asks each provider
-// to price. A model the table does not list still gets a row, marked unpriced.
-// Band edges are config (`providers.ollama.cloud.ollama.costBands`), shared with the
-// dashboard's server — one source, never two.
-async function costBands(cfg = getConfig()) {
-  const { resolveBands } = await import("../src/cost.mjs");
-  return resolveBands(providerConfig(cfg, "ollama")?.cloud?.ollama?.costBands);
 }
 
 // Read usage through registered provider capabilities. `live` lets an adapter
@@ -291,7 +283,7 @@ async function seatBlock(plan, cfg) {
     rows,
     costRows: await meterCostRows(),
     roster: await launchableRoster(cfg),
-    bands: await costBands(),
+    ...(await costSettings()),
   });
 }
 
@@ -744,15 +736,17 @@ async function readManifestTasks(dir) {
 }
 
 async function cmdPerf(rest) {
-  const { readRows, aggregate, overall, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
+  const { readRows, aggregate, dedupe, scoresPath, frontier, PRIOR_WEIGHT } = await import("../src/scores.mjs");
   const aspect = getFlag("aspect", rest);
   const model = getFlag("model", rest);
   const domain = getFlag("domain", rest);
+  const cfg = getConfig();
   const path = scoresPath();
   const rows = readRows(path);
   const report = aggregate(rows, { aspect, model, domain, combineProviders: true });
   const costs = await meterCostRows();
-  const bands = await costBands();
+  const settings = await costSettings(cfg);
+  const { bands } = settings;
   // A model is dominated only when another is strictly better AND strictly
   // cheaper; `*` marks the frontier. Unmeasured cost renders "—": blank would
   // read as dominated when the truth is unknown.
@@ -780,9 +774,7 @@ async function cmdPerf(rest) {
   if (filters) out(`filters: ${filters}`);
   out("");
   if (rest.includes("--overall")) {
-    // One table: models ranked on the mean of the four universal weighted
-    // scores; per-aspect columns beside it so the average cannot hide a hole.
-    const o = overall(rows, { model, domain, combineProviders: true });
+    const o = (await import("../src/perf-overall.mjs")).perfOverall({ cfg, roster: await launchableRoster(cfg), rows, costRows: costs, ...settings, model, domain, out });
     const costByModel = byModel(frontier(rows, costs, { model, domain, bands }));
     const w = Math.max(5, ...o.cells.map((c) => c.model.length));
     out(`    ${"model".padEnd(w)}    n  overall  ${o.universals.map((a) => a.slice(0, 5).padStart(5)).join("  ")}  cost  frontier`);
@@ -792,7 +784,8 @@ async function cmdPerf(rest) {
       const { cost, frontier: fm } = candidate?.providerLocal
         ? { cost: "—", frontier: "provider-local" }
         : costCols(candidate);
-      const flag = c.combined == null ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "";
+      const flag = (c.combined == null ? dim("  [no grades — outcomes only]") : c.provisional ? dim("  [provisional n<5]") : "")
+        + (c.supersededBy ? dim(`  [superseded by ${c.supersededBy}]`) : "");
       const bad = Object.entries(c.outcomes).filter(([k, v]) => v > 0 && k !== "completed");
       const tail = bad.length ? dim(`  · ${bad.map(([k, v]) => `${k} ${v}`).join(", ")}`) : "";
       out(`    ${c.model.padEnd(w)}  ${String(c.n).padStart(3)}  ${(c.combined == null ? "—" : c.combined.toFixed(2)).padStart(7)}  ${cols}  ${cost.padEnd(4)}${fm}${flag}${tail}`);
@@ -840,7 +833,8 @@ async function cmdPerf(rest) {
 async function cmdScoresRealmodel(rest) {
   const dryRun = rest.includes("--dry-run");
   const { readFileSync, writeFileSync, copyFileSync, existsSync } = await import("node:fs");
-  const { backfillRealmodel, scoresPath } = await import("../src/scores.mjs");
+  const { scoresPath } = await import("../src/scores.mjs");
+  const { backfillRealmodel } = await import("../src/scores-backfill.mjs");
   const { transcriptPath } = await import("../src/results.mjs");
 
   const path = scoresPath();

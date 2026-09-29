@@ -20,7 +20,7 @@ import { readRunLog } from "../src/runlog.mjs";
 import { readResult, readSummary } from "../src/results.mjs";
 import { buildSnapshot } from "../src/serve/estate.mjs";
 import { createServer } from "../src/serve/server.mjs";
-import { costView } from "../src/serve/perf-views.mjs";
+import { costView } from "../src/cost-view.mjs";
 import { identityLabel } from "../statusline/swarm-statusline.mjs";
 
 function config(root) {

@@ -13,7 +13,8 @@ import { join, dirname } from "node:path";
 import { swarmHome } from "./config.mjs";
 import { inferStoredIdentity } from "./results.mjs";
 import { costObservation as validateCostObservation } from "./contracts.mjs";
-import { deriveCloudName, dropSuperseded } from "./discovery.mjs";
+import { deriveCloudName } from "./discovery.mjs";
+import { dropSuperseded } from "./supersession.mjs";
 import { provenanceBanner } from "./usage.mjs";
 import { RATE_CARD_SOURCES, rateCardBanner, rateCards, resolveRatePrice } from "./rate-card.mjs";
 

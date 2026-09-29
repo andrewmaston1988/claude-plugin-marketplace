@@ -5,9 +5,12 @@
 // fire on correct seats and be ignored on real ones. Pure over injected rows:
 // no I/O, no store path.
 
-import { aggregate, frontier } from "./scores.mjs";
+import { aggregate, frontier, overall } from "./scores.mjs";
 import { band, DEFAULT_COST_BANDS } from "./cost.mjs";
 import { identityOf, identityKey, CLAUDE_ALIASES, claudeFamilyOf } from "./contracts.mjs";
+import { collapseRoster } from "./discovery.mjs";
+import { costView, verdictsIn } from "./cost-view.mjs";
+import { successorPitch } from "./supersession.mjs";
 
 // The seating canon: 20 graded runs per model per capability slot. Under it a
 // grade is not a verdict — printed as n<20, the rule's own term, which reads as
@@ -75,7 +78,57 @@ function resolveSeatIdentity(target, byIdentity) {
     .sort((a, b) => (b.entry.n || 0) - (a.entry.n || 0))[0] || null;
 }
 
-export function seatReport({ models = [], rows = [], costRows = [], roster = [], bands = DEFAULT_COST_BANDS } = {}) {
+// Launchable models short of the canon, each with the elder it would replace (the
+// family member whose successor it is, read backwards) and that elder's record.
+// Sorted best-value elder's successor, frontier elder's, the rest by elder rank, no elder last.
+export function gapCandidates({ roster = [], rows = [], costRows = [], bands = DEFAULT_COST_BANDS, valueMargin, cloudSuffix } = {}) {
+  if (!roster.length || !rows.length) return [];
+  const byIdentity = new Map(frontier(rows, costRows, { bands })
+    .map((e) => [identityKey(identityOf(e)), { identity: identityOf(e), entry: e }]));
+  // Store rows join the roster so an elder that has left it is still found.
+  const family = collapseRoster([...roster, ...[...byIdentity.values()].map(({ identity }) => identity)]
+    .map((m) => {
+      const identity = identityOf(m);
+      return { ...(identity.provider ? { provider: identity.provider } : {}), model: identity.model };
+    }));
+  const elderOf = (identity) => family.find((row) => row.supersededBy === identity.model
+    && (row.provider || "ollama") === (identity.provider || "ollama"))?.model || null;
+  // The rank and verdict words are the table's and the Cost screen's own — the
+  // combined-provider ranking and the same costView options the dashboard resolves.
+  const rankOf = new Map(overall(rows, { combineProviders: true }).cells.map((cell, i) => [cell.model, i + 1]));
+  const view = costRows.length ? costView(rows, costRows, { bands, valueMargin, cloudSuffix }) : null;
+  const verdictsOf = (provider, model) => verdictsIn(
+    view?.sections.find((s) => (s.provider || "unqualified") === (provider || "unqualified")), model);
+
+  const candidates = [];
+  for (const modelEntry of roster) {
+    const target = identityOf(modelEntry);
+    const resolved = resolveSeatIdentity(target, byIdentity);
+    const n = resolved?.entry?.n ?? 0;
+    if (n >= CANON_N) continue;
+    const elder = elderOf(target);
+    candidates.push({
+      model: target.model,
+      // Only a DECLARED provider rides along: writing an inferred one back would
+      // flip the identity to explicit and print "ollama/kimi-k2.7-code:cloud".
+      ...(target.explicit ? { provider: target.provider } : {}),
+      n,
+      elder,
+      rank: elder ? rankOf.get(elder) ?? null : null,
+      verdicts: elder ? verdictsOf(target.provider, elder) : [],
+    });
+  }
+  const tier = (c) => (c.elder == null ? 3 : c.verdicts.includes("best value") ? 0 : c.verdicts.includes("frontier") ? 1 : 2);
+  return candidates.sort((a, b) => tier(a) - tier(b)
+    || (a.rank ?? Infinity) - (b.rank ?? Infinity)
+    || a.n - b.n || a.model.localeCompare(b.model));
+}
+
+// The line's own instruction: the reader may have no skill or rule loaded, and
+// the seating canon is exactly what a fresh author has not read.
+const GAP_INSTRUCTION = "seat it on one bounded leaf this run; a grade at n<20 is not a verdict";
+
+export function seatReport({ models = [], rows = [], costRows = [], roster = [], bands = DEFAULT_COST_BANDS, valueMargin, cloudSuffix } = {}) {
   if (!models.length || !rows.length) return [];
 
   // One record per model straight from the source aggregators: frontier's wtd
@@ -123,8 +176,17 @@ export function seatReport({ models = [], rows = [], costRows = [], roster = [],
   }
 
   const unseated = (roster || []).filter((m) => !seated.has(identityKey(identityOf(m))));
-  if (unseated.length) {
-    const items = unseated.map((m) => {
+  // The manifest that already seats a model short of the canon needs no nudge —
+  // the seat is taken — so the line only fires when every gap is still open.
+  const gaps = gapCandidates({ roster, rows, costRows, bands, valueMargin, cloudSuffix });
+  const gap = gaps.some((c) => seated.has(identityKey(identityOf(c)))) ? null : gaps[0] ?? null;
+  if (gap) {
+    const state = gap.n > 0 ? nPart(gap.n) : "never graded";
+    lines.push(`  gap seat available: ${shown(identityOf(gap))} (${state}) — ${successorPitch(gap)} · ${GAP_INSTRUCTION}`);
+  }
+  const rest = gap ? unseated.filter((m) => identityKey(identityOf(m)) !== identityKey(identityOf(gap))) : unseated;
+  if (rest.length) {
+    const items = rest.map((m) => {
       const resolved = resolveSeatIdentity(identityOf(m), byIdentity);
       const entry = resolved?.entry || null;
       return entry && entry.n > 0 ? `${shown(identityOf(m))} ${nPart(entry.n)}` : `${shown(identityOf(m))} never graded`;

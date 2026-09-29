@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   validateRow, dedupeKey, dedupe, appendRows, readRows, aggregate, overall, scoresPath, shrink, fairPrior, PRIOR_WEIGHT, frontier, canonicalRunKey, gradedRunKeys,
-  transcriptModels, backfillRealmodel,
 } from "../src/scores.mjs";
+import { transcriptModels, backfillRealmodel } from "../src/scores-backfill.mjs";
 import { ASPECTS, OUTCOMES } from "../src/aspects.mjs";
 import { runCli } from "./helpers/cli.mjs";
 
