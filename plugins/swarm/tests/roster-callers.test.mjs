@@ -102,6 +102,19 @@ test("swarm validate reads the roster through the reader: a catalog model's effo
   }
 });
 
+const OFFLINE = new URL("./helpers/offline-fetch.mjs", import.meta.url).href;
+
+test("swarm refresh-prices reads the roster before it fetches, and reaches the vendor fetch", () => {
+  const w = world();
+  try {
+    const r = runCli(["refresh-prices", "--dry-run"], { cwd: w.dir, env: { SWARM_HOME: w.home, NODE_OPTIONS: `--import=${OFFLINE}` } });
+    ok(/-> 599/.test(r.stderr), `the command died before its first fetch:
+${r.stderr}`);
+  } finally {
+    cleanup(w.dir);
+  }
+});
+
 test("swarm cost prices a model the catalog just carried in, with no models run", () => {
   const w = world({ model: UNPRICED_MODEL });
   try {
