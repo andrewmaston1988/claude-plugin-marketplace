@@ -1,16 +1,7 @@
-// Transcript scan: everything swarm prints into a Claude session — the commands a
-// session runs and the two hook injections — names no provider that is switched off.
-// Operator, 2026-09-29: "it's just something I don't want e.g. transcripts spammed with
-// their model designations", and it runs both ways: "if you have only codex enabled ...
-// we should never see claude". Runtime output only; the static skill docs are out of scope.
-//
-// Each case seeds an isolated home with EVERY provider's roster, usage, scores, price
-// card, history and a finished run, so a leak is a read that ignored the enabled flag,
-// then drives the real entry points as child processes. Every fetch is recorded and
-// answered 599: none leaves the machine, and none may go to a disabled provider's vendor.
-// Score rows carry an explicit provider; a legacy row with none and a `gpt-*` model cannot be
-// attributed, so it is kept (nothing infers codex from a model name). No line is exempted: the one allowed mention (the setting that enables a provider) is a
-// config key, and none of these commands prints one.
+// Transcript scan: nothing swarm prints into a Claude session names a provider that is switched off.
+// Operator, 2026-09-29: "it's just something I don't want e.g. transcripts spammed with their model
+// designations" and "if you have only codex enabled ... we should never see claude".
+// Every provider is seeded everywhere, so a leak is a read that ignored the enabled flag.
 import { test } from "node:test";
 import { equal, ok } from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -45,6 +36,7 @@ function seedHome(base, enabled) {
     allowedRoots: [base],
     swarm: { always: true },
     quotaPreflight: false,
+    grading: { enabled: true },
     providers: Object.fromEntries(IDS.map((id) => [id, { enabled: enabled.includes(id), allowedRoots: [base] }])),
   };
   config.providers.ollama.cloud = { ollama: { enabled: enabled.includes("ollama") } };
@@ -146,6 +138,7 @@ test("control: with every provider enabled the seeds ARE read — each provider 
   for (const key of ["hook SessionStart", "hook UserPromptSubmit", "swarm validate plan.json"]) {
     ok(outputs[key].trim().length > 0, `${key} printed nothing — a silent surface proves nothing`);
   }
+  ok(outputs["swarm validate plan.json"].includes("seats:"), "no seats block — the validate leg of the scan would be vacuous");
 });
 
 const CASES = [
@@ -159,6 +152,7 @@ const CASES = [
 for (const { name, enabled } of CASES) {
   test(`transcript scan, ${name}: nothing printed names a disabled provider`, () => {
     const { outputs, urls } = scan(enabled);
+    ok(outputs["swarm validate plan.json"].includes("seats:"), "no seats block — the validate leg is vacuous");
     const found = IDS.filter((id) => !enabled.includes(id)).flatMap((id) => leaks(outputs, id).map((l) => `[${id}] ${l}`));
     equal(found.length, 0, `disabled providers named:\n${found.join("\n")}`);
     const vendors = { codex: /openai\.com/, claude: /anthropic\.com|claude\.com/, ollama: /ollama\.com|11434/ };
