@@ -1,9 +1,13 @@
 // Everything the run paints to stdout: the live roster, the one-shot status
 // view, the report footnote and the closing block. Storage lives in results.mjs.
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { workTokens } from "./stream.mjs";
 import { readRun } from "./runlog.mjs";
+
+const ENGINE = fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url));
 
 // ── stdout contract ───────────────────────────────────────────────────────────
 // The run repaints a full roster snapshot (header, one row per task, counts
@@ -170,7 +174,13 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000, costOf)
   if (!run) {
     return `no run.log at ${join(dir, "run.log")} (absolute) — either the run has not started or this is not the run's resultsDir; pass the absolute path printed at dispatch.`;
   }
-  return renderRun(run, { now, quietWarnMs, costOf });
+  const status = renderRun(run, { now, quietWarnMs, costOf });
+  // A finished run's kept trees are otherwise named only in its closing block, which a
+  // backgrounded dispatch never shows its session.
+  let kept = [];
+  try { kept = JSON.parse(readFileSync(join(dir, "summary.json"), "utf8")).worktreesKept || []; } catch { /* no summary: still running */ }
+  kept = kept.filter((wt) => wt?.path && existsSync(wt.path));
+  return kept.length ? `${status}\n${formatKeptWorktrees(kept, { resultsDir: dir, engine: ENGINE })}` : status;
 }
 
 // The roster view of an already-read run (see src/runlog.mjs readRun). Rows the

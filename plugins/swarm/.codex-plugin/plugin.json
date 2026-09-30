@@ -17,7 +17,7 @@
     "orchestration"
   ],
   "skills": "./skills/",
-  "hooks": {},
+  "hooks": "./hooks/hooks.json",
   "interface": {
     "displayName": "Swarm",
     "shortDescription": "Manifest-driven parallel fan-out across alternative models",

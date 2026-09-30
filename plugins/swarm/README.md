@@ -104,13 +104,14 @@ file, so the resolver reads `~/.codex/config.toml` for the enabling entry and re
 newest enabled install itself. `SWARM_PLUGIN_REGISTRY` still names a Claude-shaped registry,
 and setting it suppresses the Codex lookup.
 
-**Swarm's tool-gating hooks are Claude-only, and the Codex manifest declares none.** Codex's
-hook runtime is fully built — the event set, the `type: "command"` schemas and
-`CLAUDE_PLUGIN_ROOT` are all in the 0.156.1 binary — but `feature.plugin_hooks` is `false`
-and server-controlled, and `--enable plugin_hooks` does not flip it. A plugin-declared hook
-cannot run, so declaring one would promise enforcement that never happens. Under Codex,
-`dispatch-gate`, `foreground-guard` and `leaf-guard` do not fire: a Codex leaf is
-unguarded, and the governance roots in `~/.swarm/config.json` are the only containment.
+**Codex runs every swarm hook.** `.codex-plugin/plugin.json` names the same
+`hooks/hooks.json` Claude loads, so the session-start notice, `dispatch-gate`,
+`foreground-guard`, `leaf-guard`, `grade-nudge` and `prune-nudge` fire on both hosts. Codex asks
+you to trust a plugin's hooks once, in an interactive session; headless `codex exec` — every
+Codex leaf — silently skips untrusted hooks, so trust them before dispatching Codex leaves and
+they inherit it. Codex has no `Skill` tool: reading a swarm `SKILL.md` through the shell is the
+invocation the dispatch gate counts. It has no `run_in_background` either, so the gate lets a
+Codex host dispatch in the foreground.
 
 ## Usage
 
@@ -361,7 +362,9 @@ the target tree and merges the named branches in. There is no key for it.
 commits not yet landed (by patch, so squash-merges count) is never deleted or force-reset —
 the engine refuses rather than lose it. `swarm prune <resultsDir>` destroys one run's kept
 worktrees and branches, never its results — refuses a live run, prints every tree first,
-`--dry-run` for a no-op preview. Nothing prunes on its own.
+`--dry-run` for a no-op preview. Nothing prunes on its own; instead `swarm status` on a
+finished run names its kept trees with the prune command, and a Stop hook lists every
+finished run in the session's repo still holding trees, at every turn end until they are gone.
 
 Leaves dispatch with `--output-format stream-json`; a provider that emits plain text
 instead degrades gracefully (raw stdout becomes `output`, token columns stay empty).

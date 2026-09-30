@@ -136,9 +136,6 @@ function validateDispatchPolicy(task, identity, adapter, cfg, governanceIo) {
   if (identity.provider === "codex" && task.contextWindow !== undefined) {
     throw new Error('provider \'codex\' rejected task: Codex tasks do not support contextWindow; "1m" is a Claude CLI model-name suffix');
   }
-  if (identity.provider === "codex" && task.leafGuard && task.leafGuard !== false) {
-    throw new Error("provider 'codex' cannot run a configured leaf guard; set leafGuard: false for this task");
-  }
   const { roots, deniedBy } = allowedRootsFor(cfg, identity.provider);
   // Legacy hand-built configs predate canonical provider blocks. Keep their
   // Ollama dispatch byte-compatible, while canonical and Codex configs always
