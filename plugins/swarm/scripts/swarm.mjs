@@ -12,7 +12,7 @@ import { collapseRoster, visibleModels, probeTopModels } from "../src/discovery.
 import { enabledProviderIds, providerConfig } from "../src/providers.mjs";
 import { costBands, costSettings } from "../src/cost-settings.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
-import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
+import { runPlan, makeDefaultIo, launcherSession } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
@@ -34,6 +34,7 @@ const USAGE = `usage: swarm.mjs <command>
   run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
+  status --mine              this session's finished runs still holding kept worktrees, each with its prune command
   wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
   prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
@@ -844,6 +845,19 @@ async function main() {
         return 0;
       }
       case "status": {
+        // Parsed before the positional dir: `--mine` is a flag, and rest[0] is a path.
+        if (rest.includes("--mine")) {
+          const sessionId = launcherSession(process.env);
+          if (!sessionId) {
+            err("swarm: status --mine needs a session — set CODEX_SESSION_ID or CLAUDE_CODE_SESSION_ID, or name one run dir: swarm status <resultsDir>.");
+            return 1;
+          }
+          const { projectRunsHoldingWorktrees, formatMineStatus } = await import("../src/prune-nudge.mjs");
+          const { realRepoToplevel } = await import("../src/manifest-leaf-guard.mjs");
+          const runs = projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel: realRepoToplevel(process.cwd()), sessionId });
+          for (const line of formatMineStatus(runs)) out(line);
+          return 0;
+        }
         if (!rest[0]) { err(USAGE); return 1; }
         const quietWarnMs = (getConfig().quietWarnSecs ?? 60) * 1000;
         if (rest.includes("--watch")) {
