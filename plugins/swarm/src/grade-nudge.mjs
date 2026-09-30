@@ -1,4 +1,4 @@
-// The Stop-hook backstop for grading: which runs THIS session dispatched still
+// The per-turn nudge backstop for grading: which runs THIS session dispatched still
 // have no rows in the score store. The engine asks for grading in the run's
 // closing block — on the run's stdout, the one place a dispatching session
 // never reads, because every dispatch goes through a background Bash. This
@@ -63,7 +63,7 @@ export function ungradedRuns({ env = process.env, home = swarmHome(env), graded 
   const out = [];
   for (const dir of runDirs(home)) {
     // Cheapest predicates first: run.log is the expensive read (45.6MB across
-    // the estate, largest 2.2MB) and every stop pays for the whole walk, so a
+    // the estate, largest 2.2MB) and every turn pays for the whole walk, so a
     // run already graded, waived, or with nothing to grade must never reach it.
     const key = canonicalRunKey(dir);
     if (key == null || graded.has(key)) continue;
@@ -97,9 +97,9 @@ export function runGradeable(dir, { cfg, graded }) {
 }
 
 // Pure: given the walked runs, the store's graded keys and this session's id,
-// should this stop be blocked? A run is listed iff its owning run-start was
+// should this turn be blocked? A run is listed iff its owning run-start was
 // stamped with THIS session and the store holds no row for its canonical key.
-// No once-gate here (D3) — the hook re-fires every turn end; the `stop_hook_active`
+// No once-gate here (D3) — the hook re-fires every turn; the `stop_hook_active`
 // guard there is what keeps a single turn from looping.
 export function decideGradeNudge({ config, runs, graded, sessionId }) {
   if (config?.grading?.enabled !== true) return { block: false, reason: null };
@@ -115,6 +115,6 @@ function gradeNudgeReason(runs) {
     `${runs.length} swarm run${one ? "" : "s"} this session dispatched ${one ? "has" : "have"} no rows in the grading store (grading.enabled is on) — ungraded evidence never reaches \`swarm perf\`, which then decays back into routing by remembered incidents.`,
     `Grade each results dir: fill every universal aspect 1-10, drop \`grades\` on rows whose leaf produced no output, then \`swarm grade --file\` the grades.json it prints.`,
     ...runs.map((r) => `  node ${CLI} grade --init ${r.dir}`),
-    `Not worth grading? \`swarm grade --waive <dir> --reason "<why>"\` — this asks at every stop until each run is graded or waived.`,
+    `Not worth grading? \`swarm grade --waive <dir> --reason "<why>"\` — this asks every turn until each run is graded or waived.`,
   ].join("\n");
 }

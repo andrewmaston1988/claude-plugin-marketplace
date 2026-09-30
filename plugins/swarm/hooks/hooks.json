@@ -4,7 +4,9 @@
       { "matcher": "startup|clear|compact", "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraswarm.mjs\"" } ] }
     ],
     "UserPromptSubmit": [
-      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraswarm.mjs\"" } ] }
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/ultraswarm.mjs\"" } ] },
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/grade-nudge.mjs\"" } ] },
+      { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/prune-nudge.mjs\"" } ] }
     ],
     "PreToolUse": [
       { "hooks": [ { "type": "command", "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/leaf-guard.mjs\"" } ] },

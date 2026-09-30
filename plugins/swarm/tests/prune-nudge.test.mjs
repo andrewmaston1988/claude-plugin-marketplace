@@ -114,16 +114,16 @@ test("the block reason is exactly one line: this session's worktree count, (and 
   equal(decidePruneNudge({ mine: [{ dir: "A", kept: 1 }], config: { swarm: { pruneNudge: false } } }).block, false);
 });
 
-test("the hook binary writes prune-nudged into the run it named, is silent at the second stop, and status --mine still names it", () => {
+test("the hook binary writes prune-nudged into the run it named, is silent on its next firing, and status --mine still names it", () => {
   const f = fixture();
   try {
     const dir = f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
-    const payload = { session_id: SESSION, cwd: f.repo, hook_event_name: "Stop", stop_hook_active: false };
+    const payload = { session_id: SESSION, cwd: f.repo, hook_event_name: "UserPromptSubmit", stop_hook_active: false };
     const first = spawnHook(payload, f.home);
-    equal(first.stdout, JSON.stringify({ decision: "block", reason: reason1 }) + "\n");
+    equal(first.stdout, JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: reason1 } }) + "\n");
     equal(existsSync(pruneMarkerPath(dir)), true, "the named run is marked");
     equal(readFileSync(pruneMarkerPath(dir), "utf8"), SESSION);
-    // Named once by the HOOK: the same session's next stop is silent...
+    // Named once by the HOOK: the same session's next turn is silent...
     equal(spawnHook(payload, f.home).stdout, "");
     // ...while the listing the line points at still names the run, with its prune
     // command, for as long as its trees remain. The marker gates the hook's line only.
@@ -152,7 +152,7 @@ test("a resume by another session (a new launcher) is nudged once more", () => {
     // Re-stamped by the resume: the last run-start wins, exactly as grade-nudge reads it.
     writeFileSync(join(dir, "run.log"), JSON.stringify({ ts: Date.now(), event: "run-start", launcher: SESSION, tasks: [] }) + "\n");
     deepEqual(projectRunsHoldingWorktrees({ home: f.home, toplevel: f.toplevel, sessionId: SESSION }).mine, [{ dir, kept: 1 }]);
-    const second = spawnHook({ session_id: SESSION, cwd: f.repo, hook_event_name: "Stop" }, f.home);
+    const second = spawnHook({ session_id: SESSION, cwd: f.repo, hook_event_name: "Stop", turn_id: "turn-1", model: "gpt-6-luna" }, f.home);
     equal(second.stdout, JSON.stringify({ decision: "block", reason: reason1 }) + "\n");
     equal(readFileSync(pruneMarkerPath(dir), "utf8"), SESSION);
   } finally { f.cleanup(); }
@@ -162,7 +162,7 @@ test("no session id in the payload makes the hook silent", () => {
   const f = fixture();
   try {
     f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
-    const r = spawnHook({ cwd: f.repo, hook_event_name: "Stop" }, f.home);
+    const r = spawnHook({ cwd: f.repo, hook_event_name: "UserPromptSubmit" }, f.home);
     equal(r.status, 0);
     equal(r.stdout, "");
   } finally { f.cleanup(); }
@@ -291,4 +291,36 @@ test("nothing calls pruning a finished run the operator's call", () => {
   for (const rel of ["src/prune-nudge.mjs", "hooks/prune-nudge.mjs"]) {
     equal(/operator'?s call|reader'?s call|never yours/i.test(read(rel)), false, rel);
   }
+});
+
+test("the Claude Stop event is silent and leaves the prune marker unwritten", () => {
+  const f = fixture();
+  try {
+    const dir = f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
+    const result = spawnHook({ session_id: SESSION, cwd: f.repo, hook_event_name: "Stop" }, f.home);
+    equal(result.status, 0);
+    equal(result.stdout, "");
+    equal(existsSync(pruneMarkerPath(dir)), false);
+  } finally { f.cleanup(); }
+});
+
+test("the Codex Stop event blocks with the literal reason", () => {
+  const f = fixture();
+  try {
+    f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
+    const result = spawnHook({ session_id: SESSION, cwd: f.repo, hook_event_name: "Stop", turn_id: "turn-1", model: "gpt-6-luna" }, f.home);
+    equal(result.status, 0);
+    equal(result.stdout, JSON.stringify({ decision: "block", reason: reason1 }) + "\n");
+  } finally { f.cleanup(); }
+});
+
+test("the Codex UserPromptSubmit event is silent", () => {
+  const f = fixture();
+  try {
+    const dir = f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
+    const result = spawnHook({ session_id: SESSION, cwd: f.repo, hook_event_name: "UserPromptSubmit", turn_id: "turn-1", model: "gpt-6-luna" }, f.home);
+    equal(result.status, 0);
+    equal(result.stdout, "");
+    equal(existsSync(pruneMarkerPath(dir)), false);
+  } finally { f.cleanup(); }
 });
