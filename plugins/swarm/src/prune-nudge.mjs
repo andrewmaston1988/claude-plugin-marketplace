@@ -29,7 +29,10 @@ function alreadyNudged(dir, sessionId) {
 // LATEST run-start (`launcher`), the same rule grade-nudge reads.
 // Cheap predicates first: kept trees on disk and the marker are judged before any
 // run.log is read.
-export function projectRunsHoldingWorktrees({ home, toplevel, sessionId, heartbeatMs = 15_000 } = {}) {
+// `skipNudged` is the hook's path alone: it drops the runs whose marker already names
+// this session, so the line is said once. The listing must NOT skip them, or it would
+// hide the very run the line points at.
+export function projectRunsHoldingWorktrees({ home, toplevel, sessionId, skipNudged = false, heartbeatMs = 15_000 } = {}) {
   const out = { mine: [], others: 0 };
   if (!toplevel) return out;
   const root = join(home, "runs", runsKeyFor(toplevel));
@@ -39,7 +42,7 @@ export function projectRunsHoldingWorktrees({ home, toplevel, sessionId, heartbe
     const dir = join(root, name);
     const kept = keptWorktreesOnDisk(dir, { heartbeatMs }).length;
     if (!kept) continue;
-    if (sessionId && alreadyNudged(dir, sessionId)) continue;
+    if (skipNudged && sessionId && alreadyNudged(dir, sessionId)) continue;
     let text;
     try { text = readFileSync(join(dir, "run.log"), "utf8"); } catch { continue; }
     const launcher = lastRunStart(text)?.launcher;
@@ -56,12 +59,12 @@ export function projectRunsHoldingWorktrees({ home, toplevel, sessionId, heartbe
 // `swarm.pruneNudge: false` silences it like the sibling nudges.
 export const inLeafOrAutonomous = (env) => env.SWARM_LEAF === "1" || Boolean(env.CORRELATION_ID);
 
-// Exactly one line: the Stop hook prints this at every stop, and the whole block used
-// to cost the operator a line per run.
+// Exactly one line: the Stop hook prints it once per run, and the per-run detail it
+// points at lives in the listing `node <cli> status --mine` prints.
 export function pruneReason({ worktrees, others }) {
   const mine = `${worktrees} worktree${worktrees === 1 ? "" : "s"} from runs in this session`;
   const andOthers = others > 0 ? ` (and ${others} other${others === 1 ? "" : "s"})` : "";
-  return `${mine}${andOthers} — run \`swarm status --mine\`, take anything you still need, then prune them.`;
+  return `${mine}${andOthers} — run \`node ${CLI} status --mine\`, take what you still need, then prune each run once its work has landed or been taken — do not ask the operator.`;
 }
 
 export function decidePruneNudge({ mine = [], others = 0, env = {}, config } = {}) {
@@ -72,8 +75,9 @@ export function decidePruneNudge({ mine = [], others = 0, env = {}, config } = {
   return { block: true, reason: pruneReason({ worktrees: mine.reduce((n, r) => n + r.kept, 0), others }) };
 }
 
-// What `swarm status --mine` prints. Read-only — it prunes nothing, and still names a
-// run the hook has gone quiet about, while its trees remain.
+// What `swarm status --mine` prints. Read-only — it prunes nothing — and it lists every
+// run this session owns while its trees remain, including the ones the hook has already
+// named: the marker gates the hook's line, never this listing.
 export function formatMineStatus({ mine = [], others = 0, cli = CLI } = {}) {
   if (!mine.length) return ["swarm status --mine: no finished run this session dispatched is holding kept worktrees."];
   const trees = mine.reduce((n, r) => n + r.kept, 0);
@@ -83,6 +87,6 @@ export function formatMineStatus({ mine = [], others = 0, cli = CLI } = {}) {
     ...mine.map((r) => `  node ${cli} prune ${r.dir} --dry-run   (${r.kept} tree${r.kept === 1 ? "" : "s"})`),
   ];
   if (others > 0) lines.push(`Other sessions' runs hold ${others} more (not this session's to prune).`);
-  lines.push("Take anything you still need, then prune them: `prune` deletes a run's worktrees and branches, never its results.");
+  lines.push("Take what you still need, then prune each run once its work has landed or been taken — do not ask the operator; `prune` deletes a run's worktrees and branches, never its results.");
   return lines;
 }
