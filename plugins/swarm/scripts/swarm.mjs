@@ -763,7 +763,6 @@ async function cmdUsage(rest = [], {
   for (const [provider, message] of Object.entries(providerReading.errors)) write(`${provider}: unavailable (${message})`);
   for (const line of usageLines(usages)) write(line);
   for (const line of notableLines(usages)) write(line);
-  // A stale reading warns rather than verdicts, `quota`'s rule stated once for both.
   return usages.some((u) => u.provider === "anthropic" && u.state === "exhausted" && u.provenance !== "stale") ? 1 : 0;
 }
 
