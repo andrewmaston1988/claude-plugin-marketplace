@@ -8,12 +8,16 @@
 // `permissions.deny` binds Edit/Read but not Write. A PreToolUse hook is the only
 // primitive that confines a WRITE, so this is the one mechanism swarm can inject.
 //
-// It is INJECTED, never installed: src/manifest-normalize.mjs (and src/dispatch.mjs, for the report digest) merges it into each write-capable
-// leaf's own `--settings` on the command line. A settings file inside the worktree
-// would sit where the leaf can rewrite it, which defeats the purpose. That also
-// distinguishes this from the CONFIGURED leaf guard (`projects[].hooks.preToolUse`,
-// hooks/leaf-guard.mjs), which reaches a leaf as SWARM_LEAF_GUARD env vars and only
-// works on a machine that has its own hook reading them.
+// On Claude it is INJECTED: src/dispatch.mjs merges it, rooted by the task's
+// `writeRoots`, into each write-capable leaf's own `--settings` on the command line.
+// A settings file inside the worktree would sit where the leaf can rewrite it,
+// which defeats the purpose. Codex has no `--settings`, so there the plugin's
+// hooks.json runs it on `apply_patch` as one fixed command — Codex keys hook trust
+// by the command's hash, so per-leaf argv would never be trusted — and the engine
+// passes the roots in SWARM_WRITE_GUARD_ROOTS instead. That differs from the
+// CONFIGURED leaf guard (`projects[].hooks.preToolUse`, hooks/leaf-guard.mjs), which
+// reaches a leaf as SWARM_LEAF_GUARD env vars and only works on a machine that has
+// its own hook reading them.
 //
 // FAIL OPEN on anything unparseable, and on an invocation carrying no roots. The
 // escape this guards against is real but rare; a guard that fails closed would brick
