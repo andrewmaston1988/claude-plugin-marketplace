@@ -79,8 +79,11 @@ in the run's effective manifest snapshot; `runner` is derived internally and is 
 manifest grammar.
 
 Provider-specific roots and enabled state are checked during validation and again at
-dispatch. Codex tasks reject Claude-only `settings`; a configured project leaf guard
-applies to them like any provider.
+dispatch. Codex tasks accept `settings` with only an `env` key: per-leaf env vars reach
+the Codex process, and any other settings key is refused by name. Codex writer leaves
+get the same leaf write guard as Claude writers: `apply_patch` is confined to their own
+worktree plus `outputDir` after the operator trusts swarm hooks in an interactive Codex
+session; shell writes stay unguarded on both hosts.
 
 ### Effort — `effort`
 
