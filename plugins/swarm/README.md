@@ -368,10 +368,11 @@ the target tree and merges the named branches in. There is no key for it.
 commits not yet landed (by patch, so squash-merges count) is never deleted or force-reset —
 the engine refuses rather than lose it. `swarm prune <resultsDir>` destroys one run's kept
 worktrees and branches, never its results — refuses a live run, prints every tree first,
-`--dry-run` for a no-op preview. Nothing prunes on its own; instead `swarm status` on a
-finished run names its kept trees with the prune command, and a Stop hook lists every
-finished run in the session's repo still holding trees, at every turn end until they are gone
-(`"swarm": { "pruneNudge": false }` silences it).
+`--dry-run` for a no-op preview. `swarm status --mine` lists this session's finished runs still
+holding worktrees. The dispatching session takes what it needs from each finished run, then
+prunes it with `swarm prune`; it does not ask the operator. The Stop hook names each finished
+run once, in one line counting this session's worktrees and other sessions'. The setting
+`"swarm": { "pruneNudge": false }` silences it.
 
 Leaves dispatch with `--output-format stream-json`; a provider that emits plain text
 instead degrades gracefully (raw stdout becomes `output`, token columns stay empty).
