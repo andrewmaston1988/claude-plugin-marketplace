@@ -73,7 +73,7 @@ Dispatch is **deny-by-default, for every provider including Claude**. `allowedRo
 splits into agents (one per lane; merges only on shared surface), and it produces the numbers
 the gate's third question carries. Drafting a leaf-per-item manifest without it is the failure that skill exists to catch. It does not restate the gate and the gate does not restate it. **Invoke `swarm:executing-swarms` in the same breath** — it decides what shape the graph takes and what each task waits for, which is the other half of a manifest you could defend line by line; the two answer different questions and neither summarises the other.
 
-This is not just prose: on Claude Code and Codex alike the dispatch gate denies a `run` unless `swarm:swarm`, `swarm:orchestrating-agents` and `swarm:executing-swarms` were each invoked this session — the swarm skill per dispatch (once per session under `swarm.always`), the other two once per session. On a Codex host, which has no `Skill` tool, reading each skill's `SKILL.md` through the shell is the invocation.
+This is not just prose: on Claude Code, and on Codex once the plugin's hooks are trusted there (README → Codex), the dispatch gate denies a `run` unless `swarm:swarm`, `swarm:orchestrating-agents` and `swarm:executing-swarms` were each invoked this session — the swarm skill per dispatch (once per session under `swarm.always`), the other two once per session. On a Codex host, which has no `Skill` tool, reading each skill's `SKILL.md` through the shell is the invocation.
 
 **THE GATE'S ANSWER IS THE ONLY CONSENT TO SPEND. NO ANSWER IS NO.** Violating the letter of this rule is violating its spirit.
 

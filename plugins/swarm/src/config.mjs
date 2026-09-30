@@ -5,6 +5,9 @@ import { fileURLToPath } from "node:url";
 
 const DEFAULTS_PATH = fileURLToPath(new URL("../config.default.json", import.meta.url));
 
+// The engine CLI every printed command names, pasteable from any shell.
+export const enginePath = () => fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url));
+
 // ~/.swarm — overridable via SWARM_HOME so tests never touch the real home dir.
 export function swarmHome(env = process.env) {
   return env.SWARM_HOME || join(homedir(), ".swarm");

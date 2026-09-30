@@ -3,11 +3,11 @@
 // like grade-nudge — a reminder shown once is lost under a busy session.
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { readSummary } from "./results.mjs";
+import { enginePath } from "./config.mjs";
 import { runLiveness } from "./runlog.mjs";
 
-const CLI = fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url));
+const CLI = enginePath();
 
 // Kept trees still on disk for a FINISHED run — none for a live or resumed run, whose old
 // summary.json still lists them. summary.json is read first: most runs keep no tree.
@@ -37,8 +37,10 @@ export function projectRunsHoldingWorktrees({ home, toplevel, heartbeatMs = 15_0
 }
 
 // Pruning is the operator's call: a swarm leaf or autonomous session is never asked.
+export const inLeafOrAutonomous = (env) => env.SWARM_LEAF === "1" || Boolean(env.CORRELATION_ID);
+
 export function decidePruneNudge({ runs, env = {} }) {
-  if (env.SWARM_LEAF === "1" || env.CORRELATION_ID) return { block: false, reason: null };
+  if (inLeafOrAutonomous(env)) return { block: false, reason: null };
   if (!runs?.length) return { block: false, reason: null };
   const one = runs.length === 1;
   const reason = [

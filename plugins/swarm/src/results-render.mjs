@@ -1,13 +1,13 @@
 // Everything the run paints to stdout: the live roster, the one-shot status
 // view, the report footnote and the closing block. Storage lives in results.mjs.
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { workTokens } from "./stream.mjs";
 import { readRun } from "./runlog.mjs";
 import { keptWorktreesOnDisk } from "./prune-nudge.mjs";
+import { enginePath } from "./config.mjs";
 
-const ENGINE = fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url));
+const ENGINE = enginePath();
 
 // ── stdout contract ───────────────────────────────────────────────────────────
 // The run repaints a full roster snapshot (header, one row per task, counts

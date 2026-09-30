@@ -3,7 +3,7 @@
 // rows pin the three places the hosts differ, and the prune reminder both hosts share.
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, utimesSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, appendFileSync, utimesSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { gateDispatch, isCodexPayload, markerPath, groupingMarkerPath, shapeMarkerPath } from "../hooks/dispatch-gate.mjs";
@@ -11,6 +11,7 @@ import { shouldAck, ackTargets } from "../hooks/skill-ack.mjs";
 import { launcherSession } from "../src/scheduler.mjs";
 import { projectRunsHoldingWorktrees, decidePruneNudge } from "../src/prune-nudge.mjs";
 import { renderStatus } from "../src/results-render.mjs";
+import { enginePath } from "../src/config.mjs";
 
 const CODEX = { session_id: "s", turn_id: "t", model: "gpt-6-luna", tool_name: "Bash" };
 const CLAUDE = { session_id: "s", tool_name: "Bash" };
@@ -42,6 +43,29 @@ test("under Codex, reading a swarm SKILL.md through the shell is the skill invoc
   equal(shouldAck(read(`${root}\\swarm\\references\\setup.md`)), false);
   // On Claude the Skill tool is the invocation; a shell command naming SKILL.md arms nothing.
   equal(shouldAck({ ...CLAUDE, tool_input: { command: `cat '${root}/swarm/SKILL.md'` } }), false);
+});
+
+test("under Codex, only a read verb arms the gate — a command that merely names SKILL.md does not", () => {
+  const cmd = (command) => ({ ...CODEX, tool_input: { command } });
+  const p = "plugins/swarm/skills/swarm/SKILL.md";
+  for (const read of [`cat ${p}`, `head -n 400 ${p}`, `type ${p.replace(/\//g, "\\")}`, `sed -n 1,200p ${p}`, `Get-Content ${p}`]) {
+    equal(shouldAck(cmd(read)), true, read);
+  }
+  for (const other of [`git add ${p}`, `rg gate ${p}`, `git diff -- ${p}`]) {
+    equal(shouldAck(cmd(other)), false, other);
+  }
+});
+
+test("Codex is never told to use run_in_background, which it does not have", () => {
+  const command = "swarm run C:/m.json | tail";
+  ok(!gateDispatch({ command, ...ARMED, codex: true }).reason.includes("run_in_background"));
+  ok(gateDispatch({ command, runInBackground: true, ...ARMED }).reason.includes("run_in_background"));
+});
+
+test("every reminder names the one engine path", () => {
+  const cli = enginePath();
+  ok(cli.endsWith(join("scripts", "swarm.mjs")) && existsSync(cli), cli);
+  ok(decidePruneNudge({ runs: [{ dir: "A", kept: 1 }] }).reason.includes(`node ${cli} prune A`));
 });
 
 test("the launcher stamp prefers CODEX_SESSION_ID, which a Codex under Claude also inherits CLAUDE_CODE_SESSION_ID beside", () => {

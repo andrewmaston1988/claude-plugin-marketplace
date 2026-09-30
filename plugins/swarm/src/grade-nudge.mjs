@@ -7,15 +7,14 @@
 // spawn a hook binary (the plugin's established seam: decideNudge, decide).
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { swarmHome } from "./config.mjs";
+import { swarmHome, enginePath } from "./config.mjs";
 import { canonicalRunKey } from "./scores.mjs";
 import { listLeaves, waiverPath } from "./results.mjs";
 import { runLiveness } from "./runlog.mjs";
 
 // The engine CLI the block reason names — the same command shape the run's
 // own closing block prints, pasteable from any shell.
-const CLI = fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url));
+const CLI = enginePath();
 
 // The last run-start event in a run.log — a run's current owner. A resume
 // appends a second run-start (81 of 658 runs in the real estate), so the last

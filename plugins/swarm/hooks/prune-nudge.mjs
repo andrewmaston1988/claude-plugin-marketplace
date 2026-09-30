@@ -5,7 +5,7 @@
 import { pathToFileURL } from 'node:url';
 import { swarmHome } from '../src/config.mjs';
 import { realRepoToplevel } from '../src/manifest-leaf-guard.mjs';
-import { projectRunsHoldingWorktrees, decidePruneNudge } from '../src/prune-nudge.mjs';
+import { projectRunsHoldingWorktrees, decidePruneNudge, inLeafOrAutonomous } from '../src/prune-nudge.mjs';
 
 async function main() {
   let stdin = '';
@@ -13,7 +13,8 @@ async function main() {
   for await (const c of process.stdin) stdin += c;
   let payload = {};
   try { payload = JSON.parse(stdin); } catch { process.exit(0); }
-  if (payload.stop_hook_active) process.exit(0);
+  // Before the repo scan: a leaf stops often and is never asked.
+  if (payload.stop_hook_active || inLeafOrAutonomous(process.env)) process.exit(0);
 
   const toplevel = payload.cwd ? realRepoToplevel(payload.cwd) : null;
   if (!toplevel) process.exit(0);
