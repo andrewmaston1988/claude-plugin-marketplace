@@ -369,7 +369,7 @@ commits not yet landed (by patch, so squash-merges count) is never deleted or fo
 the engine refuses rather than lose it. `swarm prune <resultsDir>` destroys one run's kept
 worktrees and branches, never its results — refuses a live run, prints every tree first,
 `--dry-run` for a no-op preview. `swarm status --mine` lists this session's finished runs still
-holding worktrees. The dispatching session takes what it needs from each finished run, then
+holding worktrees. The dispatching session takes what it needs from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then
 prunes it with `swarm prune`; it does not ask the operator. The Stop hook names each finished
 run once, in one line counting this session's worktrees and other sessions'. The setting
 `"swarm": { "pruneNudge": false }` silences it.
