@@ -46,3 +46,12 @@ test("an author who already lists Skill gets it once", () => {
   const tools = toolsOf(buildDispatch(task({ allowedTools: "Read,Skill" }), "p", CFG, { _mcpTools: NO_MCP }));
   deepEqual(tools, ["Read", "Skill"]);
 });
+
+// --json-schema hands a `returns` leaf a StructuredOutput tool; off bypass mode an unlisted tool is denied.
+test("a returns leaf may call StructuredOutput once; a leaf without returns is not offered it", () => {
+  for (const over of [{ returns: { type: "object" } }, { returns: { type: "object" }, allowedTools: "Read,StructuredOutput" }]) {
+    const tools = toolsOf(buildDispatch(task(over), "p", CFG, { _mcpTools: NO_MCP }));
+    equal(tools.filter((t) => t === "StructuredOutput").length, 1, `${JSON.stringify(over)} → ${tools}`);
+  }
+  equal(toolsOf(buildDispatch(task(), "p", CFG, { _mcpTools: NO_MCP })).includes("StructuredOutput"), false);
+});
