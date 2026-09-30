@@ -2,11 +2,26 @@
 // and the roots its write guard is confined to. Pure questions about an already
 // parsed task — nothing here validates an authored manifest.
 
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { resolve, join, relative, isAbsolute, sep } from "node:path";
 
 // Default leaf toolset is read-only; write capability must be asked for.
 export const DEFAULT_TOOLS = "Read,Grep,Glob";
 const WRITE_TOOLS = new Set(["edit", "write", "bash", "notebookedit"]);
+
+// Every MCP server configured on the DISPATCHING machine, as an allow rule. Servers
+// must be named: `mcp__*` is skipped with a warning, so a wildcard grants nothing.
+export function mcpTools(_read = () => readFileSync(join(homedir(), ".claude.json"), "utf8")) {
+  try {
+    return Object.keys(JSON.parse(_read()).mcpServers || {}).map((s) => `mcp__${s}`);
+  } catch { return []; }
+}
+
+// Per runner: off bypass permissions an unlisted tool is DENIED, so a claude-CLI leaf keeps Skill and the MCP servers; Codex gets the trio alone.
+export function defaultToolsFor(provider, mcp = []) {
+  return provider === "codex" ? DEFAULT_TOOLS : [DEFAULT_TOOLS, "Skill", ...mcp].join(",");
+}
 
 export function hasWriteTools(allowedTools) {
   return String(allowedTools || "")

@@ -9,9 +9,11 @@ these fields; the decision of *whether* to use them lives in SKILL.md.
 declares this — `allowedTools` already says which a leaf is, and a second field saying the
 same thing is a second field to disagree with.
 
+Defaults vary by runner: Claude and Ollama get `Read,Grep,Glob,Skill` plus the dispatching machine MCP servers; Codex gets `Read,Grep,Glob`. An explicit `allowedTools` list replaces that default.
+
 | The leaf holds | It runs in | Its branch |
 |---|---|---|
-| `Read,Grep,Glob` (the default) | the live repo, at the `cwd` it was given | none — it commits nothing |
+| `Read,Grep,Glob` (the default for Codex) | the live repo, at the `cwd` it was given | none — it commits nothing |
 | `Edit`, `Write` or `Bash` | a private worktree on repo HEAD | `swarm/<run>/<id>`, scoped to this run |
 
 So granting `Bash` to a leaf moves it out of the live repo into a tree of its own. That is

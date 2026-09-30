@@ -9,7 +9,7 @@ import { declaredEfforts, effortFor } from "./models.mjs";
 import { providerConfig } from "./providers.mjs";
 import { runScopeKey } from "./worktree.mjs";
 import { checkGovernance } from "./governance.mjs";
-import { DEFAULT_TOOLS, hasWriteTools, resolveWorktreeName } from "./manifest-task-policy.mjs";
+import { defaultToolsFor, hasWriteTools, resolveWorktreeName } from "./manifest-task-policy.mjs";
 import { guardFor, probeGuard, defaultManifestIo } from "./manifest-leaf-guard.mjs";
 import { PROVIDERS, checkDenylist, checkHeadroom, resolveProvider, validateEffort } from "./manifest-model-gates.mjs";
 
@@ -20,6 +20,10 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
     if (!tops.has(dir)) tops.set(dir, io.checkoutToplevel(dir));
     return tops.get(dir);
   };
+  // The MCP roster is one file on this machine; every default-list task reads the
+  // same answer, so read it at most once per manifest.
+  let mcpRoster;
+  const mcpNames = () => (mcpRoster ??= io.mcpTools());
   return rawTasks.map((t) => {
     const l = label(t);
     const isCompute = t.compute !== undefined;
@@ -135,7 +139,9 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       fallbackModel: !isCompute && !isManifest && typeof t.fallbackModel === "string" ? t.fallbackModel : undefined,
       ...(!isCompute && !isManifest && !isIntegrate && fallbackProvider && { fallbackProvider }),
       effort: isCompute || isManifest || isIntegrate ? undefined : resolvedEffort,
-      allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || DEFAULT_TOOLS,
+      // An authored list wins whole. The default is filled in HERE — not appended at
+      // dispatch — so the snapshot and the leaf's own result record the list it got.
+      allowedTools: isCompute || isManifest || isIntegrate ? "" : t.allowedTools || defaultToolsFor(provider, mcpNames()),
       cwd: originalCwd,
       originalCwd,
       ...(checkoutToplevel !== undefined && { checkoutToplevel }),
