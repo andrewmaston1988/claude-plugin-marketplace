@@ -42,7 +42,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
 
 1. Read `results/<id>.json` and, for a leaf with a tree, `git log <target>..<branch>` — confirm it is genuinely empty. (The engine now marks a leaf that died mid-stream `failed`, not `ok`, so this is usually already flagged for you.)
 2. If empty, **re-dispatch a FRESH manifest name** (new run dir). If it rat-holed (a leaf sitting in a long silent thinking turn), fix the PROMPT first — add "write files as you go, commit early" and pre-resolve the one genuinely ambiguous step, so the leaf emits frequent tool calls instead of one long output-less turn.
-3. **Never** kill a process, `rm -rf` a run dir, or `branch -D` a worktree branch to "clean up" — that is the operator's call alone. And never relay a leaf's self-report, or your own guess, as the cause: verify the OUTPUT (the diff, the result file), not the running process.
+3. While recovering a **FAILED** leaf, **never** kill a process, `rm -rf` its run dir, or `branch -D` its worktree branch to "clean up" before you have recovered its tree. And never relay a leaf's self-report, or your own guess, as the cause: verify the OUTPUT (the diff, the result file), not the running process. Once you have taken what you need from a finished run, prune it with `swarm prune`.
 
 **Rationalisations that preceded the real incident — each is a STOP:**
 
@@ -50,6 +50,6 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
 |---|---|
 | "0 writes at 49s — it's stuck / repeating the last failure" | A leaf reads for many turns before it writes. Mid-run tool counts are not health. |
 | "I'll just kill it and restart clean" | There is no kill. Killing orphans the worktree and makes the resend 0s-fail. |
-| "I'll `git clean` / remove the orphaned worktree / delete the branch" | Destroys salvage; it is the operator's call, never yours. |
+| "I'll `git clean` / remove the orphaned worktree / delete the branch" | Before recovering a FAILED leaf, those actions destroy its salvage; once you have taken what you need from a finished run, prune it with `swarm prune`. |
 | "It ran out of turns" / "the keepalive hook hijacked it" | A confident root cause you have not proven from the result file — proof by proxy. |
 | "The `/goal` says don't pause, so I must act now" | The directive governs stalling, not interfering with a live dispatch. |

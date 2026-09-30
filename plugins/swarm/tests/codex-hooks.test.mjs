@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { gateDispatch, isCodexPayload, markerPath, groupingMarkerPath, shapeMarkerPath } from "../hooks/dispatch-gate.mjs";
 import { shouldAck, ackTargets } from "../hooks/skill-ack.mjs";
 import { launcherSession } from "../src/scheduler.mjs";
-import { projectRunsHoldingWorktrees, decidePruneNudge } from "../src/prune-nudge.mjs";
+import { decidePruneNudge } from "../src/prune-nudge.mjs";
 import { renderStatus } from "../src/results.mjs";
 import { enginePath, runsKeyFor } from "../src/config.mjs";
 
@@ -68,7 +68,10 @@ test("Codex is never told to use run_in_background, which it does not have", () 
 test("every reminder names the one engine path", () => {
   const cli = enginePath();
   ok(cli.endsWith(join("scripts", "swarm.mjs")) && existsSync(cli), cli);
-  ok(decidePruneNudge({ runs: [{ dir: "A", kept: 1 }] }).reason.includes(`node ${cli} prune A`));
+  // The prune reason hands the reader a command, spelled the way grade-nudge spells
+  // its own — a bare `swarm status --mine` is not runnable from a hook's line.
+  const reason = decidePruneNudge({ mine: [{ dir: "A", kept: 1 }] }).reason;
+  ok(reason.includes(`node ${cli} status --mine`), reason);
 });
 
 test("the launcher stamp prefers CODEX_SESSION_ID, which a Codex under Claude also inherits CLAUDE_CODE_SESSION_ID beside", () => {
@@ -98,34 +101,6 @@ function fixture() {
   };
   return { home, toplevel, run, cleanup: () => rmSync(home, { recursive: true, force: true }) };
 }
-
-test("the prune scan names finished runs in the repo whose kept trees are still on disk, from any session", () => {
-  const f = fixture();
-  try {
-    const tree = join(f.home, "tree");
-    mkdirSync(tree);
-    const holding = f.run("holding", { kept: [tree] });
-    f.run("kept-none");
-    f.run("already-pruned", { kept: [join(f.home, "gone")] });
-    f.run("resumed", { kept: [tree], resumed: true });
-    const runs = projectRunsHoldingWorktrees({ home: f.home, toplevel: f.toplevel });
-    deepEqual(runs, [{ dir: holding, kept: 1 }]);
-  } finally { f.cleanup(); }
-});
-
-test("the prune reminder blocks every stop while any run holds trees, and is silent once none do", () => {
-  const runs = [{ dir: "A", kept: 2 }, { dir: "B", kept: 1 }];
-  const first = decidePruneNudge({ runs });
-  equal(first.block, true);
-  ok(first.reason.includes("prune A --dry-run") && first.reason.includes("prune B --dry-run"), first.reason);
-  equal(decidePruneNudge({ runs }).block, true, "a second stop asks again");
-  equal(decidePruneNudge({ runs: [] }).block, false);
-  // Pruning is the operator's call: a leaf or autonomous session is never asked.
-  equal(decidePruneNudge({ runs, env: { SWARM_LEAF: "1" } }).block, false);
-  equal(decidePruneNudge({ runs, env: { CORRELATION_ID: "c" } }).block, false);
-  // The operator can switch it off, like the sibling nudges.
-  equal(decidePruneNudge({ runs, config: { swarm: { pruneNudge: false } } }).block, false);
-});
 
 test("swarm status on a finished run prints its kept trees and the prune command", () => {
   const f = fixture();

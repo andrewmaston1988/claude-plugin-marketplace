@@ -15,7 +15,7 @@ import { defaultProviderRegistry } from "../src/default-providers.mjs";
 import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
-import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
+import { formatClosing, formatKeptWorktrees, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
 import { identityOf, identityKey } from "../src/contracts.mjs";
 import { runLiveness, readRun, ALIVE_STATES } from "../src/runlog.mjs";
 import { plan as planPrune, execute as executePrune, formatPrune, registeredUnder, repoOfWorktree, reposOfTrees, makeGit, reposFromManifest } from "../src/prune.mjs";
@@ -23,6 +23,7 @@ import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim, out, err } from "../src/ui.mjs";
 import { markValidated, unvalidatedRefusal } from "../src/validated.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
+import { cmdStatus } from "./cmd-status.mjs";
 import { cmdCost } from "./cmd-cost.mjs";
 import { cmdGradeInit, cmdGradeFile, cmdGradeWaive } from "./cmd-grade.mjs";
 import { modelLine, effortsCell } from "../src/model-row.mjs";
@@ -34,6 +35,7 @@ const USAGE = `usage: swarm.mjs <command>
   run <manifest.json | name> [--args '<json>'] [--force]   execute the plan (use Bash run_in_background)
   status <resultsDir>        one-shot progress view of a run (reads run.log)
   status <resultsDir> --watch [--interval <secs>]   live repaint until Ctrl-C
+  status --mine              this session's finished runs still holding kept worktrees, each with its prune command
   wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
   prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
@@ -844,23 +846,8 @@ async function main() {
         return 0;
       }
       case "status": {
-        if (!rest[0]) { err(USAGE); return 1; }
-        const quietWarnMs = (getConfig().quietWarnSecs ?? 60) * 1000;
-        if (rest.includes("--watch")) {
-          const ivIdx = rest.indexOf("--interval");
-          const secs = ivIdx >= 0 ? Math.max(1, Number(rest[ivIdx + 1]) || 5) : 5;
-          // Repaint until Ctrl-C. Env override lets tests bound the loop.
-          const maxTicks = Number(process.env.SWARM_WATCH_TICKS) || Infinity;
-          for (let i = 0; i < maxTicks; i++) {
-            process.stdout.write("\x1b[2J\x1b[H");
-            out(renderStatus(rest[0], Date.now(), quietWarnMs, costOfFor(getConfig())));
-            out(dim(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`));
-            await new Promise((r) => setTimeout(r, secs * 1000));
-          }
-          return 0;
-        }
-        out(renderStatus(rest[0], Date.now(), quietWarnMs, costOfFor(getConfig())));
-        return 0;
+        if (!rest[0] && !rest.includes("--mine")) { err(USAGE); return 1; }
+        return await cmdStatus(rest);
       }
       case "wait": {
         if (!rest[0]) { err(USAGE); return 1; }
