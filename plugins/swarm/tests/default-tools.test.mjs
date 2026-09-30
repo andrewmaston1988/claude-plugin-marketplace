@@ -1,12 +1,4 @@
-// The leaf toolset an author does not name, and what naming one replaces.
-//
-// A Claude-runner leaf (Claude or Ollama — both dispatch the claude CLI) defaults to
-// the read-only trio plus `Skill` and every configured MCP server: off bypass
-// permissions an unlisted tool is DENIED, so those are the operator's own tooling
-// being kept reachable. A Codex leaf gets the trio alone — Codex has no Skill tool,
-// reads its MCP servers from its own config, and uses allowedTools only to pick a
-// sandbox. Naming a list replaces the default completely; dispatch adds nothing to
-// it but `StructuredOutput` (dispatch-tools.test.mjs).
+// Defaults differ by runner: a claude-CLI leaf keeps Skill and the MCP servers, Codex gets the trio alone.
 import { test } from "node:test";
 import { equal, deepEqual } from "node:assert/strict";
 import { rmSync } from "node:fs";

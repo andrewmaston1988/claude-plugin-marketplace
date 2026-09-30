@@ -22,7 +22,7 @@ import { ValidationError } from "./validation-error.mjs";
 // site outside it had to move.
 export { isUnderRoot } from "./roots.mjs";
 export { checkRunRoots } from "./governance.mjs";
-export { DEFAULT_TOOLS, hasWriteTools, resolveWorktreeName, isSharedTree, isAgentless, isSentinelModel } from "./manifest-task-policy.mjs";
+export { hasWriteTools, resolveWorktreeName, isSharedTree, isAgentless, isSentinelModel } from "./manifest-task-policy.mjs";
 export { realRepoToplevel, guardFor } from "./manifest-leaf-guard.mjs";
 export { makeReaches } from "./manifest-relations.mjs";
 export { MUST_READ_MAX_ENTRIES } from "./manifest-must-read.mjs";

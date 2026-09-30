@@ -18,12 +18,7 @@ export function mcpTools(_read = () => readFileSync(join(homedir(), ".claude.jso
   } catch { return []; }
 }
 
-// The toolset a leaf gets when its author names none, and it depends on the RUNNER,
-// not the model. Claude and Ollama both dispatch the claude CLI, where `Skill` and the
-// MCP servers are the operator's own tooling and — off bypass permissions — an
-// unlisted tool is DENIED. Codex has no Skill tool and reads its MCP servers from its
-// own config; its allowedTools only picks a sandbox (codex.mjs). An author who names a
-// list replaces this completely, the way the CLI's own --allowedTools behaves.
+// Per runner: off bypass permissions an unlisted tool is DENIED, so a claude-CLI leaf keeps Skill and the MCP servers; Codex gets the trio alone.
 export function defaultToolsFor(provider, mcp = []) {
   return provider === "codex" ? DEFAULT_TOOLS : [DEFAULT_TOOLS, "Skill", ...mcp].join(",");
 }

@@ -244,9 +244,8 @@ test("Codex dispatch: provider registry selects exact fresh argv, runner, and pa
   deepEqual(d.env, { SWARM_WRITE_GUARD_ROOTS: "" });
 });
 
-// The schema file's path travels the way mcpTools already does — buildDispatch's
-// options into the runner context. Without that forwarding an authored `returns`
-// never reaches the codex runner at all.
+// schemaPath travels as a buildDispatch option into the runner context; without that
+// forwarding an authored `returns` never reaches the codex runner at all.
 test("Codex dispatch: options.schemaPath reaches the runner context for a returns task", () => {
   const root = process.cwd();
   const cfg = {
