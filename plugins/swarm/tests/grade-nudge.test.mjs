@@ -284,7 +284,7 @@ test("the walk never reads the run.log of a run it can skip on a cheap predicate
   }
 });
 
-test("runGradeable: a waived run asks nothing — the closing block and digest footer share the Stop hook's escape", () => {
+test("runGradeable: a waived run asks nothing — the closing block and digest footer share the nudge hook's escape", () => {
   const home = tmp();
   try {
     const dir = runDir(home, { name: "waivable-1", starts: [{ launcher: "me" }] });

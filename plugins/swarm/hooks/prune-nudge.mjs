@@ -37,7 +37,7 @@ async function main() {
   // The marker is what stops this run being named again for this launcher. Written
   // after the line, so a marker that cannot be written costs one repeat, never the nudge.
   for (const r of runs.mine) {
-    try { writePruneMarker(r.dir, sessionId); } catch { /* the next stop repeats the line */ }
+    try { writePruneMarker(r.dir, sessionId); } catch { /* the next turn repeats the line */ }
   }
   process.exit(0);
 }

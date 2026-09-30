@@ -47,7 +47,7 @@ export function* runDirs(home) {
 
 // Every run under <home>/runs that has something to grade and no store rows.
 // Walks EVERY encoded-repo-toplevel directory: the encoding is the dispatching repo's
-// git toplevel, not the Stop payload's, so deriving one encoding misses runs (24
+// git toplevel, not the nudge payload's, so deriving one encoding misses runs (24
 // encodings in the real estate; swarm-statusline.mjs walks all for the same
 // reason). Runs dispatched with an explicit manifest resultsDir never appear —
 // they leave the runs tree entirely. Each row is { dir, key, launcher };
