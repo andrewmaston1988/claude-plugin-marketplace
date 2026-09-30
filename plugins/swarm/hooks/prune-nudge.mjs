@@ -17,7 +17,7 @@ async function main() {
   // Before the repo scan: a leaf stops often and is never asked.
   if (payload.stop_hook_active || inLeafOrAutonomous(process.env)) process.exit(0);
   // The session the run list is scoped to, straight from the host that is stopping.
-  const sessionId = payload.session_id;
+  const sessionId = String(payload.session_id || '');
   if (!sessionId) process.exit(0);
 
   const toplevel = payload.cwd ? realRepoToplevel(payload.cwd) : null;
@@ -25,7 +25,9 @@ async function main() {
   let config;
   try { config = loadConfig(undefined, process.env); } catch { process.exit(0); }
   if (config?.swarm?.pruneNudge === false) process.exit(0);
-  const runs = projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel, sessionId });
+  // `skipNudged` is this path's alone: `swarm status --mine` still names a run the hook
+  // has already announced, or the line would point at an empty listing.
+  const runs = projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel, sessionId, skipNudged: true });
   const decision = decidePruneNudge({ ...runs, env: process.env, config });
   if (!decision.block) process.exit(0);
 

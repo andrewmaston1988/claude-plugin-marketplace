@@ -8,8 +8,9 @@ import { launcherSession } from "../src/scheduler.mjs";
 import { dim, out, err } from "../src/ui.mjs";
 
 // This session's finished runs whose kept worktrees are still on disk, each with the
-// command that prunes it. Read-only — it prunes nothing, and it still names a run the
-// Stop hook has gone quiet about while its trees remain.
+// command that prunes it. Read-only — it prunes nothing — and it lists every run this
+// session owns while its trees remain, including the ones the Stop hook has already
+// named: the marker gates the hook's line, never this listing.
 async function mine() {
   const sessionId = launcherSession(process.env);
   if (!sessionId) {
@@ -18,7 +19,15 @@ async function mine() {
   }
   const { projectRunsHoldingWorktrees, formatMineStatus } = await import("../src/prune-nudge.mjs");
   const { realRepoToplevel } = await import("../src/manifest-leaf-guard.mjs");
-  const runs = projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel: realRepoToplevel(process.cwd()), sessionId });
+  // A missing toplevel is not an all-clear: runs are filed per repo, so the scan below
+  // would find nothing and print the empty case from anywhere outside a checkout.
+  const cwd = process.cwd();
+  const toplevel = realRepoToplevel(cwd);
+  if (!toplevel) {
+    err(`swarm: status --mine needs a git repo — ${cwd} is not inside one.`);
+    return 1;
+  }
+  const runs = projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel, sessionId });
   for (const line of formatMineStatus(runs)) out(line);
   return 0;
 }

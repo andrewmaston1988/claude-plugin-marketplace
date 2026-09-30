@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { gateDispatch, isCodexPayload, markerPath, groupingMarkerPath, shapeMarkerPath } from "../hooks/dispatch-gate.mjs";
 import { shouldAck, ackTargets } from "../hooks/skill-ack.mjs";
 import { launcherSession } from "../src/scheduler.mjs";
+import { decidePruneNudge } from "../src/prune-nudge.mjs";
 import { renderStatus } from "../src/results.mjs";
 import { enginePath, runsKeyFor } from "../src/config.mjs";
 
@@ -67,6 +68,10 @@ test("Codex is never told to use run_in_background, which it does not have", () 
 test("every reminder names the one engine path", () => {
   const cli = enginePath();
   ok(cli.endsWith(join("scripts", "swarm.mjs")) && existsSync(cli), cli);
+  // The prune reason hands the reader a command, spelled the way grade-nudge spells
+  // its own — a bare `swarm status --mine` is not runnable from a hook's line.
+  const reason = decidePruneNudge({ mine: [{ dir: "A", kept: 1 }] }).reason;
+  ok(reason.includes(`node ${cli} status --mine`), reason);
 });
 
 test("the launcher stamp prefers CODEX_SESSION_ID, which a Codex under Claude also inherits CLAUDE_CODE_SESSION_ID beside", () => {

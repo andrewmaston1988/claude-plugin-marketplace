@@ -76,7 +76,10 @@ function spawnHook(payload, home) {
   });
 }
 
-const reason1 = "1 worktree from runs in this session — run `swarm status --mine`, take anything you still need, then prune them.";
+// The footer both the hook's command and `formatMineStatus` carry: the precondition
+// that makes an irreversible `prune` safe, and the house rule that it is not a question.
+const FOOTER = "Take what you still need, then prune each run once its work has landed or been taken — do not ask the operator; `prune` deletes a run's worktrees and branches, never its results.";
+const reason1 = `1 worktree from runs in this session — run \`node ${CLI} status --mine\`, take what you still need, then prune each run once its work has landed or been taken — do not ask the operator.`;
 
 test("a finished run another session launched is counted, never listed", () => {
   const f = fixture();
@@ -93,15 +96,15 @@ test("a finished run another session launched is counted, never listed", () => {
   } finally { f.cleanup(); }
 });
 
-test("the block reason is exactly one line: this session's worktree count, (and N others) only when N > 0, and swarm status --mine", () => {
+test("the block reason is exactly one line: this session's worktree count, (and N others) only when N > 0, and the engine's status --mine", () => {
   const reason = decidePruneNudge({ mine: [{ dir: "A", kept: 3 }], others: 9 }).reason;
-  equal(reason, "3 worktrees from runs in this session (and 9 others) — run `swarm status --mine`, take anything you still need, then prune them.");
+  equal(reason, `3 worktrees from runs in this session (and 9 others) — run \`node ${CLI} status --mine\`, take what you still need, then prune each run once its work has landed or been taken — do not ask the operator.`);
   equal(reason.includes("\n"), false, "one line, whatever the run count");
   equal(decidePruneNudge({ mine: [{ dir: "A", kept: 1 }], others: 0 }).reason, reason1);
   equal(decidePruneNudge({ mine: [{ dir: "A", kept: 2 }], others: 1 }).reason,
-    "2 worktrees from runs in this session (and 1 other) — run `swarm status --mine`, take anything you still need, then prune them.");
+    `2 worktrees from runs in this session (and 1 other) — run \`node ${CLI} status --mine\`, take what you still need, then prune each run once its work has landed or been taken — do not ask the operator.`);
   equal(decidePruneNudge({ mine: [{ dir: "A", kept: 2 }, { dir: "B", kept: 1 }], others: 0 }).reason,
-    "3 worktrees from runs in this session — run `swarm status --mine`, take anything you still need, then prune them.");
+    `3 worktrees from runs in this session — run \`node ${CLI} status --mine\`, take what you still need, then prune each run once its work has landed or been taken — do not ask the operator.`);
   // Another session's trees are counted, never a reason to block on their own.
   equal(decidePruneNudge({ mine: [], others: 5 }).block, false);
   // Pruning a finished run is clean-up, not a question: a leaf or autonomous session is still never asked.
@@ -111,7 +114,7 @@ test("the block reason is exactly one line: this session's worktree count, (and 
   equal(decidePruneNudge({ mine: [{ dir: "A", kept: 1 }], config: { swarm: { pruneNudge: false } } }).block, false);
 });
 
-test("the hook binary writes prune-nudged into the run it named and is silent at the second stop", () => {
+test("the hook binary writes prune-nudged into the run it named, is silent at the second stop, and status --mine still names it", () => {
   const f = fixture();
   try {
     const dir = f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
@@ -120,11 +123,18 @@ test("the hook binary writes prune-nudged into the run it named and is silent at
     equal(first.stdout, JSON.stringify({ decision: "block", reason: reason1 }) + "\n");
     equal(existsSync(pruneMarkerPath(dir)), true, "the named run is marked");
     equal(readFileSync(pruneMarkerPath(dir), "utf8"), SESSION);
-    // Named once: the same session's next stop is silent, and the run is still listed
-    // by `status --mine` while its trees remain.
+    // Named once by the HOOK: the same session's next stop is silent...
     equal(spawnHook(payload, f.home).stdout, "");
-    const { mine } = projectRunsHoldingWorktrees({ home: f.home, toplevel: f.toplevel, sessionId: SESSION });
-    deepEqual(mine, []);
+    // ...while the listing the line points at still names the run, with its prune
+    // command, for as long as its trees remain. The marker gates the hook's line only.
+    const r = runCli(["status", "--mine"], { cwd: f.repo, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
+    equal(r.status, 0, r.stderr);
+    equal(r.stdout, [
+      "swarm status --mine: 1 finished run this session dispatched holds 1 kept worktree.",
+      `  node ${CLI} prune ${dir} --dry-run   (1 tree)`,
+      FOOTER,
+      "",
+    ].join("\n"));
   } finally { f.cleanup(); }
 });
 
@@ -133,9 +143,11 @@ test("a resume by another session (a new launcher) is nudged once more", () => {
   try {
     const dir = f.run("holding", { kept: [f.tree("tree")], launcher: OTHER });
     writePruneMarker(dir, OTHER);
-    // The resumer now owns the run: the marker records the old launcher, so the new
-    // one is told once — and the run is still not this session's while it is theirs.
-    equal(projectRunsHoldingWorktrees({ home: f.home, toplevel: f.toplevel, sessionId: OTHER }).mine.length, 0);
+    // The marker records the launcher it was written for. On the HOOK's path it silences
+    // the owner it already told... and only there: the run is not this session's while it
+    // is theirs, and the listing still names it for the session that owns it.
+    equal(projectRunsHoldingWorktrees({ home: f.home, toplevel: f.toplevel, sessionId: OTHER, skipNudged: true }).mine.length, 0);
+    deepEqual(projectRunsHoldingWorktrees({ home: f.home, toplevel: f.toplevel, sessionId: OTHER }).mine, [{ dir, kept: 1 }]);
     deepEqual(projectRunsHoldingWorktrees({ home: f.home, toplevel: f.toplevel, sessionId: SESSION }).mine, []);
     // Re-stamped by the resume: the last run-start wins, exactly as grade-nudge reads it.
     writeFileSync(join(dir, "run.log"), JSON.stringify({ ts: Date.now(), event: "run-start", launcher: SESSION, tasks: [] }) + "\n");
@@ -170,7 +182,7 @@ test("swarm status --mine lists only this session's finished runs holding trees,
       `  node ${CLI} prune ${a} --dry-run   (2 trees)`,
       `  node ${CLI} prune ${b} --dry-run   (1 tree)`,
       "Other sessions' runs hold 1 more (not this session's to prune).",
-      "Take anything you still need, then prune them: `prune` deletes a run's worktrees and branches, never its results.",
+      FOOTER,
       "",
     ].join("\n"));
     equal(r.stdout.includes(theirs), false, "another session's run is never listed");
@@ -190,6 +202,23 @@ test("swarm status --mine outside a session exits 1 and lists nothing", () => {
   } finally { f.cleanup(); }
 });
 
+test("swarm status --mine outside a git repo names the cwd and exits 1", () => {
+  const f = fixture();
+  const outside = mkdtempSync(join(tmpdir(), "prune-nudge-outside-"));
+  try {
+    // A run exists, but no repo to file it under: without an error this would read as
+    // an all-clear rather than as "asked from the wrong place".
+    f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
+    const r = runCli(["status", "--mine"], { cwd: outside, env: { SWARM_HOME: f.home, CODEX_SESSION_ID: SESSION, CLAUDE_CODE_SESSION_ID: SESSION } });
+    equal(r.status, 1);
+    equal(r.stdout, "");
+    ok(r.stderr.includes(outside), r.stderr);
+  } finally {
+    rmSync(outside, { recursive: true, force: true });
+    f.cleanup();
+  }
+});
+
 test("swarm status --mine names no run once the session has nothing left holding trees", () => {
   const f = fixture();
   try {
@@ -205,14 +234,16 @@ test("the mine listing is built from the same runs the hook decides on", () => {
   deepEqual(formatMineStatus({ mine: [{ dir: "A", kept: 1 }], others: 0 }), [
     "swarm status --mine: 1 finished run this session dispatched holds 1 kept worktree.",
     `  node ${CLI} prune A --dry-run   (1 tree)`,
-    "Take anything you still need, then prune them: `prune` deletes a run's worktrees and branches, never its results.",
+    FOOTER,
   ]);
 });
 
 // --- the grep pin ------------------------------------------------------------------
-// The reading this pins out: pruning a FINISHED run is the operator's call, so the model
-// asks instead of cleaning up. A scoped rule about a failed leaf's tree is a different
-// reading and lives on its own line — the pin is per line, not per file.
+// What the pin holds: pruning a FINISHED run whose work has landed or been taken is the
+// session's own clean-up, said plainly and never put back to the operator. The retired
+// wording — the model asks instead of cleaning up — is what the regex below bans. A
+// scoped rule about a failed leaf's tree is a different reading and lives on its own
+// line: the pin is per line, not per file.
 const PRUNE = /\bprun/i;
 const OPERATOR_DECIDES = /operator'?s (call|decision)|operator decides|(?<!not |don't |never )ask the operator|never yours|operator'?s alone/i;
 
