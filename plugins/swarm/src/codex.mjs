@@ -375,6 +375,17 @@ function writeTargetDirs(task) {
     .filter(Boolean);
 }
 
+// The same typed targets as exact paths, for the PreToolUse guard the plugin's
+// hooks.json runs on an `apply_patch`. Codex has no `--settings`, so the roots ride
+// the spawn env and the guard command stays fixed — Codex keys hook trust by a hash
+// of the command, so a per-leaf command would never be trusted and never run.
+function writeGuardRootsEnv(task) {
+  const paths = (Array.isArray(task.writeRoots) ? task.writeRoots : [])
+    .map((target) => (typeof target?.path === "string" ? target.path.trim() : ""))
+    .filter(Boolean);
+  return paths.length ? JSON.stringify(paths) : "";
+}
+
 /** Build native `codex exec --json` argv. */
 export function buildCodexInvocation(task, prompt, context = {}) {
   const cfg = providerConfig(context.config || context.cfg || {}, "codex");
@@ -411,7 +422,16 @@ export function buildCodexInvocation(task, prompt, context = {}) {
   if (task.isDigest === true && task.cwd !== task.originalCwd) args.push("--skip-git-repo-check");
   if (sessionId) args.push("resume", sessionId);
   args.push(prompt);
-  return { argv: [executable, ...args], env: { ...(cfg.env || {}) } };
+  // settings.env is the one settings key with a Codex route: the spawn env. The guard
+  // roots are spread LAST so a task cannot forge or clear the list that confines it.
+  return {
+    argv: [executable, ...args],
+    env: {
+      ...(cfg.env || {}),
+      ...(task.settings?.env || {}),
+      SWARM_WRITE_GUARD_ROOTS: writeGuardRootsEnv(task),
+    },
+  };
 }
 
 export function classifyCodexExit(exit = {}, parsed = {}, task = {}) {
@@ -470,7 +490,26 @@ export function createCodexProviderAdapter(options = {}) {
       const problems = [];
       if (typeof task?.model !== "string" || !task.model.trim()) problems.push("Codex tasks require a non-empty model");
       if (task?.sandbox === "danger-full-access") problems.push("Codex tasks cannot use danger-full-access");
-      if (task?.settings !== undefined) problems.push("Codex tasks do not accept Claude-only settings");
+      // Codex has no `--settings`: `env` is reachable (the spawn env), and every other
+      // key is Claude-only. Named individually — the blanket refusal left an author with
+      // no way to tell which key was the problem, or that `env` was fine all along.
+      const settings = task?.settings;
+      if (settings !== undefined) {
+        if (!settings || typeof settings !== "object" || Array.isArray(settings)) {
+          problems.push('Codex settings must be a JSON object — e.g. "settings": {"env": {"X": "1"}}');
+        } else {
+          const refused = Object.keys(settings).filter((key) => key !== "env");
+          if (refused.length) {
+            problems.push(`Codex tasks accept only settings.env — remove ${refused.map((k) => `'${k}'`).join(", ")}`);
+          }
+          // It is spread straight into the spawn env, so a string would arrive as
+          // keys "0", "1", … and the intended vars would silently stay unset.
+          const env = settings.env;
+          if (env !== undefined && (!env || typeof env !== "object" || Array.isArray(env))) {
+            problems.push('Codex settings.env must be a JSON object — e.g. "settings": {"env": {"X": "1"}}');
+          }
+        }
+      }
       if (context.config && !providerConfig(context.config, "codex").enabled) problems.push("Codex provider is disabled");
       return problems;
     },

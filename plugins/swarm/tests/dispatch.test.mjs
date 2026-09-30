@@ -241,7 +241,10 @@ test("Codex dispatch: provider registry selects exact fresh argv, runner, and pa
   ]);
   equal(d.runner, "codex");
   equal(d.parser, "codex");
-  deepEqual(d.env, {});
+  // The key is always present, empty when the task carries no writeRoots — a key
+  // that appeared only for writers would let a parent process's value leak into
+  // every reader the engine spawns.
+  deepEqual(d.env, { SWARM_WRITE_GUARD_ROOTS: "" });
 });
 
 // The schema file's path travels the way mcpTools already does — buildDispatch's
@@ -316,20 +319,24 @@ test("Codex dispatch: writeRoots become workspace-write plus de-duplicated --add
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-// The adapter boundary is unchanged and deliberately so: an authored Claude-settings
-// object is still refused on the Codex path, while the engine's typed targets are not.
-test("Codex dispatch: authored settings are still refused, writeRoots are not", () => {
+// The adapter boundary moved by one key: settings.env reaches the spawn env, and
+// every other key is still refused rather than silently dropped.
+test("Codex dispatch: settings.env is accepted, other settings keys are refused, writeRoots are not", () => {
   const dir = mkdtempSync(join(tmpdir(), "swarm-codex-roots-"));
   try {
     const cfg = { providers: { codex: { enabled: true, path: "codex", allowedRoots: [dir] } } };
     const base = { provider: "codex", model: "gpt-5-codex", allowedTools: "Read", cwd: dir, originalCwd: dir };
+    const d = buildDispatch({ ...base, settings: { env: { X: "1" } } }, "inspect", cfg);
+    equal(d.env.X, "1", "the task's env reaches the leaf");
+    ok(!d.argv.includes("--settings"), "Codex has no --settings flag");
     throws(
-      () => buildDispatch({ ...base, settings: { env: { X: "1" } } }, "inspect", cfg),
-      /Codex tasks do not accept Claude-only settings/
+      () => buildDispatch({ ...base, settings: { permissions: { allow: ["Read"] } } }, "inspect", cfg),
+      /settings\.env.*permissions/s
     );
-    const d = buildDispatch({ ...base, allowedTools: "Read,Write", writeRoots: [{ path: join(dir, "run", "report.md"), kind: "file" }] }, "inspect", cfg);
-    ok(d.argv.includes("--add-dir"), d.argv.join(" "));
-    ok(!d.argv.includes("--settings"));
+    const rooted = buildDispatch({ ...base, allowedTools: "Read,Write", writeRoots: [{ path: join(dir, "run", "report.md"), kind: "file" }] }, "inspect", cfg);
+    ok(rooted.argv.includes("--add-dir"), rooted.argv.join(" "));
+    ok(!rooted.argv.includes("--settings"));
+    deepEqual(JSON.parse(rooted.env.SWARM_WRITE_GUARD_ROOTS), [join(dir, "run", "report.md")]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

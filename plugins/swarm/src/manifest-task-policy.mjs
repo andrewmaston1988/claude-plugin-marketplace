@@ -2,7 +2,7 @@
 // and the roots its write guard is confined to. Pure questions about an already
 // parsed task — nothing here validates an authored manifest.
 
-import { resolve, join } from "node:path";
+import { resolve, join, relative, isAbsolute, sep } from "node:path";
 
 // Default leaf toolset is read-only; write capability must be asked for.
 export const DEFAULT_TOOLS = "Read,Grep,Glob";
@@ -38,8 +38,26 @@ export function resolveWorktreeName(t) {
 // worktree.mjs's prepareIsolation (`resolve(join(resultsDir, "wt-" + name))`) —
 // keep the two in step, or the guard denies every write into the very tree it
 // was injected to protect.
+const TREE_PREFIX = "wt-";
+
 function worktreePathFor(worktreeName, resultsDir) {
-  return resolve(join(resultsDir, `wt-${worktreeName}`));
+  return resolve(join(resultsDir, `${TREE_PREFIX}${worktreeName}`));
+}
+
+// worktreePathFor's inverse, for a task rebuilt from a RECORDED run rather than
+// from the manifest: `swarm ask` carries a finished leaf's cwd, not its tree name.
+// The name is not always the id — deterministic-steps renames each forEach clone
+// to `<id>-<i>`, so a clone's `fix[0]` runs in `wt-fix-0`. Undefined when the cwd
+// is outside every tree (a reader in the live repo, the digest in engine scratch).
+export function worktreeNameFromCwd(cwd, resultsDir) {
+  if (typeof cwd !== "string" || !cwd) return undefined;
+  const rel = relative(resolve(resultsDir), resolve(cwd));
+  // `..`, and an absolute rel on win32 (a cross-drive relative), both mean "not inside".
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) return undefined;
+  const [first] = rel.split(sep);
+  return first.startsWith(TREE_PREFIX) && first.length > TREE_PREFIX.length
+    ? first.slice(TREE_PREFIX.length)
+    : undefined;
 }
 
 // A writer's allowed roots: its own tree, plus `outputDir` when set — that one

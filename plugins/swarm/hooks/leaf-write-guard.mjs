@@ -1,18 +1,16 @@
 #!/usr/bin/env node
-// PreToolUse hook (matcher Write|Edit|NotebookEdit): deny a write whose resolved
-// path falls outside the allowed roots passed in argv.
+// PreToolUse hook (matcher Write|Edit|NotebookEdit on Claude, apply_patch on Codex):
+// deny a write whose resolved path falls outside the allowed roots — passed in argv,
+// or in SWARM_WRITE_GUARD_ROOTS when argv carries none.
 //
 // Why this exists: `--allowedTools` gates tool NAMES, never paths — `Write(dir/**)`
 // is not a valid specifier there, `--add-dir` extends reads only, and
 // `permissions.deny` binds Edit/Read but not Write. A PreToolUse hook is the only
 // primitive that confines a WRITE, so this is the one mechanism swarm can inject.
 //
-// It is INJECTED, never installed: src/manifest-normalize.mjs (and src/dispatch.mjs, for the report digest) merges it into each write-capable
-// leaf's own `--settings` on the command line. A settings file inside the worktree
-// would sit where the leaf can rewrite it, which defeats the purpose. That also
-// distinguishes this from the CONFIGURED leaf guard (`projects[].hooks.preToolUse`,
-// hooks/leaf-guard.mjs), which reaches a leaf as SWARM_LEAF_GUARD env vars and only
-// works on a machine that has its own hook reading them.
+// Injected, never installed: Claude gets it through `--settings`, Codex through the
+// plugin's hooks.json as one fixed command — Codex keys hook trust by the command's
+// hash, so the per-leaf roots reach it in SWARM_WRITE_GUARD_ROOTS instead.
 //
 // FAIL OPEN on anything unparseable, and on an invocation carrying no roots. The
 // escape this guards against is real but rare; a guard that fails closed would brick
@@ -64,13 +62,36 @@ export function realResolve(p) {
   }
 }
 
-// The write's target path, or null when the payload names none. NotebookEdit
+// Every file header a Codex patch touches. A Move to is a second write target, so
+// it counts as much as the header it renames.
+const PATCH_PATH = /^\*\*\* (?:(?:Add|Update|Delete) File|Move to): (.+)$/gm;
+
+// The write's target paths — empty when the payload names none. NotebookEdit
 // carries `notebook_path` where Write/Edit carry `file_path` — the matcher covers
-// NotebookEdit, so reading only `file_path` would leave it unguarded.
-function attemptedPath(payload) {
+// NotebookEdit, so reading only `file_path` would leave it unguarded. An
+// apply_patch path is relative to the payload's cwd, not this hook's.
+function attemptedPaths(payload) {
   const input = payload?.tool_input;
+  if (payload?.tool_name === "apply_patch") {
+    if (typeof input?.command !== "string" || typeof payload.cwd !== "string") return [];
+    return [...input.command.matchAll(PATCH_PATH)].map((m) => resolve(payload.cwd, m[1].trim()));
+  }
   const p = input?.file_path ?? input?.notebook_path;
-  return typeof p === "string" && p ? p : null;
+  return typeof p === "string" && p ? [p] : [];
+}
+
+// Argv roots when the guard is injected via `--settings` (Claude); otherwise the
+// SWARM_WRITE_GUARD_ROOTS JSON array the engine sets on a Codex leaf, whose one
+// fixed hooks.json command cannot carry per-leaf argv. Anything but a non-empty
+// array of strings is no roots.
+function rootsFrom(argv, env) {
+  if (argv.length) return argv;
+  try {
+    const roots = JSON.parse(env.SWARM_WRITE_GUARD_ROOTS);
+    return Array.isArray(roots) && roots.length && roots.every((r) => typeof r === "string" && r) ? roots : [];
+  } catch {
+    return [];
+  }
 }
 
 // The command string this guard is injected as. Quote every path: the runner
@@ -94,8 +115,8 @@ export function applyWriteGuard(settings, roots) {
 }
 
 async function main() {
-  const roots = process.argv.slice(2);
   try {
+    const roots = rootsFrom(process.argv.slice(2), process.env);
     let stdin = "";
     process.stdin.setEncoding("utf8");
     for await (const chunk of process.stdin) stdin += chunk;
@@ -108,8 +129,8 @@ async function main() {
     let payload = null;
     try { payload = JSON.parse(stdin); } catch { /* fail open below */ }
 
-    const attempted = attemptedPath(payload);
-    if (!attempted) {
+    const attempted = attemptedPaths(payload);
+    if (!attempted.length) {
       process.exit(0); // unparseable, or a tool call with no path — fail open
       return;
     }
@@ -121,10 +142,10 @@ async function main() {
       try { return realResolve(r); } catch { return resolve(r); }
     });
 
-    const real = realResolve(attempted);
-    if (!realRoots.some((root) => isUnderRoot(real, root))) {
+    const outside = attempted.find((p) => !realRoots.some((root) => isUnderRoot(realResolve(p), root)));
+    if (outside) {
       // Both halves in the reason: it is the only diagnostic the digest carries.
-      process.stdout.write(JSON.stringify(deny(`${attempted} is outside ${realRoots.join(", ")}`)));
+      process.stdout.write(JSON.stringify(deny(`${outside} is outside ${realRoots.join(", ")}`)));
     }
   } catch {
     // Fail OPEN even on this hook's own bug: a crashed guard must not be the reason
