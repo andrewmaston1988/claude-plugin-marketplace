@@ -539,12 +539,12 @@ carried measurable weekly segments (cached readings bank nothing).
 
 The dashboard Cost screen shows the newest model per family, whether or not it is denylisted; Performance keeps all generations. A newer model takes over its elder on the graded screens only once it has 5 graded rows: until then the elder stays, chipped `[superseded by …]`, and the successor's card reads `needs grades — newer generation of …`. The multiplier is
 the per-request meter weight against that floor, printed beside the grades, never collapsed into one number. A
-model is **dominated** when another is strictly higher-scoring *and* strictly cheaper — the only comparison made,
+model is **dominated** when another is at least as good on both and better on one — the only comparison made,
 since a ratio would let one cheap fluke leaf outrank a well-evidenced model.
 
 **Best value is a threshold, never a ratio.** The card names the *cheapest* model still
-worth seating: on the frontier, within `valueMargin` (default `0.5`) of the best frontier
-quality, and not thin — the margin used is printed, so the pick is judgeable. Cost bands
+worth seating: on the frontier, within `valueMargin` (default `0.5`) of the best such
+candidate's quality, not thin, and not a pending elder (unless it is the section's only candidate) — the margin used is printed, so the pick is judgeable. Cost bands
 (`providers.ollama.cloud.ollama.costBands`, default `[2, 5]`) render `$`/`$$`/`$$$` in the terminal. The
 dashboard and model detail views draw one to five coins instead, tinted per provider and scaled
 within that provider's own measured range (cheapest 1, dearest 5, log-spaced); unmeasured renders `—`, never a blank that would read as

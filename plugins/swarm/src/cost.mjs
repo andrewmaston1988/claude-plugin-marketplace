@@ -59,8 +59,8 @@ export const UNPRICED_CLASSIFICATION = "unpriced";
 // "best value" pick. Arbitrary like the bands, and config for the same reason.
 // This is a THRESHOLD, not a ratio: scores.mjs refuses to collapse quality and
 // cost into one number, and a margin does not — a candidate must be undominated
-// AND near the top AND not thin, so a cheap fluke clears none of the bars the
-// ratio objection names.
+// AND near the top AND not thin AND not a pending elder, so a cheap fluke clears
+// none of the bars the ratio objection names.
 export const DEFAULT_VALUE_MARGIN = 0.5;
 
 function isoAsOf(value) {
