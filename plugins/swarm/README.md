@@ -54,8 +54,7 @@ warns instead, since the window may have since reset.
 
 ### Per-repo leaf guard (`projects`)
 
-A leaf is a full headless Claude Code session (a Claude-runner leaf always also gets `Skill` and the MCP servers, plus `StructuredOutput` when it has `returns`), and `allowedTools` scopes tool *names*, not
-what a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every
+A Claude or Ollama task with no `allowedTools` gets `Read,Grep,Glob,Skill` plus the machine's MCP servers; a Codex task gets `Read,Grep,Glob`. An explicit `allowedTools` replaces that default completely (name MCP servers literally, such as `mcp__scout`), and every task with `returns` also gets `StructuredOutput`. `allowedTools` scopes tool *names*, not what a tool is asked to do. `projects` wires a **repo-owned PreToolUse hook** into every
 leaf that runs under that repo:
 
 ```json
