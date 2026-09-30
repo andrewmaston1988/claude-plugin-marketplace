@@ -215,7 +215,7 @@ test("write guard: present on the report-mode digest invocation, absent on the r
     const readOnly = buildDigestTask(loadManifest(p1, CFG, dir));
     equal("writeRoots" in readOnly, false, "a Read-only digest writes nothing to guard");
     equal(readOnly.settings, undefined);
-    const readOnlyInvocation = buildDispatch(readOnly, readOnly.prompt, CFG, { _mcpTools: () => [] });
+    const readOnlyInvocation = buildDispatch(readOnly, readOnly.prompt, CFG);
     ok(!readOnlyInvocation.argv.includes("--settings"), readOnlyInvocation.argv.join(" "));
 
     const p2 = writeManifest(dir, body(true), "report.json");
@@ -226,12 +226,32 @@ test("write guard: present on the report-mode digest invocation, absent on the r
       { path: join(plan.resultsDir, "report.md"), kind: "file" },
     ]);
     equal(digestTask.settings, undefined, "the task itself carries no provider wire format");
-    const invocation = buildDispatch(digestTask, digestTask.prompt, CFG, { _mcpTools: () => [] });
+    const invocation = buildDispatch(digestTask, digestTask.prompt, CFG);
     const command = JSON.parse(invocation.argv[invocation.argv.indexOf("--settings") + 1])
       .hooks.PreToolUse[0].hooks[0].command;
     match(command, /leaf-write-guard\.mjs/);
     // Its drafting directory and the one file it may write.
     match(command, /scratch-__digest/);
     match(command, /report\.md/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The digest owns its list and no author can override it, so it takes neither the
+// Claude-runner default's Skill nor the MCP servers: it reads result files, and
+// nothing else in the run does less. Dispatch adds nothing to a named list.
+test("digest argv: --allowedTools is exactly Read, or Read,Write in report mode", () => {
+  const dir = tmp();
+  try {
+    const body = (report, name) => writeManifest(dir, {
+      resultsDir: "out",
+      tasks: [claudeTask()],
+      digest: { provider: "claude", model: "claude-haiku-4-5-20251001", ...(report && { report: true }) },
+    }, name);
+
+    for (const [report, expected] of [[false, "Read"], [true, "Read,Write"]]) {
+      const task = buildDigestTask(loadManifest(body(report, `${report}.json`), CFG, dir));
+      const argv = buildDispatch(task, task.prompt, CFG).argv;
+      equal(argv[argv.indexOf("--allowedTools") + 1], expected);
+    }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

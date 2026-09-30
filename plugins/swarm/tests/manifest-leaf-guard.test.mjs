@@ -6,7 +6,7 @@ import { equal, ok, deepEqual, match } from "node:assert/strict";
 import { writeFileSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
 import { spawnSync } from "node:child_process";
-import { DEFAULT_TOOLS, hasWriteTools } from "../src/manifest.mjs";
+import { hasWriteTools } from "../src/manifest.mjs";
 import { runTask } from "../src/scheduler.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
@@ -169,8 +169,10 @@ test("write guard: absent from a read-only leaf, which has no tree to be confine
   const dir = tmp();
   try {
     const p = writeManifest(dir, { resultsDir: "out", tasks: [claudeTask()] });
-    const task = loadManifest(p, CFG, dir).tasks[0];
-    equal(task.allowedTools, DEFAULT_TOOLS);
+    // The default leaf toolset reads this machine's MCP roster, so the roster is
+    // stubbed and the expected value written out.
+    const task = loadManifest(p, CFG, dir, { io: { mcpTools: () => ["mcp__x"] } }).tasks[0];
+    equal(task.allowedTools, "Read,Grep,Glob,Skill,mcp__x");
     equal(task.settings, undefined);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

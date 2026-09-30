@@ -6,6 +6,7 @@ import { spawnSync as nodeSpawnSync } from "node:child_process";
 import { basename } from "node:path";
 import { checkoutToplevel } from "./worktree.mjs";
 import { swarmHome } from "./config.mjs";
+import { mcpTools } from "./manifest-task-policy.mjs";
 
 function namesEqual(a, b) {
   return process.platform === "win32" ? a.toLowerCase() === b.toLowerCase() : a === b;
@@ -55,6 +56,8 @@ export function defaultManifestIo() {
     stdout: (line) => console.log(line),
     repoToplevel: realRepoToplevel,
     checkoutToplevel,
+    // The machine's own MCP servers, for the leaf toolset normalize fills in.
+    mcpTools,
     // Governance judges a tree under the swarm home by its repo; tests point this at a temp dir.
     home: swarmHome(),
     platform: process.platform,

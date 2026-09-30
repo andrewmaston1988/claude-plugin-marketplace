@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
-import { homedir } from "node:os";
-import { dirname, sep, isAbsolute, join } from "node:path";
+import { dirname, sep, isAbsolute } from "node:path";
 import { spawnSync } from "node:child_process";
 import { CONTEXT_WINDOW_1M } from "./contracts.mjs";
 import { isClaudeModel } from "./models.mjs";
@@ -24,15 +23,7 @@ import { runnerParserFactories } from "./stream.mjs";
 // through a proxy where real cost is $0 but Claude Code would still meter
 // Anthropic pricing on token counts and trip the ceiling mid-task; Claude
 // dispatch is interactive-supervised, so the manifest preview is the budget gate.
-// Every configured MCP server as an allow rule. Servers must be named: `mcp__*` is
-// skipped with a warning in an allow rule, so a wildcard grants nothing.
-export function mcpTools(_read = () => readFileSync(join(homedir(), ".claude.json"), "utf8")) {
-  try {
-    return Object.keys(JSON.parse(_read()).mcpServers || {}).map((s) => `mcp__${s}`);
-  } catch { return []; }
-}
-
-function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpTools) {
+function buildClaudeInvocation(task, prompt, cfg, providerId) {
   const claudePath = cfg.claudePath || "claude";
   const ollama = providerConfig(cfg, "ollama");
   // The engine's typed write targets reach this runner as a flat root list: the
@@ -60,10 +51,11 @@ function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpToo
     "-p", prompt,
     "--model", cliModel,
     "--effort", task.effort ?? "medium",
-    // Skill and MCP go to every leaf: both are the operator's own tooling, and a leaf
-    // that loses scout falls back to grepping the tree. StructuredOutput is how
-    // a `returns` leaf answers; off bypass mode an unlisted tool is denied.
-    "--allowedTools", [...new Set([...String(task.allowedTools || "").split(",").map((t) => t.trim()), "Skill", ...(task.returns ? ["StructuredOutput"] : []), ..._mcpTools()].filter(Boolean))].join(","),
+    // The only name dispatch adds: `--json-schema` creates a StructuredOutput tool the
+    // CLI never lists, and off bypass mode an unlisted tool is denied. Skill and the
+    // MCP servers are NOT added here — they are the default normalize fills in when an
+    // author names no list, so an explicit list really does replace it.
+    "--allowedTools", [...new Set([...String(task.allowedTools || "").split(",").map((t) => t.trim()), ...(task.returns ? ["StructuredOutput"] : [])].filter(Boolean))].join(","),
     // A shell env var LOSES to the user's settings.json env block, and Claude Code
     // has no [1m] model alias — --settings is highest-precedence in the CLI's
     // settings chain, so it's the only route that overrides that block per-leaf.
@@ -109,7 +101,7 @@ function buildClaudeInvocation(task, prompt, cfg, providerId, _mcpTools = mcpToo
 
 function dispatchRunners(providerRegistry) {
   return createRunnerRegistry([
-    { id: "claude", buildInvocation: (task, prompt, context = {}) => buildClaudeInvocation(task, prompt, context.config || {}, context.provider || "claude", context.mcpTools) },
+    { id: "claude", buildInvocation: (task, prompt, context = {}) => buildClaudeInvocation(task, prompt, context.config || {}, context.provider || "claude") },
     defaultCodexRunnerAdapter,
   ], { providerRegistry });
 }
@@ -177,7 +169,7 @@ export function buildDispatch(task, prompt, cfg = {}, options = {}) {
   const invocation = runner.buildInvocation(
     { ...task, ...identity }, prompt,
     // schemaPath is the scheduler's strict-copy file — the one flag a runner cannot build itself.
-    { config: cfg, provider: identity.provider, mcpTools: options._mcpTools, schemaPath: options.schemaPath }
+    { config: cfg, provider: identity.provider, schemaPath: options.schemaPath }
   );
   const parser = runner.parser || runner.parserId || runner.id;
   if (!runnerParserFactories.has(String(parser).toLowerCase())) {

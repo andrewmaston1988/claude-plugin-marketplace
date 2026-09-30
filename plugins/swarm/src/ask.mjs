@@ -7,7 +7,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
 import { DIGEST_ID } from "./digest.mjs";
-import { worktreeNameFromCwd } from "./manifest-task-policy.mjs";
+import { defaultToolsFor, mcpTools, worktreeNameFromCwd } from "./manifest-task-policy.mjs";
 import { readResult } from "./results.mjs";
 import { cwdAllowed, defaultGovernanceIo } from "./governance.mjs";
 import { allowedRootsFor, providerConfig } from "./providers.mjs";
@@ -16,7 +16,7 @@ import { runPlan, makeDefaultIo } from "./scheduler.mjs";
 
 const PROVIDERS = defaultProviderRegistry();
 
-export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo(), providerRegistry = PROVIDERS, runnerRegistry, _governanceIo = defaultGovernanceIo() }) {
+export async function askLeaf({ resultsDir, taskId, question, model, provider, cfg, io = makeDefaultIo(), providerRegistry = PROVIDERS, runnerRegistry, _governanceIo = defaultGovernanceIo(), _mcpTools = mcpTools }) {
   const prior = readResult(resultsDir, taskId);
   if (!prior) throw new Error(`no result for '${taskId}' under ${resultsDir}`);
   if (!prior.sessionId) {
@@ -72,9 +72,13 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   // manifest.tasks — it joined the roster mid-run via an expand event. Its own
   // result carries every field a manifest task would have declared, so build the
   // ask task from that instead of requiring a manifest entry that doesn't exist.
+  // A result recorded before `allowedTools` was captured — or a hand-built task —
+  // falls back to the same runner-dependent default normalize would have filled in,
+  // so an ask keeps the confinement the original dispatch ran under.
+  const fallbackTools = defaultToolsFor(identity.provider, _mcpTools());
   const tasks = isTopLevel
     ? manifest.tasks.map((t) => (t.id === taskId
-        ? { ...t, ...(treeName !== undefined && { worktreeName: treeName }), after: t.after || [], provider: identity.provider, allowedTools: prior.allowedTools || "Read,Grep,Glob", timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
+        ? { ...t, ...(treeName !== undefined && { worktreeName: treeName }), after: t.after || [], provider: identity.provider, allowedTools: prior.allowedTools || fallbackTools, timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
         : { ...t, after: t.after || [] }))
     : [
         ...manifest.tasks.map((t) => ({ ...t, after: t.after || [] })),
@@ -84,7 +88,7 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
           provider: identity.provider,
           cwd: prior.cwd,
           originalCwd: prior.originalCwd || prior.cwd,
-          allowedTools: prior.allowedTools || "Read,Grep,Glob",
+          allowedTools: prior.allowedTools || fallbackTools,
           timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           after: [],
           ...(treeName !== undefined && { worktreeName: treeName }),

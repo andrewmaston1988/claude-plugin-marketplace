@@ -9,7 +9,7 @@ import { test } from "node:test";
 import { equal, ok, deepEqual, throws } from "node:assert/strict";
 import { writeFileSync, rmSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { ValidationError, DEFAULT_TOOLS } from "../src/manifest.mjs";
+import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask } from "./helpers/manifest-fixtures.mjs";
 
@@ -25,11 +25,13 @@ test("fully valid manifest normalizes with defaults", () => {
       ],
       digest: { provider: "claude", model: "claude-haiku-4-5-20251001", instructions: "focus on X" },
     });
-    const plan = loadManifest(p, CFG, dir);
+    // The default leaf toolset reads this machine's MCP roster, so the roster is
+    // stubbed and the expected value written out — never recomputed by the code under test.
+    const plan = loadManifest(p, CFG, dir, { io: { mcpTools: () => ["mcp__x"] } });
     equal(plan.resultsDir, join(dir, "out"));
     equal(plan.concurrency, 4);
     equal(plan.tasks.length, 3);
-    equal(plan.tasks[0].allowedTools, DEFAULT_TOOLS);
+    equal(plan.tasks[0].allowedTools, "Read,Grep,Glob,Skill,mcp__x");
     equal(plan.tasks[0].cwd, dir);
     equal(plan.tasks[0].timeoutMs, 600000);
     deepEqual(plan.tasks[2].after, ["scan-a", "scan-b"]);

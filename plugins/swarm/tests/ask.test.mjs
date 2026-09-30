@@ -46,8 +46,9 @@ test("askLeaf resumes the leaf session with its own model, cwd, and tools", asyn
     const args = call.args;
     equal(args[args.indexOf("--resume") + 1], "s-1");
     equal(args[args.indexOf("--model") + 1], "claude-haiku-4-5-20251001");
-    // MCP is appended to every leaf, so pin the propagation, not the whole string.
-    ok(args[args.indexOf("--allowedTools") + 1].startsWith("Read,Grep"));
+    // The leaf's own recorded list, verbatim: an ask is the same confinement the
+    // original dispatch ran under, and nothing joins the list on the way.
+    equal(args[args.indexOf("--allowedTools") + 1], "Read,Grep");
     equal(call.opts.cwd, tmpdir());
 
     // thread continuity: next ask resumes the NEW session id
@@ -188,6 +189,41 @@ test("askLeaf: a failed resume surfaces ok:false, does not update sessionId", as
     equal(r.ok, false);
     ok(r.answer.includes("No conversation found"), r.answer);
     equal(readResult(dir, "leaf").sessionId, "s-1");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A record with no allowedTools — one written before the field was captured, or a
+// hand-built task — falls back to the runner's own default, not a hardcoded trio:
+// an ask must hand the leaf what a fresh dispatch of that same task would.
+test("askLeaf: a top-level leaf whose result recorded no allowedTools gets the runner default", async () => {
+  const dir = setup({ allowedTools: undefined });
+  try {
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await askLeaf({ resultsDir: dir, taskId: "leaf", question: "why though?", cfg: CFG, io: makeIo(spawn), _mcpTools: () => ["mcp__x"] });
+    const args = spawn.calls[0].args;
+    equal(args[args.indexOf("--allowedTools") + 1], "Read,Grep,Glob,Skill,mcp__x");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The same fallback on the other branch — a clone's ask is rebuilt from its own
+// result, which carries no list either.
+test("askLeaf: a clone whose result recorded no allowedTools gets the same runner default", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "swarm-ask-clone-tools-"));
+  try {
+    initResultsDir(dir);
+    writeManifestSnapshot(dir, { cwd: tmpdir(), resultsDir: dir, tasks: [{ id: "fix", provider: "claude", model: "claude-haiku-4-5-20251001", forEach: { over: "{{x}}" } }] });
+    writeResult(dir, "fix[0]", {
+      id: "fix[0]", provider: "claude", model: "claude-haiku-4-5-20251001", ok: true, exit: 0, durationMs: 5,
+      output: "clone finding", sessionId: "s-clone", cwd: tmpdir(),
+    });
+    const spawn = fakeSpawnFactory(() => ({ output: STREAM }));
+    await askLeaf({ resultsDir: dir, taskId: "fix[0]", question: "why though?", cfg: CFG, io: makeIo(spawn), _mcpTools: () => ["mcp__x"] });
+    const args = spawn.calls[0].args;
+    equal(args[args.indexOf("--allowedTools") + 1], "Read,Grep,Glob,Skill,mcp__x");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
 import { writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { DEFAULT_TOOLS } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask } from "./helpers/manifest-fixtures.mjs";
 
@@ -106,12 +105,14 @@ test("manifest task: child loads, validates, and lands normalized on childPlan",
         { id: "audit", manifest: "child.json", after: ["seed"], forEach: { from: "seed", path: "", maxItems: 3 } },
       ],
     });
-    const plan = loadManifest(p, CFG, dir);
+    // A child plan normalizes with the same runner default as the parent's own
+    // tasks; the MCP roster is stubbed so the expected value is a literal.
+    const plan = loadManifest(p, CFG, dir, { io: { mcpTools: () => ["mcp__x"] } });
     const node = plan.tasks.find((t) => t.id === "audit");
     equal(node.model, "manifest");
     equal(node.childPlan.tasks.length, 2);
     equal(node.childPlan.tasks[0].id, "scan");
-    equal(node.childPlan.tasks[0].allowedTools, DEFAULT_TOOLS);
+    equal(node.childPlan.tasks[0].allowedTools, "Read,Grep,Glob,Skill,mcp__x");
     deepEqual(node.childPlan.tasks[1].after, ["scan"]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
