@@ -243,6 +243,18 @@ test("Codex accepts settings.env and refuses every other key by name", () => {
   match(problems[0], /env/, "the message must name env as the one key Codex accepts");
 });
 
+test("settings.env must be a plain object — a string, array, null or number is refused by name", () => {
+  // It is spread straight into the spawn env, so a string would arrive as keys
+  // "0", "1", … and every intended var would silently stay unset.
+  for (const env of ["FOO=bar", ["FOO=bar"], null, 7]) {
+    const problems = defaultCodexProviderAdapter.validateTask({ model: "gpt-5-codex", settings: { env } });
+    equal(problems.length, 1, `${JSON.stringify(env)}: ${problems.join("\n")}`);
+    match(problems[0], /settings\.env/, problems[0]);
+    match(problems[0], /"env": \{"X": "1"\}/, `the refusal carries an example, like the settings-object one: ${problems[0]}`);
+  }
+  deepEqual(defaultCodexProviderAdapter.validateTask({ model: "gpt-5-codex", settings: { env: {} } }), []);
+});
+
 test("settings.env may not set SWARM_WRITE_GUARD_ROOTS, and that refusal suggests no leafGuard opt-out", () => {
   const dir = tmp();
   try {

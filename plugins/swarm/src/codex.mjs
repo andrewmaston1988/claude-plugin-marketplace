@@ -502,6 +502,12 @@ export function createCodexProviderAdapter(options = {}) {
           if (refused.length) {
             problems.push(`Codex tasks accept only settings.env — remove ${refused.map((k) => `'${k}'`).join(", ")}`);
           }
+          // It is spread straight into the spawn env, so a string would arrive as
+          // keys "0", "1", … and the intended vars would silently stay unset.
+          const env = settings.env;
+          if (env !== undefined && (!env || typeof env !== "object" || Array.isArray(env))) {
+            problems.push('Codex settings.env must be a JSON object — e.g. "settings": {"env": {"X": "1"}}');
+          }
         }
       }
       if (context.config && !providerConfig(context.config, "codex").enabled) problems.push("Codex provider is disabled");

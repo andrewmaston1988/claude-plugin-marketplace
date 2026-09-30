@@ -20,7 +20,8 @@ function runHook(stdin, { envRoots, argv = [], cwd } = {}) {
   return r.stdout.trim();
 }
 
-// The payload shape probed live from `codex exec` 0.157.1.
+// The apply_patch payload shape: the patch in tool_input.command, targets relative
+// to the payload's own cwd.
 const patch = (cwd, ...lines) =>
   JSON.stringify({ tool_name: "apply_patch", tool_input: { command: ["*** Begin Patch", ...lines, "*** End Patch"].join("\n") }, cwd });
 const write = (filePath) => JSON.stringify({ tool_name: "Write", tool_input: { file_path: filePath } });

@@ -6,6 +6,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_TIMEOUT_MS } from "./config.mjs";
+import { DIGEST_ID } from "./digest.mjs";
+import { worktreeNameFromCwd } from "./manifest-task-policy.mjs";
 import { readResult } from "./results.mjs";
 import { cwdAllowed, defaultGovernanceIo } from "./governance.mjs";
 import { allowedRootsFor, providerConfig } from "./providers.mjs";
@@ -61,13 +63,18 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
   // scheduling loop can read it; the target additionally needs the dispatch
   // fields the snapshot never carried, sourced from its own last result.
   const isTopLevel = manifest.tasks.some((t) => t.id === taskId);
+  // The tree the leaf actually ran in, recovered from its own result: the manifest
+  // snapshot records `workspace` but no tree name, and a clone's id (`fix[0]`) is
+  // not its tree (`fix-0`). Rebuilding the ask task without it pointed the write
+  // guard at `wt-fix[0]`, a tree that never existed, denying every write.
+  const treeName = worktreeNameFromCwd(prior.cwd, resultsDir);
   // A forEach clone (`fix[0]`) or manifest child (`node~child`) never appears in
   // manifest.tasks — it joined the roster mid-run via an expand event. Its own
   // result carries every field a manifest task would have declared, so build the
   // ask task from that instead of requiring a manifest entry that doesn't exist.
   const tasks = isTopLevel
     ? manifest.tasks.map((t) => (t.id === taskId
-        ? { ...t, after: t.after || [], provider: identity.provider, allowedTools: prior.allowedTools || "Read,Grep,Glob", timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
+        ? { ...t, ...(treeName !== undefined && { worktreeName: treeName }), after: t.after || [], provider: identity.provider, allowedTools: prior.allowedTools || "Read,Grep,Glob", timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS }
         : { ...t, after: t.after || [] }))
     : [
         ...manifest.tasks.map((t) => ({ ...t, after: t.after || [] })),
@@ -80,6 +87,10 @@ export async function askLeaf({ resultsDir, taskId, question, model, provider, c
           allowedTools: prior.allowedTools || "Read,Grep,Glob",
           timeoutMs: cfg.timeoutMs ?? DEFAULT_TIMEOUT_MS,
           after: [],
+          ...(treeName !== undefined && { worktreeName: treeName }),
+          // The digest's cwd is engine scratch, outside every tree; without this the
+          // id fallback would name `wt-__digest` and deny every write it makes there.
+          ...(taskId === DIGEST_ID && { isDigest: true }),
         },
       ];
   // An ask is a one-off answer, not a monitored run: no roster/live-view
