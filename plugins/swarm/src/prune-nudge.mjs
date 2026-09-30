@@ -1,6 +1,6 @@
 // Finished runs whose kept worktrees are still on disk, scoped to the session that
 // dispatched them. The engine names them only in the closing block a backgrounded
-// dispatch never shows, so the Stop hook says it at the stop — one line, once per
+// dispatch never shows, so the nudge hook says it per turn — one line, once per
 // run — and the per-run list lives in `swarm status --mine`, a command's output the
 // terminal collapses.
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -59,7 +59,7 @@ export function projectRunsHoldingWorktrees({ home, toplevel, sessionId, skipNud
 // `swarm.pruneNudge: false` silences it like the sibling nudges.
 export const inLeafOrAutonomous = (env) => env.SWARM_LEAF === "1" || Boolean(env.CORRELATION_ID);
 
-// Exactly one line: the Stop hook prints it once per run, and the per-run detail it
+// Exactly one line: the nudge hook prints it once per run, and the per-run detail it
 // points at lives in the listing `node <cli> status --mine` prints.
 export function pruneReason({ worktrees, others }) {
   const mine = `${worktrees} worktree${worktrees === 1 ? "" : "s"} from runs in this session`;
