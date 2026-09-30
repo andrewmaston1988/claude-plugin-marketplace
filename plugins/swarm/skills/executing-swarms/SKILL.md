@@ -171,6 +171,8 @@ Phases of one feature that must accumulate on a single branch. Every link names 
 same worktree; `after` orders them; the reviewer holds no write tools and warns the
 next implementer through `{{result:}}`.
 
+An explicit `allowedTools` list replaces the default; name `Skill` and `mcp__<server>` if the leaf needs them.
+
 ```json
 { "tasks": [
     { "id": "p1", "provider": "ollama", "model": "glm-5.2:cloud", "workspace": "feat",
