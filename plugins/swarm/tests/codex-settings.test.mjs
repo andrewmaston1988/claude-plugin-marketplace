@@ -11,7 +11,7 @@ import { buildDigestTask, scratchPath } from "../src/digest.mjs";
 import { buildCodexInvocation, defaultCodexProviderAdapter } from "../src/codex.mjs";
 import { CFG, tmp, task, fakeSpawnFactory, makeIo } from "./helpers/scheduler-fixtures.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
-import { writeManifest, errorsOf, claudeTask, writerTask } from "./helpers/manifest-fixtures.mjs";
+import { CFG as MANIFEST_CFG, writeManifest, errorsOf, claudeTask, writerTask } from "./helpers/manifest-fixtures.mjs";
 
 // A canonical Codex transcript, so a row that asserts on the RESULT is not
 // reading a parser failure as if it were the dispatch's own verdict.
@@ -29,9 +29,13 @@ const codexCfg = (root) => ({
   timeoutMs: 600000,
 });
 
-// loadManifest refuses every task when provider.allowedRoots is unset, so the
-// manifest-level rows need a root that covers the temp dir they author in.
-const guardedCfg = (root) => ({ ...CFG, provider: { ...CFG.provider, allowedRoots: [root] } });
+// loadManifest gates every provider on configured roots; the tmp dir each manifest
+// row authors in is a tmpdir child, which the fixture's canonical block already covers.
+const manifestCfg = (root) => ({
+  ...MANIFEST_CFG,
+  provider: { allowedRoots: [root] },
+  providers: { claude: { enabled: true, allowedRoots: [root] } },
+});
 
 // Drive runTask and hand back both the spawned call and the settled result.
 async function capture(t, cfg, resultsDir, parentEnv = {}) {
@@ -67,6 +71,19 @@ test("Codex writer: runTask sets SWARM_WRITE_GUARD_ROOTS to its tree and outputD
       cwd: dir, originalCwd: dir,
     }), cfg, resultsDir);
     equal(reader.call.opts.env.SWARM_WRITE_GUARD_ROOTS, "", "a reader has no roots — and the var is still set, so nothing can inherit one");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a writer that already carries its own tree root gets no duplicate", async () => {
+  const dir = tmp();
+  try {
+    const resultsDir = join(dir, "run");
+    const { call } = await capture(task("w", {
+      provider: "codex", model: "gpt-5-codex", allowedTools: "Read,Write",
+      cwd: dir, originalCwd: dir, worktreeName: "w",
+      writeRoots: [{ path: join(resultsDir, "wt-w"), kind: "directory" }],
+    }), codexCfg(dir), resultsDir);
+    deepEqual(rootsOf(call), [join(resultsDir, "wt-w")], "the same root twice would double every --add-dir and every guard argv");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -131,7 +148,7 @@ test("normalize no longer injects settings.hooks for a writer — settings passe
   const dir = tmp();
   try {
     const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask({ settings: { env: { OTHER: "x" } } })] });
-    const planTask = loadManifest(p, guardedCfg(dir), dir).tasks[0];
+    const planTask = loadManifest(p, manifestCfg(dir), dir).tasks[0];
     deepEqual(planTask.settings, { env: { OTHER: "x" } }, "roots are computed at spawn now, so normalize writes nothing");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -230,7 +247,7 @@ test("settings.env may not set SWARM_WRITE_GUARD_ROOTS, and that refusal suggest
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [claudeTask({ cwd: ".", settings: { env: { SWARM_WRITE_GUARD_ROOTS: "[]" } } })] });
-    const errs = errorsOf(() => loadManifest(p, guardedCfg(dir), dir));
+    const errs = errorsOf(() => loadManifest(p, manifestCfg(dir), dir));
     const row = errs.find((e) => e.includes("SWARM_WRITE_GUARD_ROOTS"));
     ok(row, errs.join("\n"));
     ok(!/leafGuard/.test(row), `a task cannot opt out of the write guard: ${row}`);
@@ -242,7 +259,7 @@ test("the SWARM_LEAF* keys keep their leafGuard opt-out remedy", () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, { tasks: [claudeTask({ cwd: ".", settings: { env: { SWARM_LEAF: "0" } } })] });
-    const row = errorsOf(() => loadManifest(p, guardedCfg(dir), dir)).find((e) => e.includes("SWARM_LEAF'"));
+    const row = errorsOf(() => loadManifest(p, manifestCfg(dir), dir)).find((e) => e.includes("SWARM_LEAF'"));
     ok(row, "the SWARM_LEAF key must still be refused");
     ok(/"leafGuard": false/.test(row), row);
   } finally { rmSync(dir, { recursive: true, force: true }); }

@@ -8,9 +8,8 @@ import { CONTEXT_WINDOW_1M } from "./contracts.mjs";
 import { declaredEfforts, effortFor } from "./models.mjs";
 import { providerConfig } from "./providers.mjs";
 import { runScopeKey } from "./worktree.mjs";
-import { applyWriteGuard } from "../hooks/leaf-write-guard.mjs";
 import { checkGovernance } from "./governance.mjs";
-import { DEFAULT_TOOLS, hasWriteTools, resolveWorktreeName, leafWriteGuardRoots } from "./manifest-task-policy.mjs";
+import { DEFAULT_TOOLS, hasWriteTools, resolveWorktreeName } from "./manifest-task-policy.mjs";
 import { guardFor, probeGuard, defaultManifestIo } from "./manifest-leaf-guard.mjs";
 import { PROVIDERS, checkDenylist, checkHeadroom, resolveProvider, validateEffort } from "./manifest-model-gates.mjs";
 
@@ -120,15 +119,11 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
     const forEachBlock = !isCompute && t.forEach && typeof t.forEach === "object" && !Array.isArray(t.forEach)
       ? { forEach: { from: t.forEach.from, path: t.forEach.path ?? "", maxItems: t.forEach.maxItems } } : {};
     const outputDir = t.outputDir ? resolve(cwd, t.outputDir) : undefined;
-    // `--allowedTools` scopes tool NAMES, never paths, and a worktree confines only the
-    // leaf's cwd — so a PreToolUse guard is merged into each writer's own `--settings`.
-    // Codex is skipped deliberately: its adapter refuses any settings at all, so
-    // attaching one would fail the leaf on a message about Claude-only settings. Codex
-    // leaves do run the plugin's hooks.json, but that carries no per-leaf roots.
-    const guardRoots = !isCompute && !isManifest && !isIntegrate && provider !== "codex" && hasWriteTools(t.allowedTools)
-      ? leafWriteGuardRoots({ worktreeName, resultsDir, outputDir })
-      : [];
-    const taskSettings = guardRoots.length ? applyWriteGuard(t.settings, guardRoots) : t.settings;
+    // The write guard's roots are NOT computed here. A forEach clone is renamed after
+    // normalize, the quota fallback flips `provider` in place, and the generated digest
+    // bypasses normalize entirely — so roots frozen at this point would name a tree the
+    // leaf never runs in, or a provider that cannot accept them. runTask appends them at
+    // spawn instead; each runner adapter translates the same typed list.
     return {
       id: t.id,
       prompt: isCompute || isManifest || isIntegrate ? "" : t.prompt,
@@ -159,7 +154,7 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       ...(!isCompute && !isManifest && !isIntegrate && Array.isArray(t.mustRead) && { mustRead: t.mustRead }),
       ...(!isCompute && !isManifest && !isIntegrate && t.contextWindow !== undefined && { contextWindow: t.contextWindow }),
       ...(typeof t.verifyCitations === "boolean" && { verifyCitations: t.verifyCitations }),
-      ...(taskSettings && typeof taskSettings === "object" && !Array.isArray(taskSettings) && { settings: taskSettings }),
+      ...(t.settings && typeof t.settings === "object" && !Array.isArray(t.settings) && { settings: t.settings }),
       ...(childPlans?.has(t.id) && { childPlan: childPlans.get(t.id) }),
       ...(guard && { leafGuard: guard }),
     };

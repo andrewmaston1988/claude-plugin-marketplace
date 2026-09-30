@@ -242,8 +242,8 @@ test("Codex integration: a read-only digest configuration stays read-only end to
 });
 
 // The failed audit's shape, reproduced: the six leaves completed, __digest died
-// with durationMs 0 and the provider-settings rejection. A resume must re-dispatch
-// ONLY the digest and land both artifacts.
+// with durationMs 0 and a dispatch error. A resume must re-dispatch ONLY the
+// digest and land both artifacts.
 test("Codex integration: resume re-dispatches only the failed digest", async () => {
   const dir = tmp();
   try {
@@ -257,7 +257,7 @@ test("Codex integration: resume re-dispatches only the failed digest", async () 
     }
     writeResult(p.resultsDir, DIGEST_ID, {
       id: DIGEST_ID, model: "gpt-5-codex", provider: "codex", ok: false, exit: null, durationMs: 0,
-      output: "dispatch error: provider 'codex' rejected task: Codex tasks do not accept Claude-only settings",
+      output: "dispatch error: governance: provider 'codex' cannot dispatch from the digest's cwd",
       errorCode: "DISPATCH_ERROR",
     });
 

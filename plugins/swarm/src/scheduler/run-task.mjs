@@ -11,6 +11,8 @@ import { createRunnerParser, emptyTokens } from "../stream.mjs";
 import { createSnapshotWriter, liveViewLines } from "../ui.mjs";
 import { TEMPLATE_RE } from "../coverage.mjs";
 import { matchQuota, DEFAULT_QUOTA_PATTERNS } from "../quota.mjs";
+import { normalizeForCompare } from "../roots.mjs";
+import { hasWriteTools, resolveWorktreeName, leafWriteGuardRoots } from "../manifest-task-policy.mjs";
 
 const RATE_LIMIT_RE = /rate.?limit|429|too many requests/i;
 
@@ -107,6 +109,27 @@ function writeStrictSchema(resultsDir, id, returns) {
   return path;
 }
 
+// The write guard's roots, appended at SPAWN rather than at normalize. Roots frozen
+// earlier would name the wrong tree for a forEach clone (renamed after normalize), the
+// wrong provider for a quota fallback (which flips `provider` in place), and would miss
+// the generated digest entirely. One typed list; each runner translates it (Claude:
+// the PreToolUse guard in `--settings`; Codex: SWARM_WRITE_GUARD_ROOTS).
+function withWriteGuardRoots(task, resultsDir) {
+  if (!resultsDir || task.isDigest || !hasWriteTools(task.allowedTools)) return task;
+  const roots = leafWriteGuardRoots({
+    worktreeName: resolveWorktreeName(task),
+    resultsDir,
+    outputDir: task.outputDir,
+  });
+  if (!roots.length) return task;
+  const existing = Array.isArray(task.writeRoots) ? task.writeRoots : [];
+  const seen = new Set(existing.map((target) => normalizeForCompare(target?.path)).filter(Boolean));
+  const appended = roots
+    .filter((path) => !seen.has(normalizeForCompare(path)))
+    .map((path) => ({ path, kind: "directory" }));
+  return appended.length ? { ...task, writeRoots: [...existing, ...appended] } : task;
+}
+
 // Exported for src/ask.mjs — interrogation reuses the exact dispatch path.
 export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, onChild, onSession } = {}, runtime = {}) {
   return new Promise((resolve) => {
@@ -117,7 +140,7 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
       : undefined;
     let dispatch;
     try {
-      dispatch = buildDispatch(task, prompt, cfg, {
+      dispatch = buildDispatch(withWriteGuardRoots(task, runtime.resultsDir), prompt, cfg, {
         providerRegistry: runtime.providerRegistry,
         runnerRegistry: runtime.runnerRegistry,
         cache: runtime.cache,
@@ -145,10 +168,14 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
         // so a pipeline-launched swarm keeps its id. SWARM_LEAF never yields — a parent
         // claiming to be a leaf would arm foreground-guard's deny — and is spread LAST,
         // where neither env can unset it. SWARM_LEAF_GUARD/_PROJECT come from guardFor.
+        // SWARM_WRITE_GUARD_ROOTS is the Codex route to the same roots; it is set from
+        // the adapter's own dispatch env and never inherited, so a parent that armed a
+        // guard cannot widen a leaf's.
         env: {
           ...(io.env || process.env),
           CORRELATION_ID: (io.env || process.env).CORRELATION_ID || `swarm:${task.id}`,
           ...env,
+          SWARM_WRITE_GUARD_ROOTS: env.SWARM_WRITE_GUARD_ROOTS ?? "",
           SWARM_LEAF: "1",
           ...(task.leafGuard && { SWARM_LEAF_GUARD: task.leafGuard.command, SWARM_LEAF_GUARD_PROJECT: task.leafGuard.name }),
         },
