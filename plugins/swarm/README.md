@@ -104,14 +104,20 @@ file, so the resolver reads `~/.codex/config.toml` for the enabling entry and re
 newest enabled install itself. `SWARM_PLUGIN_REGISTRY` still names a Claude-shaped registry,
 and setting it suppresses the Codex lookup.
 
-**Codex runs every swarm hook.** `.codex-plugin/plugin.json` names the same
-`hooks/hooks.json` Claude loads, so the session-start notice, `dispatch-gate`,
-`foreground-guard`, `leaf-guard`, `grade-nudge` and `prune-nudge` fire on both hosts. Codex asks
-you to trust a plugin's hooks once, in an interactive session; headless `codex exec` — every
-Codex leaf — silently skips untrusted hooks, so trust them before dispatching Codex leaves and
-they inherit it. Codex has no `Skill` tool: reading a swarm `SKILL.md` through the shell is the
-invocation the dispatch gate counts. It has no `run_in_background` either, so the gate lets a
-Codex host dispatch in the foreground.
+**Codex runs swarm hooks after they are trusted.** `.codex-plugin/plugin.json` names the same
+`hooks/hooks.json` Claude loads. Codex asks you to trust a plugin's hooks once, in an interactive
+session; headless `codex exec` — every Codex leaf — silently skips untrusted hooks, so trust
+them before dispatching Codex leaves and they inherit it. The session-start notice,
+`dispatch-gate`, `foreground-guard`, `leaf-guard`, `grade-nudge` and `prune-nudge` then run on
+both hosts. Codex tasks accept `settings` with only an `env` key: per-leaf env vars reach the
+Codex process, and any other settings key is refused by name. Codex writer leaves are confined
+to their own worktree plus `outputDir` by the same leaf write guard Claude writers get; on
+Codex, `hooks/hooks.json` runs `leaf-write-guard.mjs` for `apply_patch`, reading those roots
+from `SWARM_WRITE_GUARD_ROOTS`. The guard runs only after the operator has trusted swarm's
+hooks in an interactive Codex session. Shell writes stay unguarded on both hosts. Codex has no
+`Skill` tool: reading a swarm `SKILL.md` through the shell is the invocation the dispatch gate
+counts. It has no `run_in_background` either, so the gate lets a Codex host dispatch in the
+foreground.
 
 ## Usage
 
