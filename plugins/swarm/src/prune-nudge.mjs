@@ -1,9 +1,6 @@
-// The Stop-hook reminder to prune: finished runs in the session's repo whose kept
-// worktrees are still on disk. The engine names them only in the run's closing block,
-// on the stdout a backgrounded dispatch never shows its session, so without this an
-// agent with no standing instructions never learns a run is holding trees. It asks at
-// every stop until the trees are gone, like grade-nudge: a reminder shown once is lost
-// under a busy session. hooks/prune-nudge.mjs is the stdin/stdout wrapper.
+// Finished runs whose kept worktrees are still on disk. The engine names them only in the
+// closing block a backgrounded dispatch never shows, so the Stop hook asks at every stop,
+// like grade-nudge — a reminder shown once is lost under a busy session.
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -12,13 +9,13 @@ import { runLiveness } from "./runlog.mjs";
 
 const CLI = fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url));
 
-// Kept trees still on disk for a FINISHED run — 0 for a live run or one that kept none.
-// summary.json is read before liveness: most runs keep no tree.
-function keptOnDisk(dir, heartbeatMs) {
+// Kept trees still on disk for a FINISHED run — none for a live or resumed run, whose old
+// summary.json still lists them. summary.json is read first: most runs keep no tree.
+export function keptWorktreesOnDisk(dir, { heartbeatMs = 15_000 } = {}) {
   const kept = (readSummary(dir, { normalize: false })?.worktreesKept || []).filter((wt) => wt?.path && existsSync(wt.path));
-  if (!kept.length) return 0;
+  if (!kept.length) return [];
   const live = runLiveness(dir, { heartbeatMs });
-  return live.finishedMs == null && live.stoppedMs == null ? 0 : kept.length;
+  return live.finishedMs == null && live.stoppedMs == null ? [] : kept;
 }
 
 // Every finished run filed under `toplevel` with a kept tree on disk, whichever session
@@ -33,13 +30,15 @@ export function projectRunsHoldingWorktrees({ home, toplevel, heartbeatMs = 15_0
   try { names = readdirSync(root); } catch { return out; }
   for (const name of names) {
     const dir = join(root, name);
-    const kept = keptOnDisk(dir, heartbeatMs);
+    const kept = keptWorktreesOnDisk(dir, { heartbeatMs }).length;
     if (kept) out.push({ dir, kept });
   }
   return out;
 }
 
-export function decidePruneNudge({ runs }) {
+// Pruning is the operator's call: a swarm leaf or autonomous session is never asked.
+export function decidePruneNudge({ runs, env = {} }) {
+  if (env.SWARM_LEAF === "1" || env.CORRELATION_ID) return { block: false, reason: null };
   if (!runs?.length) return { block: false, reason: null };
   const one = runs.length === 1;
   const reason = [

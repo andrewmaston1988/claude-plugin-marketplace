@@ -1,5 +1,5 @@
 // Codex runs swarm's hooks with Claude-shaped payloads (session_id, tool_name "Bash",
-// tool_input.command) plus turn_id and model — probed live on codex-cli 0.157.1. These
+// tool_input.command) plus turn_id and model — probed live. These
 // rows pin the three places the hosts differ, and the prune reminder both hosts share.
 import { test } from "node:test";
 import { equal, deepEqual, ok } from "node:assert/strict";
@@ -40,6 +40,8 @@ test("under Codex, reading a swarm SKILL.md through the shell is the skill invoc
   // Another skill, or the swarm tree without SKILL.md, arms nothing.
   equal(shouldAck(read(`${root}\\commit\\SKILL.md`)), false);
   equal(shouldAck(read(`${root}\\swarm\\references\\setup.md`)), false);
+  // On Claude the Skill tool is the invocation; a shell command naming SKILL.md arms nothing.
+  equal(shouldAck({ ...CLAUDE, tool_input: { command: `cat '${root}/swarm/SKILL.md'` } }), false);
 });
 
 test("the launcher stamp prefers CODEX_SESSION_ID, which a Codex under Claude also inherits CLAUDE_CODE_SESSION_ID beside", () => {
@@ -91,6 +93,9 @@ test("the prune reminder blocks every stop while any run holds trees, and is sil
   ok(first.reason.includes("prune A --dry-run") && first.reason.includes("prune B --dry-run"), first.reason);
   equal(decidePruneNudge({ runs }).block, true, "a second stop asks again");
   equal(decidePruneNudge({ runs: [] }).block, false);
+  // Pruning is the operator's call: a leaf or autonomous session is never asked.
+  equal(decidePruneNudge({ runs, env: { SWARM_LEAF: "1" } }).block, false);
+  equal(decidePruneNudge({ runs, env: { CORRELATION_ID: "c" } }).block, false);
 });
 
 test("swarm status on a finished run prints its kept trees and the prune command", () => {
@@ -102,5 +107,6 @@ test("swarm status on a finished run prints its kept trees and the prune command
     const out = renderStatus(dir);
     ok(out.includes("worktrees kept:") && out.includes(`prune ${dir}`), out);
     ok(!renderStatus(f.run("kept-none")).includes("prune"), "a run keeping nothing names no prune");
+    ok(!renderStatus(f.run("resumed", { kept: [tree], resumed: true })).includes("prune"), "a resumed run is live, not prunable");
   } finally { f.cleanup(); }
 });

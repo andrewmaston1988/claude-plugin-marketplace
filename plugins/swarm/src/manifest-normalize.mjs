@@ -89,7 +89,7 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       } else if (resolved) {
         guard = resolved;
         probeGuard(guard, originalCwd, l, io, probedGuards, errors);
-        io.stdout(`leaf guard: ${guard.name} → ${guard.command}`);
+        io.stdout(`leaf guard: ${guard.name} → ${guard.command}${provider === "codex" ? " (fires once swarm's hooks are trusted in Codex)" : ""}`);
       }
     }
     // ONE derivation, for every leaf. A leaf that can write gets a tree; a leaf that

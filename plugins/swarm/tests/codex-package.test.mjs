@@ -47,7 +47,7 @@ test("the shipped .codex-plugin/plugin.json carries every field Codex reads", ()
   deepEqual(m.interface.capabilities, ["Interactive", "Read", "Write"]);
 });
 
-// Codex runs plugin hooks (proved live on 0.157.1). Pointing at the one hooks.json both
+// Codex runs plugin hooks (proved live). Pointing at the one hooks.json both
 // hosts load is the parity: a hook added for Claude ships to Codex, and `"hooks": {}` —
 // shipped for a week on a stale claim that Codex could not run them — goes red here.
 test("the Codex manifest ships every hook, from the same hooks.json Claude loads", () => {

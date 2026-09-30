@@ -50,10 +50,10 @@ test("SKILL.md and README promise the dispatch gate on both hosts, never that Co
   ok(claim, "SKILL.md must state what the dispatch gate enforces");
   ok(claim.includes("Claude Code") && claim.includes("Codex"), `the gate promise must name both hosts; got: ${claim}`);
 
-  // Codex runs plugin hooks (probed live, codex-cli 0.157.1); a one-day measurement that it
-  // did not was written into these docs and repeated for weeks.
+  // Codex runs plugin hooks (probed live); the old claim that it could not is banned by
+  // its own vocabulary, so a true trust caveat ("do not fire until trusted") still passes.
   const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-  const lie = /hooks do not fire|do not fire|declares none|declare them yet|plugin_hooks|server-controlled|no hook fires/i;
+  const lie = /declares none|declare them yet|plugin_hooks|server-controlled/i;
   for (const [name, doc] of [["SKILL.md", text], ["README.md", readme]]) {
     const hit = doc.split(/\n\s*\n/).find((p) => /codex/i.test(p) && lie.test(p));
     ok(!hit, `${name} must not claim Codex skips swarm's hooks; got: ${hit}`);

@@ -113,10 +113,13 @@ test("provider policy: Codex rejects Claude settings, and runs a configured leaf
     const plain = writeManifest(dir, {
       tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex" }],
     }, "plain.json");
+    const lines = [];
     const plan = loadManifest(plain, cfg, dir, {
-      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, platform: process.platform },
+      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: (l) => lines.push(l), platform: process.platform },
     });
     equal(plan.tasks[0].provider, "codex");
+    // A Codex leaf runs the guard only once swarm's hooks are trusted; the armed line says so.
+    ok(lines.some((l) => /^leaf guard: .*guard-cmd.*trusted in Codex/.test(l)), lines.join("\n"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -13,7 +13,7 @@
 // Exit 0 always. This hook must never block anything.
 import fs from "node:fs";
 import path from "node:path";
-import { markerPath, groupingMarkerPath, shapeMarkerPath } from "./dispatch-gate.mjs";
+import { markerPath, groupingMarkerPath, shapeMarkerPath, isCodexPayload } from "./dispatch-gate.mjs";
 
 // A plugin skill may arrive namespaced ("swarm:swarm") or bare ("swarm"), so accept
 // both rather than betting on one and silently never arming the gate. Codex has no
@@ -27,7 +27,7 @@ function ackedSkill(payload) {
     const skill = String(payload?.tool_input?.skill || "").replace(/^swarm:/, "");
     return SKILLS.includes(skill) ? skill : null;
   }
-  if (payload?.tool_name === "Bash") {
+  if (payload?.tool_name === "Bash" && isCodexPayload(payload)) {
     const m = CODEX_SKILL_READ_RE.exec(String(payload?.tool_input?.command || ""));
     return m ? m[1].toLowerCase() : null;
   }

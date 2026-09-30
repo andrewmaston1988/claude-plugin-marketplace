@@ -1,11 +1,11 @@
 // Everything the run paints to stdout: the live roster, the one-shot status
 // view, the report footnote and the closing block. Storage lives in results.mjs.
-import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { workTokens } from "./stream.mjs";
 import { readRun } from "./runlog.mjs";
+import { keptWorktreesOnDisk } from "./prune-nudge.mjs";
 
 const ENGINE = fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url));
 
@@ -177,9 +177,7 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000, costOf)
   const status = renderRun(run, { now, quietWarnMs, costOf });
   // A finished run's kept trees are otherwise named only in its closing block, which a
   // backgrounded dispatch never shows its session.
-  let kept = [];
-  try { kept = JSON.parse(readFileSync(join(dir, "summary.json"), "utf8")).worktreesKept || []; } catch { /* no summary: still running */ }
-  kept = kept.filter((wt) => wt?.path && existsSync(wt.path));
+  const kept = keptWorktreesOnDisk(dir);
   return kept.length ? `${status}\n${formatKeptWorktrees(kept, { resultsDir: dir, engine: ENGINE })}` : status;
 }
 
