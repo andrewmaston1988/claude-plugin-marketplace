@@ -9,7 +9,7 @@ import { dim, out, err } from "../src/ui.mjs";
 
 // This session's finished runs whose kept worktrees are still on disk, each with the
 // command that prunes it. Read-only — it prunes nothing — and it lists every run this
-// session owns while its trees remain, including the ones the Stop hook has already
+// session owns while its trees remain, including the ones the nudge hook has already
 // named: the marker gates the hook's line, never this listing.
 async function mine() {
   const sessionId = launcherSession(process.env);

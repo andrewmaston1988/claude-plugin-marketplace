@@ -369,7 +369,8 @@ the engine refuses rather than lose it. `swarm prune <resultsDir>` destroys one 
 worktrees and branches, never its results — refuses a live run, prints every tree first,
 `--dry-run` for a no-op preview. `swarm status --mine` lists this session's finished runs still
 holding worktrees. The dispatching session takes what it needs from each finished run only after its work has landed (merged) or been taken (pushed or merged into your branch), then
-prunes it with `swarm prune`; it does not ask the operator. The Stop hook names each finished
+prunes it with `swarm prune`; it does not ask the operator. The per-turn nudge hook
+(Claude: `UserPromptSubmit`; Codex: `Stop`) names each finished
 run once, in one line counting this session's worktrees and other sessions'. The setting
 `"swarm": { "pruneNudge": false }` silences it.
 
@@ -473,7 +474,8 @@ what a run's `:cloud` leaves actually did; `perf` reads it back. Opt-in:
 `"grading": { "enabled": true }` — off by default, `grade`/`perf` still answer by hand.
 
 When enabled, the nudge appears on the engine's closing block, `digest.md`'s footer, and
-the session Stop hook (every turn end, not once). `swarm grade --waive <resultsDir>
+the per-turn nudge hook (Claude: `UserPromptSubmit`; Codex: `Stop`) — once a turn, not
+once a session. `swarm grade --waive <resultsDir>
 --reason "<why>"` excuses a run without a store row. The manifest's author grades it — the
 only party that knows what each leaf was *asked* for.
 
