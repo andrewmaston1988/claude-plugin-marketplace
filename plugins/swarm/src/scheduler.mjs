@@ -169,7 +169,18 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
         if (readUsage) {
           const usage = await readUsage(context);
           if (usage?.exhausted && providerTasks.some((t) => !t.fallbackModel)) {
-            throw new Error(`provider '${providerId}' usage is exhausted — ${providerTasks.filter((t) => !t.fallbackModel).map((t) => t.id).join(", ")} cannot dispatch`);
+            const undefended = providerTasks.filter((t) => !t.fallbackModel).map((t) => t.id).join(", ");
+            // Stale means the last number anyone saw, not a live verdict. A real
+            // exhaustion is still caught at dispatch by the quota path, so this
+            // warns and continues rather than grounding the run.
+            if (usage.provenance === "stale") {
+              io.stdout(
+                `⚠ provider '${providerId}' usage reads exhausted on a stale reading ` +
+                `(as of ${usage.asOf}${usage.reason ? `, ${usage.reason}` : ""}) — dispatching anyway`
+              );
+            } else {
+              throw new Error(`provider '${providerId}' usage is exhausted — ${undefended} cannot dispatch`);
+            }
           }
         }
       }

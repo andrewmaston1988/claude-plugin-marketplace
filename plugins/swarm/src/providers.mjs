@@ -4,6 +4,7 @@ import { checkQuota } from "./quota.mjs";
 import { swarmHome } from "./config.mjs";
 import { readClaudeCatalog, claudeCatalogIdentity } from "./claude-models.mjs";
 import { readClaudeUsage } from "./claude-usage.mjs";
+import { holdNote, staleAgeMark } from "./usage.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 
 // The registry's one list of capability names — `capability()` refuses anything
@@ -182,6 +183,10 @@ export async function probeProvider(id, { config = {}, registry, fetch = globalT
   }
 }
 
+// `now` arrives in both conventions — a NUMBER from a walk, a FUNCTION from io —
+// or not at all; freeze it the way readClaudeUsage does.
+const readNow = (now) => (typeof now === "function" ? now() : typeof now === "number" ? now : Date.now());
+
 async function preflightClaude({ config: cfg = {}, fetch, now, io, env, tasks = [] } = {}) {
   if (cfg.quotaPreflight === false) return { ok: true };
   const q = await checkQuota({
@@ -216,18 +221,29 @@ async function preflightClaude({ config: cfg = {}, fetch, now, io, env, tasks = 
       const what = q.exhausted
         ? `${hit.kind} at ${hit.percent}%`
         : `the ${hit.scope}-scoped limit is at ${hit.percent}%`;
-      throw new Error(
-        `Anthropic usage exhausted (${what}` +
-        `${hit.resetsAt ? `, resets ${hit.resetsAt}` : ""}) — ` +
-        `${doomed.length} Claude leaf(s) cannot dispatch: ${doomed.map((t) => t.id).join(", ")}. ` +
-        `Recast to :cloud models, add fallbackModel, or re-run after reset.`
-      );
+      // A stale reading is the last number anyone saw, never evidence the account
+      // is out: it warns and lets the leaf through. The dispatch-time quota path
+      // still catches a genuine exhaustion on the first leaf.
+      if (q.source !== "stale") {
+        throw new Error(
+          `Anthropic usage exhausted (${what}` +
+          `${hit.resetsAt ? `, resets ${hit.resetsAt}` : ""}) — ` +
+          `${doomed.length} Claude leaf(s) cannot dispatch: ${doomed.map((t) => t.id).join(", ")}. ` +
+          `Recast to :cloud models, add fallbackModel, or re-run after reset.`
+        );
+      }
+      const nowMs = readNow(now);
+      const held = [staleAgeMark(q, nowMs), holdNote(q, { now: nowMs })].filter(Boolean).join(" · ");
+      io.stdout(`⚠ Anthropic usage reads exhausted (${what}) on a stale reading${held ? ` — ${held}` : ""} — dispatching anyway`);
     }
   }
   if (q && !q.exhausted && q.worst.percent >= (cfg.quotaWarnPct ?? 80)) {
+    const nowMs = readNow(now);
+    const held = [staleAgeMark(q, nowMs), holdNote(q, { now: nowMs })].filter(Boolean);
     io.stdout(
       `⚠ Anthropic usage at ${q.worst.percent}% (${q.worst.kind}` +
-      `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — Claude leaves may hit quota mid-run`
+      `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — Claude leaves may hit quota mid-run` +
+      (held.length ? ` · ${held.join(" · ")}` : "")
     );
   }
   return { ok: true, usage: q };

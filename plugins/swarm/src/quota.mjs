@@ -103,8 +103,12 @@ function staleReading(reading, nowMs) {
     percent: l.resetsAt && Date.parse(l.resetsAt) <= nowMs ? 0 : l.percent,
     scope: l.scope ? { model: { display_name: l.scope } } : null,
   }));
-  return { ...parseUsageLimits({ limits }), source: "stale", asOfMs: reading.fetchedAt,
-    ...(reading.reason && { reason: reading.reason }) };
+  // `provenance` and `fetchedAt` are what the shared mark reads (staleAgeMark),
+  // and `retryAfter` is how long the hold that caused this reading still runs.
+  return { ...parseUsageLimits({ limits }), source: "stale", provenance: "stale",
+    asOfMs: reading.fetchedAt, fetchedAt: reading.fetchedAt,
+    ...(reading.reason && { reason: reading.reason }),
+    ...(reading.retryAfter && { retryAfter: reading.retryAfter }) };
 }
 
 // Cached best-effort quota check. The 5-minute TTL file lives under the swarm
@@ -171,7 +175,11 @@ export async function printQuota({ cfg, out, cachePath, credentialsPath, fetchIm
       cachePath,
       ...(credentialsPath && { credentialsPath }),
     });
-    if (q) usages.push(normalizeAnthropic(q));
+    // A reading served through a hold is marked as such end to end, or the
+    // figures below print bare and the reader treats a stale number as live.
+    if (q) usages.push(normalizeAnthropic(q, q.source === "stale"
+      ? { provenance: "stale", fetchedAt: q.asOfMs, reason: q.reason, retryAfter: q.retryAfter }
+      : {}));
     else out("anthropic: unavailable (no Claude Code credentials, or the usage endpoint did not respond)");
   }
 
@@ -198,7 +206,8 @@ export async function printQuota({ cfg, out, cachePath, credentialsPath, fetchIm
     if (l.severity && l.severity !== "normal") out(`anthropic ${l.kind}: [${l.severity}]`);
   }
   for (const line of notableLines(usages)) out(line);
-  // Exit code keeps its documented meaning: Anthropic exhausted. A cloud
+  // Exit code keeps its documented meaning: Anthropic exhausted — on a reading
+  // anyone may act on. A held-over reading warns; it is not a verdict. A cloud
   // provider's state is reported, never conflated with it.
-  return q?.exhausted ? 1 : 0;
+  return q?.exhausted && q.source !== "stale" ? 1 : 0;
 }
