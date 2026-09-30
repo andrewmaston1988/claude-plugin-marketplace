@@ -214,7 +214,7 @@ test("the mine listing is built from the same runs the hook decides on", () => {
 // asks instead of cleaning up. A scoped rule about a failed leaf's tree is a different
 // reading and lives on its own line — the pin is per line, not per file.
 const PRUNE = /\bprun/i;
-const OPERATOR_DECIDES = /operator'?s (call|decision)|operator decides|ask the operator|never yours|operator'?s alone/i;
+const OPERATOR_DECIDES = /operator'?s (call|decision)|operator decides|(?<!not |don't |never )ask the operator|never yours|operator'?s alone/i;
 
 function read(rel) {
   return readFileSync(join(PLUGIN, rel), "utf8");
