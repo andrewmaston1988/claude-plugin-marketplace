@@ -74,7 +74,7 @@ cldr-data
 .scout
 # --- scout managed defaults: edit above or below, not inside ---
 # Scout ignore patterns. Similar to .gitignore, but NOT identical — read the
-# three rules below before adding a line, because a wrong pattern matches nothing
+# rules below before adding a line, because a wrong pattern matches nothing
 # and says nothing.
 #
 # How lines are interpreted:
@@ -86,25 +86,32 @@ cldr-data
 #     caches, build output, vendored dependencies. ALWAYS the first choice.
 #   - Anything else (contains "/", "*", "?") is a glob, fnmatched against
 #     the path relative to the repo root, plus the bare filename.
+#   - A trailing "/" means directory-only, as in .gitignore: the entry
+#     matches directories of that name, and so everything beneath them,
+#     and it never matches a file of that name. `vendor/` ignores
+#     `vendor/a.py` and `x/vendor/b.py` while a root-level build script
+#     called `vendor` stays indexed.
 #   - A leading "!" negates. A negated line re-includes what it matches,
 #     even beneath an ignored directory, and it wins over every exclusion
 #     wherever it sits in the file (.gitignore's last-match-wins does not
 #     apply: scout's managed block may sit above or below your lines, so
 #     line order cannot be the mechanism). Re-inclusion costs
 #     the fast prune: a directory whose subtree a negation could match is
-#     walked per-file instead of pruned — an unanchored negation (no "/")
-#     drops the prune for every ignored directory.
+#     walked per-file instead of pruned — an unanchored negation (no "/"
+#     before its last character) drops the prune for every ignored directory.
 #
-# TWO FORMS THAT SILENTLY MATCH NOTHING — both look right:
-#   perf/history/       a trailing slash is a .gitignore habit; this is
-#                       tested against `perf/history/run.json`, and a
-#                       pattern ending in "/" never matches a file.
+# PATTERNS THAT SILENTLY MATCH NOTHING — both look right:
 #   */perf/history/*    paths are matched RELATIVE TO THE REPO ROOT, so a
 #                       root-level `perf/` has no leading component for the
-#                       `*/` to consume. Works nested, fails at the root.
+#                       `*/` (or `**/`) to consume. Works nested, fails at
+#                       the root.
+#   /perf/history/      a leading "/" is .gitignore's root anchor, but paths
+#                       here never start with "/", so this matches nothing.
 #
-# To exclude a directory that is not a bare name, glue the leading star:
-#   *perf/history/*     matches at the root AND at any depth.
+# A directory that is not a bare name takes its path with a trailing slash,
+# or a glued leading star when it must match at any depth:
+#   perf/history/       the directory at the repo root, and everything in it
+#   *perf/history/*     the same, at the root AND at any depth
 #
 # Verify with `scout-index prune-ignored . --dry-run` and READ THE COUNT.
 # Zero matches on a directory you know is indexed means the pattern is wrong.
