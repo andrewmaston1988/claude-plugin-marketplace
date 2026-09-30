@@ -236,7 +236,7 @@ test("report digest sits in scratch-__digest, not in the repo it reports on", ()
 
 // The digest builder states the engine's write INTENT, never a provider's wire
 // format. Claude settings here is what made every Codex report digest die at the
-// adapter boundary with `Codex tasks do not accept Claude-only settings`.
+// adapter boundary, which refused the Claude-only keys it carried.
 test("report digest carries typed writeRoots: scratch as directory, report path as file", () => {
   const t = buildDigestTask(reportPlan());
   deepEqual(t.writeRoots, [

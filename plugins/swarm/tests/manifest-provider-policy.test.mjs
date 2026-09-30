@@ -93,7 +93,7 @@ test("manifest provider field permits the same model on two dispatch providers",
   }
 });
 
-test("provider policy: Codex rejects Claude settings, and runs a configured leaf guard like any provider", () => {
+test("provider policy: Codex takes settings.env, refuses any other settings key, and runs a configured leaf guard like any provider", () => {
   const dir = tmp();
   try {
     const cfg = {
@@ -101,14 +101,24 @@ test("provider policy: Codex rejects Claude settings, and runs a configured leaf
       providers: { claude: { enabled: true }, ollama: { enabled: true, allowedRoots: [] }, codex: { enabled: true, allowedRoots: [dir] } },
       projects: [{ name: basename(dir), hooks: { preToolUse: "guard-cmd" } }],
     };
-    const guarded = writeManifest(dir, {
+    const stub = {
+      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, platform: process.platform },
+    };
+    // `env` is the one key with a Codex route — it reaches the spawn env, not a settings file.
+    const envOnly = writeManifest(dir, {
       tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex", settings: { env: { X: "1" } } }],
     }, "guarded.json");
-    const errs = errorsOf(() => loadManifest(guarded, cfg, dir, {
-      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, platform: process.platform },
-    }));
-    ok(errs.some((e) => /Codex tasks do not accept Claude-only settings/.test(e)), errs.join("\n"));
-    ok(!errs.some((e) => /leaf guard/i.test(e)), errs.join("\n"));
+    // Asserted by loading rather than by reading an error list: an accepted manifest
+    // is one that does not throw, and the key has to survive normalize to be useful.
+    const envPlan = loadManifest(envOnly, cfg, dir, stub);
+    equal(envPlan.tasks[0].settings.env.X, "1", "settings.env must reach the normalized task");
+
+    // Every other key has no Codex equivalent and is still refused, by name.
+    const claudeOnly = writeManifest(dir, {
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex", settings: { permissions: { allow: ["Read"] } } }],
+    }, "claude-only.json");
+    const refused = errorsOf(() => loadManifest(claudeOnly, cfg, dir, stub));
+    ok(refused.some((e) => /settings\.env/.test(e) && /permissions/.test(e)), refused.join("\n"));
 
     const plain = writeManifest(dir, {
       tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex" }],

@@ -26,8 +26,18 @@ const MANIFEST_BANNED_KEYS = [
 
 // The scheduler spreads these last so a task's own `env` can't override them;
 // `--settings`' env block is a second, higher-precedence path to the same
-// leaf process and must be closed the same way.
-const LEAF_GUARD_ENV_KEYS = ["SWARM_LEAF", "SWARM_LEAF_GUARD", "SWARM_LEAF_GUARD_PROJECT"];
+// leaf process and must be closed the same way. The remedy differs by key: the
+// SWARM_LEAF* vars are the leaf guard, which a task may opt out of; the write
+// roots are computed by the engine and cannot be opted out of at all.
+const LEAF_GUARD_ENV_KEYS = [
+  { key: "SWARM_LEAF", remedy: 'use "leafGuard": false to opt out instead' },
+  { key: "SWARM_LEAF_GUARD", remedy: 'use "leafGuard": false to opt out instead' },
+  { key: "SWARM_LEAF_GUARD_PROJECT", remedy: 'use "leafGuard": false to opt out instead' },
+  {
+    key: "SWARM_WRITE_GUARD_ROOTS",
+    remedy: "the roots are the task's own tree plus its outputDir, set by the engine at spawn",
+  },
+];
 
 // ── shared per-task validation ────────────────────────────────────────────────
 // One rule set for parent and child task lists. `label(t)` renders the error
@@ -158,9 +168,9 @@ export function validateTaskShapes(rawTasks, errors, label) {
       // could otherwise clear or forge the guard vars inside its own leaf session,
       // defeating the engine's env spread (the same vector proven for
       // CLAUDE_CODE_DISABLE_1M_CONTEXT in dispatch.test.mjs).
-      for (const key of LEAF_GUARD_ENV_KEYS) {
+      for (const { key, remedy } of LEAF_GUARD_ENV_KEYS) {
         if (Object.hasOwn(t.settings.env, key)) {
-          errors.push(`${l}: settings.env may not set '${key}' — it is engine-controlled; use "leafGuard": false to opt out instead`);
+          errors.push(`${l}: settings.env may not set '${key}' — it is engine-controlled; ${remedy}`);
         }
       }
     }

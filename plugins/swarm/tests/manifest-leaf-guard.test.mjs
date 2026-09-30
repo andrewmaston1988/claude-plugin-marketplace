@@ -1,12 +1,14 @@
 // Leaf guards: the project guard a task inherits from its repo name — probe,
-// print, and explicit opt-out — and the write guard injected into a writer's own
-// `--settings` so a leaf cannot rewrite it.
+// print, and explicit opt-out — and the write guard the Claude runner merges into
+// a writer's own `--settings` so a leaf cannot rewrite it.
 import { test } from "node:test";
 import { equal, ok, deepEqual, match } from "node:assert/strict";
 import { writeFileSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
 import { spawnSync } from "node:child_process";
 import { DEFAULT_TOOLS, hasWriteTools } from "../src/manifest.mjs";
+import { runTask } from "../src/scheduler.mjs";
+import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { CFG, writeManifest, tmp, errorsOf, claudeTask, writerTask } from "./helpers/manifest-fixtures.mjs";
 
@@ -132,16 +134,28 @@ test("leaf guard: a passing probe prints one line per guarded task and an opt-ou
 
 // ── leaf write guard ──────────────────────────────────────────────────────────
 // A worktree confines a leaf's cwd, not an absolute path, so a leaf could write
-// across the operator's live checkout. The guard is
-// INJECTED into each writer's own `--settings`, so the leaf cannot rewrite it.
+// across the operator's live checkout. The roots are computed at spawn — a forEach
+// clone is renamed after normalize and a quota fallback flips `provider` in place —
+// and the Claude runner merges them into the writer's own `--settings`, so the leaf
+// cannot rewrite the guard that contains it.
 
-test("write guard: attached to a write-capable leaf, rooted at its own worktree", () => {
+// The one spawn a normalized writer makes, so the rows below read the argv the leaf
+// actually got rather than a builder called beside the real path.
+async function spawnedWriter(planPath, cfg, dir, opts = {}) {
+  const plan = loadManifest(planPath, cfg, dir, opts);
+  const spawn = fakeSpawnFactory(() => ({ output: "" }));
+  await runTask(plan.tasks[0], plan.tasks[0].prompt, cfg, makeIo(spawn), null, {}, { resultsDir: plan.resultsDir });
+  const call = spawn.calls[0];
+  const settings = JSON.parse(call.args[call.args.indexOf("--settings") + 1]);
+  return { plan, task: plan.tasks[0], call, settings, guard: settings.hooks.PreToolUse[0] };
+}
+
+test("write guard: attached to a write-capable leaf, rooted at its own worktree", async () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask()] });
-    const plan = loadManifest(p, CFG, dir);
-    const guard = plan.tasks[0].settings?.hooks?.PreToolUse?.[0];
-    ok(guard, `a writer must carry the guard: ${JSON.stringify(plan.tasks[0].settings)}`);
+    const { task, guard } = await spawnedWriter(p, CFG, dir);
+    equal(task.settings, undefined, "normalize writes nothing: roots are computed at spawn");
     equal(guard.matcher, "Write|Edit|NotebookEdit");
     const command = guard.hooks[0].command;
     match(command, /leaf-write-guard\.mjs/);
@@ -155,67 +169,67 @@ test("write guard: absent from a read-only leaf, which has no tree to be confine
   const dir = tmp();
   try {
     const p = writeManifest(dir, { resultsDir: "out", tasks: [claudeTask()] });
-    const plan = loadManifest(p, CFG, dir);
-    equal(plan.tasks[0].allowedTools, DEFAULT_TOOLS);
-    equal(plan.tasks[0].settings, undefined);
+    const task = loadManifest(p, CFG, dir).tasks[0];
+    equal(task.allowedTools, DEFAULT_TOOLS);
+    equal(task.settings, undefined);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test("write guard: absent from a read-only leaf even when it declares an outputDir", () => {
   // The row above passes on its own for the wrong reason: a reader derives no tree,
-  // so its root list is empty and applyWriteGuard no-ops. outputDir is the one root a
-  // reader CAN have, which makes hasWriteTools the only thing withholding the guard.
+  // so its root list is empty. outputDir is the one root a reader CAN have, which
+  // makes hasWriteTools the only thing withholding the guard.
   const dir = tmp();
   try {
     const p = writeManifest(dir, { resultsDir: "out", tasks: [claudeTask({ outputDir: "artefacts" })] });
-    const plan = loadManifest(p, CFG, dir);
-    equal(plan.tasks[0].outputDir, join(dir, "artefacts"), "the root would exist if the predicate let it through");
-    equal(plan.tasks[0].settings, undefined);
+    const task = loadManifest(p, CFG, dir).tasks[0];
+    equal(task.outputDir, join(dir, "artefacts"), "the root would exist if the predicate let it through");
+    equal(task.settings, undefined);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("write guard: outputDir is a second allowed root — it resolves into the live checkout", () => {
+test("write guard: outputDir is a second allowed root — it resolves into the live checkout", async () => {
   const dir = tmp();
   try {
     const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask({ outputDir: "artefacts" })] });
-    const plan = loadManifest(p, CFG, dir);
-    const command = plan.tasks[0].settings.hooks.PreToolUse[0].hooks[0].command;
-    match(command, /wt-a/);
-    match(command, /artefacts/);
+    const { guard } = await spawnedWriter(p, CFG, dir);
+    match(guard.hooks[0].command, /wt-a/);
+    match(guard.hooks[0].command, /artefacts/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("write guard: a task's own hooks cannot replace it", () => {
+test("write guard: a task's own hooks cannot replace it", async () => {
   const dir = tmp();
   try {
     const own = { matcher: "Bash", hooks: [{ type: "command", command: "node mine.mjs" }] };
     const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask({
       settings: { env: { OTHER: "x" }, hooks: { PreToolUse: [own], Stop: [{ hooks: [{ type: "command", command: "node stop.mjs" }] }] } },
     })] });
-    const plan = loadManifest(p, CFG, dir);
-    const hooks = plan.tasks[0].settings.hooks;
+    const { settings } = await spawnedWriter(p, CFG, dir);
+    const hooks = settings.hooks;
     equal(hooks.PreToolUse.length, 2, "the engine's entry is prepended, not replaced");
     equal(hooks.PreToolUse[0].matcher, "Write|Edit|NotebookEdit");
     deepEqual(hooks.PreToolUse[1], own, "the task's own entry survives beside it");
     ok(hooks.Stop, "unrelated hook events survive");
-    equal(plan.tasks[0].settings.env.OTHER, "x", "unrelated settings survive");
+    equal(settings.env.OTHER, "x", "unrelated settings survive");
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test("write guard: the emitted command actually denies when a shell runs it", () => {
+test("write guard: the emitted command actually denies when a shell runs it", async () => {
   // Every other row asserts the command as a STRING; a wrong hook path or a root
   // list that never made it into the command would pass all of them. This runs it.
   const dir = tmp();
   try {
     const p = writeManifest(dir, { resultsDir: "out", tasks: [writerTask()] });
-    const command = loadManifest(p, CFG, dir).tasks[0].settings.hooks.PreToolUse[0].hooks[0].command;
+    const { plan, guard } = await spawnedWriter(p, CFG, dir);
+    const command = guard.hooks[0].command;
     const payload = (filePath) => JSON.stringify({ tool_name: "Write", tool_input: { file_path: filePath } });
     const run = (filePath) => {
       const r = spawnSync(command, { shell: true, input: payload(filePath), encoding: "utf8" });
       equal(r.status, 0, `the emitted command must run — ${r.stderr}`);
       return r.stdout.trim();
     };
-    const root = join(dir, "out", "wt-a");
+    const root = join(plan.resultsDir, "wt-a");
     equal(run(join(root, "inside.txt")), "", "a write inside the leaf's own tree is allowed");
     const out = JSON.parse(run(join(dir, "escape.txt")));
     equal(out.hookSpecificOutput.permissionDecision, "deny", "a write outside it is denied");
