@@ -4,10 +4,6 @@ import { join, resolve } from "node:path";
 import { bold, dim, green, red, cyan, magenta, yellow, paint } from "./ui.mjs";
 import { workTokens } from "./stream.mjs";
 import { readRun } from "./runlog.mjs";
-import { keptWorktreesOnDisk } from "./prune-nudge.mjs";
-import { enginePath } from "./config.mjs";
-
-const ENGINE = enginePath();
 
 // ── stdout contract ───────────────────────────────────────────────────────────
 // The run repaints a full roster snapshot (header, one row per task, counts
@@ -174,11 +170,7 @@ export function renderStatus(dir, now = Date.now(), quietWarnMs = 60000, costOf)
   if (!run) {
     return `no run.log at ${join(dir, "run.log")} (absolute) — either the run has not started or this is not the run's resultsDir; pass the absolute path printed at dispatch.`;
   }
-  const status = renderRun(run, { now, quietWarnMs, costOf });
-  // A finished run's kept trees are otherwise named only in its closing block, which a
-  // backgrounded dispatch never shows its session.
-  const kept = keptWorktreesOnDisk(dir);
-  return kept.length ? `${status}\n${formatKeptWorktrees(kept, { resultsDir: dir, engine: ENGINE })}` : status;
+  return renderRun(run, { now, quietWarnMs, costOf });
 }
 
 // The roster view of an already-read run (see src/runlog.mjs readRun). Rows the

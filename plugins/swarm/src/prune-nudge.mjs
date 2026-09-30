@@ -1,22 +1,12 @@
 // Finished runs whose kept worktrees are still on disk. The engine names them only in the
 // closing block a backgrounded dispatch never shows, so the Stop hook asks at every stop,
 // like grade-nudge — a reminder shown once is lost under a busy session.
-import { existsSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
-import { readSummary } from "./results.mjs";
-import { enginePath } from "./config.mjs";
-import { runLiveness } from "./runlog.mjs";
+import { keptWorktreesOnDisk } from "./results.mjs";
+import { enginePath, runsKeyFor } from "./config.mjs";
 
 const CLI = enginePath();
-
-// Kept trees still on disk for a FINISHED run — none for a live or resumed run, whose old
-// summary.json still lists them. summary.json is read first: most runs keep no tree.
-export function keptWorktreesOnDisk(dir, { heartbeatMs = 15_000 } = {}) {
-  const kept = (readSummary(dir, { normalize: false })?.worktreesKept || []).filter((wt) => wt?.path && existsSync(wt.path));
-  if (!kept.length) return [];
-  const live = runLiveness(dir, { heartbeatMs });
-  return live.finishedMs == null && live.stoppedMs == null ? [] : kept;
-}
 
 // Every finished run filed under `toplevel` with a kept tree on disk, whichever session
 // launched it: a run whose session has ended would otherwise never be named again.
@@ -25,7 +15,7 @@ export function keptWorktreesOnDisk(dir, { heartbeatMs = 15_000 } = {}) {
 export function projectRunsHoldingWorktrees({ home, toplevel, heartbeatMs = 15_000 } = {}) {
   const out = [];
   if (!toplevel) return out;
-  const root = join(home, "runs", toplevel.replace(/[\\/:]/g, "-"));
+  const root = join(home, "runs", runsKeyFor(toplevel));
   let names = [];
   try { names = readdirSync(root); } catch { return out; }
   for (const name of names) {
@@ -36,11 +26,12 @@ export function projectRunsHoldingWorktrees({ home, toplevel, heartbeatMs = 15_0
   return out;
 }
 
-// Pruning is the operator's call: a swarm leaf or autonomous session is never asked.
+// Pruning is the operator's call: a swarm leaf or autonomous session is never asked, and
+// `swarm.pruneNudge: false` silences it like the sibling nudges.
 export const inLeafOrAutonomous = (env) => env.SWARM_LEAF === "1" || Boolean(env.CORRELATION_ID);
 
-export function decidePruneNudge({ runs, env = {} }) {
-  if (inLeafOrAutonomous(env)) return { block: false, reason: null };
+export function decidePruneNudge({ runs, env = {}, config }) {
+  if (inLeafOrAutonomous(env) || config?.swarm?.pruneNudge === false) return { block: false, reason: null };
   if (!runs?.length) return { block: false, reason: null };
   const one = runs.length === 1;
   const reason = [

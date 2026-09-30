@@ -364,7 +364,8 @@ the engine refuses rather than lose it. `swarm prune <resultsDir>` destroys one 
 worktrees and branches, never its results — refuses a live run, prints every tree first,
 `--dry-run` for a no-op preview. Nothing prunes on its own; instead `swarm status` on a
 finished run names its kept trees with the prune command, and a Stop hook lists every
-finished run in the session's repo still holding trees, at every turn end until they are gone.
+finished run in the session's repo still holding trees, at every turn end until they are gone
+(`"swarm": { "pruneNudge": false }` silences it).
 
 Leaves dispatch with `--output-format stream-json`; a provider that emits plain text
 instead degrades gracefully (raw stdout becomes `output`, token columns stay empty).

@@ -21,6 +21,7 @@ import { pathToFileURL } from "node:url";
 import { workTokens } from "../src/stream.mjs";
 import { formatTokens } from "../src/results.mjs";
 import { readRun, runLiveness } from "../src/runlog.mjs";
+import { runsKeyFor } from "../src/config.mjs";
 
 const QUIET_FLAG_MS = 5 * 60 * 1000; // flag leaves silent longer than this
 
@@ -50,7 +51,7 @@ function sessionInfo() {
   if (process.stdin.isTTY) return {};
   try { return JSON.parse(readFileSync(0, "utf8")); } catch { return {}; }
 }
-const encodeCwd = (p) => String(p).replace(/[\\/:]/g, "-"); // same rule as the runs dir
+const encodeCwd = runsKeyFor;
 
 const listDir = (p) => { try { return readdirSync(p); } catch { return []; } };
 

@@ -1,9 +1,11 @@
 import { mkdirSync, writeFileSync, appendFileSync, readFileSync, existsSync, statSync } from "node:fs";
-import { join, basename } from "node:path";
+import { join, basename, resolve } from "node:path";
 import { tokenTotal } from "./stream.mjs";
 import { inferStoredIdentity } from "./contracts.mjs";
 import { listLeavesFrom } from "./leaf-list.mjs";
-import { gradeFooter } from "./results-render.mjs";
+import { gradeFooter, renderStatus as renderRunStatus, formatKeptWorktrees } from "./results-render.mjs";
+import { runLiveness } from "./runlog.mjs";
+import { enginePath } from "./config.mjs";
 
 // Results layout under <resultsDir>:
 //   .gitignore          '*' — runs never pollute the repo
@@ -235,6 +237,22 @@ export {
   renderProvenance,
   renderRoster,
   renderRun,
-  renderStatus,
   truncationLines,
 } from "./results-render.mjs";
+
+// Kept trees still on disk for a FINISHED run — none for a live or resumed run, whose old
+// summary.json still lists them. summary.json is read first: most runs keep no tree.
+export function keptWorktreesOnDisk(dir, { heartbeatMs = 15_000 } = {}) {
+  const kept = (readSummary(dir, { normalize: false })?.worktreesKept || []).filter((wt) => wt?.path && existsSync(wt.path));
+  if (!kept.length) return [];
+  const live = runLiveness(dir, { heartbeatMs });
+  return live.finishedMs == null && live.stoppedMs == null ? [] : kept;
+}
+
+// The status view plus a finished run's kept trees, which are otherwise named only in its
+// closing block — one a backgrounded dispatch never shows its session.
+export function renderStatus(dir, now, quietWarnMs, costOf) {
+  const status = renderRunStatus(dir, now, quietWarnMs, costOf);
+  const kept = keptWorktreesOnDisk(resolve(dir));
+  return kept.length ? `${status}\n${formatKeptWorktrees(kept, { resultsDir: resolve(dir), engine: enginePath() })}` : status;
+}

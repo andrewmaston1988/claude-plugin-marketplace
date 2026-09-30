@@ -18,10 +18,11 @@ import { markerPath, groupingMarkerPath, shapeMarkerPath, isCodexPayload } from 
 // A plugin skill may arrive namespaced ("swarm:swarm") or bare ("swarm"), so accept
 // both rather than betting on one and silently never arming the gate. Codex has no
 // Skill tool: it loads a skill by reading its SKILL.md through the shell, so that
-// read is the invocation there — a read verb, so `git add` or `rg` naming the file arms nothing.
+// read is the invocation there — a read verb (alone or after `cd …;`/`&&`), so `git add`
+// or `rg` naming the file arms nothing.
 const SKILLS = ["swarm", "orchestrating-agents", "executing-swarms"];
 const CODEX_SKILL_READ_RE = new RegExp(
-  `^\\s*(?:get-content|gc|cat|head|type|sed|less|more)\\b.*skills[\\\\/]+(${SKILLS.join("|")})[\\\\/]+SKILL\\.md`,
+  `(?:^|[;&|])\\s*(?:get-content|gc|cat|head|type|sed|less|more)\\b.*skills[\\\\/]+(${SKILLS.join("|")})[\\\\/]+SKILL\\.md`,
   "i",
 );
 

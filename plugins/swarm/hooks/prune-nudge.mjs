@@ -3,7 +3,7 @@
 // that still hold kept worktrees. Silent (exit 0) in a leaf, on a continuation stop,
 // outside a repo, or on unparseable stdin — a hook must never break the stop.
 import { pathToFileURL } from 'node:url';
-import { swarmHome } from '../src/config.mjs';
+import { swarmHome, loadConfig } from '../src/config.mjs';
 import { realRepoToplevel } from '../src/manifest-leaf-guard.mjs';
 import { projectRunsHoldingWorktrees, decidePruneNudge, inLeafOrAutonomous } from '../src/prune-nudge.mjs';
 
@@ -18,7 +18,10 @@ async function main() {
 
   const toplevel = payload.cwd ? realRepoToplevel(payload.cwd) : null;
   if (!toplevel) process.exit(0);
-  const decision = decidePruneNudge({ runs: projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel }), env: process.env });
+  let config;
+  try { config = loadConfig(undefined, process.env); } catch { process.exit(0); }
+  if (config?.swarm?.pruneNudge === false) process.exit(0);
+  const decision = decidePruneNudge({ runs: projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel }), env: process.env, config });
   if (!decision.block) process.exit(0);
 
   process.stdout.write(JSON.stringify({ decision: 'block', reason: decision.reason }) + '\n');

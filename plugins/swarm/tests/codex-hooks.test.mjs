@@ -10,8 +10,8 @@ import { gateDispatch, isCodexPayload, markerPath, groupingMarkerPath, shapeMark
 import { shouldAck, ackTargets } from "../hooks/skill-ack.mjs";
 import { launcherSession } from "../src/scheduler.mjs";
 import { projectRunsHoldingWorktrees, decidePruneNudge } from "../src/prune-nudge.mjs";
-import { renderStatus } from "../src/results-render.mjs";
-import { enginePath } from "../src/config.mjs";
+import { renderStatus } from "../src/results.mjs";
+import { enginePath, runsKeyFor } from "../src/config.mjs";
 
 const CODEX = { session_id: "s", turn_id: "t", model: "gpt-6-luna", tool_name: "Bash" };
 const CLAUDE = { session_id: "s", tool_name: "Bash" };
@@ -51,6 +51,9 @@ test("under Codex, only a read verb arms the gate — a command that merely name
   for (const read of [`cat ${p}`, `head -n 400 ${p}`, `type ${p.replace(/\//g, "\\")}`, `sed -n 1,200p ${p}`, `Get-Content ${p}`]) {
     equal(shouldAck(cmd(read)), true, read);
   }
+  // A read chained after cd or Set-Location is still a read.
+  equal(shouldAck(cmd(`cd C:/x && cat ${p}`)), true);
+  equal(shouldAck(cmd(`Set-Location C:/x; Get-Content ${p}`)), true);
   for (const other of [`git add ${p}`, `rg gate ${p}`, `git diff -- ${p}`]) {
     equal(shouldAck(cmd(other)), false, other);
   }
@@ -78,7 +81,7 @@ test("the launcher stamp prefers CODEX_SESSION_ID, which a Codex under Claude al
 function fixture() {
   const home = mkdtempSync(join(tmpdir(), "codex-hooks-"));
   const toplevel = "C:/code/repo";
-  const root = join(home, "runs", toplevel.replace(/[\\/:]/g, "-"));
+  const root = join(home, "runs", runsKeyFor(toplevel));
   const run = (name, { kept = [], live = false, resumed = false } = {}) => {
     const dir = join(root, name);
     mkdirSync(dir, { recursive: true });
@@ -120,6 +123,8 @@ test("the prune reminder blocks every stop while any run holds trees, and is sil
   // Pruning is the operator's call: a leaf or autonomous session is never asked.
   equal(decidePruneNudge({ runs, env: { SWARM_LEAF: "1" } }).block, false);
   equal(decidePruneNudge({ runs, env: { CORRELATION_ID: "c" } }).block, false);
+  // The operator can switch it off, like the sibling nudges.
+  equal(decidePruneNudge({ runs, config: { swarm: { pruneNudge: false } } }).block, false);
 });
 
 test("swarm status on a finished run prints its kept trees and the prune command", () => {
@@ -133,4 +138,9 @@ test("swarm status on a finished run prints its kept trees and the prune command
     ok(!renderStatus(f.run("kept-none")).includes("prune"), "a run keeping nothing names no prune");
     ok(!renderStatus(f.run("resumed", { kept: [tree], resumed: true })).includes("prune"), "a resumed run is live, not prunable");
   } finally { f.cleanup(); }
+});
+
+test("the runs key is one rule, shared by the run filer and the prune scan", () => {
+  equal(runsKeyFor("C:/code/repo"), "C--code-repo");
+  equal(runsKeyFor(String.raw`C:\code\repo`), "C--code-repo");
 });
