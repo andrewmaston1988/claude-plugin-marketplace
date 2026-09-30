@@ -1,17 +1,20 @@
 // Grade-nudge rows 3, 3b, 4, 4c, 6, 7, 9 (reader half), 11 of
 // swarm-grading-nudge-test-plan.md — against the exported decision function
 // with injected state, plus ungradedRuns over fixture run trees. The plugin
-// spawns no hook binary in tests; decideGradeNudge is the seam.
+// Uses decideGradeNudge as the pure seam and spawns the hook for its host gate.
 import { test } from "node:test";
+import { spawnSync } from "node:child_process";
 import { equal, deepEqual, ok, match } from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync } from "node:fs";
 import { join, basename } from "node:path";
+import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { decideGradeNudge, ungradedRuns, lastRunStart, runGradeable } from "../src/grade-nudge.mjs";
 import { gradedRunKeys } from "../src/scores.mjs";
 import { waiverPath } from "../src/results.mjs";
 
 const GRADING_ON = { grading: { enabled: true } };
+const HOOK = fileURLToPath(new URL("../hooks/grade-nudge.mjs", import.meta.url));
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "swarm-gn-"));
@@ -281,13 +284,38 @@ test("the walk never reads the run.log of a run it can skip on a cheap predicate
   }
 });
 
-test("runGradeable: a waived run asks nothing — the closing block and digest footer share the Stop hook's escape", () => {
+test("runGradeable: a waived run asks nothing — the closing block and digest footer share the nudge hook's escape", () => {
   const home = tmp();
   try {
     const dir = runDir(home, { name: "waivable-1", starts: [{ launcher: "me" }] });
     equal(runGradeable(dir, { cfg: GRADING_ON, graded: new Set() })?.count, 1, "control: an unwaived run with one leaf must ask");
     writeFileSync(waiverPath(dir), JSON.stringify({ waivedAt: new Date().toISOString(), reason: "smoke" }));
     equal(runGradeable(dir, { cfg: GRADING_ON, graded: new Set() }), undefined);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("grade reason asks every turn, and the binary is silent on the Claude Stop event", () => {
+  const home = tmp();
+  try {
+    writeFileSync(join(home, "config.json"), JSON.stringify({ grading: { enabled: true } }));
+    runDir(home, { name: "needs-grade-1", starts: [{ launcher: "me" }] });
+    const runHook = (hook_event_name) => spawnSync(process.execPath, [HOOK], {
+      input: JSON.stringify({ session_id: "me", hook_event_name }),
+      encoding: "utf8",
+      timeout: 60_000,
+      windowsHide: true,
+      env: { ...process.env, SWARM_HOME: home, CLAUDE_CODE_SESSION_ID: "me", CODEX_SESSION_ID: "", CLAUDE_CODE_ENTRYPOINT: "cli" },
+    });
+    const active = runHook("UserPromptSubmit");
+    equal(active.status, 0, active.stderr);
+    const output = JSON.parse(active.stdout);
+    ok(output.hookSpecificOutput.additionalContext.includes("asks every turn"));
+    equal(output.hookSpecificOutput.additionalContext.includes("asks at every stop"), false);
+    const offHost = runHook("Stop");
+    equal(offHost.status, 0, offHost.stderr);
+    equal(offHost.stdout, "");
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -41,7 +41,7 @@ test("fan-out: all tasks run, results + summary + run.log written", async () => 
 
 // ── launcher stamp ─────────────────────────────────────────────────────────────
 // The dispatching session's CLAUDE_CODE_SESSION_ID rides the run-start line so
-// the statusline's session filter and the Stop-hook grading nudge can attribute
+// the statusline's session filter and the per-turn grading nudge can attribute
 // runs. Env must be held for the whole awaited runPlan — restoring it before the
 // async body reaches the append would race the stamp.
 async function withSessionEnv(id, fn) {
