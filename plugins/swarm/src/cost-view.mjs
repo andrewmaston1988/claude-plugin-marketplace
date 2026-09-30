@@ -145,8 +145,8 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
     const domains = new Set(sectionSpread.map((row) => row.costDomain || "legacy"));
     if (domains.size > 1) return { best: null, worst: null };
     const eligible = sectionPoints.filter((p) => !p.supersededBy && p.onFrontier && p.multiplier != null && !p.thin);
-    // A pending elder is the generation on trial: it neither sets the margin's
-    // top nor takes the card, unless it is all the section has.
+    // A pending elder is on its way out: it neither sets the margin's top nor
+    // takes the card, unless it is the section's only candidate.
     const settled = eligible.filter((p) => !p.pendingSuccessor);
     const candidates = settled.length ? settled : eligible;
     const topWtd = candidates.reduce((m, p) => (p.wtd > m ? p.wtd : m), -Infinity);
