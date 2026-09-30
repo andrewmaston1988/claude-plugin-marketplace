@@ -42,11 +42,21 @@ test("the shipped .codex-plugin/plugin.json carries every field Codex reads", ()
   ok(typeof m.version === "string" && m.version.length > 0, "version must be a non-empty string");
   ok(Array.isArray(m.keywords) && m.keywords.length > 0, "keywords must be a non-empty array");
 
-  // Shape, not emptiness: step 3 of the plan decides whether hooks gains entries.
-  ok(m.hooks !== null && typeof m.hooks === "object" && !Array.isArray(m.hooks), "hooks must be an object");
 
   equal(m.interface.category, "Developer Tools");
   deepEqual(m.interface.capabilities, ["Interactive", "Read", "Write"]);
+});
+
+// Codex runs plugin hooks (proved live). Pointing at the one hooks.json both
+// hosts load is the parity: a hook added for Claude ships to Codex, and `"hooks": {}` —
+// shipped for a week on a stale claim that Codex could not run them — goes red here.
+test("the Codex manifest ships every hook, from the same hooks.json Claude loads", () => {
+  const m = loadCodexManifest();
+  equal(m.hooks, "./hooks/hooks.json", "hooks must name the shared hooks/hooks.json, never an inline copy or {}");
+  const events = readJson(new URL(m.hooks, pluginRoot)).hooks;
+  for (const event of ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"]) {
+    ok(events[event]?.length, `hooks.json declares no ${event} hook`);
+  }
 });
 
 test("skills resolves to the shared plugins/swarm/skills/ tree, which exists on disk", () => {

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// PostToolUse hook on Skill: writes the per-session markers that dispatch-gate.mjs
+// PostToolUse hook on Skill (Claude) and Bash (Codex): writes the per-session markers that dispatch-gate.mjs
 // requires before `swarm.mjs run` may proceed — one for the swarm skill (spend
 // consent, consumed per dispatch), one each for the two grouping skills
 // (`orchestrating-agents`, `executing-swarms` — reading, not consent, so never
@@ -13,30 +13,44 @@
 // Exit 0 always. This hook must never block anything.
 import fs from "node:fs";
 import path from "node:path";
-import { markerPath, groupingMarkerPath, shapeMarkerPath } from "./dispatch-gate.mjs";
+import { markerPath, groupingMarkerPath, shapeMarkerPath, isCodexPayload } from "./dispatch-gate.mjs";
 
 // A plugin skill may arrive namespaced ("swarm:swarm") or bare ("swarm"), so accept
-// both rather than betting on one and silently never arming the gate.
+// both rather than betting on one and silently never arming the gate. Codex has no
+// Skill tool: it loads a skill by reading its SKILL.md through the shell, so that
+// read is the invocation there — a read verb (alone or after `cd …;`/`&&`), so `git add`
+// or `rg` naming the file arms nothing.
+const SKILLS = ["swarm", "orchestrating-agents", "executing-swarms"];
+const CODEX_SKILL_READ_RE = new RegExp(
+  `(?:^|[;&|])\\s*(?:get-content|gc|cat|head|type|sed|less|more)\\b.*skills[\\\\/]+(${SKILLS.join("|")})[\\\\/]+SKILL\\.md`,
+  "i",
+);
+
+function ackedSkill(payload) {
+  if (payload?.tool_name === "Skill") {
+    const skill = String(payload?.tool_input?.skill || "").replace(/^swarm:/, "");
+    return SKILLS.includes(skill) ? skill : null;
+  }
+  if (payload?.tool_name === "Bash" && isCodexPayload(payload)) {
+    const m = CODEX_SKILL_READ_RE.exec(String(payload?.tool_input?.command || ""));
+    return m ? m[1].toLowerCase() : null;
+  }
+  return null;
+}
+
 export function shouldAck(payload) {
-  if (payload?.tool_name !== "Skill") return false;
-  const skill = payload?.tool_input?.skill;
-  return (
-    skill === "swarm:swarm" || skill === "swarm" ||
-    skill === "swarm:orchestrating-agents" || skill === "orchestrating-agents" ||
-    skill === "swarm:executing-swarms" || skill === "executing-swarms"
-  );
+  return ackedSkill(payload) !== null;
 }
 
 // Returns the marker path(s) to write for the invoked skill — empty for anything
 // else, or when no session id is present to key the marker on.
 export function ackTargets(payload) {
-  if (!shouldAck(payload)) return [];
+  const skill = ackedSkill(payload);
+  if (!skill) return [];
   const sessionId = String(payload.session_id || "");
   if (!sessionId) return [];
-
-  const skill = payload.tool_input.skill;
-  if (skill === "swarm:swarm" || skill === "swarm") return [markerPath(sessionId)];
-  if (skill === "swarm:orchestrating-agents" || skill === "orchestrating-agents") return [groupingMarkerPath(sessionId)];
+  if (skill === "swarm") return [markerPath(sessionId)];
+  if (skill === "orchestrating-agents") return [groupingMarkerPath(sessionId)];
   return [shapeMarkerPath(sessionId)];
 }
 

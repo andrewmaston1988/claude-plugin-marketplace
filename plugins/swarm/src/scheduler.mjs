@@ -25,6 +25,10 @@ import { createHeartbeatTick } from "./scheduler/heartbeat-tick.mjs";
 import { createDeterministicSteps } from "./scheduler/deterministic-steps.mjs";
 import { createLaunch } from "./scheduler/launch.mjs";
 
+export function launcherSession(env = process.env) {
+  return env.CODEX_SESSION_ID || env.CLAUDE_CODE_SESSION_ID || null;
+}
+
 export { makeDefaultIo };
 export { classifyFailure, pickNewestRunning, runTask, substituteItems, substituteTemplates } from "./scheduler/run-task.mjs";
 
@@ -188,12 +192,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // run-start line lets `status` derive pending tasks (ids never seen since
   // the latest run-start are pending) and carries models for the roster view.
   // pid: lets a reader tell a killed engine (no summary, pid gone) from a live one.
-  // launcher: the dispatching session's CLAUDE_CODE_SESSION_ID — absent when the
+  // launcher: the dispatching session's id — CODEX_SESSION_ID first, because a Codex
+  // started from a Claude session inherits CLAUDE_CODE_SESSION_ID — absent when the
   // engine runs outside a session, so the run belongs to nobody rather than to
   // whoever asks about it next. A resume appends a fresh run-start, re-stamping.
   appendRunLog(plan.resultsDir, {
     ts: ctx.started, event: "run-start", pid: process.pid,
-    ...(process.env.CLAUDE_CODE_SESSION_ID ? { launcher: process.env.CLAUDE_CODE_SESSION_ID } : {}),
+    ...(launcherSession() ? { launcher: launcherSession() } : {}),
     ...(ask && { ask: ask.taskId }),
     tasks: tasks.map((t) => ({ id: t.id, model: t.model, ...ctx.durableIdentity(t) })),
   });

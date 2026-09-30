@@ -72,7 +72,8 @@
   "swarm": {
     "always": false,
     "workflowNudge": true,
-    "agentNudge": true
+    "agentNudge": true,
+    "pruneNudge": true
   },
   "grading": {
     "enabled": false

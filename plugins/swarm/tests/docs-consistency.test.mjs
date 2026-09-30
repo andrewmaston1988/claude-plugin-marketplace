@@ -44,15 +44,20 @@ test("SKILL.md opens with the unconfigured check, before anything else", () => {
   ok(check.includes("references/setup.md"), `the check must route to the setup reference; got: ${check}`);
 });
 
-test("SKILL.md scopes the dispatch-gate promise to the host that enforces it", () => {
+test("SKILL.md and README promise the dispatch gate on both hosts, never that Codex skips hooks", () => {
   const text = skill();
-
-  // The gate is a Claude Code PreToolUse hook; the Codex manifest declares none, so
-  // an unscoped "the dispatch gate denies a run" promises Codex enforcement it lacks.
   const claim = text.split(/\n\s*\n/).find((p) => p.includes("dispatch gate denies"));
   ok(claim, "SKILL.md must state what the dispatch gate enforces");
-  ok(claim.includes("Claude Code"), `the gate promise must name its host scope; got: ${claim}`);
-  ok(claim.includes("Codex"), `the gate promise must name a Codex host's containment; got: ${claim}`);
+  ok(claim.includes("Claude Code") && claim.includes("Codex"), `the gate promise must name both hosts; got: ${claim}`);
+
+  // Codex runs plugin hooks (probed live); the old claim that it could not is banned by
+  // its own vocabulary, so a true trust caveat ("do not fire until trusted") still passes.
+  const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
+  const lie = /declares none|declare them yet|plugin_hooks|server-controlled/i;
+  for (const [name, doc] of [["SKILL.md", text], ["README.md", readme]]) {
+    const hit = doc.split(/\n\s*\n/).find((p) => /codex/i.test(p) && lie.test(p));
+    ok(!hit, `${name} must not claim Codex skips swarm's hooks; got: ${hit}`);
+  }
 });
 
 test("swarm reference docs keep the guidance no command prints", () => {

@@ -86,12 +86,10 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
       const resolved = guardFor(originalCwd, cfg, io);
       if (t.leafGuard === false) {
         if (resolved) io.stdout(`leaf guard: off (task opt-out)`);
-      } else if (resolved && provider === "codex") {
-        errors.push(`${l}: provider 'codex' cannot run a configured leaf guard; set leafGuard: false for this task`);
       } else if (resolved) {
         guard = resolved;
         probeGuard(guard, originalCwd, l, io, probedGuards, errors);
-        io.stdout(`leaf guard: ${guard.name} → ${guard.command}`);
+        io.stdout(`leaf guard: ${guard.name} → ${guard.command}${provider === "codex" ? " (fires once swarm's hooks are trusted in Codex)" : ""}`);
       }
     }
     // ONE derivation, for every leaf. A leaf that can write gets a tree; a leaf that
@@ -125,8 +123,8 @@ export function normalizeTasks(rawTasks, { cwd, resultsDir, cfg, defaultTimeoutM
     // `--allowedTools` scopes tool NAMES, never paths, and a worktree confines only the
     // leaf's cwd — so a PreToolUse guard is merged into each writer's own `--settings`.
     // Codex is skipped deliberately: its adapter refuses any settings at all, so
-    // attaching one would fail the leaf on a message about Claude-only settings, and a
-    // Codex leaf never runs the Claude Code hook machinery the guard rides.
+    // attaching one would fail the leaf on a message about Claude-only settings. Codex
+    // leaves do run the plugin's hooks.json, but that carries no per-leaf roots.
     const guardRoots = !isCompute && !isManifest && !isIntegrate && provider !== "codex" && hasWriteTools(t.allowedTools)
       ? leafWriteGuardRoots({ worktreeName, resultsDir, outputDir })
       : [];

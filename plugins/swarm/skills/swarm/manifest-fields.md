@@ -79,8 +79,8 @@ in the run's effective manifest snapshot; `runner` is derived internally and is 
 manifest grammar.
 
 Provider-specific roots and enabled state are checked during validation and again at
-dispatch. Codex tasks reject Claude-only `settings` and configured project leaf
-guards unless the task explicitly sets `"leafGuard": false`.
+dispatch. Codex tasks reject Claude-only `settings`; a configured project leaf guard
+applies to them like any provider.
 
 ### Effort — `effort`
 

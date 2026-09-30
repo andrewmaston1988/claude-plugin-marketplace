@@ -2,10 +2,10 @@
 import { test } from "node:test";
 import { deepEqual } from "node:assert/strict";
 
-const SCHEDULER = ["classifyFailure", "makeDefaultIo", "pickNewestRunning", "runPlan", "runTask", "substituteItems", "substituteTemplates"];
+const SCHEDULER = ["classifyFailure", "launcherSession", "makeDefaultIo", "pickNewestRunning", "runPlan", "runTask", "substituteItems", "substituteTemplates"];
 const RESULTS = [
   "appendRunLog", "displayIdentity", "formatClosing", "formatKeptWorktrees", "formatTokens", "gradeFooter",
-  "heartbeatPath", "inferStoredIdentity", "initResultsDir", "listLeaves", "mechanicalOf", "normalizeStoredIdentity",
+  "heartbeatPath", "inferStoredIdentity", "initResultsDir", "keptWorktreesOnDisk", "listLeaves", "mechanicalOf", "normalizeStoredIdentity",
   "readHeartbeat", "readResult", "readSummary", "recordedSessionIds", "recordedSessionRecords", "renderProvenance",
   "renderRoster", "renderRun", "renderStatus", "resultPath", "stopPath", "touchHeartbeat", "transcriptPath",
   "truncationLines", "waiverPath", "writeDigestMd", "writeManifestSnapshot", "writeResult", "writeSummary",

@@ -1,7 +1,7 @@
 import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { resolve, join, basename, dirname } from "node:path";
 import { createHash } from "node:crypto";
-import { swarmHome, DEFAULT_TIMEOUT_MS } from "./config.mjs";
+import { swarmHome, DEFAULT_TIMEOUT_MS, runsKeyFor } from "./config.mjs";
 import { buildDispatch, createDispatchRegistry } from "./dispatch.mjs";
 import { buildDigestTask } from "./digest.mjs";
 import { usageFromCache } from "./ollama-usage.mjs";
@@ -87,7 +87,7 @@ export function argsFingerprint(args) {
 // never resume into another parameterization's dir.
 function defaultResultsDir(manifestPath, toplevel, argsFp) {
   const stem = basename(manifestPath).replace(/\.json$/i, "") + (argsFp ? `.${argsFp}` : "");
-  const base = join(swarmHome(), "runs", toplevel.replace(/[\\/:]/g, "-"));
+  const base = join(swarmHome(), "runs", runsKeyFor(toplevel));
   let n = 0;
   if (existsSync(base)) {
     const re = new RegExp(`^${stem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}-(\\d+)$`);

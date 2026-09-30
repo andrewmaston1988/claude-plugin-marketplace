@@ -61,16 +61,27 @@ const NOHUP_RE = /(^|\s|;|&&)nohup\s/;
 const TRAILING_AMP_RE = /&\s*$/;
 
 const SKILL_HINT =
-  'Invoke Skill(swarm:swarm) first — it carries the offer gate (the user must approve the manifest and model mix BEFORE anything spends) and the dispatch rules. The skill was not invoked in this session. If you inherited this command from a handover or a previous session, that is exactly the case this gate exists for: the command came without the rules that govern it.';
+  'Invoke the swarm skill first (Skill(swarm:swarm); under Codex, read skills/swarm/SKILL.md) — it carries the offer gate (the user must approve the manifest and model mix BEFORE anything spends) and the dispatch rules. The skill was not invoked in this session. If you inherited this command from a handover or a previous session, that is exactly the case this gate exists for: the command came without the rules that govern it.';
 
 const GROUPING_WHY =
   "a manifest authored without them is shaped by the plan's narrative, not by its files";
 
-const BARE_HINT =
-  'Dispatch the engine BARE via Bash with run_in_background: true — no pipe, no redirect, no nohup, no trailing &. The live progress frames are the operator\'s only view of a run that may spend millions of tokens, and a decorated dispatch buffers them into nothing. "Keeping the tool result tidy" is already solved by run_in_background: the frames never enter the transcript.';
+const UNDECORATED =
+  "no pipe, no redirect, no nohup, no trailing &. The live progress frames are the operator's only view of a run that may spend millions of tokens, and a decorated dispatch buffers them into nothing.";
+
+const BARE_HINT = `Dispatch the engine BARE via Bash with run_in_background: true — ${UNDECORATED} "Keeping the tool result tidy" is already solved by run_in_background: the frames never enter the transcript.`;
+
+const CODEX_BARE_HINT = `Dispatch the engine BARE — ${UNDECORATED}`;
+
+// Codex has no run_in_background, so the background rule cannot apply there; its hook
+// payloads carry turn_id and model, which Claude's do not. Env cannot tell the hosts
+// apart: a Codex launched from a Claude session inherits CLAUDECODE=1.
+export function isCodexPayload(payload) {
+  return typeof payload?.turn_id === "string" && typeof payload?.model === "string";
+}
 
 // Pure decision, so the harness is not needed to test it.
-export function gateDispatch({ command, runInBackground, markerExists, groupingMarkerExists, shapeMarkerExists, standingMode }) {
+export function gateDispatch({ command, runInBackground, markerExists, groupingMarkerExists, shapeMarkerExists, standingMode, codex = false }) {
   const cmd = String(command || "");
   if (!DISPATCH_RE.test(cmd)) return { block: false };
 
@@ -96,11 +107,11 @@ export function gateDispatch({ command, runInBackground, markerExists, groupingM
   if (offences.length) {
     return {
       block: true,
-      reason: `This swarm dispatch is decorated with ${offences.join(" and ")}. ${BARE_HINT}`,
+      reason: `This swarm dispatch is decorated with ${offences.join(" and ")}. ${codex ? CODEX_BARE_HINT : BARE_HINT}`,
     };
   }
 
-  if (runInBackground !== true) {
+  if (!codex && runInBackground !== true) {
     return {
       block: true,
       reason: `This swarm dispatch is in the foreground: it will block the session for the length of the run and bury the live frames in a tool result — the same harm as a pipe. Re-issue it with run_in_background: true. ${BARE_HINT}`,
@@ -133,6 +144,7 @@ async function main() {
     groupingMarkerExists: fs.existsSync(groupingMarkerPath(sessionId)),
     shapeMarkerExists: fs.existsSync(shapeMarkerPath(sessionId)),
     standingMode: readJSON(CONFIG)?.swarm?.always === true,
+    codex: isCodexPayload(payload),
   });
 
   if (decision.block) {

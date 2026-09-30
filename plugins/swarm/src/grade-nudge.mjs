@@ -7,15 +7,14 @@
 // spawn a hook binary (the plugin's established seam: decideNudge, decide).
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
-import { swarmHome } from "./config.mjs";
+import { swarmHome, enginePath } from "./config.mjs";
 import { canonicalRunKey } from "./scores.mjs";
 import { listLeaves, waiverPath } from "./results.mjs";
 import { runLiveness } from "./runlog.mjs";
 
 // The engine CLI the block reason names — the same command shape the run's
 // own closing block prints, pasteable from any shell.
-const CLI = fileURLToPath(new URL("../scripts/swarm.mjs", import.meta.url));
+const CLI = enginePath();
 
 // The last run-start event in a run.log — a run's current owner. A resume
 // appends a second run-start (81 of 658 runs in the real estate), so the last
@@ -34,6 +33,18 @@ export function lastRunStart(text) {
   return last;
 }
 
+// Every run dir under <home>/runs/<encoded-repo-toplevel>/, across every encoding.
+export function* runDirs(home) {
+  const runsRoot = join(home, "runs");
+  let encodings = [];
+  try { encodings = readdirSync(runsRoot); } catch { return; }
+  for (const enc of encodings) {
+    let names = [];
+    try { names = readdirSync(join(runsRoot, enc)); } catch { continue; }
+    for (const name of names) yield join(runsRoot, enc, name);
+  }
+}
+
 // Every run under <home>/runs that has something to grade and no store rows.
 // Walks EVERY encoded-repo-toplevel directory: the encoding is the dispatching repo's
 // git toplevel, not the Stop payload's, so deriving one encoding misses runs (24
@@ -50,34 +61,26 @@ export function lastRunStart(text) {
 // before its run.log is ever read.
 export function ungradedRuns({ env = process.env, home = swarmHome(env), graded = new Set(), heartbeatMs = 15_000, _readFile = readFileSync } = {}) {
   const out = [];
-  const runsRoot = join(home, "runs");
-  let encodings = [];
-  try { encodings = readdirSync(runsRoot); } catch { return out; }
-  for (const enc of encodings) {
-    let names = [];
-    try { names = readdirSync(join(runsRoot, enc)); } catch { continue; }
-    for (const name of names) {
-      const dir = join(runsRoot, enc, name);
-      // Cheapest predicates first: run.log is the expensive read (45.6MB across
-      // the estate, largest 2.2MB) and every stop pays for the whole walk, so a
-      // run already graded, waived, or with nothing to grade must never reach it.
-      const key = canonicalRunKey(dir);
-      if (key == null || graded.has(key)) continue;
-      if (existsSync(waiverPath(dir))) continue;
-      // Nothing to grade: no results/ dir, or no result file in it — agentless
-      // nodes produce no row and skipped leaves write none.
-      let files = [];
-      try { files = readdirSync(join(dir, "results")); } catch { continue; }
-      if (!files.some((f) => f.endsWith(".json"))) continue;
-      // In-flight or aborted: awaiting a resume, which owns the run instead (D4).
-      const live = runLiveness(dir, { heartbeatMs });
-      if (live.finishedMs == null && live.stoppedMs == null) continue;
-      let text;
-      try { text = _readFile(join(dir, "run.log"), "utf8"); } catch { continue; } // not a run dir
-      const start = lastRunStart(text);
-      if (!start) continue;
-      out.push({ dir, key, launcher: typeof start.launcher === "string" ? start.launcher : null });
-    }
+  for (const dir of runDirs(home)) {
+    // Cheapest predicates first: run.log is the expensive read (45.6MB across
+    // the estate, largest 2.2MB) and every stop pays for the whole walk, so a
+    // run already graded, waived, or with nothing to grade must never reach it.
+    const key = canonicalRunKey(dir);
+    if (key == null || graded.has(key)) continue;
+    if (existsSync(waiverPath(dir))) continue;
+    // Nothing to grade: no results/ dir, or no result file in it — agentless
+    // nodes produce no row and skipped leaves write none.
+    let files = [];
+    try { files = readdirSync(join(dir, "results")); } catch { continue; }
+    if (!files.some((f) => f.endsWith(".json"))) continue;
+    // In-flight or aborted: awaiting a resume, which owns the run instead (D4).
+    const live = runLiveness(dir, { heartbeatMs });
+    if (live.finishedMs == null && live.stoppedMs == null) continue;
+    let text;
+    try { text = _readFile(join(dir, "run.log"), "utf8"); } catch { continue; } // not a run dir
+    const start = lastRunStart(text);
+    if (!start) continue;
+    out.push({ dir, key, launcher: typeof start.launcher === "string" ? start.launcher : null });
   }
   return out;
 }

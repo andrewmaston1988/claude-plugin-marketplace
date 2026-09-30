@@ -93,7 +93,7 @@ test("manifest provider field permits the same model on two dispatch providers",
   }
 });
 
-test("provider policy: Codex rejects Claude settings and configured leaf guards unless opted out", () => {
+test("provider policy: Codex rejects Claude settings, and runs a configured leaf guard like any provider", () => {
   const dir = tmp();
   try {
     const cfg = {
@@ -108,15 +108,18 @@ test("provider policy: Codex rejects Claude settings and configured leaf guards 
       io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, platform: process.platform },
     }));
     ok(errs.some((e) => /Codex tasks do not accept Claude-only settings/.test(e)), errs.join("\n"));
-    ok(errs.some((e) => /leaf guard/i.test(e) && /codex/i.test(e)), errs.join("\n"));
+    ok(!errs.some((e) => /leaf guard/i.test(e)), errs.join("\n"));
 
-    const optedOut = writeManifest(dir, {
-      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex", leafGuard: false }],
-    }, "opted-out.json");
-    const plan = loadManifest(optedOut, cfg, dir, {
-      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: () => {}, platform: process.platform },
+    const plain = writeManifest(dir, {
+      tasks: [{ id: "codex", prompt: "inspect", model: "gpt-5-codex", provider: "codex" }],
+    }, "plain.json");
+    const lines = [];
+    const plan = loadManifest(plain, cfg, dir, {
+      io: { repoToplevel: () => dir, spawnSync: () => ({ status: 0, stderr: "" }), stdout: (l) => lines.push(l), platform: process.platform },
     });
     equal(plan.tasks[0].provider, "codex");
+    // A Codex leaf runs the guard only once swarm's hooks are trusted; the armed line says so.
+    ok(lines.some((l) => /^leaf guard: .*guard-cmd.*trusted in Codex/.test(l)), lines.join("\n"));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
