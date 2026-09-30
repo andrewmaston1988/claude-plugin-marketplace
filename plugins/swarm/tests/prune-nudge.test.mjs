@@ -55,8 +55,8 @@ function fixture() {
 // The env the CLI and the hook resolve the session from. `SWARM_LEAF` and
 // `CORRELATION_ID` are stripped: the suite itself may run inside a swarm leaf,
 // where both are set, and the hook is silent there by design.
-function env(home, sessionId) {
-  const e = { ...process.env, SWARM_HOME: home, SWARM_REPAINT: "0" };
+function env(home, sessionId, entrypoint = "cli") {
+  const e = { ...process.env, SWARM_HOME: home, SWARM_REPAINT: "0", CLAUDE_CODE_ENTRYPOINT: entrypoint };
   delete e.SWARM_LEAF;
   delete e.CORRELATION_ID;
   // "" is falsy, so both empty means "no session" without runCli's env spread
@@ -66,13 +66,13 @@ function env(home, sessionId) {
   return e;
 }
 
-function spawnHook(payload, home) {
+function spawnHook(payload, home, entrypoint = "cli") {
   return spawnSync(process.execPath, [HOOK], {
     input: JSON.stringify(payload),
     encoding: "utf8",
     timeout: 60_000,
     windowsHide: true,
-    env: env(home, SESSION),
+    env: env(home, SESSION, entrypoint),
   });
 }
 
@@ -322,5 +322,16 @@ test("the Codex UserPromptSubmit event is silent", () => {
     equal(result.status, 0);
     equal(result.stdout, "");
     equal(existsSync(pruneMarkerPath(dir)), false);
+  } finally { f.cleanup(); }
+});
+test("a headless Claude Stop event blocks, while UserPromptSubmit is silent", () => {
+  const f = fixture();
+  try {
+    f.run("holding", { kept: [f.tree("tree")], launcher: SESSION });
+    const payload = { session_id: SESSION, cwd: f.repo, stop_hook_active: false };
+    const promptSubmit = spawnHook({ ...payload, hook_event_name: "UserPromptSubmit" }, f.home, "sdk-cli");
+    equal(promptSubmit.stdout, "");
+    const stop = spawnHook({ ...payload, hook_event_name: "Stop" }, f.home, "sdk-cli");
+    equal(stop.stdout, JSON.stringify({ decision: "block", reason: reason1 }) + "\n");
   } finally { f.cleanup(); }
 });

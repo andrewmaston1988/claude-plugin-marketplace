@@ -1,8 +1,10 @@
 import { isCodexPayload } from "./dispatch-gate.mjs";
-// Claude renders Stop output to the operator; UserPromptSubmit additionalContext reaches only the model.
-export const nudgeEventFor = (p) => (isCodexPayload(p) ? "Stop" : "UserPromptSubmit");
-export function nudgeOutput(p, reason) {
-  return isCodexPayload(p)
+// Claude shows Stop hook output on the operator's terminal; UserPromptSubmit additionalContext reaches only the model.
+// Headless Claude has no terminal and no later prompt turn, so it stays on Stop.
+const usesStop = (p, env) => isCodexPayload(p) || String(env.CLAUDE_CODE_ENTRYPOINT || "").startsWith("sdk");
+export const nudgeEventFor = (p, env) => (usesStop(p, env) ? "Stop" : "UserPromptSubmit");
+export function nudgeOutput(p, env, reason) {
+  return usesStop(p, env)
     ? { decision: "block", reason }
     : { hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: reason } };
 }

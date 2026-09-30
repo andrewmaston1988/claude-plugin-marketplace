@@ -306,7 +306,7 @@ test("grade reason asks every turn, and the binary is silent on the Claude Stop 
       encoding: "utf8",
       timeout: 60_000,
       windowsHide: true,
-      env: { ...process.env, SWARM_HOME: home, CLAUDE_CODE_SESSION_ID: "me", CODEX_SESSION_ID: "" },
+      env: { ...process.env, SWARM_HOME: home, CLAUDE_CODE_SESSION_ID: "me", CODEX_SESSION_ID: "", CLAUDE_CODE_ENTRYPOINT: "cli" },
     });
     const active = runHook("UserPromptSubmit");
     equal(active.status, 0, active.stderr);

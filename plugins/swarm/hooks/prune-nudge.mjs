@@ -15,10 +15,10 @@ async function main() {
   for await (const c of process.stdin) stdin += c;
   let payload = {};
   try { payload = JSON.parse(stdin); } catch { process.exit(0); }
-  if (payload.hook_event_name !== nudgeEventFor(payload)) process.exit(0);
-  // Before the repo scan: a leaf stops often and is never asked.
+  if (payload.hook_event_name !== nudgeEventFor(payload, process.env)) process.exit(0);
+  // Before the repo scan: a leaf ends turns often and is never asked.
   if (payload.stop_hook_active || inLeafOrAutonomous(process.env)) process.exit(0);
-  // The session the run list is scoped to, straight from the host that is stopping.
+  // The session the run list is scoped to, straight from the host's hook payload.
   const sessionId = String(payload.session_id || '');
   if (!sessionId) process.exit(0);
 
@@ -33,7 +33,7 @@ async function main() {
   const decision = decidePruneNudge({ ...runs, env: process.env, config });
   if (!decision.block) process.exit(0);
 
-  process.stdout.write(JSON.stringify(nudgeOutput(payload, decision.reason)) + '\n');
+  process.stdout.write(JSON.stringify(nudgeOutput(payload, process.env, decision.reason)) + '\n');
   // The marker is what stops this run being named again for this launcher. Written
   // after the line, so a marker that cannot be written costs one repeat, never the nudge.
   for (const r of runs.mine) {

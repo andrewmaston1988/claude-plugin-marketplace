@@ -20,7 +20,7 @@ async function main() {
   for await (const c of process.stdin) stdin += c;
   let payload = {};
   try { payload = JSON.parse(stdin); } catch { process.exit(0); }
-  if (payload.hook_event_name !== nudgeEventFor(payload)) process.exit(0);
+  if (payload.hook_event_name !== nudgeEventFor(payload, process.env)) process.exit(0);
   if (payload.stop_hook_active) process.exit(0);
   const sessionId = String(payload.session_id || '');
   if (!sessionId) process.exit(0);
@@ -43,7 +43,7 @@ async function main() {
   });
   if (!decision.block) process.exit(0);
 
-  process.stdout.write(JSON.stringify(nudgeOutput(payload, decision.reason)) + '\n');
+  process.stdout.write(JSON.stringify(nudgeOutput(payload, process.env, decision.reason)) + '\n');
   process.exit(0);
 }
 
