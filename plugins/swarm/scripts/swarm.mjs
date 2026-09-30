@@ -12,7 +12,7 @@ import { collapseRoster, visibleModels, probeTopModels } from "../src/discovery.
 import { enabledProviderIds, providerConfig } from "../src/providers.mjs";
 import { costBands, costSettings } from "../src/cost-settings.mjs";
 import { defaultProviderRegistry } from "../src/default-providers.mjs";
-import { runPlan, makeDefaultIo, launcherSession } from "../src/scheduler.mjs";
+import { runPlan, makeDefaultIo } from "../src/scheduler.mjs";
 import { loadCorpus, estimateRun, formatEstimate, leafCounts, integrateCaps } from "../src/estimate.mjs";
 import { citationPaths } from "../src/citations.mjs";
 import { formatClosing, formatKeptWorktrees, renderStatus, readResult, listLeaves, stopPath, appendRunLog, writeSummary, resultPath, writeDigestMd, readHeartbeat } from "../src/results.mjs";
@@ -23,6 +23,7 @@ import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim, out, err } from "../src/ui.mjs";
 import { markValidated, unvalidatedRefusal } from "../src/validated.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
+import { cmdStatus } from "./cmd-status.mjs";
 import { cmdCost } from "./cmd-cost.mjs";
 import { cmdGradeInit, cmdGradeFile, cmdGradeWaive } from "./cmd-grade.mjs";
 import { modelLine, effortsCell } from "../src/model-row.mjs";
@@ -845,36 +846,8 @@ async function main() {
         return 0;
       }
       case "status": {
-        // Parsed before the positional dir: `--mine` is a flag, and rest[0] is a path.
-        if (rest.includes("--mine")) {
-          const sessionId = launcherSession(process.env);
-          if (!sessionId) {
-            err("swarm: status --mine needs a session — set CODEX_SESSION_ID or CLAUDE_CODE_SESSION_ID, or name one run dir: swarm status <resultsDir>.");
-            return 1;
-          }
-          const { projectRunsHoldingWorktrees, formatMineStatus } = await import("../src/prune-nudge.mjs");
-          const { realRepoToplevel } = await import("../src/manifest-leaf-guard.mjs");
-          const runs = projectRunsHoldingWorktrees({ home: swarmHome(process.env), toplevel: realRepoToplevel(process.cwd()), sessionId });
-          for (const line of formatMineStatus(runs)) out(line);
-          return 0;
-        }
-        if (!rest[0]) { err(USAGE); return 1; }
-        const quietWarnMs = (getConfig().quietWarnSecs ?? 60) * 1000;
-        if (rest.includes("--watch")) {
-          const ivIdx = rest.indexOf("--interval");
-          const secs = ivIdx >= 0 ? Math.max(1, Number(rest[ivIdx + 1]) || 5) : 5;
-          // Repaint until Ctrl-C. Env override lets tests bound the loop.
-          const maxTicks = Number(process.env.SWARM_WATCH_TICKS) || Infinity;
-          for (let i = 0; i < maxTicks; i++) {
-            process.stdout.write("\x1b[2J\x1b[H");
-            out(renderStatus(rest[0], Date.now(), quietWarnMs, costOfFor(getConfig())));
-            out(dim(`(watch: refreshing every ${secs}s — Ctrl-C to exit)`));
-            await new Promise((r) => setTimeout(r, secs * 1000));
-          }
-          return 0;
-        }
-        out(renderStatus(rest[0], Date.now(), quietWarnMs, costOfFor(getConfig())));
-        return 0;
+        if (!rest[0] && !rest.includes("--mine")) { err(USAGE); return 1; }
+        return await cmdStatus(rest);
       }
       case "wait": {
         if (!rest[0]) { err(USAGE); return 1; }
