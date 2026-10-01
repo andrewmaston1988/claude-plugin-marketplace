@@ -8,7 +8,9 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // A thrown fetch means the broker is unreachable; a broker error response is an
 // ordinary Error from our own !ok branch and must NOT trigger a respawn.
-const isConnectionError = (e) =>
+// Exported for the waiter loop: a transient socket error is a retry, and an
+// AbortSignal.timeout abort of a half-open window lands in the same bucket.
+export const isConnectionError = (e) =>
   e instanceof TypeError || /ECONNREFUSED|ECONNRESET|fetch failed|aborted|timeout/i.test(e?.message ?? "");
 
 export function createBrokerClient({
@@ -73,12 +75,13 @@ export function createBrokerClient({
     throw new Error(`failed to start broker daemon on port ${port} after 6s`);
   }
 
-  async function brokerFetch(path, body, { retried = false } = {}) {
+  async function brokerFetch(path, body, { retried = false, signal } = {}) {
     try {
       const res = await _fetch(`${baseUrl}${path}`, {
         method: "POST",
         headers: authHeaders,
         body: JSON.stringify(body),
+        signal,
       });
       if (!res.ok) throw new Error(`Broker error (${path}): ${res.status} ${await res.text()}`);
       return await res.json();
@@ -99,8 +102,13 @@ export function createBrokerClient({
       return peers.some((p) => p.id === peerId);
     },
     listPeers: (opts = {}) => brokerFetch("/list-peers", { scope: "machine", cwd: "", git_root: null, include_adhoc: true, ...opts }),
-    sendMessage: (fromId, toId, text) => brokerFetch("/send-message", { from_id: fromId, to_id: toId, text }),
-    pollMessages: (id, fromId) => brokerFetch("/poll-messages", fromId ? { id, from_id: fromId } : { id }).then((r) => r.messages ?? []),
+    sendMessage: (fromId, toId, text, { kind = null } = {}) =>
+      brokerFetch("/send-message", { from_id: fromId, to_id: toId, text, kind }),
+    // Long-poll: resolves with the peer's messages (take semantics), or empty at
+    // the window. The caller owns the deadline — pass an AbortSignal.timeout one
+    // window wide, so a half-open socket becomes a retry instead of a hang.
+    wait: (id, timeoutMs, { signal } = {}) =>
+      brokerFetch("/wait", { id, timeout_ms: timeoutMs }, { signal }),
     takeMessages: (id) => brokerFetch("/take-messages", { id }),
     register: (body) => brokerFetch("/register", body),
     heartbeat: (id) => brokerFetch("/heartbeat", { id }),
