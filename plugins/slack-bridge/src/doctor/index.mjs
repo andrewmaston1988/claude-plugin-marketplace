@@ -160,7 +160,7 @@ export async function runDoctor({ config, paths, web, log }) {
     });
 
     if (config.remote.createChannels) {
-      checks.push({ name: "Remote-control scopes", ok: true, detail: "channels:write/manage configured — /slack-remote creates #rc-<context>" });
+      checks.push({ name: "Remote-control scopes", ok: true, detail: "channels:write/manage configured — /remote creates #rc-<context>" });
     } else {
       checks.push({
         name: "Remote-control DM-seize",

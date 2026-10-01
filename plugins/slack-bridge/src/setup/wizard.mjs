@@ -217,7 +217,7 @@ export async function runWizard({ paths, log }) {
       config.remote = config.remote ?? {};
       const tokRaw = await ask("Control shared-secret token (blank = generate one): ");
       config.remote.controlToken = tokRaw.trim() || randomBytes(24).toString("hex");
-      const scopesChoice = await ask("Did you add channels:write + channels:manage scopes (lets /slack-remote create a #rc-<context> channel)? [y/N] ");
+      const scopesChoice = await ask("Did you add channels:write + channels:manage scopes (lets /remote create a #rc-<context> channel)? [y/N] ");
       config.remote.createChannels = scopesChoice.trim().toLowerCase().startsWith("y");
       if (!config.remote.createChannels) {
         // DM-seize refuses without this — it must know WHICH DM is the operator's.
@@ -264,7 +264,7 @@ export async function runWizard({ paths, log }) {
         // Re-exec the CLI rather than wiring a bridge inline. The inline copy had
         // drifted from `start` — no remote subsystem, no PID file — so a bridge
         // launched from here ran with no control endpoint, no claims store and no
-        // routing branch: /slack-remote seize failed and every message silently
+        // routing branch: /remote seize failed and every message silently
         // spawned claude -p. One path through the bin, one behaviour.
         const binPath = fileURLToPath(new URL("../../bin/claude-slack.mjs", import.meta.url));
         const child = spawn(process.execPath, [binPath, "start"], { stdio: "inherit" });
