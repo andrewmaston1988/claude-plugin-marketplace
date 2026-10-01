@@ -1,7 +1,7 @@
 import { dirname } from "node:path";
 import { runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
-import { providerConfig } from "./providers.mjs";
+import { providerConfig, readNow } from "./providers.mjs";
 import { normalizeForCompare } from "./roots.mjs";
 import { holdNote, staleAgeMark } from "./usage.mjs";
 import { discoverCodexModels } from "./codex-app-server.mjs";
@@ -196,8 +196,7 @@ export function createCodexProviderAdapter(options = {}) {
         const blocked = (context.tasks || []).filter((task) => !task.fallbackModel);
         if (usage?.exhausted && blocked.length) {
           if (usage.provenance === "stale") {
-            const rawNow = context.now;
-            const nowMs = typeof rawNow === "function" ? rawNow() : (typeof rawNow === "number" ? rawNow : Date.now());
+            const nowMs = readNow(context.now);
             const held = [staleAgeMark(usage, nowMs), holdNote(usage, { now: nowMs })].filter(Boolean).join(" · ");
             context.io?.stdout?.(`⚠ Codex usage reads exhausted on a stale reading${held ? ` — ${held}` : ""} — dispatching anyway`);
             return { ok: true, usage };

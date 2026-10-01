@@ -22,7 +22,7 @@ function preflightContext(t) {
   const home = mkdtempSync(join(tmpdir(), "swarm-codex-preflight-"));
   t.after(() => rmSync(home, { recursive: true, force: true }));
   return {
-    config: { quotaCacheSecs: 1, providers: { codex: { enabled: true } } },
+    config: { providers: { codex: { enabled: true } } },
     cachePath: join(home, "codex-usage.json"),
   };
 }
@@ -46,7 +46,7 @@ test("stale exhausted Codex usage warns and dispatches", async (t) => {
   const lines = [];
   const result = await adapter.capabilities.preflight({
     ...context,
-    now: now + 6 * 60_000,
+    now: now + 6 * 60_000, // past the Codex cache's 5-minute USAGE_TTL_MS
     tasks: [{ id: "stale" }],
     io: { stdout: (line) => lines.push(line) },
     client: clientFor(new Error("app-server unavailable")),
@@ -75,7 +75,7 @@ test("io-less stale exhausted Codex usage dispatches", async (t) => {
   await adapter.capabilities.preflight({ ...context, now, client: clientFor(limits(100)) });
   const result = await adapter.capabilities.preflight({
     ...context,
-    now: now + 6 * 60_000,
+    now: now + 6 * 60_000, // past the Codex cache's 5-minute USAGE_TTL_MS
     tasks: [{ id: "stale" }],
     client: clientFor(new Error("app-server unavailable")),
   });

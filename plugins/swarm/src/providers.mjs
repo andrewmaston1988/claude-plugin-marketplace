@@ -185,7 +185,7 @@ export async function probeProvider(id, { config = {}, registry, fetch = globalT
 
 // `now` arrives in both conventions — a NUMBER from a walk, a FUNCTION from io —
 // or not at all; freeze it the way readClaudeUsage does.
-const readNow = (now) => (typeof now === "function" ? now() : typeof now === "number" ? now : Date.now());
+export const readNow = (now) => (typeof now === "function" ? now() : typeof now === "number" ? now : Date.now());
 
 async function preflightClaude({ config: cfg = {}, fetch, now, io, env, tasks = [] } = {}) {
   if (cfg.quotaPreflight === false) return { ok: true };
