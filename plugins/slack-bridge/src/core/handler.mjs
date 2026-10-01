@@ -654,8 +654,6 @@ export function startBridge({ config, log, web, socket, store, queue, extensions
   if (remote?.broker && remote?.claims) {
     const replyLoop = startReplyLoop({ broker: remote.broker, claims: remote.claims, web, config, log });
     stopReplyLoop = () => replyLoop.stop();
-    process.once("SIGINT", stopReplyLoop);
-    process.once("SIGTERM", stopReplyLoop);
   }
 
   socket.start();
