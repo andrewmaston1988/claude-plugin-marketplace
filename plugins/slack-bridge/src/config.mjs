@@ -28,8 +28,6 @@ const DEFAULTS = {
     // Long enough for a session that has to wake, read the message and answer.
     // A reply that lands after the window is still posted to the claimed channel.
     replyTimeoutMs: 300_000,
-    replyPollIntervalMs: 1_000,
-    pollIntervalMs: 1_000,
     heartbeatIntervalMs: 15_000,
   },
 };

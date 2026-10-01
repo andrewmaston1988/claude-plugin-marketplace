@@ -59,8 +59,7 @@ Defaults: `claude.model` null (Claude default); `proxy.url` `http://localhost:11
     "controlPort": 7897,
     "createChannels": false,
     "operatorUserId": "U0123ABC",
-    "replyTimeoutMs": 300000,
-    "replyPollIntervalMs": 1000
+    "replyTimeoutMs": 300000
   }
 }
 ```
@@ -73,7 +72,6 @@ Defaults: `claude.model` null (Claude default); `proxy.url` `http://localhost:11
 | `remote.createChannels` | `false` | `true` → `/remote` creates `#rc-<context-slug>` (requires `channels:write` + `channels:manage` on the bot token). `false` → DM-seize (no new scopes). |
 | `remote.operatorUserId` | `null` | The operator's Slack user id. Selects which DM the DM-seize fallback seizes — without it, DM-seize **refuses** rather than guessing at a DM. Only used when `createChannels` is `false`. The wizard asks for it. |
 | `remote.replyTimeoutMs` | `300000` | Per-message: how long the bridge waits for the live session's reply before posting "live session didn't reply in time". The claim is retained across a timeout (peer may be slow, not dead). 300 s is generous headroom for a session that has to wake, read the message and answer; shorten it only if you want the timeout notice sooner. |
-| `remote.replyPollIntervalMs` | `1000` | How often the bridge polls the broker for the live session's reply. |
 | `remote.heartbeatIntervalMs` | `15000` | How often the session-side MCP server heartbeats its peer registration so the broker's liveness view stays current. |
 
 The `remote-mcp` server is declared in the plugin manifest, so plugin installs load it automatically; the wizard can additionally register it user-scoped (`claude mcp add --scope user slack-bridge-remote -- node <path>/bin/claude-slack.mjs remote-mcp`) as a fallback for environments without plugin-declared MCP. Inbound delivery is the background waiter `slack_seize` hands back: the session runs that command, goes idle, and wakes when a Slack message arrives. See README → *How a message reaches a live session*.
