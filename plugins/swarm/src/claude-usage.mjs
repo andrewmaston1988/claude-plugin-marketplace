@@ -42,6 +42,9 @@ function claudeSnapshot(parsed, provenance, asOf, reason) {
     provenance,
     exhausted: parsed.exhausted === true,
     ...(reason ? { reason } : {}),
+    // The hold the 429 armed: whoever renders this reading has to say when the
+    // re-check is due rather than send the reader looking for a fix now.
+    ...(parsed.retryAfter != null && { retryAfter: parsed.retryAfter }),
     asOf,
   });
 }

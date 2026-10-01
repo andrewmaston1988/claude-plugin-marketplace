@@ -28,9 +28,12 @@ function asOf(value = Date.now()) {
   return Number.isNaN(date.getTime()) ? new Date().toISOString() : date.toISOString();
 }
 
-function snapshot(provider, buckets, { source = "unknown", provenance = "none", reason, asOf: at = Date.now() } = {}) {
+function snapshot(provider, buckets, { source = "unknown", provenance = "none", reason, retryAfter, asOf: at = Date.now() } = {}) {
   return providerUsageSnapshot({
-    provider, buckets, source, provenance, ...(reason ? { reason } : {}), asOf: asOf(at),
+    provider, buckets, source, provenance,
+    ...(reason ? { reason } : {}),
+    ...(retryAfter != null ? { retryAfter } : {}),
+    asOf: asOf(at),
   });
 }
 
@@ -47,10 +50,18 @@ export function normalizeAnthropic(parsed, options = {}) {
   if (!parsed?.limits?.length) return none("anthropic", { source: "anthropic-oauth-usage", ...options });
   const limits = parsed.limits.map((l) => limit(l.kind, l.percent, l.resetsAt, l.scope ?? null));
   return {
-    ...snapshot("anthropic", limits, { source: "anthropic-oauth-usage", provenance: options.provenance || "live", asOf: options.asOf }),
+    ...snapshot("anthropic", limits, {
+      source: "anthropic-oauth-usage",
+      provenance: options.provenance || "live",
+      asOf: options.asOf,
+      ...(options.reason ? { reason: options.reason } : {}),
+      ...(options.retryAfter != null ? { retryAfter: options.retryAfter } : {}),
+    }),
     provider: "anthropic",
     state: parsed.exhausted ? "exhausted" : "ok",
     limits,
+    // The mark reads a NUMBER; `asOf` beside it is the ISO form of the same instant.
+    ...(options.fetchedAt != null && { fetchedAt: options.fetchedAt }),
   };
 }
 
@@ -192,7 +203,9 @@ const PROVIDER_NORMALIZERS = {
     {
       provenance: reading.provenance,
       asOf: reading.asOf,
+      fetchedAt: Date.parse(reading.asOf),
       ...(reading.reason && { reason: reading.reason }),
+      ...(reading.retryAfter != null && { retryAfter: reading.retryAfter }),
     },
   ),
 };
@@ -348,9 +361,19 @@ function staleAge(usage, now) {
   return usage?.provenance === "stale" && typeof at === "number" ? ageText(now - at) : "";
 }
 
-function staleAgeMark(usage, now) {
+export function staleAgeMark(usage, now) {
   const age = staleAge(usage, now);
   return age ? `stale · read ${age} ago` : "";
+}
+
+// The one wording for a reading the endpoint's Retry-After is holding. Every
+// surface prints this and nothing else: the reader's reflex on "exhausted" is to
+// go and fix it, and under a hold there is nothing to fix — only a time to wait.
+export function holdNote(usage, { now = Date.now(), timeZone } = {}) {
+  if (usage?.provenance !== "stale" || !(usage.retryAfter > now)) return "";
+  const until = formatResetTime(new Date(usage.retryAfter).toISOString(), { timeZone });
+  return `usage endpoint answered ${usage.reason ?? "a refusal"}, re-checked after ${until} — ` +
+    `the last good reading, nothing to fix`;
 }
 
 // The mark travels with the number the reader acts on rather than on a banner
@@ -430,7 +453,10 @@ export function provenanceBanner(usage, { now = Date.now() } = {}) {
     const claim = usage.reason
       ? `the refresh did not answer.${mark ? `  ${mark}` : ""}`
       : `not refreshed${mark ? ` for ${staleAge(usage, now)}` : ""}.`;
-    return [`/!\\ ${title} — figures below are the last reading; ${claim}`, refresh];
+    // The refresh line is a lie while the endpoint's own hold is armed: the
+    // hold's end goes where the fix would have been named.
+    const hold = holdNote(usage, { now });
+    return [`/!\\ ${title} — figures below are the last reading; ${claim}`, hold ? `    ${hold}` : refresh];
   }
   // A partial read DID fetch this process — saying "no cached reading available"
   // over figures that just arrived live would be a lie the reader acts on.
@@ -449,6 +475,9 @@ export function notableLines(usages, { timeZone, now = Date.now() } = {}) {
   const lines = [];
   for (const u of usages) {
     lines.push(...provenanceBanner(u, { now }));
+    // A stale reading's figures are the last anyone saw, so no verdict rides on
+    // them — and a refusal-shaped line beside the hold contradicts "nothing to fix".
+    if (u.provenance === "stale") continue;
     if (u.state === "exhausted") {
       const weekly = u.limits.find((l) => l.kind === "weekly");
       const formatted = formatResetTime(weekly?.resetsAt, { timeZone });

@@ -80,6 +80,9 @@ function flatten(envelope, fallbackProvider, provenance) {
     asOf: new Date(envelope.fetchedAt).toISOString(),
     ...(envelope.lastError != null
       && { lastError: envelope.lastError, lastErrorAt: envelope.lastErrorAt ?? null }),
+    // The endpoint's hold is a fact about the provider, like the failure itself:
+    // a stale reading served inside it must be able to say when it ends.
+    ...(envelope.retryAfter != null && { retryAfter: envelope.retryAfter }),
     ...(failedSince && envelope.result.reason == null && { reason: envelope.lastError }),
   };
 }

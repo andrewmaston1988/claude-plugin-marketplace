@@ -8,7 +8,7 @@ const RECORD_FIELDS = {
     // `exhausted` is the dispatch gate's field and `reason` the partial-failure
     // caveat's. Both are dropped here in silence if unlisted, which is how a
     // dead gate ships looking committed.
-    optional: ["exhausted", "reason"],
+    optional: ["exhausted", "reason", "retryAfter"],
   },
   RunnerEvent: {
     required: ["type"],
@@ -157,6 +157,11 @@ export function providerUsageSnapshot(value) {
   requireTimestamp(out.asOf, "ProviderUsageSnapshot field 'asOf'");
   if (out.exhausted !== undefined) requireBoolean(out.exhausted, "ProviderUsageSnapshot field 'exhausted'");
   if (out.reason !== undefined) requireString(out.reason, "ProviderUsageSnapshot field 'reason'");
+  // The endpoint's hold, as a ms instant. A non-numeric one would print as
+  // "re-checked after null", so it fails the contract rather than the reader.
+  if (out.retryAfter !== undefined && (typeof out.retryAfter !== "number" || !Number.isFinite(out.retryAfter))) {
+    throw new Error("ProviderUsageSnapshot field 'retryAfter' must be a finite number");
+  }
   return out;
 }
 
