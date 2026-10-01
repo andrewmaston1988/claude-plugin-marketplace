@@ -198,7 +198,17 @@ Edit `config.json` (path shown in Step 3 above) to adjust any of these:
 
 Remote control lets a **live interactive** Claude Code session seize a Slack channel, so the operator can step away from the terminal and keep talking to that same session from a phone. It is provider-agnostic — it works on any cloud model (GLM, Kimi, …), not just the Anthropic API that the built-in `/rc` requires.
 
-When a channel is claimed, inbound Slack messages are routed to the live session through an internal localhost broker instead of spawning a fresh `claude -p`. The live session replies, and its reply replaces the "📱 routed to live session…" placeholder in Slack. If the live session doesn't reply within the window (default 300 s, `remote.replyTimeoutMs`), the bridge posts a timeout notice and **keeps the claim** (the peer may be slow, not dead). A reply that lands after the window — or with no message routed at all — is **posted to the channel as its own message** by the daemon's 30 s idle drain, never dropped: `slack_post` cannot see whether a routing window is open, so the daemon is what guarantees delivery. The default window clears the 3-minute poll cadence this plugin prescribes for cloud-model sessions — shorten it only above your own cadence. When the claiming session dies, the claim is reaped and Slack falls back to the spawn path.
+When a channel is claimed, inbound Slack messages are routed to the live session through an internal localhost broker instead of spawning a fresh `claude -p`.
+
+### How a message reaches a live session
+
+`slack_seize` returns a `wait_command` alongside the channel name. The session runs it in the background (Bash `run_in_background`, with `timeout` set to the returned `bash_timeout_ms`) and goes idle. The command long-polls the broker in short windows; a Slack message for that peer resolves the poll, the waiter prints the text and exits, and the background-task completion **wakes the idle session** as a new turn — seconds after the operator hits send. No launch flag, no channel allowlist, no polling cron; it works on any model.
+
+The session then replies **normally**: its turn text and a one-line tool status are mirrored to the claimed channel by the plugin's `PostToolUse` and `Stop` hooks, so nothing in the loop is a special tool call. Before the turn ends it re-arms by running the same command again. A `Stop` hook blocks once if a channel is claimed with no waiter armed, handing the model the exact command.
+
+The waiter caps itself short of the Bash limit and prints `WAIT EXPIRED — re-arm`, so an expiry is a wake with an instruction rather than a silent death. Connection errors are retried with backoff; only a bad `remote.controlToken` (401) is fatal. `check_messages` remains as a manual fallback — it takes anything queued for the session, and the broker retains messages for 24 h.
+
+If the live session doesn't reply within `remote.replyTimeoutMs` (default 300 s), the bridge posts a timeout notice and **keeps the claim** (the peer may be slow, not dead). When the claiming session dies, the claim is reaped and Slack falls back to the spawn path.
 
 ### Enabling
 
@@ -215,18 +225,16 @@ Run `claude-slack setup` and answer **yes** at the *Remote control* step. The wi
 
 The `remote-mcp` server is declared in the plugin manifest, so sessions with the plugin installed load it automatically. (The setup wizard can also register it user-scoped as a fallback for environments without plugin-declared MCP.)
 
-Delivery is push-or-poll, decided per session at handshake: a session launched with the `--dangerously-load-development-channels` allowlist naming slack-bridge receives inbound messages as rendered `<channel>` blocks; every other session — including all cloud-model sessions — is instructed at handshake to `CronCreate` a 3-minute `check_messages` poll, so inbound Slack messages are never silently dropped. The broker retains pushed messages for 24 h, so `check_messages` can always recover one the session never rendered.
-
 Restart any interactive session you want to control this way so it picks up the MCP server.
 
 ### Slack scopes
 
-- **Default (`createChannels: false`):** `/slack-remote` seizes an **existing DM** with the bot. No new Slack scopes are required.
-- **Channel-create (`createChannels: true`):** add `channels:write` and `channels:manage` to the bot token, and `/slack-remote` creates a dedicated `#rc-<context-slug>` channel instead.
+- **Default (`createChannels: false`):** `/remote` seizes an **existing DM** with the bot. No new Slack scopes are required.
+- **Channel-create (`createChannels: true`):** add `channels:write` and `channels:manage` to the bot token, and `/remote` creates a dedicated `#rc-<context-slug>` channel instead.
 
 ### Using it from a live session
 
-In an interactive Claude Code session, invoke the `/slack-remote` skill (or call the `slack_seize` MCP tool directly). It reports the channel to DM. Reply via `slack_post`; release with `slack_release` (or `/slack-remote release`). See `skills/slack-remote/SKILL.md`.
+In an interactive Claude Code session, invoke the `/remote` skill (or call the `slack_seize` MCP tool directly). It reports the channel to DM and returns the background command to arm. Reply by typing normally — the hooks mirror the turn to Slack. Release with `slack_release` (or `/remote release`). See `skills/remote/SKILL.md`.
 
 ### Config keys
 
