@@ -17,6 +17,7 @@ function fakeClient(script) {
       const step = script.shift() ?? [];
       if (step instanceof Error) return Promise.reject(step);
       if (step === "hang") {
+        if (!signal) return new Promise(() => {}); // truly never settles without an abort
         return new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)));
       }
       return Promise.resolve({ messages: step.map((text) => ({ from_id: "slack-bridge", text, kind: "text" })) });
