@@ -61,6 +61,15 @@ export function createControlServer({
           topic = `live session ${peerId}`;
         } catch (e) { log("setTopic failed (needs channels:manage scope)", { error: e.message }); }
       }
+      if (operatorUserId) {
+        try {
+          await web.conversationsInvite({ channel: channelId, users: operatorUserId });
+        } catch (e) {
+          if (e?.slackError !== "already_in_channel") {
+            log("operator invite failed", { error: e.message, channel: channelId, user: operatorUserId });
+          }
+        }
+      }
       return { id: channelId, name: channelName, topic, is_dm: false };
     }
     // DM-seize fallback (no channel-creation scopes): the operator's own DM
