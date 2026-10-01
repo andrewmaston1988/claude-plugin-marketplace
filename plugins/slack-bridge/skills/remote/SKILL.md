@@ -1,6 +1,6 @@
 ---
-name: slack-remote
-description: Use when the operator wants remote control of this live session from Slack mobile — seizing a channel, receiving messages, replying, or releasing.
+name: remote
+description: Use when the operator wants remote control of this live session from Slack mobile — seizing a channel, arming the background waiter, receiving messages, replying, or releasing.
 argument-hint: "[release]"
 disable-model-invocation: true
 ---
@@ -29,30 +29,38 @@ slack_seize  name="slack-bridge-remote-control"
 
 If the operator has named the chat and the harness recorded it, your `name` is ignored and their custom title is used — so passing a context slug is always safe and never clobbers an operator-chosen name. If you skip the `name` arg and the chat isn't named, you get the (maybe nonsensical) ai-title — usable but rarely descriptive, so prefer to derive.
 
-It returns the channel name, e.g. `📱 Slack remote ready: #rc-slack-bridge-remote-control — live session a1b2c3d4`. Report that to the operator verbatim: tell them to DM that channel from a second device.
+It returns the channel name, e.g. `📱 Slack remote ready: #rc-slack-bridge-remote-control — live session a1b2c3d4`, plus `wait_command` and `bash_timeout_ms`. Report the channel name to the operator verbatim — tell them to DM it from a second device — then **arm the waiter immediately** (next section).
 
 If `slack_seize` is unavailable (the `slack-bridge-remote` MCP server isn't wired user-scoped), report that and stop — see "If the tool is missing" below.
 
+## Arming the waiter — this is how you receive messages
+
+There is no push and no polling cron. A background long-poll **is** the delivery path: run the command `slack_seize` returned, in the background, then go idle.
+
+```
+Bash  command=<wait_command>  run_in_background=true  timeout=<bash_timeout_ms>
+```
+
+The command holds the broker open in short windows (retrying connection blips with backoff) and exits the moment a Slack message for this session arrives.
+
 ## Receiving messages
 
-Two delivery paths, depending on how this session was launched:
+1. Arm the waiter — `wait_command`, `run_in_background=true`, `timeout` = `bash_timeout_ms` — right after seizing, and again after every wake.
+2. Go idle. When the operator messages the channel the waiter prints `SLACK: <text>` and exits; that background-task completion **wakes this session** as a new turn. No launch flag, no allowlist, no cron — it works on any model.
+3. **Reply normally** — see *Replying*.
+4. **Re-arm before the turn ends**: run the same `wait_command` in the background again.
 
-- **Push** (launched with `--dangerously-load-development-channels plugin:slack-bridge`): inbound Slack messages arrive as a `<channel source="slack-bridge">` block mid-turn. Reply IMMEDIATELY — pause what you're doing, answer, then resume. Treat it like a coworker tapping your shoulder.
-- **Poll** (no such flag — every cloud-model session, and most others): the block never renders. Set up the recurring poll the MCP server's `initialize` instructions prescribe — follow them verbatim; they carry the exact `CronCreate` call, the schema-load step, and the job's 7-day expiry.
+Notes:
 
-  Between ticks, call `check_messages` directly whenever you're waiting on the operator's reply.
-
-The MCP server's `initialize` instructions state which path you are on — follow them.
+- The waiter caps itself short of the Bash limit: after ~1 h 55 m it prints `WAIT EXPIRED — re-arm: <command>` and exits 0, so an expiry is a wake with an instruction, not a silent death. Re-arm and carry on.
+- If the waiter died and you want to check by hand, `check_messages` still works — it takes anything queued for this session.
+- A `Stop` hook blocks a turn once when the channel is claimed and no waiter is armed, handing you the exact command in the block reason. Re-arm and finish the turn.
 
 ## Replying
 
-Reply with the `slack_post` tool:
+Reply normally — just write your answer, as you would in any other turn. The plugin's `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages, and tool calls render as **one status line edited in place**, finalised when the turn stops.
 
-```
-slack_post  message="your reply to the operator"
-```
-
-(Equivalent: `send_message` with `to_id="slack-bridge"`.) Answer inside the routing window and your reply replaces the "📱 routed to live session…" placeholder in Slack. Land it after the window — the session was slow, or no message was routed — and the daemon still posts it to the channel as its own message rather than dropping it.
+Do **not** call `slack_post`, `send_message`, or any other tool to answer the operator. There is nothing to send by hand — a tool call per message wastes context, and it posts on a path that bypasses the channel's routing window.
 
 ## Releasing
 
@@ -62,7 +70,7 @@ When the operator is done, release the channel so the next Slack message falls b
 slack_release
 ```
 
-Or invoke `/slack-remote release`.
+Or invoke `/remote release`.
 
 ## If the tool is missing
 
