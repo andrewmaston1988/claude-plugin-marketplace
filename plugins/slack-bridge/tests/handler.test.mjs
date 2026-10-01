@@ -103,6 +103,31 @@ test("handler — skips message_changed subtype", async () => {
   assert.equal(web.calls.length, 0, "message_changed should be skipped");
 });
 
+test("handler — skips channel_join and channel_topic subtypes", async () => {
+  for (const subtype of ["channel_join", "channel_topic"]) {
+    const log = makeLog();
+    const web = makeWeb();
+    const queue = createQueue({ log });
+    const store = makeStore();
+    const config = { slack: {}, claude: { cwd: "/tmp", timeout: 5000 } };
+
+    await handleMessage({
+      web, store, queue, config, log,
+      payload: {
+        type: "message", channel: "C1", subtype,
+        // Real payloads carry text; the skip must come from the subtype.
+        text: `someone has ${subtype === "channel_join" ? "joined" : "set the topic of"} the channel`,
+        client_msg_id: `join-${subtype}`,
+      },
+      botUserId: null, isFirstInSession: true,
+    });
+    await delay(50);
+    assert.equal(web.calls.length, 0, `${subtype} should be skipped`);
+    const skipLog = log.entries.find(e => e[0] === "info" && e[1] === "message skipped");
+    assert.equal(skipLog?.[2]?.reason, subtype, `${subtype} skipped with its own reason`);
+  }
+});
+
 test("handler — skips empty text after mention strip", async () => {
   const log = makeLog();
   const web = makeWeb();
@@ -279,6 +304,36 @@ test("startBridge — posts '🔄 *Bridge restarted*' to the most recent DM sess
   const restartPosts = web.calls.filter(([t, p]) => t === "post" && p.text === "🔄 *Bridge restarted*");
   assert.equal(restartPosts.length, 1, "startBridge should post one restart notification");
   assert.equal(restartPosts[0][1].channel, "D333", "should target the most recent DM session");
+});
+
+test("startBridge — starts the daemon reply loop on the broker; the returned handle stops it", async () => {
+  const log = makeLog();
+  const web = makeWeb();
+  const queue = createQueue({ log });
+  const store = makeStore();
+  const config = { slack: {}, claude: { cwd: "/tmp", timeout: 5000 } };
+  const socket = makeSocket();
+  const waits = [];
+  const broker = {
+    async isAlive() { return false; },
+    async sendMessage() { return { ok: true }; },
+    wait(id, timeoutMs, opts) {
+      waits.push({ id, timeoutMs, hasSignal: !!opts?.signal });
+      return new Promise(r => setTimeout(() => r({ messages: [] }), 20));
+    },
+  };
+  const claims = { all: () => ({}) };
+
+  const bridge = startBridge({ config, log, web, socket, store, queue, extensions: null, remote: { claims, broker } });
+  await delay(60);
+  assert.ok(waits.length >= 1, "the reply loop long-polls /wait for the daemon peer");
+  assert.equal(waits[0].id, "slack-bridge", "the daemon's own peer id");
+  assert.ok(waits[0].hasSignal, "each window carries an abort signal, so a half-open socket is a retry");
+
+  const beforeStop = waits.length;
+  bridge.stopReplyLoop();
+  await delay(80);
+  assert.equal(waits.length, beforeStop, "stop() ends the loop — no further windows are opened");
 });
 
 // Regression: the .py posted the reply as the clean message BODY
