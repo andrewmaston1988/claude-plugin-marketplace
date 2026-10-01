@@ -259,7 +259,7 @@ if (cmd === "remote-mcp") {
   }
   const { createRemoteMcpServer } = await import("../src/remote-mcp/server.mjs");
   const { createLogger: _cl } = await import("../src/log.mjs");
-  const log = _cl({ logDir: paths.logDir, tag: "remote-mcp" });
+  const log = _cl({ logDir: paths.logDir, tag: "remote-mcp", stderrOnly: true });
   // createRemoteMcpServer (and its createRpcEndpoint) call log(msg, extra) as a
   // plain function, not a logger object.
   const mcpLog = (msg, extra) => log.info(msg, extra);
