@@ -55,6 +55,7 @@ test("stale exhausted Codex usage warns and dispatches", async (t) => {
   equal(result.usage.provenance, "stale");
   equal(lines.length, 1);
   match(lines[0], /Codex usage reads exhausted on a stale reading .* dispatching anyway/);
+  match(lines[0], /stale · read 6m ago/);
 });
 
 test("live exhausted Codex usage still refuses undefended tasks", async (t) => {

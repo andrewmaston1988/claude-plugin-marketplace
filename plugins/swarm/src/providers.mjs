@@ -4,7 +4,7 @@ import { checkQuota } from "./quota.mjs";
 import { swarmHome } from "./config.mjs";
 import { readClaudeCatalog, claudeCatalogIdentity } from "./claude-models.mjs";
 import { readClaudeUsage } from "./claude-usage.mjs";
-import { holdNote, staleAgeMark } from "./usage.mjs";
+import { staleNotes } from "./usage.mjs";
 import { isUnderRoot, normalizeForCompare } from "./roots.mjs";
 
 // The registry's one list of capability names — `capability()` refuses anything
@@ -233,13 +233,13 @@ async function preflightClaude({ config: cfg = {}, fetch, now, io, env, tasks = 
         );
       }
       const nowMs = readNow(now);
-      const held = [staleAgeMark(q, nowMs), holdNote(q, { now: nowMs })].filter(Boolean).join(" · ");
+      const held = staleNotes(q, nowMs).join(" · ");
       io.stdout(`⚠ Anthropic usage reads exhausted (${what}) on a stale reading${held ? ` — ${held}` : ""} — dispatching anyway`);
     }
   }
   if (q && !q.exhausted && q.worst.percent >= (cfg.quotaWarnPct ?? 80)) {
     const nowMs = readNow(now);
-    const held = [staleAgeMark(q, nowMs), holdNote(q, { now: nowMs })].filter(Boolean);
+    const held = staleNotes(q, nowMs);
     io?.stdout?.(
       `⚠ Anthropic usage at ${q.worst.percent}% (${q.worst.kind}` +
       `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — Claude leaves may hit quota mid-run` +

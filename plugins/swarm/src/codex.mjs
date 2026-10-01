@@ -3,7 +3,7 @@ import { runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
 import { providerConfig, readNow } from "./providers.mjs";
 import { normalizeForCompare } from "./roots.mjs";
-import { holdNote, staleAgeMark } from "./usage.mjs";
+import { staleNotes } from "./usage.mjs";
 import { discoverCodexModels } from "./codex-app-server.mjs";
 
 export { normalizeCodexModel, createCodexAppServerClient, discoverCodexModels } from "./codex-app-server.mjs";
@@ -197,7 +197,7 @@ export function createCodexProviderAdapter(options = {}) {
         if (usage?.exhausted && blocked.length) {
           if (usage.provenance === "stale") {
             const nowMs = readNow(context.now);
-            const held = [staleAgeMark(usage, nowMs), holdNote(usage, { now: nowMs })].filter(Boolean).join(" · ");
+            const held = staleNotes(usage, nowMs).join(" · ");
             context.io?.stdout?.(`⚠ Codex usage reads exhausted on a stale reading${held ? ` — ${held}` : ""} — dispatching anyway`);
             return { ok: true, usage };
           }

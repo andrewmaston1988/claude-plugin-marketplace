@@ -366,6 +366,10 @@ export function staleAgeMark(usage, now) {
   return age ? `stale · read ${age} ago` : "";
 }
 
+export function staleNotes(usage, now) {
+  return [staleAgeMark(usage, now), holdNote(usage, { now })].filter(Boolean);
+}
+
 // The one wording for a reading the endpoint's Retry-After is holding. Every
 // surface prints this and nothing else: the reader's reflex on "exhausted" is to
 // go and fix it, and under a hold there is nothing to fix — only a time to wait.
