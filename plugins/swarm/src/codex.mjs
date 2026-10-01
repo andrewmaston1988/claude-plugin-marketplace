@@ -5,6 +5,7 @@ import { modelDescriptor, runResult } from "./contracts.mjs";
 import { createCodexStreamParser } from "./stream.mjs";
 import { providerConfig } from "./providers.mjs";
 import { normalizeForCompare } from "./roots.mjs";
+import { holdNote, staleAgeMark } from "./usage.mjs";
 
 const DEFAULT_CLIENT_INFO = {
   name: "swarm",
@@ -525,6 +526,13 @@ export function createCodexProviderAdapter(options = {}) {
         const usage = await readUsage({ ...context, usageOptIn: true });
         const blocked = (context.tasks || []).filter((task) => !task.fallbackModel);
         if (usage?.exhausted && blocked.length) {
+          if (usage.provenance === "stale") {
+            const rawNow = context.now;
+            const nowMs = typeof rawNow === "function" ? rawNow() : (typeof rawNow === "number" ? rawNow : Date.now());
+            const held = [staleAgeMark(usage, nowMs), holdNote(usage, { now: nowMs })].filter(Boolean).join(" · ");
+            context.io?.stdout?.(`⚠ Codex usage reads exhausted on a stale reading${held ? ` — ${held}` : ""} — dispatching anyway`);
+            return { ok: true, usage };
+          }
           return { ok: false, error: `Codex usage is exhausted — ${blocked.map((task) => task.id).join(", ")} cannot dispatch. Add fallbackModel or re-run after reset.` };
         }
         // Like Claude's: only exhaustion blocks; an unreadable meter dispatches.

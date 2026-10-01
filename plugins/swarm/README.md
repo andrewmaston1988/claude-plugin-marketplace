@@ -434,7 +434,8 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
   reading — the last good one, past its cache TTL because a refresh failed or the endpoint's
   own `Retry-After` hold is armed — warns and proceeds too (naming the hold's end and that
   there is nothing to fix, when a hold is armed): it is the last number anyone saw, not
-  evidence the account is out. Best-effort — any endpoint failure
+  evidence the account is out; the Codex preflight treats stale exhausted readings the same
+  way. Best-effort — any endpoint failure
   and the run proceeds. `"quotaPreflight": false` skips every provider's usage preflight,
   including Codex.
 - **Memory pressure parks, it doesn't fail.** Below `minFreeMemMb` (2048) a pending leaf
