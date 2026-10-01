@@ -160,6 +160,19 @@ test("the stale banner reports the hold in place of the refresh line", async () 
   ok(after.some((l) => l.includes("Refresh:")), `the hold has passed, so the fix is named again: ${after.join("\n")}`);
 });
 
+// `serve doctor` probes with no io; a warn-band reading must not throw on it.
+test("preflight: an io-less probe survives a warn-band reading", async () => {
+  const home = heldHome([{ kind: "session", percent: 90, severity: null, resets_at: RESET, scope: null }]);
+  try {
+    const preflight = await claudePreflight();
+    const res = await preflight({
+      config: {}, env: { SWARM_HOME: home, SWARM_CREDENTIALS: join(home, "creds.json") },
+      now: () => NOW, fetch: async () => { throw new Error("a held reading must not be re-asked"); },
+    });
+    equal(res.ok, true);
+  } finally { rmSync(home, { recursive: true, force: true }); }
+});
+
 test("preflight: a stale account-wide exhaustion warns instead of refusing", async () => {
   const home = heldHome(EXHAUSTED_100);
   try {
@@ -229,7 +242,7 @@ const staleClaudeAdapter = (provenance) => ({
     readUsage: async () => ({
       provider: "claude", buckets: [{ kind: "session", percent: 100, resetsAt: RESET }],
       source: "anthropic-oauth-usage", provenance, exhausted: true, reason: "HTTP 429",
-      asOf: new Date(READ_AT).toISOString(),
+      asOf: new Date(READ_AT).toISOString(), retryAfter: Date.now() + 3600_000,
     }),
   },
 });
@@ -255,7 +268,7 @@ test("the scheduler gate warns, never refuses, on a stale provider reading", asy
   try {
     const r = await runGate(dir, "stale");
     equal(r.ok, true, r.error?.message);
-    ok(r.io.lines.some((l) => l.includes("stale")), r.io.lines.join("\n"));
+    ok(r.io.lines.some((l) => l.includes("stale") && l.includes("nothing to fix")), r.io.lines.join("\n"));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -285,6 +298,7 @@ test("swarm quota: a held 100% reading marks itself stale, says nothing to fix, 
     });
     ok(lines.some((l) => l.includes("stale · read") && l.includes("100%")), lines.join("\n"));
     ok(lines.some((l) => l.includes("HTTP 429") && l.includes("nothing to fix")), lines.join("\n"));
+    ok(!lines.some((l) => l.includes("[exceeded]")), `a stale severity contradicts the warning: ${lines.join("\n")}`);
     ok(!lines.some((l) => l.includes("weekly allowance exhausted")), `a stale verdict contradicts the warning: ${lines.join("\n")}`);
     equal(code, 0, "a stale exhaustion is not an exit-1 verdict");
   } finally { rmSync(home, { recursive: true, force: true }); }

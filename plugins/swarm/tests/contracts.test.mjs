@@ -128,5 +128,6 @@ test("providerUsageSnapshot: optional exhausted and reason survive record()", ()
   equal("exhausted" in usageSnapshot({}), false);
   throws(() => usageSnapshot({ exhausted: "yes" }), /exhausted.*boolean/);
   throws(() => usageSnapshot({ reason: 42 }), /reason.*string/);
+  throws(() => usageSnapshot({ retryAfter: "soon" }), /retryAfter.*finite/);
 });
 

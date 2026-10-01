@@ -240,7 +240,7 @@ async function preflightClaude({ config: cfg = {}, fetch, now, io, env, tasks = 
   if (q && !q.exhausted && q.worst.percent >= (cfg.quotaWarnPct ?? 80)) {
     const nowMs = readNow(now);
     const held = [staleAgeMark(q, nowMs), holdNote(q, { now: nowMs })].filter(Boolean);
-    io.stdout(
+    io?.stdout?.(
       `⚠ Anthropic usage at ${q.worst.percent}% (${q.worst.kind}` +
       `${q.worst.resetsAt ? `, resets ${q.worst.resetsAt}` : ""}) — Claude leaves may hit quota mid-run` +
       (held.length ? ` · ${held.join(" · ")}` : "")

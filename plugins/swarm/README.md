@@ -431,9 +431,10 @@ Transient failures recover in-run; temporal ones fail fast with the recovery nam
 - **Quota preflight**: with Claude leaves present, the engine queries Anthropic's usage
   endpoint first (free, local credentials, cached `quotaCacheSecs`). Exhausted quota with
   undefended leaves aborts before dispatch; ≥`quotaWarnPct` (80) warns and proceeds. A **stale**
-  reading — the last good one, served while the endpoint's own `Retry-After` hold is armed —
-  warns and proceeds too, naming the hold's end and that there is nothing to fix: it is the
-  last number anyone saw, not evidence the account is out. Best-effort — any endpoint failure
+  reading — the last good one, past its cache TTL because a refresh failed or the endpoint's
+  own `Retry-After` hold is armed — warns and proceeds too (naming the hold's end and that
+  there is nothing to fix, when a hold is armed): it is the last number anyone saw, not
+  evidence the account is out. Best-effort — any endpoint failure
   and the run proceeds. `"quotaPreflight": false` skips every provider's usage preflight,
   including Codex.
 - **Memory pressure parks, it doesn't fail.** Below `minFreeMemMb` (2048) a pending leaf
@@ -459,7 +460,7 @@ codex weekly: 58% — resets Fri 11 Sep, 09:00
 `quota` fetches Anthropic live and reads the legacy Ollama cloud cache (its cookie needs a
 human, so it must not stall on one) and the cached Codex reading. `usage` asks enabled provider adapters for live
 readings. Exit code 1 means **Anthropic** exhausted specifically, on a live or in-TTL reading;
-a stale reading — the last good one, served during a 429 hold — marks itself `stale · read …`,
+a stale reading — the last good one, past its TTL (a failed refresh or a 429 hold) — marks itself `stale · read …`,
 warns, and exits 0.
 
 **`swarm ollama-usage`** owns the `:cloud` side's fetch and cookie — zero-dependency,

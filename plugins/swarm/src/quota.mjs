@@ -201,8 +201,9 @@ export async function printQuota({ cfg, out, cachePath, credentialsPath, fetchIm
 
   for (const line of usageLines(usages)) out(line);
   // Anthropic severity is its own vocabulary and has no cross-provider
-  // equivalent, so it stays an Anthropic-only annotation.
-  for (const l of q?.limits || []) {
+  // equivalent, so it stays an Anthropic-only annotation — and, like the verdict
+  // line, never rides on a stale reading.
+  for (const l of q?.source === "stale" ? [] : q?.limits || []) {
     if (l.severity && l.severity !== "normal") out(`anthropic ${l.kind}: [${l.severity}]`);
   }
   for (const line of notableLines(usages)) out(line);
