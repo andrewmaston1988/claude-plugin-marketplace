@@ -351,8 +351,8 @@ test("postResponse — posts reply as clean message text, NOT wrapped in an atta
   assert.ok(updateCalls.length >= 1, "should update the placeholder with the reply");
   const upd = updateCalls[updateCalls.length - 1][1];
   assert.equal(upd.text, "Here is the reply body.", "reply should be the message body text");
-  assert.ok(!upd.attachments || upd.attachments.length === 0,
-    "reply must NOT be wrapped in an attachment (the | bar regression)");
+  assert.deepEqual(upd.attachments, [],
+    "reply must clear the placeholder's attachment — omitting it leaves the heartbeat echo under the reply");
 });
 
 test("postResponse — first-in-session reply gets a bold title in the message text, not an attachment", async () => {
@@ -384,5 +384,5 @@ test("postError — posts the error as plain text, no attachment", async () => {
   await postError({ web, channel: "C1", placeholderTs: "ph1", threadTs: null, message: "boom" });
   const upd = web.calls.find(([t]) => t === "update")[1];
   assert.equal(upd.text, "_Error: boom_");
-  assert.ok(!upd.attachments || upd.attachments.length === 0, "error must not be wrapped in an attachment");
+  assert.deepEqual(upd.attachments, [], "error must clear the placeholder's heartbeat attachment");
 });

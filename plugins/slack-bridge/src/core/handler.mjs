@@ -130,7 +130,7 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
       if (alive === true) {
         await routeToLiveSession({
           web, channel, threadTs, text, claim, broker: remote.broker, config, log,
-          cmdEcho: deriveTitle(text), extensions, _startHeartbeat,
+          cmdEcho: deriveTitle(text), _startHeartbeat,
         });
         return;
       }
@@ -302,9 +302,8 @@ export async function postResponse({ web, channel, placeholderTs, threadTs, resp
 
   if (chunks.length === 1) {
     // Reply as the message body — no attachment wraps it (the .py recipe).
-    // The progress attachment rides along on the same updated message (text + attachment).
-    const params = { text: mrkdwn };
-    if (progressAttachment) params.attachments = [progressAttachment];
+    // attachments must be sent explicitly: omitted, Slack keeps the heartbeat's echo.
+    const params = { text: mrkdwn, attachments: progressAttachment ? [progressAttachment] : [] };
     await safeUpdate({ web, channel, ts: placeholderTs, threadTs, params });
   } else {
     await web.chatDelete({ channel, ts: placeholderTs });
@@ -336,7 +335,7 @@ async function postProgressAttachment({ web, channel, threadTs, attachment }) {
  */
 export async function postError({ web, channel, placeholderTs, threadTs, message }) {
   try {
-    await safeUpdate({ web, channel, ts: placeholderTs, threadTs, params: { text: `_Error: ${message}_` } });
+    await safeUpdate({ web, channel, ts: placeholderTs, threadTs, params: { text: `_Error: ${message}_`, attachments: [] } });
   } catch { /* placeholder already gone; error was already logged by the caller */ }
 }
 
@@ -470,7 +469,7 @@ async function clearStatus({ web, channel, log }) {
  * time" if it never does. The claim is retained either way — slow is not dead.
  */
 export async function routeToLiveSession({
-  web, channel, threadTs, text, claim, broker, config, log, cmdEcho, extensions,
+  web, channel, threadTs, text, claim, broker, config, log, cmdEcho,
   _startHeartbeat = startHeartbeat,
 }) {
   let placeholderTs = null;
@@ -488,10 +487,11 @@ export async function routeToLiveSession({
     return;
   }
 
-  // The spawn path's placeholder + heartbeat, reused as is.
+  // The spawn path's placeholder + heartbeat, minus extensions: their progress
+  // snippet describes spawned sessions, not this live one.
   const heartbeat = _startHeartbeat({
     web, channel, ts: placeholderTs, cmdEcho, log: log.child("heartbeat"),
-    extensions, sessionId: claim.peer_id, config,
+    extensions: null, sessionId: claim.peer_id, config,
   });
   if (config.slack?.verbMode === "haiku") {
     heartbeat.setTool("working", { prompt: text.slice(0, 80) });

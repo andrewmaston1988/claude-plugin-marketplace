@@ -51,8 +51,8 @@ function makeRunClaude(result = "spawn-mode reply") {
 // web calls, so "heartbeat stopped before the reply landed" is an index compare.
 function makeHeartbeat(calls) {
   const instances = [];
-  function start({ channel, ts, cmdEcho }) {
-    const rec = { channel, ts, cmdEcho, tools: [], stopped: false, stopCalls: 0 };
+  function start({ channel, ts, cmdEcho, extensions }) {
+    const rec = { channel, ts, cmdEcho, extensions, tools: [], stopped: false, stopCalls: 0 };
     instances.push(rec);
     calls.push(["hb-start", rec]);
     return {
@@ -124,12 +124,12 @@ function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveO
 }
 
 // Drive one Slack message through handleMessage with the harness wired in.
-async function slack(s, payload, { runClaude } = {}) {
+async function slack(s, payload, { runClaude, extensions = null } = {}) {
   return handleMessage({
     web: s.web, store: makeStore(), queue: s.queue, config: s.config, log: s.log,
     payload, botUserId: "U123", isFirstInSession: true,
     remote: { claims: s.claims, broker: s.broker },
-    extensions: null, _runClaude: runClaude?.fn, _startHeartbeat: s.hb.start,
+    extensions, _runClaude: runClaude?.fn, _startHeartbeat: s.hb.start,
   });
 }
 
@@ -172,6 +172,14 @@ test("routed message → grey spawn-path placeholder, heartbeat running; reply r
   );
   const replyTs = s.web.calls.find(([ty, p]) => ty === "update" && p.text?.includes("live reply!"))[1].ts;
   assert.equal(replyTs, placeholder._ts, "the reply replaces the routed placeholder in place");
+});
+
+test("routed heartbeat runs without extensions — their progress describes spawned sessions, not the live one", async (t) => {
+  const s = setup(t, { claims: [["peerA", "C1"]] });
+  const extensions = { runHeartbeatAugment: async () => "FOREIGN_PROGRESS" };
+  await slack(s, makePayload({ channel: "C1", text: "hi", client_msg_id: "m-route-ext" }), { extensions });
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  assert.equal(s.hb.instances[0].extensions, null);
 });
 
 test("haiku verbMode → heartbeat is seeded with the Slack message as the working verb", async (t) => {
