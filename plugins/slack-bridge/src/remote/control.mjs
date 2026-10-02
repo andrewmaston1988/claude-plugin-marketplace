@@ -69,6 +69,8 @@ export function createControlServer({
             log("operator invite failed", { error: e.message, channel: channelId, user: operatorUserId });
           }
         }
+      } else {
+        log("operator invite skipped: no remote.operatorUserId", { channel: channelId });
       }
       return { id: channelId, name: channelName, topic, is_dm: false };
     }

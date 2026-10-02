@@ -70,7 +70,7 @@ Defaults: `claude.model` null (Claude default); `proxy.url` `http://localhost:11
 | `remote.brokerPort` | `7898` | Internal localhost broker port. Distinct from `claude-peers`' 7899 on purpose, so the two subsystems don't collide if both run. Token-guarded like the control endpoint when `controlToken` is set. |
 | `remote.controlPort` | `7897` | Internal localhost control endpoint port. Localhost-only; the token is the auth boundary. |
 | `remote.createChannels` | `false` | `true` → `/remote` creates `#rc-<context-slug>` (requires `channels:write` + `channels:manage` on the bot token). `false` → DM-seize (no new scopes). |
-| `remote.operatorUserId` | `null` | The operator's Slack user id. Selects which DM the DM-seize fallback seizes — without it, DM-seize **refuses** rather than guessing at a DM. Only used when `createChannels` is `false`. The wizard asks for it. |
+| `remote.operatorUserId` | `null` | The operator's Slack user id. With `createChannels` it is invited into each new `#rc-<context>` channel — without it the channel is created with only the bot in it. Without `createChannels` it selects which DM the DM-seize fallback seizes — unset, DM-seize **refuses** rather than guessing at a DM. The wizard asks for it. |
 | `remote.replyTimeoutMs` | `300000` | Per-message: how long the bridge waits for the live session's reply before posting "live session didn't reply in time". The claim is retained across a timeout (peer may be slow, not dead). 300 s is generous headroom for a session that has to wake, read the message and answer; shorten it only if you want the timeout notice sooner. |
 | `remote.heartbeatIntervalMs` | `15000` | How often the session-side MCP server heartbeats its peer registration so the broker's liveness view stays current. |
 

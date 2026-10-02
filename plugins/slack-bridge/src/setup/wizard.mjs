@@ -219,11 +219,13 @@ export async function runWizard({ paths, log }) {
       config.remote.controlToken = tokRaw.trim() || randomBytes(24).toString("hex");
       const scopesChoice = await ask("Did you add channels:write + channels:manage scopes (lets /remote create a #rc-<context> channel)? [y/N] ");
       config.remote.createChannels = scopesChoice.trim().toLowerCase().startsWith("y");
-      if (!config.remote.createChannels) {
-        // DM-seize refuses without this — it must know WHICH DM is the operator's.
-        const opId = await ask("Your Slack user id (for the DM-seize default — find it in Slack → Profile → ⋮ → Copy member ID): ");
-        config.remote.operatorUserId = opId.trim() || null;
-        if (!config.remote.operatorUserId) say("  ⚠ no operator user id — DM-seize will refuse until you set remote.operatorUserId by hand");
+      // Create mode invites this user into each new channel; DM-seize uses it to pick the operator's DM.
+      const opId = await ask("Your Slack user id (Slack → Profile → ⋮ → Copy member ID): ");
+      config.remote.operatorUserId = opId.trim() || null;
+      if (!config.remote.operatorUserId) {
+        say(config.remote.createChannels
+          ? "  ⚠ no operator user id — created channels won't invite you until you set remote.operatorUserId by hand"
+          : "  ⚠ no operator user id — DM-seize will refuse until you set remote.operatorUserId by hand");
       }
       writeFileSync(configPath, JSON.stringify(config, null, 2), { mode: 0o600 });
       say(`✓ remote.controlToken written (${config.remote.createChannels ? "channel create enabled" : "DM-seize default — no new scopes needed"})`);

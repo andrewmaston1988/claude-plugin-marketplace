@@ -103,12 +103,14 @@ test("/claim remains successful when the operator invite fails", async (t) => {
   assert.ok(logs.some(([message]) => /invite/i.test(message)), "must log the invite failure");
 });
 
-test("/claim does not invite when no operator is configured", async (t) => {
+test("/claim does not invite when no operator is configured, and logs the skip", async (t) => {
   const web = makeWeb();
-  const { call } = await startControl(t, { web });
+  const logs = [];
+  const { call } = await startControl(t, { web, log: (...args) => logs.push(args) });
   const r = await call("/claim", { peer_id: "peerA" });
   assert.equal(r.body.ok, true);
   assert.ok(!web.calls.some(([c]) => c === "conversationsInvite"), "must skip invite without operatorUserId");
+  assert.ok(logs.some(([message]) => /invite skipped/i.test(message)), "a skipped invite must be logged, not silent");
 });
 
 test("/claim with an empty/whitespace name falls back to the peer-id fragment", async (t) => {

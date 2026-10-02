@@ -155,7 +155,13 @@ export async function runDoctor({ config, paths, web, log }) {
     });
 
     if (config.remote.createChannels) {
-      checks.push({ name: "Remote-control scopes", ok: true, detail: "channels:write/manage configured — /remote creates #rc-<context>" });
+      checks.push({
+        name: "Remote-control scopes",
+        ok: !!config.remote.operatorUserId,
+        detail: config.remote.operatorUserId
+          ? `channels:write/manage configured — /remote creates #rc-<context> and invites user ${config.remote.operatorUserId}`
+          : "no remote.operatorUserId — created #rc-<context> channels won't invite you. Set it to your Slack member id",
+      });
     } else {
       checks.push({
         name: "Remote-control DM-seize",
