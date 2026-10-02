@@ -14,6 +14,7 @@ function makeWeb() {
   return {
     calls,
     conversationsCreate: async (p) => { calls.push(["conversationsCreate", p]); return { ok: true, channel: { id: "C-new", name: p.name } }; },
+    conversationsInvite: async (p) => { calls.push(["conversationsInvite", p]); return { ok: true }; },
     conversationsJoin: async (p) => { calls.push(["conversationsJoin", p]); return { ok: true, channel: { id: p.channel, name: "joined" } }; },
     conversationsSetTopic: async (p) => { calls.push(["conversationsSetTopic", p]); return { ok: true }; },
     chatPostMessage: async (p) => { calls.push(["chatPostMessage", p]); return { ok: true, ts: "ts1" }; },
@@ -28,7 +29,7 @@ async function startControl(t, opts = {}) {
     token: opts.token ?? "secret",
     canCreateChannels: opts.canCreateChannels ?? true,
     operatorUserId: opts.operatorUserId ?? null,
-    log: () => {},
+    log: opts.log ?? (() => {}),
   });
   t.after(() => server.close());
   const port = await server.listen(0);
@@ -79,6 +80,37 @@ test("/claim with a name creates a #rc-<name-slug> channel describing the contex
   assert.ok(createCall, "must call conversations.create");
   assert.equal(createCall[1].name, "rc-slack-remote-setup");
   assert.equal(claims.get("C-new").peer_id, "peerA");
+});
+
+test("/claim invites the configured operator to a newly created channel", async (t) => {
+  const web = makeWeb();
+  const { call } = await startControl(t, { web, operatorUserId: "U-operator" });
+  const r = await call("/claim", { peer_id: "peerA" });
+  assert.equal(r.body.ok, true);
+  assert.ok(web.calls.some(([c, p]) => c === "conversationsInvite" && p.channel === "C-new" && p.users === "U-operator"),
+    "must invite the configured operator to the created channel");
+});
+
+test("/claim remains successful when the operator invite fails", async (t) => {
+  const web = makeWeb();
+  web.conversationsInvite = async (p) => { web.calls.push(["conversationsInvite", p]); throw new Error("invite failed"); };
+  const logs = [];
+  const { call } = await startControl(t, { web, operatorUserId: "U-operator", log: (...args) => logs.push(args) });
+  const r = await call("/claim", { peer_id: "peerA" });
+  assert.equal(r.status, 200);
+  assert.equal(r.body.ok, true);
+  assert.ok(web.calls.some(([c]) => c === "conversationsInvite"), "must attempt the invite");
+  assert.ok(logs.some(([message]) => /invite/i.test(message)), "must log the invite failure");
+});
+
+test("/claim does not invite when no operator is configured, and logs the skip", async (t) => {
+  const web = makeWeb();
+  const logs = [];
+  const { call } = await startControl(t, { web, log: (...args) => logs.push(args) });
+  const r = await call("/claim", { peer_id: "peerA" });
+  assert.equal(r.body.ok, true);
+  assert.ok(!web.calls.some(([c]) => c === "conversationsInvite"), "must skip invite without operatorUserId");
+  assert.ok(logs.some(([message]) => /invite skipped/i.test(message)), "a skipped invite must be logged, not silent");
 });
 
 test("/claim with an empty/whitespace name falls back to the peer-id fragment", async (t) => {

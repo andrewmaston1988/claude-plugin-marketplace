@@ -1,10 +1,11 @@
 // Forked from plugins/claude-peers/src/broker/index.mjs (port 7898, distinct from
 // claude-peers' 7899). Keeps ad-hoc-sender auto-registration, self-heal, and
-// corrupt-file quarantine; drops /set-summary. Delivery matches the parent:
-// pushed messages are retained 24h; /take-messages is what removes.
+// corrupt-file quarantine; drops /set-summary. Delivery: /wait long-polls and
+// /take-messages takes — both consume, so a message reaches exactly one consumer.
 import http from "node:http";
 import fs from "node:fs";
 import { emptyState, loadState, saveState } from "./broker-store.mjs";
+import { WAIT_WINDOW_MS } from "./wait-constants.mjs";
 
 const ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789";
 // Ad-hoc sender ids arrive from outside the register flow — constrain them.
@@ -23,6 +24,10 @@ const RESERVED_PEER_IDS = new Set(["slack-bridge"]);
 const RETAIN_DELIVERED_MS = 24 * 60 * 60 * 1000;
 
 const MAX_BODY_BYTES = 1_000_000;
+// Armed = a /wait for the peer is open, or one returned within this grace. The
+// grace covers the gap between the waiter's windows; without it a Stop hook that
+// lands mid-re-arm reads an armed session as unarmed and blocks it.
+const WAIT_GRACE_MS = 5_000;
 
 export function createBroker({
   stateFile = null,
@@ -43,6 +48,17 @@ export function createBroker({
     state = emptyState();
   }
   let nextMsgId = state.messages.reduce((m, x) => Math.max(m, Number(x.id) || 0), 0) + 1;
+
+  // In memory on purpose: a broker restart drops the open requests, and the
+  // waiter's retry re-arms within a window.
+  const waiters = new Map();      // peerId -> Set of open waiters
+  const armedUntil = new Map();   // peerId -> epoch ms the grace runs to
+  // The injected _now returns a Date, so every armed comparison has to go through
+  // epoch ms: `now + WAIT_GRACE_MS` on a Date is string concatenation and armed
+  // would then never be true.
+  const nowMs = () => _now().getTime();
+  const isArmed = (id) =>
+    (waiters.get(id)?.size ?? 0) > 0 || (armedUntil.get(id) ?? 0) > nowMs();
 
   const persist = () => { if (stateFile) saveState(stateFile, state); };
 
@@ -82,6 +98,25 @@ export function createBroker({
     purgeExpired();
   }
 
+  // Take semantics, shared by /wait and /take-messages. `kind` is normalised on
+  // the way out so a message written by a pre-upgrade broker still carries one.
+  function takeMessagesFor(id) {
+    const mine = state.messages.filter((m) => m.to_id === id);
+    state.messages = state.messages.filter((m) => m.to_id !== id);
+    const peer = Object.hasOwn(state.peers, id) ? state.peers[id] : null;
+    if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
+    persist();
+    return mine.map((m) => ({ ...m, kind: m.kind === "status" ? "status" : "text" }));
+  }
+
+  // Hand the peer's queue to exactly ONE waiter and leave the others open: two
+  // waiters for one peer must never both be given the same message.
+  function wakeWaiter(id) {
+    const set = waiters.get(id);
+    if (!set || set.size === 0) return;
+    set.values().next().value.finish(takeMessagesFor(id));
+  }
+
   const handlers = {
     "/register"(body) {
       for (const peer of Object.values(state.peers)) {
@@ -97,6 +132,7 @@ export function createBroker({
         git_root: body.git_root ?? null,
         tty: body.tty ?? null,
         summary: body.summary ?? "",
+        session_id: body.session_id ?? null,
         kind: "session",
         registered_at: now,
         last_seen: now,
@@ -127,7 +163,8 @@ export function createBroker({
       }
       if (body.exclude_id) peers = peers.filter((p) => p.id !== body.exclude_id);
       persist();
-      return peers;
+      // Copies, not the stored rows: armed is computed and must not be persisted.
+      return peers.map((p) => ({ ...p, session_id: p.session_id ?? null, armed: isArmed(p.id) }));
     },
 
     "/send-message"(body) {
@@ -163,39 +200,51 @@ export function createBroker({
       }
       state.messages.push({
         id: nextMsgId++, from_id: from, to_id: body.to_id,
-        text: String(body.text), sent_at: now, delivered: false,
+        text: String(body.text), kind: body.kind === "status" ? "status" : "text",
+        sent_at: now, delivered: false,
       });
       persist();
+      wakeWaiter(body.to_id);
       return { ok: true };
     },
 
-    // Push path. Returns what has not been pushed yet and marks it pushed, but
-    // keeps it: a channel notification fires into a session that may never
-    // render it, and nothing acks back, so deleting here loses the message
-    // outright. /take-messages is what actually removes.
-    "/poll-messages"(body) {
-      // Optional from_id scopes the poll to one sender, so concurrent claimed
-      // channels never mark each other's replies delivered.
-      const mine = state.messages.filter((m) => m.to_id === body.id && !m.delivered
-        && (!body.from_id || m.from_id === body.from_id));
-      for (const msg of mine) msg.delivered = true;
-      const peer = Object.hasOwn(state.peers, body.id) ? state.peers[body.id] : null;
-      if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
-      purgeExpired();
-      persist();
-      return { messages: mine };
+    // Consume path, driven by the check_messages tool. Returns everything held
+    // for the peer and removes it.
+    "/take-messages"(body) {
+      return { messages: takeMessagesFor(body.id) };
     },
 
-    // Consume path, driven by the check_messages tool. Returns everything held
-    // for the peer — pushed or not — and removes it. A message already rendered
-    // comes back one extra time; that beats the alternative of never seeing it.
-    "/take-messages"(body) {
-      const mine = state.messages.filter((m) => m.to_id === body.id);
-      state.messages = state.messages.filter((m) => m.to_id !== body.id);
-      const peer = Object.hasOwn(state.peers, body.id) ? state.peers[body.id] : null;
-      if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
-      persist();
-      return { messages: mine };
+    // Long-poll, driven by the background waiter. Returns at once when the queue
+    // is non-empty; otherwise holds the request until a send for this peer
+    // arrives or the window elapses. Take semantics, so the waiter and
+    // check_messages are the same consumer and a message never doubles up.
+    "/wait"(body, ctx) {
+      const id = body.id;
+      const queued = takeMessagesFor(id);
+      if (queued.length > 0) return { messages: queued };
+      return new Promise((resolve) => {
+        let timer;
+        const waiter = {
+          finish(messages) {
+            clearTimeout(timer);
+            const set = waiters.get(id);
+            if (set) { set.delete(waiter); if (set.size === 0) waiters.delete(id); }
+            armedUntil.set(id, nowMs() + WAIT_GRACE_MS);
+            resolve({ messages });
+          },
+        };
+        timer = setTimeout(() => waiter.finish([]), Number(body.timeout_ms ?? WAIT_WINDOW_MS));
+        if (!waiters.has(id)) waiters.set(id, new Set());
+        waiters.get(id).add(waiter);
+        // The client hung up: drop the waiter without arming, so the peer reads
+        // unarmed and the Stop hook can nudge. The messages stay queued.
+        ctx?.onDrop?.(() => {
+          clearTimeout(timer);
+          const set = waiters.get(id);
+          if (set) { set.delete(waiter); if (set.size === 0) waiters.delete(id); }
+          resolve({ messages: [] });
+        });
+      });
     },
 
     "/unregister"(body) {
@@ -208,6 +257,7 @@ export function createBroker({
 
   const server = http.createServer((req, res) => {
     const json = (status, value) => {
+      if (res.writableEnded || res.destroyed) return; // client already gone
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(value));
     };
@@ -247,13 +297,26 @@ export function createBroker({
     });
     req.on("end", () => {
       if (overflow) return;
+      let handler, body;
       try {
-        const handler = handlers[req.url];
+        handler = handlers[req.url];
         if (!handler) return json(404, { error: "not found" });
-        json(200, handler(buf ? JSON.parse(buf) : {}));
+        body = buf ? JSON.parse(buf) : {};
       } catch (e) {
-        json(500, { error: e.message });
+        return json(500, { error: e.message });
       }
+      // /wait holds the response open, so the handler is async and needs a drop
+      // hook. `req` "close" fires as soon as the body is consumed — using it
+      // would drop every waiter the moment its own request arrived. `res`
+      // "close" with writableEnded unset is a real disconnect.
+      const drops = [];
+      res.on("close", () => {
+        if (res.writableEnded) return;
+        for (const drop of drops) drop();
+      });
+      Promise.resolve()
+        .then(() => handler(body, { onDrop: (fn) => drops.push(fn) }))
+        .then((value) => json(200, value), (e) => json(500, { error: e.message }));
     });
   });
 

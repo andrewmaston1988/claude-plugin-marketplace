@@ -8,37 +8,21 @@ import os from "node:os";
 import path from "node:path";
 import { createRpcEndpoint } from "./jsonrpc.mjs";
 import { createBrokerClient } from "../remote/broker-client.mjs";
-import { detectChannelsEnabled } from "./session-flags.mjs";
+import { getPaths } from "../paths.mjs";
+import { BASH_TIMEOUT_MS, waitCommand } from "../remote/wait-constants.mjs";
 
 const PROTOCOL_VERSION = "2024-11-05";
 export const SERVER_VERSION = "0.1.0";
 
-export const INSTRUCTIONS = `You are connected to the slack-bridge remote-control channel. The operator can DM a seized Slack channel from a mobile device and the message arrives here as a <channel source="slack-bridge"> block.
+export const INSTRUCTIONS = `You are connected to the slack-bridge remote-control channel.
 
-IMPORTANT: When you receive a <channel source="slack-bridge" ...> message, it is a Slack message from the operator. Reply using the slack_post tool (or send_message with to_id "slack-bridge") so your reply posts back to the Slack channel the operator is reading.
+After slack_seize returns, run its wait_command with Bash run_in_background and timeout set to bash_timeout_ms. When the waiter wakes, reply normally; your text is mirrored to Slack by hooks. Then re-arm by running the returned wait_command again.
 
 Available tools:
-- slack_seize: Seize a Slack channel for remote control. With no channel arg the daemon creates a #rc-<name> channel. The name is chosen in this order: the session name the operator set in Claude Code (the chat's custom title, read automatically where the harness records one), then the 'name' arg you pass (a slug derived from the current task context for when the chat isn't named), then the auto ai-title as a last resort. Requires channels:write/manage scopes, else seizes an existing DM. Returns the channel name to report to the operator.
+- slack_seize: Seize a Slack channel for remote control. With no channel arg the daemon creates a #rc-<name> channel. The name is chosen in this order: the session name the operator set in Claude Code, then the 'name' arg, then the auto ai-title. Requires channels:write/manage scopes, else seizes an existing DM.
 - slack_release: Release the seized channel.
-- slack_post: Post a message to the seized Slack channel (your reply to the operator).
-- send_message: Send a message to another peer by id. With to_id "slack-bridge" it posts to the seized Slack channel (passthrough).
-- check_messages: Manually poll for inbound Slack messages (fallback).`;
-
-// Appended only when the push path cannot reach this session. Concrete tool calls,
-// not prose: the weakest model that reads this must get a working cron in one pass.
-export const POLLING_INSTRUCTIONS = `MESSAGE DELIVERY IN THIS SESSION: push is UNAVAILABLE. This session was not launched with \`--dangerously-load-development-channels plugin:slack-bridge\`, so a <channel source="slack-bridge"> block will never render for you. Ignore the paragraph above about channel messages — you must poll instead, or you will never see the operator's Slack messages.
-
-Set up the poll now, before your other startup work:
-
-1. If the CronCreate tool's schema is not loaded, load it first: ToolSearch(query="select:CronCreate")
-2. CronCreate(cron="*/3 * * * *", prompt="Call check_messages. If it returns messages, reply to each with slack_post, then resume what you were doing.", recurring=true)
-
-That checks every 3 minutes. The job lives only in this session and expires after 7 days — create it again in your next session. Between ticks, call check_messages directly whenever you are waiting on the operator's reply.`;
-
-export function buildInstructions(channelsAvailable) {
-  return channelsAvailable ? INSTRUCTIONS : `${INSTRUCTIONS}\n\n${POLLING_INSTRUCTIONS}`;
-}
-
+- send_message: Send a message to another peer by id.
+- check_messages: Manually retrieve inbound Slack messages held by the broker.`;
 export const TOOLS = [
   {
     name: "slack_seize",
@@ -58,7 +42,7 @@ export const TOOLS = [
   },
   {
     name: "slack_post",
-    description: "Post a message to the seized Slack channel. Use this to reply to the operator from the live session.",
+    description: "Post a message to the seized Slack channel.",
     inputSchema: {
       type: "object",
       properties: { message: { type: "string", description: "The message to post to Slack." } },
@@ -79,7 +63,7 @@ export const TOOLS = [
   },
   {
     name: "check_messages",
-    description: "Retrieve inbound Slack messages held by the broker — including ones already pushed as a notification that may not have rendered, so a push missed while your session was idle is not lost. May re-show a message you already saw.",
+    description: "Manually retrieve inbound Slack messages held by the broker. May re-show a message you already saw.",
     inputSchema: { type: "object", properties: {} },
   },
 ];
@@ -180,7 +164,8 @@ export function createRemoteMcpServer({
   _pid = process.pid,
   _cwd = process.cwd(),
   _setInterval = setInterval,
-  _detectChannels = detectChannelsEnabled,
+  _readSession = (pid) => { try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "sessions", `${pid}.json`), "utf8")); } catch { return null; } },
+  _getPaths = getPaths,
 } = {}) {
   const brokerPort = config.remote?.brokerPort ?? 7898;
   const controlPort = config.remote?.controlPort ?? 7897;
@@ -190,7 +175,8 @@ export function createRemoteMcpServer({
 
   let myId = null;
   let myGitRoot = null;
-  let channelsAvailable; // memoised: reading the process table is not free
+  let sessionId = null;
+  let sessionFile = null;
 
   async function controlFetch(path, body) {
     const res = await _fetch(`${controlUrl}${path}`, {
@@ -214,22 +200,48 @@ export function createRemoteMcpServer({
 
   async function register() {
     myGitRoot = await getGitRoot(_cwd);
-    const reg = await broker.register({ pid: _pid, cwd: _cwd, git_root: myGitRoot, tty: null, summary: "slack-bridge remote" });
+    const reg = await broker.register({ pid: _pid, cwd: _cwd, git_root: myGitRoot, tty: null, summary: "slack-bridge remote", session_id: sessionId });
     myId = reg.id;
     log(`registered as peer ${myId}`);
   }
 
+
+  function sessionMappingPath() {
+    if (!sessionId) return null;
+    return path.join(_getPaths().stateDir, "remote-sessions", `${sessionId}.json`);
+  }
+
+  function writeSessionMapping(peerId, channel) {
+    const destination = sessionMappingPath();
+    if (!destination) return false;
+    fs.mkdirSync(path.dirname(destination), { recursive: true });
+    const tmp = `${destination}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ peerId, configPath, channel }, null, 2));
+    fs.renameSync(tmp, destination);
+    sessionFile = destination;
+    return true;
+  }
+
+  function deleteSessionMapping() {
+    const destination = sessionFile ?? sessionMappingPath();
+    if (destination) fs.rmSync(destination, { force: true });
+    sessionFile = null;
+  }
   const toolHandlers = {
     async slack_seize(args) {
       if (!myId) return text("Not registered with broker yet", true);
       try {
         // Name precedence: operator custom-title (best-effort read from the session
-        // JSONL) → the session-derived `name` arg → auto ai-title → daemon peer-id
+        // JSONL) → the session-derived name arg → auto ai-title → daemon peer-id
         // fragment. Never the cwd basename — a project-dir channel name means broke.
         const name = readSessionName(_cwd) || args.name || readSessionAiTitle(_cwd) || null;
         const r = await controlFetch("/claim", { peer_id: myId, channel: args.channel ?? null, name });
-        const label = r.is_dm ? "your DM with the bot" : r.channel_name ? `#${r.channel_name}` : r.channel;
-        return text(`📱 Slack remote ready: ${label}${r.topic ? ` — ${r.topic}` : ""}. DM it from a second device; inbound messages arrive here as a <channel source=\"slack-bridge\"> block. Reply with slack_post.`);
+        writeSessionMapping(myId, r.channel);
+        const label = r.is_dm ? "your DM with the bot" : r.channel_name ? "#" + r.channel_name : r.channel;
+        const wait = waitCommand(myId, { configPath });
+        const sessionNote = sessionId ? "" : " No Claude session id was available, so this session will not be tracked by the Stop hook.";
+        const message = "Slack remote ready: " + label + (r.topic ? " — " + r.topic : "") + ". Run the wait command with Bash run_in_background and timeout " + BASH_TIMEOUT_MS + ": " + wait + ". When it wakes, reply normally; your text is mirrored to Slack by hooks, then run the command again to re-arm." + sessionNote;
+        return { ...text(message), wait_command: wait, bash_timeout_ms: BASH_TIMEOUT_MS };
       } catch (e) {
         return errText("Seize failed", e);
       }
@@ -238,6 +250,7 @@ export function createRemoteMcpServer({
       if (!myId) return text("Not registered with broker yet", true);
       try {
         await controlFetch("/release", { peer_id: myId });
+        deleteSessionMapping();
         return text("Released the Slack channel. The next Slack message falls back to a fresh claude -p spawn.");
       } catch (e) {
         return errText("Release failed", e);
@@ -246,10 +259,8 @@ export function createRemoteMcpServer({
     async slack_post(args) {
       if (!myId) return text("Not registered with broker yet", true);
       try {
-        // Route the reply through the broker (to_id "slack-bridge") so the daemon's
-        // reply-poll picks it up and updates the "routed to live session" placeholder
-        // in place — matching the integration-test contract. A direct control /post
-        // would post out-of-band and leave the placeholder to time out.
+        // Via the broker so the daemon's reply loop resolves the routed placeholder;
+        // a direct control /post would leave it to time out.
         const result = await broker.sendMessage(myId, "slack-bridge", args.message);
         if (!result.ok) return text(`Failed to post: ${result.error}`, true);
         return text("Reply sent to Slack.");
@@ -298,13 +309,11 @@ export function createRemoteMcpServer({
           instructions: "slack-bridge remote control is not configured (no remote.controlToken in config.json). Nothing to do here — run claude-slack setup to enable it.",
         };
       }
-      channelsAvailable ??= _detectChannels();
-      if (!channelsAvailable) log("channels unavailable — instructing this session to poll");
       return {
         protocolVersion: PROTOCOL_VERSION,
-        capabilities: { experimental: { "claude/channel": {} }, tools: {} },
+        capabilities: { tools: {} },
         serverInfo: { name: "slack-bridge-remote", version: SERVER_VERSION },
-        instructions: buildInstructions(channelsAvailable),
+        instructions: INSTRUCTIONS,
       };
     }
     if (method === "tools/list") return { tools: controlToken ? TOOLS : [] };
@@ -326,22 +335,6 @@ export function createRemoteMcpServer({
 
   const rpc = createRpcEndpoint({ input, output, onRequest, log });
 
-  async function poll() {
-    if (!myId) return;
-    try {
-      const messages = await broker.pollMessages(myId);
-      for (const msg of messages) {
-        rpc.notify("notifications/claude/channel", {
-          content: msg.text,
-          meta: { from_id: msg.from_id, from_summary: "", from_cwd: "", sent_at: msg.sent_at },
-        });
-        log(`pushed slack message from ${msg.from_id}`);
-      }
-    } catch (e) {
-      log(`poll error: ${e.message}`);
-    }
-  }
-
   async function heartbeat() {
     if (!myId) return;
     try { await broker.heartbeat(myId); } catch { /* self-heals on next poll */ }
@@ -354,14 +347,16 @@ export function createRemoteMcpServer({
       log("remote control disabled — no remote.controlToken; server dormant");
       return;
     }
+    const session = _readSession(process.ppid);
+    sessionId = typeof session?.sessionId === "string" ? session.sessionId : null;
     await broker.ensureBroker();
     await register();
-    const pollTimer = _setInterval(poll, config.remote.pollIntervalMs);
-    pollTimer.unref?.();
     const hbTimer = _setInterval(heartbeat, config.remote.heartbeatIntervalMs);
     hbTimer.unref?.();
     log("MCP endpoint ready");
   }
 
-  return { start, _onRequest: onRequest, _register: register, _poll: poll, _brokerFetch: broker.brokerFetch, _ensureBroker: broker.ensureBroker, _controlFetch: controlFetch, _myId: () => myId };
+  function shutdown() { deleteSessionMapping(); }
+  input.on?.("close", shutdown);
+  return { start, shutdown, _onRequest: onRequest, _register: register, _brokerFetch: broker.brokerFetch, _ensureBroker: broker.ensureBroker, _controlFetch: controlFetch, _myId: () => myId, _sessionId: () => sessionId };
 }

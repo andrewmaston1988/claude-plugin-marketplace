@@ -25,13 +25,9 @@ const DEFAULTS = {
     controlToken: null,
     createChannels: false,
     operatorUserId: null,
-    // Must exceed the poll cadence /slack-remote prescribes (a 3-minute cron) —
-    // a window shorter than the tick closes before the session has even seen the
-    // message. A reply that lands after it is still posted by the idle drain,
-    // just as a standalone message rather than in place of the placeholder.
+    // Long enough for a session that has to wake, read the message and answer.
+    // A reply that lands after the window is still posted to the claimed channel.
     replyTimeoutMs: 300_000,
-    replyPollIntervalMs: 1_000,
-    pollIntervalMs: 1_000,
     heartbeatIntervalMs: 15_000,
   },
 };

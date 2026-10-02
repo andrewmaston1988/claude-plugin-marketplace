@@ -268,6 +268,41 @@ if (cmd === "remote-mcp") {
   return; // stays alive on stdin + timers
 }
 
+if (cmd === "wait") {
+  // Background waiter a seized session runs via Bash run_in_background: blocks
+  // until a Slack message for the peer arrives, prints it, exits — the exit
+  // wakes the session.
+  const peerId = getFlag("--peer", rest);
+  if (!peerId) {
+    process.stderr.write("usage: claude-slack wait --peer <id> [--config <path>]\n");
+    setTimeout(() => process.exit(2), 150);
+    return;
+  }
+  const paths = getDefaultPaths();
+  const configArg = getFlag("--config", rest) ?? paths.configFile;
+  const config = await loadConfig({ configPath: configArg });
+  const { createBrokerClient } = await import("../src/remote/broker-client.mjs");
+  const { runWaiter } = await import("../src/remote/waiter.mjs");
+  const client = createBrokerClient({ port: config.remote?.brokerPort ?? 7898, token: config.remote?.controlToken ?? null, configPath: configArg });
+  const exitCode = await runWaiter({ peerId, client, configPath: configArg });
+  setTimeout(() => process.exit(exitCode), 150);
+  process.exitCode = exitCode;
+  return;
+}
+
+if (cmd === "stop-hook") {
+  // Stop + PostToolUse hook entry (hooks.json). Always exits 0; a block
+  // decision is JSON on stdout. Unclaimed sessions return before any broker call.
+  let raw = "";
+  for await (const chunk of process.stdin) raw += chunk;
+  const { runHook } = await import("../src/remote/stop-hook.mjs");
+  const decision = await runHook({ raw });
+  if (decision) process.stdout.write(JSON.stringify(decision) + "\n");
+  setTimeout(() => process.exit(0), 150);
+  process.exitCode = 0;
+  return;
+}
+
 if (cmd === "broker") {
   const paths = getDefaultPaths();
   const configArg = getFlag("--config", rest) ?? paths.configFile;

@@ -6,7 +6,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { PassThrough } from "node:stream";
-import { readSessionName, readSessionAiTitle, encodeCwd, createRemoteMcpServer, POLLING_INSTRUCTIONS } from "../../src/remote-mcp/server.mjs";
+import { readSessionName, readSessionAiTitle, encodeCwd, createRemoteMcpServer, INSTRUCTIONS } from "../../src/remote-mcp/server.mjs";
+import { BASH_TIMEOUT_MS, waitCommand } from "../../src/remote/wait-constants.mjs";
 import { createBroker } from "../../src/remote/broker.mjs";
 
 function tmpProjectsDir() {
@@ -167,73 +168,81 @@ test("full seize-name precedence: custom title > session-derived name > ai-title
   assert.equal(derive3({}), null); // never cwd basename — null signals "broke"
 });
 
-// --- delivery: push or poll (matches claude-peers' current server) ---
-// A session launched without the --channels allowlist never renders a push, and
-// cloud-model sessions cannot render one at all. The handshake must detect
-// that and instruct the session to poll — otherwise inbound Slack messages are
-// silently destroyed on exactly the sessions remote control exists for.
+// --- delivery: background waiter ---
 
 function tmpState() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-mcp-")), "state.json");
 }
 
-async function serverWithBroker(t, { detect = () => false } = {}) {
+async function serverWithBroker(t, { sessionId = "session-123", sessionReader = () => ({ sessionId }) } = {}) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-mcp-state-"));
+  const stateDir = path.join(root, "state");
   const broker = createBroker({ stateFile: tmpState() });
   t.after(() => broker.close());
   const port = await broker.listen(0);
   const config = {
-    remote: { brokerPort: port, controlPort: 0, controlToken: "t", pollIntervalMs: 60_000, heartbeatIntervalMs: 60_000 },
+    remote: { brokerPort: port, controlPort: 0, controlToken: "t", heartbeatIntervalMs: 60_000 },
   };
-  // PassThrough, not process.stdin/stdout: the rpc endpoint's listeners on the
-  // real stdin are a live handle that keeps the test runner from ever exiting.
   const server = createRemoteMcpServer({
-    config,
-    input: new PassThrough(),
-    output: new PassThrough(),
-    _detectChannels: detect,
+    config, configPath: "/tmp/remote-config.json", input: new PassThrough(), output: new PassThrough(),
+    _getPaths: () => ({ stateDir }), _readSession: sessionReader,
+    _fetch: async (url, options) => {
+      if (url.endsWith("/claim")) return new Response(JSON.stringify({ ok: true, channel: "C123", channel_name: "test" }));
+      if (url.endsWith("/release")) return new Response(JSON.stringify({ ok: true }));
+      return fetch(url, options);
+    },
   });
-  await server._register();
+  await server.start();
   const call = async (p, body) =>
     (await fetch(`http://127.0.0.1:${port}${p}`, {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
     })).json();
-  return { server, broker, call, port };
+  return { server, broker, call, port, stateDir };
 }
 
-test("initialize: channels unavailable appends the poll directive (CronCreate check_messages)", async (t) => {
-  const { server } = await serverWithBroker(t, { detect: () => false });
+test("initialize: instructions describe seize, background wait, normal reply and re-arm", async (t) => {
+  const { server } = await serverWithBroker(t);
   const res = await server._onRequest("initialize", {});
-  assert.ok(res.instructions.includes("CronCreate"),
-    "a session that cannot render pushes must be told to poll");
-  assert.ok(res.instructions.includes(POLLING_INSTRUCTIONS),
-    "the poll directive must be the concrete, copyable steps");
+  assert.equal(res.instructions, INSTRUCTIONS);
+  assert.match(res.instructions, /run_in_background/);
+  assert.match(res.instructions, /bash_timeout_ms/);
+  assert.match(res.instructions, /reply normally/);
+  assert.match(res.instructions, /re-arm/);
+  assert.doesNotMatch(res.instructions, /CronCreate|slack_post|<channel source=/);
 });
 
-test("initialize: channels available ships the push instructions without the poll directive", async (t) => {
-  const { server } = await serverWithBroker(t, { detect: () => true });
-  const res = await server._onRequest("initialize", {});
-  assert.ok(res.instructions.includes("<channel source=\"slack-bridge\">"),
-    "push instructions must describe the channel block");
-  assert.ok(!res.instructions.includes(POLLING_INSTRUCTIONS),
-    "an allowlisted session must not be told to poll");
+test("slack_seize returns wait command and timeout, and writes the session mapping", async (t) => {
+  const { server, stateDir } = await serverWithBroker(t);
+  const result = await server._onRequest("tools/call", { name: "slack_seize", arguments: {} });
+  const value = result.content[0].text;
+  assert.match(value, /Run the wait command/);
+  assert.equal(result.wait_command, waitCommand(server._myId(), { configPath: "/tmp/remote-config.json" }));
+  assert.equal(result.bash_timeout_ms, BASH_TIMEOUT_MS);
+  const mapping = JSON.parse(fs.readFileSync(path.join(stateDir, "remote-sessions", "session-123.json"), "utf8"));
+  assert.deepEqual(mapping, { peerId: server._myId(), configPath: "/tmp/remote-config.json", channel: "C123" });
 });
 
-test("check_messages recovers a message the push timer already drained (the operator-facing defect)", async (t) => {
-  const { server, call } = await serverWithBroker(t);
-  const myId = server._myId();
-  assert.ok(myId, "test hook must expose the registered peer id");
-  // the daemon routes an inbound Slack message to the live session's peer id
-  await call("/send-message", { from_id: "slack-bridge", to_id: myId, text: "hello from mobile" });
-  // the server's own push timer drains the queue within a second of arrival —
-  // on a session that never renders the push, this is where messages died
-  await server._poll();
-  // check_messages is the documented recovery: it must still find the message
-  const res = await server._onRequest("tools/call", { name: "check_messages" });
-  assert.ok(res.content[0].text.includes("hello from mobile"),
-    "a message pushed-but-unrendered must survive to check_messages");
+test("slack_release deletes the session mapping", async (t) => {
+  const { server, stateDir } = await serverWithBroker(t);
+  await server._onRequest("tools/call", { name: "slack_seize", arguments: {} });
+  await server._onRequest("tools/call", { name: "slack_release", arguments: {} });
+  assert.equal(fs.existsSync(path.join(stateDir, "remote-sessions", "session-123.json")), false);
 });
 
-// --- dormant (no remote.controlToken) ---
+test("server shutdown deletes the session mapping", async (t) => {
+  const { server, stateDir } = await serverWithBroker(t);
+  await server._onRequest("tools/call", { name: "slack_seize", arguments: {} });
+  server.shutdown();
+  assert.equal(fs.existsSync(path.join(stateDir, "remote-sessions", "session-123.json")), false);
+});
+test("start registers the session id read from the parent process session file", async (t) => {
+  const { server, broker } = await serverWithBroker(t, { sessionReader: (pid) => {
+    assert.equal(pid, process.ppid);
+    return { sessionId: "injected-session" };
+  } });
+  const peer = (await server._brokerFetch("/list-peers", { scope: "machine", cwd: "", git_root: null })).find((p) => p.id === server._myId());
+  assert.equal(peer.session_id, "injected-session");
+});// --- dormant (no remote.controlToken) ---
 // The manifest declares this server, so it loads in every plugin-installed
 // session — including installs that never ran setup. Dormant means dormant: a
 // clean "off" (no tools, honest instructions), and start() touches nothing —
@@ -254,7 +263,7 @@ test("no controlToken: initialize reports not-configured, tools/list is empty, t
 
 test("no controlToken: start() starts nothing — no broker spawn, no timers, no registration", async () => {
   const server = createRemoteMcpServer({
-    config: { remote: { brokerPort: 59998, controlPort: 0, controlToken: null, pollIntervalMs: 60_000, heartbeatIntervalMs: 60_000 } },
+    config: { remote: { brokerPort: 59998, controlPort: 0, controlToken: null, heartbeatIntervalMs: 60_000 } },
     input: new PassThrough(),
     output: new PassThrough(),
     _spawn: () => { throw new Error("dormant server must not spawn the broker"); },
@@ -278,7 +287,7 @@ test("brokerFetch sends the Bearer header — requests against a token-guarded b
   t.after(() => broker.close());
   const port = await broker.listen(0);
   const server = createRemoteMcpServer({
-    config: { remote: { brokerPort: port, controlPort: 0, controlToken: "t", pollIntervalMs: 60_000, heartbeatIntervalMs: 60_000 } },
+    config: { remote: { brokerPort: port, controlPort: 0, controlToken: "t", heartbeatIntervalMs: 60_000 } },
     input: new PassThrough(),
     output: new PassThrough(),
   });

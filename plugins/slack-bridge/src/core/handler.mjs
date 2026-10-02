@@ -1,7 +1,10 @@
 import { runClaude } from "./claude-subprocess.mjs";
-import { mdToSlack, mdToBlocks, hasTable } from "../markdown/index.mjs";
 import { startHeartbeat } from "../heartbeat/loop.mjs";
 import { fetchHistory } from "../history-bootstrap/index.mjs";
+import { safeUpdate, postResponse, postError } from "./reply-post.mjs";
+import { routeToLiveSession, startReplyLoop, _resetRouteState } from "./live-route.mjs";
+
+export { safeUpdate, postResponse, postError, routeToLiveSession, startReplyLoop, _resetRouteState };
 
 const DEDUP_SIZE = 64;
 const recentMsgIds = new Set();  // persisted across restarts via session store
@@ -24,9 +27,15 @@ function isDupe(msgId) {
   return false;
 }
 
+// channel_join / channel_topic are noise: the auto-invite join would otherwise wake
+// the live session before the operator has typed anything.
+const SKIPPED_SUBTYPES = new Set([
+  "message_changed", "message_deleted", "channel_join", "channel_topic",
+]);
+
 function shouldSkip(payload) {
   if (payload.bot_id || payload.subtype === "bot_message") return "bot_message";
-  if (payload.subtype === "message_changed" || payload.subtype === "message_deleted") return payload.subtype;
+  if (SKIPPED_SUBTYPES.has(payload.subtype)) return payload.subtype;
   if (isDupe(payload.client_msg_id)) return "dedup";
   return null;
 }
@@ -49,42 +58,7 @@ function deriveTitle(text, maxLen = 60) {
   return first.length <= maxLen ? first : first.slice(0, maxLen - 1) + "…";
 }
 
-function splitResponse(text, maxLen = 3000) {
-  if (text.length <= maxLen) return [text];
-  const chunks = [];
-  const paras = text.split(/\n\n+/);
-  let current = "";
-  for (const para of paras) {
-    if (current.length + para.length + 2 > maxLen) {
-      if (current) chunks.push(current.trim());
-      current = para.length > maxLen ? para.slice(0, maxLen) : para;
-    } else {
-      current = current ? current + "\n\n" + para : para;
-    }
-  }
-  if (current.trim()) chunks.push(current.trim());
-  return chunks.length ? chunks : [text.slice(0, maxLen)];
-}
-
-/**
- * Update a placeholder message; if Slack reports it no longer exists,
- * fall back to posting a new message in the same thread.
- */
-export async function safeUpdate({ web, channel, ts, params, threadTs }) {
-  try {
-    await web.chatUpdate({ channel, ts, ...params });
-  } catch (e) {
-    if (e.slackError === "message_not_found" || e.slackError === "cant_update_message") {
-      const postParams = { channel, ...params };
-      if (threadTs) postParams.thread_ts = threadTs;
-      await web.chatPostMessage(postParams);
-    } else {
-      throw e;
-    }
-  }
-}
-
-export async function handleMessage({ web, store, queue, config, log, payload, botUserId, isFirstInSession, extensions, remote, _runClaude }) {
+export async function handleMessage({ web, store, queue, config, log, payload, botUserId, isFirstInSession, extensions, remote, _runClaude, _startHeartbeat }) {
   const skipReason = shouldSkip(payload);
   if (skipReason) {
     log.info("message skipped", { channel: payload.channel, ts: payload.ts, reason: skipReason });
@@ -120,7 +94,10 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
       let alive = null;
       try { alive = await remote.broker.isAlive(claim.peer_id); } catch { /* fall through */ }
       if (alive === true) {
-        await routeToLiveSession({ web, channel, threadTs, text, claim, broker: remote.broker, config, log, cmdEcho: deriveTitle(text) });
+        await routeToLiveSession({
+          web, channel, threadTs, text, claim, broker: remote.broker, config, log,
+          cmdEcho: deriveTitle(text), _startHeartbeat,
+        });
         return;
       }
       if (alive === false) {
@@ -250,223 +227,6 @@ export async function postStartupNotification({ web, store, log }) {
   }
 }
 
-/**
- * Post claude's reply — mirrors the historic .py recipe: the reply is the clean
- * message body (chat_update text=response_text), NOT wrapped in a Slack attachment.
- * The mjs port had put the whole reply inside attachments[].text, so it rendered
- * inside the "|" attachment bar. Tables use Block Kit blocks; long replies split
- * into multiple plain-text posts. The first-in-session title uses **bold** (md)
- * so mdToSlack converts it to *bold* (mrkdwn), matching the .py.
- */
-export async function postResponse({ web, channel, placeholderTs, threadTs, responseText, existingSession, isFirstInSession, cmdEcho, extensions, sessionId, config }) {
-  const title = (!existingSession && isFirstInSession) ? `**${cmdEcho}**\n\n` : null;
-  const fullText = title ? title + (responseText ?? "") : (responseText ?? "");
-
-  // End-of-turn progress attachment — historic .py parity (slack_bridge.py:711-714
-  // posted _progress_snippet() as a coloured attachment on the reply). Sourced from
-  // the pipeline progress-steps DB via the extension's responseAugment hook; null
-  // when there's no active progress or no extension. Never let it fail the reply.
-  let progressAttachment = null;
-  if (extensions) {
-    try {
-      const snippet = await extensions.runResponseAugment({ channel, sessionId, isFirstInSession, config });
-      if (snippet) progressAttachment = { color: "#808080", text: snippet, mrkdwn_in: ["text"] };
-    } catch { /* progress is a sidebar; never fail the response on it */ }
-  }
-
-  if (hasTable(fullText)) {
-    const blocks = mdToBlocks(fullText);
-    if (blocks) {
-      await web.chatDelete({ channel, ts: placeholderTs });
-      const postParams = { channel, text: cmdEcho, blocks };
-      if (threadTs) postParams.thread_ts = threadTs;
-      await web.chatPostMessage(postParams);
-      if (progressAttachment) await postProgressAttachment({ web, channel, threadTs, attachment: progressAttachment });
-      return;
-    }
-  }
-
-  const mrkdwn = mdToSlack(fullText);
-  const chunks = splitResponse(mrkdwn);
-
-  if (chunks.length === 1) {
-    // Reply as the message body — no attachment wraps it (the .py recipe).
-    // The progress attachment rides along on the same updated message (text + attachment).
-    const params = { text: mrkdwn };
-    if (progressAttachment) params.attachments = [progressAttachment];
-    await safeUpdate({ web, channel, ts: placeholderTs, threadTs, params });
-  } else {
-    await web.chatDelete({ channel, ts: placeholderTs });
-    for (let i = 0; i < chunks.length; i++) {
-      const postParams = { channel, text: chunks[i] };
-      if (threadTs) postParams.thread_ts = threadTs;
-      // Attach the progress snippet to the final chunk so it appears once, at the end.
-      if (progressAttachment && i === chunks.length - 1) postParams.attachments = [progressAttachment];
-      await web.chatPostMessage(postParams);
-    }
-  }
-}
-
-/**
- * Post the end-of-turn progress snippet as a standalone coloured attachment —
- * used when the reply itself is Block Kit blocks (blocks + attachments don't
- * combine cleanly on one message). Swallows Slack errors; progress is a sidebar.
- */
-async function postProgressAttachment({ web, channel, threadTs, attachment }) {
-  const postParams = { channel, text: "", attachments: [attachment] };
-  if (threadTs) postParams.thread_ts = threadTs;
-  try { await web.chatPostMessage(postParams); } catch { /* sidebar; ignore */ }
-}
-
-/**
- * Post an error as plain message text — .py recipe: text="_Error: …_", attachments=[].
- * The mjs port had wrapped it in a red attachment; restore plain text so the error
- * isn't inside the "|" bar. Swallows Slack errors (placeholder may already be gone).
- */
-export async function postError({ web, channel, placeholderTs, threadTs, message }) {
-  try {
-    await safeUpdate({ web, channel, ts: placeholderTs, threadTs, params: { text: `_Error: ${message}_` } });
-  } catch { /* placeholder already gone; error was already logged by the caller */ }
-}
-
-// Peers with a route polling right now. The idle drain skips these: /poll-messages
-// marks what it returns delivered, and pollReply ignores delivered messages, so a
-// drain that ran underneath a live window would destroy the reply it was sent for.
-const activeRoutes = new Set();
-
-/**
- * Route a claimed channel's message to its live session: placeholder, broker
- * send, poll the peer's reply, post it in place. On timeout the claim is
- * retained (slow, not dead) and "didn't reply in time" is posted.
- */
-export async function routeToLiveSession({ web, channel, threadTs, text, claim, broker, config, log, cmdEcho }) {
-  const timeoutMs = config.remote?.replyTimeoutMs ?? 300_000;
-  const pollIntervalMs = config.remote?.replyPollIntervalMs ?? 1_000;
-
-  // Post whatever THIS peer sent that no window consumed, before the new
-  // placeholder: a late answer to a previous message is never served as this
-  // message's reply, and is never destroyed unread either. from_id scoping plus
-  // one-claim-per-peer (claims store) keeps concurrent claimed channels from
-  // draining each other's replies.
-  await drainLeftoverReplies({ broker, web, channel, threadTs, peerId: claim.peer_id, log });
-
-  let placeholderTs = null;
-  try {
-    const postParams = {
-      channel,
-      text: "",
-      attachments: [{ color: "#808080", text: `📱 _routed to live session…_`, mrkdwn_in: ["text"] }],
-    };
-    if (threadTs) postParams.thread_ts = threadTs;
-    const posted = await web.chatPostMessage(postParams);
-    placeholderTs = posted.ts;
-  } catch (e) {
-    log.error("failed to post routed placeholder", { channel, error: e.message });
-    return;
-  }
-
-  activeRoutes.add(claim.peer_id);
-  let replies = [];
-  try {
-    try {
-      const r = await broker.sendMessage("slack-bridge", claim.peer_id, text);
-      if (r && r.ok === false) throw new Error(r.error ?? "send failed");
-    } catch (e) {
-      log.error("failed to route to live session", { channel, error: e.message });
-      await postError({ web, channel, placeholderTs, threadTs, message: `failed to route to live session: ${e.message}` });
-      return;
-    }
-    replies = await pollReply({ broker, peerId: claim.peer_id, timeoutMs, pollIntervalMs, log });
-  } finally {
-    activeRoutes.delete(claim.peer_id);
-  }
-  if (replies.length) {
-    for (let i = 0; i < replies.length; i++) {
-      try {
-        if (i === 0) {
-          // The first reply replaces the placeholder; the rest post after it —
-          // a session that replies in several chunks must not have chunks 2..N
-          // silently discarded by the next routed message's pre-send drain.
-          await postResponse({
-            web, channel, placeholderTs, threadTs,
-            responseText: replies[i].text, existingSession: claim.peer_id, isFirstInSession: false,
-            cmdEcho, extensions: null, sessionId: null, config,
-          });
-        } else {
-          const postParams = { channel, text: replies[i].text };
-          if (threadTs) postParams.thread_ts = threadTs;
-          await web.chatPostMessage(postParams);
-        }
-      } catch (e) {
-        log.error("failed to post live-session reply", { channel, error: e.message });
-        await postError({ web, channel, placeholderTs: null, threadTs, message: `live session reply post failed: ${e.message}` });
-      }
-    }
-  } else {
-    await postError({ web, channel, placeholderTs, threadTs, message: "live session didn't reply in time" });
-  }
-}
-
-// Poll this peer's reply only — from_id-scoped, and the claims store allows one
-// channel per peer, so concurrent claims can't take each other's replies.
-async function pollReply({ broker, peerId, timeoutMs, pollIntervalMs, log }) {
-  const deadline = Date.now() + timeoutMs;
-  const out = [];
-  while (Date.now() < deadline) {
-    let msgs = [];
-    try { msgs = await broker.pollMessages("slack-bridge", peerId) ?? []; } catch (e) { log?.warn?.("poll error", { error: e.message }); }
-    out.push(...msgs);
-    // Drain until an empty poll: a multi-chunk reply (several slack_post calls in
-    // quick succession) must arrive whole, not just its first chunk.
-    if (out.length && msgs.length === 0) return out;
-    await new Promise((r) => setTimeout(r, pollIntervalMs));
-  }
-  return out;
-}
-
-// Post drained replies that no window consumed. A slack_post landing after its
-// window closed — or with none open — would otherwise be destroyed by the next
-// drain while the session was told it had sent.
-async function postLeftovers({ web, channel, threadTs, msgs, log }) {
-  let posted = 0;
-  for (const m of msgs) {
-    if (!m?.text) continue;
-    try {
-      const p = { channel, text: m.text };
-      if (threadTs) p.thread_ts = threadTs;
-      await web.chatPostMessage(p);
-      posted++;
-    } catch (e) {
-      log.warn("failed to post a late live-session reply", { channel, error: e.message });
-    }
-  }
-  return posted;
-}
-
-async function drainLeftoverReplies({ broker, web, channel, threadTs, peerId, log }) {
-  let msgs = [];
-  try { msgs = await broker.pollMessages("slack-bridge", peerId) ?? []; } catch { return 0; }
-  if (!msgs.length) return 0;
-  const posted = await postLeftovers({ web, channel, threadTs, msgs, log });
-  if (posted) log.info("posted late live-session replies", { channel, peer_id: peerId, count: posted });
-  return posted;
-}
-
-/**
- * Drain every claimed peer that has no route polling. Driven from a tick in
- * startBridge: slack_post cannot see whether a window is open, so the daemon is
- * the only place that can deliver what the session was told it had sent.
- */
-export async function drainIdleLeftovers({ broker, web, claims, log }) {
-  if (!broker || !claims) return 0;
-  let total = 0;
-  for (const [channel, claim] of Object.entries(claims.all())) {
-    if (!claim?.peer_id || activeRoutes.has(claim.peer_id)) continue;
-    total += await drainLeftoverReplies({ broker, web, channel, threadTs: null, peerId: claim.peer_id, log });
-  }
-  return total;
-}
-
 export function startBridge({ config, log, web, socket, store, queue, extensions, remote }) {
   loadDedup(store);
 
@@ -499,17 +259,19 @@ export function startBridge({ config, log, web, socket, store, queue, extensions
       .catch(e => log.error("slash command unhandled", { error: e.message }));
   });
 
-  // A reply sent outside a live window has no poller. Drain claimed peers on a
-  // tick so it is posted rather than destroyed by the next route's pre-send drain.
+  // Every message the live session (or its turn mirror) sends reaches its claim
+  // channel through ONE daemon-side consumer: a reply sent with no window open
+  // used to sit until the 30 s drain tick, and a window/drain race could destroy
+  // the reply a window was waiting for.
+  let stopReplyLoop = () => {};
   if (remote?.broker && remote?.claims) {
-    const drainTimer = setInterval(() => {
-      drainIdleLeftovers({ broker: remote.broker, web, claims: remote.claims, log }).catch(() => {});
-    }, 30_000);
-    drainTimer.unref?.();
+    const replyLoop = startReplyLoop({ broker: remote.broker, claims: remote.claims, web, config, log });
+    stopReplyLoop = () => replyLoop.stop();
   }
 
   socket.start();
   log.info("bridge started");
+  return { stopReplyLoop };
 }
 
 async function handleSlashCommand({ web, store, queue, config, log, payload, botUserId, extensions }) {

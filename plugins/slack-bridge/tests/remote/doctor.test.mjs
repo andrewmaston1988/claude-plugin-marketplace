@@ -66,3 +66,13 @@ test("endpoint 5xx is still a failure", async () => {
     await new Promise((r) => srv.close(r));
   }
 });
+
+test("channel-create mode without operatorUserId fails — created channels would not invite the operator", async () => {
+  const config = configFor(await freePort());
+  config.remote.createChannels = true;
+  const r = await checkNamed(config, "Remote-control scopes");
+  assert.equal(r.ok, false);
+  assert.match(r.detail, /operatorUserId/);
+  config.remote.operatorUserId = "U1";
+  assert.equal((await checkNamed(config, "Remote-control scopes")).ok, true);
+});
