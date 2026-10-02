@@ -60,7 +60,7 @@ Notes:
 
 Reply normally — just write your answer, as you would in any other turn. The plugin's `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages, and tool calls render as **one status line edited in place**, finalised when the turn stops.
 
-Do **not** answer with a tool call. There is nothing to send by hand — a tool call per message wastes context, and it posts on a path that bypasses the channel's routing window.
+Do **not** answer with a tool call. There is nothing to send by hand — the hooks already post your text, so a tool call per message wastes context and can post the same reply twice.
 
 ## Releasing
 

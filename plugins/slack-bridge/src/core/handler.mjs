@@ -553,13 +553,7 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
   }
 }
 
-/**
- * The daemon's reply loop: ONE consumer for the daemon broker peer, long-polling
- * /wait. This replaces both the 1 s pollReply and the 30 s drain tick, so there is
- * one delivery path and no window/drain race. Transient connection errors (a
- * socket reconnect, an aborted half-open window) back off and retry; nothing here
- * is fatal.
- */
+// The only consumer for the daemon broker peer: long-polls /wait; connection errors back off and retry.
 export function startReplyLoop({
   broker, claims, web, config, log,
   _sleep = (ms) => new Promise((r) => setTimeout(r, ms)),

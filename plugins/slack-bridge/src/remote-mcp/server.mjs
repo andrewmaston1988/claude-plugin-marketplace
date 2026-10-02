@@ -259,10 +259,8 @@ export function createRemoteMcpServer({
     async slack_post(args) {
       if (!myId) return text("Not registered with broker yet", true);
       try {
-        // Route the reply through the broker (to_id "slack-bridge") so the daemon's
-        // reply-poll picks it up and updates the "routed to live session" placeholder
-        // in place — matching the integration-test contract. A direct control /post
-        // would post out-of-band and leave the placeholder to time out.
+        // Via the broker so the daemon's reply loop resolves the routed placeholder;
+        // a direct control /post would leave it to time out.
         const result = await broker.sendMessage(myId, "slack-bridge", args.message);
         if (!result.ok) return text(`Failed to post: ${result.error}`, true);
         return text("Reply sent to Slack.");
