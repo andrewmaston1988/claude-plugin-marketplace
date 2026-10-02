@@ -19,7 +19,7 @@ test("remote-mcp registers with the broker and answers the MCP handshake", async
   fs.writeFileSync(cfgPath, JSON.stringify({
     tokens: { bot: "xoxb-test", app: "xapp-test" },
     claude: { cwd: tmp },
-    remote: { controlToken: token, brokerPort: port, controlPort: port + 1, pollIntervalMs: 60_000, heartbeatIntervalMs: 120_000 },
+    remote: { controlToken: token, brokerPort: port, controlPort: port + 1, heartbeatIntervalMs: 120_000 },
   }));
   const env = { ...process.env, APPDATA: tmp, LOCALAPPDATA: tmp };
 

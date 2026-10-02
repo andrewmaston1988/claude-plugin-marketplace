@@ -105,8 +105,8 @@ export async function runDoctor({ config, paths, web, log }) {
     // Exercises the exact route slack_post uses: a send TO the reserved
     // "slack-bridge" recipient. An unpatched broker rejects it ("Peer not found"),
     // so this goes genuinely red on the reply-path BLOCKER the plan called out.
-    // No take-back: the daemon's reply loop consumes the probe and drops it as
-    // unclaimed (from_id "doctor"); with no daemon it purges after 24h.
+    // No take-back: a live daemon reply loop consumes the probe and drops it as
+    // unclaimed (from_id "doctor"); with no daemon it stays queued.
     await check("Remote-control reply recipient", async () => {
       const port = config.remote.brokerPort ?? 7898;
       const headers = { "Content-Type": "application/json", Authorization: `Bearer ${config.remote.controlToken}` };

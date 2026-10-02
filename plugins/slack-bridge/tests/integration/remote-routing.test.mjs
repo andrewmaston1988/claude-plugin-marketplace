@@ -1,12 +1,5 @@
-// Integration: the routing branch in handleMessage and the daemon reply loop.
-//
-// A Slack message on a claimed channel with a live claiming peer is handed to the
-// internal broker (no claude -p spawn); the live session's reply arrives through
-// the daemon's /wait loop and resolves the route window that the message opened.
-// Unclaimed or dead-peer channels fall back to the spawn path.
-//
-// Fake broker + fake web + injected runClaude + injected heartbeat — no real
-// Slack, no real subprocess, no real broker.
+// Integration: the routing branch in handleMessage and the daemon reply loop,
+// against a fake broker, fake web and injected runClaude/heartbeat.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -377,10 +370,6 @@ test("claimed channel + dead peer → fallback spawn, claim reaped, no broker se
   assert.equal(s.claims.get("C2"), null, "the dead peer's claim must be reaped");
 });
 
-// ── Join/topic filter ───────────────────────────────────────────────────────
-// Auto-invite drags the operator into the channel the moment it is created; the
-// join event that follows would otherwise wake the live session before the
-// operator has typed anything.
 
 test("channel_join / channel_topic in a claimed channel → skipped: no broker send, no spawn", async (t) => {
   const s = setup(t, { claims: [["peerJ", "C-J"]] });

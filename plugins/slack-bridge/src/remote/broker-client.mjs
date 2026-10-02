@@ -88,7 +88,7 @@ export function createBrokerClient({
     } catch (e) {
       if (retried || !isConnectionError(e)) throw e;
       await ensureBroker();
-      return brokerFetch(path, body, { retried: true });
+      return brokerFetch(path, body, { retried: true, signal });
     }
   }
 

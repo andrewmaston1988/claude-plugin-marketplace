@@ -26,11 +26,8 @@ function isDupe(msgId) {
   return false;
 }
 
-// channel_join / channel_topic are noise: auto-invite drags the operator into the
-// channel the moment a claim creates it, so the join event that follows would wake
-// the live session (and start a turn) before the operator has typed anything.
-// Operator, 2026-10-01: "Maybe it is worthwhile dropping those messages since they
-// are noise and auto invite should drag me in, which makes it needless".
+// channel_join / channel_topic are noise: the auto-invite join would otherwise wake
+// the live session before the operator has typed anything.
 const SKIPPED_SUBTYPES = new Set([
   "message_changed", "message_deleted", "channel_join", "channel_topic",
 ]);
@@ -343,16 +340,8 @@ export async function postError({ web, channel, placeholderTs, threadTs, message
   } catch { /* placeholder already gone; error was already logged by the caller */ }
 }
 
-// ── Routing to a claimed live session ─────────────────────────────────────────
-//
-// A Slack message on a claimed channel is posted as a placeholder + heartbeat and
-// handed to the broker; routeToLiveSession then RETURNS. The live session's reply
-// arrives through the daemon reply loop below, which resolves the open window.
-//
-// The channel queue is never held across the reply. A message whose session does
-// not answer (the 22:58Z case: the session posted straight to Slack, so nothing
-// ever came back) used to hold the queue for the full replyTimeoutMs, and every
-// later message on that channel queued behind it — read as a deaf socket.
+// routeToLiveSession returns once the message is handed to the broker — the channel
+// queue is never held across the reply; the daemon reply loop resolves the window.
 
 // A reply arrives as several broker messages when the session posts in chunks.
 // The window keeps collecting until the session goes quiet, so the whole reply
@@ -499,8 +488,7 @@ export async function routeToLiveSession({
     return;
   }
 
-  // The spawn path's placeholder + heartbeat, reused as is — the operator asked
-  // for the multicoloured bar the headless sessions show, not the old caption.
+  // The spawn path's placeholder + heartbeat, reused as is.
   const heartbeat = _startHeartbeat({
     web, channel, ts: placeholderTs, cmdEcho, log: log.child("heartbeat"),
     extensions, sessionId: claim.peer_id, config,

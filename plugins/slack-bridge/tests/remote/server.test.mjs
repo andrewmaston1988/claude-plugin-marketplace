@@ -263,7 +263,7 @@ test("no controlToken: initialize reports not-configured, tools/list is empty, t
 
 test("no controlToken: start() starts nothing — no broker spawn, no timers, no registration", async () => {
   const server = createRemoteMcpServer({
-    config: { remote: { brokerPort: 59998, controlPort: 0, controlToken: null, pollIntervalMs: 60_000, heartbeatIntervalMs: 60_000 } },
+    config: { remote: { brokerPort: 59998, controlPort: 0, controlToken: null, heartbeatIntervalMs: 60_000 } },
     input: new PassThrough(),
     output: new PassThrough(),
     _spawn: () => { throw new Error("dormant server must not spawn the broker"); },
@@ -287,7 +287,7 @@ test("brokerFetch sends the Bearer header — requests against a token-guarded b
   t.after(() => broker.close());
   const port = await broker.listen(0);
   const server = createRemoteMcpServer({
-    config: { remote: { brokerPort: port, controlPort: 0, controlToken: "t", pollIntervalMs: 60_000, heartbeatIntervalMs: 60_000 } },
+    config: { remote: { brokerPort: port, controlPort: 0, controlToken: "t", heartbeatIntervalMs: 60_000 } },
     input: new PassThrough(),
     output: new PassThrough(),
   });

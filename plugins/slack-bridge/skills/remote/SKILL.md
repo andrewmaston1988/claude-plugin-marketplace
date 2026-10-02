@@ -29,7 +29,7 @@ slack_seize  name="slack-bridge-remote-control"
 
 If the operator has named the chat and the harness recorded it, your `name` is ignored and their custom title is used — so passing a context slug is always safe and never clobbers an operator-chosen name. If you skip the `name` arg and the chat isn't named, you get the (maybe nonsensical) ai-title — usable but rarely descriptive, so prefer to derive.
 
-It returns the channel name, e.g. `📱 Slack remote ready: #rc-slack-bridge-remote-control — live session a1b2c3d4`, plus `wait_command` and `bash_timeout_ms`. Report the channel name to the operator verbatim — tell them to DM it from a second device — then **arm the waiter immediately** (next section).
+It returns the channel name, e.g. `Slack remote ready: #rc-slack-bridge-remote-control — live session a1b2c3d4`, plus `wait_command` and `bash_timeout_ms`. Report the channel name to the operator verbatim — tell them to DM it from a second device — then **arm the waiter immediately** (next section).
 
 If `slack_seize` is unavailable (the `slack-bridge-remote` MCP server isn't wired user-scoped), report that and stop — see "If the tool is missing" below.
 
