@@ -25,6 +25,15 @@ test("heartbeat — fires at interval and updates message", { timeout: HEARTBEAT
   }
 });
 
+test("heartbeat — empty cmdEcho renders verb and timer only", { timeout: HEARTBEAT_INTERVAL_MS * 3 }, async () => {
+  const calls = [];
+  const log = { warn: () => {} };
+  const hb = startHeartbeat({ web: makeWeb(calls), channel: "C1", ts: "1", cmdEcho: "", log });
+  await delay(HEARTBEAT_INTERVAL_MS + 100);
+  hb.stop();
+  assert.match(calls[0].attachments[0].text, /^_\w+\.+_ _\(\d+s\)_$/);
+});
+
 test("heartbeat — stop prevents further updates", { timeout: HEARTBEAT_INTERVAL_MS * 4 }, async () => {
   const calls = [];
   const log = { warn: () => {} };

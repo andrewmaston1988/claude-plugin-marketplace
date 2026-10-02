@@ -420,7 +420,7 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
             cmdEcho, extensions: null, sessionId: null, config,
           });
         } else {
-          const postParams = { channel, text: chunks[i] };
+          const postParams = { channel, text: mdToSlack(chunks[i]) };
           if (threadTs) postParams.thread_ts = threadTs;
           await web.chatPostMessage(postParams);
         }
@@ -477,7 +477,7 @@ export async function routeToLiveSession({
     const postParams = {
       channel,
       text: "",
-      attachments: [{ color: "#808080", text: `_${cmdEcho}_`, mrkdwn_in: ["text"] }],
+      attachments: [{ color: "#808080", text: "_Working…_", mrkdwn_in: ["text"] }],
     };
     if (threadTs) postParams.thread_ts = threadTs;
     const posted = await web.chatPostMessage(postParams);
@@ -487,10 +487,10 @@ export async function routeToLiveSession({
     return;
   }
 
-  // The spawn path's placeholder + heartbeat, minus extensions: their progress
-  // snippet describes spawned sessions, not this live one.
+  // The spawn path's heartbeat minus extensions (their snippet describes spawned
+  // sessions) and minus the echo: the operator's message is already right above.
   const heartbeat = _startHeartbeat({
-    web, channel, ts: placeholderTs, cmdEcho, log: log.child("heartbeat"),
+    web, channel, ts: placeholderTs, cmdEcho: "", log: log.child("heartbeat"),
     extensions: null, sessionId: claim.peer_id, config,
   });
   if (config.slack?.verbMode === "haiku") {
@@ -545,7 +545,7 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
   }
 
   await clearStatus({ web, channel, log });
-  const postParams = { channel, text };
+  const postParams = { channel, text: mdToSlack(text) };
   try {
     await web.chatPostMessage(postParams);
   } catch (e) {

@@ -54,7 +54,8 @@ export function startHeartbeat({ web, channel, ts, cmdEcho, log, extensions, ses
     // `_(elapsed)_`. The old template `_${verb}${dots} ${cmdEcho} _(${elapsedStr})__`
     // had a stray `_(` and a trailing `__` that Slack couldn't pair, so the
     // underscores rendered literally (the `__Waiting__` symptom).
-    const lines = [`_${verb}${dots}_ ${cmdEcho} _(${elapsedStr})_`];
+    const echo = cmdEcho ? ` ${cmdEcho}` : "";
+    const lines = [`_${verb}${dots}_${echo} _(${elapsedStr})_`];
     if (augment) lines.push(augment);
 
     // Re-check after the pre-update awaits: stop() may have been called while we

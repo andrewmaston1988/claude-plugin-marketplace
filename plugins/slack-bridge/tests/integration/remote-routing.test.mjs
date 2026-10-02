@@ -147,7 +147,7 @@ const idxOf = (web, pred) => web.calls.findIndex(pred);
 
 // ── Routing: placeholder + heartbeat ─────────────────────────────────────────
 
-test("routed message → grey spawn-path placeholder, heartbeat running; reply replaces it", async (t) => {
+test("routed message → grey placeholder without the message echo, heartbeat running; reply replaces it", async (t) => {
   const s = setup(t, { claims: [["peerA", "C1"]] });
   const rc = makeRunClaude();
   await slack(s, makePayload({ channel: "C1", text: "hello from slack", client_msg_id: "m-route-1" }), { runClaude: rc });
@@ -156,11 +156,12 @@ test("routed message → grey spawn-path placeholder, heartbeat running; reply r
   const placeholder = s.web.calls.find(([type]) => type === "post")?.[1];
   assert.ok(placeholder, "a placeholder must be posted for the routed message");
   assert.equal(placeholder.attachments?.[0]?.color, "#808080", "the placeholder is the spawn-path grey attachment");
-  assert.ok(placeholder.attachments[0].text.includes("hello from slack"), "the placeholder echoes the Slack message (spawn-path shape)");
+  assert.ok(!placeholder.attachments[0].text.includes("hello from slack"), "the routed placeholder does not echo the Slack message");
   assert.ok(!/routed to live session/.test(placeholder.attachments[0].text), "the old 📱 routed caption is gone");
   assert.equal(s.hb.instances.length, 1, "one heartbeat per routed window");
   assert.equal(s.hb.instances[0].stopped, false, "the heartbeat runs while the window is open");
   assert.equal(s.hb.instances[0].ts, placeholder._ts, "the heartbeat drives the placeholder");
+  assert.equal(s.hb.instances[0].cmdEcho, "", "the routed heartbeat shows verb and timer only");
 
   s.broker.deliver("slack-bridge", { from_id: "peerA", text: "live reply!" });
   await waitFor(() => hasUpdate(s.web, "live reply!"), 4000);
@@ -251,6 +252,17 @@ test("three chunks in quick succession → all three posted, in order, in the sa
   assert.ok(i1 < i2 && i2 < i3, "the remaining chunks post after it, in order");
 });
 
+test("chunks after the first → converted to Slack mrkdwn like the first", async (t) => {
+  const s = setup(t, { claims: [["peerD", "C4"]] });
+  await slack(s, makePayload({ channel: "C4", text: "hello", client_msg_id: "m-route-md" }));
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  s.broker.deliver("slack-bridge", { from_id: "peerD", text: "first" });
+  s.broker.deliver("slack-bridge", { from_id: "peerD", text: "**Your move:** pick" });
+
+  await waitFor(() => hasPost(s.web, "pick"), 4000);
+  assert.ok(hasPost(s.web, "*Your move:* pick"), "**bold** in a later chunk must become *bold*");
+});
+
 // ── Daemon reply loop ────────────────────────────────────────────────────────
 // One consumer for the daemon peer: slack_post (or the turn mirror) reaches the
 // channel through this loop, so a reply with no window open is posted at once
@@ -264,6 +276,13 @@ test("reply with no route window open → posted to the claim channel within 2 s
   await waitFor(() => hasPost(s.web, "sent with no window open"), 2000);
   assert.ok(Date.now() - started < 2000, "delivered by the loop, not a 30 s drain tick");
   assert.ok(!hasUpdate(s.web, "sent with no window open"), "no window was open — it is a plain post, not a placeholder update");
+});
+
+test("reply with no route window open → converted to Slack mrkdwn", async (t) => {
+  const s = setup(t, { claims: [["peerE", "C5"]] });
+  s.broker.deliver("slack-bridge", { from_id: "peerE", text: "**TL;DR:** done" });
+  await waitFor(() => hasPost(s.web, "done"), 2000);
+  assert.ok(hasPost(s.web, "*TL;DR:* done"), "**bold** must become *bold*");
 });
 
 test("reply from a peer with no claim → dropped and logged, the loop keeps running", async (t) => {
@@ -298,11 +317,11 @@ test("replies resolve windows oldest-first (FIFO)", async (t) => {
   const s = setup(t, { claims: [["peerF", "C-F"]], replyTimeoutMs: 60_000 });
   await slack(s, makePayload({ channel: "C-F", text: "first", client_msg_id: "m-fifo-1" }));
   await waitFor(() => s.broker.sendCalls.length === 1);
-  const firstTs = s.web.calls.find(([ty, p]) => ty === "post" && p.attachments?.[0]?.text?.includes("first"))[1]._ts;
+  const firstTs = s.web.calls.filter(([ty, p]) => ty === "post" && p.attachments?.[0]?.color === "#808080")[0][1]._ts;
 
   await slack(s, makePayload({ channel: "C-F", text: "second", client_msg_id: "m-fifo-2" }));
   await waitFor(() => s.broker.sendCalls.length === 2);
-  const secondTs = s.web.calls.find(([ty, p]) => ty === "post" && p.attachments?.[0]?.text?.includes("second"))[1]._ts;
+  const secondTs = s.web.calls.filter(([ty, p]) => ty === "post" && p.attachments?.[0]?.color === "#808080")[1][1]._ts;
   assert.notEqual(firstTs, secondTs, "each routed message gets its own placeholder");
 
   s.broker.deliver("slack-bridge", { from_id: "peerF", text: "answer to first" });
