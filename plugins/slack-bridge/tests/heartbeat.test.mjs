@@ -34,6 +34,17 @@ test("heartbeat — empty cmdEcho renders verb and timer only", { timeout: HEART
   assert.match(calls[0].attachments[0].text, /^_\w+\.+_ _\(\d+s\)_$/);
 });
 
+test("heartbeat — setStatus puts the text above the attachment on the next tick", { timeout: HEARTBEAT_INTERVAL_MS * 3 }, async () => {
+  const calls = [];
+  const log = { warn: () => {} };
+  const hb = startHeartbeat({ web: makeWeb(calls), channel: "C1", ts: "1", cmdEcho: "", log });
+  hb.setStatus("Bash: node --test");
+  await delay(HEARTBEAT_INTERVAL_MS + 100);
+  hb.stop();
+  assert.equal(calls[0].text, "Bash: node --test");
+  assert.match(calls[0].attachments[0].text, /^_\w+\.+_ _\(\d+s\)_$/);
+});
+
 test("heartbeat — stop prevents further updates", { timeout: HEARTBEAT_INTERVAL_MS * 4 }, async () => {
   const calls = [];
   const log = { warn: () => {} };

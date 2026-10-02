@@ -52,11 +52,12 @@ function makeRunClaude(result = "spawn-mode reply") {
 function makeHeartbeat(calls) {
   const instances = [];
   function start({ channel, ts, cmdEcho, extensions }) {
-    const rec = { channel, ts, cmdEcho, extensions, tools: [], stopped: false, stopCalls: 0 };
+    const rec = { channel, ts, cmdEcho, extensions, tools: [], statuses: [], stopped: false, stopCalls: 0 };
     instances.push(rec);
     calls.push(["hb-start", rec]);
     return {
       setTool(tool, input) { rec.tools.push([tool, input]); },
+      setStatus(text) { rec.statuses.push(text); },
       stop() { rec.stopped = true; rec.stopCalls++; calls.push(["hb-stop", rec]); return Promise.resolve(); },
     };
   }
@@ -313,28 +314,54 @@ test("two routed messages, no reply to the first → the second reaches the brok
   assert.deepEqual(s.broker.sendCalls.map((c) => c.text), ["first", "second"]);
 });
 
-test("replies resolve windows oldest-first (FIFO)", async (t) => {
-  const s = setup(t, { claims: [["peerF", "C-F"]], replyTimeoutMs: 60_000 });
-  await slack(s, makePayload({ channel: "C-F", text: "first", client_msg_id: "m-fifo-1" }));
-  await waitFor(() => s.broker.sendCalls.length === 1);
-  const firstTs = s.web.calls.filter(([ty, p]) => ty === "post" && p.attachments?.[0]?.color === "#808080")[0][1]._ts;
+const placeholderTss = (web) =>
+  web.calls.filter(([ty, p]) => ty === "post" && p.attachments?.[0]?.color === "#808080").map(([, p]) => p._ts);
 
-  await slack(s, makePayload({ channel: "C-F", text: "second", client_msg_id: "m-fifo-2" }));
+// One session turn answers everything queued, so its reply belongs at the bottom
+// of the channel — under the newest message — not in a placeholder scrolled away.
+test("a reply resolves the NEWEST window; older unanswered placeholders are abandoned", async (t) => {
+  const s = setup(t, { claims: [["peerF", "C-F"]], replyTimeoutMs: 60_000 });
+  await slack(s, makePayload({ channel: "C-F", text: "first", client_msg_id: "m-new-1" }));
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  await slack(s, makePayload({ channel: "C-F", text: "second", client_msg_id: "m-new-2" }));
   await waitFor(() => s.broker.sendCalls.length === 2);
-  const secondTs = s.web.calls.filter(([ty, p]) => ty === "post" && p.attachments?.[0]?.color === "#808080")[1][1]._ts;
+  const [firstTs, secondTs] = placeholderTss(s.web);
   assert.notEqual(firstTs, secondTs, "each routed message gets its own placeholder");
 
-  s.broker.deliver("slack-bridge", { from_id: "peerF", text: "answer to first" });
-  await waitFor(() => hasUpdate(s.web, "answer to first"), 4000);
-  const firstReply = s.web.calls.find(([ty, p]) => ty === "update" && p.text?.includes("answer to first"))[1];
-  assert.equal(firstReply.ts, firstTs, "the oldest window resolves first");
+  s.broker.deliver("slack-bridge", { from_id: "peerF", text: "answer to both" });
+  await waitFor(() => hasUpdate(s.web, "answer to both"), 4000);
+  const reply = s.web.calls.find(([ty, p]) => ty === "update" && p.text?.includes("answer to both"))[1];
+  assert.equal(reply.ts, secondTs, "the reply lands in the newest placeholder");
+  assert.ok(s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === firstTs), "the older placeholder is deleted");
+  assert.equal(s.hb.instances[0].stopped, true, "the abandoned window's heartbeat is stopped");
+});
 
-  // The first window has finalised (its quiet gap elapsed) — the next reply
-  // belongs to the second message.
-  s.broker.deliver("slack-bridge", { from_id: "peerF", text: "answer to second" });
-  await waitFor(() => hasUpdate(s.web, "answer to second"), 4000);
-  const secondReply = s.web.calls.find(([ty, p]) => ty === "update" && p.text?.includes("answer to second"))[1];
-  assert.equal(secondReply.ts, secondTs, "the second window resolves second");
+test("a window already collecting a reply keeps its chunks when a newer message arrives", async (t) => {
+  const s = setup(t, { claims: [["peerF", "C-F"]], replyTimeoutMs: 60_000 });
+  await slack(s, makePayload({ channel: "C-F", text: "first", client_msg_id: "m-col-1" }));
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  s.broker.deliver("slack-bridge", { from_id: "peerF", text: "chunk one" });
+  await delay(100);
+  await slack(s, makePayload({ channel: "C-F", text: "second", client_msg_id: "m-col-2" }));
+  await waitFor(() => s.broker.sendCalls.length === 2);
+  s.broker.deliver("slack-bridge", { from_id: "peerF", text: "chunk two" });
+
+  const [firstTs, secondTs] = placeholderTss(s.web);
+  await waitFor(() => hasPost(s.web, "chunk two"), 4000);
+  const first = s.web.calls.find(([ty, p]) => ty === "update" && p.text === "chunk one")[1];
+  assert.equal(first.ts, firstTs, "the collecting window keeps the reply it started");
+  assert.ok(!s.web.calls.some(([ty, p]) => ty === "delete" && p.ts === secondTs), "the newer window stays open");
+  assert.equal(s.hb.instances[1].stopped, false);
+});
+
+test("status while a window is open → shown above the placeholder's attachment, no separate line", async (t) => {
+  const s = setup(t, { claims: [["peerH", "C-H"]], replyTimeoutMs: 60_000 });
+  await slack(s, makePayload({ channel: "C-H", text: "go", client_msg_id: "m-st-1" }));
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  s.broker.deliver("slack-bridge", { from_id: "peerH", kind: "status", text: "Bash: node --test" });
+  await waitFor(() => s.hb.instances[0].statuses.length === 1, 2000);
+  assert.deepEqual(s.hb.instances[0].statuses, ["Bash: node --test"]);
+  assert.ok(!hasPost(s.web, "Bash:"), "no separate status message below the placeholder");
 });
 
 test("broker ECONNRESET mid-loop → the loop retries and delivers the next reply", async (t) => {

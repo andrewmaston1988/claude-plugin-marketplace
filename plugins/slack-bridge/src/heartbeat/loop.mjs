@@ -12,6 +12,8 @@ export function startHeartbeat({ web, channel, ts, cmdEcho, log, extensions, ses
   // Haiku verb state — updated asynchronously when tool changes
   let currentVerb = null;
   let lastTool = undefined;
+  // Message text renders above the attachment, so a live tool status sits there.
+  let statusText = "";
 
   const timer = setInterval(async () => {
     if (stopped) return;
@@ -72,7 +74,7 @@ export function startHeartbeat({ web, channel, ts, cmdEcho, log, extensions, ses
     const p = web.chatUpdate({
       channel,
       ts,
-      text: "",
+      text: statusText,
       attachments: [{ color, text: lines.join("\n"), mrkdwn_in: ["text"] }],
     }).catch(e => {
       log?.warn("heartbeat update failed", { error: e.message });
@@ -98,6 +100,8 @@ export function startHeartbeat({ web, channel, ts, cmdEcho, log, extensions, ses
         });
       }
     },
+
+    setStatus(text) { statusText = text; },
 
     stop() {
       stopped = true;

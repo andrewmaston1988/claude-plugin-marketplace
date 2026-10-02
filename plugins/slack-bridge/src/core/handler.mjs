@@ -434,6 +434,32 @@ async function finalizeWindow(window, { timeout = false, errorMessage = null } =
   }
 }
 
+// The window a reply or status belongs to: one already collecting a reply keeps
+// it; otherwise the newest, so the reply lands at the bottom of the channel.
+function targetWindow(peerId) {
+  const windows = routeWindows.get(peerId);
+  if (!windows?.length) return null;
+  return windows.find((w) => w.chunks.length) ?? windows[windows.length - 1];
+}
+
+// One session turn answers everything queued, so placeholders older than the one
+// the reply lands in will never get their own answer — delete them.
+async function abandonOlderWindows(target) {
+  const windows = routeWindows.get(target.peerId) ?? [];
+  for (const w of windows.slice(0, windows.indexOf(target))) {
+    w.done = true;
+    clearTimeout(w.timeoutTimer);
+    clearTimeout(w.quietTimer);
+    removeWindow(w);
+    try {
+      await w.heartbeat?.stop();
+      await w.web.chatDelete({ channel: w.channel, ts: w.placeholderTs });
+    } catch (e) {
+      w.log.warn("abandoned placeholder delete failed", { channel: w.channel, error: e.message });
+    }
+  }
+}
+
 // Tool calls render as ONE line per channel, edited in place (the turn mirror sends
 // them as kind:"status"). The next text reply finalises it, so a stale "Bash: …"
 // line does not linger under the answer.
@@ -510,9 +536,10 @@ export async function routeToLiveSession({
 }
 
 /**
- * One broker message from the daemon peer → its claim channel. kind:"status" edits
- * the channel's one status line; a text reply resolves the OLDEST open window for
- * that peer (FIFO), or posts directly when none is open. A message from a peer
+ * One broker message from the daemon peer → its claim channel. kind:"status" shows
+ * in the open window's placeholder, else on the channel's one status line; a text
+ * reply resolves the newest open window (abandoning older ones), or posts directly
+ * when none is open. A message from a peer
  * with no claim has nowhere to go and is dropped with a log.
  */
 async function handleBrokerMessage({ message, claims, web, config, log }) {
@@ -527,13 +554,16 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
   const [channel] = entry;
   const text = String(message?.text ?? "");
 
+  const window = targetWindow(fromId);
   if (message.kind === "status") {
-    if (text) await postStatus({ web, channel, text, log });
+    if (!text) return;
+    if (window) window.heartbeat?.setStatus?.(text);
+    else await postStatus({ web, channel, text, log });
     return;
   }
 
-  const window = routeWindows.get(fromId)?.[0];
   if (window) {
+    if (!window.chunks.length) await abandonOlderWindows(window);
     window.chunks.push(text);
     // Restart the quiet gap: stop the window's deadline firing mid-collection,
     // then finalise once the session has stopped sending.
