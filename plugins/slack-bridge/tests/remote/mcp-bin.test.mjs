@@ -93,4 +93,11 @@ test("remote-mcp registers with the broker and answers the MCP handshake", async
     }
   }
   assert.ok(registered, `remote-mcp must register as a peer, stderr: ${err}`);
+
+  // stdout is the JSON-RPC pipe: the harness rejects the whole server on any
+  // other line, so a log line here kills every session's handshake.
+  const stray = out.split("\n").filter((l) => l.trim()).filter((l) => {
+    try { return JSON.parse(l).jsonrpc !== "2.0"; } catch { return true; }
+  });
+  assert.deepEqual(stray, [], "remote-mcp stdout must carry only JSON-RPC");
 });
