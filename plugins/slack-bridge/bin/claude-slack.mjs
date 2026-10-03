@@ -271,7 +271,7 @@ if (cmd === "wait") {
 }
 
 if (cmd === "stop-hook") {
-  // Stop + PostToolUse hook entry (hooks.json). Always exits 0; a block
+  // Stop + PostToolUse + PreToolUse(AskUserQuestion) hook entry (hooks.json). Always exits 0; a block
   // decision is JSON on stdout. Unclaimed sessions return before any broker call.
   let raw = "";
   for await (const chunk of process.stdin) raw += chunk;
