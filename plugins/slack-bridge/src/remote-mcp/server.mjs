@@ -78,6 +78,13 @@ export function encodeCwd(cwd) {
   return String(cwd).replace(/[\\/.:]/g, "-");
 }
 
+// The harness writes dotted cwds under two spellings — dots rewritten and dots
+// kept — so probe both; the first is the common one.
+function resolveProjectDir(dir, cwd) {
+  const spellings = [encodeCwd(cwd), String(cwd).replace(/[\\/:]/g, "-")];
+  return spellings.map((e) => path.join(dir, e)).find((p) => fs.existsSync(p)) ?? null;
+}
+
 // Scan the most-recently-modified session JSONL in this project's session dir for
 // the latest record of `recordType` and return its `field` value (newest match wins).
 // "Most-recently-modified" is a heuristic for "the current session" — wrong only when
@@ -86,8 +93,8 @@ export function encodeCwd(cwd) {
 function readLatestSessionField(cwd, recordType, field, { projectsDir } = {}) {
   try {
     const dir = (projectsDir ?? path.join(os.homedir(), ".claude", "projects")) + "";
-    const projDir = path.join(dir, encodeCwd(cwd));
-    if (!fs.existsSync(projDir)) return null;
+    const projDir = resolveProjectDir(dir, cwd);
+    if (!projDir) return null;
     const entries = fs.readdirSync(projDir).filter((f) => f.endsWith(".jsonl"));
     if (entries.length === 0) return null;
     let latest = null;
@@ -139,9 +146,8 @@ function readLatestSessionField(cwd, recordType, field, { projectsDir } = {}) {
   }
 }
 
-// The operator-named chat name, read from a `custom-title` session record (best-effort:
-// that record shape is not observed on every harness, and a missing one falls through
-// cleanly to the session-derived name). Returns null when the chat was never named.
+// The operator-named chat name: `/rename` appends `{type:"custom-title",customTitle,sessionId}`
+// to the transcript JSONL. Returns null when the chat was never named.
 export function readSessionName(cwd, opts) {
   return readLatestSessionField(cwd, "custom-title", "customTitle", opts);
 }
@@ -166,6 +172,7 @@ export function createRemoteMcpServer({
   _setInterval = setInterval,
   _readSession = (pid) => { try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "sessions", `${pid}.json`), "utf8")); } catch { return null; } },
   _getPaths = getPaths,
+  _projectsDir = path.join(os.homedir(), ".claude", "projects"),
 } = {}) {
   const brokerPort = config.remote?.brokerPort ?? 7898;
   const controlPort = config.remote?.controlPort ?? 7897;
@@ -234,7 +241,8 @@ export function createRemoteMcpServer({
         // Name precedence: operator custom-title (best-effort read from the session
         // JSONL) → the session-derived name arg → auto ai-title → daemon peer-id
         // fragment. Never the cwd basename — a project-dir channel name means broke.
-        const name = readSessionName(_cwd) || args.name || readSessionAiTitle(_cwd) || null;
+        const read = { projectsDir: _projectsDir };
+        const name = readSessionName(_cwd, read) || args.name || readSessionAiTitle(_cwd, read) || null;
         const r = await controlFetch("/claim", { peer_id: myId, channel: args.channel ?? null, name });
         writeSessionMapping(myId, r.channel);
         const label = r.is_dm ? "your DM with the bot" : r.channel_name ? "#" + r.channel_name : r.channel;

@@ -101,8 +101,12 @@ test("clock passes WAIT_CAP_MS → WAIT EXPIRED, returns 0; cap < Bash timeout",
   assert.ok(WAIT_CAP_MS < BASH_TIMEOUT_MS);
 });
 
+// The mock hang holds no handle, so an unref'd AbortSignal.timeout lets the loop
+// drain and the test is cancelled before the abort fires (seen on Linux CI).
+const refdTimeout = (ms) => () => { const c = new AbortController(); setTimeout(() => c.abort(), ms); return c.signal; };
+
 test("a window whose fetch never settles is aborted, counted as a retry, the loop continues (A5)", async () => {
-  const h = harness(["hang", ["late message"]], { _signal: () => AbortSignal.timeout(20) });
+  const h = harness(["hang", ["late message"]], { _signal: refdTimeout(20) });
   const code = await h.run();
   assert.equal(code, 0);
   assert.match(h.output(), /SLACK: late message/);

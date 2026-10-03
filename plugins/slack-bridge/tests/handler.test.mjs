@@ -273,6 +273,16 @@ test("postStartupNotification — posts '🔄 *Bridge restarted*' to the most re
   assert.equal(restartPosts[0][1].channel, "D333", "should target the most recent DM session (last bare-id key)");
 });
 
+// A channel-level session is also a bare id; picking it posted into an archived channel.
+test("postStartupNotification — skips bare-id channel sessions, targets the DM", async () => {
+  const log = makeLog();
+  const web = makeWeb();
+  const store = makeStore({ "D111": "s1", "C222": "s2", "C333": "s3" });
+  await postStartupNotification({ web, store, log });
+  const restartPosts = web.calls.filter(([t, p]) => t === "post" && p.text === "🔄 *Bridge restarted*");
+  assert.deepEqual(restartPosts.map(([, p]) => p.channel), ["D111"]);
+});
+
 test("postStartupNotification — posts nothing when there are no DM sessions", async () => {
   const log = makeLog();
   const web = makeWeb();
