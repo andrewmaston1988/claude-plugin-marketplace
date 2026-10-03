@@ -146,9 +146,8 @@ function readLatestSessionField(cwd, recordType, field, { projectsDir } = {}) {
   }
 }
 
-// The operator-named chat name, read from a `custom-title` session record (best-effort:
-// that record shape is not observed on every harness, and a missing one falls through
-// cleanly to the session-derived name). Returns null when the chat was never named.
+// The operator-named chat name: `/rename` appends `{type:"custom-title",customTitle,sessionId}`
+// to the transcript JSONL. Returns null when the chat was never named.
 export function readSessionName(cwd, opts) {
   return readLatestSessionField(cwd, "custom-title", "customTitle", opts);
 }
