@@ -26,13 +26,26 @@ export function createControlServer({
   operatorUserId = null,
   log = () => {},
 } = {}) {
+  // Without the channels:join scope a channel the bot was invited into is still
+  // seizable; one it is not in needs the operator to invite it.
+  async function joinChannel(channel) {
+    try {
+      return (await web.conversationsJoin({ channel }))?.channel ?? { id: channel };
+    } catch (e) {
+      if (e?.slackError !== "missing_scope") throw e;
+      // The membership check itself needs channels:read; without it, say what to do.
+      const ch = await web.conversationsInfo({ channel }).then((r) => r?.channel, () => null);
+      if (ch?.is_member) return ch;
+      throw new Error(`the bot is not in channel ${channel} and lacks the channels:join scope — invite the bot to the channel first (/invite @<bot>), or add channels:join to the app's bot scopes`);
+    }
+  }
+
   // `name` labels the created channel: #rc-<slug> (e.g. #rc-long-night). The rc-
   // prefix namespaces remote-control channels apart from real project channels.
   // Falls back to the peer-id fragment when no usable name is provided.
   async function claimChannel(peerId, channel, name) {
     if (channel) {
-      const joined = await web.conversationsJoin({ channel });
-      const ch = joined?.channel ?? { id: channel };
+      const ch = await joinChannel(channel);
       return { id: ch.id ?? channel, name: ch.name ?? null, topic: null };
     }
     if (canCreateChannels) {

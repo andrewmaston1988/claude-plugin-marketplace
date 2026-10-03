@@ -6,31 +6,25 @@ function sleep(ms) {
 }
 
 export function createWebClient({ token, log }) {
-  async function call(method, body) {
-    const res = await fetch(`${SLACK_API}/${method}`, {
+  // Some read methods (conversations.info) reject a JSON body; those go form-encoded.
+  async function call(method, body, { form = false } = {}) {
+    const request = () => fetch(`${SLACK_API}/${method}`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${token}`,
-        "Content-Type": "application/json; charset=utf-8",
+        "Content-Type": form ? "application/x-www-form-urlencoded" : "application/json; charset=utf-8",
       },
-      body: JSON.stringify(body),
+      body: form ? new URLSearchParams(body) : JSON.stringify(body),
       signal: AbortSignal.timeout(API_TIMEOUT_MS),
     });
+    const res = await request();
 
     if (res.status === 429) {
       const retryAfter = parseInt(res.headers.get("Retry-After") ?? "1", 10);
       log.warn("rate limited", { method, retryAfter });
       await sleep(retryAfter * 1000);
       // One retry
-      const res2 = await fetch(`${SLACK_API}/${method}`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${token}`,
-          "Content-Type": "application/json; charset=utf-8",
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(API_TIMEOUT_MS),
-      });
+      const res2 = await request();
       if (res2.status === 429) {
         log.warn("rate limited again, giving up", { method });
         const err = new Error(`Slack ${method}: rate limited`);
@@ -77,6 +71,7 @@ export function createWebClient({ token, log }) {
     conversationsCreate: (params) => call("conversations.create", params),
     conversationsInvite: (params) => call("conversations.invite", params),
     conversationsJoin: (params) => call("conversations.join", params),
+    conversationsInfo: (params) => call("conversations.info", params, { form: true }),
     conversationsSetTopic: (params) => call("conversations.setTopic", params),
     conversationsList: (params) => call("conversations.list", params),
 

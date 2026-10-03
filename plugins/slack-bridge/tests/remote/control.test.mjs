@@ -133,6 +133,45 @@ test("/claim with a channel joins the existing channel instead of creating", asy
   assert.equal(claims.get("C-existing").peer_id, "peerB");
 });
 
+function missingScope() {
+  const e = new Error("Slack API conversations.join: missing_scope");
+  e.slackError = "missing_scope";
+  return e;
+}
+
+test("/claim of a channel the bot is already in succeeds without the join scope", async (t) => {
+  const web = makeWeb();
+  web.conversationsJoin = async () => { throw missingScope(); };
+  web.conversationsInfo = async (p) => ({ ok: true, channel: { id: p.channel, name: "ops", is_member: true } });
+  const { call, claims } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerB", channel: "C-existing" });
+  assert.equal(r.body.ok, true, r.body.error);
+  assert.equal(r.body.channel_name, "ops");
+  assert.equal(claims.get("C-existing").peer_id, "peerB");
+});
+
+test("/claim of a channel the bot is not in, without the join scope, says to invite the bot", async (t) => {
+  const web = makeWeb();
+  web.conversationsJoin = async () => { throw missingScope(); };
+  web.conversationsInfo = async (p) => ({ ok: true, channel: { id: p.channel, name: "ops", is_member: false } });
+  const { call, claims } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerB", channel: "C-existing" });
+  assert.equal(r.body.ok, false);
+  assert.match(r.body.error, /invite the bot/i);
+  assert.match(r.body.error, /channels:join/);
+  assert.equal(claims.get("C-existing"), null);
+});
+
+test("/claim without the join scope or channels:read still says to invite the bot", async (t) => {
+  const web = makeWeb();
+  web.conversationsJoin = async () => { throw missingScope(); };
+  web.conversationsInfo = async () => { throw missingScope(); };
+  const { call } = await startControl(t, { web });
+  const r = await call("/claim", { peer_id: "peerB", channel: "C-existing" });
+  assert.equal(r.body.ok, false);
+  assert.match(r.body.error, /invite the bot/i);
+});
+
 test("/release clears the claim", async (t) => {
   const claims = createClaimsStore({ path: path.join(fs.mkdtempSync(path.join(os.tmpdir(), "rel-")), "claims.json") });
   await claims.claim("peerA", "C1");
