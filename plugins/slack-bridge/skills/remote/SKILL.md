@@ -13,7 +13,7 @@ If `$ARGUMENTS` is `release`, skip straight to *Releasing*.
 
 Call the `slack_seize` MCP tool. The daemon names the created channel `#rc-<slug>` where `<slug>` is chosen in this order:
 
-1. **The session name the operator set in Claude Code** (the chat's custom title) — read from the session JSONL where the harness records one (best-effort: not observed on every harness), so when the operator has named the chat the channel appears named after it, and you never override a name the operator chose.
+1. **The session name the operator set in Claude Code** (the chat's custom title) — read from the `custom-title` record that `/rename` writes to the session JSONL, so when the operator has named the chat the channel appears named after it, and you never override a name the operator chose.
 2. **A slug you derive from the current task context**, passed as the `name` arg — for the common case where the operator has *not* named the chat (operators rarely name chats). Derive it from something descriptive of what you're working on right now: the git branch (`autonomous/slack-bridge-remote-control` → `slack-bridge-remote-control`), the plan slug, or the feature/bug name. Slugify it yourself (lowercase, hyphens, no spaces). **Always do this** — it is your job, not the daemon's.
 3. **The auto ai-title** — Claude Code's generated summary (often just derived from the first message, so maybe nonsensical). Read automatically as a last-resort fallback so the channel is never nameless.
 
