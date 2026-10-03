@@ -147,3 +147,49 @@ test("socket-mode — server ping receives pong reply with reply_to", async () =
   assert.equal(pong.reply_to, 42, "pong reply_to should match ping reply_to");
   restore(); client.stop();
 });
+
+// Item 6: a half-open socket never fires `close`, so only a frame-silence
+// watchdog notices it. Each connect gets a fresh stub so reconnects are countable.
+function makeClientWithStubs({ staleMs }) {
+  const stubs = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ json: async () => ({ ok: true, url: "wss://stub.example.com" }) });
+  const log = makeLog();
+  const client = createSocketModeClient({
+    appToken: "xapp-test",
+    log,
+    _WebSocket: function() { const s = new StubWS(); stubs.push(s); return s; },
+    _staleMs: staleMs,
+  });
+  return { client, log, stubs, restore: () => { globalThis.fetch = origFetch; } };
+}
+
+test("socket-mode — no frame for longer than the watchdog window → socket closed and reconnected", async () => {
+  const { client, log, stubs, restore } = makeClientWithStubs({ staleMs: 50 });
+  client.start();
+  await delay(10);
+  stubs[0].open();
+  stubs[0].receive({ type: "hello" });
+  // Silent from here: the watchdog fires at 50 ms, the first backoff is 1 s.
+  await delay(1300);
+  assert.equal(stubs[0].readyState, 3, "the silent socket must be force-closed");
+  assert.ok(stubs.length >= 2, `a new socket must be opened, got ${stubs.length}`);
+  assert.ok(log.entries.some(e => e.m?.includes("no frame")), "the watchdog logs why it reconnected");
+  restore(); client.stop();
+});
+
+test("socket-mode — frames inside the watchdog window → no reconnect", async () => {
+  const { client, log, stubs, restore } = makeClientWithStubs({ staleMs: 80 });
+  client.start();
+  await delay(10);
+  stubs[0].open();
+  stubs[0].receive({ type: "hello" });
+  for (let i = 0; i < 15; i++) {
+    await delay(25);
+    stubs[0].receive({ type: "ping", reply_to: i });
+  }
+  assert.equal(stubs[0].readyState, 1, "a socket that keeps receiving frames stays open");
+  assert.equal(stubs.length, 1);
+  assert.ok(!log.entries.some(e => e.m?.includes("scheduling reconnect")));
+  restore(); client.stop();
+});

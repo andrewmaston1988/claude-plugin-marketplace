@@ -1,8 +1,11 @@
 import { EventEmitter } from "node:events";
 
 const BACKOFF_CAP_MS = 30_000;
+// A half-open socket never fires `close`, so silence is the only signal. Slack's
+// own SDK treats 30 s without a server ping as dead; three times that avoids churn.
+const STALE_MS = 90_000;
 
-export function createSocketModeClient({ appToken, log, _WebSocket }) {
+export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = STALE_MS }) {
   const WS = _WebSocket ?? WebSocket; // injectable for tests
   const emitter = new EventEmitter();
 
@@ -11,6 +14,7 @@ export function createSocketModeClient({ appToken, log, _WebSocket }) {
   let noReconnect = false;
   let backoffMs = 1_000;
   let reconnectTimer = null;
+  let watchdog = null;
 
   async function getWssUrl() {
     const res = await fetch("https://slack.com/api/apps.connections.open", {
@@ -31,6 +35,22 @@ export function createSocketModeClient({ appToken, log, _WebSocket }) {
 
   function clearTimers() {
     if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+    if (watchdog) { clearTimeout(watchdog); watchdog = null; }
+  }
+
+  // Reset on every frame. On expiry, reconnect directly rather than waiting for
+  // `close`: a close handshake on a dead link may never complete.
+  function armWatchdog(socket) {
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      watchdog = null;
+      if (stopped || socket !== ws) return;
+      log.warn("no frame from Slack — forcing reconnect", { staleMs: _staleMs });
+      ws = null; // its late `close` must not schedule a second reconnect
+      socket.close();
+      scheduleReconnect();
+    }, _staleMs);
+    watchdog.unref?.();
   }
 
   function scheduleReconnect() {
@@ -50,10 +70,12 @@ export function createSocketModeClient({ appToken, log, _WebSocket }) {
 
       socket.addEventListener("open", () => {
         log.info("socket open, waiting for hello");
+        armWatchdog(socket);
       });
 
       socket.addEventListener("message", ({ data }) => {
         let msg;
+        armWatchdog(socket);
         try { msg = JSON.parse(data); } catch { return; }
 
         if (msg.type === "hello") {
@@ -105,6 +127,7 @@ export function createSocketModeClient({ appToken, log, _WebSocket }) {
       });
 
       socket.addEventListener("close", ({ code, reason }) => {
+        if (socket !== ws) return; // abandoned by the watchdog
         clearTimers();
         if (stopped || noReconnect) return;
         log.warn("socket closed", { code, reason: String(reason) });
