@@ -563,7 +563,7 @@ since a ratio would let one cheap fluke leaf outrank a well-evidenced model.
 
 **Best value is a threshold, never a ratio.** The card names the *cheapest* model still
 worth seating: on the frontier, within `valueMargin` (default `0.5`) of the best such
-candidate's quality, not thin, and not a pending elder (unless it is the section's only candidate) — the margin used is printed, so the pick is judgeable. Cost bands
+candidate's quality, not thin, graded at least 5 times, and not a pending elder (unless it is the section's only candidate) — the margin used is printed, so the pick is judgeable. A model under 5 grades neither sets the bar, wins it, nor takes worst value. A rate card's base model keeps its row once a successor supersedes it (it is the multiplier unit), but it drops out of the best and worst verdicts. A row barred from the verdicts cannot knock another off the frontier either. Cost bands
 (`providers.ollama.cloud.ollama.costBands`, default `[2, 5]`) render `$`/`$$`/`$$$` in the terminal. The
 dashboard and model detail views draw one to five coins instead, tinted per provider and scaled
 within that provider's own measured range (cheapest 1, dearest 5, log-spaced); unmeasured renders `—`, never a blank that would read as

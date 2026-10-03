@@ -188,6 +188,44 @@ test("best value: topWtd comes from the CANDIDATES — a thin high scorer must n
   equal(best.model, "h-cheap", "the bar is set by what could actually be picked");
 });
 
+test("best value: a model with fewer than PROVISIONAL_N grades neither raises the bar nor takes the card", () => {
+  const rows = [...many("p-young", 9.9, 2), ...many("p-sol", 9.0), ...many("p-luna", 8.6)];
+  const { best, points } = costView(rows, [costRow("p-young", 50), costRow("p-sol", 10), costRow("p-luna", 0.5)]);
+  ok(points.every((p) => p.onFrontier), "fixture precondition: all three on the frontier");
+  equal(best.model, "p-luna", "two grades are a coin toss, not the bar every graded model is measured against");
+});
+
+test("best value: a base model whose successor is graded is out of the verdict, though still drawn", () => {
+  const base = "gpt-5.6-luna";
+  const priced = (model, mult) => costRow(model, mult, { baseModel: base });
+  const rows = [...many(base, 9.0), ...many("gpt-6-luna", 8.0), ...many("gpt-6-sol", 9.3)];
+  const { best, points } = costView(rows, [priced(base, 1), priced("gpt-6-luna", 0.5), priced("gpt-6-sol", 10)]);
+  const elder = points.find((p) => p.model === base);
+  ok(elder.onFrontier, "fixture precondition: the elder is undominated");
+  equal(elder.supersededBy, undefined, "the unit row stays on the screen");
+  equal(best.model, "gpt-6-sol", "the retired unit must not take the card from its own family's successor");
+});
+
+test("best value: a young model cannot knock the pick off the frontier either", () => {
+  const rows = [...many("y-young", 9.6, 2), ...many("y-sol", 9.2)];
+  const { best } = costView(rows, [costRow("y-young", 1), costRow("y-sol", 2)]);
+  equal(best?.model, "y-sol", "two grades that dominate the only ready model must not blank the card");
+});
+
+test("best value: a retired base model cannot knock its successor off the frontier", () => {
+  const base = "gpt-5.6-luna";
+  const priced = (model, mult) => costRow(model, mult, { baseModel: base });
+  const rows = [...many(base, 9.0), ...many("gpt-6-luna", 8.0)];
+  const { best } = costView(rows, [priced(base, 1), priced("gpt-6-luna", 1)]);
+  equal(best?.model, "gpt-6-luna", "the retired unit dominated its successor and blanked the card");
+});
+
+test("worst value: a model with fewer than PROVISIONAL_N grades does not collect it", () => {
+  const rows = [...many("w-good", 9), ...many("w-young", 5, 2)];
+  const { worst } = costView(rows, [costRow("w-good", 1), costRow("w-young", 4)]);
+  equal(worst, null, "two grades are a coin toss for the worst card too");
+});
+
 test("best value: a dominated model is never picked, however cheap", () => {
   const rows = [...many("d-good", 9), ...many("d-bad", 5)];
   // d-bad is cheaper AND worse -> dominated by d-good, so it is off the frontier.

@@ -10,12 +10,16 @@ import { band, coins, resolveBands, resolveValueMargin, THIN_REQUESTS, DEFAULT_C
 function markSuperseded(rows, { providerKey = () => "unqualified", ...options } = {}) {
   const { superseded, pending } = supersessionReading(rows, { providerKey, ...options });
   for (const row of rows) {
-    // A card's base model IS its section's unit: the screen labels every multiplier
-    // against it, so a newer sibling must never hide it.
-    if (row.baseModel !== undefined && row.model === row.baseModel) continue;
     const key = supersessionKey(providerKey(row), row.model);
     const by = superseded.get(key);
     const next = pending.get(key);
+    // A card's base model IS its section's unit: the screen labels every multiplier
+    // against it, so a newer sibling must never hide it — but it is still retired
+    // from the verdicts, or the unit wins the card from its own successor.
+    if (row.baseModel !== undefined && row.model === row.baseModel) {
+      if (by) row.retiredBy = by;
+      continue;
+    }
     if (by) row.supersededBy = by;
     else if (next) row.pendingSuccessor = next;
   }
@@ -144,7 +148,9 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
   const verdicts = (sectionPoints, sectionSpread) => {
     const domains = new Set(sectionSpread.map((row) => row.costDomain || "legacy"));
     if (domains.size > 1) return { best: null, worst: null };
-    const eligible = sectionPoints.filter((p) => !p.supersededBy && p.onFrontier && p.multiplier != null && !p.thin);
+    // Under PROVISIONAL_N grades a score is a coin toss: it neither sets the bar nor wins.
+    const eligible = sectionPoints.filter((p) => !p.supersededBy && !p.retiredBy && p.onFrontier
+      && p.multiplier != null && !p.thin && isReady(p.n));
     // A pending elder is on its way out: it neither sets the margin's top nor
     // takes the card, unless it is the section's only candidate.
     const settled = eligible.filter((p) => !p.pendingSuccessor);
@@ -154,14 +160,16 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
       .sort((a, z) => a.multiplier - z.multiplier || z.wtd - a.wtd || compareIdentity(a, z))[0] ?? null;
     // Nor is it this provider's worst buy — it does not collect that verdict
     // on its way out.
-    const worst = sectionPoints.filter((p) => !p.supersededBy && !p.pendingSuccessor && p.dominatedBy != null)
+    const worst = sectionPoints.filter((p) => !p.supersededBy && !p.retiredBy && !p.pendingSuccessor && p.dominatedBy != null && isReady(p.n))
       .sort((a, z) => z.multiplier - a.multiplier || a.wtd - z.wtd || compareIdentity(a, z))[0] ?? null;
     return { best, worst };
   };
   const providers = [...new Set([...points, ...costs].map(providerKey))].sort();
   for (const sectionProvider of providers) {
     const sectionPoints = points.filter((point) => providerKey(point) === sectionProvider);
-    const participants = sectionPoints.filter((point) => !point.supersededBy && point.wtd != null && point.multiplier != null);
+    // A row barred from the verdicts cannot decide them by dominating the pick either.
+    const participants = sectionPoints.filter((point) => !point.supersededBy && !point.retiredBy && isReady(point.n)
+      && point.wtd != null && point.multiplier != null);
     const comparable = sectionPoints.filter((point) => point.wtd != null && point.multiplier != null);
     for (const point of comparable) {
       const dominator = participants.find((other) => other !== point

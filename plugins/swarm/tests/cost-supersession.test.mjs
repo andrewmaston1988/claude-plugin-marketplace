@@ -238,9 +238,10 @@ test("rankCells keeps an elder whose successor is under five grades", () => {
 });
 
 test("a pending elder is never named worst, and is still pending", () => {
-  const elder = "claude-opus-5", successor = "claude-opus-5-5", other = "claude-sonnet-5";
-  const rows = [...grades(elder, 3), ...grades(successor, 9).slice(0, 2), ...grades(other, 4)];
-  const view = costView(rows, [cost(elder, 9), cost(successor, 1), cost(other, 5)]);
+  const elder = "claude-opus-5", successor = "claude-opus-5-5", other = "claude-sonnet-5", ready = "claude-haiku-5";
+  // A two-grade successor cannot dominate anything, so a ready model makes both rows dominated.
+  const rows = [...grades(elder, 3), ...grades(successor, 9).slice(0, 2), ...grades(other, 4), ...grades(ready, 9)];
+  const view = costView(rows, [cost(elder, 9), cost(successor, 1), cost(other, 5), cost(ready, 1)]);
 
   // The elder is the dearest dominated row, so it would win `worst` on sort
   // order alone the moment it stopped being superseded.
