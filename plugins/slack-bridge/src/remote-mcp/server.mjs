@@ -78,6 +78,13 @@ export function encodeCwd(cwd) {
   return String(cwd).replace(/[\\/.:]/g, "-");
 }
 
+// The harness writes dotted cwds under two spellings — dots rewritten and dots
+// kept — so probe both; the first is the common one.
+function resolveProjectDir(dir, cwd) {
+  const spellings = [encodeCwd(cwd), String(cwd).replace(/[\\/:]/g, "-")];
+  return spellings.map((e) => path.join(dir, e)).find((p) => fs.existsSync(p)) ?? null;
+}
+
 // Scan the most-recently-modified session JSONL in this project's session dir for
 // the latest record of `recordType` and return its `field` value (newest match wins).
 // "Most-recently-modified" is a heuristic for "the current session" — wrong only when
@@ -86,8 +93,8 @@ export function encodeCwd(cwd) {
 function readLatestSessionField(cwd, recordType, field, { projectsDir } = {}) {
   try {
     const dir = (projectsDir ?? path.join(os.homedir(), ".claude", "projects")) + "";
-    const projDir = path.join(dir, encodeCwd(cwd));
-    if (!fs.existsSync(projDir)) return null;
+    const projDir = resolveProjectDir(dir, cwd);
+    if (!projDir) return null;
     const entries = fs.readdirSync(projDir).filter((f) => f.endsWith(".jsonl"));
     if (entries.length === 0) return null;
     let latest = null;

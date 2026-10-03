@@ -119,6 +119,16 @@ test("readers tolerate unparseable lines (partial split at the tail boundary)", 
 // A custom title can be set hours ago on a transcript that has grown megabytes
 // since — a fixed last-1MB tail read misses it and the channel gets a
 // context-free name. The scan must cover the whole file, chunked.
+// The harness writes both spellings for dotted cwds (dot-rewritten and
+// dot-preserved); a reader that probes only one misses every `.swarm` session.
+test("readSessionName finds a session under the dot-preserved project-dir spelling", () => {
+  const dir = tmpProjectsDir();
+  writeSession(dir, "C--work-x-.worktrees-main", "s1", [
+    `{"type":"custom-title","customTitle":"Dotted Name","sessionId":"s1"}`,
+  ]);
+  assert.equal(readSessionName("C:\\work\\x\\.worktrees\\main", { projectsDir: dir }), "Dotted Name");
+});
+
 test("readSessionName finds a custom-title set further back than the last 1 MB", () => {
   const dir = tmpProjectsDir();
   const filler = `{"type":"message","content":"${"x".repeat(200)}"}`;
