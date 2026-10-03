@@ -12,6 +12,7 @@ features:
     - { command: /reset,   description: Alias for /new }
     - { command: /restart, description: Restart the bridge daemon }
     - { command: /stop,    description: Interrupt Claude mid-response }
+    - { command: /model,   description: Pick the model this channel spawns (no arg shows it) }
 
 oauth_config:
   scopes:
