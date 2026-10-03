@@ -46,7 +46,7 @@ jobs:
         with:
           node-version: "22"
       - name: Unit tests
-        run: node --test plugins/slack-bridge/tests/*.test.mjs
+        run: node --test plugins/slack-bridge/tests/*.test.mjs plugins/slack-bridge/tests/*/*.test.mjs
 
   claude-peers:
     name: claude-peers
