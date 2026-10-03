@@ -160,14 +160,16 @@ export function costView(rows, costRows, { domain, costDomain, bands = DEFAULT_C
       .sort((a, z) => a.multiplier - z.multiplier || z.wtd - a.wtd || compareIdentity(a, z))[0] ?? null;
     // Nor is it this provider's worst buy — it does not collect that verdict
     // on its way out.
-    const worst = sectionPoints.filter((p) => !p.supersededBy && !p.retiredBy && !p.pendingSuccessor && p.dominatedBy != null)
+    const worst = sectionPoints.filter((p) => !p.supersededBy && !p.retiredBy && !p.pendingSuccessor && p.dominatedBy != null && isReady(p.n))
       .sort((a, z) => z.multiplier - a.multiplier || a.wtd - z.wtd || compareIdentity(a, z))[0] ?? null;
     return { best, worst };
   };
   const providers = [...new Set([...points, ...costs].map(providerKey))].sort();
   for (const sectionProvider of providers) {
     const sectionPoints = points.filter((point) => providerKey(point) === sectionProvider);
-    const participants = sectionPoints.filter((point) => !point.supersededBy && point.wtd != null && point.multiplier != null);
+    // A row barred from the verdicts cannot decide them by dominating the pick either.
+    const participants = sectionPoints.filter((point) => !point.supersededBy && !point.retiredBy && isReady(point.n)
+      && point.wtd != null && point.multiplier != null);
     const comparable = sectionPoints.filter((point) => point.wtd != null && point.multiplier != null);
     for (const point of comparable) {
       const dominator = participants.find((other) => other !== point
