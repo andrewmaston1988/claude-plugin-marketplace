@@ -1,9 +1,13 @@
 import { EventEmitter } from "node:events";
+import dc from "node:diagnostics_channel";
 
 const BACKOFF_CAP_MS = 30_000;
 // A half-open socket never fires `close`, so silence is the only signal. Slack's
 // own SDK treats 30 s without a server ping as dead; three times that avoids churn.
 const STALE_MS = 90_000;
+// Slack's keepalive is a protocol ping (~10 s), never a JSON frame, and undici
+// reports it only here — without it an idle workspace reconnects every STALE_MS.
+const PING_CHANNEL = "undici:websocket:ping";
 
 export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = STALE_MS }) {
   const WS = _WebSocket ?? WebSocket; // injectable for tests
@@ -53,6 +57,10 @@ export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = S
       scheduleReconnect();
     }, _staleMs);
     watchdog.unref?.();
+  }
+
+  function onPing({ websocket }) {
+    if (!stopped && websocket && websocket === ws) armWatchdog(ws);
   }
 
   function scheduleReconnect() {
@@ -156,10 +164,12 @@ export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = S
   return {
     start() {
       stopped = false;
+      dc.subscribe(PING_CHANNEL, onPing);
       connect();
     },
     stop() {
       stopped = true;
+      dc.unsubscribe(PING_CHANNEL, onPing);
       clearTimers();
       if (ws) { ws.close(); ws = null; }
     },
