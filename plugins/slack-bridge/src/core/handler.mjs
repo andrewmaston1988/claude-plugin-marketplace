@@ -8,7 +8,8 @@ import { routeToLiveSession, startReplyLoop, _resetRouteState } from "./live-rou
 export { safeUpdate, postResponse, postError, routeToLiveSession, startReplyLoop, _resetRouteState };
 
 const DEDUP_SIZE = 64;
-const MODEL_HINT = "No model set for this channel — type /model <name>, e.g. /model sonnet.";
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const MODEL_HINT ="No model set for this channel — type /model <name>, e.g. /model sonnet.";
 const recentMsgIds = new Set();  // persisted across restarts via session store
 const activeProcs = new Map();   // channel → child process
 let _dedupStore = null;
@@ -111,7 +112,7 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
     }
 
     // An unclaimed channel spawns nothing until /model picks its model. A claim held
-    // through a broker outage is still the operator's session, so it skips the gate.
+    // through a broker outage is still a live session, so it skips the gate.
     const model = channelModel(store, channel);
     if (!model && !brokerDown) {
       const hint = { channel, text: MODEL_HINT };
@@ -301,6 +302,11 @@ async function handleSlashCommand({ web, store, queue, config, log, payload, bot
       const name = (payload.text ?? "").trim();
       if (!name) {
         await web.chatPostMessage({ channel, text: `Model: ${channelModel(store, channel) ?? "none"}` });
+        break;
+      }
+      // The name reaches a cmd.exe argv on Windows, so only plain model ids pass.
+      if (!MODEL_NAME.test(name)) {
+        await web.chatPostMessage({ channel, text: `Invalid model name: use letters, digits and . _ : - only, e.g. /model sonnet.` });
         break;
       }
       setChannelModel(store, channel, name);

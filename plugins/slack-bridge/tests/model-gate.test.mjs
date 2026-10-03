@@ -128,6 +128,15 @@ test("/model — switching Claude ↔ non-Claude drops sessionId on the channel 
   assert.deepEqual(store._data.C2, { sessionId: "X" }, "other channels untouched");
 });
 
+test("/model — rejects a name that is not a plain model id, storing nothing", async () => {
+  for (const bad of ["sonnet & calc", "a|b", "x\"y", "-p", "opus %PATH%"]) {
+    const store = makeStore({ C1: { model: "sonnet" } });
+    const posts = await slash(store, "/model", bad);
+    assert.deepEqual(store._data.C1, { model: "sonnet" }, `stored ${bad}`);
+    assert.ok(posts.some(t => t.startsWith("Invalid model name")), `no rejection for ${bad}`);
+  }
+});
+
 test("/model — switching within the Claude side keeps sessionId", async () => {
   const store = makeStore({ C1: { model: "sonnet", sessionId: "S" } });
   await slash(store, "/model", "opus");
