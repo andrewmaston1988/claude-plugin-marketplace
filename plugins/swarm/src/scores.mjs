@@ -256,10 +256,11 @@ export function aggregate(rows, { aspect, model, provider, domain, combineProvid
     throw new Error(`unknown aspect ${JSON.stringify(aspect)} — use one of ${ASPECTS.join(" | ")}`);
   }
   const wanted = aspect ? [aspect] : ASPECTS;
+  // The model filter narrows the output, never the field: the prior is every model's, so a
+  // drill-in shows the same shrunk score the full table ranks on.
   const scoped = dedupe(rows).filter((r) => {
     const identity = identityOf(r);
-    return (!model || identity.model === model)
-      && (provider === undefined || identity.provider === String(provider).toLowerCase())
+    return (provider === undefined || identity.provider === String(provider).toLowerCase())
       && (!domain || r.domain === domain);
   });
 
@@ -316,7 +317,8 @@ export function aggregate(rows, { aspect, model, provider, domain, combineProvid
         provisional: c.n < PROVISIONAL_N,
       }));
       const prior = fairPrior(raw);
-      const list = raw.map((c) => ({ ...c, weighted: shrink(c.mean, c.n, prior) }));
+      const list = raw.filter((c) => !model || c.model === model)
+        .map((c) => ({ ...c, weighted: shrink(c.mean, c.n, prior) }));
       // Ranked on the shrunk score: an unweighted mean lets one lucky sample head
       // the table two points clear of a forty-sample cell, which the provisional
       // tag warns about but the ordering contradicts.
