@@ -364,6 +364,24 @@ test("status while a window is open → shown above the placeholder's attachment
   assert.ok(!hasPost(s.web, "Bash:"), "no separate status message below the placeholder");
 });
 
+// Item 13: a session sitting on an AskUserQuestion dialog cannot reply, so a
+// message sent meanwhile must wait for it rather than time out.
+test("question → resolves the open window; messages sent while it is pending don't time out until the session moves", async (t) => {
+  const s = setup(t, { claims: [["peerQ", "C-Q"]], replyTimeoutMs: 200 });
+  await slack(s, makePayload({ channel: "C-Q", text: "fix it", client_msg_id: "m-q-1" }));
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  s.broker.deliver("slack-bridge", { from_id: "peerQ", kind: "question", text: "Which branch should the fix land on?" });
+  await waitFor(() => hasUpdate(s.web, "Which branch"), 2000);
+
+  await slack(s, makePayload({ channel: "C-Q", text: "followups", client_msg_id: "m-q-2" }));
+  await waitFor(() => s.broker.sendCalls.length === 2);
+  await delay(600);
+  assert.ok(!hasUpdate(s.web, "didn't reply"), "a message sent while a question is pending must not time out");
+
+  s.broker.deliver("slack-bridge", { from_id: "peerQ", kind: "status", text: "Bash: git switch" });
+  await waitFor(() => hasUpdate(s.web, "didn't reply"), 3000);
+});
+
 test("broker ECONNRESET mid-loop → the loop retries and delivers the next reply", async (t) => {
   _resetRouteState();
   const claims = createClaimsStore({ path: tmpClaims() });

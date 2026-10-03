@@ -28,6 +28,8 @@ const MAX_BODY_BYTES = 1_000_000;
 // grace covers the gap between the waiter's windows; without it a Stop hook that
 // lands mid-re-arm reads an armed session as unarmed and blocks it.
 const WAIT_GRACE_MS = 5_000;
+const KINDS = new Set(["status", "question"]);
+const normaliseKind = (kind) => (KINDS.has(kind) ? kind : "text");
 
 export function createBroker({
   stateFile = null,
@@ -106,7 +108,7 @@ export function createBroker({
     const peer = Object.hasOwn(state.peers, id) ? state.peers[id] : null;
     if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
     persist();
-    return mine.map((m) => ({ ...m, kind: m.kind === "status" ? "status" : "text" }));
+    return mine.map((m) => ({ ...m, kind: normaliseKind(m.kind) }));
   }
 
   // Hand the peer's queue to exactly ONE waiter and leave the others open: two
@@ -200,7 +202,7 @@ export function createBroker({
       }
       state.messages.push({
         id: nextMsgId++, from_id: from, to_id: body.to_id,
-        text: String(body.text), kind: body.kind === "status" ? "status" : "text",
+        text: String(body.text), kind: normaliseKind(body.kind),
         sent_at: now, delivered: false,
       });
       persist();

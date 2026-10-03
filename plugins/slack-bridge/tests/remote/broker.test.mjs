@@ -470,6 +470,15 @@ test("kind survives a round-trip through /wait", async (t) => {
   assert.equal(waited.messages[0].kind, "status");
 });
 
+test("kind question survives the broker, so a pending AskUserQuestion reaches the daemon as one", async (t) => {
+  const { call } = await startBroker(t);
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "Which?", kind: "question" });
+  const { body: waited } = await call("/wait", { id: b.id, timeout_ms: 1000 });
+  assert.equal(waited.messages[0].kind, "question");
+});
+
 // A7: the push path is gone with the channel notification. Two delivery
 // semantics for one direction is what /take-messages + /wait would have had to
 // reconcile, so the route is deleted outright rather than left as a third.

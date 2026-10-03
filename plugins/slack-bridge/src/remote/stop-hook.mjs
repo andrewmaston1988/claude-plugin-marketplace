@@ -1,6 +1,6 @@
-// Stop + PostToolUse hook for a session holding a Slack claim: mirrors the
-// turn's assistant text to the channel, posts a tool status line, and on Stop
-// blocks once when no waiter is armed. Any error allows — a broken hook must
+// Stop + PostToolUse + PreToolUse(AskUserQuestion) hook for a session holding a
+// Slack claim: mirrors the turn's assistant text to the channel, posts a tool
+// status line or the pending question, and on Stop blocks once when no waiter is armed. Any error allows — a broken hook must
 // never wedge a session.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -59,6 +59,17 @@ async function isArmed(client, peerId, _sleep) {
   }
 }
 
+// The terminal dialog can't be answered from Slack, but the operator must see
+// what it is asking — the PostToolUse line alone is a bare tool name.
+export function formatQuestion(input) {
+  const qs = Array.isArray(input?.questions) ? input.questions : [];
+  return qs.map((q) => {
+    const opts = (Array.isArray(q?.options) ? q.options : [])
+      .map((o) => `• *${o?.label ?? ""}*${o?.description ? ` — ${o.description}` : ""}`);
+    return [`❓ ${q?.question ?? ""}`, ...opts].join("\n");
+  }).join("\n\n");
+}
+
 export async function runHook({
   raw,
   stateDir = getPaths().stateDir,
@@ -69,7 +80,8 @@ export async function runHook({
   try {
     const input = JSON.parse(raw);
     const event = input.hook_event_name;
-    if (event !== "Stop" && event !== "PostToolUse") return null;
+    const isQuestion = event === "PreToolUse" && input.tool_name === "AskUserQuestion";
+    if (event !== "Stop" && event !== "PostToolUse" && !isQuestion) return null;
     // Absent file = no claim held: exit before any config load or broker call,
     // which is what keeps PostToolUse cheap on unclaimed sessions.
     const session = readSessionFile(stateDir, input.session_id);
@@ -86,6 +98,12 @@ export async function runHook({
     try {
       await mirror({ stateDir, sessionId: input.session_id, transcriptPath: input.transcript_path, session, client });
     } catch {}
+
+    if (isQuestion) {
+      const text = formatQuestion(input.tool_input);
+      if (text) await client.sendMessage(session.peerId, "slack-bridge", text, { kind: "question" });
+      return null;
+    }
 
     if (event === "PostToolUse") {
       const arg = shortArg(input.tool_input);

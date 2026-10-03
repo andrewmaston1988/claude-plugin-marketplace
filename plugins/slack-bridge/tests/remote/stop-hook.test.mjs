@@ -348,3 +348,39 @@ test("a lock older than 10 s is stale and broken (B2)", async (t) => {
   assert.equal(env.cursor(), "a1");
   assert.ok(!fs.existsSync(lock), "lock released after the op");
 });
+
+// --- AskUserQuestion (item 13) ---
+
+const QUESTION = {
+  questions: [{
+    question: "Which branch should the fix land on?",
+    header: "Branch",
+    multiSelect: false,
+    options: [
+      { label: "followups", description: "the open followups branch" },
+      { label: "new branch", description: "cut a fresh one" },
+    ],
+  }],
+};
+
+test("PreToolUse AskUserQuestion → the question and every option reach Slack as a question message", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const client = fakeClient({ armed: [true] });
+  const out = await hook(env, client, { event: "PreToolUse", tool: { name: "AskUserQuestion", input: QUESTION } });
+  assert.equal(out, null, "the hook never blocks or rewrites the question");
+  const questions = client.sends.filter((s) => s.kind === "question");
+  assert.equal(questions.length, 1, `one question message, got ${JSON.stringify(client.sends)}`);
+  const text = questions[0].text;
+  for (const needle of ["Which branch should the fix land on?", "followups", "the open followups branch", "new branch", "cut a fresh one"]) {
+    assert.ok(text.includes(needle), `question message must carry "${needle}": ${text}`);
+  }
+});
+
+test("PreToolUse for any other tool → nothing sent", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const client = fakeClient({ armed: [true] });
+  await hook(env, client, { event: "PreToolUse", tool: { name: "Bash", input: { command: "ls" } } });
+  assert.equal(client.sends.length, 0);
+});
