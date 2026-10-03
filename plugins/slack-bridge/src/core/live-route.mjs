@@ -49,23 +49,31 @@ function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartb
   windows.push(window);
   routeWindows.set(peerId, windows);
 
-  if (!pendingQuestion.has(peerId)) armTimeout(window);
+  window.held = pendingQuestion.has(peerId);
+  armTimeout(window);
   return window;
 }
+
+// A held window still gets a ceiling: a peer that dies on the dialog never moves.
+const HELD_CEILING_FACTOR = 12;
 
 // The window's own deadline. Nothing else posts on its behalf: the reply loop
 // only ever sees a window that is still open.
 function armTimeout(window) {
+  const ms = window.config.remote?.replyTimeoutMs ?? 300_000;
   window.timeoutTimer = setTimeout(() => { void finalizeWindow(window, { timeout: true }); },
-    window.config.remote?.replyTimeoutMs ?? 300_000);
+    window.held ? ms * HELD_CEILING_FACTOR : ms);
   window.timeoutTimer.unref?.();
 }
 
-// Any later message means the dialog was answered: arm the windows it held.
+// Any later message means the dialog was answered: re-arm the windows it held.
 function releaseQuestion(peerId) {
   if (!pendingQuestion.delete(peerId)) return;
   for (const w of routeWindows.get(peerId) ?? []) {
-    if (!w.done && !w.chunks.length && !w.timeoutTimer) armTimeout(w);
+    if (w.done || w.chunks.length || !w.held) continue;
+    clearTimeout(w.timeoutTimer);
+    w.held = false;
+    armTimeout(w);
   }
 }
 

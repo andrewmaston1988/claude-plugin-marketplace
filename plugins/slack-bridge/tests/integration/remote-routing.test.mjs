@@ -382,6 +382,19 @@ test("question → resolves the open window; messages sent while it is pending d
   await waitFor(() => hasUpdate(s.web, "didn't reply"), 3000);
 });
 
+test("question pending and the session never moves → the held window still times out at the ceiling", async (t) => {
+  const s = setup(t, { claims: [["peerD", "C-D"]], replyTimeoutMs: 50 });
+  await slack(s, makePayload({ channel: "C-D", text: "fix it", client_msg_id: "m-d-1" }));
+  await waitFor(() => s.broker.sendCalls.length === 1);
+  s.broker.deliver("slack-bridge", { from_id: "peerD", kind: "question", text: "Which branch?" });
+  await waitFor(() => hasUpdate(s.web, "Which branch"), 2000);
+
+  await slack(s, makePayload({ channel: "C-D", text: "followups", client_msg_id: "m-d-2" }));
+  await waitFor(() => s.broker.sendCalls.length === 2);
+  await waitFor(() => hasUpdate(s.web, "didn't reply"), 3000);
+  assert.equal(s.hb.instances[1].stopped, true, "the held window's heartbeat stops at the ceiling");
+});
+
 test("broker ECONNRESET mid-loop → the loop retries and delivers the next reply", async (t) => {
   _resetRouteState();
   const claims = createClaimsStore({ path: tmpClaims() });

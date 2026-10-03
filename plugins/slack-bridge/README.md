@@ -208,7 +208,7 @@ The session then replies **normally**: its turn text and a one-line tool status 
 
 The waiter caps itself short of the Bash limit and prints `WAIT EXPIRED — re-arm`, so an expiry is a wake with an instruction rather than a silent death. Connection errors are retried with backoff; only a bad `remote.controlToken` (401) is fatal. `check_messages` remains as a manual fallback — it takes anything queued for the session, and the broker retains messages for 24 h.
 
-If the live session doesn't reply within `remote.replyTimeoutMs` (default 300 s), the bridge posts a timeout notice and **keeps the claim** (the peer may be slow, not dead). The timer is suspended while the session has an `AskUserQuestion` dialog open: the question is mirrored to Slack, but it can only be answered at the terminal. When the claiming session dies, the claim is reaped and Slack falls back to the spawn path.
+If the live session doesn't reply within `remote.replyTimeoutMs` (default 300 s), the bridge posts a timeout notice and **keeps the claim** (the peer may be slow, not dead). While the session has an `AskUserQuestion` dialog open the timer stretches to 12× `replyTimeoutMs`: the question is mirrored to Slack, but it can only be answered at the terminal. When the claiming session dies, the claim is reaped and Slack falls back to the spawn path.
 
 ### Enabling
 
