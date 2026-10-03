@@ -131,6 +131,7 @@ test("GET /health reports ok and a peer count", async (t) => {
   const body = await res.json();
   assert.equal(body.status, "ok");
   assert.equal(typeof body.peers, "number");
+  assert.equal(body.lease, true, "clients replace a broker that does not advertise leases");
 });
 
 test("POST /shutdown closes the broker gracefully", async (t) => {

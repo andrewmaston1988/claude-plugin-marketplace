@@ -290,7 +290,7 @@ export function createBroker({
       if (req.url === "/health") {
         reapDead();
         persist();
-        return json(200, { status: "ok", peers: Object.keys(state.peers).length });
+        return json(200, { status: "ok", lease: true, peers: Object.keys(state.peers).length });
       }
       res.writeHead(200);
       return res.end("slack-bridge remote-control broker");

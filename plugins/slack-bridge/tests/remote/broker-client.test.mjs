@@ -5,7 +5,7 @@ import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 test("wait: the retry after a connection error keeps the caller's abort signal", async () => {
   const signals = [];
   const _fetch = async (url, opts = {}) => {
-    if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "ok" }) };
+    if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "ok", lease: true }) };
     signals.push(opts.signal);
     if (signals.length === 1) throw new TypeError("fetch failed");
     return { ok: true, json: async () => [] };
@@ -42,4 +42,36 @@ test("takeMessages: a failed ack still returns the messages (the lease redeliver
   };
   const res = await createBrokerClient({ port: 1, _fetch }).takeMessages("p1");
   assert.deepEqual(res.messages.map((m) => m.text), ["a"]);
+});
+
+// A broker from before leases consumes on take, so a lost response loses the
+// message. /health advertises `lease`; ensureBroker replaces a broker without it.
+test("ensureBroker: replaces a running broker that does not advertise leases", async () => {
+  const calls = [];
+  let up = true;
+  let spawned = 0;
+  const _fetch = async (url) => {
+    const path = new URL(url).pathname;
+    calls.push(path);
+    if (path === "/shutdown") { up = false; return { ok: true, json: async () => ({}) }; }
+    if (path === "/health") {
+      if (!up) throw new TypeError("fetch failed");
+      return { ok: true, json: async () => (spawned ? { status: "ok", lease: true } : { status: "ok" }) };
+    }
+    throw new Error(`unexpected ${path}`);
+  };
+  const _spawn = () => { spawned++; up = true; return { unref() {} }; };
+  await createBrokerClient({ port: 1, _fetch, _spawn }).ensureBroker();
+  assert.ok(calls.includes("/shutdown"), "old broker was asked to shut down");
+  assert.equal(spawned, 1);
+});
+
+test("ensureBroker: keeps a running broker that advertises leases", async () => {
+  let spawned = 0;
+  const _fetch = async (url) => {
+    if (url.endsWith("/health")) return { ok: true, json: async () => ({ status: "ok", lease: true }) };
+    throw new Error(`unexpected ${url}`);
+  };
+  await createBrokerClient({ port: 1, _fetch, _spawn: () => { spawned++; return { unref() {} }; } }).ensureBroker();
+  assert.equal(spawned, 0);
 });

@@ -65,8 +65,16 @@ export function createBrokerClient({
   }
 
   async function doEnsureBroker() {
-    if (await health()) return;
-    log("broker not reachable — starting daemon");
+    const h = await health();
+    if (h?.lease) return;
+    if (h) {
+      // A pre-lease broker consumes on take, so a lost response loses the message.
+      log("broker predates leased takes — restarting it");
+      await _fetch(`${baseUrl}/shutdown`, { method: "POST", headers: authHeaders, signal: AbortSignal.timeout(2000) }).catch(() => {});
+      for (let i = 0; i < 20 && (await health()); i++) await sleep(150);
+    } else {
+      log("broker not reachable — starting daemon");
+    }
     spawnBroker();
     for (let i = 0; i < 30; i++) {
       await sleep(200);
