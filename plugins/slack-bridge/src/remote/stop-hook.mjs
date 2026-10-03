@@ -8,7 +8,7 @@ import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
 import { waitCommand, BASH_TIMEOUT_MS } from "./wait-constants.mjs";
-import { readTranscript, textAfter, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
+import { readTranscriptFrom, textAfter, textOf, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 const RECHECK_MS = 500;
@@ -34,16 +34,23 @@ function readSessionFile(stateDir, sessionId) {
 // The seize mark (remote-sessions file mtime) resets the cursor on a re-seize,
 // so text written while unclaimed is never backfilled. A contender that can't
 // take the lock sends nothing: its text stays after the un-advanced cursor.
+// Without a usable offset (none yet, or the transcript was rewritten) one
+// whole-file read locates the cursor by uuid.
 async function mirror({ stateDir, sessionId, transcriptPath, session, client }) {
   const cursorFile = join(stateDir, "mirror", `${sessionId}.json`);
   const release = tryLock(cursorFile + ".lock");
   if (!release) return;
   try {
     const cursor = readCursor(cursorFile);
-    const fromUuid = cursor?.seizeMark === session.seizeMark ? cursor.uuid : null;
-    const { text, lastUuid } = textAfter(readTranscript(transcriptPath), fromUuid);
+    const resume = cursor?.seizeMark === session.seizeMark ? cursor : null;
+    const fromUuid = resume?.uuid ?? null;
+    const tail = fromUuid && Number.isInteger(resume.offset) ? readTranscriptFrom(transcriptPath, resume.offset) : null;
+    const read = tail ?? readTranscriptFrom(transcriptPath, 0);
+    const { text, lastUuid } = tail ? textOf(read.entries, fromUuid) : textAfter(read.entries, fromUuid);
     if (text) await client.sendMessage(session.peerId, "slack-bridge", text);
-    if (lastUuid && lastUuid !== fromUuid) writeCursor(cursorFile, { uuid: lastUuid, seizeMark: session.seizeMark });
+    if (lastUuid && (lastUuid !== fromUuid || read.end !== resume?.offset)) {
+      writeCursor(cursorFile, { uuid: lastUuid, seizeMark: session.seizeMark, offset: read.end });
+    }
   } finally {
     release();
   }

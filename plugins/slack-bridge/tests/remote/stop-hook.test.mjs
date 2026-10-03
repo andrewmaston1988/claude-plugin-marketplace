@@ -221,6 +221,63 @@ test("mirror: second stop with no new entries → no send", async (t) => {
   assert.equal(textSends(c2).length, 0);
 });
 
+// --- offset tail: only the appended region is read ---
+
+const readCursorFile = (env) => JSON.parse(fs.readFileSync(env.cursorFile, "utf8"));
+const writeCursorFile = (env, patch) => fs.writeFileSync(env.cursorFile, JSON.stringify({ ...readCursorFile(env), ...patch }));
+
+test("mirror: the cursor records the byte offset it has read up to", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  assert.equal(readCursorFile(env).offset, fs.statSync(env.transcript).size);
+});
+
+test("mirror: bytes before the stored offset are never re-read", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  // Mark a1 as already read by offset while the uuid cursor still sits at a0:
+  // a whole-file reader would re-send it, an offset reader cannot see it.
+  env.append(textEntry("a1", "ALREADY READ"));
+  writeCursorFile(env, { offset: fs.statSync(env.transcript).size });
+  env.append(textEntry("a2", "fresh"));
+  const client = fakeClient({ armed: [true] });
+  await hook(env, client);
+  assert.deepEqual(textSends(client).map((s) => s.text), ["fresh"]);
+  assert.equal(env.cursor(), "a2");
+});
+
+test("mirror: a half-written last line is left for the next read, then sent once", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const line = JSON.stringify(textEntry("a2", "second"));
+  env.append(textEntry("a1", "first"));
+  fs.appendFileSync(env.transcript, line.slice(0, 20));
+  const c1 = fakeClient({ armed: [true] });
+  await hook(env, c1);
+  fs.appendFileSync(env.transcript, line.slice(20) + "\n");
+  const c2 = fakeClient({ armed: [true] });
+  await hook(env, c2);
+  assert.deepEqual(textSends(c1).map((s) => s.text), ["first"]);
+  assert.deepEqual(textSends(c2).map((s) => s.text), ["second"]);
+});
+
+test("mirror: a transcript rewritten under the offset falls back to the uuid cursor", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  env.append(textEntry("a1", "x".repeat(400)));
+  await hook(env, fakeClient({ armed: [true] }));
+  // Shorter rewrite (offset now past EOF), then a longer one (offset mid-line).
+  for (const [uuid, text] of [["a2", "after short rewrite"], ["a3", "after long rewrite"]]) {
+    const body = [textEntry("a1", "x"), textEntry(uuid, text)];
+    if (uuid === "a3") body.unshift(userEntry("pad", "p".repeat(2000)));
+    fs.writeFileSync(env.transcript, body.map((e) => JSON.stringify(e) + "\n").join(""));
+    writeCursorFile(env, { uuid: "a1" });
+    const client = fakeClient({ armed: [true] });
+    await hook(env, client);
+    assert.deepEqual(textSends(client).map((s) => s.text), [text]);
+  }
+});
+
 test("mirror: no claim → no send", async (t) => {
   const env = setup(t, { claimed: false });
   env.append(textEntry("a1", "unclaimed"));
