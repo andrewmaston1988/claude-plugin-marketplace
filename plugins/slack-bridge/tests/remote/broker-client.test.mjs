@@ -66,6 +66,17 @@ test("ensureBroker: replaces a running broker that does not advertise leases", a
   assert.equal(spawned, 1);
 });
 
+test("ensureBroker: a pre-lease broker that refuses /shutdown is an error, not accepted", async () => {
+  const _fetch = async (url) => {
+    const path = new URL(url).pathname;
+    if (path === "/shutdown") return { ok: false, status: 401, json: async () => ({}) };
+    if (path === "/health") return { ok: true, json: async () => ({ status: "ok" }) };
+    throw new Error(`unexpected ${path}`);
+  };
+  const client = createBrokerClient({ port: 1, _fetch, _spawn: () => ({ unref() {} }), _sleep: async () => {} });
+  await assert.rejects(client.ensureBroker(), /predates leased takes/);
+});
+
 test("ensureBroker: keeps a running broker that advertises leases", async () => {
   let spawned = 0;
   const _fetch = async (url) => {

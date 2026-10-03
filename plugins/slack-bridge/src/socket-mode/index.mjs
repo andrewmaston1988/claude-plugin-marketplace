@@ -15,6 +15,7 @@ export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = S
   let backoffMs = 1_000;
   let reconnectTimer = null;
   let watchdog = null;
+  let attempt = 0; // a connect the watchdog gave up on must not land later
 
   async function getWssUrl() {
     const res = await fetch("https://slack.com/api/apps.connections.open", {
@@ -38,8 +39,9 @@ export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = S
     if (watchdog) { clearTimeout(watchdog); watchdog = null; }
   }
 
-  // Reset on every frame. On expiry, reconnect directly rather than waiting for
-  // `close`: a close handshake on a dead link may never complete.
+  // Reset on every frame, and armed from the start of connect() so a hung URL
+  // fetch or handshake is covered too. On expiry, reconnect directly rather than
+  // waiting for `close`: a close handshake on a dead link may never complete.
   function armWatchdog(socket) {
     if (watchdog) clearTimeout(watchdog);
     watchdog = setTimeout(() => {
@@ -47,7 +49,7 @@ export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = S
       if (stopped || socket !== ws) return;
       log.warn("no frame from Slack — forcing reconnect", { staleMs: _staleMs });
       ws = null; // its late `close` must not schedule a second reconnect
-      socket.close();
+      socket?.close();
       scheduleReconnect();
     }, _staleMs);
     watchdog.unref?.();
@@ -62,11 +64,15 @@ export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = S
 
   function connect() {
     if (stopped) return;
+    const mine = ++attempt;
+    armWatchdog(null);
 
     getWssUrl().then(url => {
+      if (stopped || mine !== attempt) return;
       log.info("connecting", { url: url.replace(/\?.*/, "") });
       const socket = new WS(url);
       ws = socket;
+      armWatchdog(socket);
 
       socket.addEventListener("open", () => {
         log.info("socket open, waiting for hello");
@@ -74,6 +80,7 @@ export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = S
       });
 
       socket.addEventListener("message", ({ data }) => {
+        if (socket !== ws) return; // abandoned by the watchdog
         let msg;
         armWatchdog(socket);
         try { msg = JSON.parse(data); } catch { return; }
@@ -140,6 +147,7 @@ export function createSocketModeClient({ appToken, log, _WebSocket, _staleMs = S
         if (emitter.listenerCount("error") > 0) emitter.emit("error", err);
       });
     }).catch(err => {
+      if (mine !== attempt) return;
       log.error("failed to get WSS URL", { message: err.message });
       scheduleReconnect();
     });

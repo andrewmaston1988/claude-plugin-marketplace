@@ -68,11 +68,12 @@ async function isArmed(client, peerId, _sleep) {
 
 // The terminal dialog can't be answered from Slack, but the operator must see
 // what it is asking — the PostToolUse line alone is a bare tool name.
+// Markdown, not mrkdwn: every sender runs it through mdToSlack, which also spaces the dash.
 export function formatQuestion(input) {
   const qs = Array.isArray(input?.questions) ? input.questions : [];
   return qs.map((q) => {
     const opts = (Array.isArray(q?.options) ? q.options : [])
-      .map((o) => `• *${o?.label ?? ""}*${o?.description ? ` — ${o.description}` : ""}`);
+      .map((o) => `• **${o?.label ?? ""}**${o?.description ? `—${o.description}` : ""}`);
     return [`❓ ${q?.question ?? ""}`, ...opts].join("\n");
   }).join("\n\n");
 }

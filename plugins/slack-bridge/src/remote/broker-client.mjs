@@ -23,6 +23,7 @@ export function createBrokerClient({
   _spawn = spawn,
   _execPath = process.execPath,
   _setInterval = setInterval,
+  _sleep = sleep,
 } = {}) {
   const baseUrl = `http://127.0.0.1:${port}`;
   // /health stays unauthenticated on purpose: it's the liveness probe that
@@ -71,14 +72,17 @@ export function createBrokerClient({
       // A pre-lease broker consumes on take, so a lost response loses the message.
       log("broker predates leased takes — restarting it");
       await _fetch(`${baseUrl}/shutdown`, { method: "POST", headers: authHeaders, signal: AbortSignal.timeout(2000) }).catch(() => {});
-      for (let i = 0; i < 20 && (await health()); i++) await sleep(150);
+      for (let i = 0; i < 20 && (await health()); i++) await _sleep(150);
     } else {
       log("broker not reachable — starting daemon");
     }
     spawnBroker();
     for (let i = 0; i < 30; i++) {
-      await sleep(200);
-      if (await health()) return;
+      await _sleep(200);
+      const up = await health();
+      if (up?.lease) return;
+      // Still the old broker: it refused /shutdown (a token mismatch 401s it).
+      if (up && h) throw new Error(`broker on port ${port} predates leased takes and refused /shutdown — stop it by PID`);
     }
     throw new Error(`failed to start broker daemon on port ${port} after 6s`);
   }

@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runHook, shortArg } from "../../src/remote/stop-hook.mjs";
+import { runHook, shortArg, formatQuestion } from "../../src/remote/stop-hook.mjs";
+import { mdToSlack } from "../../src/markdown/index.mjs";
 import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 import { waitCommand, BASH_TIMEOUT_MS } from "../../src/remote/wait-constants.mjs";
 
@@ -440,4 +441,12 @@ test("PreToolUse for any other tool → nothing sent", async (t) => {
   const client = fakeClient({ armed: [true] });
   await hook(env, client, { event: "PreToolUse", tool: { name: "Bash", input: { command: "ls" } } });
   assert.equal(client.sends.length, 0);
+});
+
+// Every consumer posts the question through mdToSlack, so it must be markdown in.
+test("formatQuestion: renders bold labels and one-spaced dashes once through mdToSlack", () => {
+  const text = formatQuestion({ questions: [{ question: "Which DB?", options: [
+    { label: "Postgres", description: "relational" }, { label: "Redis" },
+  ] }] });
+  assert.equal(mdToSlack(text), "❓ Which DB?\n• *Postgres* — relational\n• *Redis*");
 });
