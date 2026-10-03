@@ -110,8 +110,9 @@ export function createBroker({
   function takeMessagesFor(id, lease = false) {
     const mine = state.messages.filter((m) => isReady(m, id));
     if (lease && mine.length > 0) {
-      for (const m of mine) m.leased_until = nowMs() + _leaseMs;
-      setTimeout(() => wakeWaiter(id), _leaseMs).unref();
+      const until = nowMs() + _leaseMs;
+      for (const m of mine) m.leased_until = until;
+      wakeAt(id, until);
     } else if (!lease) {
       state.messages = state.messages.filter((m) => !isReady(m, id));
     }
@@ -124,6 +125,13 @@ export function createBroker({
   // Hand the peer's queue to exactly ONE waiter and leave the others open: two
   // waiters for one peer must never both be given the same message. Nothing
   // ready (a lease timer firing after its ack) leaves the waiter open.
+  // A timer can fire before the clock reaches `at`; re-arm for what is left.
+  function wakeAt(id, at) {
+    const left = at - nowMs();
+    if (left > 0) setTimeout(() => wakeAt(id, at), left).unref();
+    else wakeWaiter(id);
+  }
+
   function wakeWaiter(id) {
     const set = waiters.get(id);
     if (!set || set.size === 0) return;

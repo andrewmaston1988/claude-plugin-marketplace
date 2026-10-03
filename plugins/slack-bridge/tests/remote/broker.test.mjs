@@ -250,6 +250,22 @@ test("an expiring lease wakes an open waiter", async (t) => {
   assert.ok(Date.now() - started < 2000, "woken by the lease expiry, not the window");
 });
 
+// A timer can fire before the clock reaches the lease expiry (seen on Linux CI):
+// the wake must re-arm for the remaining time, not give up.
+test("a lease timer that fires early still wakes the waiter at expiry", async (t) => {
+  const start = Date.now();
+  const _now = () => new Date(start + (Date.now() - start) / 2); // clock runs at half speed
+  const { call } = await startBroker(t, { _leaseMs: 50, _now });
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "retry me" });
+  await call("/take-messages", { id: b.id, lease: true });
+  const started = Date.now();
+  const { body: waited } = await call("/wait", { id: b.id, timeout_ms: 3000, lease: true });
+  assert.deepEqual(waited.messages.map((m) => m.text), ["retry me"]);
+  assert.ok(Date.now() - started < 2000, "woken by the lease expiry, not the window");
+});
+
 test("reaping a dead peer drops its queued messages", async (t) => {
   const stateFile = tmpState();
   const dead = new Set();
