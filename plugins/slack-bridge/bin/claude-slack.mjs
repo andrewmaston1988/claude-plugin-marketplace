@@ -387,7 +387,14 @@ if (cmd === "broker") {
   return;
 }
 
-// Default: start
+// Default: start — only a bare flag or `start` gets here. A hook naming a
+// subcommand this bin predates must not launch a duplicate bridge.
+if (cmd !== "start" && !cmd.startsWith("-")) {
+  process.stderr.write(`claude-slack: unknown command "${cmd}" — see claude-slack --help\n`);
+  setTimeout(() => process.exit(2), 150);
+  return;
+}
+
 const configFlag = getFlag("--config", [cmd, ...rest]);
 const paths = getDefaultPaths();
 const configPath = configFlag ?? paths.configFile;
