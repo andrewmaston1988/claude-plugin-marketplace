@@ -92,6 +92,16 @@ export function createBrokerClient({
     }
   }
 
+  // Acking only once the response is in hand is what makes a lost response a
+  // redelivery. A failed ack (or a pre-lease broker's 404) costs at most a
+  // duplicate when the lease runs out, never the message.
+  async function leasedTake(path, body, opts) {
+    const res = await brokerFetch(path, { ...body, lease: true }, opts);
+    const ids = (res?.messages ?? []).map((m) => m.id);
+    if (ids.length > 0) await brokerFetch("/ack", { id: body.id, ids }).catch(() => {});
+    return res;
+  }
+
   return {
     port,
     ensureBroker,
@@ -108,8 +118,8 @@ export function createBrokerClient({
     // the window. The caller owns the deadline — pass an AbortSignal.timeout one
     // window wide, so a half-open socket becomes a retry instead of a hang.
     wait: (id, timeoutMs, { signal } = {}) =>
-      brokerFetch("/wait", { id, timeout_ms: timeoutMs }, { signal }),
-    takeMessages: (id) => brokerFetch("/take-messages", { id }),
+      leasedTake("/wait", { id, timeout_ms: timeoutMs }, { signal }),
+    takeMessages: (id) => leasedTake("/take-messages", { id }),
     register: (body) => brokerFetch("/register", body),
     heartbeat: (id) => brokerFetch("/heartbeat", { id }),
     unregister: (id) => brokerFetch("/unregister", { id }),

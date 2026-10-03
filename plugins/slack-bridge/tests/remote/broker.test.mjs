@@ -151,9 +151,8 @@ test("unknown POST path is a 404", async (t) => {
 
 // --- queue retention ---
 // A queued message must reach check_messages — the documented recovery — even if
-// nothing long-polled it. /take-messages is the consumer; the 24 h retention only
-// clears residue a pre-upgrade broker marked delivered (the push that set that
-// flag is gone with /poll-messages).
+// nothing long-polled it. /take-messages is the consumer; the 24 h retention drops
+// whatever nothing ever took (e.g. a doctor probe with no daemon running).
 
 test("a queued message survives to take-messages with nothing polling it", async (t) => {
   const { call } = await startBroker(t);
@@ -185,23 +184,69 @@ test("a message /wait delivered does not resurface in take-messages (one consume
   assert.equal(taken.messages.length, 0, "a message /wait consumed must not be served again");
 });
 
-test("delivered residue is purged past the retention window; an undelivered message is kept", async (t) => {
+test("an un-taken message past the retention window is purged; a fresh one is kept", async (t) => {
   let now = Date.parse("2026-09-17T12:00:00Z");
   const stateFile = tmpState();
-  const at = new Date(now).toISOString();
+  const at = (ms) => new Date(ms).toISOString();
   fs.writeFileSync(stateFile, JSON.stringify({
-    peers: { p1: { id: "p1", pid: 111, cwd: "", git_root: null, tty: null, summary: "", kind: "session", registered_at: at, last_seen: at } },
+    peers: { p1: { id: "p1", pid: 111, cwd: "", git_root: null, tty: null, summary: "", kind: "session", registered_at: at(now), last_seen: at(now) } },
     messages: [
-      { id: 1, from_id: "p2", to_id: "p1", text: "delivered residue", sent_at: at, delivered: true },
-      { id: 2, from_id: "p2", to_id: "p1", text: "still pending", sent_at: at, delivered: false },
+      { id: 1, from_id: "p2", to_id: "p1", text: "never taken", sent_at: at(now), delivered: false },
+      { id: 2, from_id: "p2", to_id: "p1", text: "fresh", sent_at: at(now + 24 * 60 * 60 * 1000) },
     ],
   }));
   const { call } = await startBroker(t, { stateFile, _now: () => new Date(now), _kill: () => {} });
   now += 25 * 60 * 60 * 1000;
   await call("/list-peers", { scope: "machine", cwd: "x", git_root: null }); // reapDead triggers the purge
   const { body: taken } = await call("/take-messages", { id: "p1" });
-  assert.deepEqual(taken.messages.map((m) => m.text), ["still pending"],
-    "the delivered residue goes, an undelivered message stays");
+  assert.deepEqual(taken.messages.map((m) => m.text), ["fresh"],
+    "a message nothing took for 24 h goes; a younger one stays");
+});
+
+// --- leased takes (item 10) ---
+// A lease-requesting take keeps the rows until /ack; a response lost on the wire
+// is redelivered once the lease runs out instead of being dropped.
+
+test("a leased take that is never acked is redelivered after the lease", async (t) => {
+  let now = Date.parse("2026-09-17T12:00:00Z");
+  const { call } = await startBroker(t, { _now: () => new Date(now) });
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "lost on the wire" });
+  const first = await call("/wait", { id: b.id, timeout_ms: 1000, lease: true });
+  assert.deepEqual(first.body.messages.map((m) => m.text), ["lost on the wire"]);
+  const during = await call("/take-messages", { id: b.id, lease: true });
+  assert.equal(during.body.messages.length, 0, "a leased row is not served twice inside its lease");
+  now += 60_000;
+  const after = await call("/take-messages", { id: b.id, lease: true });
+  assert.deepEqual(after.body.messages.map((m) => m.text), ["lost on the wire"],
+    "an un-acked lease must expire back into the queue");
+});
+
+test("an acked leased take is gone for good", async (t) => {
+  let now = Date.parse("2026-09-17T12:00:00Z");
+  const { call } = await startBroker(t, { _now: () => new Date(now) });
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "acked" });
+  const { body: taken } = await call("/take-messages", { id: b.id, lease: true });
+  const ack = await call("/ack", { id: b.id, ids: taken.messages.map((m) => m.id) });
+  assert.equal(ack.status, 200);
+  now += 60_000;
+  const after = await call("/take-messages", { id: b.id, lease: true });
+  assert.equal(after.body.messages.length, 0);
+});
+
+test("an expiring lease wakes an open waiter", async (t) => {
+  const { call } = await startBroker(t, { _leaseMs: 50 });
+  const { body: a } = await call("/register", { ...REG, pid: process.pid });
+  const { body: b } = await call("/register", { ...REG, pid: process.ppid });
+  await call("/send-message", { from_id: a.id, to_id: b.id, text: "retry me" });
+  await call("/take-messages", { id: b.id, lease: true }); // taken, never acked
+  const started = Date.now();
+  const { body: waited } = await call("/wait", { id: b.id, timeout_ms: 5000, lease: true });
+  assert.deepEqual(waited.messages.map((m) => m.text), ["retry me"]);
+  assert.ok(Date.now() - started < 2000, "woken by the lease expiry, not the window");
 });
 
 test("reaping a dead peer drops its queued messages", async (t) => {

@@ -2,6 +2,8 @@
 // claude-peers' 7899). Keeps ad-hoc-sender auto-registration, self-heal, and
 // corrupt-file quarantine; drops /set-summary. Delivery: /wait long-polls and
 // /take-messages takes — both consume, so a message reaches exactly one consumer.
+// A take with `lease: true` holds the rows until /ack, so a response lost on the
+// wire is redelivered when the lease runs out; a take without it consumes outright.
 import http from "node:http";
 import fs from "node:fs";
 import { emptyState, loadState, saveState } from "./broker-store.mjs";
@@ -16,12 +18,11 @@ const ADHOC_REAP_MS = 60 * 60 * 1000;
 // recipient must not depend on prior traffic: it is materialised on receive
 // and never reaped, or every reply on a cold or restarted broker fails.
 const RESERVED_PEER_IDS = new Set(["slack-bridge"]);
-// A pushed message is kept so check_messages can still find it: the push is a
-// notification with no ack, and a session that never renders it (no --channels
-// allowlist on launch, or a provider whose sessions cannot render at all) must
-// not lose the message outright. Backstop only — reaping the peer drops its
-// messages first in the normal case.
-const RETAIN_DELIVERED_MS = 24 * 60 * 60 * 1000;
+// A message nothing takes (e.g. the doctor probe with no daemon running) is
+// dropped after this age. Backstop only — reaping the peer drops its messages
+// first in the normal case.
+const RETAIN_MS = 24 * 60 * 60 * 1000;
+const LEASE_MS = 30_000;
 
 const MAX_BODY_BYTES = 1_000_000;
 // Armed = a /wait for the peer is open, or one returned within this grace. The
@@ -38,6 +39,7 @@ export function createBroker({
   onShutdown = null,
   _kill = (pid) => process.kill(pid, 0),
   _now = () => new Date(),
+  _leaseMs = LEASE_MS,
 } = {}) {
   let state;
   try {
@@ -89,8 +91,8 @@ export function createBroker({
   }
 
   function purgeExpired() {
-    const cutoff = _now().getTime() - RETAIN_DELIVERED_MS;
-    state.messages = state.messages.filter((m) => !m.delivered || new Date(m.sent_at).getTime() >= cutoff);
+    const cutoff = _now().getTime() - RETAIN_MS;
+    state.messages = state.messages.filter((m) => new Date(m.sent_at).getTime() >= cutoff);
   }
 
   function reapDead() {
@@ -102,21 +104,32 @@ export function createBroker({
 
   // Take semantics, shared by /wait and /take-messages. `kind` is normalised on
   // the way out so a message written by a pre-upgrade broker still carries one.
-  function takeMessagesFor(id) {
-    const mine = state.messages.filter((m) => m.to_id === id);
-    state.messages = state.messages.filter((m) => m.to_id !== id);
+  // A row inside its lease is invisible to every take until it expires or is acked.
+  const isReady = (m, id) => m.to_id === id && !(m.leased_until > nowMs());
+
+  function takeMessagesFor(id, lease = false) {
+    const mine = state.messages.filter((m) => isReady(m, id));
+    if (lease && mine.length > 0) {
+      for (const m of mine) m.leased_until = nowMs() + _leaseMs;
+      setTimeout(() => wakeWaiter(id), _leaseMs).unref();
+    } else if (!lease) {
+      state.messages = state.messages.filter((m) => !isReady(m, id));
+    }
     const peer = Object.hasOwn(state.peers, id) ? state.peers[id] : null;
     if (peer?.kind === "adhoc") peer.last_seen = _now().toISOString();
     persist();
-    return mine.map((m) => ({ ...m, kind: normaliseKind(m.kind) }));
+    return mine.map(({ leased_until, delivered, ...m }) => ({ ...m, kind: normaliseKind(m.kind) }));
   }
 
   // Hand the peer's queue to exactly ONE waiter and leave the others open: two
-  // waiters for one peer must never both be given the same message.
+  // waiters for one peer must never both be given the same message. Nothing
+  // ready (a lease timer firing after its ack) leaves the waiter open.
   function wakeWaiter(id) {
     const set = waiters.get(id);
     if (!set || set.size === 0) return;
-    set.values().next().value.finish(takeMessagesFor(id));
+    if (!state.messages.some((m) => isReady(m, id))) return;
+    const waiter = set.values().next().value;
+    waiter.finish(takeMessagesFor(id, waiter.lease));
   }
 
   const handlers = {
@@ -203,7 +216,7 @@ export function createBroker({
       state.messages.push({
         id: nextMsgId++, from_id: from, to_id: body.to_id,
         text: String(body.text), kind: normaliseKind(body.kind),
-        sent_at: now, delivered: false,
+        sent_at: now,
       });
       persist();
       wakeWaiter(body.to_id);
@@ -213,7 +226,15 @@ export function createBroker({
     // Consume path, driven by the check_messages tool. Returns everything held
     // for the peer and removes it.
     "/take-messages"(body) {
-      return { messages: takeMessagesFor(body.id) };
+      return { messages: takeMessagesFor(body.id, body.lease === true) };
+    },
+
+    // Settles a leased take: the acked rows are gone for good.
+    "/ack"(body) {
+      const ids = new Set(Array.isArray(body.ids) ? body.ids : []);
+      state.messages = state.messages.filter((m) => !(m.to_id === body.id && ids.has(m.id)));
+      persist();
+      return { ok: true };
     },
 
     // Long-poll, driven by the background waiter. Returns at once when the queue
@@ -222,11 +243,13 @@ export function createBroker({
     // check_messages are the same consumer and a message never doubles up.
     "/wait"(body, ctx) {
       const id = body.id;
-      const queued = takeMessagesFor(id);
+      const lease = body.lease === true;
+      const queued = takeMessagesFor(id, lease);
       if (queued.length > 0) return { messages: queued };
       return new Promise((resolve) => {
         let timer;
         const waiter = {
+          lease,
           finish(messages) {
             clearTimeout(timer);
             const set = waiters.get(id);
