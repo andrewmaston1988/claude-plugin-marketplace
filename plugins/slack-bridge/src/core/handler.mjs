@@ -212,11 +212,9 @@ export function killActive(channel) {
  */
 export async function postStartupNotification({ web, store, log }) {
   const sessions = store.all();
-  // DM session keys are bare channel ids (no ":"); thread sessions are
-  // "channel:thread_ts". Skip internal keys like "__dedup__" — they're bare-id
-  // (no ":") so they'd pass the DM filter and get picked as the target channel,
-  // producing a channel_not_found error and swallowing the restart notice.
-  const dmChannels = Object.keys(sessions).filter(k => !k.includes(":") && !k.startsWith("__"));
+  // Only DM ids start with "D". Channel sessions are bare ids too, and the newest
+  // may be archived (is_archived); internal keys like "__dedup__" are bare as well.
+  const dmChannels = Object.keys(sessions).filter(k => /^D[A-Z0-9]+$/.test(k));
   if (!dmChannels.length) return;
   const channel = dmChannels[dmChannels.length - 1];
   try {

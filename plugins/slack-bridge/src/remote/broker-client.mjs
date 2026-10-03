@@ -23,6 +23,7 @@ export function createBrokerClient({
   _spawn = spawn,
   _execPath = process.execPath,
   _setInterval = setInterval,
+  _sleep = sleep,
 } = {}) {
   const baseUrl = `http://127.0.0.1:${port}`;
   // /health stays unauthenticated on purpose: it's the liveness probe that
@@ -65,12 +66,23 @@ export function createBrokerClient({
   }
 
   async function doEnsureBroker() {
-    if (await health()) return;
-    log("broker not reachable — starting daemon");
+    const h = await health();
+    if (h?.lease) return;
+    if (h) {
+      // A pre-lease broker consumes on take, so a lost response loses the message.
+      log("broker predates leased takes — restarting it");
+      await _fetch(`${baseUrl}/shutdown`, { method: "POST", headers: authHeaders, signal: AbortSignal.timeout(2000) }).catch(() => {});
+      for (let i = 0; i < 20 && (await health()); i++) await _sleep(150);
+    } else {
+      log("broker not reachable — starting daemon");
+    }
     spawnBroker();
     for (let i = 0; i < 30; i++) {
-      await sleep(200);
-      if (await health()) return;
+      await _sleep(200);
+      const up = await health();
+      if (up?.lease) return;
+      // Still the old broker: it refused /shutdown (a token mismatch 401s it).
+      if (up && h) throw new Error(`broker on port ${port} predates leased takes and refused /shutdown — stop it by PID`);
     }
     throw new Error(`failed to start broker daemon on port ${port} after 6s`);
   }
@@ -92,6 +104,16 @@ export function createBrokerClient({
     }
   }
 
+  // Acking only once the response is in hand is what makes a lost response a
+  // redelivery. A failed ack (or a pre-lease broker's 404) costs at most a
+  // duplicate when the lease runs out, never the message.
+  async function leasedTake(path, body, opts) {
+    const res = await brokerFetch(path, { ...body, lease: true }, opts);
+    const ids = (res?.messages ?? []).map((m) => m.id);
+    if (ids.length > 0) await brokerFetch("/ack", { id: body.id, ids }).catch(() => {});
+    return res;
+  }
+
   return {
     port,
     ensureBroker,
@@ -108,8 +130,8 @@ export function createBrokerClient({
     // the window. The caller owns the deadline — pass an AbortSignal.timeout one
     // window wide, so a half-open socket becomes a retry instead of a hang.
     wait: (id, timeoutMs, { signal } = {}) =>
-      brokerFetch("/wait", { id, timeout_ms: timeoutMs }, { signal }),
-    takeMessages: (id) => brokerFetch("/take-messages", { id }),
+      leasedTake("/wait", { id, timeout_ms: timeoutMs }, { signal }),
+    takeMessages: (id) => leasedTake("/take-messages", { id }),
     register: (body) => brokerFetch("/register", body),
     heartbeat: (id) => brokerFetch("/heartbeat", { id }),
     unregister: (id) => brokerFetch("/unregister", { id }),

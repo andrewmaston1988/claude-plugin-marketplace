@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import dc from "node:diagnostics_channel";
 import { createSocketModeClient } from "../src/socket-mode/index.mjs";
 
 function makeLog() {
@@ -146,4 +147,143 @@ test("socket-mode — server ping receives pong reply with reply_to", async () =
   assert.ok(pong, "should send a pong in response to server ping");
   assert.equal(pong.reply_to, 42, "pong reply_to should match ping reply_to");
   restore(); client.stop();
+});
+
+// Item 6: a half-open socket never fires `close`, so only a frame-silence
+// watchdog notices it. Each connect gets a fresh stub so reconnects are countable.
+function makeClientWithStubs({ staleMs }) {
+  const stubs = [];
+  const origFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ json: async () => ({ ok: true, url: "wss://stub.example.com" }) });
+  const log = makeLog();
+  const client = createSocketModeClient({
+    appToken: "xapp-test",
+    log,
+    _WebSocket: function() { const s = new StubWS(); stubs.push(s); return s; },
+    _staleMs: staleMs,
+  });
+  return { client, log, stubs, restore: () => { globalThis.fetch = origFetch; } };
+}
+
+test("socket-mode — no frame for longer than the watchdog window → socket closed and reconnected", async () => {
+  const { client, log, stubs, restore } = makeClientWithStubs({ staleMs: 50 });
+  client.start();
+  await delay(10);
+  stubs[0].open();
+  stubs[0].receive({ type: "hello" });
+  // Silent from here: the watchdog fires at 50 ms, the first backoff is 1 s.
+  await delay(1300);
+  assert.equal(stubs[0].readyState, 3, "the silent socket must be force-closed");
+  assert.ok(stubs.length >= 2, `a new socket must be opened, got ${stubs.length}`);
+  assert.ok(log.entries.some(e => e.m?.includes("no frame")), "the watchdog logs why it reconnected");
+  restore(); client.stop();
+});
+
+test("socket-mode — frames inside the watchdog window → no reconnect", async () => {
+  const { client, log, stubs, restore } = makeClientWithStubs({ staleMs: 80 });
+  client.start();
+  await delay(10);
+  stubs[0].open();
+  stubs[0].receive({ type: "hello" });
+  for (let i = 0; i < 15; i++) {
+    await delay(25);
+    stubs[0].receive({ type: "ping", reply_to: i });
+  }
+  assert.equal(stubs[0].readyState, 1, "a socket that keeps receiving frames stays open");
+  assert.equal(stubs.length, 1);
+  assert.ok(!log.entries.some(e => e.m?.includes("scheduling reconnect")));
+  restore(); client.stop();
+});
+
+// Slack's keepalive is a protocol-level ping every ~10 s, never a JSON frame;
+// undici surfaces it only on this diagnostics channel (probed live 2026-10-03).
+test("socket-mode — protocol pings inside the watchdog window → no reconnect", async () => {
+  const { client, log, stubs, restore } = makeClientWithStubs({ staleMs: 80 });
+  const ping = dc.channel("undici:websocket:ping");
+  client.start();
+  await delay(10);
+  stubs[0].open();
+  stubs[0].receive({ type: "hello" });
+  for (let i = 0; i < 15; i++) {
+    await delay(25);
+    ping.publish({ websocket: stubs[0], payload: Buffer.alloc(0) });
+  }
+  assert.equal(stubs.length, 1);
+  assert.ok(!log.entries.some(e => e.m?.includes("scheduling reconnect")));
+  restore(); client.stop();
+});
+
+test("socket-mode — a protocol ping on another socket does not hold the watchdog off", async () => {
+  const { client, stubs, restore } = makeClientWithStubs({ staleMs: 50 });
+  const ping = dc.channel("undici:websocket:ping");
+  client.start();
+  await delay(10);
+  stubs[0].open();
+  stubs[0].receive({ type: "hello" });
+  const other = new StubWS();
+  const keepAlive = setInterval(() => ping.publish({ websocket: other, payload: Buffer.alloc(0) }), 20);
+  await delay(1300);
+  clearInterval(keepAlive);
+  assert.ok(stubs.length >= 2, `a foreign ping must not keep a silent socket alive, got ${stubs.length}`);
+  restore(); client.stop();
+});
+
+test("socket-mode — a URL fetch that never settles → the watchdog retries the connect", async () => {
+  const origFetch = globalThis.fetch;
+  let fetches = 0;
+  globalThis.fetch = () => { fetches++; return new Promise(() => {}); };
+  const client = createSocketModeClient({ appToken: "xapp-test", log: makeLog(), _WebSocket: function() { return new StubWS(); }, _staleMs: 50 });
+  client.start();
+  await delay(1300);
+  client.stop(); globalThis.fetch = origFetch;
+  assert.ok(fetches >= 2, `a hung connect must be retried, got ${fetches} fetch(es)`);
+});
+
+test("socket-mode — a handshake that never opens → the watchdog reconnects", async () => {
+  const { client, stubs, restore } = makeClientWithStubs({ staleMs: 50 });
+  client.start();
+  await delay(1300);
+  assert.equal(stubs[0].readyState, 3, "the never-opened socket must be closed");
+  assert.ok(stubs.length >= 2, `a new socket must be opened, got ${stubs.length}`);
+  restore(); client.stop();
+});
+
+test("socket-mode — a late frame on an abandoned socket does not disarm the live socket's watchdog", async () => {
+  const { client, stubs, restore } = makeClientWithStubs({ staleMs: 50 });
+  client.start();
+  await delay(10);
+  stubs[0].open();
+  stubs[0].receive({ type: "hello" });
+  // Silent → the watchdog abandons stubs[0] and reconnects; open stubs[1] at once.
+  while (stubs.length < 2) await delay(5);
+  stubs[1].open();
+  stubs[1].receive({ type: "hello" });
+  stubs[0].receive({ type: "ping", reply_to: 1 }); // late frame from the abandoned socket
+  await delay(1300); // stubs[1] is silent too, so its watchdog must still fire
+  assert.ok(stubs.length >= 3, `the live socket's watchdog must survive the late frame, got ${stubs.length} sockets`);
+  restore(); client.stop();
+});
+
+test("socket-mode — a connect the watchdog gave up on does not open a second socket when it lands late", async () => {
+  const origFetch = globalThis.fetch;
+  let fetches = 0;
+  globalThis.fetch = () => {
+    const n = ++fetches;
+    const res = { json: async () => ({ ok: true, url: "wss://stub.example.com" }) };
+    return n === 1 ? new Promise(r => setTimeout(() => r(res), 1200)) : Promise.resolve(res);
+  };
+  const stubs = [];
+  const client = createSocketModeClient({
+    appToken: "xapp-test", log: makeLog(), _staleMs: 50,
+    _WebSocket: function() { const s = new StubWS(); stubs.push(s); return s; },
+  });
+  client.start();
+  while (stubs.length < 1) await delay(5); // the watchdog's retry connected
+  stubs[0].open();
+  stubs[0].receive({ type: "hello" });
+  const keepAlive = setInterval(() => stubs[0].receive({ type: "ping", reply_to: 0 }), 20);
+  await delay(400); // the first, abandoned fetch resolves meanwhile
+  clearInterval(keepAlive);
+  client.stop(); globalThis.fetch = origFetch;
+  assert.equal(stubs.length, 1, "the late first connect must not open a second socket");
 });

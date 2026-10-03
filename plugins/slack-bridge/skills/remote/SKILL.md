@@ -13,7 +13,7 @@ If `$ARGUMENTS` is `release`, skip straight to *Releasing*.
 
 Call the `slack_seize` MCP tool. The daemon names the created channel `#rc-<slug>` where `<slug>` is chosen in this order:
 
-1. **The session name the operator set in Claude Code** (the chat's custom title) — read from the session JSONL where the harness records one (best-effort: not observed on every harness), so when the operator has named the chat the channel appears named after it, and you never override a name the operator chose.
+1. **The session name the operator set in Claude Code** (the chat's custom title) — read from the `custom-title` record that `/rename` writes to the session JSONL, so when the operator has named the chat the channel appears named after it, and you never override a name the operator chose.
 2. **A slug you derive from the current task context**, passed as the `name` arg — for the common case where the operator has *not* named the chat (operators rarely name chats). Derive it from something descriptive of what you're working on right now: the git branch (`autonomous/slack-bridge-remote-control` → `slack-bridge-remote-control`), the plan slug, or the feature/bug name. Slugify it yourself (lowercase, hyphens, no spaces). **Always do this** — it is your job, not the daemon's.
 3. **The auto ai-title** — Claude Code's generated summary (often just derived from the first message, so maybe nonsensical). Read automatically as a last-resort fallback so the channel is never nameless.
 
@@ -58,7 +58,7 @@ Notes:
 
 ## Replying
 
-Reply normally — just write your answer, as you would in any other turn. The plugin's `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages, and tool calls render as **one status line edited in place**, finalised when the turn stops.
+Reply normally — just write your answer, as you would in any other turn. The plugin's `PostToolUse` and `Stop` hooks mirror the turn to the claimed channel: your narration posts as messages, and tool calls render as **one status line edited in place**, finalised when the turn stops. A `PreToolUse` hook mirrors an `AskUserQuestion` (question and options) to the channel, but the dialog can only be answered at the terminal.
 
 Do **not** answer with a tool call. There is nothing to send by hand — the hooks already post your text, so a tool call per message wastes context and can post the same reply twice.
 

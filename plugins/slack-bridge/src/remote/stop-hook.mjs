@@ -1,6 +1,6 @@
-// Stop + PostToolUse hook for a session holding a Slack claim: mirrors the
-// turn's assistant text to the channel, posts a tool status line, and on Stop
-// blocks once when no waiter is armed. Any error allows — a broken hook must
+// Stop + PostToolUse + PreToolUse(AskUserQuestion) hook for a session holding a
+// Slack claim: mirrors the turn's assistant text to the channel, posts a tool
+// status line or the pending question, and on Stop blocks once when no waiter is armed. Any error allows — a broken hook must
 // never wedge a session.
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -8,7 +8,7 @@ import { getPaths } from "../paths.mjs";
 import { loadConfig } from "../config.mjs";
 import { createBrokerClient } from "./broker-client.mjs";
 import { waitCommand, BASH_TIMEOUT_MS } from "./wait-constants.mjs";
-import { readTranscript, textAfter, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
+import { readTranscriptFrom, textAfter, textOf, readCursor, writeCursor, tryLock } from "./transcript-tail.mjs";
 
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
 const RECHECK_MS = 500;
@@ -34,16 +34,23 @@ function readSessionFile(stateDir, sessionId) {
 // The seize mark (remote-sessions file mtime) resets the cursor on a re-seize,
 // so text written while unclaimed is never backfilled. A contender that can't
 // take the lock sends nothing: its text stays after the un-advanced cursor.
+// Without a usable offset (none yet, or the transcript was rewritten) one
+// whole-file read locates the cursor by uuid.
 async function mirror({ stateDir, sessionId, transcriptPath, session, client }) {
   const cursorFile = join(stateDir, "mirror", `${sessionId}.json`);
   const release = tryLock(cursorFile + ".lock");
   if (!release) return;
   try {
     const cursor = readCursor(cursorFile);
-    const fromUuid = cursor?.seizeMark === session.seizeMark ? cursor.uuid : null;
-    const { text, lastUuid } = textAfter(readTranscript(transcriptPath), fromUuid);
+    const resume = cursor?.seizeMark === session.seizeMark ? cursor : null;
+    const fromUuid = resume?.uuid ?? null;
+    const tail = fromUuid && Number.isInteger(resume.offset) ? readTranscriptFrom(transcriptPath, resume.offset) : null;
+    const read = tail ?? readTranscriptFrom(transcriptPath, 0);
+    const { text, lastUuid } = tail ? textOf(read.entries, fromUuid) : textAfter(read.entries, fromUuid);
     if (text) await client.sendMessage(session.peerId, "slack-bridge", text);
-    if (lastUuid && lastUuid !== fromUuid) writeCursor(cursorFile, { uuid: lastUuid, seizeMark: session.seizeMark });
+    if (lastUuid && (lastUuid !== fromUuid || read.end !== resume?.offset)) {
+      writeCursor(cursorFile, { uuid: lastUuid, seizeMark: session.seizeMark, offset: read.end });
+    }
   } finally {
     release();
   }
@@ -59,6 +66,18 @@ async function isArmed(client, peerId, _sleep) {
   }
 }
 
+// The terminal dialog can't be answered from Slack, but the operator must see
+// what it is asking — the PostToolUse line alone is a bare tool name.
+// Markdown, not mrkdwn: every sender runs it through mdToSlack, which also spaces the dash.
+export function formatQuestion(input) {
+  const qs = Array.isArray(input?.questions) ? input.questions : [];
+  return qs.map((q) => {
+    const opts = (Array.isArray(q?.options) ? q.options : [])
+      .map((o) => `• **${o?.label ?? ""}**${o?.description ? `—${o.description}` : ""}`);
+    return [`❓ ${q?.question ?? ""}`, ...opts].join("\n");
+  }).join("\n\n");
+}
+
 export async function runHook({
   raw,
   stateDir = getPaths().stateDir,
@@ -69,7 +88,8 @@ export async function runHook({
   try {
     const input = JSON.parse(raw);
     const event = input.hook_event_name;
-    if (event !== "Stop" && event !== "PostToolUse") return null;
+    const isQuestion = event === "PreToolUse" && input.tool_name === "AskUserQuestion";
+    if (event !== "Stop" && event !== "PostToolUse" && !isQuestion) return null;
     // Absent file = no claim held: exit before any config load or broker call,
     // which is what keeps PostToolUse cheap on unclaimed sessions.
     const session = readSessionFile(stateDir, input.session_id);
@@ -86,6 +106,12 @@ export async function runHook({
     try {
       await mirror({ stateDir, sessionId: input.session_id, transcriptPath: input.transcript_path, session, client });
     } catch {}
+
+    if (isQuestion) {
+      const text = formatQuestion(input.tool_input);
+      if (text) await client.sendMessage(session.peerId, "slack-bridge", text, { kind: "question" });
+      return null;
+    }
 
     if (event === "PostToolUse") {
       const arg = shortArg(input.tool_input);

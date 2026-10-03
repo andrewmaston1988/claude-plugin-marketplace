@@ -14,6 +14,9 @@ const QUIET_GAP_MS = 1_000;
 
 const routeWindows = new Map();  // peer_id → open windows, oldest first
 const statusLines = new Map();   // channel → ts of its in-place status line
+// Peers sitting on an AskUserQuestion dialog: they can't reply until the operator
+// answers it, so windows opened meanwhile hold their timeout until the peer moves.
+const pendingQuestion = new Set();
 
 /** Test hook: drop window/status state between cases. */
 export function _resetRouteState() {
@@ -26,6 +29,7 @@ export function _resetRouteState() {
   }
   routeWindows.clear();
   statusLines.clear();
+  pendingQuestion.clear();
 }
 
 function removeWindow(window) {
@@ -45,12 +49,32 @@ function openRouteWindow({ web, peerId, channel, threadTs, placeholderTs, heartb
   windows.push(window);
   routeWindows.set(peerId, windows);
 
-  // The window's own deadline. Nothing else posts on its behalf: the reply loop
-  // only ever sees a window that is still open.
-  window.timeoutTimer = setTimeout(() => { void finalizeWindow(window, { timeout: true }); },
-    config.remote?.replyTimeoutMs ?? 300_000);
-  window.timeoutTimer.unref?.();
+  window.held = pendingQuestion.has(peerId);
+  armTimeout(window);
   return window;
+}
+
+// A held window still gets a ceiling: a peer that dies on the dialog never moves.
+const HELD_CEILING_FACTOR = 12;
+
+// The window's own deadline. Nothing else posts on its behalf: the reply loop
+// only ever sees a window that is still open.
+function armTimeout(window) {
+  const ms = window.config.remote?.replyTimeoutMs ?? 300_000;
+  window.timeoutTimer = setTimeout(() => { void finalizeWindow(window, { timeout: true }); },
+    window.held ? ms * HELD_CEILING_FACTOR : ms);
+  window.timeoutTimer.unref?.();
+}
+
+// Any later message means the dialog was answered: re-arm the windows it held.
+function releaseQuestion(peerId) {
+  if (!pendingQuestion.delete(peerId)) return;
+  for (const w of routeWindows.get(peerId) ?? []) {
+    if (w.done || w.chunks.length || !w.held) continue;
+    clearTimeout(w.timeoutTimer);
+    w.held = false;
+    armTimeout(w);
+  }
 }
 
 /**
@@ -203,7 +227,7 @@ export async function routeToLiveSession({
 /**
  * One broker message from the daemon peer → its claim channel. kind:"status" shows
  * in the open window's placeholder, else on the channel's one status line; a text
- * reply resolves the newest open window (abandoning older ones), or posts directly
+ * or question reply resolves the newest open window (abandoning older ones), or posts directly
  * when none is open. A message from a peer
  * with no claim has nowhere to go and is dropped with a log.
  */
@@ -218,6 +242,9 @@ async function handleBrokerMessage({ message, claims, web, config, log }) {
   }
   const [channel] = entry;
   const text = String(message?.text ?? "");
+
+  if (message.kind === "question") pendingQuestion.add(fromId);
+  else releaseQuestion(fromId);
 
   const window = targetWindow(fromId);
   if (message.kind === "status") {

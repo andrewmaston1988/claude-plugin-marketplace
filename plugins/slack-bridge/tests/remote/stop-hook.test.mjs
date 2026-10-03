@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { runHook, shortArg } from "../../src/remote/stop-hook.mjs";
+import { runHook, shortArg, formatQuestion } from "../../src/remote/stop-hook.mjs";
+import { mdToSlack } from "../../src/markdown/index.mjs";
 import { createBrokerClient } from "../../src/remote/broker-client.mjs";
 import { waitCommand, BASH_TIMEOUT_MS } from "../../src/remote/wait-constants.mjs";
 
@@ -221,6 +222,63 @@ test("mirror: second stop with no new entries → no send", async (t) => {
   assert.equal(textSends(c2).length, 0);
 });
 
+// --- offset tail: only the appended region is read ---
+
+const readCursorFile = (env) => JSON.parse(fs.readFileSync(env.cursorFile, "utf8"));
+const writeCursorFile = (env, patch) => fs.writeFileSync(env.cursorFile, JSON.stringify({ ...readCursorFile(env), ...patch }));
+
+test("mirror: the cursor records the byte offset it has read up to", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  assert.equal(readCursorFile(env).offset, fs.statSync(env.transcript).size);
+});
+
+test("mirror: bytes before the stored offset are never re-read", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  // Mark a1 as already read by offset while the uuid cursor still sits at a0:
+  // a whole-file reader would re-send it, an offset reader cannot see it.
+  env.append(textEntry("a1", "ALREADY READ"));
+  writeCursorFile(env, { offset: fs.statSync(env.transcript).size });
+  env.append(textEntry("a2", "fresh"));
+  const client = fakeClient({ armed: [true] });
+  await hook(env, client);
+  assert.deepEqual(textSends(client).map((s) => s.text), ["fresh"]);
+  assert.equal(env.cursor(), "a2");
+});
+
+test("mirror: a half-written last line is left for the next read, then sent once", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const line = JSON.stringify(textEntry("a2", "second"));
+  env.append(textEntry("a1", "first"));
+  fs.appendFileSync(env.transcript, line.slice(0, 20));
+  const c1 = fakeClient({ armed: [true] });
+  await hook(env, c1);
+  fs.appendFileSync(env.transcript, line.slice(20) + "\n");
+  const c2 = fakeClient({ armed: [true] });
+  await hook(env, c2);
+  assert.deepEqual(textSends(c1).map((s) => s.text), ["first"]);
+  assert.deepEqual(textSends(c2).map((s) => s.text), ["second"]);
+});
+
+test("mirror: a transcript rewritten under the offset falls back to the uuid cursor", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  env.append(textEntry("a1", "x".repeat(400)));
+  await hook(env, fakeClient({ armed: [true] }));
+  // Shorter rewrite (offset now past EOF), then a longer one (offset mid-line).
+  for (const [uuid, text] of [["a2", "after short rewrite"], ["a3", "after long rewrite"]]) {
+    const body = [textEntry("a1", "x"), textEntry(uuid, text)];
+    if (uuid === "a3") body.unshift(userEntry("pad", "p".repeat(2000)));
+    fs.writeFileSync(env.transcript, body.map((e) => JSON.stringify(e) + "\n").join(""));
+    writeCursorFile(env, { uuid: "a1" });
+    const client = fakeClient({ armed: [true] });
+    await hook(env, client);
+    assert.deepEqual(textSends(client).map((s) => s.text), [text]);
+  }
+});
+
 test("mirror: no claim → no send", async (t) => {
   const env = setup(t, { claimed: false });
   env.append(textEntry("a1", "unclaimed"));
@@ -347,4 +405,48 @@ test("a lock older than 10 s is stale and broken (B2)", async (t) => {
   assert.deepEqual(textSends(client).map((s) => s.text), ["after stale lock"]);
   assert.equal(env.cursor(), "a1");
   assert.ok(!fs.existsSync(lock), "lock released after the op");
+});
+
+// --- AskUserQuestion (item 13) ---
+
+const QUESTION = {
+  questions: [{
+    question: "Which branch should the fix land on?",
+    header: "Branch",
+    multiSelect: false,
+    options: [
+      { label: "followups", description: "the open followups branch" },
+      { label: "new branch", description: "cut a fresh one" },
+    ],
+  }],
+};
+
+test("PreToolUse AskUserQuestion → the question and every option reach Slack as a question message", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const client = fakeClient({ armed: [true] });
+  const out = await hook(env, client, { event: "PreToolUse", tool: { name: "AskUserQuestion", input: QUESTION } });
+  assert.equal(out, null, "the hook never blocks or rewrites the question");
+  const questions = client.sends.filter((s) => s.kind === "question");
+  assert.equal(questions.length, 1, `one question message, got ${JSON.stringify(client.sends)}`);
+  const text = questions[0].text;
+  for (const needle of ["Which branch should the fix land on?", "followups", "the open followups branch", "new branch", "cut a fresh one"]) {
+    assert.ok(text.includes(needle), `question message must carry "${needle}": ${text}`);
+  }
+});
+
+test("PreToolUse for any other tool → nothing sent", async (t) => {
+  const env = setup(t);
+  await prime(env);
+  const client = fakeClient({ armed: [true] });
+  await hook(env, client, { event: "PreToolUse", tool: { name: "Bash", input: { command: "ls" } } });
+  assert.equal(client.sends.length, 0);
+});
+
+// Every consumer posts the question through mdToSlack, so it must be markdown in.
+test("formatQuestion: renders bold labels and one-spaced dashes once through mdToSlack", () => {
+  const text = formatQuestion({ questions: [{ question: "Which DB?", options: [
+    { label: "Postgres", description: "relational" }, { label: "Redis" },
+  ] }] });
+  assert.equal(mdToSlack(text), "❓ Which DB?\n• *Postgres* — relational\n• *Redis*");
 });

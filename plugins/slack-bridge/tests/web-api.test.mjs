@@ -131,3 +131,23 @@ test("web-api — two consecutive 429s throws ratelimited error", async () => {
     assert.equal(log.warns.length, 2);
   } finally { restore(); await close(); }
 });
+
+// Slack rejects a JSON body on conversations.info with invalid_arguments (probed live 2026-10-03).
+test("web-api — conversationsInfo sends a form-encoded body", async () => {
+  let contentType, body = "";
+  const { server, port, close } = await stubServer((req, res) => {
+    contentType = req.headers["content-type"];
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ ok: true, channel: { id: "C1", is_member: true } }));
+    });
+  });
+  const { client, restore } = clientForServer(port);
+  try {
+    const result = await client.conversationsInfo({ channel: "C1" });
+    assert.equal(result.channel.is_member, true);
+    assert.match(contentType, /application\/x-www-form-urlencoded/);
+    assert.equal(new URLSearchParams(body).get("channel"), "C1");
+  } finally { restore(); await close(); }
+});
