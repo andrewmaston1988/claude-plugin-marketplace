@@ -130,51 +130,13 @@ test("readSessionName finds a custom-title set further back than the last 1 MB",
     "a title beyond the last 1 MB must still be found");
 });
 
-test("full seize-name precedence: custom title > session-derived name > ai-title (never cwd)", () => {
-  const dir = tmpProjectsDir();
-  writeSession(dir, "C--code-long-night", "s1", [
-    `{"type":"ai-title","aiTitle":"Greeting GLM","sessionId":"s1"}`,
-    `{"type":"custom-title","customTitle":"can-you-read-this-name","sessionId":"s1"}`,
-  ]);
-  // Mirrors the precedence in server.mjs slack_seize:
-  //   readSessionName(_cwd) || args.name || readSessionAiTitle(_cwd) || null
-  const derive = (args = {}) =>
-    readSessionName("C:\\code\\long-night", { projectsDir: dir }) ||
-    args.name ||
-    readSessionAiTitle("C:\\code\\long-night", { projectsDir: dir }) ||
-    null;
-  // Custom title wins even when the session passes a derived name:
-  assert.equal(derive({ name: "slack-remote-setup" }), "can-you-read-this-name");
-  assert.equal(derive({}), "can-you-read-this-name"); // custom title is the default
-  // When no custom title: session-derived name beats ai-title.
-  const dir2 = tmpProjectsDir();
-  writeSession(dir2, "C--code-long-night", "s1", [
-    `{"type":"ai-title","aiTitle":"Greeting GLM","sessionId":"s1"}`,
-  ]);
-  const derive2 = (args = {}) =>
-    readSessionName("C:\\code\\long-night", { projectsDir: dir2 }) ||
-    args.name ||
-    readSessionAiTitle("C:\\code\\long-night", { projectsDir: dir2 }) ||
-    null;
-  assert.equal(derive2({ name: "slack-remote-setup" }), "slack-remote-setup"); // session-derived slug
-  assert.equal(derive2({}), "Greeting GLM"); // no title, no name → ai-title last resort
-  // When nothing is readable at all: null (daemon falls back to peer-id fragment).
-  const dir3 = tmpProjectsDir();
-  const derive3 = (args = {}) =>
-    readSessionName("C:\\code\\long-night", { projectsDir: dir3 }) ||
-    args.name ||
-    readSessionAiTitle("C:\\code\\long-night", { projectsDir: dir3 }) ||
-    null;
-  assert.equal(derive3({}), null); // never cwd basename — null signals "broke"
-});
-
 // --- delivery: background waiter ---
 
 function tmpState() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-mcp-")), "state.json");
 }
 
-async function serverWithBroker(t, { sessionId = "session-123", sessionReader = () => ({ sessionId }) } = {}) {
+async function serverWithBroker(t, { sessionId = "session-123", sessionReader = () => ({ sessionId }), projectsDir = tmpProjectsDir(), cwd = process.cwd(), claims = [] } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "slack-remote-mcp-state-"));
   const stateDir = path.join(root, "state");
   const broker = createBroker({ stateFile: tmpState() });
@@ -185,8 +147,9 @@ async function serverWithBroker(t, { sessionId = "session-123", sessionReader = 
   };
   const server = createRemoteMcpServer({
     config, configPath: "/tmp/remote-config.json", input: new PassThrough(), output: new PassThrough(),
-    _getPaths: () => ({ stateDir }), _readSession: sessionReader,
+    _getPaths: () => ({ stateDir }), _readSession: sessionReader, _projectsDir: projectsDir, _cwd: cwd,
     _fetch: async (url, options) => {
+      if (url.endsWith("/claim")) claims.push(JSON.parse(options.body));
       if (url.endsWith("/claim")) return new Response(JSON.stringify({ ok: true, channel: "C123", channel_name: "test" }));
       if (url.endsWith("/release")) return new Response(JSON.stringify({ ok: true }));
       return fetch(url, options);
@@ -235,6 +198,26 @@ test("server shutdown deletes the session mapping", async (t) => {
   server.shutdown();
   assert.equal(fs.existsSync(path.join(stateDir, "remote-sessions", "session-123.json")), false);
 });
+// Drives the real slack_seize expression — a test that re-types the precedence
+// moves with it and can never go red.
+test("slack_seize name precedence: custom title > name arg > ai-title > null (never cwd)", async (t) => {
+  const cwd = "C:\\code\\long-night";
+  const seizeName = async (lines, args) => {
+    const projectsDir = tmpProjectsDir();
+    if (lines) writeSession(projectsDir, "C--code-long-night", "s1", lines);
+    const claims = [];
+    const { server } = await serverWithBroker(t, { projectsDir, cwd, claims });
+    await server._onRequest("tools/call", { name: "slack_seize", arguments: args });
+    return claims[0].name;
+  };
+  const ai = `{"type":"ai-title","aiTitle":"Greeting GLM","sessionId":"s1"}`;
+  const custom = `{"type":"custom-title","customTitle":"can-you-read-this-name","sessionId":"s1"}`;
+  assert.equal(await seizeName([ai, custom], { name: "slack-remote-setup" }), "can-you-read-this-name");
+  assert.equal(await seizeName([ai], { name: "slack-remote-setup" }), "slack-remote-setup");
+  assert.equal(await seizeName([ai], {}), "Greeting GLM");
+  assert.equal(await seizeName(null, {}), null);
+});
+
 test("start registers the session id read from the parent process session file", async (t) => {
   const { server, broker } = await serverWithBroker(t, { sessionReader: (pid) => {
     assert.equal(pid, process.ppid);

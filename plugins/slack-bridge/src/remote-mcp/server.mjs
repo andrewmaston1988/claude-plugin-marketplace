@@ -166,6 +166,7 @@ export function createRemoteMcpServer({
   _setInterval = setInterval,
   _readSession = (pid) => { try { return JSON.parse(fs.readFileSync(path.join(os.homedir(), ".claude", "sessions", `${pid}.json`), "utf8")); } catch { return null; } },
   _getPaths = getPaths,
+  _projectsDir = path.join(os.homedir(), ".claude", "projects"),
 } = {}) {
   const brokerPort = config.remote?.brokerPort ?? 7898;
   const controlPort = config.remote?.controlPort ?? 7897;
@@ -234,7 +235,8 @@ export function createRemoteMcpServer({
         // Name precedence: operator custom-title (best-effort read from the session
         // JSONL) → the session-derived name arg → auto ai-title → daemon peer-id
         // fragment. Never the cwd basename — a project-dir channel name means broke.
-        const name = readSessionName(_cwd) || args.name || readSessionAiTitle(_cwd) || null;
+        const read = { projectsDir: _projectsDir };
+        const name = readSessionName(_cwd, read) || args.name || readSessionAiTitle(_cwd, read) || null;
         const r = await controlFetch("/claim", { peer_id: myId, channel: args.channel ?? null, name });
         writeSessionMapping(myId, r.channel);
         const label = r.is_dm ? "your DM with the bot" : r.channel_name ? "#" + r.channel_name : r.channel;
