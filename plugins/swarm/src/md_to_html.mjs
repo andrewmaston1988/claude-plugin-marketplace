@@ -216,7 +216,7 @@ function renderTally(bodyHtml) {
 }
 
 // The masthead eyebrow names which document you are reading — the digest is a
-// compressed handoff, the report a write-up; the operator ruled them distinct.
+// compressed handoff, the report a write-up — two documents, never one.
 const EYEBROWS = {
   digest: "Swarm digest · compressed handoff",
   report: "Swarm source review · cross-examined",

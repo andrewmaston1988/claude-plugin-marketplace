@@ -8,9 +8,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mdToHtml } from "../src/md_to_html.mjs";
-import { connect, devtoolsPort, evaluate, findBrowser, getJson, pageTarget, sleep } from "./lib/cdp.mjs";
+import { connect, devtoolsPort, evaluate, findBrowser, getJson, pageTarget, sleep, waitFor } from "./lib/cdp.mjs";
 
 const WIDTH = 412;
+const DARK_BG = "rgb(16, 18, 25)";
 const LONG_PATH = "src/stonk/research/very_module_name/decision_table_helpers.py";
 const CITE = "src/stonk/research/decision_table.py:760";
 if (LONG_PATH.length !== 61 || CITE.length !== 40) throw new Error("probe fixture lengths changed");
@@ -41,6 +42,7 @@ async function main() {
   try { exe = findBrowser(); }
   catch (error) {
     console.log(`SKIP — ${error.message}`);
+    process.exitCode = 1; // a probe that measured nothing has not passed
     return;
   }
 
@@ -69,15 +71,15 @@ async function main() {
     await client.send("Emulation.setEmulatedMedia", {
       features: [{ name: "prefers-color-scheme", value: "dark" }],
     });
-    await sleep(150);
+    await waitFor(client, `location.protocol === "file:" && document.readyState === "complete"`, "the fixture page to load");
     const measurements = await evaluate(client, `({
       scrollWidth: document.documentElement.scrollWidth,
       background: getComputedStyle(document.body).backgroundColor,
     })`);
     const widthPass = measurements.scrollWidth <= WIDTH;
-    const darkPass = measurements.background !== "rgb(255, 255, 255)" && measurements.background !== "rgba(0, 0, 0, 0)";
+    const darkPass = measurements.background === DARK_BG;
     console.log(`${widthPass ? "PASS" : "FAIL"} — documentElement.scrollWidth ${measurements.scrollWidth}px <= ${WIDTH}px`);
-    console.log(`${darkPass ? "PASS" : "FAIL"} — dark body background ${measurements.background} is not white or transparent`);
+    console.log(`${darkPass ? "PASS" : "FAIL"} — dark body background ${measurements.background} === ${DARK_BG}`);
     if (!widthPass || !darkPass) process.exitCode = 1;
   } finally {
     await shutdown();

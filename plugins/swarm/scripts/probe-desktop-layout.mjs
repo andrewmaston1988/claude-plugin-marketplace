@@ -6,11 +6,11 @@
 // Outside `npm test`: node plugins/swarm/scripts/probe-desktop-layout.mjs [--browser <path>]; exits 1 outside tolerance.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../src/serve/server.mjs";
-import { connect, devtoolsPort, evaluate, findBrowser, getJson, pageTarget, sleep } from "./lib/cdp.mjs";
+import { connect, devtoolsPort, evaluate, findBrowser, getJson, pageTarget, sleep, waitFor } from "./lib/cdp.mjs";
 
 const TOL_PX = 1;
 // Relative, not absolute: the fr tracks' floors (minmax(<n>ch, 1fr)) can bind at the
@@ -123,17 +123,6 @@ const OPEN_LIVE_MEASURE = `(() => {
   const box = (r) => ({ left: r1(r.left), right: r1(r.right), top: r1(r.top), bottom: r1(r.bottom) });
   return { feed: box(feed), first: box(a), second: box(b), open: box(o), cardGap: r1(parseFloat(getComputedStyle(cards[0]).marginTop)) };
 })()`;
-
-// The table is the thing under test, so a missing one is a RESULT, not a crash: the
-// soft wait lets the geometry checks still run and report what they did measure.
-async function waitFor(client, expression, what, soft = false) {
-  for (let i = 0; i < 150; i++) {
-    if (await evaluate(client, expression)) return true;
-    await sleep(100);
-  }
-  if (soft) return false;
-  throw new Error(`timed out waiting for ${what}`);
-}
 
 async function measure(client, pass) {
   let missing = null;

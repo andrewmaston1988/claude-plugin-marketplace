@@ -25,9 +25,9 @@ export function findBrowser() {
   throw new Error("no browser found — pass --browser <path>");
 }
 
-export function connect(url) {
+export function connect(url, { _WebSocket = WebSocket } = {}) {
   return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
+    const ws = new _WebSocket(url);
     const waiting = new Map();
     let nextId = 1;
     ws.addEventListener("message", (event) => {
@@ -38,6 +38,13 @@ export function connect(url) {
       message.error ? waiter.reject(new Error(message.error.message)) : waiter.resolve(message.result);
     });
     ws.addEventListener("error", () => reject(new Error(`websocket failed: ${url}`)));
+    // A dead browser closes the socket; without this every pending call hangs the probe.
+    ws.addEventListener("close", () => {
+      const error = new Error(`websocket closed: ${url}`);
+      reject(error);
+      for (const waiter of waiting.values()) waiter.reject(error);
+      waiting.clear();
+    });
     ws.addEventListener("open", () => resolve({
       send(method, params = {}) {
         const id = nextId++;
@@ -74,6 +81,16 @@ export async function pageTarget(port) {
     await sleep(100);
   }
   throw new Error("no page target appeared");
+}
+
+// soft: a missing element is a measured result, so return false instead of throwing.
+export async function waitFor(client, expression, what, soft = false) {
+  for (let i = 0; i < 150; i++) {
+    if (await evaluate(client, expression)) return true;
+    await sleep(100);
+  }
+  if (soft) return false;
+  throw new Error(`timed out waiting for ${what}`);
 }
 
 export async function evaluate(client, expression) {

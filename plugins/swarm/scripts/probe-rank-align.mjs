@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../src/serve/server.mjs";
-import { connect, devtoolsPort, evaluate, findBrowser, getJson, pageTarget, sleep } from "./lib/cdp.mjs";
+import { connect, devtoolsPort, evaluate, findBrowser, getJson, pageTarget, sleep, waitFor } from "./lib/cdp.mjs";
 
 const TOL_PX = 1;
 // The three shapes the fix must hold in: a card at desktop width, the same card
@@ -83,14 +83,6 @@ function seedHome() {
     weeklyModels: MODELS.filter((m) => m.share != null).map((m) => ({ model: m.model.replace(/:cloud$/, ""), requests: REQUESTS, meterSharePct: m.share })),
   }) + "\n", "utf8");
   return home;
-}
-
-async function waitFor(client, expression, what) {
-  for (let i = 0; i < 150; i++) {
-    if (await evaluate(client, expression)) return;
-    await sleep(100);
-  }
-  throw new Error(`timed out waiting for ${what}`);
 }
 
 async function measure(client, pass) {

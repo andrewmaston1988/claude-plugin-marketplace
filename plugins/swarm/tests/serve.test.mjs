@@ -52,8 +52,7 @@ test("routes: runs list, run, leaf (no raw log; prompt exposed for the accordion
       assert.equal(digest.status, 200);
       assert.match(digest.headers["content-type"], /text\/html/);
       assert.match(digest.body, /digest/);
-      // The digest is the digest. report.md is never substituted for it, however
-      // tempting the fallback — the operator ruled the two documents distinct.
+      // The digest is the digest: report.md is never substituted for it — two documents, never one.
       writeFileSync(join(home, "runs", "C--code-b", "done-1", "digest.md"), "# Digest\n\nDIGESTMARKER", "utf8");
       const both = await get("/api/runs/C--code-b/done-1/digest", { raw: true });
       assert.equal(both.status, 200);
