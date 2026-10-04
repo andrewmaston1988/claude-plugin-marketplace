@@ -131,7 +131,7 @@ This carves out the *resume*, nothing else. A manifest edited before re-running 
 
 1. **Discover models**: `swarm models` — lists launchable rows from enabled providers with descriptions and provider identity. Run FIRST so the manifest names models the account can launch right now. When the graded record has rows, read `swarm perf --overall` and `swarm cost` together and seat from the frontier. When a job needs a capability class no frontier model has shown — cross-file architectural reasoning or subtle synthesis — seat the matching Claude tier. With no graded record, seat from the descriptions `swarm models` prints.
 2. **Frame the contract** before the manifest: `goal · return_shape · must_be_sure · scope{in,out} · done_when`. scope → per-leaf prompts and file scopes; must_be_sure → `digest.instructions`; done_when → you check it post-run.
-3. **Author the manifest** (schema below) and offer it through the gate above.
+3. **Author the manifest** (schema below) and offer it through the gate above. Name the file `<subject>-<action>.json` and every task id `<action>-<target>`, in whole words — `tray-singleton-review` / `find-correctness`, not `lserev` / `rv-correctness`; no commit SHAs, no private abbreviations, and never `manifest` in a filename.
 4. **Validate**: `swarm validate <manifest.json>` — id/dep/governance/effort/context-fit errors surface now, not after a background wait. With `grading.enabled` on it also prints a `seats:` block after the estimate — the graded record (scores, `n`, cost band, frontier verdict) of every model the manifest seats, plus the launchable ones it does not. Read it as the record the seating was decided on; it states evidence and never judges — `n<20` and `never graded` are the seating rule's own terms, not warnings.
 5. **Run**: dispatch from the repo the work belongs to and pass the manifest by absolute path (`cd <repo>; swarm run "<abs manifest path>"`) — the run is filed under that repo's git toplevel, and a cwd outside any repo, or a repo outside `provider.allowedRoots`, is refused. `swarm run <manifest.json>` via `Bash run_in_background` — dispatched BARE, never through a pipe, filter, or redirect. Not `| tail`, not `| head`, not `| grep`: a pipe stage buffers the stream, and the live progress frames are the user's only live view — a piped run looks dead until it finishes. "Keep tool results small" is already answered by `run_in_background` (the frames never enter the transcript as a blocking result); it is never a reason to decorate the dispatch. The completion notification is the "run finished" signal; if the host reaped that wrapper (low memory) and no notice ever arrives, dispatch `swarm wait <resultsDir>` with `run_in_background` — it blocks until the run settles, prints the final roster, and gives you that notice.
    **The engine prints `resultsDir:` and a ready-made `watch:` line at dispatch. COPY THEM — never reconstruct a run directory from the manifest name.** The default is `<stem>-1`, and `--force` re-executes into that SAME directory rather than minting a `<stem>-2`; a cached re-run mints nothing either. A session that guessed instead of copying published `…/p5-review-2` — a path that has never existed — as the user's watch target. Hand the user the printed `watch:` line for a separate terminal and copy it to their clipboard (always absolute: a relative path resolves against their terminal's cwd and fails with "no run.log").
@@ -210,11 +210,11 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
 
 ```json
 {
-  "resultsDir": null,                           // OMIT - default ~/.swarm/runs/<encoded-repo-toplevel>/<stem>-<n>/ keeps runs out of the repo entirely
+  "resultsDir": null,                           // OMIT - default ~/.swarm/runs/<encoded-repo-toplevel>/<stem>-<n>/ keeps runs out of the repo entirely; <stem> is the manifest filename — name it <subject>-<action>
   "concurrency": 4,                           // optional; at most the config ceiling (concurrency in ~/.swarm/config.json) — higher fails validate
   "cwd": "C:/code/somerepo",                  // optional; every task runs as if swarm were launched here (relative: against the launch dir) — the run is filed under its repo
   "tasks": [{
-    "id": "scan-a",                            // unique, filename-safe
+    "id": "verify-sites",                      // <action>-<target>, whole words: find-correctness, not rv-correctness
     "prompt": "…",
     "provider": "ollama", "model": "glm-5.2:cloud",                  // required; the full model id (claude-opus-5, never "opus")
     "effort": "medium",                        // optional; defaults to the model's declared default or medium; validated when the provider declares levels
@@ -231,10 +231,10 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
     "timeoutMs": 3600000,
     "settings": {"env": {"CLAUDE_CODE_DISABLE_1M_CONTEXT": "0"}},   // optional; per-leaf override of disable1mContext (beats the config default and the user settings.json env block)
     "leafGuard": false,                        // optional; the only accepted value — opts this task out of its matching projects[].hooks.preToolUse entry (~/.swarm/config.json)
-    "after": ["scan-b"],                       // dependencies
-    "forEach": { "from": "scan-b", "path": "sites", "maxItems": 30 },  // clone this leaf per array item — swarm:executing-swarms
-    "when": { "from": "scan-b", "expr": "length(value) > 20" },        // run only if true; else completes as skipped
-    "compute": "unique_by(deps['scan-b'].sites, 'file')",              // agentless expression step — replaces model+prompt
+    "after": ["find-sites"],                   // dependencies
+    "forEach": { "from": "find-sites", "path": "sites", "maxItems": 30 },  // clone this leaf per array item — swarm:executing-swarms
+    "when": { "from": "find-sites", "expr": "length(value) > 20" },        // run only if true; else completes as skipped
+    "compute": "unique_by(deps['find-sites'].sites, 'file')",              // agentless expression step — replaces model+prompt
     "returns": { "type": "object", "required": ["sites"] },            // schema-validated output (see Schema-guaranteed leaf output)
     "mustRead": ["principles.md", { "path": "shard.diff", "lines": [[1, 1000]] }]  // engine proves the leaf Read these from its transcript (see manifest-fields.md)
   }],

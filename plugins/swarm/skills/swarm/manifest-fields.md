@@ -173,7 +173,7 @@ A leaf with `mustRead` must prove, from its OWN transcript, that it read the fil
 {
   "tasks": [
     {
-      "id": "review-arch",
+      "id": "review-architecture",
       "prompt": "Review the scheduler for architectural defects.",
       "provider": "claude", "model": "claude-opus-5",
       "allowedTools": "Read,Grep,Glob",

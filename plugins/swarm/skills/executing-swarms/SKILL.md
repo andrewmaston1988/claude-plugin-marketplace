@@ -153,9 +153,9 @@ If you cannot find the answer, say so in one line — do not expand scope.
 
 ```json
 { "tasks": [
-    { "id": "auth",    "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "Your single job: where is session token expiry enforced?\nFile scope: src/auth/**\nReturn your findings as ≤10 bullet points: name, file path, line number, one-line description. No prose. If you cannot find the answer, say so in one line — do not expand scope." },
-    { "id": "session", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…same shape, session-store cluster…" },
-    { "id": "api",     "provider": "ollama", "model": "glm-5.2:cloud",    "prompt": "…same shape, API-layer cluster…" }
+    { "id": "auth",            "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "Your single job: where is session token expiry enforced?\nFile scope: src/auth/**\nReturn your findings as ≤10 bullet points: name, file path, line number, one-line description. No prose. If you cannot find the answer, say so in one line — do not expand scope." },
+    { "id": "session",         "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…same shape, session-store cluster…" },
+    { "id": "find-api-expiry", "provider": "ollama", "model": "glm-5.2:cloud",    "prompt": "…same shape, API-layer cluster…" }
   ],
   "digest": { "provider": "ollama", "model": "glm-5.2:cloud", "instructions": "must_be_sure: the expiry enforcement point, with file:line. PROVEN/OPEN ledger required." } }
 ```
@@ -175,18 +175,18 @@ An explicit `allowedTools` list replaces the default; name `Skill` and `mcp__<se
 
 ```json
 { "tasks": [
-    { "id": "p1", "provider": "ollama", "model": "glm-5.2:cloud", "workspace": "feat",
+    { "id": "implement-phase-1", "provider": "ollama", "model": "glm-5.2:cloud", "workspace": "feat",
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Phase 1: <scope>.\nCommit your work before you finish — the next link builds on your commits." },
 
-    { "id": "p1-review", "provider": "ollama", "model": "kimi-k2.7-code:cloud", "after": ["p1"],
+    { "id": "review-phase-1", "provider": "ollama", "model": "kimi-k2.7-code:cloud", "after": ["implement-phase-1"],
       "allowedTools": "Read,Grep,Glob,Bash",
       "prompt": "Review phase 1's commits. The chain's branch is the one ending in /feat — \`git branch --list '*/feat'\` names it; git log/diff it.\nReturn ONLY: (a) defects with file:line, (b) risks phase 2 must avoid. No prose." },
 
-    { "id": "p2", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["p1-review"],
+    { "id": "implement-phase-2", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["review-phase-1"],
       "workspace": "feat",
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "Phase 2: <scope>.\nThe phase-1 reviewer warned:\n{{result:p1-review}}\nFix what it flagged, then do phase 2. Commit before you finish." }
+      "prompt": "Phase 2: <scope>.\nThe phase-1 reviewer warned:\n{{result:review-phase-1}}\nFix what it flagged, then do phase 2. Commit before you finish." }
   ] }
 ```
 
@@ -196,9 +196,9 @@ An explicit `allowedTools` list replaces the default; name `Skill` and `mcp__<se
 - **A reviewer needs `Bash`, and `Bash` is a write tool** (`manifest.mjs:32`), so it gets a private tree of its own on repo HEAD. That is fine and costs nothing: a worktree shares the repo's refs, so `git log`/`git diff` reach the chain's branch from it, and a tree the reviewer never writes to is swept at collect. **"Reviewers get no write tools" is a convention about intent, not a confinement guarantee** — a leaf holding `Bash` can write anywhere, and withholding it would only stop the reviewer reading the commits it exists to review. What a reviewer must not do is name the chain's `workspace`: that would put it in the writers' tree and force it into their `after` ordering.
 - **Every implementing prompt must say "commit before you finish."** The engine never commits for a leaf. Uncommitted work still reaches the next link (same tree), but the history is what makes a failed link recoverable.
 - **The tree is collected once**, after the last link — so one entry in `worktreesKept`, with a diffstat spanning every phase.
-- **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix p2, re-run, and p3/p4 redo their work on the corrected base.
+- **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix implement-phase-2, re-run, and its successors redo their work on the corrected base.
 - **`forEach` cannot name a `workspace`** — clones are concurrent by construction, so each gets its own tree.
-- **A leaf that branches off the chain gets its own tree, seeded by an `integrate` node.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their workspace — sharing demands total ordering, which would force a false dependency. Give it its own tree (just write tools, no `workspace`) and put an agentless `integrate` node before it: `{ "id": "seed-docs", "after": ["p1"], "integrate": { "into": "docs", "from": ["p1"] } }` creates the `docs` tree and merges `p1`'s commits into it. Name the last link that WRITES, never the reviewer between them.
+- **A leaf that branches off the chain gets its own tree, seeded by an `integrate` node.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their workspace — sharing demands total ordering, which would force a false dependency. Give it its own tree (just write tools, no `workspace`) and put an agentless `integrate` node before it: `{ "id": "seed-docs", "after": ["implement-phase-1"], "integrate": { "into": "docs", "from": ["implement-phase-1"] } }` creates the `docs` tree and merges `implement-phase-1`'s commits into it. Name the last link that WRITES, never the reviewer between them.
 
 **How a verifier link works** — why a reviewer needs no write tools to report, and what breaks if you give it some: [references/topology.md](references/topology.md).
 
@@ -208,12 +208,12 @@ Same subject, diverse lenses, JSON verdicts; the digest presents agreement and d
 
 ```json
 { "tasks": [
-    { "id": "diff",        "provider": "claude", "model": "claude-haiku-4-5-20251001", "prompt": "…produce the diff under review as one result…" },
-    { "id": "security",    "provider": "ollama", "model": "glm-5.2:cloud",    "after": ["diff"],
-      "prompt": "Review the diff at {{resultPath:diff}} as a security reviewer. Return JSON {verdict, findings:[{severity, path, line, note}]}.",
-      "mustRead": ["{{resultPath:diff}}"] },
-    { "id": "performance", "provider": "ollama", "model": "minimax-m3:cloud", "effort": "high", "after": ["diff"], "prompt": "…performance lens, same JSON shape…" },
-    { "id": "api-design",  "provider": "claude", "model": "claude-sonnet-5",           "after": ["diff"], "prompt": "…API-design lens, same JSON shape…" }
+    { "id": "produce-diff", "provider": "claude", "model": "claude-haiku-4-5-20251001", "prompt": "…produce the diff under review as one result…" },
+    { "id": "security",     "provider": "ollama", "model": "glm-5.2:cloud",    "after": ["produce-diff"],
+      "prompt": "Review the diff at {{resultPath:produce-diff}} as a security reviewer. Return JSON {verdict, findings:[{severity, path, line, note}]}.",
+      "mustRead": ["{{resultPath:produce-diff}}"] },
+    { "id": "performance",  "provider": "ollama", "model": "minimax-m3:cloud", "effort": "high", "after": ["produce-diff"], "prompt": "…performance lens, same JSON shape…" },
+    { "id": "api-design",   "provider": "claude", "model": "claude-sonnet-5",           "after": ["produce-diff"], "prompt": "…API-design lens, same JSON shape…" }
   ],
   "digest": { "provider": "ollama", "model": "glm-5.2:cloud", "instructions": "Where judges disagree, present both sides — do not average verdicts." } }
 ```
@@ -224,25 +224,25 @@ A run may narrow to one task and widen again:
 
 ```json
 { "tasks": [
-    { "id": "survey-a", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question A…" },
-    { "id": "survey-b", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question B…" },
+    { "id": "survey-auth", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question A…" },
+    { "id": "survey-session", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question B…" },
 
-    { "id": "helper", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["survey-a", "survey-b"],
+    { "id": "helper", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["survey-auth", "survey-session"],
       "workspace": "feat", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "Read {{resultPath:survey-a}} and {{resultPath:survey-b}}. Write the helper. Commit before you finish.",
-      "mustRead": ["{{resultPath:survey-a}}", "{{resultPath:survey-b}}"] },
+      "prompt": "Read {{resultPath:survey-auth}} and {{resultPath:survey-session}}. Write the helper. Commit before you finish.",
+      "mustRead": ["{{resultPath:survey-auth}}", "{{resultPath:survey-session}}"] },
 
     { "id": "seed-x", "after": ["helper"], "integrate": { "into": "migrate-x", "from": ["helper"] } },
     { "id": "seed-y", "after": ["helper"], "integrate": { "into": "migrate-y", "from": ["helper"] } },
 
-    { "id": "migrate-x", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-x", "survey-a"],
+    { "id": "migrate-x", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-x", "survey-auth"],
       "workspace": "migrate-x", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "…migrate every site in {{resultPath:survey-a}}. Commit before you finish.",
-      "mustRead": ["{{resultPath:survey-a}}"] },
-    { "id": "migrate-y", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-y", "survey-b"],
+      "prompt": "…migrate every site in {{resultPath:survey-auth}}. Commit before you finish.",
+      "mustRead": ["{{resultPath:survey-auth}}"] },
+    { "id": "migrate-y", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-y", "survey-session"],
       "workspace": "migrate-y", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish.",
-      "mustRead": ["{{resultPath:survey-b}}"] },
+      "prompt": "…migrate every site in {{resultPath:survey-session}}. Commit before you finish.",
+      "mustRead": ["{{resultPath:survey-session}}"] },
 
     { "id": "join", "after": ["migrate-x", "migrate-y"],
       "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
