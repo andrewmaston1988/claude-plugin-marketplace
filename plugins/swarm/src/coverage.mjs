@@ -22,7 +22,7 @@ const samePath = (a, b) => {
   return win32() ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
 };
 
-// [{ file, offset, limit }] | null. null = unsupported runner or an unparseable
+// [{ file, offset, limit } | { file, unverifiable: true }] | null. null = unsupported runner or an unparseable
 // transcript (zero assistant events in non-empty text) — the caller treats null
 // as a total miss, never as "read nothing, so an empty requirement is complete".
 // `cwd` is the leaf's own, for a codex command that names a relative path.
@@ -63,7 +63,7 @@ export function parseReadCalls(text, runner, { cwd } = {}) {
 // Codex has no Read tool: a leaf reads with a shell command, and the transcript
 // records it as an item.completed / command_execution event carrying `command`,
 // `exit_code` and `aggregated_output`. The same [{file, offset, limit}] windows
-// come out, so checkCoverage and everything downstream stay shared.
+// come out (plus `unverifiable` entries for an over-cap multi-statement read), so checkCoverage and everything downstream stay shared.
 
 // Codex middle-truncates a command's output before the MODEL sees it, so
 // `aggregated_output` (the event field) is not what the model read: inside this
@@ -90,11 +90,13 @@ function parseCodexReadCalls(text, cwd) {
     // Literal `$name = '…'` assignments in statement order: a Join-Path resolves only
     // against what was assigned BEFORE it.
     const vars = new Map();
+    let emitters = 0;
     // A pipe or an output redirect means the model saw another program's output or a
     // file's, never this one's. `2>&1` merges streams and is neither, so it is stripped
     // BEFORE the chain split — the `&` inside it would otherwise cut the command in two.
-    for (const raw of codexPipelines(payload.replace(/\d*>&\d+/g, ""))) {
-      const pipeline = raw.trim();
+    for (const statement of codexPipelines(payload.replace(/\d*>&\d+/g, ""))) {
+      const pipeline = statement.trim();
+      if (!pipeline) continue;
       const assign = /^\$(\w+)\s*=\s*([\s\S]*)$/.exec(pipeline);
       if (assign) {
         const lit = /^(?:'([^']*)'|"([^"$]*)")$/.exec(assign[2].trim());
@@ -102,6 +104,7 @@ function parseCodexReadCalls(text, cwd) {
         else vars.delete(assign[1].toLowerCase());
         continue;
       }
+      emitters++;
       if (pipeline.includes("|") || pipeline.includes(">")) continue;
       const resolved = resolveJoinPaths(pipeline, vars);
       const spec = resolved && codexReadSpec(resolved);
@@ -110,10 +113,10 @@ function parseCodexReadCalls(text, cwd) {
     }
     if (!specs.length) continue;
     const output = String(item.aggregated_output ?? "");
-    // One command's output is shared by every segment, so the cap rules on the
-    // command: past it, only a lone read's bytes can be told apart. The read happened
-    // but cannot be proven, so it is labelled, never credited.
-    if (specs.length > 1 && Buffer.byteLength(output, "utf8") > CODEX_MODEL_OUTPUT_BYTES) {
+    // One command's output is shared by every statement that emits, read or not, so the
+    // cap rules on the command: past it, only a lone emitter's bytes can be told apart.
+    // The read happened but cannot be proven, so it is labelled, never credited.
+    if (emitters > 1 && Buffer.byteLength(output, "utf8") > CODEX_MODEL_OUTPUT_BYTES) {
       for (const spec of specs) reads.push({ file: codexPath(spec.path, cwd), unverifiable: true });
       continue;
     }

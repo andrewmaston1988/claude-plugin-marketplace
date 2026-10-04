@@ -106,6 +106,21 @@ test("codex shapes: an over-cap multi-read marks each path unverifiable, and eve
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test("codex shapes: over cap, a lone read beside a non-read statement is unverifiable — its bytes may sit outside both halves", () => {
+  const dir = tmp();
+  try {
+    const A = writeLines(dir, "a.mjs", 5);
+    const piped = `Get-ChildItem C:\\ -Recurse | Select-Object -First 3000\nGet-Content -Raw '${dbl(A)}'`;
+    deepEqual(readsOf(transcript(event(pwshRun(piped), { output: OVER_CAP })), dir), [{ file: A, unverifiable: true }], "newline + pipe");
+    const chained = `Get-ChildItem C:\\ -Recurse | Select-Object -First 3000; Get-Content -Raw '${dbl(A)}'`;
+    deepEqual(readsOf(transcript(event(pwshRun(chained), { output: OVER_CAP })), dir), [{ file: A, unverifiable: true }], "; + pipe");
+    const plain = `Write-Output start; Get-Content -Raw '${dbl(A)}'`;
+    deepEqual(readsOf(transcript(event(pwshRun(plain), { output: OVER_CAP })), dir), [{ file: A, unverifiable: true }], "unrecognised statement");
+    const assigned = `$root='${dbl(dir)}'; Get-Content -Raw (Join-Path $root 'a.mjs')`;
+    ok(!readsOf(transcript(event(pwshRun(assigned), { output: OVER_CAP })), dir)[0].unverifiable, "an assignment emits nothing: a lone read stays windowed");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("codex shapes: computeCoverage — an unverifiable entry alone leaves the file incomplete, never a NaN-window complete", () => {
   const dir = tmp();
   try {

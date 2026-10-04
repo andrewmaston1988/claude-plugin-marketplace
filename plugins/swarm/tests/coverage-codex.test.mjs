@@ -14,7 +14,7 @@ import { loadManifest } from "./helpers/repo-io.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
 import { fakeSpawnFactory, makeIo, usageEnv, codexReading } from "./helpers/fake-io.mjs";
-import { dbl, cmdRun, bashRun, event, transcript, readsOf, PS_EXE, pwshRun, psRun } from "./helpers/codex-events.mjs";
+import { dbl, cmdRun, bashRun, event, transcript, readsOf, pwshRun, psRun } from "./helpers/codex-events.mjs";
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/coverage/", import.meta.url));
 const fixture = (f) => readFileSync(join(FIXTURES, f), "utf8");
