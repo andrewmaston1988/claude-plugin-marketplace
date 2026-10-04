@@ -6,17 +6,13 @@
 // Exits 1 when any |delta| > TOL_PX; removes its temp dirs, kills only its own browser.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../src/serve/server.mjs";
+import { connect, devtoolsPort, evaluate, findBrowser, getJson, pageTarget, sleep } from "./lib/cdp.mjs";
 
 const TOL_PX = 1;
-const EDGE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
-const CHROME = [
-  "C:/Program Files/Google/Chrome/Application/chrome.exe",
-  "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-];
 // The three shapes the fix must hold in: a card at desktop width, the same card
 // on a phone, and the compact list (a shorter value and a smaller trophy, so its
 // drift is its own).
@@ -74,24 +70,6 @@ const MEASURE = `(() => {
   });
 })()`;
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function arg(name) {
-  const i = process.argv.indexOf(name);
-  return i >= 0 ? process.argv[i + 1] : null;
-}
-
-function findBrowser() {
-  const explicit = arg("--browser") || process.env.SWARM_PROBE_BROWSER;
-  for (const c of [explicit, EDGE, ...CHROME].filter(Boolean)) if (existsSync(c)) return c;
-  for (const name of ["chrome", "google-chrome", "chromium"]) {
-    const r = spawnSync(process.platform === "win32" ? "where" : "which", [name], { encoding: "utf8" });
-    const first = (r.stdout || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
-    if (first && existsSync(first)) return first;
-  }
-  throw new Error(`no browser found — pass --browser <path>`);
-}
-
 // ── the fixture home ────────────────────────────────────────────────────────
 function seedHome() {
   const home = mkdtempSync(join(tmpdir(), "swarm-rank-"));
@@ -105,64 +83,6 @@ function seedHome() {
     weeklyModels: MODELS.filter((m) => m.share != null).map((m) => ({ model: m.model.replace(/:cloud$/, ""), requests: REQUESTS, meterSharePct: m.share })),
   }) + "\n", "utf8");
   return home;
-}
-
-// ── the DevTools client ─────────────────────────────────────────────────────
-function connect(url) {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
-    const waiting = new Map();
-    let nextId = 1;
-    ws.addEventListener("message", (e) => {
-      const msg = JSON.parse(e.data);
-      const w = msg.id != null && waiting.get(msg.id);
-      if (!w) return;
-      waiting.delete(msg.id);
-      msg.error ? w.reject(new Error(msg.error.message)) : w.resolve(msg.result);
-    });
-    ws.addEventListener("error", () => reject(new Error(`websocket failed: ${url}`)));
-    ws.addEventListener("open", () => resolve({
-      send(method, params = {}) {
-        const id = nextId++;
-        return new Promise((res, rej) => { waiting.set(id, { resolve: res, reject: rej }); ws.send(JSON.stringify({ id, method, params })); });
-      },
-      close() { try { ws.close(); } catch {} },
-    }));
-  });
-}
-
-const getJson = async (url) => (await fetch(url)).json();
-
-// The browser writes its port here once the debug socket is up (port 0 = pick one).
-async function devtoolsPort(userDataDir, child) {
-  const file = join(userDataDir, "DevToolsActivePort");
-  for (let i = 0; i < 200; i++) {
-    if (existsSync(file)) {
-      const port = Number(readFileSync(file, "utf8").split("\n")[0]);
-      if (port) return port;
-    }
-    if (child.exitCode != null) throw new Error(`browser exited early (code ${child.exitCode})`);
-    await sleep(100);
-  }
-  throw new Error("browser never wrote DevToolsActivePort");
-}
-
-async function pageTarget(port) {
-  for (let i = 0; i < 100; i++) {
-    try {
-      const list = await getJson(`http://127.0.0.1:${port}/json/list`);
-      const page = list.find((t) => t.type === "page");
-      if (page?.webSocketDebuggerUrl) return page;
-    } catch {}
-    await sleep(100);
-  }
-  throw new Error("no page target appeared");
-}
-
-async function evaluate(client, expression) {
-  const r = await client.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || "evaluate threw");
-  return r.result.value;
 }
 
 async function waitFor(client, expression, what) {
