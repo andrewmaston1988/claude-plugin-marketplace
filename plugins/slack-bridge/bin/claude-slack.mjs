@@ -200,9 +200,10 @@ if (cmd === "import-sessions") {
     setTimeout(() => process.exit(1), 150);
     return;
   }
-  const invalid = Object.entries(raw).filter(([, v]) => typeof v !== "string");
+  const { isSessionValue } = await import("../src/core/session-value.mjs");
+  const invalid = Object.entries(raw).filter(([, v]) => !isSessionValue(v));
   if (invalid.length > 0) {
-    process.stderr.write(`import-sessions: ${invalid.length} entry/entries have non-string values — aborting\n`);
+    process.stderr.write(`import-sessions: ${invalid.length} entry/entries are neither a session-id string nor an object of string fields — aborting\n`);
     process.exitCode = 1;
     setTimeout(() => process.exit(1), 150);
     return;

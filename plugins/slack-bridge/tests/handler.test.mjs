@@ -153,7 +153,7 @@ test("handler — posts placeholder on valid message", async () => {
   const log = makeLog();
   const web = makeWeb({ postTs: "placeholder-ts" });
   const queue = createQueue({ log });
-  const store = makeStore();
+  const store = makeStore({ C1: { model: "sonnet" } });
   const config = { slack: {}, claude: { cwd: "/tmp", timeout: 100 } };
 
   await handleMessage({
@@ -165,6 +165,7 @@ test("handler — posts placeholder on valid message", async () => {
   const postCalls = web.calls.filter(([type]) => type === "post");
   assert.ok(postCalls.length >= 1, "should have posted a placeholder");
   assert.equal(postCalls[0][1].channel, "C1");
+  assert.equal(postCalls[0][1].attachments?.[0]?.text, "_hello world_");
 });
 
 // safeUpdate tests

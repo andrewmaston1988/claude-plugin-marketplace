@@ -25,11 +25,18 @@ export function clearSession(store, key) {
 // switch across that line drops the channel's session and its threads' sessions.
 export function setChannelModel(store, channel, model) {
   const prev = channelModel(store, channel);
-  if (prev && isClaudeModel(prev) !== isClaudeModel(model)) {
+  if (!prev || isClaudeModel(prev) !== isClaudeModel(model)) {
     for (const key of Object.keys(store.all())) {
       if (key.startsWith(`${channel}:`)) clearSession(store, key);
     }
     clearSession(store, channel);
   }
   writeSession(store, channel, { model });
+}
+
+// A store value is a legacy session-id string or an object of string fields.
+export function isSessionValue(v) {
+  if (typeof v === "string") return true;
+  if (!v || typeof v !== "object" || Array.isArray(v)) return false;
+  return Object.values(v).every(f => typeof f === "string");
 }

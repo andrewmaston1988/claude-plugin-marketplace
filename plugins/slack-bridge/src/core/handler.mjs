@@ -111,8 +111,8 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
       brokerDown = alive === null;
     }
 
-    // An unclaimed channel spawns nothing until /model picks its model. A claim held
-    // through a broker outage is still a live session, so it skips the gate.
+    // No model, no spawn: /model must pick one first. Exception: a claimed channel whose
+    // broker is unreachable belongs to a live session, so it spawns modelless rather than go silent.
     const model = channelModel(store, channel);
     if (!model && !brokerDown) {
       const hint = { channel, text: MODEL_HINT };
@@ -186,7 +186,8 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
       });
 
       activeProcs.delete(channel);
-      if (sessionId) writeSession(store, key, { sessionId });
+      // A /model switch mid-run already cleared this key; the old backend's session must not return.
+      if (sessionId && channelModel(store, channel) === model) writeSession(store, key, { sessionId });
 
       // .py canon (slack_bridge.py:685-688): stop the heartbeat AND join it before
       // posting the reply, so a final heartbeat tick can't land chatUpdate(text:"")

@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { handleMessage, startBridge } from "../src/core/handler.mjs";
 import { createQueue } from "../src/core/queue.mjs";
+import { setChannelModel } from "../src/core/session-value.mjs";
 import { delay, makeLog, makeStore, makeWeb, makeSocket } from "./fakes.mjs";
 
 const HINT = "No model set for this channel — type /model <name>, e.g. /model sonnet.";
@@ -14,10 +15,9 @@ function makeRunClaude() {
 }
 
 let n = 0;
-async function send({ store, payload = {}, remote, config = { slack: {}, claude: { cwd: "/tmp", timeout: 100 } } }) {
+async function send({ store, payload = {}, remote, config = { slack: {}, claude: { cwd: "/tmp", timeout: 100 } }, runClaude = makeRunClaude() }) {
   const log = makeLog();
   const web = makeWeb();
-  const runClaude = makeRunClaude();
   await handleMessage({
     web, store, queue: createQueue({ log }), config, log, remote,
     payload: { type: "message", channel: "C1", text: "hi", client_msg_id: `mg-${++n}`, ...payload },
@@ -70,6 +70,13 @@ test("spawn — stores the session as an object, keeping the model", async () =>
   const store = makeStore({ C1: { model: "sonnet" } });
   await send({ store });
   assert.deepEqual(store._data.C1, { model: "sonnet", sessionId: "S-new" });
+});
+
+test("spawn — a /model backend switch mid-run keeps the finished run's session out of the store", async () => {
+  const store = makeStore({ C1: { model: "sonnet" } });
+  const runClaude = async () => { setChannelModel(store, "C1", "gpt-x"); return { result: "ok", sessionId: "S-new" }; };
+  await send({ store, runClaude });
+  assert.deepEqual(store._data.C1, { model: "gpt-x" });
 });
 
 test("spawn — a thread session inherits the channel model and resumes its own session", async () => {
