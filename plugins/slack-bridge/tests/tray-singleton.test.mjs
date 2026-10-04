@@ -35,6 +35,14 @@ test("mutex name is the sha256 of the lowercased full PID path, stable across sp
     assert.notEqual(printMutexName(base.replace("claude-slack.pid", "other.pid")), expected);
   });
 
+test("a tray started without -PidFile refuses rather than sharing a hashless mutex name",
+  { skip: shell ? false : "no PowerShell on PATH" }, () => {
+    const r = spawnSync(shell, ["-NoProfile", "-NonInteractive", "-File", trayScript, "-PrintMutexName"],
+      { encoding: "utf8", windowsHide: true, timeout: 15_000 });
+    assert.notEqual(r.status, 0, `expected a non-zero exit, got ${r.status}; stdout: ${r.stdout}`);
+    assert.doesNotMatch(r.stdout, /claude-slack-tray-\s*$/);
+  });
+
 function launchTray(tmp) {
   return spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden",
     "-File", trayScript,

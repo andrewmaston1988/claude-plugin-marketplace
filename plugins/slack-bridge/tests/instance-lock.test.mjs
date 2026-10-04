@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { acquireInstanceLock, lockPath } from "../src/instance-lock.mjs";
+import { EventEmitter } from "node:events";
+import { acquireInstanceLock, lockPath, probeInstance } from "../src/instance-lock.mjs";
 
 const binPath = fileURLToPath(new URL("../bin/claude-slack.mjs", import.meta.url));
 
@@ -25,6 +26,20 @@ test("a second acquire on one stateDir is refused; release frees it", async (t) 
   await first.release();
   const again = await acquireInstanceLock({ stateDir });
   await again.release();
+});
+
+test("probeInstance: a held lock answers, an absent one does not", async (t) => {
+  const stateDir = tmpDir(t, "probe-");
+  assert.equal(await probeInstance({ stateDir }), false);
+  const lock = await acquireInstanceLock({ stateDir });
+  assert.equal(await probeInstance({ stateDir }), true);
+  await lock.release();
+});
+
+// Refusing a start is recoverable; reclaiming a slow live bridge's socket is not.
+test("probeInstance: a connect that never resolves counts as alive", async () => {
+  const silent = Object.assign(new EventEmitter(), { destroy() {} });
+  assert.equal(await probeInstance({ stateDir: "unused", _net: { connect: () => silent } }), true);
 });
 
 test("different stateDirs lock independently", async (t) => {

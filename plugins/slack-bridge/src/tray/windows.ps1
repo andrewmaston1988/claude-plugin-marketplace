@@ -11,6 +11,8 @@ param(
 )
 
 # One tray per PID file per logon session. Local\ is deliberate: each logon owns its own desktop.
+# Without a PID file every tray would share one hashless name and block each other.
+if (-not $PidFile) { [Console]::Error.WriteLine("windows.ps1: -PidFile is required"); exit 2 }
 $full = [System.IO.Path]::GetFullPath($PidFile)
 $hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(
   [Text.Encoding]::UTF8.GetBytes($full.ToLowerInvariant()))).Replace('-', '').Substring(0, 16).ToLowerInvariant()
