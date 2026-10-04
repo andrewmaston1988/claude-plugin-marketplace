@@ -319,12 +319,17 @@ if (rest.includes("--daemon") || rest.includes("-d")) {
   const { spawn: _sp } = await import("node:child_process");
   const configArgDaemon = configFlag ?? paths.configFile;
 
-  const child = _sp(process.execPath, [entry, "start", "--config", configArgDaemon], {
-    detached: true,
-    stdio: "ignore",
-    env: { ...process.env },
-  });
-  child.unref();
+  // A live bridge answers on the lock: skip the fork, but still ensure a tray.
+  const { probeInstance } = await import("../src/instance-lock.mjs");
+  let child = null;
+  if (!(await probeInstance({ stateDir: paths.stateDir }))) {
+    child = _sp(process.execPath, [entry, "start", "--config", configArgDaemon], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env },
+    });
+    child.unref();
+  }
 
   if (process.platform === "win32") {
     const trayScript = _ftu(new URL("../src/tray/windows.ps1", import.meta.url));
@@ -353,9 +358,22 @@ if (rest.includes("--daemon") || rest.includes("-d")) {
     tray.unref();
   }
 
-  process.stdout.write(`Bridge started (PID ${child.pid})\n`);
+  process.stdout.write(child
+    ? `Bridge started (PID ${child.pid})\n`
+    : `Bridge already running (PID ${_readPid(paths) ?? "unknown"})\n`);
   process.exitCode = 0;
   setTimeout(() => process.exit(0), 150);
+  return;
+}
+
+// Taken before the logger, broker, control port and PID file: a refused start leaves no trace.
+const { acquireInstanceLock } = await import("../src/instance-lock.mjs");
+try {
+  await acquireInstanceLock({ stateDir: paths.stateDir });
+} catch (e) {
+  if (e.code !== "ALREADY_RUNNING") throw e;
+  process.stderr.write(`claude-slack: a bridge is already running for ${paths.stateDir} (PID ${_readPid(paths) ?? "unknown"})\n`);
+  setTimeout(() => process.exit(1), 150);
   return;
 }
 

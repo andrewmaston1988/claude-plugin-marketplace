@@ -6,8 +6,24 @@ param(
   [string]$EntryPath,
   [string]$ConfigPath,
   [string]$NodeExe,
-  [string]$LogDir = ""
+  [string]$LogDir = "",
+  [switch]$PrintMutexName
 )
+
+# One tray per PID file per logon session. Local\ is deliberate: each logon owns its own desktop.
+$full = [System.IO.Path]::GetFullPath($PidFile)
+$hash = [BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash(
+  [Text.Encoding]::UTF8.GetBytes($full.ToLowerInvariant()))).Replace('-', '').Substring(0, 16).ToLowerInvariant()
+$mutexName = "Local\claude-slack-tray-$hash"
+if ($PrintMutexName) { Write-Output $mutexName; exit 0 }
+
+# Fails open: a mutex error must never cost the operator their only tray.
+$mutex = $null
+try {
+  $created = $false
+  $mutex = [System.Threading.Mutex]::new($false, $mutexName, [ref]$created)
+  if (-not $created) { $mutex.Dispose(); exit 0 }
+} catch { $mutex = $null }
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -107,3 +123,4 @@ $timer.Start()
 $timer.Stop()
 $tray.Visible = $false
 $tray.Dispose()
+if ($mutex) { $mutex.Dispose() }
