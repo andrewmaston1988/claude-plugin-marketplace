@@ -87,19 +87,36 @@ function parseCodexReadCalls(text, cwd) {
     const payload = codexShellPayload(String(item.command || ""));
     if (!payload) continue;
     const specs = [];
+    // Literal `$name = '…'` assignments in statement order: a Join-Path resolves only
+    // against what was assigned BEFORE it.
+    const vars = new Map();
     // A pipe or an output redirect means the model saw another program's output or a
     // file's, never this one's. `2>&1` merges streams and is neither, so it is stripped
     // BEFORE the chain split — the `&` inside it would otherwise cut the command in two.
-    for (const pipeline of codexPipelines(payload.replace(/\d*>&\d+/g, ""))) {
+    for (const raw of codexPipelines(payload.replace(/\d*>&\d+/g, ""))) {
+      const pipeline = raw.trim();
+      const assign = /^\$(\w+)\s*=\s*([\s\S]*)$/.exec(pipeline);
+      if (assign) {
+        const lit = /^(?:'([^']*)'|"([^"$]*)")$/.exec(assign[2].trim());
+        if (lit) vars.set(assign[1].toLowerCase(), lit[1] ?? lit[2]);
+        else vars.delete(assign[1].toLowerCase());
+        continue;
+      }
       if (pipeline.includes("|") || pipeline.includes(">")) continue;
-      const spec = codexReadSpec(pipeline);
-      if (spec) specs.push(spec);
+      const resolved = resolveJoinPaths(pipeline, vars);
+      const spec = resolved && codexReadSpec(resolved);
+      // A `$var` or `(…)` path is computed at run time: fail closed, never credit it literally.
+      if (spec && !/^[$(]/.test(unquote(spec.path))) specs.push(spec);
     }
     if (!specs.length) continue;
     const output = String(item.aggregated_output ?? "");
     // One command's output is shared by every segment, so the cap rules on the
-    // command: past it, only a lone read's bytes can be told apart.
-    if (specs.length > 1 && Buffer.byteLength(output, "utf8") > CODEX_MODEL_OUTPUT_BYTES) continue;
+    // command: past it, only a lone read's bytes can be told apart. The read happened
+    // but cannot be proven, so it is labelled, never credited.
+    if (specs.length > 1 && Buffer.byteLength(output, "utf8") > CODEX_MODEL_OUTPUT_BYTES) {
+      for (const spec of specs) reads.push({ file: codexPath(spec.path, cwd), unverifiable: true });
+      continue;
+    }
     for (const spec of specs) {
       for (const w of codexWindows(output, spec)) {
         reads.push({ file: codexPath(spec.path, cwd), offset: w.offset, limit: w.limit });
@@ -125,19 +142,55 @@ function codexShellPayload(command) {
   if (!m) return null;
   const exe = (m[1] ?? m[2] ?? m[3] ?? "").replace(/\.(exe|cmd|bat|com)$/i, "").split(/[\\/]/).pop().toLowerCase();
   if (!CODEX_SHELLS.has(exe)) return null;
-  const payload = m[5].trim();
-  const q = payload[0];
-  return payload ? (q === '"' || q === "'") && payload.length > 1 && payload.endsWith(q) ? payload.slice(1, -1) : payload : null;
+  return shellWord(m[5].trim()) || null;
 }
 
-// cmd chains with & / &&, POSIX with `;`. Quote-aware so a path containing & survives.
+// Codex records the argv POSIX-quoted, so one argument arrives as concatenated
+// segments: `'…'` verbatim, `"…"` with only \" \\ \$ \` escaped. No `$` expansion.
+// An unterminated quote cannot be reconstructed → null.
+function shellWord(arg) {
+  let out = "";
+  for (let i = 0; i < arg.length; i++) {
+    if (arg[i] === "'") {
+      const end = arg.indexOf("'", i + 1);
+      if (end === -1) return null;
+      out += arg.slice(i + 1, end);
+      i = end;
+    } else if (arg[i] === '"') {
+      let j = i + 1;
+      for (; j < arg.length && arg[j] !== '"'; j++) {
+        if (arg[j] === "\\" && '"\\$`'.includes(arg[j + 1] ?? "x")) j++;
+        out += arg[j];
+      }
+      if (j >= arg.length) return null;
+      i = j;
+    } else out += arg[i];
+  }
+  return out;
+}
+
+// `(Join-Path $root '<lit>')` → the joined literal path, against the assignments made
+// so far; null when a variable is unknown, so the statement credits nothing.
+function resolveJoinPaths(pipeline, vars) {
+  let unknown = false;
+  const out = pipeline.replace(/\(\s*Join-Path\s+\$(\w+)\s+(?:'([^']*)'|"([^"]*)")\s*\)/gi, (_, name, sq, dq) => {
+    const base = vars.get(name.toLowerCase());
+    if (base === undefined) { unknown = true; return ""; }
+    const sep = base.includes("\\") ? "\\" : "/";
+    return `"${base.replace(/[\\/]+$/, "")}${sep}${(sq ?? dq).replace(/^[\\/]+/, "")}"`;
+  });
+  return unknown ? null : out;
+}
+
+// cmd chains with & / &&, POSIX with `;`, PowerShell also with a newline. Quote-aware
+// so a path containing & or a newline survives.
 function codexPipelines(payload) {
   const out = [];
   let cur = "", quote = null;
   for (const ch of payload) {
     if (quote) { if (ch === quote) quote = null; }
     else if (ch === '"' || ch === "'") quote = ch;
-    else if (ch === "&" || ch === ";") { out.push(cur); cur = ""; continue; }
+    else if (ch === "&" || ch === ";" || ch === "\n") { out.push(ch === "\n" ? cur.replace(/\r$/, "") : cur); cur = ""; continue; }
     cur += ch;
   }
   out.push(cur);
@@ -319,14 +372,18 @@ export function resolveMustRead(entries, { cwd, substitute = (s) => s, readFile 
 // Per required path the Read windows for that path are merged into an interval
 // union (adjacent windows join: a window ending at n and one starting at n+1),
 // then each required range must sit inside one merged interval.
+const UNVERIFIABLE_NOTE = ` (unverifiable: output past the ${CODEX_MODEL_OUTPUT_BYTES}-byte codex cap — read one file per command)`;
+
 export function checkCoverage(required, reads) {
   const missed = [];
   const gaps = [];
   let read = 0;
   for (const item of required) {
-    const windows = (reads || [])
-      .filter((r) => samePath(r.file, item.path))
-      .map((r) => [r.offset, r.offset + r.limit - 1]);
+    const mine = (reads || []).filter((r) => samePath(r.file, item.path));
+    // An unverifiable entry has no window: mapped, it is [undefined, NaN], and
+    // subtract() emits no gap on a NaN cursor — a silent false complete.
+    const windows = mine.filter((r) => !r.unverifiable).map((r) => [r.offset, r.offset + r.limit - 1]);
+    const note = mine.some((r) => r.unverifiable) ? UNVERIFIABLE_NOTE : "";
     const merged = mergeIntervals(windows);
     const uncovered = [];
     for (const [a, b] of item.ranges) uncovered.push(...subtract([a, b], merged));
@@ -334,9 +391,9 @@ export function checkCoverage(required, reads) {
     // Bare "<path>" ONLY when nothing of the file was read (whole-file entry);
     // otherwise per uncovered range, so the gap is legible and paging-checkable.
     if (item.whole && windows.length === 0) {
-      missed.push(item.path);
+      missed.push(item.path + note);
     } else {
-      for (const [a, b] of uncovered) missed.push(`${item.path}:${a}-${b}`);
+      for (const [a, b] of uncovered) missed.push(`${item.path}:${a}-${b}${note}`);
     }
     gaps.push({ path: item.path, ranges: uncovered });
   }
@@ -419,7 +476,7 @@ export function coverageErrorLines(gaps, { indexErrors = [], runner = "claude", 
 // OWN reader: a codex leaf has no Read tool.
 export function coverageRetryBlock(gaps, { indexErrors = [], runner = "claude", platform = process.platform } = {}) {
   const how = runner === "codex"
-    ? "Run the command shown for each of the following, exactly as stated"
+    ? "Run the command shown for each of the following, exactly as stated, one command per call"
     : "Read each of the following with the Read tool, exactly as stated";
   return `You did not read everything this task requires. ${how}, then give your corrected answer:` +
     `\n  - ${coverageErrorLines(gaps, { indexErrors, runner, platform }).join("\n  - ")}`;

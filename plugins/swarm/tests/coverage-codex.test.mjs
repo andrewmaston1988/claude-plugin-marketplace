@@ -181,9 +181,9 @@ test("codex: a whole-file dump past the model-visible cap covers head + tail onl
     const inside = readsOf(transcript(event(cmdRun(`type ${dbl(small)}`), { output: "x\n".repeat(100) })), dir);
     deepEqual(inside, [{ file: small, offset: 1, limit: 100 }]);
     // chained past the cap: every segment shares the one output, so no segment's bytes
-    // can be told apart — the whole command credits nothing
+    // can be told apart — the whole command credits nothing, each path only labelled unverifiable
     const chained = readsOf(transcript(event(cmdRun(`type ${dbl(F)} & type ${dbl(small)}`), { output: content })), dir);
-    deepEqual(chained, []);
+    deepEqual(chained, [{ file: F, unverifiable: true }, { file: small, unverifiable: true }]);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
