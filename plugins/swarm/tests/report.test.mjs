@@ -276,3 +276,50 @@ test("Codex integration: resume re-dispatches only the failed digest", async () 
     equal(r.digestFailed, false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+// ── HTML pages: the run renders its own readable pages ─────────────────
+
+test("integration: a digest run finishes with digest.html", async () => {
+  const dir = tmp();
+  try {
+    const p = planWith(dir, false);
+    await runPlan(p, CFG, makeIo(spawnFor(dir, { writesReport: false })));
+    ok(existsSync(join(p.resultsDir, "digest.html")), "a digest run must leave digest.html");
+    const html = readFileSync(join(p.resultsDir, "digest.html"), "utf8");
+    ok(html.includes("<title>run · digest</title>"), "the page is titled after the run");
+    ok(html.includes("Swarm digest · compressed handoff"), "the digest page carries the digest eyebrow");
+    ok(html.includes("DIGEST TEXT"), "the digest body is rendered");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: a report-mode run also gets report.html, rendered AFTER the footnote", async () => {
+  const dir = tmp();
+  try {
+    const p = planWith(dir, true);
+    await runPlan(p, CFG, makeIo(spawnFor(dir, { writesReport: true })));
+    ok(existsSync(join(p.resultsDir, "report.html")), "a report run must leave report.html");
+    const html = readFileSync(join(p.resultsDir, "report.html"), "utf8");
+    ok(html.includes("<title>run · report</title>"));
+    ok(html.includes("Both leaves ran."), "the report body is rendered");
+    ok(html.includes('class="prov"'), "the page is rendered after the engine appended the footnote");
+    ok(html.includes("scan-a"), "the footnote's leaf names render");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// digest.html pre-exists as a DIRECTORY: the digest page cannot land (rename
+// cannot replace a directory). The run must not care — the report page still
+// lands, digest.md is untouched, and the run reports clean. The injected
+// failure is the whole point: a broken page is a missing page, never a broken run.
+test("integration: a render failure never fails the run and never touches digest.md", async () => {
+  const dir = tmp();
+  try {
+    const p = planWith(dir, true);
+    mkdirSync(join(p.resultsDir, "digest.html"), { recursive: true });
+    const r = await runPlan(p, CFG, makeIo(spawnFor(dir, { writesReport: true })));
+
+    equal(r.digestFailed, false, "a render failure is not a digest failure");
+    equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "DIGEST TEXT");
+    ok(existsSync(join(p.resultsDir, "report.html")), "the healthy page still lands");
+    equal(existsSync(join(p.resultsDir, "digest.html.tmp")), false, "no half-written tmp left behind");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
