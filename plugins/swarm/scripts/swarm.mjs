@@ -39,7 +39,7 @@ const USAGE = `usage: swarm.mjs <command>
   wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
   prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
-  report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
+  report <resultsDir>        render the run's digest.md/report.md → digest.html/report.html (self-contained, theme-aware; backfill for old runs)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota | usage              provider utilization per limit window (exit 1 when Anthropic is exhausted)
   ollama-usage [--cookie '<value>']   ollama.com :cloud weekly-allowance meter (exit 1 when exhausted)
@@ -856,19 +856,19 @@ async function main() {
       }
       case "report": {
         if (!rest[0]) { err(USAGE); return 1; }
-        const { readFileSync, writeFileSync, existsSync, renameSync } = await import("node:fs");
-        const mdPath = join(rest[0], "report.md");
-        if (!existsSync(mdPath)) {
-          err(`swarm: no report.md in ${rest[0]} — report mode was not enabled for this run, or it has not finished.`);
+        const { renderRunPages } = await import("../src/md_to_html.mjs");
+        let written;
+        try {
+          written = renderRunPages(rest[0], { runName: basename(rest[0]) });
+        } catch (e) {
+          err(`swarm: ${e.message}`);
           return 1;
         }
-        const { mdToHtml } = await import("../src/md_to_html.mjs");
-        const html = mdToHtml(readFileSync(mdPath, "utf8"));
-        const htmlPath = join(rest[0], "report.html");
-        const tmp = htmlPath + ".tmp";
-        writeFileSync(tmp, html);
-        renameSync(tmp, htmlPath);
-        out(htmlPath);
+        if (!written.length) {
+          err(`swarm: no digest.md or report.md in ${rest[0]} — the run has not finished, or it wrote neither document.`);
+          return 1;
+        }
+        for (const p of written) out(p);
         return 0;
       }
       case "ask": {

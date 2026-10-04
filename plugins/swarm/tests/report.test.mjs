@@ -3,7 +3,7 @@
 // leaf writes report.md, the ENGINE prepends the provenance header to it, and the
 // agent-facing digest.md is unaffected either way.
 import { test } from "node:test";
-import { deepEqual, equal, ok } from "node:assert/strict";
+import { deepEqual, equal, match, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -14,6 +14,7 @@ import { buildDigestTask, scratchPath, DIGEST_ID } from "../src/digest.mjs";
 import { writeResult } from "../src/results.mjs";
 import { normalizeForCompare } from "../src/roots.mjs";
 import { addDirsOf, fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
+import { runCli } from "./helpers/cli.mjs";
 
 const SHIM = fileURLToPath(new URL("./shims/codex-shim.mjs", import.meta.url));
 
@@ -321,5 +322,33 @@ test("integration: a render failure never fails the run and never touches digest
     equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "DIGEST TEXT");
     ok(existsSync(join(p.resultsDir, "report.html")), "the healthy page still lands");
     equal(existsSync(join(p.resultsDir, "digest.html.tmp")), false, "no half-written tmp left behind");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── `swarm report`: the backfill for runs that predate engine rendering ─
+
+test("swarm report on a digest-only run writes digest.html and exits 0", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# Digest\n\n- one finding\n");
+    const r = runCli(["report", dir]);
+    equal(r.status, 0, r.stderr);
+    ok(existsSync(join(dir, "digest.html")), "the backfill writes the digest page");
+    ok(r.stdout.includes(join(dir, "digest.html")), "the written path is printed");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("swarm report errors only when it wrote nothing", () => {
+  const dir = tmp();
+  try {
+    const none = runCli(["report", dir]);
+    equal(none.status, 1, none.stdout);
+    match(none.stderr, /no digest\.md or report\.md/);
+
+    writeFileSync(join(dir, "report.md"), "# Report\n\nbody\n");
+    const one = runCli(["report", dir]);
+    equal(one.status, 0, one.stderr);
+    ok(existsSync(join(dir, "report.html")));
+    ok(one.stdout.includes(join(dir, "report.html")));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
