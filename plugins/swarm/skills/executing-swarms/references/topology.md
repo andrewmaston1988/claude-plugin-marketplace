@@ -6,9 +6,9 @@ themselves are in `SKILL.md`; what follows is the field-by-field detail those sh
 
 ## `{{result:}}` / `{{resultPath:}}` reach only a DIRECT dependency
 
-In a wide graph the task you want is often a grandparent — `migrate-x` needs the survey, but
-its `after` names only `helper`. Referencing it anyway fails validation; add the upstream id to
-`after` too (`["helper", "survey-a"]`). The extra edge changes no ordering, it declares what the
+In a wide graph the task you want is often a grandparent — `migrate-auth-sites` needs the survey, but
+its `after` names only `write-helper`. Referencing it anyway fails validation; add the upstream id to
+`after` too (`["write-helper", "survey-auth"]`). The extra edge changes no ordering, it declares what the
 prompt reads.
 
 ## A tree is ALWAYS based on repo HEAD — `integrate` is what seeds it
@@ -58,28 +58,28 @@ with an **`integrate`** node — agentless like `compute`, so it spends nothing 
 named task's branch into `into`:
 
 ```json
-{ "id": "join", "after": ["migrate-x", "migrate-y"],
-  "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } }
+{ "id": "join-migrations", "after": ["migrate-auth-sites", "migrate-session-sites"],
+  "integrate": { "into": "feat", "from": ["migrate-auth-sites", "migrate-session-sites"] } }
 ```
 
 Every id in `from` must be a task that WRITES, and for the obvious reason: a
 read-only task has no branch to merge. The one exception is a `forEach` parent — see below.
 
 **A conflict is not a failure.** The merge stops with markers in the tree, the node stays `ok`,
-and the conflicting paths land in its result — pass `{{result:join}}` to the next leaf and tell
+and the conflicting paths land in its result — pass `{{result:join-migrations}}` to the next leaf and tell
 it to resolve them. Without an integrate node that merge is the next leaf's job.
 
 ## Folding a `forEach` fan-out back — `integrate.from` naming the parent
 
 A `forEach` parent named in `from` owns no branch itself — its clones do, and their ids do not
-exist at authoring time. `from: ["fix"]` resolves at merge time to every clone that actually
-expanded, `fix[0]`…`fix[n-1]`, in index order — the same runtime expansion `forEach` already
+exist at authoring time. `from: ["fix-sites"]` resolves at merge time to every clone that actually
+expanded, `fix-sites[0]`…`fix-sites[n-1]`, in index order — the same runtime expansion `forEach` already
 performs, applied one step later:
 
 ```json
-{ "id": "fix", "after": ["find-sites"], "forEach": { "from": "find-sites", "path": "sites", "maxItems": 30 },
+{ "id": "fix-sites", "after": ["find-sites"], "forEach": { "from": "find-sites", "path": "sites", "maxItems": 30 },
   "provider": "ollama", "model": "glm-5.2:cloud", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash", "prompt": "Fix {{item.file}}:{{item.line}}. Commit before you finish." },
-{ "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
+{ "id": "join-fixes", "after": ["fix-sites"], "integrate": { "into": "feat", "from": ["fix-sites"] } }
 ```
 
 Nothing about `integrate` itself changes: the merge is still sequential, a conflict still leaves
@@ -93,7 +93,7 @@ markers with the node `ok`. Everything else follows from that:
   no-change clone's branch survives `collect()` until the merge — same reasoning as "An
   `integrate.from` source is the exception" above.
 
-`validate`'s preview line names the fan-in's cap: `join ≤ 30 branches (fix forEach)`.
+`validate`'s preview line names the fan-in's cap: `join-fixes ≤ 30 branches (fix-sites forEach)`.
 
 ## Worktree names do not carry across manifests
 

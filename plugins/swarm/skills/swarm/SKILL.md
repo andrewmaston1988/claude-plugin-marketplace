@@ -214,7 +214,7 @@ The red flags above are about a *healthy* run. The other failure class (2026-07-
   "concurrency": 4,                           // optional; at most the config ceiling (concurrency in ~/.swarm/config.json) — higher fails validate
   "cwd": "C:/code/somerepo",                  // optional; every task runs as if swarm were launched here (relative: against the launch dir) — the run is filed under its repo
   "tasks": [{
-    "id": "verify-sites",                      // <action>-<target>, whole words: find-correctness, not rv-correctness
+    "id": "verify-sites",                      // unique, filename-safe; <action>-<target> in whole words
     "prompt": "…",
     "provider": "ollama", "model": "glm-5.2:cloud",                  // required; the full model id (claude-opus-5, never "opus")
     "effort": "medium",                        // optional; defaults to the model's declared default or medium; validated when the provider declares levels
@@ -324,7 +324,7 @@ Leaves fabricate: invented functions, plausible-but-fake `file:line`, confident 
    **The verifier takes the PATH, not the inline copy.** `{{result:}}` inlines at most `resultInlineCap` chars (default 4,000) and drops the tail. A finder productive enough to overrun that gets a verifier that checks only the findings which fit — and the run then reports the unchecked remainder exactly like the checked ones. Observed: a 7-finding finder whose verifier was fed 5; of the 2 it never saw, one was fabricated and one was a real defect. **The cap bites hardest on the runs that found the most, so a verifier must never be fed an inline result.** The engine now warns loudly when a prompt is cut (leaf result field, `run.log`, closing block) and the digest marks the unchecked findings OPEN rather than PROVEN — but that is a backstop for manifests that get this wrong, not a licence to use `{{result:}}` here.
 3. **Digest rule** — add to `digest.instructions`: `Findings lacking a citation are noise-band: drop. Findings REFUTED by their verifier appear only in the ledger, marked refuted. Only CONFIRMED findings may appear as headlines.`
 
-Manifest sketch: `find-a`,`find-b` (glm) → `verify-a`,`verify-b` (`after` each, haiku or minimax) → digest counting only survivors.
+Manifest sketch: `find-alpha`,`find-beta` (glm) → `verify-alpha`,`verify-beta` (`after` each, haiku or minimax) → digest counting only survivors.
 
 ## Anti-patterns
 
