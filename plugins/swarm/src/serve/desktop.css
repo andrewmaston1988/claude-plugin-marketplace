@@ -131,9 +131,9 @@
   :is(main:has(> .banner):has(> .graph), .ovrun) > .totals .bar { width:100%; }
 
   /* The phone's action bar is fixed above the tab bar; on this layout it is a row of the
-     grid, so the button sizes to itself instead of stretching across the window. */
+     grid, so the buttons size to themselves instead of stretching across the window. */
   :is(main:has(> .banner):has(> .graph), .ovrun) > .actionbar { position:static; margin:0; padding:0; border:0; background:none; }
-  :is(main:has(> .banner):has(> .graph), .ovrun) > .actionbar .primary { flex:0 0 auto; height:38px; padding:0 18px; }
+  :is(main:has(> .banner):has(> .graph), .ovrun) > .actionbar :is(.primary, .secondary) { flex:0 0 auto; height:38px; padding:0 18px; }
 
   /* The leaves as a table: the phone's row, cut into its columns. `:has(> .body > .col)`
      is what tells a leaf row from the wave labels and manifest rows sharing the list —

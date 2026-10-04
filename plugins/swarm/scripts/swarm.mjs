@@ -24,6 +24,7 @@ import { dim, out, err } from "../src/ui.mjs";
 import { markValidated, unvalidatedRefusal } from "../src/validated.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { cmdStatus } from "./cmd-status.mjs";
+import { cmdReport } from "./cmd-report.mjs";
 import { cmdCost } from "./cmd-cost.mjs";
 import { cmdGradeInit, cmdGradeFile, cmdGradeWaive } from "./cmd-grade.mjs";
 import { modelLine, effortsCell } from "../src/model-row.mjs";
@@ -39,7 +40,7 @@ const USAGE = `usage: swarm.mjs <command>
   wait <resultsDir> [--timeout <secs>]  block until the run settles, then print the final roster (exit 0 clean · 1 leaf not ok · 2 engine died · 3 timed out)
   stop <resultsDir>          cooperative stop: signal a live engine and wait, or record a dead one — never kills a process
   prune <resultsDir> [--dry-run]   destroy a finished run's kept worktrees + branches; refuses a live run
-  report <resultsDir>        render report.md → report.html (self-contained, theme-aware)
+  report <resultsDir>        render the run's digest.md/report.md → digest.html/report.html (self-contained, theme-aware; backfill for old runs)
   ask <resultsDir> <taskId> "<question>" [--model <m>]   resume a finished leaf's session with a follow-up
   quota | usage              provider utilization per limit window (exit 1 when Anthropic is exhausted)
   ollama-usage [--cookie '<value>']   ollama.com :cloud weekly-allowance meter (exit 1 when exhausted)
@@ -442,6 +443,7 @@ async function cmdRun(rest) {
     digestPath: r.digestPath,
     reportPath: r.reportPath,
     reportMissing: r.reportMissing,
+    pagesError: r.pagesError,
     digestFailed: r.digestFailed,
     summaryPath: r.summaryPath,
     totalTokens: r.summary.totalTokens,
@@ -856,20 +858,7 @@ async function main() {
       }
       case "report": {
         if (!rest[0]) { err(USAGE); return 1; }
-        const { readFileSync, writeFileSync, existsSync, renameSync } = await import("node:fs");
-        const mdPath = join(rest[0], "report.md");
-        if (!existsSync(mdPath)) {
-          err(`swarm: no report.md in ${rest[0]} — report mode was not enabled for this run, or it has not finished.`);
-          return 1;
-        }
-        const { mdToHtml } = await import("../src/md_to_html.mjs");
-        const html = mdToHtml(readFileSync(mdPath, "utf8"));
-        const htmlPath = join(rest[0], "report.html");
-        const tmp = htmlPath + ".tmp";
-        writeFileSync(tmp, html);
-        renameSync(tmp, htmlPath);
-        out(htmlPath);
-        return 0;
+        return await cmdReport(rest);
       }
       case "ask": {
         const positional = [];

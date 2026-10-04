@@ -17,7 +17,7 @@ test("safeSegment: ids with [ ] ~ . - pass; traversal, slashes, empties do not",
   for (const bad of ["..", "../x", "a/b", "a\\b", "", ".", "a b", "%2e%2e", "C:"]) assert.ok(!safeSegment(bad), JSON.stringify(bad));
 });
 
-test("routes: runs list, run, leaf (no raw log; prompt exposed for the accordion), digest fallback, manifest", async () => {
+test("routes: runs list, run, leaf (no raw log; prompt exposed for the accordion), manifest", async () => {
   const { home } = seedHome();
   try {
     await withServer({ home }, async ({ get }) => {
@@ -47,16 +47,6 @@ test("routes: runs list, run, leaf (no raw log; prompt exposed for the accordion
       assert.equal(leaf.body.prompt, "secret prompt", "the prompt is served for the leaf-view accordion");
       assert.equal(leaf.body.log, undefined);
       assert.equal((await get("/api/runs/C--code-a/live-1/leaves/nope")).status, 404);
-
-      const digest = await get("/api/runs/C--code-a/live-1/digest", { raw: true });
-      assert.equal(digest.status, 200);
-      assert.match(digest.headers["content-type"], /text\/html/);
-      assert.match(digest.body, /digest/);
-      const report = await get("/api/runs/C--code-b/done-1/digest", { raw: true });
-      assert.match(report.body, /Report/, "report.md wins over digest.md");
-      rmSync(join(home, "runs", "C--code-b", "done-1", "report.md"));
-      rmSync(join(home, "runs", "C--code-b", "done-1", "digest.md"));
-      assert.equal((await get("/api/runs/C--code-b/done-1/digest")).status, 404);
 
       const page = await get("/", { raw: true });
       assert.equal(page.status, 200);

@@ -76,14 +76,35 @@ test("/api/runs/<p>/<r>/report is 404 when the run rendered no report.html", asy
   } finally { srv.close(); }
 });
 
-test("the action bar appears only for a run carrying report.html", async () => {
-  const withReport = await paint({ finishedMs: Date.now(), reportHtmlPath: "/runs/TARGETRUN/report.html" });
+test("the action bar offers one labelled button per document the run has", async () => {
+  const withReport = await paint({ finishedMs: Date.now(), reportHtmlPath: "/runs/TARGETRUN/report.html", reportPath: "/runs/TARGETRUN/report.md" });
   const bars = withReport.findByClass("actionbar");
   assert.equal(bars.length, 1, "one action bar");
   assert.ok(withReport.screenText().includes("Open report"), "it names the action");
+  const primary = withReport.findByClass("primary");
+  assert.equal(primary.length, 1, "the report is the primary action");
+  assert.equal(primary[0].getAttribute("href"), "#/run/C--code-tgt/TARGETRUN/report");
 
-  const without = await paint({ finishedMs: Date.now(), reportHtmlPath: null, digestPath: "/runs/TARGETRUN/digest.md" });
-  assert.equal(without.findByClass("actionbar").length, 0, "a digest-only run gets no report bar");
+  // A digest-only run is not a report run, but it is still a run with something to
+  // read — the bar offers the digest instead of vanishing.
+  const digestOnly = await paint({ finishedMs: Date.now(), reportHtmlPath: null, reportPath: null, digestPath: "/runs/TARGETRUN/digest.md" });
+  assert.equal(digestOnly.findByClass("actionbar").length, 1, "a digest-only run gets its own bar");
+  assert.ok(digestOnly.screenText().includes("Open digest"), "it names the digest");
+  assert.ok(!digestOnly.screenText().includes("Open report"), "and offers no report the run does not have");
+  const secondary = digestOnly.findByClass("secondary");
+  assert.equal(secondary.length, 1, "the digest is the secondary action");
+  assert.equal(secondary[0].getAttribute("href"), "#/run/C--code-tgt/TARGETRUN/digest");
+});
+
+test("a report run's bar carries both documents in one bar — report primary, digest secondary", async () => {
+  const P = await paint({ finishedMs: Date.now(), reportHtmlPath: "/runs/TARGETRUN/report.html", reportPath: "/runs/TARGETRUN/report.md", digestPath: "/runs/TARGETRUN/digest.md" });
+  assert.equal(P.findByClass("actionbar").length, 1, "one bar, not one per document");
+  const primary = P.findByClass("primary");
+  const secondary = P.findByClass("secondary");
+  assert.equal(primary.length, 1);
+  assert.equal(secondary.length, 1);
+  assert.equal(primary[0].getAttribute("href"), "#/run/C--code-tgt/TARGETRUN/report");
+  assert.equal(secondary[0].getAttribute("href"), "#/run/C--code-tgt/TARGETRUN/digest");
 });
 
 // The regression this rung exists to prevent. The previous build rendered this bar
@@ -116,6 +137,11 @@ test("a finished run banners as done and opens the digest", async () => {
   assert.ok(el.getAttribute("class").includes("ok"), "done tone");
   assert.ok(text.includes("Digest ready"), "names what is waiting");
   assert.equal(el.getAttribute("data-href"), "#/run/C--code-tgt/TARGETRUN/digest", "tapping it reaches the digest");
+});
+
+test("a report-only run's banner links the report — the digest route would 404 it", async () => {
+  const { el } = await bannerOf({ finishedMs: Date.now(), digestPath: null, reportPath: "/runs/TARGETRUN/report.md", byState: { ok: 1 } });
+  assert.equal(el.getAttribute("data-href"), "#/run/C--code-tgt/TARGETRUN/report", "no digest on disk, so the tap must land on the report");
 });
 
 test("failed leaves outrank a finished timestamp", async () => {

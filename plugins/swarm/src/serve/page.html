@@ -321,6 +321,10 @@
     background:var(--ground); border-top:1px solid var(--rule); }
   .actionbar .primary { flex:1; height:46px; border-radius:12px; background:var(--accent); color:var(--ground);
     display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; }
+  /* The second document's button: same shape as the primary, outlined instead of filled
+     so the report stays the one that reads as the run's main action. */
+  .actionbar a.secondary { flex:1; height:46px; border-radius:12px; background:transparent; border:1px solid var(--accent); color:var(--accent);
+    display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; }
   main:has(.actionbar) { padding-bottom:calc(140px + env(safe-area-inset-bottom)); }
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:.35; } }
   .flash { animation:pulse .8s ease-in-out 3; }
@@ -765,7 +769,9 @@
     const failed = n("failed", "failed:timeout", "failed:stopped", "blocked");
     const tok = fmtTok(tasks.reduce((a, t) => a + tokWork(t.tokens), 0));
     const cost = run.costText ? ` · ${esc(run.costText)}` : "";
-    const dhref = (run.digestPath || run.reportPath) ? `#/run/${enc(run.project)}/${enc(run.name)}/digest` : null;
+    // The tap must land on a document the run actually has: a report-only run has
+    // no digest, and the digest route 404s without one.
+    const dhref = (run.digestPath || run.reportPath) ? `#/run/${enc(run.project)}/${enc(run.name)}/${run.digestPath ? "digest" : "report"}` : null;
 
     if (run.abortedMs) return tile("bad", "✕", "Aborted — the engine is gone", `${done} of ${tasks.length} finished · ${tok} tokens${cost}`, dhref);
     if (run.stoppedMs) return tile("bad", "✗", "Stopped by hand", `${tasks.length - done} never finished · ${tok} tokens${cost}`, dhref);
@@ -793,9 +799,16 @@
   function runChromeHtml(run, tasks) {
     let html = bannerHtml(run, tasks, Date.now(), run.quietWarnMs || 60000);
     if (isDesktop()) html += `<div class="stat"><span>${runElapsed(run)}</span></div>`;
-    // report.html only — the digest is already one tap away from the banner.
-    if (run.reportHtmlPath)
-      html += `<div class="actionbar"><a class="primary" href="#/run/${enc(run.project)}/${enc(run.name)}/report">Open report</a></div>`;
+    // One labelled button per document the run has — the report is the write-up and
+    // leads, the digest is the compressed handoff. The conditions read the markdown,
+    // not the rendered HTML, so a run that was never backfilled still gets its bar.
+    const report = run.reportPath || run.reportHtmlPath;
+    if (report || run.digestPath) {
+      html += `<div class="actionbar">`;
+      if (report) html += `<a class="primary" href="#/run/${enc(run.project)}/${enc(run.name)}/report">Open report</a>`;
+      if (run.digestPath) html += `<a class="secondary" href="#/run/${enc(run.project)}/${enc(run.name)}/digest">Open digest</a>`;
+      html += `</div>`;
+    }
     return html;
   }
 

@@ -269,7 +269,7 @@ export function gradeFooter({ count, resultsDir, cli }) {
   ].join("\n");
 }
 
-export function formatClosing({ digestPath, reportPath, reportMissing, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], coverageGaps = [], estimate, gradeable, resultsDir, engine, memoryParks = 0, costText }) {
+export function formatClosing({ digestPath, reportPath, reportMissing, pagesError, digestFailed, summaryPath, totalTokens, worktreesKept = [], truncations = [], refutations = [], coverageGaps = [], estimate, gradeable, resultsDir, engine, memoryParks = 0, costText }) {
   const lines = [];
   // loud by contract: neither cap may read as full coverage. A capped forEach ran
   // fewer ITEMS; a capped {{result:}} fed a leaf fewer CHARS of its dependency —
@@ -303,6 +303,7 @@ export function formatClosing({ digestPath, reportPath, reportMissing, digestFai
   // A requested report that never materialised must SAY so. Printing nothing is
   // how you ask for a report and are left wondering where it went.
   else if (reportMissing) lines.push(`${bold("report:")} ${red("NOT WRITTEN")} — report was requested but the digest leaf produced no report.md`);
+  if (pagesError) lines.push(`${bold("pages:")} ${red("NOT RENDERED")} — ${pagesError}`);
   lines.push(`${bold("summary:")} ${summaryPath}`);
   if (totalTokens && workTokens(totalTokens) > 0) {
     const input = formatTokens(totalTokens.input + totalTokens.cacheCreation);

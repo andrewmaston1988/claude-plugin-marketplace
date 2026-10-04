@@ -6,10 +6,11 @@
 // Outside `npm test`: node plugins/swarm/scripts/probe-desktop-layout.mjs [--browser <path>]; exits 1 outside tolerance.
 
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createServer } from "../src/serve/server.mjs";
+import { connect, devtoolsPort, evaluate, findBrowser, getJson, pageTarget, sleep, waitFor } from "./lib/cdp.mjs";
 
 const TOL_PX = 1;
 // Relative, not absolute: the fr tracks' floors (minmax(<n>ch, 1fr)) can bind at the
@@ -32,12 +33,6 @@ const PASSES = [
 ];
 // The fr columns, in track order: three 1fr and the 0.8fr that closes the row.
 const FR_RATIO = [1, 1, 1, 0.8];
-const EDGE = "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe";
-const CHROME = [
-  "C:/Program Files/Google/Chrome/Application/chrome.exe",
-  "C:/Program Files (x86)/Google/Chrome/Application/chrome.exe",
-];
-
 // One project with two live runs and six finished ones: two live cards, and a finished
 // stack deep enough that a misaligned column shows up as a row-to-row difference.
 const PROJECT = "C--code-probe";
@@ -128,92 +123,6 @@ const OPEN_LIVE_MEASURE = `(() => {
   const box = (r) => ({ left: r1(r.left), right: r1(r.right), top: r1(r.top), bottom: r1(r.bottom) });
   return { feed: box(feed), first: box(a), second: box(b), open: box(o), cardGap: r1(parseFloat(getComputedStyle(cards[0]).marginTop)) };
 })()`;
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function arg(name) {
-  const i = process.argv.indexOf(name);
-  return i >= 0 ? process.argv[i + 1] : null;
-}
-
-function findBrowser() {
-  const explicit = arg("--browser") || process.env.SWARM_PROBE_BROWSER;
-  for (const c of [explicit, EDGE, ...CHROME].filter(Boolean)) if (existsSync(c)) return c;
-  for (const name of ["chrome", "google-chrome", "chromium"]) {
-    const r = spawnSync(process.platform === "win32" ? "where" : "which", [name], { encoding: "utf8" });
-    const first = (r.stdout || "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean)[0];
-    if (first && existsSync(first)) return first;
-  }
-  throw new Error(`no browser found — pass --browser <path>`);
-}
-
-// ── the DevTools client ─────────────────────────────────────────────────────
-function connect(url) {
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
-    const waiting = new Map();
-    let nextId = 1;
-    ws.addEventListener("message", (e) => {
-      const msg = JSON.parse(e.data);
-      const w = msg.id != null && waiting.get(msg.id);
-      if (!w) return;
-      waiting.delete(msg.id);
-      msg.error ? w.reject(new Error(msg.error.message)) : w.resolve(msg.result);
-    });
-    ws.addEventListener("error", () => reject(new Error(`websocket failed: ${url}`)));
-    ws.addEventListener("open", () => resolve({
-      send(method, params = {}) {
-        const id = nextId++;
-        return new Promise((res, rej) => { waiting.set(id, { resolve: res, reject: rej }); ws.send(JSON.stringify({ id, method, params })); });
-      },
-      close() { try { ws.close(); } catch {} },
-    }));
-  });
-}
-
-const getJson = async (url) => (await fetch(url)).json();
-
-async function devtoolsPort(userDataDir, child) {
-  const file = join(userDataDir, "DevToolsActivePort");
-  for (let i = 0; i < 200; i++) {
-    if (existsSync(file)) {
-      const port = Number(readFileSync(file, "utf8").split("\n")[0]);
-      if (port) return port;
-    }
-    if (child.exitCode != null) throw new Error(`browser exited early (code ${child.exitCode})`);
-    await sleep(100);
-  }
-  throw new Error("browser never wrote DevToolsActivePort");
-}
-
-async function pageTarget(port) {
-  for (let i = 0; i < 100; i++) {
-    try {
-      const list = await getJson(`http://127.0.0.1:${port}/json/list`);
-      const page = list.find((t) => t.type === "page");
-      if (page?.webSocketDebuggerUrl) return page;
-    } catch {}
-    await sleep(100);
-  }
-  throw new Error("no page target appeared");
-}
-
-async function evaluate(client, expression) {
-  const r = await client.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
-  if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || "evaluate threw");
-  return r.result.value;
-}
-
-// The table is the thing under test, so a missing one is a RESULT, not a crash: the
-// soft wait lets the geometry checks still run and report what they did measure.
-async function waitFor(client, expression, what, soft = false) {
-  for (let i = 0; i < 150; i++) {
-    if (await evaluate(client, expression)) return true;
-    await sleep(100);
-  }
-  if (soft) return false;
-  throw new Error(`timed out waiting for ${what}`);
-}
 
 async function measure(client, pass) {
   let missing = null;

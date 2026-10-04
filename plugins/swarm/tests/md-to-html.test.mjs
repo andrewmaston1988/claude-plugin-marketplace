@@ -5,8 +5,11 @@
 // HTML-injection, badge-word-in-prose, path:line-in-a-fence, malformed input — and
 // the upgrades themselves.
 import { test } from "node:test";
-import { ok, match, doesNotMatch } from "node:assert/strict";
-import { mdToHtml } from "../src/md_to_html.mjs";
+import { ok, match, doesNotMatch, equal, deepEqual, throws } from "node:assert/strict";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { mdToHtml, renderRunPages } from "../src/md_to_html.mjs";
 
 // ── failure modes (the load-bearing ones) ──────────────────────────────
 
@@ -140,4 +143,168 @@ test("the H1 becomes the masthead title with the cross-examined eyebrow", () => 
   match(html, /class="eyebrow"/);
   match(html, /class="title"/);
   ok(html.includes("crafting chain"));
+});
+
+// ── phone width: selector PLACEMENT, not substring ─────────────────────
+// A bare "CSS contains overflow-wrap" check passes with the rule on the wrong
+// element, which is exactly how the narrow-view defect shipped. Parse the
+// stylesheet into selector → declarations and assert WHERE each rule lives.
+
+// Minimal block parser for a generated stylesheet (no braces inside strings):
+// @media/@keyframes bodies are walked through and their inner rules surface
+// under their own selectors; comments stripped; a trailing declaration without
+// its `;` is still captured.
+function cssRules(html) {
+  const css = /<style>([\s\S]*?)<\/style>/.exec(html)[1].replace(/\/\*[\s\S]*?\*\//g, "");
+  const rules = [];
+  const stack = [];
+  let buf = "";
+  for (const ch of css) {
+    if (ch === "{") { stack.push({ selector: buf.trim(), decls: [] }); buf = ""; }
+    else if (ch === "}") {
+      const b = stack.pop();
+      const trailing = buf.trim();
+      if (b && !b.selector.startsWith("@")) {
+        if (trailing) b.decls.push(trailing);
+        rules.push(b);
+      }
+      buf = "";
+    } else if (ch === ";" && stack.length) {
+      if (buf.trim()) stack[stack.length - 1].decls.push(buf.trim());
+      buf = "";
+    } else buf += ch;
+  }
+  return rules;
+}
+const ruleOf = (rules, selector) => rules.find((r) => r.selector === selector);
+const decl = (rule, prop) => rule?.decls
+  .map((d) => d.replace(/\s+/g, " ").replace(/:\s*/, ": "))
+  .find((d) => d.startsWith(prop));
+
+test("the ground sits on html/body — the overflow strip past .doc is not white", () => {
+  const rules = cssRules(mdToHtml("# T\n\ntext\n"));
+  const ground = ruleOf(rules, "html, body");
+  ok(ground, "an `html, body` rule must exist");
+  equal(decl(ground, "background"), "background: var(--ground)");
+  equal(decl(ground, "color"), "color: var(--ink)");
+});
+
+test("long paths wrap: overflow-wrap lives on .doc itself", () => {
+  const rules = cssRules(mdToHtml("# T\n\ntext\n"));
+  equal(decl(ruleOf(rules, ".doc"), "overflow-wrap"), "overflow-wrap: anywhere");
+});
+
+test("citations wrap — cite loses nowrap; the short fixed-label chips keep theirs", () => {
+  const rules = cssRules(mdToHtml("# T\n\ntext\n"));
+  ok(!decl(ruleOf(rules, "cite, .cite"), "white-space"), "cite must not force nowrap");
+  equal(decl(ruleOf(rules, ".badge"), "white-space"), "white-space: nowrap");
+  equal(decl(ruleOf(rules, ".feel"), "white-space"), "white-space: nowrap");
+});
+
+test(".doc keeps its own styling — the html/body rule is additive, not a re-copy", () => {
+  const rules = cssRules(mdToHtml("# T\n\ntext\n"));
+  const doc = ruleOf(rules, ".doc");
+  equal(decl(doc, "min-height"), "min-height: 100vh");
+  equal(decl(doc, "font-family"), "font-family: var(--serif)");
+  ok(decl(doc, "padding").startsWith("padding: clamp(1.2rem"));
+});
+
+// ── kind: each document names itself ────────────────────────────────────
+
+test("kind 'digest' leads with the compressed-handoff eyebrow, never the source-review one", () => {
+  const html = mdToHtml("# T\n\nbody\n", { kind: "digest" });
+  ok(html.includes("Swarm digest · compressed handoff"), "the digest page names itself a digest");
+  ok(!html.includes("Swarm source review"), "the report eyebrow must not lead a digest page");
+});
+
+test("no kind, and kind 'report', keep the cross-examined source-review eyebrow", () => {
+  ok(mdToHtml("# T\n\ntext\n").includes("Swarm source review · cross-examined"));
+  ok(mdToHtml("# T\n\ntext\n", { kind: "report" }).includes("Swarm source review · cross-examined"));
+});
+
+// ── renderRunPages: the engine's own HTML writer ────────────────────────
+// digest.md → digest.html, report.md → report.html — the scheduler calls it
+// after every footnote; `swarm report` calls it as the backfill. Atomic per
+// page (tmp + rename), skip-missing, and a failed page never takes the healthy
+// one down.
+
+const pageDir = () => mkdtempSync(join(tmpdir(), "swarm-md-html-"));
+const tmpFiles = (dir) => readdirSync(dir).filter((f) => f.endsWith(".tmp"));
+
+test("writes digest.html and report.html with run-named titles and their own eyebrows", () => {
+  const dir = pageDir();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# Digest — compressed handoff\n\n- one\n");
+    writeFileSync(join(dir, "report.md"), "# Callers of frobnicate\n\nBoth leaves ran.\n");
+    deepEqual(renderRunPages(dir, { runName: "dwreview-1" }),
+      [join(dir, "digest.html"), join(dir, "report.html")]);
+    const digest = readFileSync(join(dir, "digest.html"), "utf8");
+    ok(digest.includes("<title>dwreview-1 · digest</title>"), "the digest page names itself after the run");
+    ok(digest.includes("Swarm digest · compressed handoff"));
+    const report = readFileSync(join(dir, "report.html"), "utf8");
+    ok(report.includes("<title>dwreview-1 · report</title>"));
+    ok(report.includes("Swarm source review · cross-examined"));
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("skips a missing source; an empty dir writes nothing and returns no paths", () => {
+  const dir = pageDir();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# Just the digest\n\n- one\n");
+    mkdirSync(join(dir, "empty"));
+    deepEqual(renderRunPages(dir, { runName: "r" }), [join(dir, "digest.html")]);
+    equal(existsSync(join(dir, "report.html")), false, "no report.md → no report.html");
+    deepEqual(renderRunPages(join(dir, "empty"), { runName: "r" }), []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("atomic: no .tmp survives a successful render", () => {
+  const dir = pageDir();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# D\n\nbody\n");
+    renderRunPages(dir, { runName: "r" });
+    equal(tmpFiles(dir).length, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// The scheduler and a manual `swarm report` can render one run at once; each
+// writer owns its own tmp, so another writer's tmp never blocks this one.
+test("a tmp held by a concurrent writer does not block the render", () => {
+  const dir = pageDir();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# D\n\nbody\n");
+    mkdirSync(join(dir, "digest.html.tmp"));
+    deepEqual(renderRunPages(dir, { runName: "r" }), [join(dir, "digest.html")]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a failed re-render removes the old page rather than serve it stale", () => {
+  const dir = pageDir();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# Old\n\nbody\n");
+    writeFileSync(join(dir, "report.md"), "# R\n\nbody\n");
+    renderRunPages(dir, { runName: "r" });
+    writeFileSync(join(dir, "digest.md"), "# New\n\nbody\n");
+    mkdirSync(join(dir, `digest.html.${process.pid}.tmp`)); // this writer's tmp cannot be written
+    deepEqual(renderRunPages(dir, { runName: "r" }), [join(dir, "report.html")]);
+    equal(existsSync(join(dir, "digest.html")), false, "no stale digest.html left to serve");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a page that cannot land is skipped tmp-clean; every page failing throws", () => {
+  const dir = pageDir();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# D\n\nbody\n");
+    writeFileSync(join(dir, "report.md"), "# R\n\nbody\n");
+    mkdirSync(join(dir, "digest.html")); // rename cannot replace a directory
+    deepEqual(renderRunPages(dir, { runName: "r" }), [join(dir, "report.html")],
+      "the healthy page still lands");
+    equal(tmpFiles(dir).length, 0, "the failed page leaves no half-written tmp");
+
+    rmSync(join(dir, "report.html")); // phase 1 wrote it; make it unlandable too
+    mkdirSync(join(dir, "report.html"));
+    throws(() => renderRunPages(dir, { runName: "r" }), /could not render/,
+      "nothing written at all is an error, not a silent empty result");
+    equal(tmpFiles(dir).length, 0, "still no tmp after the throw");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

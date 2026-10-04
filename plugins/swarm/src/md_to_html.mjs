@@ -11,6 +11,9 @@
 //  - a path:line inside a ``` fence is code, never a citation.
 //  - a malformed report (no ledger, no footnote) still renders — degrade, never throw.
 
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+
 const VERDICTS = {
   PROVEN: "b-proven", CONFIRMED: "b-confirmed", OPEN: "b-open",
   REFUTED: "b-refuted", OVERCLAIM: "b-overclaim", UNVERIFIED: "b-unverif",
@@ -212,16 +215,23 @@ function renderTally(bodyHtml) {
     `<div class="tally-legend">${legend}</div></div>`;
 }
 
-function renderMasthead(h1) {
+// The masthead eyebrow names which document you are reading — the digest is a
+// compressed handoff, the report a write-up — two documents, never one.
+const EYEBROWS = {
+  digest: "Swarm digest · compressed handoff",
+  report: "Swarm source review · cross-examined",
+};
+
+function renderMasthead(h1, eyebrow) {
   const raw = h1 ? h1.text : "Swarm report";
   const parts = raw.split(/\s+—\s+/);
   const title = inlineFmt(parts[0]);
   const dek = parts.length > 1 ? `<p class="dek">${inlineFmt(parts.slice(1).join(" — "))}</p>` : "";
-  return `<div class="eyebrow">Swarm source review · cross-examined</div>` +
+  return `<div class="eyebrow">${eyebrow}</div>` +
     `<h1 class="title">${title}</h1>${dek}`;
 }
 
-export function mdToHtml(md, { title } = {}) {
+export function mdToHtml(md, { title, kind } = {}) {
   const blocks = parseBlocks(md || "");
   const h1 = blocks.find((b) => b.type === "heading" && b.level === 1) || null;
   const run = blocks.find((b) => b.type === "run") || null;
@@ -247,6 +257,7 @@ export function mdToHtml(md, { title } = {}) {
   const tally = renderTally(bodyHtml);
   const prov = run ? renderProvenance(run.text) : "";
   const docTitle = escapeHtml(title || (h1 ? h1.text.split(/\s+—\s+/)[0] : "Swarm report"));
+  const eyebrow = EYEBROWS[kind] || EYEBROWS.report;
 
   return `<!doctype html>
 <html lang="en">
@@ -258,13 +269,43 @@ export function mdToHtml(md, { title } = {}) {
 </head>
 <body>
 <div class="doc"><div class="wrap">
-${renderMasthead(h1)}
+${renderMasthead(h1, eyebrow)}
 ${tally}
 ${bodyHtml}
 ${prov}
 </div></div>
 </body>
 </html>`;
+}
+
+// digest.md → digest.html, report.md → report.html, each atomic and only when its
+// source exists. A page that cannot land is removed, never served stale, and never
+// takes the healthy one down; throws only when sources exist and nothing landed.
+export function renderRunPages(resultsDir, { runName }) {
+  const pages = [
+    ["digest.md", "digest.html", "digest"],
+    ["report.md", "report.html", "report"],
+  ];
+  const written = [];
+  const failures = [];
+  for (const [src, dst, kind] of pages) {
+    const srcPath = join(resultsDir, src);
+    if (!existsSync(srcPath)) continue;
+    const dstPath = join(resultsDir, dst);
+    const tmpPath = `${dstPath}.${process.pid}.tmp`;
+    try {
+      writeFileSync(tmpPath, mdToHtml(readFileSync(srcPath, "utf8"), { title: `${runName} · ${kind}`, kind }));
+      renameSync(tmpPath, dstPath);
+      written.push(dstPath);
+    } catch (e) {
+      for (const p of [tmpPath, dstPath]) try { rmSync(p, { force: true }); } catch { /* left for the next render */ }
+      failures.push(`${src}: ${e.message}`);
+    }
+  }
+  if (!written.length && failures.length) {
+    throw new Error(`could not render ${resultsDir}: ${failures.join("; ")}`);
+  }
+  return written;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -317,9 +358,11 @@ const CSS = `
 
   * { box-sizing: border-box; }
   body { margin:0; }
+  html, body { background: var(--ground); color: var(--ink); }
   .doc {
     background: var(--ground);
     color: var(--ink);
+    overflow-wrap: anywhere;
     font-family: var(--serif);
     font-size: 18px;
     line-height: 1.62;
@@ -385,7 +428,7 @@ const CSS = `
     font-family:var(--mono); font-style:normal; font-size:.82em;
     background:var(--surface); color:var(--accent);
     border:1px solid var(--rule); border-radius:5px;
-    padding:.05em .42em; white-space:nowrap;
+    padding:.05em .42em;
     box-decoration-break: clone;
   }
   .cite.strike { color:var(--refuted); text-decoration:line-through; text-decoration-color:var(--refuted); opacity:.85; }

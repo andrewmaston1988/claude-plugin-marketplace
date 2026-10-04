@@ -182,3 +182,11 @@ test("the table's cells never outrank the leaf's own state colour", () => {
   assert.ok(rule, "the cells carry one base rule");
   assert.doesNotMatch(rule[1], /color:/, "the colour belongs to `.c-<state>` and to the named columns");
 });
+
+// Both action-bar buttons size to themselves; an unsized Open digest keeps the phone's
+// flex:1 and stretches across the desktop window.
+test("the desktop action bar sizes the secondary button like the primary", () => {
+  const rule = CSS.split("\n").find((l) => /> \.actionbar [^{]*\.primary/.test(l)) ?? "";
+  assert.match(rule, /\.secondary/, rule);
+  assert.match(rule, /flex:0 0 auto/, rule);
+});

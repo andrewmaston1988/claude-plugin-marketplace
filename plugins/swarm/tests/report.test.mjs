@@ -3,9 +3,9 @@
 // leaf writes report.md, the ENGINE prepends the provenance header to it, and the
 // agent-facing digest.md is unaffected either way.
 import { test } from "node:test";
-import { deepEqual, equal, ok } from "node:assert/strict";
+import { deepEqual, equal, match, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -14,6 +14,7 @@ import { buildDigestTask, scratchPath, DIGEST_ID } from "../src/digest.mjs";
 import { writeResult } from "../src/results.mjs";
 import { normalizeForCompare } from "../src/roots.mjs";
 import { addDirsOf, fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
+import { runCli } from "./helpers/cli.mjs";
 
 const SHIM = fileURLToPath(new URL("./shims/codex-shim.mjs", import.meta.url));
 
@@ -274,5 +275,93 @@ test("Codex integration: resume re-dispatches only the failed digest", async () 
     ok(readFileSync(join(p.resultsDir, "digest.md"), "utf8").includes(CODEX_DIGEST_TEXT));
     ok(existsSync(join(p.resultsDir, "report.md")), "the report the failed run never produced");
     equal(r.digestFailed, false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── HTML pages: the run renders its own readable pages ─────────────────
+
+test("integration: a digest run finishes with digest.html", async () => {
+  const dir = tmp();
+  try {
+    const p = planWith(dir, false);
+    await runPlan(p, CFG, makeIo(spawnFor(dir, { writesReport: false })));
+    ok(existsSync(join(p.resultsDir, "digest.html")), "a digest run must leave digest.html");
+    const html = readFileSync(join(p.resultsDir, "digest.html"), "utf8");
+    ok(html.includes("<title>run · digest</title>"), "the page is titled after the run");
+    ok(html.includes("Swarm digest · compressed handoff"), "the digest page carries the digest eyebrow");
+    ok(html.includes("DIGEST TEXT"), "the digest body is rendered");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: a report-mode run also gets report.html, rendered AFTER the footnote", async () => {
+  const dir = tmp();
+  try {
+    const p = planWith(dir, true);
+    await runPlan(p, CFG, makeIo(spawnFor(dir, { writesReport: true })));
+    ok(existsSync(join(p.resultsDir, "report.html")), "a report run must leave report.html");
+    const html = readFileSync(join(p.resultsDir, "report.html"), "utf8");
+    ok(html.includes("<title>run · report</title>"));
+    ok(html.includes("Both leaves ran."), "the report body is rendered");
+    ok(html.includes('class="prov"'), "the page is rendered after the engine appended the footnote");
+    ok(html.includes("scan-a"), "the footnote's leaf names render");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// digest.html pre-exists as a DIRECTORY: the digest page cannot land (rename
+// cannot replace a directory). The run must not care — the report page still
+// lands, digest.md is untouched, and the run reports clean. The injected
+// failure is the whole point: a broken page is a missing page, never a broken run.
+test("integration: a render failure never fails the run and never touches digest.md", async () => {
+  const dir = tmp();
+  try {
+    const p = planWith(dir, true);
+    mkdirSync(join(p.resultsDir, "digest.html"), { recursive: true });
+    const r = await runPlan(p, CFG, makeIo(spawnFor(dir, { writesReport: true })));
+
+    equal(r.digestFailed, false, "a render failure is not a digest failure");
+    equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "DIGEST TEXT");
+    ok(existsSync(join(p.resultsDir, "report.html")), "the healthy page still lands");
+    deepEqual(readdirSync(p.resultsDir).filter(n => n.endsWith(".tmp")), [], "no half-written tmp left behind");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: no page landing at all is reported as pagesError, not swallowed", async () => {
+  const dir = tmp();
+  try {
+    const p = planWith(dir, true);
+    mkdirSync(join(p.resultsDir, "digest.html"), { recursive: true });
+    mkdirSync(join(p.resultsDir, "report.html"), { recursive: true });
+    const r = await runPlan(p, CFG, makeIo(spawnFor(dir, { writesReport: true })));
+
+    equal(r.digestFailed, false);
+    match(r.pagesError ?? "", /could not render/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// ── `swarm report`: the backfill for runs that predate engine rendering ─
+
+test("swarm report on a digest-only run writes digest.html and exits 0", () => {
+  const dir = tmp();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# Digest\n\n- one finding\n");
+    const r = runCli(["report", dir]);
+    equal(r.status, 0, r.stderr);
+    ok(existsSync(join(dir, "digest.html")), "the backfill writes the digest page");
+    ok(r.stdout.includes(join(dir, "digest.html")), "the written path is printed");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("swarm report errors only when it wrote nothing", () => {
+  const dir = tmp();
+  try {
+    const none = runCli(["report", dir]);
+    equal(none.status, 1, none.stdout);
+    match(none.stderr, /no digest\.md or report\.md/);
+
+    writeFileSync(join(dir, "report.md"), "# Report\n\nbody\n");
+    const one = runCli(["report", dir]);
+    equal(one.status, 0, one.stderr);
+    ok(existsSync(join(dir, "report.html")));
+    ok(one.stdout.includes(join(dir, "report.html")));
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
