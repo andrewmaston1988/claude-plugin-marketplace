@@ -189,7 +189,7 @@ dominates:
 | Predictive cost consent — estimate at approval, one projection warn, actual-vs-estimate close | ✅ | ❌ reactive only |
 | Weak-model authorability — fill-in-the-blanks JSON; validation errors teach | ✅ | ⚠️ JS bar |
 | Mechanical citation verification — `{file, line, quote}` returns string-matched against real files before any verifier spawns | ✅ zero tokens | ❌ |
-| Transcript-proven read coverage — a leaf proves from its own transcript it read the files/ranges it declared (the `Read` tool, or a codex leaf's own shell dump), one corrective re-ask then recorded | ✅ `mustRead`, zero tokens | ❌ |
+| Transcript-proven read coverage — a leaf proves from its own transcript it read the files/ranges it declared (the `Read` tool, or a codex leaf's own shell dump), one corrective re-ask then recorded; a codex multi-file dump past the 40,000-byte output cap is labelled `unverifiable`, never credited | ✅ `mustRead`, zero tokens | ❌ |
 
 Rule of thumb: bounded fan-out — sweeps, judge panels, generation, mechanical
 implementation, discover-then-map — is swarm's shape, especially with alternative models
