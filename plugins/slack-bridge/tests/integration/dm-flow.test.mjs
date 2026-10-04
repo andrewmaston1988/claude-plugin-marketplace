@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { startTestBridge, waitFor } from "./helpers.mjs";
 
 test("DM flow — message → claude → response posted", async (t) => {
-  const { mock, stop } = await startTestBridge({ mockResponse: "Hello from Claude" });
+  const { mock, stop } = await startTestBridge({ mockResponse: "Hello from Claude", models: { D001: "sonnet" } });
   t.after(stop);
 
   // Send a DM event via Socket Mode
@@ -35,7 +35,7 @@ test("DM flow — message → claude → response posted", async (t) => {
 });
 
 test("DM flow — duplicate client_msg_id is ignored", async (t) => {
-  const { mock, stop } = await startTestBridge({ mockResponse: "Response" });
+  const { mock, stop } = await startTestBridge({ mockResponse: "Response", models: { D002: "sonnet" } });
   t.after(stop);
 
   const event = {
@@ -54,7 +54,8 @@ test("DM flow — duplicate client_msg_id is ignored", async (t) => {
   };
 
   mock.send(event);
-  await waitFor(() => mock.posted().length >= 1, 5000);
+  // Wait for this message's own placeholder; the restart notice may post first.
+  await waitFor(() => mock.posted().some(p => p.attachments?.[0]?.text === "_Duplicate_"), 5000);
   const countAfterFirst = mock.posted().length;
 
   // Send exact same message — should be deduped

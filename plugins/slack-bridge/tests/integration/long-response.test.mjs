@@ -6,7 +6,7 @@ test("long response (>3000 chars) splits into multiple posts", async (t) => {
   // Generate a response that exceeds the 3000-char limit
   const longResponse = "Word ".repeat(700).trim(); // ~3500 chars
 
-  const { mock, stop } = await startTestBridge({ mockResponse: longResponse });
+  const { mock, stop } = await startTestBridge({ mockResponse: longResponse, models: { "C-long": "sonnet" } });
   t.after(stop);
 
   mock.send({

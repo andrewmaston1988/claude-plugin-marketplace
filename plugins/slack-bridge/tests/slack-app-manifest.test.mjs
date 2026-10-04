@@ -11,3 +11,7 @@ function botScopes(yaml) {
 test("bot scopes include channels:join so seizing an existing channel can join it", () => {
   assert.ok(botScopes(renderManifest()).includes("channels:join"));
 });
+
+test("slash commands include /model so a channel can pick its spawn model", () => {
+  assert.match(renderManifest(), /command: \/model,/);
+});

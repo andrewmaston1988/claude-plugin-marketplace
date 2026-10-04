@@ -1,4 +1,5 @@
 import { runClaude } from "./claude-subprocess.mjs";
+import { readSession, channelModel, writeSession, clearSession, setChannelModel } from "./session-value.mjs";
 import { startHeartbeat } from "../heartbeat/loop.mjs";
 import { fetchHistory } from "../history-bootstrap/index.mjs";
 import { safeUpdate, postResponse, postError } from "./reply-post.mjs";
@@ -7,6 +8,8 @@ import { routeToLiveSession, startReplyLoop, _resetRouteState } from "./live-rou
 export { safeUpdate, postResponse, postError, routeToLiveSession, startReplyLoop, _resetRouteState };
 
 const DEDUP_SIZE = 64;
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const MODEL_HINT ="No model set for this channel — type /model <name>, e.g. /model sonnet.";
 const recentMsgIds = new Set();  // persisted across restarts via session store
 const activeProcs = new Map();   // channel → child process
 let _dedupStore = null;
@@ -87,6 +90,7 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
     // dead/missing claiming peer falls through to the spawn path (after reaping
     // the stale claim) so Slack is never silent.
     const claim = remote?.claims?.get(channel) ?? null;
+    let brokerDown = false;
     if (claim && remote?.broker) {
       // null = broker unreachable: keep the claim and serve THIS message via the
       // spawn path — a transient outage costs per-message spawns, not the claim;
@@ -104,9 +108,20 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
         try { await remote.claims.release(claim.peer_id); } catch { /* reaped below */ }
         log.info("remote-control claim reaped (peer dead), falling back to spawn", { channel, peer_id: claim.peer_id });
       }
+      brokerDown = alive === null;
     }
 
-    const existingSession = store.get(key);
+    // No model, no spawn: /model must pick one first. Exception: a claimed channel whose
+    // broker is unreachable belongs to a live session, so it spawns modelless rather than go silent.
+    const model = channelModel(store, channel);
+    if (!model && !brokerDown) {
+      const hint = { channel, text: MODEL_HINT };
+      if (threadTs) hint.thread_ts = threadTs;
+      try { await web.chatPostMessage(hint); } catch (e) { log.error("failed to post model hint", { channel, error: e.message }); }
+      return;
+    }
+
+    const existingSession = readSession(store, key).sessionId ?? null;
     const cmdEcho = deriveTitle(text);
     let placeholderTs = null;
     let heartbeat = null;
@@ -163,7 +178,7 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
         addDir: config.claude.addDir,
         prompt: (inject ? inject + "\n" : "") + prelude + text,
         sessionId: existingSession ?? undefined,
-        model: config.claude.model,
+        model: model ?? undefined,
         proxy: config.proxy,
         timeoutMs: config.claude.timeout,
         onStarted: child => { activeProcs.set(channel, child); },
@@ -171,7 +186,8 @@ export async function handleMessage({ web, store, queue, config, log, payload, b
       });
 
       activeProcs.delete(channel);
-      if (sessionId) store.set(key, sessionId);
+      // A /model switch mid-run already cleared this key; the old backend's session must not return.
+      if (sessionId && channelModel(store, channel) === model) writeSession(store, key, { sessionId });
 
       // .py canon (slack_bridge.py:685-688): stop the heartbeat AND join it before
       // posting the reply, so a final heartbeat tick can't land chatUpdate(text:"")
@@ -279,8 +295,23 @@ async function handleSlashCommand({ web, store, queue, config, log, payload, bot
   switch (cmd) {
     case "/new":
     case "/reset": {
-      store.delete(channel);
+      clearSession(store, channel);
       await web.chatPostMessage({ channel, text: "_Session cleared. Start a new message to begin fresh._" });
+      break;
+    }
+    case "/model": {
+      const name = (payload.text ?? "").trim();
+      if (!name) {
+        await web.chatPostMessage({ channel, text: `Model: ${channelModel(store, channel) ?? "none"}` });
+        break;
+      }
+      // The name reaches a cmd.exe argv on Windows, so only plain model ids pass.
+      if (!MODEL_NAME.test(name)) {
+        await web.chatPostMessage({ channel, text: `Invalid model name: use letters, digits and . _ : - only, e.g. /model sonnet.` });
+        break;
+      }
+      setChannelModel(store, channel, name);
+      await web.chatPostMessage({ channel, text: `Model set: ${name}` });
       break;
     }
     case "/restart": {

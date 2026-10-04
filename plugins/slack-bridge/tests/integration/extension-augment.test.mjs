@@ -20,6 +20,7 @@ test("extension heartbeatAugment appears in placeholder updates", async (t) => {
 
   const { mock, stop } = await startTestBridge({
     mockResponse: "Done",
+    models: { "C-ext": "sonnet" },
     config: { extensions: [TMP_EXT] },
   });
   t.after(stop);

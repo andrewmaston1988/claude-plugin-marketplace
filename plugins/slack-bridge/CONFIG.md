@@ -30,14 +30,12 @@ For production deployments, prefer env vars for token values so they don't land 
 
 ## Model routing
 
-The bridge agent runs on your Claude Code default model unless `claude.model` is set. Any non-Claude model name (e.g. an ollama `:cloud` tag) routes through the Anthropic-format endpoint in `proxy` — same mechanism as the pipeline plugin; the auth token is a pass-through placeholder (ollama auth rides the app's ambient signin). Change the config, restart the bridge, job done.
+Each channel picks its own model with `/model <name>` in Slack. Until it does, a message in an unclaimed channel gets a one-line hint and spawns nothing. Thread sessions use their channel's model. `/new` clears the session and keeps the model.
+
+Any non-Claude model name (e.g. an ollama `:cloud` tag) routes through the Anthropic-format endpoint in `proxy` — same mechanism as the pipeline plugin; the auth token is a pass-through placeholder (ollama auth rides the app's ambient signin). Switching a channel between a Claude and a non-Claude model drops its session, since neither side can resume the other's.
 
 ```json
 {
-  "claude": {
-    "cwd": "/home/user/myproject",
-    "model": "minimax-m3:cloud"
-  },
   "proxy": {
     "url": "http://localhost:11434",
     "authToken": "ollama"
@@ -45,7 +43,7 @@ The bridge agent runs on your Claude Code default model unless `claude.model` is
 }
 ```
 
-Defaults: `claude.model` null (Claude default); `proxy.url` `http://localhost:11434`; `proxy.authToken` `"ollama"`. Claude models (`claude-*`, `haiku`, `sonnet`, `opus`, `fable`) never touch the proxy. The heartbeat's `slack.verbModel` is independent and stays on Claude.
+Defaults: `proxy.url` `http://localhost:11434`; `proxy.authToken` `"ollama"`. Claude models (`claude-*`, `haiku`, `sonnet`, `opus`, `fable`) never touch the proxy. The heartbeat's `slack.verbModel` is independent and stays on Claude. Existing Slack app installs must re-apply the app manifest before `/model` appears in the client.
 
 ## Remote control
 

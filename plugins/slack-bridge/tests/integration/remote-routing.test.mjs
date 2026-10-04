@@ -124,10 +124,11 @@ function setup(t, { replyTimeoutMs = 3000, claims: preClaims = [], alive: aliveO
   return { claims, broker, web, hb, log, config, loop, queue };
 }
 
-// Drive one Slack message through handleMessage with the harness wired in.
+// Drive one Slack message through handleMessage with the harness wired in; the
+// channel has a model picked, so the spawn fallback is reachable.
 async function slack(s, payload, { runClaude, extensions = null } = {}) {
   return handleMessage({
-    web: s.web, store: makeStore(), queue: s.queue, config: s.config, log: s.log,
+    web: s.web, store: makeStore({ [payload.channel]: { model: "sonnet" } }), queue: s.queue, config: s.config, log: s.log,
     payload, botUserId: "U123", isFirstInSession: true,
     remote: { claims: s.claims, broker: s.broker },
     extensions, _runClaude: runClaude?.fn, _startHeartbeat: s.hb.start,

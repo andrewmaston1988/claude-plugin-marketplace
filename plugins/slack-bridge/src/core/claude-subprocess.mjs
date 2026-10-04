@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 
 const CLAUDE_ALIASES = new Set(["haiku", "sonnet", "opus", "fable"]);
 
-function isClaudeModel(model) {
+export function isClaudeModel(model) {
   return model.startsWith("claude-") || CLAUDE_ALIASES.has(model.toLowerCase());
 }
 

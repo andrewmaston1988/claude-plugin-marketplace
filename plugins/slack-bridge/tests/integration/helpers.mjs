@@ -17,10 +17,10 @@ const noop = { info() {}, warn() {}, error() {}, child() { return noop; } };
  * Spin up a mock Slack server + a bridge pointing at it.
  * Injects FIXTURES_BIN/claude.cmd as the claude executable.
  *
- * @param {{ scenario?: object, config?: object, mockResponse?: string }} opts
+ * @param {{ scenario?: object, config?: object, mockResponse?: string, models?: Record<string,string> }} opts  models: channel → /model pick
  * @returns {Promise<{ mock, bridge, stop }>}
  */
-export async function startTestBridge({ scenario = {}, config: extraConfig = {}, mockResponse } = {}) {
+export async function startTestBridge({ scenario = {}, config: extraConfig = {}, mockResponse, models = {} } = {}) {
   const mock = await startMockSlack({ scenario });
 
   // Patch PATH so "claude" resolves to our mock
@@ -49,6 +49,7 @@ export async function startTestBridge({ scenario = {}, config: extraConfig = {},
   const queue  = createQueue({ log: noop });
 
   startBridge({ config, log: noop, web, socket, store, queue });
+  for (const [channel, model] of Object.entries(models)) store.set(channel, { model });
 
   // Wait for WS connection
   await new Promise(r => mock.events.once("ws-connected", r));

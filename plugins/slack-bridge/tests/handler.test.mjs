@@ -2,56 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { handleMessage, loadDedup, safeUpdate, startBridge, postStartupNotification, postResponse, postError } from "../src/core/handler.mjs";
 import { createQueue } from "../src/core/queue.mjs";
-
-function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-function makeLog() {
-  const entries = [];
-  const log = {
-    info: (...a) => entries.push(["info", ...a]),
-    warn: (...a) => entries.push(["warn", ...a]),
-    error: (...a) => entries.push(["error", ...a]),
-    child: () => log,
-    entries,
-  };
-  return log;
-}
-
-function makeStore(initial = {}) {
-  const data = { ...initial };
-  return {
-    get: k => data[k],
-    set: (k, v) => { data[k] = v; },
-    delete: k => { delete data[k]; },
-    all: () => ({ ...data }),
-    _data: data,
-  };
-}
-
-function makeWeb({ postTs = "ts1", updateError } = {}) {
-  const calls = [];
-  const web = {
-    calls,
-    chatPostMessage: async p => { calls.push(["post", p]); return { ts: postTs, ok: true }; },
-    chatUpdate: async p => {
-      calls.push(["update", p]);
-      if (updateError) throw updateError;
-      return {};
-    },
-    chatDelete: async p => { calls.push(["delete", p]); return {}; },
-    authTest: async () => ({ user_id: "U123", team_id: "T1" }),
-  };
-  return web;
-}
-
-function makeSocket() {
-  const handlers = {};
-  return {
-    on(evt, fn) { handlers[evt] = fn; return this; },
-    start() {},
-    _handlers: handlers,
-  };
-}
+import { delay, makeLog, makeStore, makeWeb, makeSocket } from "./fakes.mjs";
 
 test("handler — skips bot messages", async () => {
   const log = makeLog();
@@ -202,7 +153,7 @@ test("handler — posts placeholder on valid message", async () => {
   const log = makeLog();
   const web = makeWeb({ postTs: "placeholder-ts" });
   const queue = createQueue({ log });
-  const store = makeStore();
+  const store = makeStore({ C1: { model: "sonnet" } });
   const config = { slack: {}, claude: { cwd: "/tmp", timeout: 100 } };
 
   await handleMessage({
@@ -214,6 +165,7 @@ test("handler — posts placeholder on valid message", async () => {
   const postCalls = web.calls.filter(([type]) => type === "post");
   assert.ok(postCalls.length >= 1, "should have posted a placeholder");
   assert.equal(postCalls[0][1].channel, "C1");
+  assert.equal(postCalls[0][1].attachments?.[0]?.text, "_hello world_");
 });
 
 // safeUpdate tests
