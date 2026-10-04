@@ -409,17 +409,25 @@ export function createServer({ home, cfg, now = Date.now, log = () => {}, _watch
       const { groupOf, labelOf } = projectGrouping(_projectKeys(home));
       return send(res, 200, { ...run, groupLabel: labelOf(groupOf(run.project)), costText: costText(run.tasks, { home, money, cloudSuffix }) });
     }
-    // Already HTML — served as written, never through mdToHtml. 20 runs on disk
-    // carry one and nothing could reach them before this route existed.
+    // The two documents are separate pages, never one merged. Each serves its
+    // rendered HTML when the run wrote one — served as written, never through
+    // mdToHtml — and otherwise renders its own markdown, so a run that predates
+    // the engine's render, or whose render failed, still opens.
     if (seg.length === 3 && seg[2] === "report") {
-      const file = join(dir, "report.html");
-      if (!existsSync(file)) return notFound(res);
-      return send(res, 200, readFileSync(file, "utf8"), "text/html; charset=utf-8");
+      const html = join(dir, "report.html");
+      if (existsSync(html)) return send(res, 200, readFileSync(html, "utf8"), "text/html; charset=utf-8");
+      const md = join(dir, "report.md");
+      if (!existsSync(md)) return notFound(res);
+      return send(res, 200, mdToHtml(readFileSync(md, "utf8"), { title: `${seg[1]} · report`, kind: "report" }), "text/html; charset=utf-8");
     }
     if (seg.length === 3 && seg[2] === "digest") {
-      const md = ["report.md", "digest.md"].map((f) => join(dir, f)).find(existsSync);
-      if (!md) return notFound(res);
-      return send(res, 200, mdToHtml(readFileSync(md, "utf8"), { title: `${seg[1]} · digest` }), "text/html; charset=utf-8");
+      const html = join(dir, "digest.html");
+      if (existsSync(html)) return send(res, 200, readFileSync(html, "utf8"), "text/html; charset=utf-8");
+      // The digest route serves the digest: report.md is never substituted for it,
+      // however tempting that fallback was.
+      const md = join(dir, "digest.md");
+      if (!existsSync(md)) return notFound(res);
+      return send(res, 200, mdToHtml(readFileSync(md, "utf8"), { title: `${seg[1]} · digest`, kind: "digest" }), "text/html; charset=utf-8");
     }
     if (seg.length === 4 && seg[2] === "leaves") {
       const file = resolve(dir, "results", `${seg[3]}.json`);
