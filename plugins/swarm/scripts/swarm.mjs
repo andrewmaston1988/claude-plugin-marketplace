@@ -24,6 +24,7 @@ import { dim, out, err } from "../src/ui.mjs";
 import { markValidated, unvalidatedRefusal } from "../src/validated.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { cmdStatus } from "./cmd-status.mjs";
+import { cmdReport } from "./cmd-report.mjs";
 import { cmdCost } from "./cmd-cost.mjs";
 import { cmdGradeInit, cmdGradeFile, cmdGradeWaive } from "./cmd-grade.mjs";
 import { modelLine, effortsCell } from "../src/model-row.mjs";
@@ -857,20 +858,7 @@ async function main() {
       }
       case "report": {
         if (!rest[0]) { err(USAGE); return 1; }
-        const { renderRunPages } = await import("../src/md_to_html.mjs");
-        let written;
-        try {
-          written = renderRunPages(rest[0], { runName: basename(rest[0]) });
-        } catch (e) {
-          err(`swarm: ${e.message}`);
-          return 1;
-        }
-        if (!written.length) {
-          err(`swarm: no digest.md or report.md in ${rest[0]} — the run has not finished, or it wrote neither document.`);
-          return 1;
-        }
-        for (const p of written) out(p);
-        return 0;
+        return await cmdReport(rest);
       }
       case "ask": {
         const positional = [];
