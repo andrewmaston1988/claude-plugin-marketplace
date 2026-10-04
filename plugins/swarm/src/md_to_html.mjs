@@ -278,12 +278,9 @@ ${prov}
 </html>`;
 }
 
-// The run's own HTML pages: digest.md → digest.html, report.md → report.html,
-// each only when its source exists, each atomic (tmp + rename) so a reader never
-// sees a half-written page. One helper, two callers — the scheduler (every
-// finished run) and `swarm report` (the backfill); nothing else writes HTML.
-// A page that cannot land is skipped without taking the healthy one down;
-// sources existing but nothing landing is an error, an empty dir is not.
+// digest.md → digest.html, report.md → report.html, each atomic and only when its
+// source exists. A page that cannot land is removed, never served stale, and never
+// takes the healthy one down; throws only when sources exist and nothing landed.
 export function renderRunPages(resultsDir, { runName }) {
   const pages = [
     ["digest.md", "digest.html", "digest"],
@@ -295,13 +292,13 @@ export function renderRunPages(resultsDir, { runName }) {
     const srcPath = join(resultsDir, src);
     if (!existsSync(srcPath)) continue;
     const dstPath = join(resultsDir, dst);
-    const tmpPath = dstPath + ".tmp";
+    const tmpPath = `${dstPath}.${process.pid}.tmp`;
     try {
       writeFileSync(tmpPath, mdToHtml(readFileSync(srcPath, "utf8"), { title: `${runName} · ${kind}`, kind }));
       renameSync(tmpPath, dstPath);
       written.push(dstPath);
     } catch (e) {
-      rmSync(tmpPath, { force: true }); // never leave a half-written tmp behind
+      for (const p of [tmpPath, dstPath]) try { rmSync(p, { force: true }); } catch { /* left for the next render */ }
       failures.push(`${src}: ${e.message}`);
     }
   }

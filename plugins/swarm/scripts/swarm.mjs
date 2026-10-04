@@ -442,6 +442,7 @@ async function cmdRun(rest) {
     digestPath: r.digestPath,
     reportPath: r.reportPath,
     reportMissing: r.reportMissing,
+    pagesError: r.pagesError,
     digestFailed: r.digestFailed,
     summaryPath: r.summaryPath,
     totalTokens: r.summary.totalTokens,

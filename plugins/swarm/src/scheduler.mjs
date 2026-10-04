@@ -431,15 +431,13 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   // requested-but-absent is a distinct, LOUD state — never silence
   const reportMissing = !!plan.digest?.report && !reportPath;
 
-  // Every finished run leaves its own readable pages: digest.md → digest.html,
-  // report.md → report.html. Placed after BOTH footnotes above (ask mode re-enters
-  // runPlan and appends again, so an earlier render would go stale) and ungated
-  // on ctx.digestPath — a digest leaf that failed after writing report.md still
-  // gets its report page. Best-effort like the footnote: a render failure never
-  // fails the run or touches digest.md.
+  // After both footnotes (ask mode re-enters runPlan and appends again) and ungated
+  // on ctx.digestPath, so a failed digest leaf's report.md still gets its page.
+  // A render failure is reported, never fails the run.
+  let pagesError = null;
   try {
     renderRunPages(plan.resultsDir, { runName: basename(plan.resultsDir) });
-  } catch { /* a broken page is a missing page, never a broken run */ }
+  } catch (e) { pagesError = e.message; }
 
-  return { summary, summaryPath, digestPath: ctx.digestPath, digestFailed: ctx.digestFailed, reportPath, reportMissing, worktreesKept: ctx.worktreesKept, memoryParks: ctx.memoryParkCount };
+  return { summary, summaryPath, digestPath: ctx.digestPath, digestFailed: ctx.digestFailed, reportPath, reportMissing, pagesError, worktreesKept: ctx.worktreesKept, memoryParks: ctx.memoryParkCount };
 }

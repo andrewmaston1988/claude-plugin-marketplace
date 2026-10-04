@@ -267,6 +267,30 @@ test("atomic: no .tmp survives a successful render", () => {
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+// The scheduler and a manual `swarm report` can render one run at once; each
+// writer owns its own tmp, so another writer's tmp never blocks this one.
+test("a tmp held by a concurrent writer does not block the render", () => {
+  const dir = pageDir();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# D\n\nbody\n");
+    mkdirSync(join(dir, "digest.html.tmp"));
+    deepEqual(renderRunPages(dir, { runName: "r" }), [join(dir, "digest.html")]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("a failed re-render removes the old page rather than serve it stale", () => {
+  const dir = pageDir();
+  try {
+    writeFileSync(join(dir, "digest.md"), "# Old\n\nbody\n");
+    writeFileSync(join(dir, "report.md"), "# R\n\nbody\n");
+    renderRunPages(dir, { runName: "r" });
+    writeFileSync(join(dir, "digest.md"), "# New\n\nbody\n");
+    mkdirSync(join(dir, `digest.html.${process.pid}.tmp`)); // this writer's tmp cannot be written
+    deepEqual(renderRunPages(dir, { runName: "r" }), [join(dir, "report.html")]);
+    equal(existsSync(join(dir, "digest.html")), false, "no stale digest.html left to serve");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test("a page that cannot land is skipped tmp-clean; every page failing throws", () => {
   const dir = pageDir();
   try {

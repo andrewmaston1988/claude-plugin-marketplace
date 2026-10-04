@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import { deepEqual, equal, match, ok } from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync, existsSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -321,7 +321,20 @@ test("integration: a render failure never fails the run and never touches digest
     equal(r.digestFailed, false, "a render failure is not a digest failure");
     equal(readFileSync(join(p.resultsDir, "digest.md"), "utf8").trim(), "DIGEST TEXT");
     ok(existsSync(join(p.resultsDir, "report.html")), "the healthy page still lands");
-    equal(existsSync(join(p.resultsDir, "digest.html.tmp")), false, "no half-written tmp left behind");
+    deepEqual(readdirSync(p.resultsDir).filter(n => n.endsWith(".tmp")), [], "no half-written tmp left behind");
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test("integration: no page landing at all is reported as pagesError, not swallowed", async () => {
+  const dir = tmp();
+  try {
+    const p = planWith(dir, true);
+    mkdirSync(join(p.resultsDir, "digest.html"), { recursive: true });
+    mkdirSync(join(p.resultsDir, "report.html"), { recursive: true });
+    const r = await runPlan(p, CFG, makeIo(spawnFor(dir, { writesReport: true })));
+
+    equal(r.digestFailed, false);
+    match(r.pagesError ?? "", /could not render/);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 

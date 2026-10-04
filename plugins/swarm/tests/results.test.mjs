@@ -551,6 +551,13 @@ test("formatClosing: a requested report that never landed is LOUD, not absent", 
   ok(!/report:/.test(none), none);
 });
 
+test("formatClosing: pages that failed to render say so; rendered pages print nothing extra", () => {
+  const out = formatClosing({ digestPath: "d.md", summaryPath: "s.json", totalTokens: null, pagesError: "could not render x: boom" });
+  ok(/pages:.*NOT RENDERED.*boom/.test(out), out);
+  const fine = formatClosing({ digestPath: "d.md", summaryPath: "s.json", totalTokens: null });
+  ok(!/pages:/.test(fine), fine);
+});
+
 test("formatClosing names every link of a shared chain, and only a chain", () => {
   const chained = formatClosing({ worktreesKept: [
     { name: "feat", branch: "swarm/feat", path: "/w/wt-feat", taskIds: ["p1", "rev", "p2"] },
