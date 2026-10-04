@@ -126,6 +126,7 @@ swarm list                # saved manifests (<cwd>/.swarm/manifests + ~/.swarm/m
 swarm validate <plan.json | name> [--args '<json>'] [--resolved]  # lint ids, deps, template refs, governance roots, effort pairs, context fit, forEach/when/compute shapes + expressions
 swarm run <plan.json | name> [--args '<json>']    # execute; designed for Bash run_in_background. Refuses unless `validate` passed on the same bytes + args (markers in ~/.swarm/validated/)
 swarm ask <resultsDir> <leaf-id> "follow-up?"   # interrogate a finished leaf
+swarm report <resultsDir>   # render the run's digest.md/report.md → digest.html/report.html (backfill for old runs)
 swarm quota                # Anthropic plus cached cloud-provider utilization
 swarm usage [--provider X] # live usage from enabled provider capabilities
 swarm ollama-usage [--cookie '<value>']  # ollama.com session/weekly usage — see below
@@ -344,6 +345,8 @@ source array, or a failed clone, behave exactly as they do for a hand-listed `fr
   results/<id>.json          # { id, model, ok, exit, durationMs, tokens?, costUsd?, numTurns?, sessionId?, prompt?, cwd, allowedTools, output, outputJson?, citations?, worktree? }
   results/<id>.log           # the leaf's raw stream-json events — tail one leaf's tool calls live
   digest.md                  # when a digest block is present — read this, not the raw results
+  digest.html                # the run's own readable pages, rendered by the engine as the
+  report.html                # run finishes (report.html in report mode); phone-friendly
   summary.json               # { started, finished, tasks: [...], blocked: [], worktreesKept: [], totalTokens }
   run.log                    # JSONL — state changes, live token ticks, run-start roster — tailable mid-run
                               # also carries a `session` event ({ id, sessionId }) the moment each
