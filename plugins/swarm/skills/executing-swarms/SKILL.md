@@ -122,7 +122,7 @@ when a finished swarm missed something, or when the result should be auditable o
 
 ```json
 { "tasks": [
-    { "id": "check", "provider": "ollama", "model": "glm-5.2:cloud",
+    { "id": "check-question", "provider": "ollama", "model": "glm-5.2:cloud",
       "prompt": "Your single job: <closed question>.
 File scope: <paths>.
 Return ≤10 bullets: claim, file:line. No prose. If you cannot answer, say so in one line." }
@@ -153,9 +153,9 @@ If you cannot find the answer, say so in one line — do not expand scope.
 
 ```json
 { "tasks": [
-    { "id": "auth",    "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "Your single job: where is session token expiry enforced?\nFile scope: src/auth/**\nReturn your findings as ≤10 bullet points: name, file path, line number, one-line description. No prose. If you cannot find the answer, say so in one line — do not expand scope." },
-    { "id": "session", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…same shape, session-store cluster…" },
-    { "id": "api",     "provider": "ollama", "model": "glm-5.2:cloud",    "prompt": "…same shape, API-layer cluster…" }
+    { "id": "find-auth-expiry",   "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "Your single job: where is session token expiry enforced?\nFile scope: src/auth/**\nReturn your findings as ≤10 bullet points: name, file path, line number, one-line description. No prose. If you cannot find the answer, say so in one line — do not expand scope." },
+    { "id": "find-session-store", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…same shape, session-store cluster…" },
+    { "id": "find-api-expiry",    "provider": "ollama", "model": "glm-5.2:cloud",    "prompt": "…same shape, API-layer cluster…" }
   ],
   "digest": { "provider": "ollama", "model": "glm-5.2:cloud", "instructions": "must_be_sure: the expiry enforcement point, with file:line. PROVEN/OPEN ledger required." } }
 ```
@@ -175,18 +175,18 @@ An explicit `allowedTools` list replaces the default; name `Skill` and `mcp__<se
 
 ```json
 { "tasks": [
-    { "id": "p1", "provider": "ollama", "model": "glm-5.2:cloud", "workspace": "feat",
+    { "id": "implement-phase-1", "provider": "ollama", "model": "glm-5.2:cloud", "workspace": "feat",
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Phase 1: <scope>.\nCommit your work before you finish — the next link builds on your commits." },
 
-    { "id": "p1-review", "provider": "ollama", "model": "kimi-k2.7-code:cloud", "after": ["p1"],
+    { "id": "review-phase-1", "provider": "ollama", "model": "kimi-k2.7-code:cloud", "after": ["implement-phase-1"],
       "allowedTools": "Read,Grep,Glob,Bash",
       "prompt": "Review phase 1's commits. The chain's branch is the one ending in /feat — \`git branch --list '*/feat'\` names it; git log/diff it.\nReturn ONLY: (a) defects with file:line, (b) risks phase 2 must avoid. No prose." },
 
-    { "id": "p2", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["p1-review"],
+    { "id": "implement-phase-2", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["review-phase-1"],
       "workspace": "feat",
       "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "Phase 2: <scope>.\nThe phase-1 reviewer warned:\n{{result:p1-review}}\nFix what it flagged, then do phase 2. Commit before you finish." }
+      "prompt": "Phase 2: <scope>.\nThe phase-1 reviewer warned:\n{{result:review-phase-1}}\nFix what it flagged, then do phase 2. Commit before you finish." }
   ] }
 ```
 
@@ -196,9 +196,9 @@ An explicit `allowedTools` list replaces the default; name `Skill` and `mcp__<se
 - **A reviewer needs `Bash`, and `Bash` is a write tool** (`manifest.mjs:32`), so it gets a private tree of its own on repo HEAD. That is fine and costs nothing: a worktree shares the repo's refs, so `git log`/`git diff` reach the chain's branch from it, and a tree the reviewer never writes to is swept at collect. **"Reviewers get no write tools" is a convention about intent, not a confinement guarantee** — a leaf holding `Bash` can write anywhere, and withholding it would only stop the reviewer reading the commits it exists to review. What a reviewer must not do is name the chain's `workspace`: that would put it in the writers' tree and force it into their `after` ordering.
 - **Every implementing prompt must say "commit before you finish."** The engine never commits for a leaf. Uncommitted work still reaches the next link (same tree), but the history is what makes a failed link recoverable.
 - **The tree is collected once**, after the last link — so one entry in `worktreesKept`, with a diffstat spanning every phase.
-- **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix p2, re-run, and p3/p4 redo their work on the corrected base.
+- **Re-running a link redoes its successors.** Transitive cache invalidation already handles this: fix implement-phase-2, re-run, and its successors redo their work on the corrected base.
 - **`forEach` cannot name a `workspace`** — clones are concurrent by construction, so each gets its own tree.
-- **A leaf that branches off the chain gets its own tree, seeded by an `integrate` node.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their workspace — sharing demands total ordering, which would force a false dependency. Give it its own tree (just write tools, no `workspace`) and put an agentless `integrate` node before it: `{ "id": "seed-docs", "after": ["p1"], "integrate": { "into": "docs", "from": ["p1"] } }` creates the `docs` tree and merges `p1`'s commits into it. Name the last link that WRITES, never the reviewer between them.
+- **A leaf that branches off the chain gets its own tree, seeded by an `integrate` node.** If it is not ordered against the chain's later links (a docs leaf that needs only phase 1's design, say), it cannot share their workspace — sharing demands total ordering, which would force a false dependency. Give it its own tree (just write tools, no `workspace`) and put an agentless `integrate` node before it: `{ "id": "seed-docs", "after": ["implement-phase-1"], "integrate": { "into": "docs", "from": ["implement-phase-1"] } }` creates the `docs` tree and merges `implement-phase-1`'s commits into it. Name the last link that WRITES, never the reviewer between them.
 
 **How a verifier link works** — why a reviewer needs no write tools to report, and what breaks if you give it some: [references/topology.md](references/topology.md).
 
@@ -208,12 +208,12 @@ Same subject, diverse lenses, JSON verdicts; the digest presents agreement and d
 
 ```json
 { "tasks": [
-    { "id": "diff",        "provider": "claude", "model": "claude-haiku-4-5-20251001", "prompt": "…produce the diff under review as one result…" },
-    { "id": "security",    "provider": "ollama", "model": "glm-5.2:cloud",    "after": ["diff"],
-      "prompt": "Review the diff at {{resultPath:diff}} as a security reviewer. Return JSON {verdict, findings:[{severity, path, line, note}]}.",
-      "mustRead": ["{{resultPath:diff}}"] },
-    { "id": "performance", "provider": "ollama", "model": "minimax-m3:cloud", "effort": "high", "after": ["diff"], "prompt": "…performance lens, same JSON shape…" },
-    { "id": "api-design",  "provider": "claude", "model": "claude-sonnet-5",           "after": ["diff"], "prompt": "…API-design lens, same JSON shape…" }
+    { "id": "produce-diff",      "provider": "claude", "model": "claude-haiku-4-5-20251001", "prompt": "…produce the diff under review as one result…" },
+    { "id": "judge-security",    "provider": "ollama", "model": "glm-5.2:cloud",    "after": ["produce-diff"],
+      "prompt": "Review the diff at {{resultPath:produce-diff}} as a security reviewer. Return JSON {verdict, findings:[{severity, path, line, note}]}.",
+      "mustRead": ["{{resultPath:produce-diff}}"] },
+    { "id": "judge-performance", "provider": "ollama", "model": "minimax-m3:cloud", "effort": "high", "after": ["produce-diff"], "prompt": "…performance lens, same JSON shape…" },
+    { "id": "judge-api-design",  "provider": "claude", "model": "claude-sonnet-5",           "after": ["produce-diff"], "prompt": "…API-design lens, same JSON shape…" }
   ],
   "digest": { "provider": "ollama", "model": "glm-5.2:cloud", "instructions": "Where judges disagree, present both sides — do not average verdicts." } }
 ```
@@ -224,38 +224,38 @@ A run may narrow to one task and widen again:
 
 ```json
 { "tasks": [
-    { "id": "survey-a", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question A…" },
-    { "id": "survey-b", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question B…" },
+    { "id": "survey-auth", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question A…" },
+    { "id": "survey-session", "provider": "ollama", "model": "minimax-m3:cloud", "prompt": "…closed question B…" },
 
-    { "id": "helper", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["survey-a", "survey-b"],
+    { "id": "write-helper", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["survey-auth", "survey-session"],
       "workspace": "feat", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "Read {{resultPath:survey-a}} and {{resultPath:survey-b}}. Write the helper. Commit before you finish.",
-      "mustRead": ["{{resultPath:survey-a}}", "{{resultPath:survey-b}}"] },
+      "prompt": "Read {{resultPath:survey-auth}} and {{resultPath:survey-session}}. Write the helper. Commit before you finish.",
+      "mustRead": ["{{resultPath:survey-auth}}", "{{resultPath:survey-session}}"] },
 
-    { "id": "seed-x", "after": ["helper"], "integrate": { "into": "migrate-x", "from": ["helper"] } },
-    { "id": "seed-y", "after": ["helper"], "integrate": { "into": "migrate-y", "from": ["helper"] } },
+    { "id": "seed-auth-migration", "after": ["write-helper"], "integrate": { "into": "migrate-auth-sites", "from": ["write-helper"] } },
+    { "id": "seed-session-migration", "after": ["write-helper"], "integrate": { "into": "migrate-session-sites", "from": ["write-helper"] } },
 
-    { "id": "migrate-x", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-x", "survey-a"],
-      "workspace": "migrate-x", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "…migrate every site in {{resultPath:survey-a}}. Commit before you finish.",
-      "mustRead": ["{{resultPath:survey-a}}"] },
-    { "id": "migrate-y", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-y", "survey-b"],
-      "workspace": "migrate-y", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
-      "prompt": "…migrate every site in {{resultPath:survey-b}}. Commit before you finish.",
-      "mustRead": ["{{resultPath:survey-b}}"] },
+    { "id": "migrate-auth-sites", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-auth-migration", "survey-auth"],
+      "workspace": "migrate-auth-sites", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+      "prompt": "…migrate every site in {{resultPath:survey-auth}}. Commit before you finish.",
+      "mustRead": ["{{resultPath:survey-auth}}"] },
+    { "id": "migrate-session-sites", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["seed-session-migration", "survey-session"],
+      "workspace": "migrate-session-sites", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
+      "prompt": "…migrate every site in {{resultPath:survey-session}}. Commit before you finish.",
+      "mustRead": ["{{resultPath:survey-session}}"] },
 
-    { "id": "join", "after": ["migrate-x", "migrate-y"],
-      "integrate": { "into": "feat", "from": ["migrate-x", "migrate-y"] } },
+    { "id": "join-migrations", "after": ["migrate-auth-sites", "migrate-session-sites"],
+      "integrate": { "into": "feat", "from": ["migrate-auth-sites", "migrate-session-sites"] } },
 
-    { "id": "cleanup", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["join"],
+    { "id": "clean-up-dead-code", "provider": "ollama", "model": "glm-5.2:cloud", "after": ["join-migrations"],
       "workspace": "feat", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "…delete the dead code, run the suite. Commit before you finish." }
   ] }
 ```
 
-Width goes `2 → 1 → 2 → 1`. `migrate-x` and `migrate-y` name **different workspaces**, so the
+Width goes `2 → 1 → 2 → 1`. `migrate-auth-sites` and `migrate-session-sites` name **different workspaces**, so the
 total-ordering rule never applies between them and they run concurrently, while the `feat`
-group (`helper`, `cleanup`) stays totally ordered through them.
+group (`write-helper`, `clean-up-dead-code`) stays totally ordered through them.
 
 **The two `seed-*` nodes are what `isolation.from` used to be.** A tree is always based on repo
 HEAD, so a leaf that must start from another task's commits gets an agentless `integrate` node
@@ -280,27 +280,27 @@ Three declarative keys cover the logic between leaves that never needed an LLM. 
     { "id": "find-sites", "provider": "ollama", "model": "glm-5.2:cloud",
       "prompt": "…return ONLY JSON: {\"sites\":[{\"file\":\"…\",\"line\":1}]}" },
 
-    { "id": "dedupe", "after": ["find-sites"],
+    { "id": "dedupe-sites", "after": ["find-sites"],
       "compute": "unique_by(deps['find-sites'].sites, 'file')" },
 
-    { "id": "fix", "after": ["dedupe"],
-      "forEach": { "from": "dedupe", "path": "", "maxItems": 30 },
+    { "id": "fix-sites", "after": ["dedupe-sites"],
+      "forEach": { "from": "dedupe-sites", "path": "", "maxItems": 30 },
       "provider": "ollama", "model": "glm-5.2:cloud", "allowedTools": "Read,Grep,Glob,Edit,Write,Bash",
       "prompt": "Fix the call site at {{item.file}}:{{item.line}} (clone {{index}})" },
 
-    { "id": "escalate", "after": ["fix", "dedupe"],
-      "when": { "from": "dedupe", "expr": "length(value) > 20" },
-      "provider": "claude", "model": "claude-sonnet-5", "prompt": "Many sites were touched: {{result:fix}} …" },
+    { "id": "escalate-sites", "after": ["fix-sites", "dedupe-sites"],
+      "when": { "from": "dedupe-sites", "expr": "length(value) > 20" },
+      "provider": "claude", "model": "claude-sonnet-5", "prompt": "Many sites were touched: {{result:fix-sites}} …" },
 
-    { "id": "join", "after": ["fix"], "integrate": { "into": "feat", "from": ["fix"] } }
+    { "id": "join-fixes", "after": ["fix-sites"], "integrate": { "into": "feat", "from": ["fix-sites"] } }
   ] }
 ```
 
-`fix`'s clones own branches, not `fix` itself — `join` folds every expanded clone back via
-`integrate.from: ["fix"]` (see topology.md).
+`fix-sites`'s clones own branches, not `fix-sites` itself — `join-fixes` folds every expanded clone back via
+`integrate.from: ["fix-sites"]` (see topology.md).
 
 - **`compute`** — an agentless step: an expression over `deps['<id>']` (each dependency's JSON output; raw text binds as a string). Zero tokens; the result is a normal task result, so `{{result:}}` and `forEach.from` consume it. Replaces `model`+`prompt` — never combine them.
-- **`forEach`** — clones this leaf once per element of a dependency's JSON array. `from` names a dependency in `after`; `path` selects the array inside its output (`""` = the output itself); **`maxItems` is required — the cap is the approval**. Clones get ids `fix[0]`, `fix[1]`, … and inherit model/effort/fallbackModel/retries, and each clone gets its own tree. `{{item}}` (whole element), `{{item.field}}`, `{{index}}` substitute at clone time. Dependents wait for ALL clones; `{{result:fix}}` inlines a JSON array of clone outputs. If the source array exceeds `maxItems` the run proceeds loudly (result field + run.log + closing warning) — never silently.
+- **`forEach`** — clones this leaf once per element of a dependency's JSON array. `from` names a dependency in `after`; `path` selects the array inside its output (`""` = the output itself); **`maxItems` is required — the cap is the approval**. Clones get ids `fix-sites[0]`, `fix-sites[1]`, … and inherit model/effort/fallbackModel/retries, and each clone gets its own tree. `{{item}}` (whole element), `{{item.field}}`, `{{index}}` substitute at clone time. Dependents wait for ALL clones; `{{result:fix-sites}}` inlines a JSON array of clone outputs. If the source array exceeds `maxItems` the run proceeds loudly (result field + run.log + closing warning) — never silently.
 - **`when`** — a conditional edge: `expr` runs over `value` (the `from` dependency's JSON output) and **must yield true/false** — write a comparison like `length(value) > 0`, never a bare value. False ⇒ the task completes as `skipped`; dependents still run and `{{result:}}` of a skipped task inlines empty.
 
 **Expression grammar** (same for `when`/`compute`, ≤500 chars): literals, `deps['id']`/`value`/`item` + `.field`/`[0]` access, `== != > >= < <=`, `&& || !`, and functions `length(x)`, `count(arr, pred?)`, `filter(arr, pred)`, `unique_by(arr, 'key')`, `flatten(arr)`, `min/max/sum(arr)`, `contains(a, b)`. Predicates bind `item` per element and must yield true/false. No arithmetic, no user JS. On any validation error, run `validate` and follow the message — it names the field, the fix, and an example.
