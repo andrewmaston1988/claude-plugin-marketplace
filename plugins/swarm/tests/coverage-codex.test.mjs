@@ -14,44 +14,12 @@ import { loadManifest } from "./helpers/repo-io.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { readResult } from "../src/results.mjs";
 import { fakeSpawnFactory, makeIo, usageEnv, codexReading } from "./helpers/fake-io.mjs";
+import { dbl, cmdRun, bashRun, event, transcript, readsOf, PS_EXE, pwshRun, psRun } from "./helpers/codex-events.mjs";
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/coverage/", import.meta.url));
 const fixture = (f) => readFileSync(join(FIXTURES, f), "utf8");
 function tmp() { return mkdtempSync(join(tmpdir(), "swarm-codex-cov-")); }
 const writeLines = (dir, name, n) => { const p = join(dir, name); writeFileSync(p, "x\n".repeat(n)); return p; };
-
-// ── fixtures: the REAL wrapper shape ──────────────────────────────────────────
-// A parsed command carries a quoted absolute exe path with DOUBLED separators
-// (`C:\\Users\\…` — cmd tolerates them). Build that by doubling a real path rather
-// than hand-escaping it per case.
-let _uid = 0;
-const dbl = (p) => p.replace(/\\/g, "\\\\");
-const cmdRun = (payload) => `"${dbl("C:\\WINDOWS\\system32\\cmd.exe")}" /c "${payload}"`;
-const bashRun = (payload) => `"${dbl("C:\\Program Files\\Git\\usr\\bin\\bash.exe")}" -c '${payload}'`;
-
-// Every completed exec event in the real transcript has an `item.started` twin
-// (exit_code null) and a non-JSON line ahead of the stream.
-function event(command, { exit = 0, output = "", started = true } = {}) {
-  const item = { id: `item_${_uid++}`, type: "command_execution", command, aggregated_output: output, exit_code: exit, status: exit === 0 ? "completed" : "failed" };
-  const lines = [];
-  if (started) lines.push(JSON.stringify({ type: "item.started", item: { ...item, aggregated_output: "", exit_code: null, status: "in_progress" } }));
-  lines.push(JSON.stringify({ type: "item.completed", item }));
-  return lines;
-}
-const transcript = (...events) => [
-  "Reading additional input from stdin...",
-  JSON.stringify({ type: "thread.started", thread_id: "t-1" }),
-  JSON.stringify({ type: "turn.started" }),
-  ...events.flat(),
-].join("\n") + "\n";
-const readsOf = (text, cwd) => parseReadCalls(text, "codex", { cwd });
-
-// The PowerShell wrapper, as codex really emits it: the exe as a quoted absolute
-// path with doubled separators, then the payload. A payload holding `"` arrives
-// escaped (`\"`), as codex re-serialises it.
-const PS_EXE = "C:\\Program Files\\PowerShell\\7\\pwsh.exe";
-const pwshRun = (payload, ...switches) => `"${dbl(PS_EXE)}"${switches.map((s) => ` ${s}`).join("")} -Command "${payload.replace(/"/g, '\\"')}"`;
-const psRun = (payload, ...switches) => `"${dbl("C:\\WINDOWS\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")}"${switches.map((s) => ` ${s}`).join("")} -Command "${payload.replace(/"/g, '\\"')}"`;
 
 // ── 1. whole file ─────────────────────────────────────────────────────────────
 
