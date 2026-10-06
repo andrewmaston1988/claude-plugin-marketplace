@@ -85,11 +85,27 @@ test("timeout kills the tree and preserves an exit code during drain", { timeout
   equal(makeDefaultIo().exitDrainMs, 2000);
 });
 
+// The exit lands well inside the run and the deadline passes well after it: a
+// 5 ms/15 ms pair rounds into the same coarse Windows timer tick and the
+// deadline wins about half the time, which tests the clock rather than the guard.
+test("an exit before the deadline settles as success, never as a timeout", { timeout: 2000 }, async () => {
+  let killCalls = 0;
+  const { io } = childIo((child) => {
+    child.stdout.emit("data", terminal);
+    setTimeout(() => child.emit("exit", 0), 5);
+  });
+  const result = await run({ ...io, exitDrainMs: 250, killTree: () => { killCalls++; } }, 100);
+  equal(result.ok, true);
+  ok(!result.timedOut);
+  equal(result.exit, 0);
+  equal(killCalls, 0);
+});
+
 test("Windows default tree kill uses taskkill recursively and forcibly", () => {
   let call;
   const io = makeDefaultIo({ platform: "win32", spawnSync: (...args) => { call = args; } });
   io.killTree({ pid: 73, kill() { throw new Error("must use taskkill"); } });
   deepEqual(call[0], "taskkill");
   deepEqual(call[1], ["/PID", "73", "/T", "/F"]);
-  deepEqual(call[2], { stdio: "ignore", windowsHide: true });
+  deepEqual(call[2], { stdio: "ignore", windowsHide: true, timeout: 5000 });
 });

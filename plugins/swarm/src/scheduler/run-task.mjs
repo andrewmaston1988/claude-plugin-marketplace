@@ -28,7 +28,7 @@ export function makeDefaultIo({ platform = process.platform, spawnSync = nodeSpa
     },
     killTree: (child) => {
       if (platform === "win32") {
-        try { spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true }); } catch { /* best effort */ }
+        try { spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true, timeout: 5000 }); } catch { /* best effort */ }
       } else {
         try { child.kill(); } catch { /* already gone */ }
       }
@@ -207,6 +207,9 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
     let settled = false;
     let drain = null;
     let exitCode = null;
+    // Exit is a boolean, not a code comparison: the code is null on a signal kill,
+    // and an exited child must not be reported as a timeout even then.
+    let exited = false;
     // Every runner emits the same contract. Raw stdout/stderr is retained only
     // for diagnostics and failure classification; it never decides whether a
     // non-Claude runner completed successfully.
@@ -235,14 +238,21 @@ export function runTask(task, prompt, cfg, io, leafLog, { onTokens, onActivity, 
     const armDrain = () => {
       if (drain || settled) return;
       drain = setTimeout(() => {
+        // The engine is about to cut streams the leaf's descendants still hold
+        // open. Say so in the leaf's own log, or the truncated tail reads as a
+        // leaf that stopped talking.
+        leafLog?.write(`[swarm] exit drain fired after ${io.now() - started} ms (exit ${exitCode}); output streams closed by the engine\n`);
         child.stdout?.destroy?.();
         child.stderr?.destroy?.();
         settle(exitCode);
       }, io.exitDrainMs ?? EXIT_DRAIN_MS);
       if (drain.unref) drain.unref();
     };
-    child.on("exit", (code) => { exitCode = code; armDrain(); });
+    child.on("exit", (code) => { exitCode = code; exited = true; armDrain(); });
     const timer = setTimeout(() => {
+      // Already exited: the drain armed at exit will settle with the real code.
+      // Marking a timeout here would report completed work as a false failure.
+      if (exited) return;
       timedOut = true;
       armDrain();
       try { (io.killTree ?? ((c) => c.kill()))(child); } catch { /* best effort */ }
