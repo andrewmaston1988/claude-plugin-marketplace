@@ -9,7 +9,7 @@ these fields; the decision of *whether* to use them lives in SKILL.md.
 declares this — `allowedTools` already says which a leaf is, and a second field saying the
 same thing is a second field to disagree with.
 
-Defaults vary by runner: Claude and Ollama get `Read,Grep,Glob,Skill` plus the dispatching machine MCP servers; Codex gets `Read,Grep,Glob`. An explicit `allowedTools` list replaces that default.
+Defaults vary by runner: Claude and Ollama get `Read,Grep,Glob,Skill` plus the dispatching machine MCP servers; Codex gets `Read,Grep,Glob`. An explicit `allowedTools` list replaces that default. It is only a CLI allow-list: under `bypassPermissions`, unlisted tools can still run, and listed `Bash` can reach any file; `--disallowedTools` filters tool names, not paths. Only a matching `projects[].hooks.preToolUse` guard denies access mechanically.
 
 | The leaf holds | It runs in | Its branch |
 |---|---|---|
@@ -43,15 +43,15 @@ no leaf, so none of this applies, and naming either key on one is refused.
 {
   "tasks": [
     { "id": "survey", "provider": "claude", "model": "claude-haiku-4-5-20251001", "prompt": "…" },
-    { "id": "impl", "provider": "claude", "model": "claude-sonnet-5", "allowedTools": "Read,Edit,Bash", "prompt": "…" },
-    { "id": "review", "provider": "claude", "model": "claude-sonnet-5", "after": ["impl"], "allowedTools": "Read,Edit,Bash",
+    { "id": "implementation", "provider": "claude", "model": "claude-sonnet-5", "allowedTools": "Read,Edit,Bash", "prompt": "…" },
+    { "id": "review", "provider": "claude", "model": "claude-sonnet-5", "after": ["implementation"], "allowedTools": "Read,Edit,Bash",
       "workspace": "feat", "prompt": "…" },
     { "id": "read-logs", "provider": "claude", "model": "claude-haiku-4-5-20251001", "cwd": "C:/logs", "prompt": "…" }
   ]
 }
 ```
 
-`survey` reads the live repo; `impl` gets a private tree without asking; `review` shares the
+`survey` reads the live repo; `implementation` gets a private tree without asking; `review` shares the
 `feat` tree with anything else naming it; `read-logs` reads a directory that is not a repo.
 
 **To start a tree from another task's commits, use an `integrate` node** — it creates the
