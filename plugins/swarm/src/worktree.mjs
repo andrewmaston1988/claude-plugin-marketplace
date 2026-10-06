@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 
 export const WORKTREE_ADD_TIMEOUT_MS = 180000;
 
@@ -62,13 +62,19 @@ function isRegisteredWorktree(path, repo) {
 }
 
 // Create — or re-enter — an isolated worktree for an implementation leaf:
-//   git worktree add <resultsDir>/wt-<name> -b <prefix><name> --no-track <HEAD of task cwd repo>
+//   git worktree add <resultsDir>/wt-<name> -b <prefix><name> --no-track <base>
 // The branch prefix comes from config — never hardcoded. On resend the leaf's
 // worktree may already exist (kept on timeout for salvage): re-enter it so the
 // partial diff survives and the leaf resumes in place, rather than 0s-failing on
-// a re-create. `reset` (the --force redo) scrubs it back to HEAD first.
-export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTimeoutMs } = {}) {
+// a re-create. `reset` (the --force redo) scrubs it back to the base first.
+//
+// `base` is REQUIRED — the run's pinned dispatch commit for this repo (run-bases.mjs),
+// never a live HEAD read; defaulting it is how a caller silently keeps the old behaviour.
+export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTimeoutMs, base } = {}) {
   if (!(Number.isFinite(addTimeoutMs) && addTimeoutMs > 0)) throw new Error("prepareIsolation requires a positive addTimeoutMs");
+  if (typeof base !== "string" || !base.trim()) {
+    throw new Error("prepareIsolation requires the run's pinned base commit — reading the live HEAD here would cut the tree from a commit the run never saw");
+  }
   const repo = task.originalCwd || task.cwd;
   // Ordered siblings sharing a name meet in one tree; without one, the task's
   // own id names a private tree.
@@ -76,19 +82,10 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
   const branch = branchNameFor(task, cfg);
   const path = resolve(join(resultsDir, `wt-${name}`));
 
-  // A leaf that builds on another's committed work bases its tree on that
-  // branch instead of repo HEAD — otherwise it starts without the code it
-  // depends on. `wt.head` follows the base, so "did this leaf change anything"
-  // stays a question about THIS leaf's work.
-  const head = git(["rev-parse", "HEAD"], repo, { timeout: 60000 });
-  if (head.status !== 0) {
-    throw new Error(`cannot resolve HEAD in ${repo}: ${head.stderr || "not a git repo?"}`);
-  }
-
   if (isRegisteredWorktree(path, repo)) {
     // A --force redo scrubs the kept partial work; a plain resend preserves it.
     if (reset) {
-      git(["reset", "--hard", head.stdout], path, { timeout: 60000 });
+      git(["reset", "--hard", base], path, { timeout: 60000 });
       git(["clean", "-fd"], path, { timeout: 60000 });
     }
     // A follower starts from what its predecessor left, so its own collect()
@@ -101,15 +98,18 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
     const reused = on.status === 0 && on.stdout && on.stdout !== "HEAD" ? on.stdout : branch;
     return {
       path, branch: reused, name, repo, reused: true,
-      head: (!reset && treeHead.status === 0) ? treeHead.stdout : head.stdout,
+      head: (!reset && treeHead.status === 0) ? treeHead.stdout : base,
     };
   }
 
-  let add = git(["worktree", "add", path, "-b", branch, "--no-track", head.stdout], repo, { timeout: addTimeoutMs });
+  let add = git(["worktree", "add", path, "-b", branch, "--no-track", base], repo, { timeout: addTimeoutMs });
   if (add.status !== 0 && /already exists/i.test(add.stderr)) {
-    // Stale branch (path was cleaned but the branch lingered): force it to HEAD.
+    // Stale branch (path was cleaned but the branch lingered): force it to the base.
     // But -B RESETS the branch, so refuse when it still carries unlanded work.
-    const unlanded = unlandedCount(head.stdout, branch, repo);
+    // "Unlanded" is measured against the LIVE tip — the base is only where this
+    // run's trees start, and squashing onto it would hide work already merged on.
+    const tip = repoHead(repo);
+    const unlanded = tip ? unlandedCount(tip, branch, repo) : Infinity;
     if (unlanded > 0 && !reset) {
       throw new Error(
         `worktree branch '${branch}' carries ${unlanded === Infinity ? "an unknown number of" : unlanded} unlanded commit(s) — refusing to reset it ` +
@@ -117,16 +117,36 @@ export function prepareIsolation(task, cfg, resultsDir, { reset = false, addTime
         `    inspect:  git log ${branch}\n` +
         `    reuse it: name a different worktree, merge/delete '${branch}' yourself, or re-run with --force`);
     }
-    add = git(["worktree", "add", path, "-B", branch, "--no-track", head.stdout], repo, { timeout: addTimeoutMs });
+    add = git(["worktree", "add", path, "-B", branch, "--no-track", base], repo, { timeout: addTimeoutMs });
   }
   if (add.status !== 0) {
+    // A branch live in another worktree is not a retryable add failure: the message
+    // git gives names the tree, and nothing else does. A run that re-enters a kept
+    // tree from an earlier run (or two runs of one manifest sharing a branch) lands
+    // here, and the raw "already used by worktree" reads as corruption.
+    if (/already (used by|checked out at) worktree/i.test(add.stderr)) {
+      const holder = add.stderr.match(/worktree at '([^']+)'/)?.[1];
+      // The holder is the TREE; `swarm prune` takes the RUN dir that holds it, and
+      // the tree path fails with "no run at … (no run.log)".
+      const runDir = holder ? dirname(holder) : null;
+      throw new Error(
+        `branch '${branch}' is checked out in another worktree${holder ? ` (${holder})` : ""} — ` +
+        `finish or prune that run (swarm prune ${runDir || "…"}), or name a different branch/workspace`);
+    }
     if (add.timedOut) {
       throw new Error(`git worktree add timed out after ${addTimeoutMs / 1000}s for '${task.id}' — a slow repo hook (post-checkout / reference-transaction) is the usual cause: ${add.stderr}`);
     }
     throw new Error(`git worktree add failed for '${task.id}': ${add.stderr}`);
   }
 
-  return { path, branch, name, head: head.stdout, repo, reused: false };
+  return { path, branch, name, head: base, repo, reused: false };
+}
+
+// The live HEAD of `repo`'s checkout — the commit a run PINS at dispatch
+// (run-bases.mjs) and the tip `unlandedCount` measures against. Null outside git.
+export function repoHead(repo) {
+  const r = git(["rev-parse", "HEAD"], repo, { timeout: 60000 });
+  return r.status === 0 && r.stdout ? r.stdout : null;
 }
 
 // Collect after the leaf ran: unchanged worktrees are removed (and their
@@ -179,9 +199,9 @@ export function collect(task, cfg, wt, { isChainFollower = false, isIntegrateSou
 //
 // The node owns the target tree: it creates it (or re-enters a kept one) rather
 // than borrowing a tree a leaf is using, so nothing races.
-export function integrate(task, cfg, resultsDir, { repo: repoOverride } = {}) {
+export function integrate(task, cfg, resultsDir, { repo: repoOverride, base } = {}) {
   const repo = repoOverride || task.originalCwd || task.cwd;
-  const wt = prepareIsolation({ ...task, originalCwd: repo }, cfg, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+  const wt = prepareIsolation({ ...task, originalCwd: repo }, cfg, resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base });
 
   const merged = [];
   const conflicts = [];

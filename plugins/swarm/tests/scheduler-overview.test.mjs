@@ -28,7 +28,7 @@ test("fan-out: all tasks run, results + summary + run.log written", async () => 
     deepEqual(summary.tasks.map((t) => t.state), ["ok", "ok", "ok"]);
     deepEqual(summary.blocked, []);
     const logLines = readFileSync(join(p.resultsDir, "run.log"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
-    equal(logLines.length, 7); // run-start + (running + terminal) per task
+    equal(logLines.length, 8); // run-start + bases + (running + terminal) per task
     equal(logLines[0].event, "run-start");
     deepEqual(logLines[0].tasks, [
       { id: "a", provider: "claude", runner: "claude", model: "claude-haiku-4-5-20251001" }, { id: "b", provider: "claude", runner: "claude", model: "claude-haiku-4-5-20251001" }, { id: "c", provider: "claude", runner: "claude", model: "claude-haiku-4-5-20251001" },

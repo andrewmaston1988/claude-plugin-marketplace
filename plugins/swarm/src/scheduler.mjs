@@ -18,6 +18,7 @@ import { defaultProviderRegistry } from "./default-providers.mjs";
 import { createDispatchRegistry } from "./dispatch.mjs";
 import { ALIVE_STATES } from "./runlog.mjs";
 import { settleInline } from "./inline-steps.mjs";
+import { baseFor, captureBases } from "./run-bases.mjs";
 import * as defaultWorktree from "./worktree.mjs";
 import { makeDefaultIo } from "./scheduler/run-task.mjs";
 import { createRunIdentity } from "./scheduler/run-identity.mjs";
@@ -110,6 +111,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
   };
 
   initResultsDir(plan.resultsDir);
+  // Pin the run's base commits BEFORE anything dispatches: every tree is cut from
+  // one of these (worktree.mjs), so a leaf that waits on `after` cannot end up
+  // standing on commits that landed in the checkout while the run was in flight.
+  // A resume reuses the file an earlier engine wrote; --force recaptures.
+  ctx.bases = captureBases(tasks, { resultsDir: plan.resultsDir, cwd: plan.cwd }, io, { force });
+  ctx.baseFor = (repo) => baseFor(ctx.bases, repo, plan.resultsDir);
   // A prior `swarm stop` leaves its marker and no other engine is live here (cmdRun
   // refuses one): clear it before any await, so a stop landing during startup still counts.
   rmSync(stopPath(plan.resultsDir), { force: true });
@@ -218,6 +225,12 @@ export async function runPlan(plan, cfg, io = makeDefaultIo(), {
     ...(launcherSession() ? { launcher: launcherSession() } : {}),
     ...(ask && { ask: ask.taskId }),
     tasks: tasks.map((t) => ({ id: t.id, model: t.model, ...ctx.durableIdentity(t) })),
+  });
+  // The bases event follows run-start, never precedes it: readers key on the FIRST
+  // run-start line to derive pending tasks, and its index is part of the contract.
+  appendRunLog(plan.resultsDir, {
+    ts: ctx.started, event: "bases",
+    bases: Object.fromEntries(ctx.bases),
   });
   ctx.runStartMs = io.now();
 

@@ -1,59 +1,25 @@
 import { test } from "node:test";
 import { equal, ok, deepEqual } from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import {
   prepareIsolation, collect, integrate, branchNameFor,
-  runScopeKey, treeCwd, WORKTREE_ADD_TIMEOUT_MS,
+  runScopeKey, treeCwd,
 } from "../src/worktree.mjs";
 import { runPlan } from "../src/scheduler.mjs";
 import { ValidationError } from "../src/manifest.mjs";
 import { loadManifest } from "./helpers/repo-io.mjs";
 import { fakeSpawnFactory, makeIo } from "./helpers/fake-io.mjs";
-const ADD = { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS };
-const CFG = {
-  provider: { mode: "env", url: "http://127.0.0.1:1", authToken: "x", allowedRoots: [] },
-  resultInlineCap: 4000,
-  worktreeBranchPrefix: "swarm/",
-};
-
-function git(args, cwd) {
-  const r = spawnSync("git", args, { cwd, encoding: "utf8", windowsHide: true });
-  return (r.stdout || "").trim();
-}
-
-function initRepo() {
-  const repo = mkdtempSync(join(tmpdir(), "swarm-wt-repo-"));
-  spawnSync("git", ["init", "-q", "-b", "main"], { cwd: repo, windowsHide: true });
-  writeFileSync(join(repo, "a.txt"), "hello\n");
-  spawnSync("git", ["add", "."], { cwd: repo, windowsHide: true });
-  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "init"], { cwd: repo, windowsHide: true });
-  return repo;
-}
-
-function cleanup(...dirs) {
-  for (const d of dirs) rmSync(d, { recursive: true, force: true });
-}
-
-function commitAll(cwd, msg) {
-  spawnSync("git", ["add", "."], { cwd, windowsHide: true });
-  spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
-    "commit", "-q", "-m", msg], { cwd, windowsHide: true });
-}
-
-// git holds the worktree dir open; remove it before rmSync'ing the repo.
-function dropWorktree(repo, path) {
-  spawnSync("git", ["worktree", "remove", "--force", path], { cwd: repo, windowsHide: true });
-}
+import { git, initRepo, cleanup, commitAll, dropWorktree, CFG, ADD } from "./helpers/worktree-fixtures.mjs";
 
 test("prepareIsolation creates a worktree on the prefixed branch at repo HEAD", () => {
   const repo = initRepo();
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "impl", originalCwd: repo, cwd: repo };
-    const wt = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     equal(wt.branch, "swarm/impl");
     equal(wt.path, join(resultsDir, "wt-impl"));
     ok(existsSync(join(wt.path, "a.txt")));
@@ -68,7 +34,7 @@ test("branch prefix comes from config, never hardcoded", () => {
   const repo = initRepo();
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
-    const wt = prepareIsolation({ id: "x", originalCwd: repo }, { worktreeBranchPrefix: "custom/" }, resultsDir, ADD);
+    const wt = prepareIsolation({ id: "x", originalCwd: repo }, { worktreeBranchPrefix: "custom/" }, resultsDir, ADD(repo));
     equal(wt.branch, "custom/x");
   } finally {
     cleanup(resultsDir, repo);
@@ -80,12 +46,12 @@ test("prepareIsolation re-enters a kept worktree in place — a resend keeps the
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "impl", originalCwd: repo, cwd: repo };
-    const wt = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     // leaf did partial work then timed out — the worktree is kept, dirty
     writeFileSync(join(wt.path, "partial.txt"), "half-done work\n");
 
     // a resend re-enters the SAME worktree rather than throwing "already exists"
-    const again = prepareIsolation(task, CFG, resultsDir, ADD);
+    const again = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     equal(again.path, wt.path);
     equal(again.reused, true, "must signal it re-entered an existing worktree");
     ok(existsSync(join(again.path, "partial.txt")), "partial diff must survive the resend");
@@ -100,11 +66,11 @@ test("prepareIsolation with { reset } scrubs a kept worktree clean — the --for
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "impl", originalCwd: repo, cwd: repo };
-    const wt = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     writeFileSync(join(wt.path, "partial.txt"), "half-done work\n");
     writeFileSync(join(wt.path, "a.txt"), "tampered\n");
 
-    const forced = prepareIsolation(task, CFG, resultsDir, { reset: true, ...ADD });
+    const forced = prepareIsolation(task, CFG, resultsDir, { reset: true, ...ADD(repo) });
     equal(forced.path, wt.path);
     equal(forced.reused, true);
     ok(!existsSync(join(forced.path, "partial.txt")), "untracked partial work is cleaned");
@@ -119,7 +85,7 @@ test("prepareIsolation on a fresh path still creates and reports reused:false", 
   const repo = initRepo();
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
-    const wt = prepareIsolation({ id: "fresh", originalCwd: repo }, CFG, resultsDir, ADD);
+    const wt = prepareIsolation({ id: "fresh", originalCwd: repo }, CFG, resultsDir, ADD(repo));
     equal(wt.reused, false);
     ok(existsSync(join(wt.path, "a.txt")));
   } finally {
@@ -135,7 +101,7 @@ test("two tasks sharing a worktree name land in one tree on one branch", () => {
     const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
     const p2 = { id: "p2", worktreeName: "feat", originalCwd: repo, cwd: repo };
 
-    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD);
+    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD(repo));
     equal(wt1.branch, "swarm/feat", "branch comes from the name, not the task id");
     equal(wt1.name, "feat");
     ok(wt1.path.endsWith("wt-feat"), `expected wt-feat, got ${wt1.path}`);
@@ -143,7 +109,7 @@ test("two tasks sharing a worktree name land in one tree on one branch", () => {
     writeFileSync(join(wt1.path, "phase1.txt"), "phase 1 work\n");
     commitAll(wt1.path, "phase 1");
 
-    const wt2 = prepareIsolation(p2, CFG, resultsDir, ADD);
+    const wt2 = prepareIsolation(p2, CFG, resultsDir, ADD(repo));
     equal(wt2.path, wt1.path, "second task re-enters the same tree");
     equal(wt2.branch, wt1.branch);
     ok(wt2.reused, "second task reuses rather than creates");
@@ -159,13 +125,13 @@ test("a follower's head is the tree's HEAD, so its diffstat spans only its own w
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
-    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD);
+    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD(repo));
     writeFileSync(join(wt1.path, "phase1.txt"), "work\n");
     commitAll(wt1.path, "phase 1");
     const phase1Head = git(["rev-parse", "HEAD"], wt1.path);
 
     const rev = { id: "rev", worktreeName: "feat", originalCwd: repo, cwd: repo };
-    const wtR = prepareIsolation(rev, CFG, resultsDir, ADD);
+    const wtR = prepareIsolation(rev, CFG, resultsDir, ADD(repo));
     equal(wtR.path, wt1.path);
     equal(wtR.head, phase1Head, "a follower starts from what its predecessor left, not repo HEAD");
 
@@ -186,12 +152,12 @@ test("--force on a follower resets to repo HEAD, not the tree's", () => {
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
-    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD);
+    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD(repo));
     writeFileSync(join(wt1.path, "phase1.txt"), "work\n");
     commitAll(wt1.path, "phase 1");
 
     const p2 = { id: "p2", worktreeName: "feat", originalCwd: repo, cwd: repo };
-    const forced = prepareIsolation(p2, CFG, resultsDir, { reset: true, ...ADD });
+    const forced = prepareIsolation(p2, CFG, resultsDir, { reset: true, ...ADD(repo) });
     equal(forced.head, git(["rev-parse", "HEAD"], repo), "a reset restarts the group from repo HEAD");
     ok(!existsSync(join(forced.path, "phase1.txt")), "reset scrubs the whole group's work");
   } finally {
@@ -204,7 +170,7 @@ test("a task with no worktreeName keeps its per-task tree (regression)", () => {
   const repo = initRepo();
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
-    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, CFG, resultsDir, ADD);
+    const wt = prepareIsolation({ id: "impl", originalCwd: repo, cwd: repo }, CFG, resultsDir, ADD(repo));
     equal(wt.branch, "swarm/impl");
     equal(wt.name, "impl");
     ok(wt.path.endsWith("wt-impl"));
@@ -219,14 +185,14 @@ test("collect never destroys a reused tree — a failed follower would take the 
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
-    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD);
+    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD(repo));
     writeFileSync(join(wt1.path, "phase1.txt"), "phase 1 work\n");
     commitAll(wt1.path, "phase 1");
 
     // p2 is the final link and fails without touching the tree: relative to its
     // own start HEAD nothing changed, which is the destroy condition.
     const p2 = { id: "p2", worktreeName: "feat", originalCwd: repo, cwd: repo };
-    const wt2 = prepareIsolation(p2, CFG, resultsDir, ADD);
+    const wt2 = prepareIsolation(p2, CFG, resultsDir, ADD(repo));
     const c = collect(p2, CFG, wt2, { isChainFollower: true });
 
     equal(c.kept, true, "the shared branch must survive");
@@ -246,11 +212,11 @@ test("collect sweeps an unchanged worktree on solo resend, even though it was re
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "solo", originalCwd: repo };
-    const wt1 = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt1 = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     // First attempt "fails" without touching the tree — nothing to collect yet.
     // Re-enter (simulating a resend): reused: true, but isChainFollower defaults
     // to false because collect() is called without it (solo task, group size 1).
-    const wt2 = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt2 = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     ok(wt2.reused, "the resend must re-enter the same tree");
     const c = collect(task, CFG, wt2);
 
@@ -268,7 +234,7 @@ test("collect removes an unchanged worktree and deletes its branch", () => {
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "noop", originalCwd: repo };
-    const wt = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     const c = collect(task, CFG, wt);
     equal(c.kept, false);
     equal(c.branch, "swarm/noop");
@@ -285,7 +251,7 @@ test("collect keeps a changed worktree with porcelain + diffstat (uncommitted)",
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "edit", originalCwd: repo };
-    const wt = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     writeFileSync(join(wt.path, "a.txt"), "changed\n");
     writeFileSync(join(wt.path, "new.txt"), "brand new\n");
     const c = collect(task, CFG, wt);
@@ -307,7 +273,7 @@ test("collect keeps a worktree whose changes were committed", () => {
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "commit", originalCwd: repo };
-    const wt = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     writeFileSync(join(wt.path, "b.txt"), "committed change\n");
     spawnSync("git", ["add", "."], { cwd: wt.path, windowsHide: true });
     spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", "leaf work"], { cwd: wt.path, windowsHide: true });
@@ -325,7 +291,7 @@ test("collect keeps the branch of an unchanged integrate-source, but still remov
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "src", originalCwd: repo };
-    const wt = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     const c = collect(task, CFG, wt, { isIntegrateSource: true });
     equal(c.kept, false, "the worktree still counts as swept");
     equal(c.branchKept, true, "the branch survives — a later integrate needs the ref, not its contents");
@@ -343,7 +309,7 @@ test("collect sweeps an unchanged NON-source completely — branch and all", () 
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "nonsrc", originalCwd: repo };
-    const wt = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     const c = collect(task, CFG, wt, { isIntegrateSource: false });
     equal(c.kept, false);
     equal(c.branchKept, false, "not named by any integrate — nothing protects the ref");
@@ -359,7 +325,7 @@ test("collect keeps a changed integrate-source exactly as before — isIntegrate
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const task = { id: "changed-src", originalCwd: repo };
-    const wt = prepareIsolation(task, CFG, resultsDir, ADD);
+    const wt = prepareIsolation(task, CFG, resultsDir, ADD(repo));
     writeFileSync(join(wt.path, "new.txt"), "work\n");
     commitAll(wt.path, "leaf work");
     const c = collect(task, CFG, wt, { isIntegrateSource: true });
@@ -381,11 +347,11 @@ test("isChainFollower and carriesWork guards still keep worktree and branch, una
   const resultsDir = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     const p1 = { id: "p1", worktreeName: "feat", originalCwd: repo, cwd: repo };
-    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD);
+    const wt1 = prepareIsolation(p1, CFG, resultsDir, ADD(repo));
     writeFileSync(join(wt1.path, "phase1.txt"), "phase 1 work\n");
     commitAll(wt1.path, "phase 1");
     const p2 = { id: "p2", worktreeName: "feat", originalCwd: repo, cwd: repo };
-    const wt2 = prepareIsolation(p2, CFG, resultsDir, ADD);
+    const wt2 = prepareIsolation(p2, CFG, resultsDir, ADD(repo));
     const cFollower = collect(p2, CFG, wt2, { isChainFollower: true, isIntegrateSource: false });
     equal(cFollower.kept, true, "isChainFollower still protects the shared tree");
     ok(git(["branch", "--list", "swarm/feat"], repo).includes("swarm/feat"));
@@ -395,11 +361,11 @@ test("isChainFollower and carriesWork guards still keep worktree and branch, una
     // then changed nothing. `changed` is false and the chain guard is off, so
     // only unlandedCount stands between `swarm/carry` and `branch -D`.
     const c1 = { id: "c1", worktreeName: "carry", originalCwd: repo, cwd: repo };
-    const wtc1 = prepareIsolation(c1, CFG, resultsDir, ADD);
+    const wtc1 = prepareIsolation(c1, CFG, resultsDir, ADD(repo));
     writeFileSync(join(wtc1.path, "carried.txt"), "earlier phase\n");
     commitAll(wtc1.path, "earlier phase");
     const c2 = { id: "c2", worktreeName: "carry", originalCwd: repo, cwd: repo };
-    const wtc2 = prepareIsolation(c2, CFG, resultsDir, ADD);
+    const wtc2 = prepareIsolation(c2, CFG, resultsDir, ADD(repo));
     const cCarries = collect(c2, CFG, wtc2, { isChainFollower: false, isIntegrateSource: false });
     equal(cCarries.kept, true, "carriesWork protects commits not landed on repo HEAD");
     ok(git(["branch", "--list", "swarm/carry"], repo).includes("swarm/carry"));
@@ -495,7 +461,7 @@ test("collect never deletes a branch carrying commits it did not create", () => 
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     // Phase 1 lands real work on the shared branch.
-    const p1 = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD);
+    const p1 = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     writeFileSync(join(p1.path, "phase1.txt"), "phase 1 work\n");
     commitAll(p1.path, "phase 1");
     const phase1Tip = git(["rev-parse", "HEAD"], p1.path);
@@ -503,7 +469,7 @@ test("collect never deletes a branch carrying commits it did not create", () => 
     // A later leaf re-enters the same tree and changes NOTHING of its own — a
     // review leaf, a no-op, a leaf that found nothing to do. It is the sole
     // member of its group in this plan, so isChainFollower is false.
-    const p2 = prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD);
+    const p2 = prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     ok(p2.reused, "re-entered the existing tree");
     const out = collect({ id: "p2" }, CFG, p2, { isChainFollower: false });
 
@@ -521,7 +487,7 @@ test("prepareIsolation refuses to force-reset a branch carrying commits", () => 
   try {
     // A prior run left commits on swarm/feat, then its worktree was removed by
     // hand (or pruned) while the branch survived.
-    const first = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD);
+    const first = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     writeFileSync(join(first.path, "work.txt"), "real work\n");
     commitAll(first.path, "phase 1");
     const tip = git(["rev-parse", "swarm/feat"], repo);
@@ -533,7 +499,7 @@ test("prepareIsolation refuses to force-reset a branch carrying commits", () => 
     try {
       let threw = null;
       try {
-        prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other, ADD);
+        prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other, ADD(repo));
       } catch (e) { threw = e; }
       ok(threw, "must refuse rather than silently reset a branch with commits");
       ok(/carries \d+ unlanded commit/i.test(threw.message), `message should name the loss: ${threw?.message}`);
@@ -547,7 +513,7 @@ test("prepareIsolation still force-resets an EMPTY stale branch after HEAD moves
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-res-"));
   try {
     // Stale branch carrying nothing, tree removed — the legitimate -B case.
-    const first = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD);
+    const first = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     spawnSync("git", ["worktree", "remove", "--force", first.path], { cwd: repo, windowsHide: true });
 
     // Repo HEAD moves SIDEWAYS (a different branch), so the stale branch is not
@@ -558,7 +524,7 @@ test("prepareIsolation still force-resets an EMPTY stale branch after HEAD moves
 
     const other = mkdtempSync(join(tmpdir(), "swarm-wt-res2-"));
     try {
-      const wt = prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other, ADD);
+      const wt = prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other, ADD(repo));
       ok(existsSync(wt.path), "an empty stale branch is still safe to reuse");
     } finally { cleanup(other); }
   } finally { cleanup(repo, results); }
@@ -570,7 +536,7 @@ test("an explicit branch names the branch independently of the tree", () => {
   try {
     const wt = prepareIsolation(
       { id: "p3", originalCwd: repo, worktreeName: "p3", branchName: "swarm/eco-p3branch" },
-      CFG, results, ADD);
+      CFG, results, ADD(repo));
     equal(wt.branch, "swarm/eco-p3branch", "explicit branch wins over the derived name");
     ok(wt.path.endsWith("wt-p3"), "the tree is still keyed by the worktree name");
     ok(git(["branch", "--list", "swarm/eco-p3branch"], repo).includes("swarm/eco-p3branch"));
@@ -581,7 +547,7 @@ test("a squash-merged branch no longer blocks reuse; --force overrides an unland
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-sq-"));
   try {
-    const wt = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD);
+    const wt = prepareIsolation({ id: "p1", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     writeFileSync(join(wt.path, "work.txt"), "real work\n");
     commitAll(wt.path, "phase 1");
     spawnSync("git", ["worktree", "remove", "--force", wt.path], { cwd: repo, windowsHide: true });
@@ -589,14 +555,14 @@ test("a squash-merged branch no longer blocks reuse; --force overrides an unland
     // Unlanded work still blocks...
     const other = mkdtempSync(join(tmpdir(), "swarm-wt-sq2-"));
     let threw = null;
-    try { prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other, ADD); }
+    try { prepareIsolation({ id: "p2", originalCwd: repo, worktreeName: "feat" }, CFG, other, ADD(repo)); }
     catch (e) { threw = e; }
     ok(threw && /unlanded/.test(threw.message), "unlanded commits still refuse");
 
     // ...but --force is the documented escape hatch.
     const forced = mkdtempSync(join(tmpdir(), "swarm-wt-sq3-"));
     const okWt = prepareIsolation(
-      { id: "p3", originalCwd: repo, worktreeName: "feat" }, CFG, forced, { reset: true, ...ADD });
+      { id: "p3", originalCwd: repo, worktreeName: "feat" }, CFG, forced, { reset: true, ...ADD(repo) });
     ok(existsSync(okWt.path), "--force overrides the guard");
     spawnSync("git", ["worktree", "remove", "--force", okWt.path], { cwd: repo, windowsHide: true });
     cleanup(other, forced);
@@ -604,14 +570,14 @@ test("a squash-merged branch no longer blocks reuse; --force overrides an unland
     // Squash-merge on a FRESH branch — the --force above already reset swarm/feat
     // to HEAD, so reusing it here would assert nothing.
     const sqDir = mkdtempSync(join(tmpdir(), "swarm-wt-sq4-"));
-    const sq = prepareIsolation({ id: "sq", originalCwd: repo, worktreeName: "sq" }, CFG, sqDir, ADD);
+    const sq = prepareIsolation({ id: "sq", originalCwd: repo, worktreeName: "sq" }, CFG, sqDir, ADD(repo));
     writeFileSync(join(sq.path, "sq.txt"), "squashed work\n");
     commitAll(sq.path, "sq work");
     spawnSync("git", ["worktree", "remove", "--force", sq.path], { cwd: repo, windowsHide: true });
     // Before the squash lands, that branch genuinely blocks.
     let blocked = null;
     const preDir = mkdtempSync(join(tmpdir(), "swarm-wt-sq5-"));
-    try { prepareIsolation({ id: "sq2", originalCwd: repo, worktreeName: "sq" }, CFG, preDir, ADD); }
+    try { prepareIsolation({ id: "sq2", originalCwd: repo, worktreeName: "sq" }, CFG, preDir, ADD(repo)); }
     catch (e) { blocked = e; }
     ok(blocked && /unlanded/.test(blocked.message), "unlanded work blocks before the squash");
     cleanup(preDir);
@@ -620,7 +586,7 @@ test("a squash-merged branch no longer blocks reuse; --force overrides an unland
     commitAll(repo, "squashed sq");
     const after = mkdtempSync(join(tmpdir(), "swarm-wt-sq6-"));
     try {
-      const reused = prepareIsolation({ id: "sq3", originalCwd: repo, worktreeName: "sq" }, CFG, after, ADD);
+      const reused = prepareIsolation({ id: "sq3", originalCwd: repo, worktreeName: "sq" }, CFG, after, ADD(repo));
       ok(existsSync(reused.path), "a squash-merged branch is reusable");
     } finally { cleanup(after, sqDir); }
   } finally { cleanup(repo, results); }
@@ -630,18 +596,18 @@ test("integrate merges sibling branches into the target tree", () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int-"));
   try {
-    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD);
+    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     writeFileSync(join(base.path, "helper.txt"), "helper\n");
     commitAll(base.path, "helper");
 
     for (const id of ["x", "y"]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD);
+      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
       writeFileSync(join(wt.path, `${id}.txt`), `${id} work\n`);
       commitAll(wt.path, `${id} work`);
     }
 
     const out = integrate(
-      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo });
+      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo, ...ADD(repo) });
 
     equal(out.conflicts.length, 0, "disjoint files merge cleanly");
     ok(existsSync(join(out.path, "x.txt")) && existsSync(join(out.path, "y.txt")),
@@ -653,18 +619,18 @@ test("integrate leaves conflict markers in place and reports the paths", () => {
   const repo = initRepo();
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-int2-"));
   try {
-    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD);
+    const base = prepareIsolation({ id: "helper", originalCwd: repo, worktreeName: "feat" }, CFG, results, ADD(repo));
     writeFileSync(join(base.path, "shared.txt"), "original\n");
     commitAll(base.path, "base");
 
     for (const [id, text] of [["x", "x version\n"], ["y", "y version\n"]]) {
-      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD);
+      const wt = prepareIsolation({ id, originalCwd: repo, worktreeName: id }, CFG, results, ADD(repo));
       writeFileSync(join(wt.path, "shared.txt"), text);
       commitAll(wt.path, `${id} edits shared`);
     }
 
     const out = integrate(
-      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo });
+      { id: "join", worktreeName: "feat", sources: ["swarm/x", "swarm/y"] }, CFG, results, { repo, ...ADD(repo) });
 
     deepEqual(out.conflicts, ["shared.txt"], "the conflicting path is reported");
     const body = readFileSync(join(out.path, "shared.txt"), "utf8");
@@ -777,12 +743,12 @@ test("prepareIsolation re-enters a registered worktree named with different case
   const results = mkdtempSync(join(tmpdir(), "swarm-wt-CASE-"));
   const task = { id: "impl", originalCwd: repo, worktreeName: "feat" };
   try {
-    const first = prepareIsolation(task, CFG, results, ADD);
+    const first = prepareIsolation(task, CFG, results, ADD(repo));
     equal(first.reused, false);
 
     // The chain's next link, asking for the SAME tree via a differently-cased results dir.
     const swapped = results.replace(/swarm-wt-CASE-/, (m) => m.toUpperCase());
-    const second = prepareIsolation({ ...task, id: "rev" }, CFG, swapped, ADD);
+    const second = prepareIsolation({ ...task, id: "rev" }, CFG, swapped, ADD(repo));
     equal(second.reused, true, "the second link must re-enter the tree, not re-create it");
 
     dropWorktree(repo, first.path);

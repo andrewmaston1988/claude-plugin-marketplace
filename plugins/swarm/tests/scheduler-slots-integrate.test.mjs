@@ -5,8 +5,10 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { EventEmitter } from "node:events";
 import { runPlan, runTask, substituteTemplates, substituteItems, classifyFailure, pickNewestRunning } from "../src/scheduler.mjs";
+import { loadManifest } from "../src/manifest.mjs";
 import { DIGEST_ID } from "../src/digest.mjs";
 import { CFG, tmp, task, plan, fakeSpawnFactory, makeIo, promptOf, gitInRepo, initGitRepo, commitAllInRepo, buildStrandPlan, integrateLeaf } from "./helpers/scheduler-fixtures.mjs";
+import { CFG as MANIFEST_CFG, writeManifest } from "./helpers/manifest-fixtures.mjs";
 // S1/S3 pin the `running` map slot leak: a leaf whose IIFE resolves a value other than
 // the id it launched under, which `running.delete(finished)` cannot handle. Seam —
 // `io.notify` fires inside the launch IIFE (after `record()`, before `return task.id`),
@@ -275,11 +277,12 @@ test("IS4: a seed integrate node's tree, reused by a workspace writer, joins on 
     const p = {
       cwd: repo, resultsDir: join(dir, "run"), concurrency: 1, goal: "",
       tasks: [
-        // branchScope is what manifest.mjs gives a writer inside a git repo —
-        // and what it withholds from an integrate node.
+        // branchScope is what manifest.mjs gives a writer inside a git repo — and,
+        // with the seed below, an integrate node too. One run, one resultsDir, one
+        // scope: the seed and the writer that reuses its tree resolve the SAME ref.
         integrateLeaf("helper", { cwd: repo, originalCwd: repo, worktreeName: "feat", branchScope: "run1" }),
         { id: "seed-x", model: "integrate", prompt: "", allowedTools: "", cwd: repo, originalCwd: repo,
-          timeoutMs: 5000, after: ["helper"], worktreeName: "migrate-x",
+          timeoutMs: 5000, after: ["helper"], worktreeName: "migrate-x", branchScope: "run1",
           integrate: { into: "migrate-x", from: ["helper"] } },
         integrateLeaf("migrate-x", { cwd: repo, originalCwd: repo, after: ["seed-x"],
           worktreeName: "migrate-x", branchScope: "run1" }),
@@ -291,13 +294,47 @@ test("IS4: a seed integrate node's tree, reused by a workspace writer, joins on 
     await runPlan(p, CFG, io);
 
     const res = JSON.parse(readFileSync(join(p.resultsDir, "results", "join.json"), "utf8"));
-    ok(gitInRepo(["branch", "--list", "swarm/migrate-x"], repo) !== "",
-      "precondition: the seed created swarm/migrate-x — the ref the writer reused and committed onto");
+    ok(gitInRepo(["branch", "--list", "swarm/run1/migrate-x"], repo) !== "",
+      "precondition: the seed created swarm/run1/migrate-x — the ref the writer reused and committed onto");
     equal(res.ok, true, `the join must merge the branch its source actually created, got: ${res.output}`);
-    deepEqual(res.outputJson.merged, ["swarm/migrate-x"],
+    deepEqual(res.outputJson.merged, ["swarm/run1/migrate-x"],
       "the writer's commits are on the seed's branch, so that is the ref the join merges");
     ok(existsSync(join(p.resultsDir, "wt-feat", "migrated.txt")),
       "the writer's commit reaches the target tree");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// An integrate node's tree survives its run. Two runs of one manifest in one repo
+// therefore land on each other's `into` branch — unless normalisation scopes that
+// branch to the running run. This drives the REAL normalisation (loadManifest, as
+// `swarm run` does), so the scope is derived from each run's resultsDir, never
+// hand-set: a hand-built plan would be given the scope by the test and prove nothing.
+test("IS5: two runs of one manifest seeding the same `into` do not collide on the branch", async () => {
+  const repo = initGitRepo();
+  const dir = tmp();
+  try {
+    const body = (resultsDir) => ({ resultsDir, tasks: [
+      { id: "src", prompt: "do src", provider: "claude", model: "claude-haiku-4-5-20251001",
+        allowedTools: "Read,Edit,Bash", cwd: repo },
+      { id: "seed", after: ["src"], integrate: { into: "feat", from: ["src"] } },
+    ] });
+    const runOnce = async (name) => {
+      const p = loadManifest(writeManifest(dir, body(join(dir, name)), `${name}.json`), MANIFEST_CFG, repo);
+      return runPlan(p, CFG, makeIo(fakeSpawnFactory(() => ({}))));
+    };
+
+    await runOnce("run-a");
+    const b = await runOnce("run-b");
+
+    const seedB = b.summary.tasks.find((t) => t.id === "seed");
+    equal(seedB.state, "ok",
+      `the second run's integrate node must re-enter its OWN branch, not the first run's kept tree: ${JSON.stringify(seedB)}`);
+    const branchOf = (name) => JSON.parse(readFileSync(join(dir, name, "results", "seed.json"), "utf8")).outputJson.branch;
+    ok(branchOf("run-a") !== branchOf("run-b"),
+      `each run's seed owns its own branch: ${branchOf("run-a")} vs ${branchOf("run-b")}`);
   } finally {
     rmSync(dir, { recursive: true, force: true });
     rmSync(repo, { recursive: true, force: true });

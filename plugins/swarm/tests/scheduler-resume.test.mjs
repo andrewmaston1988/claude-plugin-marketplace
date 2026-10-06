@@ -43,6 +43,11 @@ function plan(dir, tasks) {
   return { cwd: dir, resultsDir: join(dir, "run"), concurrency: 4, tasks, goal: "" };
 }
 
+// The commit a run pins at dispatch. prepareIsolation no longer reads the live
+// HEAD, so a test that builds a tree by hand must pin exactly what runPlan's own
+// capture would have — the repo's HEAD at that moment.
+const repoHeadNow = (repo) => spawnSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf8", windowsHide: true }).stdout.trim();
+
 // The session id the dispatch carried, or null when it was sent cold.
 function resumeOf(call) {
   const argv = call.args ?? call.argv;
@@ -114,7 +119,7 @@ test("R1: a leaf reseated onto another provider dispatches with no resume", asyn
       ts: new Date().toISOString(), id: "prose", event: "session",
       sessionId: CODEX_SID, provider: "codex", runner: "codex",
     });
-    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -151,7 +156,7 @@ test("R2: a session whose attempt completed no turn is not resumed — same prov
       ts: new Date().toISOString(), id: "prose", event: "session",
       sessionId: CODEX_SID, provider: "ollama", runner: "claude",
     });
-    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -176,7 +181,7 @@ test("R3: a same-provider leaf that completed turns before dying still resumes",
     writeResult(p.resultsDir, "impl", priorAttempt("impl", {
       durationMs: 2400000, numTurns: 40, tokens: TURNS, sessionId: OLLAMA_SID,
     }));
-    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -199,7 +204,7 @@ test("R4: a leaf with no recorded session starts cold and claims no decline", as
     initResultsDir(p.resultsDir);
     // A tree from an earlier generation, but no result and no session record for
     // this leaf: there is nothing to decline, so nothing may be claimed.
-    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -242,7 +247,7 @@ test("R6: --force still resets the tree and clears every session", async () => {
       ts: new Date().toISOString(), id: "impl", event: "session",
       sessionId: OLLAMA_SID, provider: "ollama", runner: "claude",
     });
-    const wt = prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    const wt = prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
     writeFileSync(join(wt.path, "partial.txt"), "kept partial work\n");
 
     const spawn = fakeSpawnFactory(writesInTree);
@@ -341,7 +346,7 @@ test("Z-codex: a codex leaf that failed at zero turns dispatches with no resume"
       ts: new Date().toISOString(), id: "prose", event: "session",
       sessionId: CODEX_SID, provider: "codex", runner: "codex",
     });
-    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CODEX_CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    prepareIsolation({ id: "prose", worktreeName: "wt", cwd: repo, originalCwd: repo }, CODEX_CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
 
     const spawn = fakeSpawnFactory(writesInTree);
     // The codex preflight reads the meter first, so the home must already hold a
@@ -370,7 +375,7 @@ test("U1: an absent turn count behaves as today — the session is still resumed
       tokens: TURNS, sessionId: OLLAMA_SID,
       output: "leaf ended with a runner error: Claude runner failed",
     }));
-    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));
@@ -397,7 +402,7 @@ test("U2: a turn count in the field wins over a zero in the output text", async 
       output: 'leaf ended with a runner error: Claude runner failed\n'
         + JSON.stringify({ type: "result", subtype: "error_during_execution", is_error: true, num_turns: 0 }),
     }));
-    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS });
+    prepareIsolation({ id: "impl", worktreeName: "wt", cwd: repo, originalCwd: repo }, CFG, p.resultsDir, { addTimeoutMs: WORKTREE_ADD_TIMEOUT_MS, base: repoHeadNow(repo) });
 
     const spawn = fakeSpawnFactory(writesInTree);
     await runPlan(p, CFG, makeIo(spawn));

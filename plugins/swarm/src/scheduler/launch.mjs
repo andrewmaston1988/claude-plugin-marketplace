@@ -82,6 +82,8 @@ export function createLaunch(ctx) {
           wt = ctx.worktree.prepareIsolation({ ...task, worktreeName: wtName }, cfg, plan.resultsDir, {
             reset: ctx.force && ctx.groupFirst.get(wtName) === task.id,
             addTimeoutMs: defaultWorktree.WORKTREE_ADD_TIMEOUT_MS,
+            // The commit the run pinned at dispatch, not whatever HEAD says now.
+            base: ctx.baseFor(task.originalCwd || task.cwd),
           });
           // Every tree-holding leaf sits at its declared depth. Unconditionally: the old
           // mode test skipped this for a hand-written tree and landed it at the root.
