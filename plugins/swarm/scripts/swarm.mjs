@@ -22,7 +22,7 @@ import { plan as planPrune, execute as executePrune, formatPrune, registeredUnde
 import { addTokens, emptyTokens } from "../src/stream.mjs";
 import { dim, out, err } from "../src/ui.mjs";
 import { markValidated, unvalidatedRefusal } from "../src/validated.mjs";
-import { claimEngine, releaseEngine, lockRefusal } from "../src/engine-lock.mjs";
+import { claimEngine, lockRefusal } from "../src/engine-lock.mjs";
 import { cmdServe } from "./cmd-serve.mjs";
 import { cmdStatus } from "./cmd-status.mjs";
 import { cmdReport } from "./cmd-report.mjs";
@@ -389,28 +389,23 @@ async function cmdRun(rest) {
   // Shared by the end-of-run status and the scheduler's single-shot cost warn.
   const { createNotifier } = await import("../src/notify.mjs");
   const notify = createNotifier({ notifyCmd: cfg.notifyCmd });
-  // The claim replaces the liveness check here: it is taken at the first point the
-  // run dir is known, so the estimate's corpus walk, the preflights and runPlan's
-  // startup all sit safely inside it. The heartbeat is written at the very end of
-  // that startup, which is exactly the window a second `swarm run` used to slip into.
-  const claimed = claimEngine(plan.resultsDir, { heartbeatMs: Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000) });
-  if (!claimed.ok) {
-    err(lockRefusal(plan.resultsDir, claimed.pid, "re-running"));
-    return 1;
-  }
-  // Corroborating read, after the claim and never instead of it: an engine started
-  // before this lock existed — a plugin update mid-run — holds no lock, and only
-  // its heartbeat says it is there.
-  if (refuseLiveEngine(plan.resultsDir, cfg, "re-running")) {
-    releaseEngine(plan.resultsDir);
-    return 1;
-  }
-  // Engine-side, so it holds on hosts the hook gates never reach; the claim above
-  // owns the liveness refusal, so the refusal below must release before it returns.
+  // Engine-side, so it holds on hosts the hook gates never reach. Both refusals below
+  // are synchronous reads that return before the claim, which is what keeps a refused
+  // run from creating its run dir: only `claimEngine` may do that.
+  if (refuseLiveEngine(plan.resultsDir, cfg, "re-running")) return 1;
   const refusal = unvalidatedRefusal(plan, args, rest[0]);
   if (refusal) {
     err(refusal);
-    releaseEngine(plan.resultsDir);
+    return 1;
+  }
+  // The claim owns everything expensive that follows: the estimate's corpus walk, the
+  // preflights and runPlan's startup all sit inside it, and the heartbeat is written at
+  // the very end of that startup — exactly the window a second `swarm run` used to slip
+  // into. Nothing awaited separates the checks above from here, so no race can land in
+  // between them.
+  const claimed = claimEngine(plan.resultsDir, { heartbeatMs: Math.max(50, (cfg.heartbeatSecs ?? 15) * 1000) });
+  if (!claimed.ok) {
+    err(lockRefusal(plan.resultsDir, claimed.pid, "re-running"));
     return 1;
   }
 
@@ -887,6 +882,10 @@ async function main() {
         const [resultsDir, taskId, question] = positional;
         if (!resultsDir || !taskId || !question) { err(USAGE); return 1; }
         const cfg = getConfig();
+        // The heartbeat read, kept alongside the claim `askLeaf` takes: an engine started
+        // before the lock existed — a plugin update mid-run — holds no lock, and only its
+        // heartbeat says it is there. Refused here, so no run dir is touched on the way.
+        if (refuseLiveEngine(resultsDir, cfg, "asking")) return 1;
         const { askLeaf } = await import("../src/ask.mjs");
         const { formatTokens } = await import("../src/results.mjs");
         const { workTokens } = await import("../src/stream.mjs");

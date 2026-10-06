@@ -132,3 +132,38 @@ test("ask: refused while an engine holds the claim, and its own claim is release
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// `stop` is the operator's way out of a long run. It exits through the scheduler's
+// finally like any other end, so the claim must go with it — a claim that outlives
+// its engine refuses the resume the operator runs next.
+test("stop: a live engine holds its claim, and `swarm stop` releases it", async () => {
+  const dir = tmp();
+  try {
+    const home = join(dir, "home");
+    const manifest = join(dir, "plan.json");
+    writeFileSync(manifest, JSON.stringify({
+      resultsDir: "out",
+      tasks: [{ id: "t1", prompt: "x", provider: "claude", model: "claude-haiku-4-5-20251001" }],
+    }));
+    const env = { SWARM_HOME: home, SWARM_SHIM_STREAM: "1", SWARM_SHIM_OUTPUT: "x", SWARM_SHIM_SLEEP_MS: "30000" };
+    const v = runCli(["validate", manifest], { cwd: dir, env });
+    equal(v.status, 0, v.stderr);
+    const run = runCliAsync(["run", manifest], { cwd: dir, env });
+    const out = join(dir, "out");
+    const deadline = Date.now() + 60_000;
+    while (!existsSync(join(out, "heartbeat")) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25));
+    }
+    ok(existsSync(join(out, "heartbeat")), "engine must have started ticking before stop is issued");
+    // The claim is taken before the heartbeat, so a ticking engine always holds one.
+    ok(existsSync(join(out, "engine.lock")), "a live engine must hold its claim");
+
+    const stopped = runCli(["stop", out], { cwd: dir, env });
+    equal(stopped.status, 0, stopped.stdout + stopped.stderr);
+    const r = await run;
+    equal(r.status, 1, r.stdout + r.stderr);
+    equal(existsSync(join(out, "engine.lock")), false, "a stopped engine must release its claim");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
